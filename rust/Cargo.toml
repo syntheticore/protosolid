@@ -1,0 +1,60 @@
+[package]
+name = "alchemy-web"
+version = "0.1.0"
+description = "Direct parametrics for the web"
+authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
+readme = "README.md"
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+lto = true
+# opt-level = "s"
+
+[features]
+# default = ["wee_alloc"]
+
+[dependencies]
+rand = "^0.3.14"
+js-sys = "^0.3.27"
+wasm-bindgen = "^0.2.50"
+wee_alloc = { version = "^0.4.2", optional = true }
+
+alchemy-core = { path = "lib/alchemy-core" }
+
+[dependencies.web-sys]
+version = "^0.3.22"
+features = [
+  "console",
+  "Headers",
+  "Request",
+  "Document",
+  "Element",
+  "HtmlElement",
+  "Node",
+  "Window",
+  "CanvasRenderingContext2d",
+  "HtmlCanvasElement",
+]
+
+[target."cfg(debug_assertions)".dependencies]
+console_error_panic_hook = "^0.1.5"
+
+[dev-dependencies]
+wasm-bindgen-test = "^0.2.45"
+futures = "^0.1.27"
+js-sys = "^0.3.22"
+wasm-bindgen-futures = "^0.3.22"
+
+[package.metadata.bundle]
+name = "Alchemy"
+identifier = "org.shapex.Alchemy"
+icon = ["128x128@2x.png"]
+resources = ["resources"]
+copyright = "Copyright (c) Björn Breitgoff 2018"
+category = "public.app-category.graphics-design"
+long_description = """
+Lorem ipsum dolor sit amet, consectetur adipiscing elit
+"""

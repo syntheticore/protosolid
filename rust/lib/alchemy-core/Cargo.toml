@@ -1,0 +1,12 @@
+[package]
+name = "alchemy-core"
+version = "0.1.0"
+description = "Direct parametrics ftw"
+authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+cgmath = "0.16.1"
+# uuid = { version = "^0.7.1", features = ["v4"] }
+
+shapex = { path = "../shapex" }

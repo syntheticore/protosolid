@@ -29,7 +29,7 @@ module.exports = (env) => {
     plugins: [
       new MiniCssExtractPlugin(),
       new VueLoaderPlugin(),
-      new CopyPlugin([
+      new CopyPlugin(env.wc ? [] : [
         './package.json',
         static + '/index.html',
         path.resolve(__dirname, 'electron')
@@ -40,7 +40,7 @@ module.exports = (env) => {
           path.resolve(__dirname, 'rust/lib/shapex/src/'),
           path.resolve(__dirname, 'rust/lib/alchemy-core/src/'),
         ],
-        extraArgs: '--out-name wasm_index',
+        extraArgs: '--out-name wasm-index',
       }),
     ],
     module: {

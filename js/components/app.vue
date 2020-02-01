@@ -1,9 +1,8 @@
 <template lang="pug">
   #app
     header#main-header
-    TreeView(msg="Hellas")
-    main
-      canvas#main-canvas
+    SideBar
+    ViewPort
     footer#main-footer
       | Footer
 </template>
@@ -13,7 +12,7 @@
   #app
     height: 100%
     display: grid
-    grid-template-columns: 200px 1fr
+    grid-template-columns: 220px 1fr
     grid-template-rows: 1fr 26px
     // grid-gap: 1px
     // grid-auto-rows: minmax(100px, auto)
@@ -26,40 +25,33 @@
     position: absolute
     z-index: 99
     pointer-events: none
-    // background: rgb(41, 53, 67);
-    // border-bottom: 1px solid #1d283f
-    // padding: 11px 84px
 
-  main
+  .side-bar
+    grid-column: 1
+    grid-row: 1
+    border-right: black
+
+  .view-port
     grid-column: 2
     grid-row: 1
-    position: relative
-    overflow: hidden
-    display: flex
-
-  #main-canvas
-    flex: 1 1 auto
-    background: radial-gradient(0 0, farthest-corner, #2f4553, #08111b)
 
   #main-footer
-    // height: 30px
+    grid-column: 1 / 3
+    grid-row: 2
     background: #1b1b1b
     border-top: 1px solid #2b3034
     font-size: 12px
     padding: 6px 12px
     color: #878787
     text-shadow: 0 1px 2px black
-    // font-weight: bold
-    grid-column: 1 / 3
-    grid-row: 2
-    background: linear-gradient(top, #202424, #1f1f1f)
+    background: linear-gradient(top, $dark1, $dark2)
 </style>
 
 
 <script>
-  import TodoItem from './todo-item.vue'
-  import TreeView from './tree-view.vue'
-  import('../../rust/pkg/wasm_index.js').then(main).catch(console.error);
+  import SideBar from './side-bar.vue'
+  import ViewPort from './view-port.vue'
+  import('../../rust/pkg/wasm-index.js').then(main).catch(console.error);
 
   function main(wasm) {
     // let canvas = document.getElementById('main-canvas');
@@ -93,8 +85,8 @@
   export default {
     name: 'app',
     components: {
-      TodoItem,
-      TreeView,
+      SideBar,
+      ViewPort,
     },
     data () {
       return {

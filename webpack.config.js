@@ -7,7 +7,7 @@ const VueLoaderPlugin = require('vue-loader/lib/plugin');
 const dist = path.resolve(__dirname, 'dist');
 const static = path.resolve(__dirname, 'static');
 
-module.exports = env => {
+module.exports = (env) => {
   return {
     entry: {
       main: env.wc ?
@@ -21,16 +21,13 @@ module.exports = env => {
     },
     devServer: {
       openPage: 'dev.html',
-      // contentBase: [static, path.resolve(__dirname, 'js/components')],
       contentBase: static,
       watchContentBase: true,
       overlay: true,
       hot: true,
     },
     plugins: [
-      new MiniCssExtractPlugin({
-        // filename: 'style.css'
-      }),
+      new MiniCssExtractPlugin(),
       new VueLoaderPlugin(),
       new CopyPlugin([
         './package.json',
@@ -48,10 +45,6 @@ module.exports = env => {
     ],
     module: {
       rules: [
-        {
-          test: /\.html$/i,
-          use: 'raw-loader',
-        },
         {
           test: /\.vue$/,
           loader: 'vue-loader',
@@ -98,8 +91,8 @@ module.exports = env => {
               options: {
                 use: [require('nib')()],
                 import: env.wc ?
-                  ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/reset.styl')] :
-                  ['~nib/lib/nib/index.styl']
+                  ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/reset.styl'), path.resolve(__dirname, 'styles/variables.styl')] :
+                  ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/variables.styl')]
               },
             },
           ]

@@ -29,9 +29,9 @@ module.exports = (env) => {
     plugins: [
       new MiniCssExtractPlugin(),
       new VueLoaderPlugin(),
-      new CopyPlugin(env.wc ? [] : [
+      new CopyPlugin(env.wc ? [static] : [
         './package.json',
-        static + '/index.html',
+        static,
         path.resolve(__dirname, 'electron')
       ]),
       new WasmPackPlugin({

@@ -1,12 +1,12 @@
 {
   "name": "alchemy-web",
-  "productName": "Alchemy",
   "version": "0.1.0",
+  "productName": "Alchemy",
   "description": "Parametric CAD",
   "author": "Björn Breitgoff <syntheticore@gmail.com>",
   "main": "dist/main.js",
   "scripts": {
-    "build": "npm run clean && webpack --mode production --env.production --env.wc",
+    "build":          "npm run clean && webpack --mode production --env.production --env.wc",
     "build-electron": "npm run clean && webpack --mode production --env.production",
     "serve": "cd dist && live-server --port=8080 --open=/dev.html",
     "serve-dev": "npm run clean && webpack-dev-server --env.development --hot --open -d",

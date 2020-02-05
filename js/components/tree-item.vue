@@ -12,7 +12,7 @@
         span.name {{ node.name }}
     //- ul.children(v-show="isAssembly && expanded")
     transition(name="fade" mode="out-in")
-      transition-group.children(name="list" tag="ul" v-show="isAssembly && expanded")
+      transition-group.children(name="list" tag="ul" v-show="expanded" v-if="isAssembly")
         li(is="tree-item",
            v-for="child in node.children",
            :key="child.id",
@@ -26,10 +26,11 @@
     margin-left: 21px
   header
     pointer-events: all
+    display: inline-block
   .expander
     margin-right: 0
     font-size: 16px
-    cursor: pointer
+    // cursor: pointer
     transition: all 0.2s
     &:hover
       color: $bright1
@@ -37,7 +38,6 @@
       transform: rotate(-0.25turn)
   .box
     background: $dark2
-    color: $bright1
     font-size: 0.75rem
     font-weight: bold
     padding: 4px 3px
@@ -46,6 +46,7 @@
     border-radius: 3px
     display: inline-block
     transition: all 0.2s
+    // box-shadow: 0 0 0 1px $dark2 * 0.75
     // text-shadow: 0 -1px 1px black
     &.hidden
       opacity: 0.5
@@ -55,7 +56,7 @@
     color: $bright2
     &.eye
       color: $bright1
-      cursor: pointer
+      // cursor: pointer
       transition: all 0.2s
       &:hover
         color: $bright1 * 2
@@ -65,23 +66,21 @@
       color: #ca6f8e
     &.blank
       visibility: hidden
-
-  ul, li
+  .fade-enter-active
     transition: all 0.6s
-
-  // .fade-enter-active, .fade-leave-active
-  //   transition: all .5s
-
-  .fade-enter, .fade-leave-to
+  .fade-leave-active
+    transition: all 0.2s
+  .fade-enter
+  .fade-leave-to
     opacity: 0
-
-  .list-enter, .list-leave-to
-    opacity: 0;
-    transform: translateY(30px);
+  .list-enter
+  .list-leave-to
+    opacity: 0
+    transform: translateY(30px)
   .list-leave-active
     position: absolute;
   .list-move
-    transition: transform 1s;
+    transition: transform 1s
 </style>
 
 
@@ -93,7 +92,7 @@
       node: Object,
       parentHidden: Boolean,
     },
-    data: function() {
+    data() {
       return {
         hidden: false,
         expanded: true,

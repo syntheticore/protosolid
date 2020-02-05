@@ -9,14 +9,21 @@ let mainWindow
 function createWindow () {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 800,
+    width: 950,
+    minWidth: 950,
     height: 600,
+    minHeight: 200,
     titleBarStyle: 'hiddenInset',
-    // transparent: true,
+    scrollBounce: true,
+    devTools: true,
     // frame: false,
+    // vibrancy: 'dark',
+    // transparent: true,
+    // opacity: 0.9,
+    // fullscreenWindowTitle: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
-      // nodeIntegration: true
+      preload: path.join(__dirname, 'preload.js'),
+      // nodeIntegration: true,
     }
   })
 

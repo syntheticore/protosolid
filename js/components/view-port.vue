@@ -8,9 +8,9 @@
   .view-port
     position: relative
     overflow: hidden
-    border-top: 1px solid #152b41
+    border-top: 1px solid #152b41 * $gb
   canvas
-    background: radial-gradient(50% 150%, farthest-corner, #2f4553 * 0.7, #08111b * 1.4)
+    background: radial-gradient(50% 150%, farthest-corner, #2f4553 * 0.7 * $gb, #08111b * 1.4 * $gb)
 </style>
 
 

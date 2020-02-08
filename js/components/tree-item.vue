@@ -5,7 +5,7 @@
                        :class="{blank: !isAssembly || isTop, closed: !expanded}",
                        v-on:click="toggle()"
                        fixed-width)
-      .box(:class="{hidden: !isVisible}")
+      .box(:class="{hidden: !isVisible, selected: node.selected}")
         fa-icon.eye(icon="eye" fixed-width v-on:click="hidden = !hidden" v-if="!isTop")
         fa-icon.assembly(icon="boxes" fixed-width v-if="isAssembly")
         fa-icon.part(icon="box" fixed-width v-else)
@@ -40,14 +40,19 @@
     background: $dark2
     font-size: 0.75rem
     font-weight: bold
-    padding: 4px 3px
+    padding: 4px
     margin: 1px 0
-    border: 0.5px solid $dark1 * 1.2
+    border: 0.5px solid $dark1 * 1.3
     border-radius: 3px
     display: inline-block
-    transition: all 0.2s
-    // box-shadow: 0 0 0 1px $dark2 * 0.75
-    // text-shadow: 0 -1px 1px black
+    transition: opacity 0.2s
+    pointer-events: all
+    &:hover
+      background: $dark2 * 1.3
+      border-color: $dark1 * 1.85
+    &.selected
+      border-color: $highlight * 1.2
+      box-shadow: 0 0 0px 1px $highlight * 1.2
     &.hidden
       opacity: 0.5
   svg
@@ -61,9 +66,9 @@
       &:hover
         color: $bright1 * 2
     &.part
-      color: #528e9e
+      color: #139a8f
     &.assembly
-      color: #ca6f8e
+      color: #1789ad
     &.blank
       visibility: hidden
   .fade-enter-active

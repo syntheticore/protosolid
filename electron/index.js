@@ -1,5 +1,5 @@
 // Modules to control application life and create native browser window
-const {app, BrowserWindow, Menu} = require('electron')
+const {app, ipcMain, BrowserWindow, Menu} = require('electron')
 const path = require('path')
 
 // Keep a global reference of the window object, if you don't, the window will
@@ -16,14 +16,15 @@ function createWindow () {
     titleBarStyle: 'hiddenInset',
     scrollBounce: true,
     devTools: true,
+    backgroundColor: 'black',
     // frame: false,
-    // vibrancy: 'dark',
+    // vibrancy: 'ultra-dark',
     // transparent: true,
     // opacity: 0.9,
     // fullscreenWindowTitle: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      // nodeIntegration: true,
+      nodeIntegration: false,
     }
   })
 
@@ -39,6 +40,19 @@ function createWindow () {
     // in an array if your app supports multi windows, this is the time
     // when you should delete the corresponding element.
     mainWindow = null
+  })
+
+  mainWindow.on('enter-full-screen', function () {
+    mainWindow.webContents.send('fullscreen-changed', true)
+  })
+  mainWindow.on('enter-html-full-screen', function () {
+    mainWindow.webContents.send('fullscreen-changed', true)
+  })
+  mainWindow.on('leave-full-screen', function () {
+    mainWindow.webContents.send('fullscreen-changed', false)
+  })
+  mainWindow.on('leave-html-full-screen', function () {
+    mainWindow.webContents.send('fullscreen-changed', false)
   })
 }
 
@@ -59,6 +73,10 @@ app.on('activate', function () {
   // dock icon is clicked and there are no other windows open.
   if (mainWindow === null) createWindow()
 })
+
+ipcMain.on('ping', function() {
+  mainWindow.webContents.send('pong')
+});
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.

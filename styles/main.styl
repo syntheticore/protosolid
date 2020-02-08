@@ -1,10 +1,56 @@
+@import './variables.styl'
+
 body
   height: 100vh
   margin: 0
   color: white
-  background: black
+  background: $dark1
+  // background: rgba($dark1, 0)
   overflow: hidden
   font-family: arial, sans-serif
+
+form
+  fieldset
+    padding-left: 6px
+    margin-top: 6px
+  legend
+    color: $bright1 * 0.95
+    font-size: 13px
+    font-weight: bold
+    margin: 6px 0
+    margin-left: -6px
+  label
+    display: block
+    color: $bright2
+  .inset
+    margin-bottom: 6px
+    &:last-child
+      margin-bottom: 0
+  select, input[type="text"], input[type="number"]
+    margin-left: 8px
+  input[type="checkbox"]
+    margin-right: 8px
+  input[type="text"], input[type="number"]
+    background: $bright2
+    border: none
+    border: 2px solid transparent
+    font-weight: 700
+    border-radius: 3px
+    padding: 3px 0 3px 5px
+    font-size: 11px
+    transition: all 0.4s
+    &:focus
+      background: $bright1
+      border: 2px solid $highlight
+
+.bordered
+  border-radius: 5px
+  border: 1px solid $dark1 * 1.1
+  border-top-color: $dark1 * 1.25
+  background: rgba($dark2, 0.95)
+  box-shadow: 0 0 0 1px $dark2 * 0.5, 0 2px 10px rgba(black, 0.15)
+  -webkit-backdrop-filter: blur(8px)
+  backdrop-filter: blur(8px)
 
 alchemy-editor
   height: 100%

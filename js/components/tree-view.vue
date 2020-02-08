@@ -6,7 +6,7 @@
 
 <style lang="stylus" scoped>
   .tree-view
-    margin-left: -10px
+    margin-left: -7px
     margin-bottom: 22px
   .tree-item
     margin-left: 0

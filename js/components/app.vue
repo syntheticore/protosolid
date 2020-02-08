@@ -1,22 +1,19 @@
 <template lang="pug">
-  #app
+  #app(:class="{fullscreen: isFullscreen}")
     ToolBar
     main
       ViewPort
       SideBar.bar-left
-        h1 Tree
+        //- h1 Tree
         TreeView(:top="tree")
       SideBar.bar-right
         h1 Views
-        TreeView(:top="views")
+        ListChooser(:list="views")
         h1 Poses
-        TreeView(:top="poses")
-      footer
-        b Select Tool
-        fa-icon(icon="mouse" fixed-width)
-        | Select geometry
-        fa-icon(icon="mouse" fixed-width)
-        | Bring up actions
+        ListChooser(:list="poses")
+        h1 Sets
+        ListChooser(:list="sets")
+      FooterView
 </template>
 
 
@@ -34,7 +31,6 @@
     user-select: none
     cursor: default
     overflow: hidden
-    background: $dark1
     color: $bright1
 
   .tool-bar
@@ -46,34 +42,28 @@
     overflow: hidden
 
   .side-bar
-    pointer-events: none
     position: absolute
     top: 0
+    padding-top: 14px
+    h1
+      text-align: center
     &.bar-left
       left: 0
+      h1
+        margin-left: 14px
     &.bar-right
       right: 0
+      margin-right: 14px
 
   .view-port
     width: 100%
     height: 100%
 
-  footer
+  .footer-view
     position: absolute
     left: 0
     bottom: 0
     width: 100%
-    font-size: 13px
-    padding: 22px
-    color: $bright2
-    text-shadow: 0 1px 3px black
-    b
-      margin-right: 6px
-      color: $bright1 * 0.9
-    svg
-      margin-left: 9px
-      margin-right: 3px
-      color: $bright1
 </style>
 
 
@@ -82,18 +72,20 @@
   import SideBar from './side-bar.vue'
   import ViewPort from './view-port.vue'
   import TreeView from './tree-view.vue'
+  import FooterView from './footer-view.vue'
+  import ListChooser from './list-chooser.vue'
   import('../../rust/pkg/wasm-index.js').then(main).catch(console.error);
 
   function main(wasm) {
     var alchemy = wasm.getAlchemy();
-
-    window.addEventListener('keydown', event => {
-      console.log(event.keyCode);
-      if(event.keyCode === 83) { // S
-        return;
-      }
-    });
   }
+
+  window.addEventListener('keydown', (e) => {
+    console.log(e.keyCode)
+    if(e.keyCode === 83) { // S
+      return
+    }
+  });
 
   export default {
     name: 'app',
@@ -103,21 +95,44 @@
       SideBar,
       ViewPort,
       TreeView,
+      FooterView,
+      ListChooser,
     },
 
-    mounted() {
-
+    created() {
+      if(!window.ipcRenderer) {
+        this.isFullscreen = true
+        return
+      }
+      window.ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
+        console.log(event)
+        console.log(isFullscreen)
+        this.isFullscreen = isFullscreen
+      })
+      window.ipcRenderer.on('pong', () => {
+        console.log('pong')
+      })
+      window.ipcRenderer.send('ping')
     },
     
     data() {
       return {
+        isFullscreen: false,
         projectName: 'Untitled Project',
-        views: {
-
-        },
-        poses: {
-
-        },
+        views: [
+          { title: 'Top' },
+          { title: 'Left', active: true },
+          { title: 'Front' },
+          { title: 'Perspective' },
+        ],
+        poses: [
+          { title: 'Base' },
+          { title: 'Activated' },
+        ],
+        sets: [
+          { title: 'Filet 14' },
+          { title: 'Extrude 2' },
+        ],
         tree: {
           id: '1',
           name: 'Main Assembly',
@@ -137,6 +152,7 @@
                 {
                   id: '5',
                   name: 'Part 3',
+                  selected: true,
                 },
                 {
                   id: '6',
@@ -145,6 +161,7 @@
                     {
                       id: '7',
                       name: 'Part 4',
+                      selected: false,
                     },
                     {
                       id: '8',

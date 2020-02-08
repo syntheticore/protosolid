@@ -8,9 +8,11 @@
   .view-port
     position: relative
     overflow: hidden
-    border-top: 1px solid #152b41 * $gb
+    // border-top: 1px solid #152b41 * $gb
+    border-top: 1px solid #2d3467
   canvas
-    background: radial-gradient(50% 150%, farthest-corner, #2f4553 * 0.7 * $gb, #08111b * 1.4 * $gb)
+    // background: radial-gradient(50% 150%, farthest-corner, #2f4553 * 0.8 * $gb, #08111b * 1.4 * $gb)
+    background: radial-gradient(50% 150%, farthest-corner, #713b44, #001a36)
 </style>
 
 
@@ -63,7 +65,7 @@
       scene.add( light );
    
       // geometry = new THREE.BoxGeometry( 0.2, 0.2, 0.2 );
-      var geometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 200, 35);
+      var geometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 26);
       var material = new THREE.MeshStandardMaterial({
         color: 'coral',
         roughness: 0,

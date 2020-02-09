@@ -1,6 +1,6 @@
 <template lang="pug">
   .menu-button
-    button(:class="{pressed: isOpen}" v-on:click="toggle()")
+    button(:class="{pressed: isOpen}" @click="toggle()")
       fa-icon(:icon="icon" fixed-width)
       fa-icon.expander(icon="angle-down")
     transition(name="fade" mode="out-in")
@@ -15,7 +15,20 @@
   .menu-button
     position: relative
     display: inline-block
-    margin: 4px
+    margin: 4px 5px
+    color: $bright1
+    .fullscreen .tool-bar &
+      margin: 0 4px
+      top: -1px
+      &:first-child
+        margin-left: 0
+      &:last-child
+        margin-right: 0
+      button
+        padding: 2px 12px
+        border-radius: 0
+        // border-top: none
+        border-bottom: none
 
   button
     // background: $dark1
@@ -26,13 +39,11 @@
     // background: linear-gradient(top, $dark1 * 1.2, $dark2 * 1.3)
     border-radius: 2px
     font-size: 16px
-    color: $bright1
     padding: 4px 8px
     margin: 0
+    color: inherit
     // cursor: pointer
     transition: background 0.4s
-    &:fullscreen
-      background: red
     &:hover
       // background: linear-gradient(top, $dark1 * 1.3, $dark2 * 1.4)
       background: linear-gradient(top, $dark1 * 1.2, rgba($dark2 * 1.3, 0.0)), $dark2 * 1.8

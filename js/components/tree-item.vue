@@ -3,10 +3,10 @@
     header
       fa-icon.expander(icon="caret-down",
                        :class="{blank: !isAssembly || isTop, closed: !expanded}",
-                       v-on:click="toggle()"
+                       @click="toggle()"
                        fixed-width)
       .box(:class="{hidden: !isVisible, selected: node.selected}")
-        fa-icon.eye(icon="eye" fixed-width v-on:click="hidden = !hidden" v-if="!isTop")
+        fa-icon.eye(icon="eye" fixed-width @click="hidden = !hidden" v-if="!isTop")
         fa-icon.assembly(icon="boxes" fixed-width v-if="isAssembly")
         fa-icon.part(icon="box" fixed-width v-else)
         span.name {{ node.name }}
@@ -24,9 +24,11 @@
 <style lang="stylus" scoped>
   .tree-item
     margin-left: 21px
+  
   header
     pointer-events: all
     display: inline-block
+  
   .expander
     margin-right: 0
     font-size: 16px
@@ -36,6 +38,7 @@
       color: $bright1
     &.closed
       transform: rotate(-0.25turn)
+  
   .box
     background: $dark2
     font-size: 0.75rem
@@ -55,6 +58,7 @@
       box-shadow: 0 0 0px 1px $highlight * 1.2
     &.hidden
       opacity: 0.5
+  
   svg
     font-size: 13px
     margin-right: 4px
@@ -71,6 +75,7 @@
       color: #1789ad
     &.blank
       visibility: hidden
+  
   .fade-enter-active
     transition: all 0.6s
   .fade-leave-active
@@ -78,14 +83,16 @@
   .fade-enter
   .fade-leave-to
     opacity: 0
+
+  .list-enter-active
+  .list-leave-active
+    transition: all 0.3s
   .list-enter
   .list-leave-to
     opacity: 0
-    transform: translateY(30px)
-  .list-leave-active
-    position: absolute;
-  .list-move
-    transition: transform 1s
+    height: 0
+    padding: 0
+    margin: 0
 </style>
 
 

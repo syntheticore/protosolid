@@ -12,6 +12,7 @@
     border-top: 1px solid #2d3467
   canvas
     // background: radial-gradient(50% 150%, farthest-corner, #2f4553 * 0.8 * $gb, #08111b * 1.4 * $gb)
+    display: block
     background: radial-gradient(50% 150%, farthest-corner, #713b44, #001a36)
 </style>
 
@@ -106,12 +107,12 @@
 
       controls = new OrbitControls( camera, renderer.domElement );
       controls.enableDamping = true;
-      controls.damping = 0.2;
-      controls.panSpeed = 1.5;
+      controls.dampingFactor = 0.25;
+      controls.panSpeed = 1.0;
       controls.keyPanSpeed = 12;
-      controls.zoomSpeed = 0.5;
+      controls.zoomSpeed = 0.4;
       controls.screenSpacePanning = true;
-      controls.rotateSpeed = 1.6;
+      controls.rotateSpeed = 1.2;
       // controls.autoRotate = true;
       controls.addEventListener('change', this.render.bind(this));
 
@@ -124,7 +125,9 @@
       transformControl.addEventListener('dragging-changed', function(event) {
         controls.enabled = !event.value;
       });
-      transformControl.addEventListener('objectChange', function(event) {});
+      transformControl.addEventListener('objectChange', (event) => {
+        this.$emit('change-pose')
+      });
       scene.add(transformControl);
       transformControl.attach(mesh);
 
@@ -144,6 +147,11 @@
     },
 
     methods: {
+      render: function() {
+        renderer.render(scene, camera);
+        this.$emit('render')
+      },
+      
       animate: function() {
         if(!rendering) return;
         requestAnimationFrame(this.animate.bind(this));
@@ -151,9 +159,7 @@
         // mesh.rotation.x += 0.01; mesh.rotation.y += 0.01;
         // render();
       },
-      render: function() {
-        renderer.render(scene, camera);
-      },
+
       onWindowResize: function() {
         const canvas = this.$el.querySelector('canvas');
         if(!canvas) return;

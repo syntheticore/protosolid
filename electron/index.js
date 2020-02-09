@@ -9,14 +9,15 @@ let mainWindow
 function createWindow () {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 950,
-    minWidth: 950,
+    width: 900,
+    minWidth: 900,
     height: 600,
-    minHeight: 200,
+    minHeight: 400,
     titleBarStyle: 'hiddenInset',
     scrollBounce: true,
     devTools: true,
-    backgroundColor: 'black',
+    backgroundColor: '#000',
+    show: false,
     // frame: false,
     // vibrancy: 'ultra-dark',
     // transparent: true,
@@ -76,6 +77,12 @@ app.on('activate', function () {
 
 ipcMain.on('ping', function() {
   mainWindow.webContents.send('pong')
+});
+
+ipcMain.on('vue-ready', function() {
+  setTimeout(() => {
+    mainWindow.show()
+  }, 500)
 });
 
 // In this file you can include the rest of your app's specific main process

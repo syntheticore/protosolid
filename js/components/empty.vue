@@ -5,7 +5,7 @@
 
 <style lang="stylus" scoped>
   .empty
-    // 
+    //@
 </style>
 
 

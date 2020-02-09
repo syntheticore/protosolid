@@ -1,21 +1,45 @@
 <template lang="pug">
   #app(:class="{fullscreen: isFullscreen}")
-    ToolBar
+    ToolBar(
+      :documents="documents"
+      :active-document="activeDocument"
+      @change-document="changeDocument"
+    )
     main
-      ViewPort
+      ViewPort(
+        @render="activeDocument.isViewDirty = true"
+        @change-pose="activeDocument.isPoseDirty = true"
+      )
       SideBar.bar-left
         //- h1 Tree
-        TreeView(:top="tree")
+        TreeView(:top="activeDocument.tree")
       SideBar.bar-right
         h1 Views
-        ListChooser(:list="views")
+        ListChooser(
+          :list="activeDocument.views"
+          :active="activeDocument.activeView"
+          :allow-create="activeDocument.isViewDirty"
+          @create="createView"
+          @activate="activateView"
+        )
         h1 Poses
-        ListChooser(:list="poses")
+        ListChooser(
+          :list="activeDocument.poses"
+          :active="activeDocument.activePose"
+          :allow-create="activeDocument.isPoseDirty"
+          @create="createPose"
+          @activate="activatePose"
+        )
         h1 Sets
-        ListChooser(:list="sets")
+        ListChooser(
+          :list="activeDocument.sets"
+          :allow-create="activeDocument.isSetDirty"
+          @create="createSet"
+        )
       FooterView
 </template>
 
+auto tcreated sets
 
 <style lang="stylus" scoped>
   #app
@@ -32,6 +56,8 @@
     cursor: default
     overflow: hidden
     color: $bright1
+    &.fullscreen
+      grid-template-rows: 24px 1fr
 
   .tool-bar
     grid-area: header
@@ -52,8 +78,14 @@
       h1
         margin-left: 14px
     &.bar-right
-      right: 0
-      margin-right: 14px
+      right: 14px
+      bottom: 155px
+      display: flex
+      flex-direction: column
+      h1
+        flex: 0 0 content
+      .list-chooser
+        flex: 0 1 auto  
 
   .view-port
     width: 100%
@@ -87,6 +119,8 @@
     }
   });
 
+  let lastId = 1;
+
   export default {
     name: 'app',
 
@@ -100,97 +134,149 @@
     },
 
     created() {
+      this.activeDocument = this.documents[0]
+      this.activeDocument.activeView = this.activeDocument.views[1]
+      this.activeDocument.activePose = this.activeDocument.poses[0]
+
       if(!window.ipcRenderer) {
-        this.isFullscreen = true
+        // this.isFullscreen = true
         return
       }
+
       window.ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
         console.log(event)
         console.log(isFullscreen)
         this.isFullscreen = isFullscreen
       })
+
       window.ipcRenderer.on('pong', () => {
         console.log('pong')
       })
       window.ipcRenderer.send('ping')
     },
+
+    mounted() {
+      if(!window.ipcRenderer) return
+      window.ipcRenderer.send('vue-ready')
+    },
+
+    methods: {
+      createView: function() {
+        this.activeDocument.views.push({ title: 'Fresh View', id: lastId++ })
+        this.activeDocument.isViewDirty = false
+      },
+
+      createPose: function() {
+        this.activeDocument.poses.push({ title: 'Untitled Pose', id: lastId++ })
+        this.activeDocument.isPoseDirty = false
+      },
+
+      createSet: function() {
+        this.activeDocument.sets.push({ title: 'Untitled Set', id: lastId++ })
+        this.activeDocument.isSetDirty = false
+      },
+
+      activateView: function(view) {
+        this.activeDocument.activeView = view
+      },
+
+      activatePose: function(pose) {
+        this.activeDocument.activePose = pose
+      },
+
+      changeDocument: function(doc) {
+        this.activeDocument = doc
+      }
+    },
     
     data() {
       return {
         isFullscreen: false,
-        projectName: 'Untitled Project',
-        views: [
-          { title: 'Top' },
-          { title: 'Left', active: true },
-          { title: 'Front' },
-          { title: 'Perspective' },
-        ],
-        poses: [
-          { title: 'Base' },
-          { title: 'Activated' },
-        ],
-        sets: [
-          { title: 'Filet 14' },
-          { title: 'Extrude 2' },
-        ],
-        tree: {
-          id: '1',
-          name: 'Main Assembly',
-          children: [
-            {
-              id: '2',
-              name: 'Part 1',
-            },
-            {
-              id: '3',
-              name: 'Sub Assembly 1',
+        activeDocument: null,
+        documents: [
+          {
+            title: 'Rocket Engine',
+            activeView: null,
+            activePose: null,
+            isViewDirty: false,
+            isPoseDirty: false,
+            isSetDirty: false,
+            views: [
+              { title: 'Top', id: lastId++ },
+              { title: 'Left', id: lastId++ },
+              { title: 'Front', id: lastId++ },
+              { title: 'Perspective', id: lastId++ },
+            ],
+            poses: [
+              { title: 'Base', id: lastId++ },
+              { title: 'Activated', id: lastId++ },
+            ],
+            sets: [
+              { title: 'Filet 14', id: lastId++ },
+              { title: 'Extrude 2', id: lastId++ },
+            ],
+            tree: {
+              id: '1',
+              name: 'Main Assembly',
               children: [
                 {
-                  id: '4',
-                  name: 'Part 2',
+                  id: '2',
+                  name: 'Part 1',
                 },
                 {
-                  id: '5',
-                  name: 'Part 3',
-                  selected: true,
-                },
-                {
-                  id: '6',
-                  name: 'Sub Assembly 2',
+                  id: '3',
+                  name: 'Sub Assembly 1',
                   children: [
                     {
-                      id: '7',
-                      name: 'Part 4',
-                      selected: false,
+                      id: '4',
+                      name: 'Part 2',
                     },
                     {
-                      id: '8',
-                      name: 'Part 5',
-                    },
-                  ]
-                },
-                {
-                  id: '9',
-                  name: 'Sub Assembly 2',
-                  children: [
-                    {
-                      id: '10',
-                      name: 'Part 6',
+                      id: '5',
+                      name: 'Part 3',
+                      selected: true,
                     },
                     {
-                      id: '11',
-                      name: 'Part 7',
+                      id: '6',
+                      name: 'Sub Assembly 2',
+                      children: [
+                        {
+                          id: '7',
+                          name: 'Part 4',
+                          selected: false,
+                        },
+                        {
+                          id: '8',
+                          name: 'Part 5',
+                        },
+                      ]
                     },
                     {
-                      id: '12',
-                      name: 'Part 8',
+                      id: '9',
+                      name: 'Sub Assembly 2',
+                      children: [
+                        {
+                          id: '10',
+                          name: 'Part 6',
+                        },
+                        {
+                          id: '11',
+                          name: 'Part 7',
+                        },
+                        {
+                          id: '12',
+                          name: 'Part 8',
+                        },
+                      ]
                     },
                   ]
                 },
               ]
-            },
-          ]
-        }
+            }
+          },
+          { title: 'Print Head', views: [], poses: [], sets: [], tree: {} },
+          { title: 'Tool Holder', views: [], poses: [], sets: [], tree: {} },
+        ],
       }
     }
   }

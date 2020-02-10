@@ -39,7 +39,6 @@
       FooterView
 </template>
 
-auto tcreated sets
 
 <style lang="stylus" scoped>
   #app

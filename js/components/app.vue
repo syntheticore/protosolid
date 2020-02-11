@@ -7,36 +7,37 @@
     )
     main
       ViewPort(
-        @render="activeDocument.isViewDirty = true"
+        @change-view="activeDocument.isViewDirty = true"
         @change-pose="activeDocument.isPoseDirty = true"
       )
-      SideBar.bar-left
-        //- h1 Tree
-        TreeView(:top="activeDocument.tree")
-      SideBar.bar-right
-        h1 Views
-        ListChooser(
-          :list="activeDocument.views"
-          :active="activeDocument.activeView"
-          :allow-create="activeDocument.isViewDirty"
-          @create="createView"
-          @activate="activateView"
-        )
-        h1 Poses
-        ListChooser(
-          :list="activeDocument.poses"
-          :active="activeDocument.activePose"
-          :allow-create="activeDocument.isPoseDirty"
-          @create="createPose"
-          @activate="activatePose"
-        )
-        h1 Sets
-        ListChooser(
-          :list="activeDocument.sets"
-          :allow-create="activeDocument.isSetDirty"
-          @create="createSet"
-        )
-      FooterView
+      .ui-layer
+        ToolBox
+        SideBar.bar-left
+          TreeView(:top="activeDocument.tree")
+        SideBar.bar-right
+          h1 Views
+          ListChooser(
+            :list="activeDocument.views"
+            :active="activeDocument.activeView"
+            :allow-create="activeDocument.isViewDirty"
+            @create="createView"
+            @activate="activateView"
+          )
+          h1 Poses
+          ListChooser(
+            :list="activeDocument.poses"
+            :active="activeDocument.activePose"
+            :allow-create="activeDocument.isPoseDirty"
+            @create="createPose"
+            @activate="activatePose"
+          )
+          h1 Sets
+          ListChooser(
+            :list="activeDocument.sets"
+            :allow-create="activeDocument.isSetDirty"
+            @create="createSet"
+          )
+        FooterView
 </template>
 
 
@@ -65,6 +66,19 @@
     grid-area: main
     position: relative
     overflow: hidden
+
+  .ui-layer
+    position: absolute
+    top: 0
+    left: 0
+    right: 0
+    bottom: 0
+    display: grid
+
+  .tool-box
+    position: absolute
+    top: 16px
+    left: 50%
 
   .side-bar
     position: absolute
@@ -103,6 +117,7 @@
   import SideBar from './side-bar.vue'
   import ViewPort from './view-port.vue'
   import TreeView from './tree-view.vue'
+  import ToolBox from './tool-box.vue'
   import FooterView from './footer-view.vue'
   import ListChooser from './list-chooser.vue'
   import('../../rust/pkg/wasm-index.js').then(main).catch(console.error);
@@ -128,6 +143,7 @@
       SideBar,
       ViewPort,
       TreeView,
+      ToolBox,
       FooterView,
       ListChooser,
     },

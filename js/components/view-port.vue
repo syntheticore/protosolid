@@ -9,7 +9,7 @@
     position: relative
     overflow: hidden
     // border-top: 1px solid #152b41 * $gb
-    border-top: 1px solid #2d3467
+    border-top: 1px solid #263246
   canvas
     // background: radial-gradient(50% 150%, farthest-corner, #2f4553 * 0.8 * $gb, #08111b * 1.4 * $gb)
     display: block
@@ -114,7 +114,10 @@
       controls.screenSpacePanning = true;
       controls.rotateSpeed = 1.2;
       // controls.autoRotate = true;
-      controls.addEventListener('change', this.render.bind(this));
+      controls.addEventListener('change', () => {
+        this.render()
+        this.$emit('change-view')
+      })
 
       var transformControl = new TransformControls(camera, renderer.domElement);
       transformControl.space = 'world';
@@ -149,7 +152,6 @@
     methods: {
       render: function() {
         renderer.render(scene, camera);
-        this.$emit('render')
       },
       
       animate: function() {

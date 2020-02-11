@@ -1,12 +1,12 @@
 <template lang="pug">
   .menu-button
-    button(:class="{pressed: isOpen}" @click="toggle()")
+    button.button(:class="{pressed: isOpen}" @click="toggle()")
       fa-icon(:icon="icon" fixed-width)
       fa-icon.expander(icon="angle-down")
     transition(name="fade" mode="out-in")
       .pop-up.bordered(v-if="isOpen")
         .wrapper
-          h1 {{ title }}
+          h1(v-if="title") {{ title }}
           slot
 </template>
 
@@ -16,7 +16,7 @@
     position: relative
     display: inline-block
     margin: 4px 5px
-    color: $bright1
+    // color: $bright1
     .fullscreen .tool-bar &
       margin: 0 4px
       top: -1px
@@ -25,42 +25,30 @@
       &:last-child
         margin-right: 0
       button
-        padding: 2px 12px
+        padding: 3px 12px
         border-radius: 0
-        // border-top: none
+        // height: 23px
+        border-top: none
         border-bottom: none
+    &.left
+      .pop-up
+        right: unset
+        left: -12px
+        &::before
+          right: unset
+          left: 20px
 
   button
-    // background: $dark1
-    box-shadow: 0 0 0 1px $dark2 * 0.55
-    border: 1px solid $dark1 * 1.1
-    border-top-color: $dark1 * 1.6
-    background: linear-gradient(top, $dark1 * 1.2, rgba($dark2 * 1.4, 0.0)), $dark2 * 1.4
-    // background: linear-gradient(top, $dark1 * 1.2, $dark2 * 1.3)
-    border-radius: 2px
-    font-size: 16px
-    padding: 4px 8px
     margin: 0
     color: inherit
-    // cursor: pointer
-    transition: background 0.4s
-    &:hover
-      // background: linear-gradient(top, $dark1 * 1.3, $dark2 * 1.4)
-      background: linear-gradient(top, $dark1 * 1.2, rgba($dark2 * 1.3, 0.0)), $dark2 * 1.8
-      border-top-color: $dark1 * 1.7
-      transition: none
     &.pressed
     &:active
-      border: 1px solid $dark1 * 0.95
-      background: linear-gradient(top, $dark1 * 1.1, $dark2 * 1.275)
       .expander
         transform: rotate(180deg)
     .expander
       margin-left: 8px
       color: $bright2
       transition: transform 0.2s
-    svg
-      filter: drop-shadow(0 -1px 0px rgba(0,0,0, 0.6))
 
   .fade-enter
   .fade-leave-to
@@ -98,7 +86,7 @@
     overflow: hidden
     padding: 14px
     border-radius: 5px
-  
+    right: -12px
   h1
     // letter-spacing: 0.1em
     text-align: center

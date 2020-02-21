@@ -8,6 +8,7 @@
         .version Version 0.1
       hr
       form.preferences
+        IconView
 
     ul.tabs
       li(v-for="doc in documents"
@@ -19,7 +20,7 @@
     .grab-handle
     
     nav
-      MenuButton(title="Tool Settings" icon="pen")
+      MenuButton(title="Tool Settings" icon="code-branch")
         form
           label
             | Transform:
@@ -104,7 +105,7 @@
       margin-top: 4px
 
   .preferences
-    height: 200px
+    min-height: 200px
   
   .tabs
     display: inline-block
@@ -125,7 +126,8 @@
       text-shadow: 0 -1px 0px black
       // cursor: pointer
       &:hover
-        background: $dark1
+        // background: $dark1
+        background: $dark2 * 1.2
         svg
           opacity: 1
       &.active
@@ -188,12 +190,14 @@
 
 <script>
   import MenuButton from './menu-button.vue'
+  import IconView from './icon-view.vue'
 
   export default {
     name: 'ToolBar',
 
     components: {
       MenuButton,
+      IconView,
     },
     
     props: {

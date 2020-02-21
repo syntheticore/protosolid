@@ -41,6 +41,8 @@
       renderer.outputEncoding = THREE.sRGBEncoding;
       renderer.physicallyCorrectLights = true;
       renderer.shadowMap.enabled = true;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
       // renderer.shadowMap.type = THREE.VSMShadowMap;
       // renderer.toneMapping = THREE.ReinhardToneMapping;
       // renderer.toneMapping = THREE.LinearToneMapping;
@@ -56,14 +58,14 @@
       // scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20);
       // scene.add(new THREE.AmbientLight(0x666666));
       var sun = new THREE.DirectionalLight(0xdfebff, 1);
-      sun.position.set(0, 200, 0);
+      sun.position.set(0, 100, 0);
       sun.castShadow = true;
-      // sun.shadow.mapSize.width = 1024;
-      // sun.shadow.mapSize.height = 1024;
+      sun.shadow.mapSize.width = 2048;
+      sun.shadow.mapSize.height = 2048;
       scene.add(sun);
 
-      var light = new THREE.HemisphereLight( 0xffffbb, 0x080820, 1 );
-      scene.add( light );
+      var light = new THREE.HemisphereLight(0xffffbb, 0x080820, 1);
+      scene.add(light);
    
       // geometry = new THREE.BoxGeometry( 0.2, 0.2, 0.2 );
       var geometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 26);
@@ -105,7 +107,7 @@
         this.render();
       });
 
-      controls = new OrbitControls( camera, renderer.domElement );
+      controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.25;
       controls.panSpeed = 1.0;

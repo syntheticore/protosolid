@@ -87,6 +87,7 @@
     padding: 14px
     border-radius: 5px
     right: -12px
+  
   h1
     // letter-spacing: 0.1em
     text-align: center

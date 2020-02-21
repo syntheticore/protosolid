@@ -40,7 +40,7 @@
     // flex: 0 0 content
   
   .selection-info
-    line-height: 2
+    line-height: 1.9
   
   td:first-child
     text-align: right

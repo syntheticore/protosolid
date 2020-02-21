@@ -10,34 +10,33 @@
         @change-view="activeDocument.isViewDirty = true"
         @change-pose="activeDocument.isPoseDirty = true"
       )
-      .ui-layer
-        ToolBox
-        SideBar.bar-left
-          TreeView(:top="activeDocument.tree")
-        SideBar.bar-right
-          h1 Views
-          ListChooser(
-            :list="activeDocument.views"
-            :active="activeDocument.activeView"
-            :allow-create="activeDocument.isViewDirty"
-            @create="createView"
-            @activate="activateView"
-          )
-          h1 Poses
-          ListChooser(
-            :list="activeDocument.poses"
-            :active="activeDocument.activePose"
-            :allow-create="activeDocument.isPoseDirty"
-            @create="createPose"
-            @activate="activatePose"
-          )
-          h1 Sets
-          ListChooser(
-            :list="activeDocument.sets"
-            :allow-create="activeDocument.isSetDirty"
-            @create="createSet"
-          )
-        FooterView
+      ToolBox
+      SideBar.bar-left
+        TreeView(:top="activeDocument.tree")
+      SideBar.bar-right
+        h1 Views
+        ListChooser(
+          :list="activeDocument.views"
+          :active="activeDocument.activeView"
+          :allow-create="activeDocument.isViewDirty"
+          @create="createView"
+          @activate="activateView"
+        )
+        h1 Poses
+        ListChooser(
+          :list="activeDocument.poses"
+          :active="activeDocument.activePose"
+          :allow-create="activeDocument.isPoseDirty"
+          @create="createPose"
+          @activate="activatePose"
+        )
+        h1 Sets
+        ListChooser(
+          :list="activeDocument.sets"
+          :allow-create="activeDocument.isSetDirty"
+          @create="createSet"
+        )
+      FooterView
 </template>
 
 
@@ -66,19 +65,13 @@
     grid-area: main
     position: relative
     overflow: hidden
-
-  .ui-layer
-    position: absolute
-    top: 0
-    left: 0
-    right: 0
-    bottom: 0
-    display: grid
+    display: flex
+    justify-content: center
 
   .tool-box
     position: absolute
-    top: 16px
-    left: 50%
+    margin-top: 12px
+    max-width: calc(100% - 450px)
 
   .side-bar
     position: absolute
@@ -149,7 +142,7 @@
     },
 
     created() {
-      this.activeDocument = this.documents[0]
+      this.activeDocument = this.documents[1]
       this.activeDocument.activeView = this.activeDocument.views[1]
       this.activeDocument.activePose = this.activeDocument.poses[0]
 
@@ -209,6 +202,7 @@
         isFullscreen: false,
         activeDocument: null,
         documents: [
+          { title: 'Table Press', views: [], poses: [], sets: [], tree: {} },
           {
             title: 'Rocket Engine',
             activeView: null,

@@ -10,7 +10,7 @@ edition = "2018"
 crate-type = ["cdylib"]
 
 [profile.release]
-lto = true
+# lto = true
 # opt-level = "s"
 
 [features]
@@ -18,10 +18,12 @@ lto = true
 
 [dependencies]
 rand = "^0.3.14"
+serde = { version = "1.0.80", features = ["derive"] }
+serde_derive = "^1.0.59"
+wasm-bindgen = { version = "^0.2.50", features = ["serde-serialize"] }
 js-sys = "^0.3.27"
-wasm-bindgen = "^0.2.50"
+uuid = { version = "0.8", features = ["serde", "v4", "wasm-bindgen"] }
 wee_alloc = { version = "^0.4.2", optional = true }
-
 alchemy = { path = "lib/alchemy" }
 # shapex = { path = "lib/shapex" }
 

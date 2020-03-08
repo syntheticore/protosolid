@@ -3,31 +3,77 @@
 
 // pub use tools::*;
 // pub use renderer::*;
+
 pub use shapex;
 
 use std::rc::Rc;
 use std::cell::RefCell;
+use uuid::Uuid;
 use shapex::*;
 
 
 #[derive(Default)]
 pub struct Component {
+  pub id: Uuid,
   pub name: String,
-  pub parts: Vec<Part>,
+  pub bodies: Vec<Solid>,
   pub sketches: Vec<Rc<RefCell<Sketch>>>,
   pub visible: bool
 }
 
-
-pub struct Part {
-  pub name: String,
-  pub solid: Solid,
-  // pub material: Material,
-  pub visible: bool
+impl Component {
+  pub fn new() -> Self {
+    let mut this: Self = Default::default();
+    this.id = Uuid::new_v4();
+    this
+  }
 }
 
 
 trait Constraint {}
+
+
+#[derive(Debug)]
+pub struct TreeNode<T> {
+  pub item: T,
+  pub transform: Matrix4,
+  pub children: Vec<TreeNode<T>>
+}
+
+impl<T> TreeNode<T> {
+  pub fn new(item: T) -> Self {
+    Self {
+      item: item,
+      transform: Matrix4::from_scale(1.0),
+      children: Default::default()
+    }
+  }
+
+  pub fn add_child(&mut self, child: T) {
+    self.children.push(Self::new(child));
+  }
+}
+
+// #[derive(Debug)]
+// pub struct TreeNode<T> {
+//   pub item: Option<T>,
+//   pub transform: Matrix4,
+//   pub children: Vec<TreeNode<T>>
+// }
+
+// impl<T> TreeNode<T> {
+//   pub fn new(item: Option<T>) -> Self {
+//     Self {
+//       item: item,
+//       transform: Matrix4::from_scale(1.0),
+//       children: Default::default()
+//     }
+//   }
+
+//   pub fn add_child(&mut self, child: T) {
+//     self.children.push(TreeNode::new(Some(child)));
+//   }
+// }
 
 
 pub struct VertexIterator<'a> {
@@ -103,18 +149,18 @@ pub struct Scene {
 
 impl Scene {
   pub fn new() -> Self {
-    let mut comp: Component = Default::default();
+    let mut comp = Component::new();
     comp.name = "Main Bracket".to_string();
     comp.visible = true;
     let comp = Rc::new(RefCell::new(comp));
-    let tree = TreeNode::new(Some(Rc::clone(&comp)));
+    let tree = TreeNode::new(Rc::clone(&comp));
     Self {
       tree: tree,
     }
   }
 
   pub fn create_component(&mut self) {
-    let mut component: Component = Default::default();
+    let mut component = Component::new();
     component.name = "Assembly1".to_string();
     component.visible = true;
     self.tree.add_child(Rc::new(RefCell::new(component)));

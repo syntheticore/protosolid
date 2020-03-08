@@ -39,7 +39,7 @@ module.exports = (env) => {
         crateDirectory: path.resolve(__dirname, 'rust'),
         watchDirectories: [
           path.resolve(__dirname, 'rust/lib/shapex/src/'),
-          path.resolve(__dirname, 'rust/lib/alchemy-core/src/'),
+          path.resolve(__dirname, 'rust/lib/alchemy/src/'),
         ],
         extraArgs: '--out-name wasm-index',
       }),
@@ -62,7 +62,8 @@ module.exports = (env) => {
           test: /\.styl$/,
           use: [
             { loader: MiniCssExtractPlugin.loader },
-            'css-loader?url=false',
+            'css-loader',
+            // 'css-loader?url=false',
             {
               loader: 'stylus-loader',
               options: {
@@ -86,7 +87,8 @@ module.exports = (env) => {
                 hmr: !env.production
               }
             },
-            'css-loader?url=false',
+            'css-loader',
+            // 'css-loader?url=false',
             {
               loader: 'stylus-loader',
               options: {

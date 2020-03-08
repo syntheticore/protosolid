@@ -1,7 +1,7 @@
 // mod vector;
 
 // pub use self::vector::Vec3;
-pub use cgmath::prelude::*;
+use cgmath::prelude::*;
 
 pub type Vec2 = cgmath::Vector2<f64>;
 pub type Vec3 = cgmath::Vector3<f64>;
@@ -86,44 +86,22 @@ pub enum Intersection {
 }
 
 
-#[derive(Debug)]
-pub struct TreeNode<T> {
-  pub item: Option<T>,
-  pub transform: Transform,
-  pub children: Vec<TreeNode<T>>
-}
+// #[derive(Clone, Debug)]
+// pub struct Transform {
+//   pub translation: Vec3
+// }
 
-impl<T> TreeNode<T> {
-  pub fn new(item: Option<T>) -> Self {
-    Self {
-      item: item,
-      transform: Transform::new(),
-      children: Default::default()
-    }
-  }
+// impl Transform {
+//   pub fn new() -> Self {
+//     Self {
+//       translation: Vec3::new(0.0, 0.0, 0.0)
+//     }
+//   }
 
-  pub fn add_child(&mut self, child: T) {
-    self.children.push(TreeNode::new(Some(child)));
-  }
-}
-
-
-#[derive(Debug)]
-pub struct Transform {
-  pub translation: Vec3
-}
-
-impl Transform {
-  pub fn new() -> Self {
-    Self {
-      translation: Vec3::new(0.0, 0.0, 0.0)
-    }
-  }
-
-  pub fn to_mat4(&self) -> Matrix4 {
-    Matrix4::from_translation(self.translation)
-  }
-}
+//   pub fn to_mat4(&self) -> Matrix4 {
+//     Matrix4::from_translation(self.translation)
+//   }
+// }
 
 
 #[derive(Clone, Debug)]

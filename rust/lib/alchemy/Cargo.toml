@@ -7,6 +7,6 @@ edition = "2018"
 
 [dependencies]
 cgmath = "0.16.1"
-# uuid = { version = "^0.7.1", features = ["v4"] }
+uuid = { version = "0.8", features = ["v4"] }
 
 shapex = { path = "../shapex" }

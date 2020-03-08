@@ -3,6 +3,7 @@
     ToolBar(
       :documents="documents"
       :active-document="activeDocument"
+      @create-document="createDocument"
       @change-document="changeDocument"
     )
     main
@@ -32,6 +33,7 @@
         )
         h1 Sets
         ListChooser(
+          v-if="activeDocument.sets.length || activeDocument.isSetDirty"
           :list="activeDocument.sets"
           :allow-create="activeDocument.isSetDirty"
           @create="createSet"
@@ -115,18 +117,22 @@
   import ListChooser from './list-chooser.vue'
   import('../../rust/pkg/wasm-index.js').then(main).catch(console.error);
 
-  function main(wasm) {
+  function main(_wasm) {
+    wasm = _wasm
     let alchemy = new wasm.AlchemyProxy()
-    console.log(alchemy)
+    console.log(alchemy.foo())
+    console.log(alchemy.bar())
+    console.log(alchemy.get_tree())
   }
 
   window.addEventListener('keydown', (e) => {
-    console.log(e.keyCode)
+    // console.log(e.keyCode)
     if(e.keyCode === 83) { // S
       return
     }
   });
 
+  let wasm;
   let lastId = 1;
 
   export default {
@@ -143,9 +149,7 @@
     },
 
     created() {
-      this.activeDocument = this.documents[1]
-      this.activeDocument.activeView = this.activeDocument.views[1]
-      this.activeDocument.activePose = this.activeDocument.poses[0]
+      this.changeDocument(this.documents[0])
 
       if(!window.ipcRenderer) {
         // this.isFullscreen = true
@@ -170,6 +174,28 @@
     },
 
     methods: {
+      createDocument: function() {
+        let proxy = new wasm.AlchemyProxy()
+        this.documents.push({
+          title: 'Untitled Document',
+          proxy: proxy,
+          views: [
+            { title: 'Top', id: lastId++ },
+            { title: 'Left', id: lastId++ },
+            { title: 'Front', id: lastId++ },
+            { title: 'Perspective', id: lastId++ },
+          ],
+          poses: [{ title: 'Base', id: lastId++ },],
+          sets: [],
+          tree: proxy.get_tree(),
+          activeView: null,
+          activePose: null,
+          isViewDirty: false,
+          isPoseDirty: false,
+          isSetDirty: true,
+        })
+      },
+
       createView: function() {
         this.activeDocument.views.push({ title: 'Fresh View', id: lastId++ })
         this.activeDocument.isViewDirty = false
@@ -195,6 +221,8 @@
 
       changeDocument: function(doc) {
         this.activeDocument = doc
+        this.activeDocument.activeView = this.activeDocument.views[0]
+        this.activeDocument.activePose = this.activeDocument.poses[0]
       }
     },
     
@@ -203,7 +231,7 @@
         isFullscreen: false,
         activeDocument: null,
         documents: [
-          { title: 'Table Press', views: [], poses: [], sets: [], tree: {} },
+          // { title: 'Table Press', views: [], poses: [], sets: [], tree: {} },
           {
             title: 'Rocket Engine',
             activeView: null,
@@ -284,8 +312,8 @@
               ]
             }
           },
-          { title: 'Print Head', views: [], poses: [], sets: [], tree: {} },
-          { title: 'Tool Holder', views: [], poses: [], sets: [], tree: {} },
+          // { title: 'Print Head', views: [], poses: [], sets: [], tree: {} },
+          // { title: 'Tool Holder', views: [], poses: [], sets: [], tree: {} },
         ],
       }
     }

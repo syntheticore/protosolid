@@ -7,6 +7,7 @@
         h1 Alchemy
         .version Version 0.1
       hr
+      button.button(@click="createDocument") New Document
       form.preferences
         IconView
 
@@ -210,6 +211,10 @@
     },
 
     methods: {
+      createDocument: function() {
+        this.$emit('create-document')
+      },
+
       activate: function(doc) {
         this.$emit('change-document', doc)
       },

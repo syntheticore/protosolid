@@ -116,7 +116,8 @@
   import('../../rust/pkg/wasm-index.js').then(main).catch(console.error);
 
   function main(wasm) {
-    var alchemy = wasm.getAlchemy();
+    let alchemy = new wasm.AlchemyProxy()
+    console.log(alchemy)
   }
 
   window.addEventListener('keydown', (e) => {

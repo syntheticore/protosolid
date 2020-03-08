@@ -1,5 +1,5 @@
 [package]
-name = "alchemy-core"
+name = "alchemy"
 version = "0.1.0"
 description = "Direct parametrics ftw"
 authors = ["Björn Breitgoff <syntheticore@gmail.com>"]

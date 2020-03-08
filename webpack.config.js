@@ -12,7 +12,8 @@ module.exports = (env) => {
     entry: {
       main: env.wc ?
         ['./js/main-wc.js', './styles/main.styl'] :
-        ['./js/main-app.js', './styles/main.styl']
+        ['./js/main-app.js', './styles/main.styl'],
+      website: ['./js/main-website.js', './styles/website.styl']
     },
     devtool: '#source-map',
     output: {
@@ -61,7 +62,7 @@ module.exports = (env) => {
           test: /\.styl$/,
           use: [
             { loader: MiniCssExtractPlugin.loader },
-            'css-loader',
+            'css-loader?url=false',
             {
               loader: 'stylus-loader',
               options: {
@@ -85,7 +86,7 @@ module.exports = (env) => {
                 hmr: !env.production
               }
             },
-            'css-loader',
+            'css-loader?url=false',
             {
               loader: 'stylus-loader',
               options: {

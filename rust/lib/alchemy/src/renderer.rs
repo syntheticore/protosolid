@@ -1,7 +1,5 @@
-use crate::geom::*;
-// use std::rc::Rc;
+pub use shapex::*;
 use std::f64::consts::PI;
-use cgmath::Transform as OtherTransform;
 
 pub struct Renderer {
   stack: Vec<Matrix4>,

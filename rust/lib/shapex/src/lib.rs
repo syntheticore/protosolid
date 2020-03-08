@@ -1,3 +1,3 @@
-pub mod geom;
+mod geom;
 
-pub use self::geom::*;
+pub use geom::*;

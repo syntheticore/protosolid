@@ -9,7 +9,7 @@
         fa-icon.eye(icon="eye" fixed-width @click="hidden = !hidden" v-if="!isTop")
         fa-icon.assembly(icon="boxes" fixed-width v-if="isAssembly")
         fa-icon.part(icon="box" fixed-width v-else)
-        span.name {{ node.name }}
+        span.name {{ node.title }}
     //- ul.children(v-show="isAssembly && expanded")
     transition(name="fade" mode="out-in")
       transition-group.children(name="list" tag="ul" v-show="expanded" v-if="isAssembly")

@@ -75,13 +75,18 @@
     border-radius-bottom: 0
   
   .fullscreen
-    .tool-bar
-      padding-left: 0px
-      background: $dark2
-      border-top: none
     .tabs li
       padding: 6px 12px
       height: 23px
+    .tool-bar
+      border-top: none
+
+  .fullscreen
+  .browser
+    .tool-bar
+      padding-left: 0px
+      background: $dark2
+      // border-top: none
 
   .app-menu-btn
     color: $highlight * 1.2

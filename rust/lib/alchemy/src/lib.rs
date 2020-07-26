@@ -6,53 +6,18 @@
 
 pub use shapex;
 
+use core::fmt::Debug;
 use std::rc::Rc;
 use std::cell::RefCell;
 use uuid::Uuid;
+// use std::marker::PhantomPinned;
+// use std::pin::Pin;
+// use std::ptr::NonNull;
 use shapex::*;
-
-
-#[derive(Default)]
-pub struct Component {
-  pub id: Uuid,
-  pub name: String,
-  pub bodies: Vec<Solid>,
-  pub sketches: Vec<Rc<RefCell<Sketch>>>,
-  pub visible: bool
-}
-
-impl Component {
-  pub fn new() -> Self {
-    let mut this: Self = Default::default();
-    this.id = Uuid::new_v4();
-    this
-  }
-}
 
 
 trait Constraint {}
 
-
-#[derive(Debug)]
-pub struct TreeNode<T> {
-  pub item: T,
-  pub transform: Matrix4,
-  pub children: Vec<TreeNode<T>>
-}
-
-impl<T> TreeNode<T> {
-  pub fn new(item: T) -> Self {
-    Self {
-      item: item,
-      transform: Matrix4::from_scale(1.0),
-      children: Default::default()
-    }
-  }
-
-  pub fn add_child(&mut self, child: T) {
-    self.children.push(Self::new(child));
-  }
-}
 
 // #[derive(Debug)]
 // pub struct TreeNode<T> {
@@ -76,49 +41,79 @@ impl<T> TreeNode<T> {
 // }
 
 
-pub struct VertexIterator<'a> {
-  elem_iter: std::slice::Iter<'a, PolyLine>,
-  vertex_iter: Option<std::slice::Iter<'a, Point3>>,
+// pub struct VertexIterator<'a> {
+//   elem_iter: std::slice::Iter<'a, PolyLine>,
+//   vertex_iter: Option<std::slice::Iter<'a, Point3>>,
+// }
+
+// impl<'a> VertexIterator<'a> {
+//   pub fn new(sketch: &'a Sketch) -> Self {
+//     Self {
+//       elem_iter: sketch.elements.iter(),
+//       vertex_iter: None
+//     }
+//   }
+// }
+
+// impl<'a> Iterator for VertexIterator<'a> {
+//   type Item = &'a Point3;
+
+//   fn next(&mut self) -> Option<&'a Point3> {
+//     if let Some(ref mut vertex_iter) = self.vertex_iter {
+//       let vertex = vertex_iter.next();
+//       if vertex.is_some() {
+//         vertex
+//       } else {
+//         self.vertex_iter = None;
+//         self.next()
+//       }
+//     } else {
+//       if let Some(line) = self.elem_iter.next() {
+//         self.vertex_iter = Some(line.vertices.iter());
+//         self.next()
+//       } else {
+//         None
+//       }
+//     }
+//   }
+// }
+
+
+pub trait Controllable {
+  fn get_handles(&self) -> &Vec<Point3>;
+  fn set_handles(&mut self, _: Vec<Point3>);
 }
 
-impl<'a> VertexIterator<'a> {
-  pub fn new(sketch: &'a Sketch) -> Self {
-    Self {
-      elem_iter: sketch.elements.iter(),
-      vertex_iter: None
-    }
+
+pub trait SketchElement: Differentiable + Controllable {}
+
+impl Debug for dyn SketchElement {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    write!(f, "Sketch elem")
   }
 }
 
-impl<'a> Iterator for VertexIterator<'a> {
-  type Item = &'a Point3;
 
-  fn next(&mut self) -> Option<&'a Point3> {
-    if let Some(ref mut vertex_iter) = self.vertex_iter {
-      let vertex = vertex_iter.next();
-      if vertex.is_some() {
-        vertex
-      } else {
-        self.vertex_iter = None;
-        self.next()
-      }
-    } else {
-      if let Some(line) = self.elem_iter.next() {
-        self.vertex_iter = Some(line.vertices.iter());
-        self.next()
-      } else {
-        None
-      }
-    }
+impl Controllable for BezierSpline {
+  fn get_handles(&self) -> &Vec<Point3> {
+    &self.vertices
+  }
+
+  fn set_handles(&mut self, handles: Vec<Point3>) {
+    self.vertices = handles;
+    self.update();
   }
 }
+
+impl SketchElement for BezierSpline {}
 
 
 #[derive(Debug)]
 pub struct Sketch {
-  pub name: String,
+  pub title: String,
   pub plane: Plane,
-  pub elements: Vec<PolyLine>,
+  // pub elements: Vec<PolyLine>,
+  pub elements: Vec<Box<dyn SketchElement>>,
   // pub constraints: Vec<Box<Constraint>>
   pub visible: bool
 }
@@ -126,7 +121,7 @@ pub struct Sketch {
 impl Sketch {
   pub fn new() -> Self {
     Self {
-      name: "Sketch1".to_string(),
+      title: "Sketch1".to_string(),
       plane: Plane::new(),
       elements: vec![],
       // constraints: vec![]
@@ -134,43 +129,95 @@ impl Sketch {
     }
   }
 
-  pub fn all_vertices(&self) -> VertexIterator {
-    VertexIterator::new(self)
+  // pub fn all_vertices(&self) -> VertexIterator {
+  //   VertexIterator::new(self)
+  // }
+}
+
+
+#[derive(Debug)]
+pub struct TreeNode<T> {
+  pub item: T,
+  pub transform: Matrix4,
+  pub children: Vec<TreeNode<T>>
+}
+
+impl<T> TreeNode<T> {
+  pub fn new(item: T) -> Self {
+    Self {
+      item: item,
+      transform: Matrix4::from_scale(1.0),
+      children: Default::default()
+    }
+  }
+
+  pub fn add_child(&mut self, child: T) -> &Self {
+    self.children.push(Self::new(child));
+    &self.children.last().unwrap()
+  }
+}
+
+
+#[derive(Default)]
+pub struct Component {
+  pub id: Uuid,
+  pub title: String,
+  pub bodies: Vec<Solid>,
+  pub sketches: Vec<Rc<RefCell<Sketch>>>,
+  pub visible: bool,
+  pub children: Vec<Rc<RefCell<Component>>>,
+}
+
+impl Component {
+  pub fn new() -> Self {
+    let mut this: Self = Default::default();
+    this.id = Uuid::new_v4();
+    this
   }
 }
 
 
 pub struct Scene {
-  pub tree: TreeNode<Rc<RefCell<Component>>>,
+  pub tree: Rc<RefCell<Component>>,
+  pub current_node: Rc<RefCell<Component>>,
   // pub render_tree: TreeNode<Vec<Box<dyn Drawable>>>,
-  // pub current_component: Rc<RefCell<Component>>,
   // pub current_sketch: Option<Rc<RefCell<Sketch>>>
 }
 
 impl Scene {
   pub fn new() -> Self {
     let mut comp = Component::new();
-    comp.name = "Main Bracket".to_string();
+    comp.title = "Main Assembly".to_string();
+    comp.visible = true;
+    let tree = Rc::new(RefCell::new(comp));
+    let current_node = Rc::clone(&tree);
+    Self { tree, current_node }
+  }
+
+  pub fn create_component(&mut self) -> Rc<RefCell<Component>> {
+    let mut comp = Component::new();
+    comp.title = "New Component".to_string();
     comp.visible = true;
     let comp = Rc::new(RefCell::new(comp));
-    let tree = TreeNode::new(Rc::clone(&comp));
-    Self {
-      tree: tree,
+    {
+      let mut current_node = self.current_node.borrow_mut();
+      current_node.children.push(Rc::clone(&comp));
     }
+    self.current_node = Rc::clone(&comp);
+    comp
   }
 
-  pub fn create_component(&mut self) {
-    let mut component = Component::new();
-    component.name = "Assembly1".to_string();
-    component.visible = true;
-    self.tree.add_child(Rc::new(RefCell::new(component)));
-  }
-
-  pub fn create_sketch(&mut self) {
+  pub fn create_sketch(&mut self) -> Rc<RefCell<Sketch>> {
     let mut sketch: Sketch = Sketch::new();
-    sketch.name = "Sketch1".to_string();
+    sketch.title = "Sketch1".to_string();
     sketch.visible = true;
-    let _sketch = Rc::new(RefCell::new(sketch));
+    let sketch = Rc::new(RefCell::new(sketch));
+    self.current_node.borrow_mut().sketches.push(Rc::clone(&sketch));
+    sketch
+  }
+
+  pub fn activate(&mut self, comp: Rc<RefCell<Component>>) {
+    self.current_node = comp;
   }
 
   // pub fn edit_sketch(&mut self, sketch: &Rc<RefCell<Sketch>>) {

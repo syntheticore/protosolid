@@ -5,7 +5,7 @@
   "description": "Parametric CAD",
   "author": "Björn Breitgoff <syntheticore@gmail.com>",
   "main": "index.js",
-  "sideEffects": false,
+  "sideEffects": true,
   "scripts": {
     "build": "npm run clean && webpack --mode production --env.production --env.wc",
     "build-electron": "npm run clean && webpack --mode production --env.production",

@@ -178,7 +178,7 @@
     padding-top: 120px
     padding-bottom: 290px
     margin-bottom: -290px
-    // background: url('img/hero.png')
+    background: url('img/hero.png')
     background-repeat: no-repeat
     background-position: top
     // background-position: center

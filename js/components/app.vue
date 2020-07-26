@@ -1,5 +1,5 @@
 <template lang="pug">
-  #app(:class="{fullscreen: isFullscreen}")
+  #app(:class="{fullscreen: isFullscreen, browser: isBrowser}" v-if="activeDocument")
     ToolBar(
       :documents="documents"
       :active-document="activeDocument"
@@ -8,6 +8,7 @@
     )
     main
       ViewPort(
+        :tree="activeDocument.tree"
         @change-view="activeDocument.isViewDirty = true"
         @change-pose="activeDocument.isPoseDirty = true"
       )
@@ -59,7 +60,6 @@
     color: $bright1
     &.fullscreen
       grid-template-rows: 24px 1fr
-
   .tool-bar
     grid-area: header
 
@@ -115,13 +115,15 @@
   import ToolBox from './tool-box.vue'
   import FooterView from './footer-view.vue'
   import ListChooser from './list-chooser.vue'
-  import('../../rust/pkg/wasm-index.js').then(main).catch(console.error);
+  const wasmP = import('../../rust/pkg/wasm-index.js').then(main).catch(console.error);
+
+  let wasm;
+  let lastId = 1;
 
   function main(_wasm) {
     wasm = _wasm
     let alchemy = new wasm.AlchemyProxy()
-    console.log(alchemy.foo())
-    console.log(alchemy.bar())
+    console.log(alchemy)
     console.log(alchemy.get_tree())
   }
 
@@ -131,9 +133,6 @@
       return
     }
   });
-
-  let wasm;
-  let lastId = 1;
 
   export default {
     name: 'app',
@@ -149,7 +148,8 @@
     },
 
     created() {
-      this.changeDocument(this.documents[0])
+      // this.changeDocument(this.documents[0])
+      this.createDocument().then(() => this.changeDocument(this.documents[0]) )
 
       if(!window.ipcRenderer) {
         // this.isFullscreen = true
@@ -175,24 +175,26 @@
 
     methods: {
       createDocument: function() {
-        let proxy = new wasm.AlchemyProxy()
-        this.documents.push({
-          title: 'Untitled Document',
-          proxy: proxy,
-          views: [
-            { title: 'Top', id: lastId++ },
-            { title: 'Left', id: lastId++ },
-            { title: 'Front', id: lastId++ },
-            { title: 'Perspective', id: lastId++ },
-          ],
-          poses: [{ title: 'Base', id: lastId++ },],
-          sets: [],
-          tree: proxy.get_tree(),
-          activeView: null,
-          activePose: null,
-          isViewDirty: false,
-          isPoseDirty: false,
-          isSetDirty: true,
+        return wasmP.then(() => {
+          let proxy = new wasm.AlchemyProxy()
+          this.documents.push({
+            title: 'Untitled Document',
+            proxy: proxy,
+            views: [
+              { title: 'Top', id: lastId++ },
+              { title: 'Left', id: lastId++ },
+              { title: 'Front', id: lastId++ },
+              { title: 'Perspective', id: lastId++ },
+            ],
+            poses: [{ title: 'Base', id: lastId++ },],
+            sets: [],
+            tree: proxy.get_tree(),
+            activeView: null,
+            activePose: null,
+            isViewDirty: false,
+            isPoseDirty: false,
+            isSetDirty: true,
+          })
         })
       },
 
@@ -229,89 +231,94 @@
     data() {
       return {
         isFullscreen: false,
+        isBrowser: !window.ipcRenderer,
         activeDocument: null,
         documents: [
           // { title: 'Table Press', views: [], poses: [], sets: [], tree: {} },
-          {
-            title: 'Rocket Engine',
-            activeView: null,
-            activePose: null,
-            isViewDirty: false,
-            isPoseDirty: false,
-            isSetDirty: false,
-            views: [
-              { title: 'Top', id: lastId++ },
-              { title: 'Left', id: lastId++ },
-              { title: 'Front', id: lastId++ },
-              { title: 'Perspective', id: lastId++ },
-            ],
-            poses: [
-              { title: 'Base', id: lastId++ },
-              { title: 'Activated', id: lastId++ },
-            ],
-            sets: [
-              { title: 'Filet 14', id: lastId++ },
-              { title: 'Extrude 2', id: lastId++ },
-            ],
-            tree: {
-              id: '1',
-              name: 'Main Assembly',
-              children: [
-                {
-                  id: '2',
-                  name: 'Part 1',
-                },
-                {
-                  id: '3',
-                  name: 'Sub Assembly 1',
-                  children: [
-                    {
-                      id: '4',
-                      name: 'Part 2',
-                    },
-                    {
-                      id: '5',
-                      name: 'Part 3',
-                      selected: true,
-                    },
-                    {
-                      id: '6',
-                      name: 'Sub Assembly 2',
-                      children: [
-                        {
-                          id: '7',
-                          name: 'Part 4',
-                          selected: false,
-                        },
-                        {
-                          id: '8',
-                          name: 'Part 5',
-                        },
-                      ]
-                    },
-                    {
-                      id: '9',
-                      name: 'Sub Assembly 2',
-                      children: [
-                        {
-                          id: '10',
-                          name: 'Part 6',
-                        },
-                        {
-                          id: '11',
-                          name: 'Part 7',
-                        },
-                        {
-                          id: '12',
-                          name: 'Part 8',
-                        },
-                      ]
-                    },
-                  ]
-                },
-              ]
-            }
-          },
+          // {
+          //   title: 'Rocket Engine',
+          //   activeView: null,
+          //   activePose: null,
+          //   isViewDirty: false,
+          //   isPoseDirty: false,
+          //   isSetDirty: false,
+          //   views: [
+          //     { title: 'Top', id: lastId++ },
+          //     { title: 'Left', id: lastId++ },
+          //     { title: 'Front', id: lastId++ },
+          //     { title: 'Perspective', id: lastId++ },
+          //   ],
+          //   poses: [
+          //     { title: 'Base', id: lastId++ },
+          //     { title: 'Activated', id: lastId++ },
+          //   ],
+          //   sets: [
+          //     { title: 'Filet 14', id: lastId++ },
+          //     { title: 'Extrude 2', id: lastId++ },
+          //   ],
+          //   tree: {
+          //     id: '1',
+          //     title: 'Main Assembly',
+          //     sketches: [],
+          //     children: [
+          //       {
+          //         id: '2',
+          //         title: 'Part 1',
+          //       },
+          //       {
+          //         id: '3',
+          //         title: 'Sub Assembly 1',
+          //         sketches: [],
+          //         children: [
+          //           {
+          //             id: '4',
+          //             title: 'Part 2',
+          //           },
+          //           {
+          //             id: '5',
+          //             title: 'Part 3',
+          //             selected: true,
+          //           },
+          //           {
+          //             id: '6',
+          //             title: 'Sub Assembly 2',
+          //             sketches: [],
+          //             children: [
+          //               {
+          //                 id: '7',
+          //                 title: 'Part 4',
+          //                 selected: false,
+          //               },
+          //               {
+          //                 id: '8',
+          //                 title: 'Part 5',
+          //               },
+          //             ]
+          //           },
+          //           {
+          //             id: '9',
+          //             title: 'Sub Assembly 2',
+          //             sketches: [],
+          //             children: [
+          //               {
+          //                 id: '10',
+          //                 title: 'Part 6',
+          //               },
+          //               {
+          //                 id: '11',
+          //                 title: 'Part 7',
+          //               },
+          //               {
+          //                 id: '12',
+          //                 title: 'Part 8',
+          //               },
+          //             ]
+          //           },
+          //         ]
+          //       },
+          //     ]
+          //   }
+          // },
           // { title: 'Print Head', views: [], poses: [], sets: [], tree: {} },
           // { title: 'Tool Holder', views: [], poses: [], sets: [], tree: {} },
         ],

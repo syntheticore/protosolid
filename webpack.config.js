@@ -62,8 +62,7 @@ module.exports = (env) => {
           test: /\.styl$/,
           use: [
             { loader: MiniCssExtractPlugin.loader },
-            'css-loader',
-            // 'css-loader?url=false',
+            'css-loader?url=false',
             {
               loader: 'stylus-loader',
               options: {
@@ -87,8 +86,7 @@ module.exports = (env) => {
                 hmr: !env.production
               }
             },
-            'css-loader',
-            // 'css-loader?url=false',
+            'css-loader?url=false',
             {
               loader: 'stylus-loader',
               options: {

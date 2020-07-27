@@ -38,7 +38,7 @@
       & + li
         border-left: 1px solid $dark1 * 1.15
       &:hover
-        background: $dark2 * 1.2
+        background: $dark2 * 1.3
       &:active
       &.active
         background: $dark1 * 1.15
@@ -49,22 +49,29 @@
     li
       display: inline-block
       text-align: center
-      background: $dark1
+      // background: $dark1
+      background: none
+      border: none
+      box-shadow: none
       padding: 5px 6px
       min-width: 55px
       padding-bottom: 4px
       margin-right: 0
       margin-bottom: 0
+      text-shadow: none
       &:hover
         background: $dark1 * 1.15
         svg
           color: $highlight
+        .title
+          color: $bright1
       &:active
         background: $dark1 * 0.9
       svg
         font-size: 21px
         color: $bright1
-        transition: all 0.4s
+        // transition: all 0.15s
+        filter: none
       .title
         color: $bright2
         font-size: 11px

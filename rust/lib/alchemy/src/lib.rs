@@ -113,7 +113,7 @@ pub struct Sketch {
   pub title: String,
   pub plane: Plane,
   // pub elements: Vec<PolyLine>,
-  pub elements: Vec<Box<dyn SketchElement>>,
+  pub elements: Vec<Rc<RefCell<dyn SketchElement>>>,
   // pub constraints: Vec<Box<Constraint>>
   pub visible: bool
 }
@@ -135,27 +135,27 @@ impl Sketch {
 }
 
 
-#[derive(Debug)]
-pub struct TreeNode<T> {
-  pub item: T,
-  pub transform: Matrix4,
-  pub children: Vec<TreeNode<T>>
-}
+// #[derive(Debug)]
+// pub struct TreeNode<T> {
+//   pub item: T,
+//   pub transform: Matrix4,
+//   pub children: Vec<TreeNode<T>>
+// }
 
-impl<T> TreeNode<T> {
-  pub fn new(item: T) -> Self {
-    Self {
-      item: item,
-      transform: Matrix4::from_scale(1.0),
-      children: Default::default()
-    }
-  }
+// impl<T> TreeNode<T> {
+//   pub fn new(item: T) -> Self {
+//     Self {
+//       item: item,
+//       transform: Matrix4::from_scale(1.0),
+//       children: Default::default()
+//     }
+//   }
 
-  pub fn add_child(&mut self, child: T) -> &Self {
-    self.children.push(Self::new(child));
-    &self.children.last().unwrap()
-  }
-}
+//   pub fn add_child(&mut self, child: T) -> &Self {
+//     self.children.push(Self::new(child));
+//     &self.children.last().unwrap()
+//   }
+// }
 
 
 #[derive(Default)]
@@ -179,7 +179,7 @@ impl Component {
 
 pub struct Scene {
   pub tree: Rc<RefCell<Component>>,
-  pub current_node: Rc<RefCell<Component>>,
+  pub current_component: Rc<RefCell<Component>>,
   // pub render_tree: TreeNode<Vec<Box<dyn Drawable>>>,
   // pub current_sketch: Option<Rc<RefCell<Sketch>>>
 }
@@ -190,8 +190,8 @@ impl Scene {
     comp.title = "Main Assembly".to_string();
     comp.visible = true;
     let tree = Rc::new(RefCell::new(comp));
-    let current_node = Rc::clone(&tree);
-    Self { tree, current_node }
+    let current_component = Rc::clone(&tree);
+    Self { tree, current_component }
   }
 
   pub fn create_component(&mut self) -> Rc<RefCell<Component>> {
@@ -200,10 +200,10 @@ impl Scene {
     comp.visible = true;
     let comp = Rc::new(RefCell::new(comp));
     {
-      let mut current_node = self.current_node.borrow_mut();
-      current_node.children.push(Rc::clone(&comp));
+      let mut current_component = self.current_component.borrow_mut();
+      current_component.children.push(Rc::clone(&comp));
     }
-    self.current_node = Rc::clone(&comp);
+    self.current_component = Rc::clone(&comp);
     comp
   }
 
@@ -212,12 +212,12 @@ impl Scene {
     sketch.title = "Sketch1".to_string();
     sketch.visible = true;
     let sketch = Rc::new(RefCell::new(sketch));
-    self.current_node.borrow_mut().sketches.push(Rc::clone(&sketch));
+    self.current_component.borrow_mut().sketches.push(Rc::clone(&sketch));
     sketch
   }
 
   pub fn activate(&mut self, comp: Rc<RefCell<Component>>) {
-    self.current_node = comp;
+    self.current_component = comp;
   }
 
   // pub fn edit_sketch(&mut self, sketch: &Rc<RefCell<Sketch>>) {

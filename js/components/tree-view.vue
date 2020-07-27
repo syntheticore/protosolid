@@ -1,6 +1,6 @@
 <template lang="pug">
   ul.tree-view
-    li(is="tree-item", :node="top" is-top)
+    li(is="tree-item", :node="top", v-on:create-component="createComponent", is-top)
 </template>
 
 
@@ -24,5 +24,10 @@
     props: {
       top: Object,
     },
+    methods: {
+      createComponent: function(parent) {
+        parent.create_component('New Component')
+      },
+    }
   }
 </script>

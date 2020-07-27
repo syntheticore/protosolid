@@ -51,7 +51,7 @@
     grid-template-rows: 38px 1fr
     // grid-gap: 1px
     // grid-auto-rows: minmax(100px, auto)
-    grid-template-areas: 
+    grid-template-areas:
       "header"\
       "main"
     user-select: none
@@ -93,7 +93,7 @@
       h1
         flex: 0 0 content
       .list-chooser
-        flex: 0 1 auto  
+        flex: 0 1 auto
 
   .view-port
     width: 100%
@@ -115,17 +115,9 @@
   import ToolBox from './tool-box.vue'
   import FooterView from './footer-view.vue'
   import ListChooser from './list-chooser.vue'
-  const wasmP = import('../../rust/pkg/wasm-index.js').then(main).catch(console.error);
+  const wasmP = import('../../rust/pkg/wasm-index.js')
 
-  let wasm;
   let lastId = 1;
-
-  function main(_wasm) {
-    wasm = _wasm
-    let alchemy = new wasm.AlchemyProxy()
-    console.log(alchemy)
-    console.log(alchemy.get_tree())
-  }
 
   window.addEventListener('keydown', (e) => {
     // console.log(e.keyCode)
@@ -175,8 +167,25 @@
 
     methods: {
       createDocument: function() {
-        return wasmP.then(() => {
-          let proxy = new wasm.AlchemyProxy()
+        return wasmP.then((wasm) => {
+          const proxy = new wasm.AlchemyProxy()
+          const tree = proxy.get_main_assembly()
+            const part1 = tree.create_component('Part 1')
+            const assm1 = tree.create_component('Sub Assembly 1')
+              const part2 = assm1.create_component('Part 2')
+              const part3 = assm1.create_component('Part 3')
+              part3.selected = true
+              console.log(part3)
+              const assm2 = assm1.create_component('Sub Assembly 2')
+                const part4 = assm2.create_component('Part 4')
+                const part5 = assm2.create_component('Part 5')
+              const assm3 = assm1.create_component('Sub Assembly 3')
+                const part6 = assm3.create_component('Part 6')
+                const part7 = assm3.create_component('Part 7')
+                const part8 = assm3.create_component('Part 8')
+          part3.create_sketch().add_segment()
+          part3.get_sketches()[0].add_segment()
+          console.log(part3.get_sketches()[0].get_segments())
           this.documents.push({
             title: 'Untitled Document',
             proxy: proxy,
@@ -186,9 +195,15 @@
               { title: 'Front', id: lastId++ },
               { title: 'Perspective', id: lastId++ },
             ],
-            poses: [{ title: 'Base', id: lastId++ },],
-            sets: [],
-            tree: proxy.get_tree(),
+            poses: [
+              { title: 'Base', id: lastId++ },
+              { title: 'Activated', id: lastId++ },
+            ],
+            sets: [
+              { title: 'Filet 14', id: lastId++ },
+              { title: 'Extrude 2', id: lastId++ },
+            ],
+            tree: tree,
             activeView: null,
             activePose: null,
             isViewDirty: false,
@@ -227,101 +242,13 @@
         this.activeDocument.activePose = this.activeDocument.poses[0]
       }
     },
-    
+
     data() {
       return {
         isFullscreen: false,
         isBrowser: !window.ipcRenderer,
         activeDocument: null,
-        documents: [
-          // { title: 'Table Press', views: [], poses: [], sets: [], tree: {} },
-          // {
-          //   title: 'Rocket Engine',
-          //   activeView: null,
-          //   activePose: null,
-          //   isViewDirty: false,
-          //   isPoseDirty: false,
-          //   isSetDirty: false,
-          //   views: [
-          //     { title: 'Top', id: lastId++ },
-          //     { title: 'Left', id: lastId++ },
-          //     { title: 'Front', id: lastId++ },
-          //     { title: 'Perspective', id: lastId++ },
-          //   ],
-          //   poses: [
-          //     { title: 'Base', id: lastId++ },
-          //     { title: 'Activated', id: lastId++ },
-          //   ],
-          //   sets: [
-          //     { title: 'Filet 14', id: lastId++ },
-          //     { title: 'Extrude 2', id: lastId++ },
-          //   ],
-          //   tree: {
-          //     id: '1',
-          //     title: 'Main Assembly',
-          //     sketches: [],
-          //     children: [
-          //       {
-          //         id: '2',
-          //         title: 'Part 1',
-          //       },
-          //       {
-          //         id: '3',
-          //         title: 'Sub Assembly 1',
-          //         sketches: [],
-          //         children: [
-          //           {
-          //             id: '4',
-          //             title: 'Part 2',
-          //           },
-          //           {
-          //             id: '5',
-          //             title: 'Part 3',
-          //             selected: true,
-          //           },
-          //           {
-          //             id: '6',
-          //             title: 'Sub Assembly 2',
-          //             sketches: [],
-          //             children: [
-          //               {
-          //                 id: '7',
-          //                 title: 'Part 4',
-          //                 selected: false,
-          //               },
-          //               {
-          //                 id: '8',
-          //                 title: 'Part 5',
-          //               },
-          //             ]
-          //           },
-          //           {
-          //             id: '9',
-          //             title: 'Sub Assembly 2',
-          //             sketches: [],
-          //             children: [
-          //               {
-          //                 id: '10',
-          //                 title: 'Part 6',
-          //               },
-          //               {
-          //                 id: '11',
-          //                 title: 'Part 7',
-          //               },
-          //               {
-          //                 id: '12',
-          //                 title: 'Part 8',
-          //               },
-          //             ]
-          //           },
-          //         ]
-          //       },
-          //     ]
-          //   }
-          // },
-          // { title: 'Print Head', views: [], poses: [], sets: [], tree: {} },
-          // { title: 'Tool Holder', views: [], poses: [], sets: [], tree: {} },
-        ],
+        documents: [],
       }
     }
   }

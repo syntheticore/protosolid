@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 
 use wasm_bindgen::prelude::*;
-use serde::{Serialize};
-use uuid::Uuid;
+use js_sys::Array;
+// use serde::{Serialize};
+
 use alchemy::*;
 
 #[cfg(feature = "wee_alloc")]
@@ -46,57 +46,62 @@ pub fn main() -> Result<(), JsValue> {
   Ok(())
 }
 
-#[derive(Serialize)]
-pub struct JsTreeNode {
-  id: Uuid,
-  title: String,
-  sketches: Vec<JsSketch>,
-  children: Vec<JsTreeNode>,
-}
 
-#[derive(Serialize)]
-pub struct JsSketch {
-  title: String,
-  segments: Vec<JsSegment>,
-}
+// #[derive(Serialize)]
+// pub struct JsSegment {
+//   handles: Vec<(f64, f64, f64)>,
+//   vertices: Vec<(f64, f64, f64)>,
 
-#[derive(Serialize)]
+//   #[serde(skip_serializing)]
+//   real: Rc<RefCell<dyn SketchElement>>,
+// }
+
+
+#[wasm_bindgen]
 pub struct JsSegment {
-  handles: Vec<(f64, f64, f64)>,
-  vertices: Vec<(f64, f64, f64)>,
+  real: Rc<RefCell<dyn SketchElement>>,
 }
 
 #[wasm_bindgen]
-pub struct AlchemyProxy {
-  scene: Scene,
-  element_cache: HashMap<Uuid, Rc<RefCell<Component>>>,
+impl JsSegment {
+  fn from(elem: &Rc<RefCell<dyn SketchElement>>) -> Self {
+    Self {
+      real: elem.clone()
+    }
+  }
+
+  pub fn get_handles(&self) -> Array {
+    self.real.borrow().get_handles().iter().map(|vertex|
+      JsValue::from_serde(&[vertex.x, vertex.y, vertex.z]).unwrap()
+    ).collect()
+  }
+
+  pub fn tesselate(&self, steps: i32) -> Array {
+    self.real.borrow().tesselate(steps).iter().map(|vertex|
+      JsValue::from_serde(&[vertex.x, vertex.y, vertex.z]).unwrap()
+    ).collect()
+  }
+}
+
+
+#[wasm_bindgen]
+pub struct JsSketch {
+  real: Rc<RefCell<Sketch>>,
 }
 
 #[wasm_bindgen]
-impl AlchemyProxy {
-
-  #[wasm_bindgen(constructor)]
-  pub fn new() -> Self {
-    let scene = Scene::new();
-    let mut this = Self { scene, element_cache: Default::default() };
-    this.create_component();
-    this.create_component();
-    this.create_sketch();
-    this
+impl JsSketch {
+  fn from(sketch: &Rc<RefCell<Sketch>>) -> Self {
+    JsSketch {
+      real: sketch.clone(),
+    }
   }
 
-  pub fn foo(&self) -> Result<f64, JsValue> {
-    Ok(44.0)
+  pub fn get_segments(&self) -> Array {
+    self.real.borrow().elements.iter().map(|elem| JsValue::from(JsSegment::from(elem)) ).collect()
   }
 
-  pub fn create_component(&mut self) {
-    let comp = self.scene.create_component();
-    let id = comp.borrow().id;
-    self.element_cache.insert(id, comp);
-  }
-
-  pub fn create_sketch(&mut self) {
-    let sketch = self.scene.create_sketch();
+  pub fn add_segment(&self) {
     let spline = shapex::BezierSpline::new(vec![
         shapex::Point3::new(0.0, 0.0, 1.0),
         shapex::Point3::new(1.0, 0.0, 1.25),
@@ -108,44 +113,92 @@ impl AlchemyProxy {
         shapex::Point3::new(0.0, 1.0, 2.75),
       ]
     );
-    sketch.borrow_mut().elements.push(Box::new(spline));
+    self.real.borrow_mut().elements.push(Rc::new(RefCell::new(spline)));
+  }
+}
+
+
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct JsComponent {
+  // title: String,
+  real: Rc<RefCell<Component>>,
+}
+
+#[wasm_bindgen]
+impl JsComponent {
+  #[wasm_bindgen(constructor)]
+  pub fn new() -> Self {
+    Default::default()
   }
 
-  pub fn get_tree(&mut self) -> JsValue {
-    let tree = self.build_tree(&self.scene.tree);
-    JsValue::from_serde(&tree).unwrap()
-  }
-
-  pub fn get_element(&self, id: &str) -> JsValue {
-    let id = Uuid::parse_str(id).unwrap();
-    let comp = self.element_cache.get(&id).unwrap();
-    JsValue::from_serde(&self.build_tree_node(comp)).unwrap()
-  }
-
-  fn build_tree(&self, comp: &Rc<RefCell<Component>>) -> JsTreeNode {
-    let mut node = self.build_tree_node(&comp);
-    for child in &comp.borrow().children {
-      node.children.push(self.build_tree(child));
+  fn from(comp: &Rc<RefCell<Component>>) -> Self {
+    JsComponent {
+      // title: String::from(&comp.borrow().title),
+      real: comp.clone()
     }
-    node
   }
 
-  fn build_tree_node(&self, comp: &Rc<RefCell<Component>>) -> JsTreeNode {
-    let comp = comp.borrow();
-    let sketches = comp.sketches.iter().map(|sketch| {
-      let sketch = sketch.borrow();
-      JsSketch {
-        title: String::from(&sketch.title),
-        segments: sketch.elements.iter()
-          .map(|elem| JsSegment { handles: elem.get_handles().iter().map(|p| (p.x, p.y, p.z) ).collect(), vertices: elem.tesselate(40).iter().map(|p| (p.x, p.y, p.z) ).collect() } )
-          .collect(),
-      }
-    }).collect();
-    JsTreeNode {
-      id: comp.id,
-      title: String::from(&comp.title),
-      sketches: sketches,
-      children: vec![],
-    }
+  pub fn get_id(&self) -> JsValue {
+    JsValue::from_serde(&self.real.borrow().id).unwrap()
+  }
+
+  pub fn get_title(&self) -> JsValue {
+    JsValue::from_serde(&self.real.borrow().title).unwrap()
+  }
+
+  pub fn get_sketches(&self) -> Array {
+    self.real.borrow().sketches.iter().map(|sketch| JsValue::from(JsSketch::from(sketch)) ).collect()
+  }
+
+  pub fn get_children(&self) -> Array {
+    self.real.borrow().children.iter().map(|child| JsValue::from(JsComponent::from(child)) ).collect()
+  }
+
+  pub fn create_sketch(&mut self) -> JsSketch {
+    let mut sketch = Sketch::new();
+    sketch.title = "Sketch1".to_string();
+    sketch.visible = true;
+    let sketch = Rc::new(RefCell::new(sketch));
+    self.real.borrow_mut().sketches.push(sketch.clone());
+    JsSketch::from(&sketch)
+  }
+
+  pub fn create_component(&mut self, title: &str) -> JsComponent {
+    let mut comp = Component::new();
+    comp.title = title.to_string();
+    comp.visible = true;
+    let comp = Rc::new(RefCell::new(comp));
+    self.real.borrow_mut().children.push(comp.clone());
+    JsComponent::from(&comp)
+  }
+}
+
+
+#[wasm_bindgen]
+pub struct AlchemyProxy {
+  scene: Scene,
+}
+
+#[wasm_bindgen]
+impl AlchemyProxy {
+
+  #[wasm_bindgen(constructor)]
+  pub fn new() -> Self {
+    let scene = Scene::new();
+    Self { scene }
+  }
+
+  // pub fn foo(&self) -> Result<f64, JsValue> {
+  //   Ok(44.0)
+  // }
+
+  // pub fn create_component(&mut self) -> JsComponent {
+  //   let comp = self.scene.create_component();
+  //   JsComponent::from(&comp)
+  // }
+
+  pub fn get_main_assembly(&mut self) -> JsComponent {
+    JsComponent::from(&self.scene.tree)
   }
 }

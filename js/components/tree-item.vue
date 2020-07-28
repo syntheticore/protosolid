@@ -1,28 +1,31 @@
 <template lang="pug">
   li.tree-item
     header
-      fa-icon.expander(icon="caret-down",
-                       :class="{blank: !isAssembly || isTop, closed: !expanded}",
-                       @click="toggle()"
-                       fixed-width)
-      .box(:class="{hidden: !isVisible, selected: node.selected}")
+      fa-icon.expander(
+        icon="caret-down"
+        :class="{blank: !isAssembly || isTop, closed: !expanded}"
+        @click="toggle()"
+        fixed-width
+      )
+      .box(:class="{hidden: !isVisible, selected: node == activeNode}")
         fa-icon.eye(icon="eye" fixed-width @click="hidden = !hidden" v-if="!isTop")
         fa-icon.assembly(icon="boxes"  v-if="isAssembly")
         fa-icon.part(icon="box"  v-else)
         span.name {{ node.get_title() }}
         .controls
           fa-icon.menu(icon="ellipsis-v" fixed-width @click="createComponent(node)")
-          fa-icon.activate(icon="edit" fixed-width title="Activate" @click="activate(node)")
+          fa-icon.activate(icon="edit" fixed-width title="Activate" @click="activateComponent(node)")
     //- ul.children(v-show="isAssembly && expanded")
     transition(name="fade" mode="out-in")
       transition-group.children(name="list" tag="ul" v-show="expanded" v-if="isAssembly")
         li(
-          is="tree-item",
-          v-for="child in node.get_children()",
-          :key="child.get_id()",
-          :node="child",
-          :parent-hidden="!isVisible",
-          v-on="$listeners")
+          is="tree-item"
+          v-for="child in node.get_children()"
+          :key="child.get_id()"
+          :node="child"
+          :parent-hidden="!isVisible"
+          v-on="$listeners"
+        )
         //- @activate="activate"
 </template>
 
@@ -68,7 +71,7 @@
       .controls
         margin-right: 0
         opacity: 1
-        transition-delay: 0.15s
+        transition-delay: 0.05s
     &.selected
       border-color: $highlight * 1.2
       box-shadow: 0 0 0px 1px $highlight * 1.2
@@ -107,7 +110,7 @@
     margin-right: -54px
     opacity: 0
     transition: all 0.2s
-    transition-delay: 0.4s
+    transition-delay: 0.25s
 
   .fade-enter-active
     transition: all 0.6s
@@ -132,23 +135,28 @@
 <script>
   export default {
     name: 'TreeItem',
+
     props: {
       isTop: Boolean,
       node: Object,
+      activeNode: Object,
       parentHidden: Boolean,
     },
+
     data() {
       return {
         hidden: false,
         expanded: true,
       };
     },
+
     methods: {
       toggle: function() {
         this.expanded = !this.expanded;
       },
 
-      activate: function(node) {
+      activateComponent: function(node) {
+        console.log('ACTIVATE')
         this.$emit('activate-component', node)
       },
 
@@ -157,11 +165,13 @@
         this.$emit('create-component', parent)
       },
     },
+
     computed: {
       isAssembly: function() {
         // return this.node.children && this.node.children.length;
         return this.node.get_children().length;
       },
+
       isVisible: function() {
         return !this.hidden && !this.parentHidden;
       },

@@ -6,40 +6,9 @@
       @create-document="createDocument"
       @change-document="changeDocument"
     )
-    main
-      ViewPort(
-        :tree="activeDocument.tree"
-        @change-view="activeDocument.isViewDirty = true"
-        @change-pose="activeDocument.isPoseDirty = true"
-      )
-      ToolBox
-      SideBar.bar-left
-        TreeView(:top="activeDocument.tree")
-      SideBar.bar-right
-        h1 Views
-        ListChooser(
-          :list="activeDocument.views"
-          :active="activeDocument.activeView"
-          :allow-create="activeDocument.isViewDirty"
-          @create="createView"
-          @activate="activateView"
-        )
-        h1 Poses
-        ListChooser(
-          :list="activeDocument.poses"
-          :active="activeDocument.activePose"
-          :allow-create="activeDocument.isPoseDirty"
-          @create="createPose"
-          @activate="activatePose"
-        )
-        h1 Sets
-        ListChooser(
-          v-if="activeDocument.sets.length || activeDocument.isSetDirty"
-          :list="activeDocument.sets"
-          :allow-create="activeDocument.isSetDirty"
-          @create="createSet"
-        )
-      FooterView
+    DocumentView(
+      :document="activeDocument"
+    )
 </template>
 
 
@@ -60,61 +29,19 @@
     color: $bright1
     &.fullscreen
       grid-template-rows: 24px 1fr
+
   .tool-bar
     grid-area: header
 
-  main
+  .document-view
     grid-area: main
     position: relative
-    overflow: hidden
-    display: flex
-    justify-content: center
-
-  .tool-box
-    position: absolute
-    margin-top: 12px
-    max-width: calc(100% - 450px)
-
-  .side-bar
-    position: absolute
-    top: 0
-    padding-top: 14px
-    h1
-      text-align: center
-    &.bar-left
-      left: 0
-      h1
-        margin-left: 14px
-    &.bar-right
-      right: 14px
-      bottom: 155px
-      display: flex
-      flex-direction: column
-      h1
-        flex: 0 0 content
-      .list-chooser
-        flex: 0 1 auto
-
-  .view-port
-    width: 100%
-    height: 100%
-
-  .footer-view
-    position: absolute
-    left: 0
-    bottom: 0
-    width: 100%
 </style>
 
 
 <script>
   import ToolBar from './tool-bar.vue'
-  import SideBar from './side-bar.vue'
-  import ViewPort from './view-port.vue'
-  import TreeView from './tree-view.vue'
-  import ToolBox from './tool-box.vue'
-  import FooterView from './footer-view.vue'
-  import ListChooser from './list-chooser.vue'
+  import DocumentView from './document-view.vue'
   const wasmP = import('../../rust/pkg/wasm-index.js')
 
   let lastId = 1;
@@ -131,12 +58,7 @@
 
     components: {
       ToolBar,
-      SideBar,
-      ViewPort,
-      TreeView,
-      ToolBox,
-      FooterView,
-      ListChooser,
+      DocumentView,
     },
 
     created() {
@@ -211,29 +133,6 @@
             isSetDirty: true,
           })
         })
-      },
-
-      createView: function() {
-        this.activeDocument.views.push({ title: 'Fresh View', id: lastId++ })
-        this.activeDocument.isViewDirty = false
-      },
-
-      createPose: function() {
-        this.activeDocument.poses.push({ title: 'Untitled Pose', id: lastId++ })
-        this.activeDocument.isPoseDirty = false
-      },
-
-      createSet: function() {
-        this.activeDocument.sets.push({ title: 'Untitled Set', id: lastId++ })
-        this.activeDocument.isSetDirty = false
-      },
-
-      activateView: function(view) {
-        this.activeDocument.activeView = view
-      },
-
-      activatePose: function(pose) {
-        this.activeDocument.activePose = pose
       },
 
       changeDocument: function(doc) {

@@ -7,14 +7,16 @@
         @click="toggle()"
         fixed-width
       )
-      .box(:class="{hidden: !isVisible, selected: node == activeNode}")
+      .box(:class="{hidden: !isVisible, selected: node.get_id() == activeNode.get_id()}")
         fa-icon.eye(icon="eye" fixed-width @click="hidden = !hidden" v-if="!isTop")
         fa-icon.assembly(icon="boxes"  v-if="isAssembly")
         fa-icon.part(icon="box"  v-else)
         span.name {{ node.get_title() }}
         .controls
-          fa-icon.menu(icon="ellipsis-v" fixed-width @click="createComponent(node)")
-          fa-icon.activate(icon="edit" fixed-width title="Activate" @click="activateComponent(node)")
+          fa-icon.activate(icon="check-circle" fixed-width title="Activate" @click="activateComponent(node)")
+          fa-icon.new-component(icon="plus-circle" fixed-width title="Create Component" @click="createComponent(node)")
+          fa-icon.new-sketch(icon="edit" fixed-width title="Create Sketch" @click="createSketch(node)")
+          fa-icon.new-sketch(icon="sliders-h" fixed-width title="Create Variable" @click="createVariable(node)")
     //- ul.children(v-show="isAssembly && expanded")
     transition(name="fade" mode="out-in")
       transition-group.children(name="list" tag="ul" v-show="expanded" v-if="isAssembly")
@@ -23,6 +25,7 @@
           v-for="child in node.get_children()"
           :key="child.get_id()"
           :node="child"
+          :active-node="activeNode"
           :parent-hidden="!isVisible"
           v-on="$listeners"
         )
@@ -106,11 +109,13 @@
     margin-right: 6px
 
   .controls
-    border-left: 1px solid $dark1 * 1.3
-    margin-right: -54px
+    border-left: 0.5px solid $dark1 * 1.3
+    margin-right: -106px
     opacity: 0
     transition: all 0.2s
     transition-delay: 0.25s
+    svg
+      margin-bottom: 1px
 
   .fade-enter-active
     transition: all 0.6s

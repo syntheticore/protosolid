@@ -72,13 +72,13 @@ impl JsSegment {
 
   pub fn get_handles(&self) -> Array {
     self.real.borrow().get_handles().iter().map(|vertex|
-      JsValue::from_serde(&[vertex.x, vertex.y, vertex.z]).unwrap()
+      JsValue::from_serde(&(vertex.x, vertex.y, vertex.z)).unwrap()
     ).collect()
   }
 
   pub fn tesselate(&self, steps: i32) -> Array {
     self.real.borrow().tesselate(steps).iter().map(|vertex|
-      JsValue::from_serde(&[vertex.x, vertex.y, vertex.z]).unwrap()
+      JsValue::from_serde(&(vertex.x, vertex.y, vertex.z)).unwrap()
     ).collect()
   }
 }

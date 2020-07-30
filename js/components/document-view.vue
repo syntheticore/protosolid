@@ -62,6 +62,7 @@
     &.bar-left
       left: 0
       overflow: hidden
+      pointer-events: all
       // h1
       //   margin-left: 14px
     &.bar-right

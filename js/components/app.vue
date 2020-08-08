@@ -106,7 +106,7 @@
                 const part7 = assm3.create_component('Part 7')
                 const part8 = assm3.create_component('Part 8')
           part3.create_sketch().add_segment()
-          part3.get_sketches()[0].add_segment()
+          // part3.get_sketches()[0].add_segment()
           console.log(part3.get_sketches()[0].get_segments())
           this.documents.push({
             title: 'Untitled Document',

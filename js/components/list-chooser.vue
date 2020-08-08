@@ -19,12 +19,16 @@
     overflow: hidden
     display: flex
     flex-direction: column
-  
+
   ul
     flex: 1 1 auto
     overflow: auto
     -webkit-overflow-scrolling: touch
     max-height: 210px
+    -ms-overflow-style: none
+    scrollbar-width: none
+    &::-webkit-scrollbar
+      display: none
 
   li
     padding: 8px 12px

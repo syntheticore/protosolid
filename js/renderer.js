@@ -4,13 +4,17 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
 import { HDRCubeTextureLoader } from 'three/examples/jsm/loaders/HDRCubeTextureLoader.js'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
+import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
 var rendering = true
-var renderer, controls, scene, camera, mesh, lineMaterial, pointMaterial
+var renderer, controls, camera, mesh, lineMaterial, pointMaterial
 
 export class Renderer {
   constructor(canvas) {
     this.emitter = createNanoEvents()
+    this.isDragging = false
 
     renderer = new THREE.WebGLRenderer({
       canvas: canvas,
@@ -30,23 +34,25 @@ export class Renderer {
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     // renderer.toneMappingExposure = 1.2
 
+    this.raycaster = new THREE.Raycaster()
+
     camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
     camera.position.x = 3
     camera.position.y = 2
     camera.position.z = 3
 
-    scene = new THREE.Scene()
-    // scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
-    // scene.add(new THREE.AmbientLight(0x666666))
+    this.scene = new THREE.Scene()
+    // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
+    // this.scene.add(new THREE.AmbientLight(0x666666))
     var sun = new THREE.DirectionalLight(0xdfebff, 1)
     sun.position.set(0, 100, 0)
     sun.castShadow = true
     sun.shadow.mapSize.width = 2048
     sun.shadow.mapSize.height = 2048
-    scene.add(sun)
+    this.scene.add(sun)
 
     var light = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
-    scene.add(light)
+    this.scene.add(light)
 
     // geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2)
     var geometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 26)
@@ -59,20 +65,22 @@ export class Renderer {
     mesh = new THREE.Mesh(geometry, material)
     mesh.castShadow = true
     mesh.receiveShadow = true
-    scene.add(mesh)
+    mesh.alcSelectable = true
+    this.scene.add(mesh)
 
     var groundGeo = new THREE.PlaneBufferGeometry(10, 10)
     groundGeo.rotateX(- Math.PI / 2)
     var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
     ground.receiveShadow = true
     ground.position.y = -1.85
-    scene.add(ground)
+    ground.alcProjectable = true
+    this.scene.add(ground)
 
     var grid = new THREE.GridHelper(20, 20)
     grid.position.y = -1.8
     grid.material.opacity = 0.1
     grid.material.transparent = true
-    scene.add(grid)
+    this.scene.add(grid)
 
     var pmremGenerator = new THREE.PMREMGenerator(renderer)
     pmremGenerator.compileCubemapShader()
@@ -82,7 +90,7 @@ export class Renderer {
     .setDataType(THREE.UnsignedByteType)
     .load(['px.hdr', 'nx.hdr', 'py.hdr', 'ny.hdr', 'pz.hdr', 'nz.hdr'], (texture) => {
       var envMap = pmremGenerator.fromCubemap(texture).texture
-      scene.environment = envMap
+      this.scene.environment = envMap
       texture.dispose()
       pmremGenerator.dispose()
       this.render()
@@ -103,6 +111,15 @@ export class Renderer {
       this.emitter.emit('change-view')
     })
 
+    controls.addEventListener('start', () => {
+      this.isDragging = true
+      transformControl.enabled = false
+    })
+    controls.addEventListener('end', () => {
+      this.isDragging = false
+      transformControl.enabled = true
+    })
+
     var transformControl = new TransformControls(camera, renderer.domElement)
     transformControl.space = 'world'
     // transformControl.translationSnap = 0.5
@@ -115,13 +132,25 @@ export class Renderer {
     transformControl.addEventListener('objectChange', (event) => {
       this.emitter.emit('change-pose')
     })
-    scene.add(transformControl)
+    this.scene.add(transformControl)
     transformControl.attach(mesh)
 
-    lineMaterial = new THREE.LineBasicMaterial({ color: '#2590e1', linewidth: 2, fog: true })
-    pointMaterial = new THREE.PointsMaterial({ color: 'white', size: 8, sizeAttenuation: false, map: new THREE.TextureLoader().load('textures/disc.png'), alphaTest: 0.01, transparent: true })
-    pointMaterial.color.setHSL(0.1, 0.9, 0.6)
-    // this.loadTree(this.tree)
+    // lineMaterial = new THREE.LineBasicMaterial({ color: '#2590e1', linewidth: 2, fog: true })
+    lineMaterial = new LineMaterial( {
+      color: 'yellow',
+      linewidth: 2,
+      vertexColors: true,
+      dashed: false
+    })
+
+    // pointMaterial = new THREE.PointsMaterial({
+    //   color: 'yellow',
+    //   size: 8,
+    //   sizeAttenuation: false,
+    //   map: new THREE.TextureLoader().load('textures/disc.png'),
+    //   alphaTest: 0.01,
+    //   transparent: true
+    // })
 
     // var dragcontrols = new DragControls([mesh], camera, renderer.domElement)
     // dragcontrols.addEventListener('hoveron', function(event) {
@@ -138,7 +167,7 @@ export class Renderer {
   }
 
   render() {
-    renderer.render(scene, camera)
+    renderer.render(this.scene, camera)
     this.emitter.emit('render')
   }
 
@@ -155,10 +184,19 @@ export class Renderer {
   onWindowResize() {
     const canvas = renderer.domElement
     if(!canvas) return
-    renderer.setSize(canvas.parentElement.offsetWidth, canvas.parentElement.offsetHeight)
-    camera.aspect = canvas.parentElement.offsetWidth / canvas.parentElement.offsetHeight
+    const parent = canvas.parentElement
+    renderer.setSize(parent.offsetWidth, parent.offsetHeight)
+    camera.aspect = parent.offsetWidth / parent.offsetHeight
     camera.updateProjectionMatrix()
+    lineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
     this.render()
+  }
+
+  fromScreen(coords) {
+    this.raycaster.setFromCamera(coords, camera)
+    const intersects = this.raycaster.intersectObjects(this.scene.children)
+    const hit = intersects.filter(obj => obj.object.alcProjectable)[0]
+    return hit && hit.point
   }
 
   toScreen(vec) {
@@ -172,6 +210,21 @@ export class Renderer {
     }
   }
 
+  objectsAtScreen(coords, filter) {
+    this.raycaster.setFromCamera(coords, camera)
+    const intersects = this.raycaster.intersectObjects(this.scene.children)
+    const objects = Array.from(new Set(intersects.map(obj => obj.object)))
+    return objects.filter(obj => obj[filter])
+  }
+
+  onMouseMove(coords) {
+    if(this.isDragging) return
+    const objects = this.objectsAtScreen(coords, 'alcSelectable')
+    objects.forEach(obj => obj.material.color.set(0x2cadff))
+    this.fromScreen(coords)
+    this.render()
+  }
+
   getSegments(node) {
     const segments = node.get_sketches().flatMap(sketch => sketch.get_segments())
     return segments.concat(node.get_children().flatMap(child => this.getSegments(child)))
@@ -182,13 +235,21 @@ export class Renderer {
     this.handles = this.segments.flatMap(seg => seg.get_handles())
     this.segments.forEach(segment => {
       const vertices = segment.tesselate(60).map(vertex => new THREE.Vector3().fromArray(vertex))
-      const handles = segment.get_handles().map(handle => new THREE.Vector3().fromArray(handle))
-      var lineGeom = new THREE.BufferGeometry().setFromPoints(vertices)
-      var pointGeom = new THREE.BufferGeometry().setFromPoints(handles)
-      var line = new THREE.Line(lineGeom, lineMaterial)
-      var points = new THREE.Points(pointGeom, pointMaterial)
-      scene.add(line)
-      scene.add(points)
+      // const handles = segment.get_handles().map(handle => new THREE.Vector3().fromArray(handle))
+      // var lineGeom = new THREE.BufferGeometry().setFromPoints(vertices)
+      // // var pointGeom = new THREE.BufferGeometry().setFromPoints(handles)
+      // var line = new THREE.Line(lineGeom, lineMaterial)
+      // // var points = new THREE.Points(pointGeom, pointMaterial)
+      // this.scene.add(line)
+      // // this.scene.add(points)
+      var geometry = new LineGeometry()
+      geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
+      geometry.setColors(Array(vertices.length * 3).fill(1))
+      var line = new Line2(geometry, lineMaterial)
+      line.computeLineDistances()
+      // line.scale.set(1, 1, 1)
+      line.alcSelectable = true
+      this.scene.add(line)
     })
   }
 

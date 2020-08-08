@@ -1,6 +1,6 @@
 <template lang="pug">
   .view-port
-    canvas
+    canvas(ref="canvas" @mousedown="mouseDown" @mousemove="mouseMove")
     ul.widgets
       li(
         v-for="widget in widgets"
@@ -29,8 +29,8 @@
     bottom: 0
     pointer-events: none
     li
-      size = 29px
-      padding: 6px
+      size = 21px
+      // padding: 7px
       position: absolute
       display: block
       width: size
@@ -39,7 +39,21 @@
       margin-top: -(size / 2)
       pointer-events: auto
       // cursor: move
+      display: flex
+      align-items: center
+      justify-content: center
+      &::before
+        position: absolute
+        display: block
+        content: ''
+        margin: 0
+        padding: 0
+        width:  7px
+        height: 7px
+        border-radius: 99px
+        background: #ffefae
       &::after
+        position: absolute
         display: block
         content: ''
         margin: 0
@@ -47,7 +61,7 @@
         width:  calc(100% - 4px)
         height: calc(100% - 4px)
         border-radius: 99px
-        border: 2px solid #85de85
+        border: 2px solid $highlight * 1.6
         transition: all 0.2s
         opacity: 0
         transform: scale(1.5)
@@ -64,6 +78,15 @@
   import { Renderer } from './../renderer.js'
 
   var renderer
+
+
+  function getMouseCoords(e, canvas) {
+    var coords = new THREE.Vector2()
+    var rect = e.target.getBoundingClientRect();
+    coords.x = (e.clientX - rect.left) / canvas.offsetWidth * 2 - 1
+    coords.y = - (e.clientY - rect.top) / canvas.offsetHeight * 2 + 1
+    return coords
+  }
 
   export default {
     name: 'ViewPort',
@@ -114,6 +137,14 @@
           const pos = this.renderer.toScreen(new THREE.Vector3().fromArray(point))
           this.$set(this.widgets, i, {pos, type: 'vertex'})
         })
+      },
+
+      mouseDown: function() {
+
+      },
+
+      mouseMove: function(e) {
+        this.renderer.onMouseMove(getMouseCoords(e, this.$refs.canvas))
       },
     }
   }

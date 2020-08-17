@@ -38,7 +38,7 @@
     margin-left: 23px
 
   header
-    pointer-events: all
+    // pointer-events: all
     // display: inline-block
     display: flex
     align-items: center
@@ -66,7 +66,7 @@
     display: flex
     align-items: center
     transition: opacity 0.2s
-    pointer-events: all
+    // pointer-events: all
     overflow: hidden
     &:hover
       background: $dark2 * 1.3
@@ -78,6 +78,7 @@
     &.selected
       border-color: $highlight * 1.2
       box-shadow: 0 0 0px 1px $highlight * 1.2
+      color: white
     &.hidden
       opacity: 0.5
 
@@ -114,8 +115,8 @@
     opacity: 0
     transition: all 0.2s
     transition-delay: 0.25s
-    svg
-      margin-bottom: 1px
+    // svg
+    //   margin-bottom: 1px
 
   .fade-enter-active
     transition: all 0.6s

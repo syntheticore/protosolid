@@ -1,4 +1,4 @@
-const {app, ipcMain, BrowserWindow, Menu} = require('electron')
+const {app, ipcMain, BrowserWindow, Menu, screen} = require('electron')
 const path = require('path')
 
 const isMac = process.platform === 'darwin'
@@ -116,11 +116,11 @@ function createWindow () {
     minHeight: 450,
     titleBarStyle: 'hiddenInset',
     devTools: true,
-    backgroundColor: '#000',
+    backgroundColor: isMac ? '#000' : false,
     show: false,
-    // frame: false,
+    frame: isMac,
     // vibrancy: 'ultra-dark',
-    // transparent: true,
+    transparent: !isMac,
     // opacity: 0.9,
     // fullscreenWindowTitle: true,
     webPreferences: {
@@ -147,15 +147,80 @@ function createWindow () {
   mainWindow.on('enter-full-screen', function () {
     mainWindow.webContents.send('fullscreen-changed', true)
   })
+
   mainWindow.on('enter-html-full-screen', function () {
     mainWindow.webContents.send('fullscreen-changed', true)
   })
+
   mainWindow.on('leave-full-screen', function () {
     mainWindow.webContents.send('fullscreen-changed', false)
   })
+
   mainWindow.on('leave-html-full-screen', function () {
     mainWindow.webContents.send('fullscreen-changed', false)
   })
+
+  mainWindow.on('maximize', function () {
+    mainWindow.webContents.send('maximize-changed', true)
+  })
+
+  mainWindow.on('unmaximize', function () {
+    mainWindow.webContents.send('maximize-changed', false)
+  })
+
+  //XXX Fix for missing window events with transparent: true
+  if(mainWindow.webContents.browserWindowOptions.transparent) {
+    // rewrite getNormalBounds, maximize, unmaximize and isMaximized API for the transparent window
+    let resizable = mainWindow.isResizable()
+    let normalBounds = mainWindow.getNormalBounds ? mainWindow.getNormalBounds() : mainWindow.getBounds()
+
+    mainWindow.getNormalBounds = function () {
+      if (!this.isMaximized()) {
+        if (BrowserWindow.prototype.getNormalBounds) {
+          normalBounds = BrowserWindow.prototype.getNormalBounds.call(this)
+        } else {
+          normalBounds = BrowserWindow.prototype.getBounds.call(this)
+        }
+      }
+      return normalBounds
+    }.bind(mainWindow)
+
+    mainWindow.maximize = function () {
+      normalBounds = this.getNormalBounds() // store the bounds of normal window
+      resizable = this.isResizable() // store resizable value
+      BrowserWindow.prototype.maximize.call(this)
+      if (!BrowserWindow.prototype.isMaximized.call(this)) {
+        // while isMaximized() was returning false, it will not emit 'maximize' event
+        this.emit('maximize', { sender: this, preventDefault: () => {} })
+      }
+      this.setResizable(false) // disable resize when the window is maximized
+    }.bind(mainWindow)
+
+    mainWindow.unmaximize = function () {
+      const fromMaximized = BrowserWindow.prototype.isMaximized.call(this)
+      BrowserWindow.prototype.unmaximize.call(this)
+      if (!fromMaximized) {
+        // isMaximized() returned false before unmaximize was called, it will not emit 'unmaximize' event
+        this.emit('unmaximize', { sender: this, preventDefault: () => {} })
+      }
+      this.setResizable(resizable) // restore resizable
+    }.bind(mainWindow)
+
+    mainWindow.isMaximized = function () {
+      const nativeIsMaximized = BrowserWindow.prototype.isMaximized.call(this)
+      if (!nativeIsMaximized) {
+        // determine whether the window is full of the screen work area
+        const bounds = this.getBounds()
+        const workArea = screen.getDisplayMatching(bounds).workArea
+        if (bounds.x <= workArea.x && bounds.y <= workArea.y && bounds.width >= workArea.width && bounds.height >= workArea.height) {
+          return true
+        }
+      }
+      return nativeIsMaximized
+    }.bind(mainWindow)
+  }
+
+  mainWindow.removeMenu()
 }
 
 // This method will be called when Electron has finished
@@ -180,6 +245,22 @@ ipcMain.on('ping', function() {
   mainWindow.webContents.send('pong')
 });
 
+ipcMain.on('maximize', function() {
+  mainWindow.maximize()
+});
+
+ipcMain.on('unmaximize', function() {
+  mainWindow.unmaximize()
+});
+
+ipcMain.on('minimize', function() {
+  mainWindow.minimize()
+});
+
+ipcMain.on('close', function() {
+  mainWindow.close()
+});
+
 ipcMain.on('vue-ready', function() {
   setTimeout(() => {
     mainWindow.show()
@@ -188,3 +269,4 @@ ipcMain.on('vue-ready', function() {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
+

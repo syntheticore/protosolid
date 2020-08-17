@@ -2,10 +2,16 @@
   main.document-view
     ViewPort(
       :tree="document.tree"
+      :active-component="activeComponent"
+      :active-tool="activeTool"
       @change-view="document.isViewDirty = true"
       @change-pose="document.isPoseDirty = true"
+      @activate-tool="activateTool"
     )
-    ToolBox
+    ToolBox(
+      :active-tool="activeTool"
+      @activate-tool="activateTool"
+    )
     SideBar.bar-left
       TreeView(
         :top="document.tree"
@@ -122,6 +128,7 @@
     data() {
       return {
         activeComponent: this.document.tree,
+        activeTool: null,
       }
     },
 
@@ -130,7 +137,11 @@
     },
 
     mounted() {
-
+      this.$root.$on('escape', () => {
+        if(!this.activeTool) return
+        this.activeTool.dispose()
+        this.activeTool = null
+      })
     },
 
     methods: {
@@ -165,6 +176,10 @@
       activateComponent: function(comp) {
         console.log('ac1', comp)
         this.activeComponent = comp
+      },
+
+      activateTool: function(tool) {
+        this.activeTool = tool
       },
     },
   }

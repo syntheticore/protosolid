@@ -1,9 +1,14 @@
 <template lang="pug">
   .view-port
-    canvas(ref="canvas" @mousedown="mouseDown" @mousemove="mouseMove")
+    canvas(
+      ref="canvas"
+      @mousedown="mouseDown"
+      @mousemove="mouseMove"
+    )
     ul.widgets
       li(
         v-for="widget in widgets"
+        @click="widgetClicked(widget)"
         :style="{top: widget.pos.y + 'px', left: widget.pos.x + 'px'}"
      )
 </template>
@@ -76,9 +81,7 @@
 <script>
   import * as THREE from 'three'
   import { Renderer } from './../renderer.js'
-
-  var renderer
-
+  import { LineTool } from './../tools.js'
 
   function getMouseCoords(e, canvas) {
     var coords = new THREE.Vector2()
@@ -93,11 +96,13 @@
 
     props: {
       tree: Object,
+      activeComponent: Object,
+      activeTool: Object,
     },
 
     watch: {
       tree: function() {
-        renderer.loadTree(this.tree)
+        this.renderer.loadTree(this.tree)
       },
     },
 
@@ -122,6 +127,20 @@
         this.$emit('change-pose')
       })
 
+      this.renderer.on('component-changed', (comp) => {
+        this.renderer.loadTree(this.tree)
+      })
+
+      this.$root.$on('activate-toolname', (toolName) => {
+        let tool
+        switch(toolName) {
+          case 'Line':
+          tool = new LineTool(this.activeComponent, this.renderer)
+          break;
+        }
+        this.$emit('activate-tool', tool)
+      })
+
       this.renderer.loadTree(this.tree)
     },
 
@@ -134,17 +153,29 @@
         if(!this.renderer.handles) return
         this.widgets.length = 0
         this.renderer.handles.forEach((point, i) => {
-          const pos = this.renderer.toScreen(new THREE.Vector3().fromArray(point))
-          this.$set(this.widgets, i, {pos, type: 'vertex'})
+          const vec = new THREE.Vector3().fromArray(point)
+          const pos = this.renderer.toScreen(vec)
+          this.$set(this.widgets, i, {pos, vec, type: 'vertex'})
         })
       },
 
-      mouseDown: function() {
-
+      mouseDown: function(e) {
+        const coords = getMouseCoords(e, this.$refs.canvas)
+        this.renderer.onMouseDown(coords)
+        const vec = this.renderer.fromScreen(coords)
+        if(this.activeTool && vec) this.activeTool.mouseDown(vec)
       },
 
       mouseMove: function(e) {
-        this.renderer.onMouseMove(getMouseCoords(e, this.$refs.canvas))
+        const coords = getMouseCoords(e, this.$refs.canvas)
+        this.renderer.onMouseMove(coords)
+        if(!this.activeTool) return
+        const vec = this.renderer.fromScreen(coords)
+        if(vec) this.activeTool.mouseMove(vec)
+      },
+
+      widgetClicked: function(widget) {
+        if(this.activeTool) this.activeTool.mouseDown(widget.vec)
       },
     }
   }

@@ -11,4 +11,5 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 })
 
-window.ipcRenderer = require('electron').ipcRenderer;
+window.ipcRenderer = require('electron').ipcRenderer
+window.electronPlatform = require('os').platform()

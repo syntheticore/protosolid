@@ -4,10 +4,15 @@ body
   height: 100vh
   margin: 0
   color: white
-  background: $dark1
-  // background: rgba($dark1, 0)
+  background: none
   overflow: hidden
   font-family: arial, sans-serif
+
+[data-platform="browser"]
+[data-platform="darwin"]
+  body
+    background: $dark1
+    // background: rgba($dark1, 0)
 
 form
   fieldset

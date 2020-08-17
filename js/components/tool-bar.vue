@@ -17,9 +17,9 @@
          :class="{active: doc == activeDocument}")
         span.title {{ doc.title }}
         fa-icon(icon="times")
-    
+
     .grab-handle
-    
+
     nav
       MenuButton(title="Tool Settings" icon="code-branch")
         form
@@ -51,13 +51,20 @@
       //- MenuButton(title="Snapping" icon="ruler")
       MenuButton.account(title="Account" icon="user-circle")
         span.name Björn
-    
-    //- .window-controls
-    //-   button
-    //-     fa-icon(icon="expand")
-    //-   //- button
-    //-   //-   fa-icon(icon="compress")
-    
+
+    .window-controls
+      button(@click="minimize")
+        fa-icon(icon="window-minimize")
+
+      button(v-if="isMaximized" @click="unmaximize")
+        fa-icon(icon="window-restore")
+
+      button(v-else @click="maximize")
+        fa-icon(icon="window-maximize")
+
+      button(@click="close")
+        fa-icon(icon="window-close")
+
 </template>
 
 
@@ -65,7 +72,6 @@
   .tool-bar
     display: flex
     // overflow: hidden
-    padding-left: 74px
     // background: $dark2
     background: linear-gradient(top, $dark1 * 0.9, $dark2 * 0.95)
     // background: linear-gradient(top, rgba($dark1, 0.92), rgba($dark2, 0.92))
@@ -73,7 +79,9 @@
     border-bottom: 1px solid black
     border-radius: 5px 5px 0px 0px
     border-radius-bottom: 0
-  
+    [data-platform="darwin"] &
+      padding-left: 74px
+
   .fullscreen
     .tabs li
       padding: 6px 12px
@@ -82,10 +90,12 @@
       border-top: none
 
   .fullscreen
-  .browser
+  .maximized
+  [data-platform="browser"]
     .tool-bar
       padding-left: 0px
-      background: $dark2
+      border-radius: 0
+      // background: $dark2
       // border-top: none
 
   .app-menu-btn
@@ -112,7 +122,7 @@
 
   .preferences
     min-height: 200px
-  
+
   .tabs
     display: inline-block
     flex: 1 1 content
@@ -155,26 +165,28 @@
         &:hover
           color: $bright1
           // transition-delay: 0
-  
+
   .grab-handle
     -webkit-app-region: drag
     -webkit-user-select: none
     flex: 1 1 auto
-  
-  nav
-    // margin-right: 6px
 
   .window-controls
+    margin-left: 22px
+    display: none
     button
       background: none
       border: none
       color: $bright1
-      font-size: 16px
+      font-size: 12px
       margin: 0
-      padding: 9px 12px
+      padding: 0 12px
+      height: 100%
       &:hover
         background: $dark1
-  
+    [data-platform="win32"] &
+      display: block
+
   // .account
   //   font-weight: bold
   //   flex: 0 0 auto
@@ -188,7 +200,7 @@
   input[type="text"]
   input[type="number"]
     width: 47px
-  
+
   .inset
     margin-left: 8px
 </style>
@@ -205,10 +217,11 @@
       MenuButton,
       IconView,
     },
-    
+
     props: {
       documents: Array,
       activeDocument: Object,
+      isMaximized: Boolean,
     },
 
     data() {
@@ -222,6 +235,22 @@
 
       activate: function(doc) {
         this.$emit('change-document', doc)
+      },
+
+      minimize: function() {
+        window.ipcRenderer.send('minimize')
+      },
+
+      maximize: function() {
+        window.ipcRenderer.send('maximize')
+      },
+
+      unmaximize: function() {
+        window.ipcRenderer.send('unmaximize')
+      },
+
+      close: function() {
+        window.ipcRenderer.send('close')
       },
     }
   }

@@ -3,12 +3,12 @@
     ul.tabs
       li(
         v-for="(tab, index) in tabs"
-        v-on:click="activeTab = index"
+        @click="activeTab = index"
         :class="{active: index == activeTab}"
       )
         | {{ tab.title }}
     ul.tools
-      li.button(v-for="tool in tabs[activeTab].tools")
+      li.button(v-for="tool in tabs[activeTab].tools" @click="activateTool(tool.title)")
         fa-icon(:icon="tool.icon" fixed-width)
         .title(v-html="tool.title")
 </template>
@@ -85,11 +85,16 @@
 
   export default {
     name: 'ToolBox',
+
     components: {},
-    props: {},
+
+    props: {
+      activeTool: Object,
+    },
+
     data() {
       return {
-        activeTab: 1,
+        activeTab: 0,
         tabs: [
           {
             title: 'Sketch',
@@ -129,7 +134,15 @@
         ]
       }
     },
+
     mounted() {},
+
+    methods: {
+      activateTool: function(toolName) {
+        this.$root.$emit('activate-toolname', toolName)
+      },
+    },
+
     beforeDestroy() {},
   }
 </script>

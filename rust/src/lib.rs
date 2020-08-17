@@ -76,8 +76,22 @@ impl JsSegment {
     ).collect()
   }
 
+  pub fn set_handles(&self, handles: Array) {
+    let points = handles.iter().map(|vertex| {
+      let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
+      shapex::Point3::new(vertex.0, vertex.1, vertex.2)
+    }).collect();
+    self.real.borrow_mut().set_handles(points);
+  }
+
   pub fn tesselate(&self, steps: i32) -> Array {
     self.real.borrow().tesselate(steps).iter().map(|vertex|
+      JsValue::from_serde(&(vertex.x, vertex.y, vertex.z)).unwrap()
+    ).collect()
+  }
+
+  pub fn default_tesselation(&self) -> Array {
+    self.real.borrow().default_tesselation().iter().map(|vertex|
       JsValue::from_serde(&(vertex.x, vertex.y, vertex.z)).unwrap()
     ).collect()
   }
@@ -151,8 +165,43 @@ impl JsComponent {
     self.real.borrow().sketches.iter().map(|sketch| JsValue::from(JsSketch::from(sketch)) ).collect()
   }
 
+  pub fn get_sketch_elements(&self) -> Array {
+    self.real.borrow().sketch_elements.iter().map(|elem| JsValue::from(JsSegment::from(elem)) ).collect()
+  }
+
   pub fn get_children(&self) -> Array {
     self.real.borrow().children.iter().map(|child| JsValue::from(JsComponent::from(child)) ).collect()
+  }
+
+  pub fn add_segment(&self) {
+    let spline = shapex::BezierSpline::new(vec![
+        shapex::Point3::new(0.0, 0.0, 1.0),
+        shapex::Point3::new(1.0, 0.0, 1.25),
+        shapex::Point3::new(1.0, 1.0, 1.5),
+        shapex::Point3::new(0.0, 1.0, 1.75),
+        shapex::Point3::new(0.0, 0.0, 2.0),
+        shapex::Point3::new(1.0, 0.0, 2.25),
+        shapex::Point3::new(1.0, 1.0, 2.5),
+        shapex::Point3::new(0.0, 1.0, 2.75),
+      ]
+    );
+    self.real.borrow_mut().sketch_elements.push(Rc::new(RefCell::new(spline)));
+  }
+
+  pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsSegment {
+    let p1: (f64, f64, f64) = p1.into_serde().unwrap();
+    let p2: (f64, f64, f64) = p2.into_serde().unwrap();
+    let line = shapex::Line {
+      points: (shapex::Point3::from(p1), shapex::Point3::from(p2))
+    };
+    let mut real = self.real.borrow_mut();
+    real.sketch_elements.push(Rc::new(RefCell::new(line)));
+    JsSegment::from(&real.sketch_elements.last().unwrap())
+  }
+
+  pub fn remove_element(&mut self, index: usize) {
+    let mut real = self.real.borrow_mut();
+    real.sketch_elements.remove(index);
   }
 
   pub fn create_sketch(&mut self) -> JsSketch {

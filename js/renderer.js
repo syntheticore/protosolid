@@ -11,6 +11,43 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 var rendering = true
 var renderer, controls, camera, mesh, lineMaterial, pointMaterial
 
+function createPlaneStencilGroup(geometry, plane, renderOrder) {
+  var group = new THREE.Group()
+  var baseMat = new THREE.MeshBasicMaterial()
+  baseMat.depthWrite = false
+  baseMat.depthTest = false
+  baseMat.colorWrite = false
+  baseMat.stencilWrite = true
+  baseMat.stencilFunc = THREE.AlwaysStencilFunc
+
+  // back faces
+  var mat0 = baseMat.clone()
+  mat0.side = THREE.BackSide
+  mat0.clippingPlanes = [plane]
+  mat0.stencilFail = THREE.IncrementWrapStencilOp
+  mat0.stencilZFail = THREE.IncrementWrapStencilOp
+  mat0.stencilZPass = THREE.IncrementWrapStencilOp
+
+  var mesh0 = new THREE.Mesh(geometry, mat0)
+  mesh0.renderOrder = renderOrder
+  group.add(mesh0)
+
+  // front faces
+  var mat1 = baseMat.clone()
+  mat1.side = THREE.FrontSide
+  mat1.clippingPlanes = [plane]
+  mat1.stencilFail = THREE.DecrementWrapStencilOp
+  mat1.stencilZFail = THREE.DecrementWrapStencilOp
+  mat1.stencilZPass = THREE.DecrementWrapStencilOp
+
+  var mesh1 = new THREE.Mesh(geometry, mat1)
+  mesh1.renderOrder = renderOrder
+
+  group.add(mesh1)
+
+  return group
+}
+
 export class Renderer {
   constructor(canvas) {
     this.emitter = createNanoEvents()
@@ -33,13 +70,13 @@ export class Renderer {
     // renderer.toneMapping = THREE.LinearToneMapping
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     // renderer.toneMappingExposure = 1.2
+    renderer.localClippingEnabled = true
+    // renderer.setClearColor(0x263238)
 
     this.raycaster = new THREE.Raycaster()
 
     camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
-    camera.position.x = 3
-    camera.position.y = 2
-    camera.position.z = 3
+    camera.position.set(3, 2, 3)
 
     this.scene = new THREE.Scene()
     // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
@@ -47,28 +84,31 @@ export class Renderer {
     var sun = new THREE.DirectionalLight(0xdfebff, 1)
     sun.position.set(0, 100, 0)
     sun.castShadow = true
-    sun.shadow.mapSize.width = 2048
-    sun.shadow.mapSize.height = 2048
+    sun.shadow.mapSize.width = 4096
+    sun.shadow.mapSize.height = 4096
+    let shadowFrustum = 20 / 2
+    sun.shadow.camera = new THREE.OrthographicCamera(-shadowFrustum, shadowFrustum, shadowFrustum, -shadowFrustum, 1, 200)
     this.scene.add(sun)
 
     var light = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
     this.scene.add(light)
 
     // geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2)
-    var geometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 26)
+    var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
     var material = new THREE.MeshStandardMaterial({
       color: 'coral',
       roughness: 0,
       metalness: 0.1,
     })
 
-    mesh = new THREE.Mesh(geometry, material)
+    mesh = new THREE.Mesh(torusGeometry, material)
     mesh.castShadow = true
     mesh.receiveShadow = true
     mesh.alcSelectable = true
+    // mesh.visible = false
     this.scene.add(mesh)
 
-    var groundGeo = new THREE.PlaneBufferGeometry(10, 10)
+    var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
     groundGeo.rotateX(- Math.PI / 2)
     var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
     ground.receiveShadow = true
@@ -113,11 +153,11 @@ export class Renderer {
 
     controls.addEventListener('start', () => {
       this.isDragging = true
-      transformControl.enabled = false
+      // transformControl.enabled = false
     })
     controls.addEventListener('end', () => {
       this.isDragging = false
-      transformControl.enabled = true
+      // transformControl.enabled = true
     })
 
     var transformControl = new TransformControls(camera, renderer.domElement)
@@ -131,12 +171,13 @@ export class Renderer {
     })
     transformControl.addEventListener('objectChange', (event) => {
       this.emitter.emit('change-pose')
+      renderer.shadowMap.needsUpdate = true
     })
     this.scene.add(transformControl)
     transformControl.attach(mesh)
 
     // lineMaterial = new THREE.LineBasicMaterial({ color: '#2590e1', linewidth: 2, fog: true })
-    lineMaterial = new LineMaterial( {
+    lineMaterial = new LineMaterial({
       color: 'yellow',
       linewidth: 2,
       vertexColors: true,
@@ -157,7 +198,10 @@ export class Renderer {
     //   transformControl.attach(event.object)
     // })
 
+    this.elements = []
+
     window.addEventListener('resize', this.onWindowResize.bind(this), false)
+    // this.createClippingPlanes(torusGeometry)
     this.onWindowResize()
     this.animate()
   }
@@ -167,6 +211,15 @@ export class Renderer {
   }
 
   render() {
+    this.planes && this.planes.forEach((plane, i) => {
+      var po = this.planeObjects[i]
+      plane.coplanarPoint(po.position)
+      po.lookAt(
+        po.position.x - plane.normal.x,
+        po.position.y - plane.normal.y,
+        po.position.z - plane.normal.z,
+      )
+    })
     renderer.render(this.scene, camera)
     this.emitter.emit('render')
   }
@@ -178,7 +231,6 @@ export class Renderer {
     // mesh.rotation.x += 0.01
     // mesh.rotation.y += 0.01
     // renderer.shadowMap.needsUpdate = true
-    // this.render()
   }
 
   onWindowResize() {
@@ -203,7 +255,7 @@ export class Renderer {
     const widthHalf = 0.5 * renderer.domElement.width
     const heightHalf = 0.5 * renderer.domElement.height
     // camera.updateMatrixWorld()
-    const vector = vec.project(camera)
+    const vector = vec.clone().project(camera)
     return {
       x: (vector.x * widthHalf) + widthHalf,
       y: - (vector.y * heightHalf) + heightHalf,
@@ -217,6 +269,13 @@ export class Renderer {
     return objects.filter(obj => obj[filter])
   }
 
+  onMouseDown(coords) {
+    if(this.isDragging) return
+    const objects = this.objectsAtScreen(coords, 'alcSelectable')
+    objects.forEach(obj => obj.material.color.set('red'))
+    this.render()
+  }
+
   onMouseMove(coords) {
     if(this.isDragging) return
     const objects = this.objectsAtScreen(coords, 'alcSelectable')
@@ -225,16 +284,77 @@ export class Renderer {
     this.render()
   }
 
+  createClippingPlanes(geometry) {
+    this.planes = [
+      new THREE.Plane(new THREE.Vector3(- 1, 0, 0), 0),
+      new THREE.Plane(new THREE.Vector3(0, - 1, 0), 0),
+      // new THREE.Plane(new THREE.Vector3(0, 0, - 1), 0)
+   ]
+
+    const object = new THREE.Group()
+    this.scene.add(object)
+
+    // Set up clip plane rendering
+    this.planeObjects = []
+    var planeGeom = new THREE.PlaneBufferGeometry(4, 4)
+    this.planes.forEach((plane, i) => {
+
+      var poGroup = new THREE.Group()
+      var stencilGroup = createPlaneStencilGroup(geometry, plane, i + 1)
+
+      // Plane is clipped by the other clipping planes
+      var planeMat = new THREE.MeshStandardMaterial({
+        color: 0xE91E63,
+        metalness: 0.1,
+        roughness: 0.75,
+        clippingPlanes: this.planes.filter(p => p !== plane),
+        stencilWrite: true,
+        stencilRef: 0,
+        stencilFunc: THREE.NotEqualStencilFunc,
+        stencilFail: THREE.ReplaceStencilOp,
+        stencilZFail: THREE.ReplaceStencilOp,
+        stencilZPass: THREE.ReplaceStencilOp,
+      })
+      var po = new THREE.Mesh(planeGeom, planeMat)
+      po.onAfterRender = () => renderer.clearStencil()
+      po.renderOrder = i + 1.1
+
+      object.add(stencilGroup)
+      poGroup.add(po)
+      this.planeObjects.push(po)
+      this.scene.add(poGroup)
+    })
+
+    var material = new THREE.MeshStandardMaterial({
+      color: 0xFFC107,
+      metalness: 0.1,
+      roughness: 0.75,
+      clippingPlanes: this.planes,
+      clipShadows: true,
+      shadowSide: THREE.DoubleSide,
+    })
+
+    // Clipped Object itself
+    var clippedColorFront = new THREE.Mesh(geometry, material)
+    clippedColorFront.castShadow = true
+    clippedColorFront.renderOrder = 6
+    object.add(clippedColorFront)
+  }
+
   getSegments(node) {
-    const segments = node.get_sketches().flatMap(sketch => sketch.get_segments())
+    // const segments = node.get_sketches().flatMap(sketch => sketch.get_segments())
+    const segments = node.get_sketch_elements()
     return segments.concat(node.get_children().flatMap(child => this.getSegments(child)))
   }
 
   loadTree(tree) {
+    console.log('loadTree')
+    this.elements.forEach(elem => this.scene.remove(elem))
+    this.elements.length = 0
     this.segments = this.getSegments(tree)
     this.handles = this.segments.flatMap(seg => seg.get_handles())
     this.segments.forEach(segment => {
-      const vertices = segment.tesselate(60).map(vertex => new THREE.Vector3().fromArray(vertex))
+      const vertices = segment.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
       // const handles = segment.get_handles().map(handle => new THREE.Vector3().fromArray(handle))
       // var lineGeom = new THREE.BufferGeometry().setFromPoints(vertices)
       // // var pointGeom = new THREE.BufferGeometry().setFromPoints(handles)
@@ -249,8 +369,10 @@ export class Renderer {
       line.computeLineDistances()
       // line.scale.set(1, 1, 1)
       line.alcSelectable = true
+      this.elements.push(line)
       this.scene.add(line)
     })
+    this.render()
   }
 
   dispose() {

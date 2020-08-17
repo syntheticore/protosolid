@@ -80,8 +80,29 @@ trait Constraint {}
 
 
 pub trait Controllable {
-  fn get_handles(&self) -> &Vec<Point3>;
+  fn get_handles(&self) -> Vec<Point3>;
   fn set_handles(&mut self, _: Vec<Point3>);
+}
+
+impl Controllable for BezierSpline {
+  fn get_handles(&self) -> Vec<Point3> {
+    self.vertices.clone()
+  }
+
+  fn set_handles(&mut self, handles: Vec<Point3>) {
+    self.vertices = handles;
+    self.update();
+  }
+}
+
+impl Controllable for Line {
+  fn get_handles(&self) -> Vec<Point3> {
+    vec![self.points.0, self.points.1]
+  }
+
+  fn set_handles(&mut self, handles: Vec<Point3>) {
+    self.points = (handles[0], handles[1]);
+  }
 }
 
 
@@ -93,19 +114,8 @@ impl Debug for dyn SketchElement {
   }
 }
 
-
-impl Controllable for BezierSpline {
-  fn get_handles(&self) -> &Vec<Point3> {
-    &self.vertices
-  }
-
-  fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.vertices = handles;
-    self.update();
-  }
-}
-
 impl SketchElement for BezierSpline {}
+impl SketchElement for Line {}
 
 
 #[derive(Debug)]
@@ -166,6 +176,7 @@ pub struct Component {
   pub sketches: Vec<Rc<RefCell<Sketch>>>,
   pub visible: bool,
   pub children: Vec<Rc<RefCell<Component>>>,
+  pub sketch_elements: Vec<Rc<RefCell<dyn SketchElement>>>,
 }
 
 impl Component {

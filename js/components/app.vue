@@ -1,8 +1,13 @@
 <template lang="pug">
-  #app(:class="{fullscreen: isFullscreen, browser: isBrowser}" v-if="activeDocument")
+  #app(
+    v-if="activeDocument"
+    :class="{fullscreen: isFullscreen, maximized: isMaximized}"
+    :data-platform="platform"
+  )
     ToolBar(
       :documents="documents"
       :active-document="activeDocument"
+      :is-maximized="isMaximized"
       @create-document="createDocument"
       @change-document="changeDocument"
     )
@@ -46,13 +51,6 @@
 
   let lastId = 1;
 
-  window.addEventListener('keydown', (e) => {
-    // console.log(e.keyCode)
-    if(e.keyCode === 83) { // S
-      return
-    }
-  });
-
   export default {
     name: 'app',
 
@@ -61,8 +59,17 @@
       DocumentView,
     },
 
+    data() {
+      return {
+        isFullscreen: false,
+        isMaximized: false,
+        platform: window.electronPlatform || 'browser',
+        activeDocument: null,
+        documents: [],
+      }
+    },
+
     created() {
-      // this.changeDocument(this.documents[0])
       this.createDocument().then(() => this.changeDocument(this.documents[0]) )
 
       if(!window.ipcRenderer) {
@@ -71,20 +78,31 @@
       }
 
       window.ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
-        console.log(event)
-        console.log(isFullscreen)
         this.isFullscreen = isFullscreen
       })
 
-      window.ipcRenderer.on('pong', () => {
-        console.log('pong')
+      window.ipcRenderer.on('maximize-changed', (e, isMaximized) => {
+        this.isMaximized = isMaximized
+      })
+
+      window.ipcRenderer.on('pong', (e, arg) => {
+        console.log('pong', arg)
       })
       window.ipcRenderer.send('ping')
     },
 
     mounted() {
+      window.addEventListener('keydown', (e) => {
+        console.log(e.keyCode)
+        if(e.keyCode === 83) { // S
+          return
+        } else if(e.keyCode === 27) {
+          this.$root.$emit('escape')
+        }
+      });
       if(!window.ipcRenderer) return
       window.ipcRenderer.send('vue-ready')
+      console.log(window.electronPlatform)
     },
 
     methods: {
@@ -105,9 +123,10 @@
                 const part6 = assm3.create_component('Part 6')
                 const part7 = assm3.create_component('Part 7')
                 const part8 = assm3.create_component('Part 8')
-          part3.create_sketch().add_segment()
+          // part3.create_sketch().add_segment()
+          part3.add_segment()
           // part3.get_sketches()[0].add_segment()
-          console.log(part3.get_sketches()[0].get_segments())
+          // console.log(part3.get_sketches()[0].get_segments())
           this.documents.push({
             title: 'Untitled Document',
             proxy: proxy,
@@ -141,14 +160,5 @@
         this.activeDocument.activePose = this.activeDocument.poses[0]
       }
     },
-
-    data() {
-      return {
-        isFullscreen: false,
-        isBrowser: !window.ipcRenderer,
-        activeDocument: null,
-        documents: [],
-      }
-    }
   }
 </script>

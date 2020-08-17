@@ -50,6 +50,7 @@ pub type Matrix4 = cgmath::Matrix4<f64>;
 
 pub trait Differentiable {
   fn sample(&self, t: f64) -> Point3;
+  fn default_tesselation(&self) -> Vec<Point3>;
 
   fn tesselate(&self, steps: i32) -> Vec<Point3> {
     (0..steps + 1).map(|i| {
@@ -61,7 +62,7 @@ pub trait Differentiable {
     let points = self.tesselate(steps);
     let mut lines = vec![];
     for i in 0..points.len() - 1 {
-      lines.push(Line{ points: [points[i], points[i + 1]]});
+      lines.push(Line{ points: (points[i], points[i + 1])});
     }
     lines
   }
@@ -79,6 +80,10 @@ pub struct BezierSpline {
 impl Differentiable for BezierSpline {
   fn sample(&self, t: f64) -> Point3 {
     self.real_sample(t, &self.vertices)
+  }
+
+  fn default_tesselation(&self) -> Vec<Point3> {
+    self.tesselate(60)
   }
 }
 
@@ -179,7 +184,18 @@ impl BezierSpline {
 pub struct Line {
   // pub p1: Point3,
   // pub p2: Point3,
-  pub points: [Point3; 2]
+  pub points: (Point3, Point3)
+}
+
+impl Differentiable for Line {
+  fn sample(&self, t: f64) -> Point3 {
+    let vec = self.points.1 - self.points.0;
+    self.points.0 + vec * t
+  }
+
+  fn default_tesselation(&self) -> Vec<Point3> {
+    self.tesselate(1)
+  }
 }
 
 

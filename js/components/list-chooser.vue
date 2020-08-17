@@ -31,8 +31,8 @@
       display: none
 
   li
-    padding: 8px 12px
-    height: 28px
+    padding: 10px 16px
+    // height: 28px
     font-size: 12px
     font-weight: bold
     text-align: center
@@ -41,6 +41,7 @@
       background: $dark1
     &.active
       background: $highlight
+      color: white
 
   button
     display: block

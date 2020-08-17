@@ -17,8 +17,9 @@
     margin-left: -7px
     margin-bottom: 22px
     overflow-y: auto
-    padding-right: 17px
+    padding-right: 24px
     box-sizing: content-box
+    pointer-events: all
 
   .tree-item
     margin-left: 0

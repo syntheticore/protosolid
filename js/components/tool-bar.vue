@@ -18,7 +18,7 @@
         span.title {{ doc.title }}
         fa-icon(icon="times")
 
-    .grab-handle
+    .grab-handle.dynamic
 
     nav
       MenuButton(title="Tool Settings" icon="code-branch")
@@ -52,6 +52,8 @@
       MenuButton.account(title="Account" icon="user-circle")
         span.name Björn
 
+    .grab-handle.fixed
+
     .window-controls
       button(@click="minimize")
         fa-icon(icon="window-minimize")
@@ -78,9 +80,12 @@
     border-top: 1px solid $dark1 * 1.3
     border-bottom: 1px solid black
     border-radius: 5px 5px 0px 0px
-    border-radius-bottom: 0
+    max-width: 100vw
     [data-platform="darwin"] &
       padding-left: 74px
+    > *
+      flex: 0 0 auto
+
 
   .fullscreen
     .tabs li
@@ -97,6 +102,8 @@
       border-radius: 0
       // background: $dark2
       // border-top: none
+    .window-controls button:last-child
+      border-radius: 0
 
   .app-menu-btn
     color: $highlight * 1.2
@@ -125,7 +132,13 @@
 
   .tabs
     display: inline-block
-    flex: 1 1 content
+    flex: 1 1 auto
+    white-space: nowrap
+    overflow: auto
+    -ms-overflow-style: none
+    scrollbar-width: none
+    &::-webkit-scrollbar
+      display: none
     li
       display: inline-block
       border-left: 1px solid $dark1 * 1.2
@@ -169,11 +182,19 @@
   .grab-handle
     -webkit-app-region: drag
     -webkit-user-select: none
-    flex: 1 1 auto
+    min-width: 24px
+    &.dynamic
+      flex: 1 1 auto
+      min-width: 44px
+    &.fixed
+      display: none
+      [data-platform="win32"] &
+        display: block
 
   .window-controls
-    margin-left: 22px
     display: none
+    [data-platform="win32"] &
+      display: block
     button
       background: none
       border: none
@@ -182,10 +203,14 @@
       margin: 0
       padding: 0 12px
       height: 100%
+      transition: all 0.15s
+      &:last-child
+        border-radius: 0px 5px 0px 0px
       &:hover
         background: $dark1
-    [data-platform="win32"] &
-      display: block
+        color: white
+        &:last-child
+          background: #b70f0f
 
   // .account
   //   font-weight: bold

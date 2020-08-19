@@ -2,6 +2,7 @@
   .view-port
     canvas(
       ref="canvas"
+      @click="click"
       @mousedown="mouseDown"
       @mousemove="mouseMove"
     )
@@ -125,7 +126,6 @@
     },
 
     mounted: function() {
-      this.isDragging = false
 
       renderer = new THREE.WebGLRenderer({
         canvas: this.$el.querySelector('canvas'),
@@ -209,6 +209,25 @@
         this.render()
       })
 
+      // Transform Controls
+      var transformControl = new TransformControls(camera, renderer.domElement)
+      transformControl.space = 'world'
+      // transformControl.translationSnap = 0.5
+      // transformControl.rotationSnap = THREE.MathUtils.degToRad(10)
+      // transformControl.setMode('rotate')
+      // transformControl.addEventListener('change', () => this.render())
+      transformControl.addEventListener('dragging-changed', (event) => {
+        controls.enabled = !event.value
+      })
+      transformControl.addEventListener('objectChange', (event) => {
+        this.$emit('change-pose')
+        renderer.shadowMap.needsUpdate = true
+        this.render()
+      })
+      this.scene.add(transformControl)
+      transformControl.attach(mesh)
+
+      // View Controls
       controls = new OrbitControls(camera, renderer.domElement)
       controls.enableDamping = true
       controls.dampingFactor = 0.25
@@ -225,29 +244,14 @@
       })
 
       controls.addEventListener('start', () => {
-        this.isDragging = true
-        // transformControl.enabled = false
-      })
-      controls.addEventListener('end', () => {
-        this.isDragging = false
-        // transformControl.enabled = true
+        transformControl.enabled = false
+        this.isOrbiting = true
       })
 
-      var transformControl = new TransformControls(camera, renderer.domElement)
-      transformControl.space = 'world'
-      // transformControl.translationSnap = 0.5
-      // transformControl.rotationSnap = THREE.MathUtils.degToRad(10)
-      // transformControl.setMode('rotate')
-      transformControl.addEventListener('change', () => this.render())
-      transformControl.addEventListener('dragging-changed', (event) => {
-        controls.enabled = !event.value
+      controls.addEventListener('end', () => {
+        transformControl.enabled = true
+        this.isOrbiting = false
       })
-      transformControl.addEventListener('objectChange', (event) => {
-        this.$emit('change-pose')
-        renderer.shadowMap.needsUpdate = true
-      })
-      this.scene.add(transformControl)
-      transformControl.attach(mesh)
 
       // lineMaterial = new THREE.LineBasicMaterial({ color: '#2590e1', linewidth: 2, fog: true })
       lineMaterial = new LineMaterial({
@@ -276,8 +280,6 @@
       // dragcontrols.addEventListener('hoveron', function(event) {
       //   transformControl.attach(event.object)
       // })
-
-      this.elements = []
 
       window.addEventListener('resize', this.onWindowResize.bind(this), false)
       this.onWindowResize()
@@ -316,27 +318,39 @@
         // })
       },
 
+      click: function(e) {
+        controls.enabled = true
+        const coords = getMouseCoords(e, this.$refs.canvas)
+        if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return
+        const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
+        if(object) return
+        if(this.selectedElement) this.selectedElement.three.material = lineMaterial
+        this.$emit('element-selected', null)
+        this.render()
+      },
+
       mouseDown: function(e) {
-        if(this.isDragging) return
+        if(e.button != 0) return
         const coords = getMouseCoords(e, this.$refs.canvas)
         if(this.activeTool) {
           const vec = this.fromScreen(coords)
           if(this.activeTool && vec) this.activeTool.mouseDown(vec)
         } else {
-          if(this.selectedElement) this.selectedElement.three.material = lineMaterial
           const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
           if(object) {
+            if(this.selectedElement) this.selectedElement.three.material = lineMaterial
             object.material = selectionLineMaterial
             this.$emit('element-selected', object.element)
-          } else {
-            this.$emit('element-selected', null)
+            controls.enabled = false
+            this.render()
           }
-          this.render()
         }
+        this.lastCoords = coords
       },
 
       mouseMove: function(e) {
-        if(this.isDragging) return
+        if(e.button != 0) return
+        if(this.isOrbiting) return
         const coords = getMouseCoords(e, this.$refs.canvas)
         if(this.activeTool) {
           const vec = this.fromScreen(coords)

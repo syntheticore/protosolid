@@ -11,14 +11,14 @@ export class LineTool extends Tool {
   mouseDown(vec) {
     this.mouseMove(vec)
     this.line = this.component.add_line(vec.toArray(), vec.toArray())
-    this.viewport.componentChanged(this.component)
+    this.viewport.elementChanged(this.line, this.component)
   }
 
   mouseMove(vec) {
     if(!this.line) return
     let p1 = this.line.get_handles()[0]
     this.line.set_handles([p1, vec.toArray()])
-    this.viewport.componentChanged(this.component)
+    this.viewport.elementChanged(this.line, this.component)
   }
 
   dispose() {
@@ -40,7 +40,7 @@ export class SplineTool extends Tool {
     } else {
       this.spline = this.component.add_spline([vec.toArray(), vec.toArray()])
     }
-    this.viewport.componentChanged(this.component)
+    this.viewport.elementChanged(this.spline, this.component)
   }
 
   mouseMove(vec) {
@@ -48,7 +48,7 @@ export class SplineTool extends Tool {
     let points = this.spline.get_handles()
     points[points.length - 1] = vec.toArray()
     this.spline.set_handles(points)
-    this.viewport.componentChanged(this.component)
+    this.viewport.elementChanged(this.spline, this.component)
   }
 
   dispose() {
@@ -56,7 +56,7 @@ export class SplineTool extends Tool {
     let points = this.spline.get_handles()
     points.pop()
     this.spline.set_handles(points)
-    this.viewport.componentChanged(this.component)
+    this.viewport.elementChanged(this.spline, this.component)
   }
 }
 

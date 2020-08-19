@@ -423,33 +423,42 @@
         return objects.filter(obj => obj[filter])
       },
 
+      loadElement: function(element, node) {
+        this.scene.remove(element.three)
+        node.threeObjects.filter(obj => obj !== element.three)
+        const vertices = element.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
+        var geometry = new LineGeometry()
+        geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
+        geometry.setColors(Array(vertices.length * 3).fill(1))
+        var line = new Line2(geometry, lineMaterial)
+        line.computeLineDistances()
+        // line.scale.set(1, 1, 1)
+        line.alcSelectable = true
+        node.threeObjects.push(line)
+        element.three = line
+        line.component = node
+        line.element = element
+        this.scene.add(line)
+      },
+
       loadTree: function(node, recursive) {
         console.log('loadTree')
         node.threeObjects = node.threeObjects || []
         node.threeObjects.forEach(elem => this.scene.remove(elem))
         node.threeObjects.length = 0
-        const segments = node.get_sketch_elements()
-        // this.handles = segments.flatMap(seg => seg.get_handles())
-        segments.forEach(segment => {
-          const vertices = segment.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
-          var geometry = new LineGeometry()
-          geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
-          geometry.setColors(Array(vertices.length * 3).fill(1))
-          var line = new Line2(geometry, lineMaterial)
-          line.computeLineDistances()
-          // line.scale.set(1, 1, 1)
-          line.alcSelectable = true
-          node.threeObjects.push(line)
-          segment.three = line
-          line.component = node
-          line.element = segment
-          this.scene.add(line)
-        })
+        const elements = node.get_sketch_elements()
+        // this.handles = elements.flatMap(seg => seg.get_handles())
+        elements.forEach(element => this.loadElement(element, node))
         if(recursive) node.get_children().each(child => this.loadTree(child, true, true))
       },
 
       componentChanged: function(comp) {
         this.loadTree(comp)
+        this.render()
+      },
+
+      elementChanged: function(elem, comp) {
+        this.loadElement(elem, comp)
         this.render()
       },
     }

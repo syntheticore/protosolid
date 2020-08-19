@@ -1,6 +1,7 @@
 // mod vector;
 
 // pub use self::vector::Vec3;
+use std::convert::TryInto;
 use cgmath::prelude::*;
 
 pub type Vec2 = cgmath::Vector2<f64>;
@@ -9,6 +10,7 @@ pub type Vec4 = cgmath::Vector4<f64>;
 pub type Point2 = cgmath::Point2<f64>;
 pub type Point3 = cgmath::Point3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
+
 
 // pub trait Differentiable {
 //   fn sample(&self, t: f64) -> Vec3;
@@ -83,7 +85,7 @@ impl Differentiable for BezierSpline {
   }
 
   fn default_tesselation(&self) -> Vec<Point3> {
-    self.tesselate(60)
+    self.tesselate((self.vertices.len() * 10).try_into().unwrap())
   }
 }
 

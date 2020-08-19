@@ -9,7 +9,7 @@
     .selection-info.bordered
       div
         span # Objects
-        span 4
+        span {{selectedElement ? 1 : 0}}
       div
         span Weight
         span 12.3g
@@ -75,12 +75,17 @@
 
   export default {
     name: 'FooterView',
+
     components: {},
-    props: {},
+
+    props: {
+      selectedElement: Object
+    },
+
     // data() {
     //   return {}
     // },
+
     // mounted() {},
-    // beforeDestroy() {},
   }
 </script>

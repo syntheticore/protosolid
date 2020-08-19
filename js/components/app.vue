@@ -114,8 +114,6 @@
             const assm1 = tree.create_component('Sub Assembly 1')
               const part2 = assm1.create_component('Part 2')
               const part3 = assm1.create_component('Part 3')
-              part3.selected = true
-              console.log(part3)
               const assm2 = assm1.create_component('Sub Assembly 2')
                 const part4 = assm2.create_component('Part 4')
                 const part5 = assm2.create_component('Part 5')

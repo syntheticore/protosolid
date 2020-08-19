@@ -199,6 +199,17 @@ impl JsComponent {
     JsSegment::from(&real.sketch_elements.last().unwrap())
   }
 
+  pub fn add_spline(&self, vertices: Array) -> JsSegment {
+    let points = vertices.iter().map(|vertex| {
+      let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
+      shapex::Point3::new(vertex.0, vertex.1, vertex.2)
+    }).collect();
+    let spline = shapex::BezierSpline::new(points);
+    let mut real = self.real.borrow_mut();
+    real.sketch_elements.push(Rc::new(RefCell::new(spline)));
+    JsSegment::from(&real.sketch_elements.last().unwrap())
+  }
+
   pub fn remove_element(&mut self, index: usize) {
     let mut real = self.real.borrow_mut();
     real.sketch_elements.remove(index);

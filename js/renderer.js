@@ -9,47 +9,12 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
 var rendering = true
-var renderer, controls, camera, mesh, lineMaterial, pointMaterial
-
-function createPlaneStencilGroup(geometry, plane, renderOrder) {
-  var group = new THREE.Group()
-  var baseMat = new THREE.MeshBasicMaterial()
-  baseMat.depthWrite = false
-  baseMat.depthTest = false
-  baseMat.colorWrite = false
-  baseMat.stencilWrite = true
-  baseMat.stencilFunc = THREE.AlwaysStencilFunc
-
-  // back faces
-  var mat0 = baseMat.clone()
-  mat0.side = THREE.BackSide
-  mat0.clippingPlanes = [plane]
-  mat0.stencilFail = THREE.IncrementWrapStencilOp
-  mat0.stencilZFail = THREE.IncrementWrapStencilOp
-  mat0.stencilZPass = THREE.IncrementWrapStencilOp
-
-  var mesh0 = new THREE.Mesh(geometry, mat0)
-  mesh0.renderOrder = renderOrder
-  group.add(mesh0)
-
-  // front faces
-  var mat1 = baseMat.clone()
-  mat1.side = THREE.FrontSide
-  mat1.clippingPlanes = [plane]
-  mat1.stencilFail = THREE.DecrementWrapStencilOp
-  mat1.stencilZFail = THREE.DecrementWrapStencilOp
-  mat1.stencilZPass = THREE.DecrementWrapStencilOp
-
-  var mesh1 = new THREE.Mesh(geometry, mat1)
-  mesh1.renderOrder = renderOrder
-
-  group.add(mesh1)
-
-  return group
-}
+var renderer, controls, camera, mesh, lineMaterial, selectionLineMaterial, highlightLineMaterial, pointMaterial
 
 export class Renderer {
-  constructor(canvas) {
+  constructor(canvas, viewport) {
+    this.viewport = viewport
+
     this.emitter = createNanoEvents()
     this.isDragging = false
 
@@ -70,7 +35,6 @@ export class Renderer {
     // renderer.toneMapping = THREE.LinearToneMapping
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     // renderer.toneMappingExposure = 1.2
-    renderer.localClippingEnabled = true
     // renderer.setClearColor(0x263238)
 
     this.raycaster = new THREE.Raycaster()
@@ -104,7 +68,7 @@ export class Renderer {
     mesh = new THREE.Mesh(torusGeometry, material)
     mesh.castShadow = true
     mesh.receiveShadow = true
-    mesh.alcSelectable = true
+    // mesh.alcSelectable = true
     // mesh.visible = false
     this.scene.add(mesh)
 
@@ -179,10 +143,16 @@ export class Renderer {
     // lineMaterial = new THREE.LineBasicMaterial({ color: '#2590e1', linewidth: 2, fog: true })
     lineMaterial = new LineMaterial({
       color: 'yellow',
-      linewidth: 2,
+      linewidth: 4,
       vertexColors: true,
       dashed: false
     })
+
+    selectionLineMaterial = lineMaterial.clone()
+    selectionLineMaterial.color.set('red')
+
+    highlightLineMaterial = lineMaterial.clone()
+    highlightLineMaterial.color.set('white')
 
     // pointMaterial = new THREE.PointsMaterial({
     //   color: 'yellow',
@@ -201,7 +171,6 @@ export class Renderer {
     this.elements = []
 
     window.addEventListener('resize', this.onWindowResize.bind(this), false)
-    // this.createClippingPlanes(torusGeometry)
     this.onWindowResize()
     this.animate()
   }
@@ -241,6 +210,8 @@ export class Renderer {
     camera.aspect = parent.offsetWidth / parent.offsetHeight
     camera.updateProjectionMatrix()
     lineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
+    selectionLineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
+    highlightLineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
     this.render()
   }
 
@@ -271,97 +242,70 @@ export class Renderer {
 
   onMouseDown(coords) {
     if(this.isDragging) return
-    const objects = this.objectsAtScreen(coords, 'alcSelectable')
-    objects.forEach(obj => obj.material.color.set('red'))
+    if(this.viewport.selectedElement) this.viewport.selectedElement.three.material = lineMaterial
+    const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
+    if(object) {
+      object.material = selectionLineMaterial
+      this.emitter.emit('element-selected', object.element)
+    } else {
+      this.emitter.emit('element-selected', null)
+    }
     this.render()
   }
 
   onMouseMove(coords) {
     if(this.isDragging) return
-    const objects = this.objectsAtScreen(coords, 'alcSelectable')
-    objects.forEach(obj => obj.material.color.set(0x2cadff))
-    this.fromScreen(coords)
+    const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
+    if(!object) return this.render()
+    const oldMaterial = object.material
+    object.material = highlightLineMaterial
     this.render()
+    object.material = oldMaterial
   }
 
-  createClippingPlanes(geometry) {
-    this.planes = [
-      new THREE.Plane(new THREE.Vector3(- 1, 0, 0), 0),
-      new THREE.Plane(new THREE.Vector3(0, - 1, 0), 0),
-      // new THREE.Plane(new THREE.Vector3(0, 0, - 1), 0)
-   ]
+  // getSegments(node) {
+  //   // const segments = node.get_sketches().flatMap(sketch => sketch.get_segments())
+  //   const segments = node.get_sketch_elements()
+  //   return segments.concat(node.get_children().flatMap(child => this.getSegments(child)))
+  // }
 
-    const object = new THREE.Group()
-    this.scene.add(object)
+  // loadTree(node, recursive) {
+  //   console.log('loadTree')
+  //   this.elements.forEach(elem => this.scene.remove(elem))
+  //   this.elements.length = 0
+  //   this.segments = this.getSegments(node)
+  //   this.handles = this.segments.flatMap(seg => seg.get_handles())
+  //   this.segments.forEach(segment => {
+  //     const vertices = segment.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
+  //     // const handles = segment.get_handles().map(handle => new THREE.Vector3().fromArray(handle))
+  //     // var lineGeom = new THREE.BufferGeometry().setFromPoints(vertices)
+  //     // // var pointGeom = new THREE.BufferGeometry().setFromPoints(handles)
+  //     // var line = new THREE.Line(lineGeom, lineMaterial)
+  //     // // var points = new THREE.Points(pointGeom, pointMaterial)
+  //     // this.scene.add(line)
+  //     // // this.scene.add(points)
+  //     var geometry = new LineGeometry()
+  //     geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
+  //     geometry.setColors(Array(vertices.length * 3).fill(1))
+  //     var line = new Line2(geometry, lineMaterial)
+  //     line.computeLineDistances()
+  //     // line.scale.set(1, 1, 1)
+  //     line.alcSelectable = true
+  //     this.elements.push(line)
+  //     this.scene.add(line)
+  //   })
+  //   this.render()
+  // }
 
-    // Set up clip plane rendering
-    this.planeObjects = []
-    var planeGeom = new THREE.PlaneBufferGeometry(4, 4)
-    this.planes.forEach((plane, i) => {
-
-      var poGroup = new THREE.Group()
-      var stencilGroup = createPlaneStencilGroup(geometry, plane, i + 1)
-
-      // Plane is clipped by the other clipping planes
-      var planeMat = new THREE.MeshStandardMaterial({
-        color: 0xE91E63,
-        metalness: 0.1,
-        roughness: 0.75,
-        clippingPlanes: this.planes.filter(p => p !== plane),
-        stencilWrite: true,
-        stencilRef: 0,
-        stencilFunc: THREE.NotEqualStencilFunc,
-        stencilFail: THREE.ReplaceStencilOp,
-        stencilZFail: THREE.ReplaceStencilOp,
-        stencilZPass: THREE.ReplaceStencilOp,
-      })
-      var po = new THREE.Mesh(planeGeom, planeMat)
-      po.onAfterRender = () => renderer.clearStencil()
-      po.renderOrder = i + 1.1
-
-      object.add(stencilGroup)
-      poGroup.add(po)
-      this.planeObjects.push(po)
-      this.scene.add(poGroup)
-    })
-
-    var material = new THREE.MeshStandardMaterial({
-      color: 0xFFC107,
-      metalness: 0.1,
-      roughness: 0.75,
-      clippingPlanes: this.planes,
-      clipShadows: true,
-      shadowSide: THREE.DoubleSide,
-    })
-
-    // Clipped Object itself
-    var clippedColorFront = new THREE.Mesh(geometry, material)
-    clippedColorFront.castShadow = true
-    clippedColorFront.renderOrder = 6
-    object.add(clippedColorFront)
-  }
-
-  getSegments(node) {
-    // const segments = node.get_sketches().flatMap(sketch => sketch.get_segments())
-    const segments = node.get_sketch_elements()
-    return segments.concat(node.get_children().flatMap(child => this.getSegments(child)))
-  }
-
-  loadTree(tree) {
+  loadTree(node, recursive, notTop) {
     console.log('loadTree')
-    this.elements.forEach(elem => this.scene.remove(elem))
-    this.elements.length = 0
-    this.segments = this.getSegments(tree)
-    this.handles = this.segments.flatMap(seg => seg.get_handles())
-    this.segments.forEach(segment => {
+    node.threeObjects = node.threeObjects || []
+    node.threeObjects.forEach(elem => this.scene.remove(elem))
+    node.threeObjects.length = 0
+    const segments = node.get_sketch_elements()
+    // this.handles = segments.flatMap(seg => seg.get_handles())
+    segments.forEach(segment => {
       const vertices = segment.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
-      // const handles = segment.get_handles().map(handle => new THREE.Vector3().fromArray(handle))
-      // var lineGeom = new THREE.BufferGeometry().setFromPoints(vertices)
-      // // var pointGeom = new THREE.BufferGeometry().setFromPoints(handles)
-      // var line = new THREE.Line(lineGeom, lineMaterial)
-      // // var points = new THREE.Points(pointGeom, pointMaterial)
-      // this.scene.add(line)
-      // // this.scene.add(points)
       var geometry = new LineGeometry()
       geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
       geometry.setColors(Array(vertices.length * 3).fill(1))
@@ -369,10 +313,14 @@ export class Renderer {
       line.computeLineDistances()
       // line.scale.set(1, 1, 1)
       line.alcSelectable = true
-      this.elements.push(line)
+      node.threeObjects.push(line)
+      segment.three = line
+      line.component = node
+      line.element = segment
       this.scene.add(line)
     })
-    this.render()
+    if(recursive) node.get_children().each(child => loadTree(child, true, true))
+    if(!notTop) this.render()
   }
 
   dispose() {

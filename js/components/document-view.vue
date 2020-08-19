@@ -4,9 +4,11 @@
       :tree="document.tree"
       :active-component="activeComponent"
       :active-tool="activeTool"
+      :selected-element="selectedElement"
       @change-view="document.isViewDirty = true"
       @change-pose="document.isPoseDirty = true"
       @activate-tool="activateTool"
+      @element-selected="elementSelected"
     )
     ToolBox(
       :active-tool="activeTool"
@@ -43,7 +45,9 @@
         :allow-create="document.isSetDirty"
         @create="createSet"
       )
-    FooterView
+    FooterView(
+      :selected-element="selectedElement"
+    )
 </template>
 
 
@@ -129,6 +133,7 @@
       return {
         activeComponent: this.document.tree,
         activeTool: null,
+        selectedElement: null,
       }
     },
 
@@ -180,6 +185,10 @@
 
       activateTool: function(tool) {
         this.activeTool = tool
+      },
+
+      elementSelected: function(elem) {
+        this.selectedElement = elem
       },
     },
   }

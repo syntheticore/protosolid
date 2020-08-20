@@ -82,6 +82,23 @@ trait Constraint {}
 pub trait Controllable {
   fn get_handles(&self) -> Vec<Point3>;
   fn set_handles(&mut self, _: Vec<Point3>);
+  fn get_snap_points(&self) -> Vec<Point3>;
+}
+
+impl Controllable for Line {
+  fn get_handles(&self) -> Vec<Point3> {
+    vec![self.points.0, self.points.1]
+  }
+
+  fn set_handles(&mut self, handles: Vec<Point3>) {
+    self.points = (handles[0], handles[1]);
+  }
+
+  fn get_snap_points(&self) -> Vec<Point3> {
+    let mut points = self.get_handles();
+    points.push(self.midpoint());
+    points
+  }
 }
 
 impl Controllable for BezierSpline {
@@ -93,15 +110,9 @@ impl Controllable for BezierSpline {
     self.vertices = handles;
     self.update();
   }
-}
 
-impl Controllable for Line {
-  fn get_handles(&self) -> Vec<Point3> {
-    vec![self.points.0, self.points.1]
-  }
-
-  fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.points = (handles[0], handles[1]);
+  fn get_snap_points(&self) -> Vec<Point3> {
+    self.get_handles()
   }
 }
 

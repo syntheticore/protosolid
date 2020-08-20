@@ -50,6 +50,7 @@ pub type Matrix4 = cgmath::Matrix4<f64>;
 //     sum += binomial(n,k) * (1-t)^(n-k) * t^(k)
 //   return sum
 
+
 pub trait Differentiable {
   fn sample(&self, t: f64) -> Point3;
   fn default_tesselation(&self) -> Vec<Point3>;
@@ -71,22 +72,35 @@ pub trait Differentiable {
 }
 
 
+#[derive(Debug)]
+pub struct Line {
+  pub points: (Point3, Point3)
+}
+
+impl Line {
+  pub fn midpoint(&self) -> Point3 {
+    (self.points.0 + self.points.1.to_vec()) / 2.0
+  }
+}
+
+impl Differentiable for Line {
+  fn sample(&self, t: f64) -> Point3 {
+    let vec = self.points.1 - self.points.0;
+    self.points.0 + vec * t
+  }
+
+  fn default_tesselation(&self) -> Vec<Point3> {
+    self.tesselate(1)
+  }
+}
+
+
 const LUT_STEPS: i32 = 100;
 
 #[derive(Debug, Default)]
 pub struct BezierSpline {
   pub vertices: Vec<Point3>,
   pub lut: Vec<Point3>,
-}
-
-impl Differentiable for BezierSpline {
-  fn sample(&self, t: f64) -> Point3 {
-    self.real_sample(t, &self.vertices)
-  }
-
-  fn default_tesselation(&self) -> Vec<Point3> {
-    self.tesselate((self.vertices.len() * 10).try_into().unwrap())
-  }
 }
 
 impl BezierSpline {
@@ -121,10 +135,7 @@ impl BezierSpline {
     let mut left: Vec<Point3> = vec![];
     let mut right: Vec<Point3> = vec![];
     self.real_split(t, &self.vertices, &mut left, &mut right);
-    (
-      Self { vertices: left, lut: vec![] },
-      Self { vertices: right, lut: vec![] },
-    )
+    (Self::new(left), Self::new(right))
   }
 
   fn real_split(&self, t: f64, vertices: &[Point3], left: &mut Vec<Point3>, right: &mut Vec<Point3>) -> Point3 {
@@ -141,7 +152,7 @@ impl BezierSpline {
         if i == len - 1 { right.push(vertices[i + 1]) }
         new_vertices.push(vertices[i] * (1.0 - t) + (vertices[i + 1] * t).to_vec());
       }
-      self.real_sample(t, &new_vertices)
+      self.real_split(t, &new_vertices, left, right)
     }
   }
 
@@ -181,22 +192,13 @@ impl BezierSpline {
   }
 }
 
-
-#[derive(Debug)]
-pub struct Line {
-  // pub p1: Point3,
-  // pub p2: Point3,
-  pub points: (Point3, Point3)
-}
-
-impl Differentiable for Line {
+impl Differentiable for BezierSpline {
   fn sample(&self, t: f64) -> Point3 {
-    let vec = self.points.1 - self.points.0;
-    self.points.0 + vec * t
+    self.real_sample(t, &self.vertices)
   }
 
   fn default_tesselation(&self) -> Vec<Point3> {
-    self.tesselate(1)
+    self.tesselate((self.vertices.len() * 10).try_into().unwrap())
   }
 }
 

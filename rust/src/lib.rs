@@ -56,6 +56,19 @@ pub fn main() -> Result<(), JsValue> {
 //   real: Rc<RefCell<dyn SketchElement>>,
 // }
 
+fn vertices_to_js(points: Vec<shapex::Point3>) -> Array {
+  points.iter().map(|p|
+    JsValue::from_serde(&(p.x, p.y, p.z)).unwrap()
+  ).collect()
+}
+
+fn vertices_from_js(points: Array) -> Vec<shapex::Point3> {
+  points.iter().map(|vertex| {
+    let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
+    shapex::Point3::new(vertex.0, vertex.1, vertex.2)
+  }).collect()
+}
+
 
 #[wasm_bindgen]
 pub struct JsSegment {
@@ -71,29 +84,24 @@ impl JsSegment {
   }
 
   pub fn get_handles(&self) -> Array {
-    self.real.borrow().get_handles().iter().map(|vertex|
-      JsValue::from_serde(&(vertex.x, vertex.y, vertex.z)).unwrap()
-    ).collect()
+    vertices_to_js(self.real.borrow().get_handles())
   }
 
   pub fn set_handles(&self, handles: Array) {
-    let points = handles.iter().map(|vertex| {
-      let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
-      shapex::Point3::new(vertex.0, vertex.1, vertex.2)
-    }).collect();
+    let points = vertices_from_js(handles);
     self.real.borrow_mut().set_handles(points);
   }
 
+  pub fn get_snap_points(&self) -> Array {
+    vertices_to_js(self.real.borrow().get_snap_points())
+  }
+
   pub fn tesselate(&self, steps: i32) -> Array {
-    self.real.borrow().tesselate(steps).iter().map(|vertex|
-      JsValue::from_serde(&(vertex.x, vertex.y, vertex.z)).unwrap()
-    ).collect()
+    vertices_to_js(self.real.borrow().tesselate(steps))
   }
 
   pub fn default_tesselation(&self) -> Array {
-    self.real.borrow().default_tesselation().iter().map(|vertex|
-      JsValue::from_serde(&(vertex.x, vertex.y, vertex.z)).unwrap()
-    ).collect()
+    vertices_to_js(self.real.borrow().default_tesselation())
   }
 }
 
@@ -175,16 +183,15 @@ impl JsComponent {
 
   pub fn add_segment(&self) {
     let spline = shapex::BezierSpline::new(vec![
-        shapex::Point3::new(0.0, 0.0, 1.0),
-        shapex::Point3::new(1.0, 0.0, 1.25),
-        shapex::Point3::new(1.0, 1.0, 1.5),
-        shapex::Point3::new(0.0, 1.0, 1.75),
-        shapex::Point3::new(0.0, 0.0, 2.0),
-        shapex::Point3::new(1.0, 0.0, 2.25),
-        shapex::Point3::new(1.0, 1.0, 2.5),
-        shapex::Point3::new(0.0, 1.0, 2.75),
-      ]
-    );
+      shapex::Point3::new(0.0, 0.0, 1.0),
+      shapex::Point3::new(1.0, 0.0, 1.25),
+      shapex::Point3::new(1.0, 1.0, 1.5),
+      shapex::Point3::new(0.0, 1.0, 1.75),
+      shapex::Point3::new(0.0, 0.0, 2.0),
+      shapex::Point3::new(1.0, 0.0, 2.25),
+      shapex::Point3::new(1.0, 1.0, 2.5),
+      shapex::Point3::new(0.0, 1.0, 2.75),
+    ]);
     self.real.borrow_mut().sketch_elements.push(Rc::new(RefCell::new(spline)));
   }
 

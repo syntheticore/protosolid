@@ -101,7 +101,9 @@
   }
 
   var rendering = true
-  var renderer, controls, camera, mesh, lineMaterial, selectionLineMaterial, highlightLineMaterial, pointMaterial
+  var renderer, controls, camera, mesh, lineMaterial, selectionLineMaterial, highlightLineMaterial, pointMaterial, transformControl
+
+  const snapDistance = 5 // px
 
   export default {
     name: 'ViewPort',
@@ -116,6 +118,10 @@
     watch: {
       tree: function() {
         this.loadTree(this.tree)
+      },
+
+      activeTool: function() {
+        this.widgets.length = 0
       },
     },
 
@@ -210,7 +216,7 @@
       })
 
       // Transform Controls
-      var transformControl = new TransformControls(camera, renderer.domElement)
+      transformControl = new TransformControls(camera, renderer.domElement)
       transformControl.space = 'world'
       // transformControl.translationSnap = 0.5
       // transformControl.rotationSnap = THREE.MathUtils.degToRad(10)
@@ -219,11 +225,13 @@
       transformControl.addEventListener('dragging-changed', (event) => {
         controls.enabled = !event.value
       })
+
       transformControl.addEventListener('objectChange', (event) => {
         this.$emit('change-pose')
         renderer.shadowMap.needsUpdate = true
         this.render()
       })
+
       this.scene.add(transformControl)
       transformControl.attach(mesh)
 
@@ -285,7 +293,6 @@
       this.onWindowResize()
       this.animate()
 
-
       this.$root.$on('activate-toolname', (toolName) => {
         let tool
         switch(toolName) {
@@ -308,24 +315,15 @@
     },
 
     methods: {
-      updateWidgets: function() {
-        // if(!this.renderer.handles) return
-        // this.widgets.length = 0
-        // this.renderer.handles.forEach((point, i) => {
-        //   const vec = new THREE.Vector3().fromArray(point)
-        //   const pos = this.renderer.toScreen(vec)
-        //   this.$set(this.widgets, i, {pos, vec, type: 'vertex'})
-        // })
-      },
-
       click: function(e) {
         controls.enabled = true
         const coords = getMouseCoords(e, this.$refs.canvas)
-        if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return
+        if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return this.render()
         const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
-        if(object) return
+        if(object) return this.render()
         if(this.selectedElement) this.selectedElement.three.material = lineMaterial
         this.$emit('element-selected', null)
+        transformControl.detach()
         this.render()
       },
 
@@ -333,7 +331,7 @@
         if(e.button != 0) return
         const coords = getMouseCoords(e, this.$refs.canvas)
         if(this.activeTool) {
-          const vec = this.fromScreen(coords)
+          const vec = this.snapVector(this.fromScreen(coords))
           if(this.activeTool && vec) this.activeTool.mouseDown(vec)
         } else {
           const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
@@ -341,6 +339,7 @@
             if(this.selectedElement) this.selectedElement.three.material = lineMaterial
             object.material = selectionLineMaterial
             this.$emit('element-selected', object.element)
+            transformControl.attach(object)
             controls.enabled = false
             this.render()
           }
@@ -349,11 +348,13 @@
       },
 
       mouseMove: function(e) {
+        this.widgets.length = 0
+        this.widgets = this.widgets.slice()
         if(e.button != 0) return
         if(this.isOrbiting) return
         const coords = getMouseCoords(e, this.$refs.canvas)
         if(this.activeTool) {
-          const vec = this.fromScreen(coords)
+          const vec = this.snapVector(this.fromScreen(coords))
           if(vec) this.activeTool.mouseMove(vec)
         } else {
           const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
@@ -368,6 +369,40 @@
         }
       },
 
+      snapVector: function(vec) {
+        this.widgets.length = 0
+        if(!vec) return
+        const vecScreen = this.toScreen(vec)
+        const sketchElements = this.activeComponent.get_sketch_elements()
+        const snapPoints = sketchElements.flatMap(elem => {
+          let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
+          // Filter out last point of the sketch element actively being drawn
+          if(elem == sketchElements.slice(-1)[0]) {
+            const handles = elem.get_handles()
+            const lastHandle = new THREE.Vector3().fromArray(handles[handles.length - 1])
+            points = points.filter(p => !p.equals(lastHandle))
+          }
+          return points
+        })
+        let closestDist = 99999
+        let target
+        snapPoints.forEach(p => {
+          const dist = this.toScreen(p).distanceTo(vecScreen)
+          if(dist < snapDistance && dist < closestDist) {
+            closestDist = dist
+            target = p
+          }
+        })
+        if(target) {
+          this.widgets.push({
+            type: 'vertex',
+            pos: this.toScreen(target),
+            vec: target,
+          })
+        }
+        return target || vec
+      },
+
       widgetClicked: function(widget) {
         if(this.activeTool) this.activeTool.mouseDown(widget.vec)
       },
@@ -376,18 +411,17 @@
         if(this.activeTool) this.activeTool.mouseMove(widget.vec)
       },
 
-      render: function() {
-        this.planes && this.planes.forEach((plane, i) => {
-          var po = this.planeObjects[i]
-          plane.coplanarPoint(po.position)
-          po.lookAt(
-            po.position.x - plane.normal.x,
-            po.position.y - plane.normal.y,
-            po.position.z - plane.normal.z,
-          )
+      updateWidgets: function() {
+        this.widgets.forEach((widget, i) => {
+          widget.pos = this.toScreen(widget.vec)
+          this.$set(this.widgets, i, widget)
         })
-        renderer.render(this.scene, camera)
+      },
+
+      render: function() {
+        camera.updateMatrixWorld()
         this.updateWidgets()
+        renderer.render(this.scene, camera)
       },
 
       animate: function() {
@@ -424,10 +458,10 @@
         const heightHalf = 0.5 * renderer.domElement.height
         // camera.updateMatrixWorld()
         const vector = vec.clone().project(camera)
-        return {
-          x: (vector.x * widthHalf) + widthHalf,
-          y: - (vector.y * heightHalf) + heightHalf,
-        }
+        return new THREE.Vector2(
+          (vector.x * widthHalf) + widthHalf,
+          - (vector.y * heightHalf) + heightHalf
+        )
       },
 
       objectsAtScreen: function(coords, filter) {
@@ -440,9 +474,11 @@
       loadElement: function(element, node) {
         this.scene.remove(element.three)
         node.threeObjects.filter(obj => obj !== element.three)
-        const vertices = element.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
+        // const vertices = element.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
+        const vertices = element.default_tesselation()
         var geometry = new LineGeometry()
-        geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
+        // geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
+        geometry.setPositions(vertices.flatMap(vertex => vertex))
         geometry.setColors(Array(vertices.length * 3).fill(1))
         var line = new Line2(geometry, lineMaterial)
         line.computeLineDistances()

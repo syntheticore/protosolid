@@ -103,7 +103,7 @@
   var rendering = true
   var renderer, controls, camera, mesh, lineMaterial, selectionLineMaterial, highlightLineMaterial, pointMaterial, transformControl
 
-  const snapDistance = 5 // px
+  const snapDistance = 11 // px
 
   export default {
     name: 'ViewPort',
@@ -113,11 +113,12 @@
       activeComponent: Object,
       activeTool: Object,
       selectedElement: Object,
+      data: Object,
     },
 
     watch: {
       tree: function() {
-        this.loadTree(this.tree)
+        this.loadTree(this.tree, true)
       },
 
       activeTool: function() {
@@ -132,7 +133,6 @@
     },
 
     mounted: function() {
-
       renderer = new THREE.WebGLRenderer({
         canvas: this.$el.querySelector('canvas'),
         antialias: window.devicePixelRatio <= 1.0,
@@ -306,7 +306,15 @@
         this.$emit('activate-tool', tool)
       })
 
-      this.loadTree(this.tree)
+      this.$root.$on('component-changed', this.componentChanged)
+
+      window.addEventListener('keydown', (e) => {
+        if(e.keyCode === 46 || e.keyCode === 8) { // Del / Backspace
+          if(this.selectedElement) this.deleteElement(this.selectedElement)
+        }
+      });
+
+      this.loadTree(this.tree, true)
     },
 
     beforeDestroy: function() {
@@ -419,9 +427,8 @@
       },
 
       render: function() {
-        camera.updateMatrixWorld()
-        this.updateWidgets()
         renderer.render(this.scene, camera)
+        this.updateWidgets()
       },
 
       animate: function() {
@@ -471,39 +478,56 @@
         return objects.filter(obj => obj[filter])
       },
 
-      loadElement: function(element, node) {
-        this.scene.remove(element.three)
-        node.threeObjects.filter(obj => obj !== element.three)
-        // const vertices = element.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
-        const vertices = element.default_tesselation()
+      loadElement: function(elem, node) {
+        this.unloadElement(elem, node)
+        const vertices = elem.default_tesselation()
         var geometry = new LineGeometry()
-        // geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
         geometry.setPositions(vertices.flatMap(vertex => vertex))
         geometry.setColors(Array(vertices.length * 3).fill(1))
         var line = new Line2(geometry, lineMaterial)
         line.computeLineDistances()
         // line.scale.set(1, 1, 1)
         line.alcSelectable = true
-        node.threeObjects.push(line)
-        element.three = line
+        this.data[node.id()].threeObjects.push(line)
+        elem.three = line
         line.component = node
-        line.element = element
+        line.element = elem
         this.scene.add(line)
       },
 
-      loadTree: function(node, recursive) {
-        console.log('loadTree')
-        node.threeObjects = node.threeObjects || []
-        node.threeObjects.forEach(elem => this.scene.remove(elem))
-        node.threeObjects.length = 0
-        const elements = node.get_sketch_elements()
-        // this.handles = elements.flatMap(seg => seg.get_handles())
-        elements.forEach(element => this.loadElement(element, node))
-        if(recursive) node.get_children().each(child => this.loadTree(child, true, true))
+      unloadElement: function(elem, node) {
+        this.scene.remove(elem.three)
+        const cache = this.data[node.id()]
+        cache.threeObjects = cache.threeObjects || []
+        cache.threeObjects = cache.threeObjects.filter(obj => obj !== elem.three)
       },
 
-      componentChanged: function(comp) {
-        this.loadTree(comp)
+      deleteElement: function(elem) {
+        // this.unloadElement(elem, node)
+        transformControl.detach()
+        this.activeComponent.remove_element(elem.id())
+        this.componentChanged(this.activeComponent)
+        this.$emit('element-selected', null)
+      },
+
+      loadTree: function(node, recursive) {
+        this.unloadTree(node, recursive)
+        if(this.data[node.id()].hidden) return
+        const elements = node.get_sketch_elements()
+        elements.forEach(element => this.loadElement(element, node))
+        if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
+      },
+
+      unloadTree: function(node, recursive) {
+        const cache = this.data[node.id()]
+        cache.threeObjects = cache.threeObjects || []
+        cache.threeObjects.forEach(obj => this.scene.remove(obj))
+        cache.threeObjects.length = 0
+        if(recursive) node.get_children().forEach(child => this.unloadTree(child, true))
+      },
+
+      componentChanged: function(comp, recursive) {
+        this.loadTree(comp, recursive)
         this.render()
       },
 

@@ -2,6 +2,7 @@
 
 // pub use self::vector::Vec3;
 use std::convert::TryInto;
+use uuid::Uuid;
 use cgmath::prelude::*;
 
 pub type Vec2 = cgmath::Vector2<f64>;
@@ -60,24 +61,23 @@ pub trait Differentiable {
       self.sample(1.0 / steps as f64 * i as f64)
     }).collect()
   }
-
-  fn tesselate_lines(&self, steps: i32) -> Vec<Line> {
-    let points = self.tesselate(steps);
-    let mut lines = vec![];
-    for i in 0..points.len() - 1 {
-      lines.push(Line{ points: (points[i], points[i + 1])});
-    }
-    lines
-  }
 }
 
 
 #[derive(Debug)]
 pub struct Line {
+  pub id: Uuid,
   pub points: (Point3, Point3)
 }
 
 impl Line {
+  pub fn new(points: (Point3, Point3)) -> Self {
+    Self {
+      id: Uuid::new_v4(),
+      points: points,
+    }
+  }
+
   pub fn midpoint(&self) -> Point3 {
     (self.points.0 + self.points.1.to_vec()) / 2.0
   }
@@ -99,6 +99,7 @@ const LUT_STEPS: i32 = 100;
 
 #[derive(Debug, Default)]
 pub struct BezierSpline {
+  pub id: Uuid,
   pub vertices: Vec<Point3>,
   pub lut: Vec<Point3>,
 }
@@ -106,6 +107,7 @@ pub struct BezierSpline {
 impl BezierSpline {
   pub fn new(vertices: Vec<Point3>) -> Self {
     let mut this = Self {
+      id: Uuid::new_v4(),
       vertices: vertices,
       lut: vec![],
     };

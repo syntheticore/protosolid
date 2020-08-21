@@ -80,12 +80,17 @@ trait Constraint {}
 
 
 pub trait Controllable {
+  fn id(&self) -> Uuid;
   fn get_handles(&self) -> Vec<Point3>;
   fn set_handles(&mut self, _: Vec<Point3>);
   fn get_snap_points(&self) -> Vec<Point3>;
 }
 
 impl Controllable for Line {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+
   fn get_handles(&self) -> Vec<Point3> {
     vec![self.points.0, self.points.1]
   }
@@ -102,6 +107,10 @@ impl Controllable for Line {
 }
 
 impl Controllable for BezierSpline {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+
   fn get_handles(&self) -> Vec<Point3> {
     self.vertices.clone()
   }

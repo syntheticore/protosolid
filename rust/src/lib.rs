@@ -3,6 +3,7 @@ use std::cell::RefCell;
 
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
+
 // use serde::{Serialize};
 
 use alchemy::*;
@@ -83,6 +84,10 @@ impl JsSegment {
     }
   }
 
+  pub fn id(&self) -> JsValue {
+    JsValue::from_serde(&self.real.borrow().id()).unwrap()
+  }
+
   pub fn get_handles(&self) -> Array {
     vertices_to_js(self.real.borrow().get_handles())
   }
@@ -161,7 +166,7 @@ impl JsComponent {
     }
   }
 
-  pub fn get_id(&self) -> JsValue {
+  pub fn id(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
   }
 
@@ -198,9 +203,7 @@ impl JsComponent {
   pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsSegment {
     let p1: (f64, f64, f64) = p1.into_serde().unwrap();
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
-    let line = shapex::Line {
-      points: (shapex::Point3::from(p1), shapex::Point3::from(p2))
-    };
+    let line = shapex::Line::new((shapex::Point3::from(p1), shapex::Point3::from(p2)));
     let mut real = self.real.borrow_mut();
     real.sketch_elements.push(Rc::new(RefCell::new(line)));
     JsSegment::from(&real.sketch_elements.last().unwrap())
@@ -217,9 +220,10 @@ impl JsComponent {
     JsSegment::from(&real.sketch_elements.last().unwrap())
   }
 
-  pub fn remove_element(&mut self, index: usize) {
+  pub fn remove_element(&mut self, id: JsValue) {
+    let id = id.into_serde().unwrap();
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.remove(index);
+    real.sketch_elements.retain(|elem| elem.borrow().id() != id);
   }
 
   pub fn create_sketch(&mut self) -> JsSketch {

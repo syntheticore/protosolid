@@ -23,9 +23,7 @@ export class LineTool extends Tool {
 
   dispose() {
     if(!this.line) return
-    const index = this.component.get_sketch_elements().length - 1
-    console.log('dispose', index)
-    if(index != -1) this.component.remove_element(index)
+    this.component.remove_element(this.line.id())
     this.viewport.componentChanged(this.component)
   }
 }

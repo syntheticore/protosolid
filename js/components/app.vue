@@ -98,6 +98,8 @@
           return
         } else if(e.keyCode === 27) {
           this.$root.$emit('escape')
+        // } else if(e.keyCode === 46 || e.keyCode === 8) { // Del / Backspace
+        //   this.$root.$emit('delete')
         }
       });
       if(!window.ipcRenderer) return
@@ -110,21 +112,6 @@
         return wasmP.then((wasm) => {
           const proxy = new wasm.AlchemyProxy()
           const tree = proxy.get_main_assembly()
-            const part1 = tree.create_component('Part 1')
-            const assm1 = tree.create_component('Sub Assembly 1')
-              const part2 = assm1.create_component('Part 2')
-              const part3 = assm1.create_component('Part 3')
-              const assm2 = assm1.create_component('Sub Assembly 2')
-                const part4 = assm2.create_component('Part 4')
-                const part5 = assm2.create_component('Part 5')
-              const assm3 = assm1.create_component('Sub Assembly 3')
-                const part6 = assm3.create_component('Part 6')
-                const part7 = assm3.create_component('Part 7')
-                const part8 = assm3.create_component('Part 8')
-          // part3.create_sketch().add_segment()
-          part3.add_segment()
-          // part3.get_sketches()[0].add_segment()
-          // console.log(part3.get_sketches()[0].get_segments())
           this.documents.push({
             title: 'Untitled Document',
             proxy: proxy,

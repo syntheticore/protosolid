@@ -5,6 +5,7 @@
       :active-component="activeComponent"
       :active-tool="activeTool"
       :selected-element="selectedElement"
+      :data="data"
       @change-view="document.isViewDirty = true"
       @change-pose="document.isPoseDirty = true"
       @activate-tool="activateTool"
@@ -18,6 +19,7 @@
       TreeView(
         :top="document.tree"
         :active-component="activeComponent"
+        :data="data"
         @create-component="createComponent"
         @activate-component="activateComponent"
       )
@@ -134,11 +136,27 @@
         activeComponent: this.document.tree,
         activeTool: null,
         selectedElement: null,
+        data: {},
       }
     },
 
     created() {
-
+      this.data[this.document.tree.id()] = {}
+      const part1 = this.createComponent(this.document.tree, 'Part 1')
+        const assm1 = this.createComponent(this.document.tree, 'Sub Assembly 1')
+          const part2 = this.createComponent(assm1, 'Part 2')
+          const part3 = this.createComponent(assm1, 'Part 3')
+          const assm2 = this.createComponent(assm1, 'Sub Assembly 2')
+            const part4 = this.createComponent(assm2, 'Part 4')
+            const part5 = this.createComponent(assm2, 'Part 5')
+          const assm3 = this.createComponent(assm1, 'Sub Assembly 3')
+            const part6 = this.createComponent(assm3, 'Part 6')
+            const part7 = this.createComponent(assm3, 'Part 7')
+            const part8 = this.createComponent(assm3, 'Part 8')
+      // part3.create_sketch().add_segment()
+      part3.add_segment()
+      // part3.get_sketches()[0].add_segment()
+      // console.log(part3.get_sketches()[0].get_segments())
     },
 
     mounted() {
@@ -147,6 +165,10 @@
         this.activeTool.dispose()
         this.activeTool = null
       })
+
+      // this.$root.$on('delete', () => {
+      //   this.selectedElement
+      // })
     },
 
     methods: {
@@ -173,9 +195,12 @@
         this.document.activePose = pose
       },
 
-      createComponent: function(parent) {
+      createComponent: function(parent, title) {
         console.log('cr1')
-        this.activeComponent = parent.create_component('New Component')
+        this.activeComponent = parent.create_component(title || 'New Component')
+        console.log(this.activeComponent.id())
+        this.$set(this.data, this.activeComponent.id(), {hidden: false, threeObjects: []})
+        return this.activeComponent
       },
 
       activateComponent: function(comp) {

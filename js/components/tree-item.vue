@@ -7,7 +7,7 @@
         @click="toggle()"
         fixed-width
       )
-      .box(:class="{hidden: !isVisible, selected: node.get_id() == activeNode.get_id()}")
+      .box(:class="{hidden: !isVisible, selected: node.id() == activeNode.id()}")
         fa-icon.eye(icon="eye" fixed-width @click="hidden = !hidden" v-if="!isTop")
         fa-icon.assembly(icon="boxes"  v-if="isAssembly")
         fa-icon.part(icon="box"  v-else)
@@ -23,10 +23,11 @@
         li(
           is="tree-item"
           v-for="child in node.get_children()"
-          :key="child.get_id()"
+          :key="child.id()"
           :node="child"
           :active-node="activeNode"
           :parent-hidden="!isVisible"
+          :data="data"
           v-on="$listeners"
         )
         //- @activate="activate"
@@ -147,13 +148,21 @@
       node: Object,
       activeNode: Object,
       parentHidden: Boolean,
+      data: Object,
     },
 
     data() {
       return {
-        hidden: false,
+        hidden: this.data[this.node.id()].hidden,
         expanded: true,
       };
+    },
+
+    watch: {
+      hidden: function(hidden) {
+        this.$set(this.data[this.node.id()], 'hidden', !this.isVisible)
+        this.$root.$emit('component-changed', this.node, true)
+      }
     },
 
     methods: {
@@ -162,20 +171,17 @@
       },
 
       activateComponent: function(node) {
-        console.log('ACTIVATE')
         this.$emit('activate-component', node)
       },
 
       createComponent: function(parent) {
-        console.log('CREATE')
         this.$emit('create-component', parent)
       },
     },
 
     computed: {
       isAssembly: function() {
-        // return this.node.children && this.node.children.length;
-        return this.node.get_children().length;
+        return !!this.node.get_children().length;
       },
 
       isVisible: function() {

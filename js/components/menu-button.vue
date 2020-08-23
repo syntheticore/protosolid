@@ -68,6 +68,7 @@
     margin: 12px
     text-align: left
     &::before
+      left: unset
       right: 20px
 
   .wrapper

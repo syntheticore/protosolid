@@ -15,6 +15,7 @@ class Tool {
   dispose() {}
 }
 
+
 export class ManipulationTool extends Tool {
   click(coords) {
     const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
@@ -45,19 +46,21 @@ export class ManipulationTool extends Tool {
   }
 }
 
-export class SelectionTool extends Tool {
-  mouseDown(vec) {
 
+export class SelectionTool extends ManipulationTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport)
+    this.callback = callback
   }
 
-  mouseMove(vec) {
-
+  click(coords) {
+    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    this.callback(object)
   }
 
-  dispose() {
-
-  }
+  mouseDown() {}
 }
+
 
 export class LineTool extends Tool {
   mouseDown(vec) {
@@ -79,6 +82,7 @@ export class LineTool extends Tool {
     this.viewport.componentChanged(this.component)
   }
 }
+
 
 export class SplineTool extends Tool {
   mouseDown(vec) {
@@ -110,6 +114,7 @@ export class SplineTool extends Tool {
   }
 }
 
+
 export class CircleTool extends Tool {
   mouseDown(vec) {
     if(this.center) {
@@ -127,36 +132,6 @@ export class CircleTool extends Tool {
     this.circle = this.component.add_circle(this.center.toArray(), radius)
     // this.viewport.elementChanged(this.circle, this.component)
     this.viewport.componentChanged(this.component)
-  }
-
-  dispose() {
-    if(!this.spline) return
-    let points = this.spline.get_handles()
-    points.pop()
-    this.spline.set_handles(points)
-    this.viewport.elementChanged(this.spline, this.component)
-  }
-}
-
-export class ExtrudeTool extends Tool {
-  mouseDown(vec) {
-    if(this.spline) {
-      let points = this.spline.get_handles()
-      points[points.length - 1] = vec.toArray()
-      points.push(vec.toArray())
-      this.spline.set_handles(points)
-    } else {
-      this.spline = this.component.add_spline([vec.toArray(), vec.toArray()])
-    }
-    this.viewport.elementChanged(this.spline, this.component)
-  }
-
-  mouseMove(vec) {
-    if(!this.spline) return
-    let points = this.spline.get_handles()
-    points[points.length - 1] = vec.toArray()
-    this.spline.set_handles(points)
-    this.viewport.elementChanged(this.spline, this.component)
   }
 
   dispose() {

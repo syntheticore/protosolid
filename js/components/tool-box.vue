@@ -12,11 +12,12 @@
         li.button(
           v-for="(tool, index) in tabs[activeTab].tools"
           :class="{active: index == 0}"
-          @click="activateTool(tool.title)"
+          @click="tool.type == 'feature' ? activateFeature(tool.title) : activateTool(tool.title)"
         )
           fa-icon(:icon="tool.icon" fixed-width)
           .title(v-html="tool.title")
-    FeatureBox()
+
+    component(:is="activeFeatureComponent")
 </template>
 
 
@@ -113,6 +114,7 @@
     data() {
       return {
         activeTab: 1,
+        activeFeatureComponent: null,
         tabs: [
           {
             title: 'Sketch',
@@ -127,7 +129,7 @@
           {
             title: 'Create',
             tools: [
-              { title: 'Extrude', icon: 'box' },
+              { title: 'Extrude', icon: 'box', type: 'feature' },
               { title: 'Revolve', icon: 'wave-square' },
               { title: 'Loft', icon: 'layer-group' },
               { title: 'Sweep', icon: 'route' },
@@ -153,14 +155,18 @@
       }
     },
 
-    mounted() {},
+    mounted() {
+      this.activateFeature('FeatureBox')
+    },
 
     methods: {
       activateTool: function(toolName) {
         this.$root.$emit('activate-toolname', toolName)
       },
-    },
 
-    beforeDestroy() {},
+      activateFeature: function(featureName) {
+        this.activeFeatureComponent = featureName
+      },
+    },
   }
 </script>

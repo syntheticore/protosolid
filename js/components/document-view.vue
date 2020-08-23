@@ -74,9 +74,6 @@
     &.bar-left
       left: 0
       overflow: hidden
-      // pointer-events: all
-      // h1
-      //   margin-left: 14px
     &.bar-right
       right: 14px
       bottom: 155px
@@ -135,6 +132,7 @@
       return {
         activeComponent: this.document.tree,
         activeTool: null,
+        activeFeature: null,
         selectedElement: null,
         data: {},
       }
@@ -153,19 +151,12 @@
             const part6 = this.createComponent(assm3, 'Part 6')
             const part7 = this.createComponent(assm3, 'Part 7')
             const part8 = this.createComponent(assm3, 'Part 8')
-      // part3.create_sketch().add_segment()
-      // part3.add_segment()
-      // part3.get_sketches()[0].add_segment()
-      // console.log(part3.get_sketches()[0].get_segments())
       this.activeComponent = assm2
     },
 
     mounted() {
       this.$root.$on('escape', () => {
-        // if(!this.activeTool) return
         if(this.activateTool.constructor.name == 'ManipulationTool') return
-        // this.activeTool.dispose()
-        // this.activeTool = null
         this.$root.$emit('activate-toolname', 'Manipulate')
       })
 
@@ -188,18 +179,18 @@
         this.document.isSetDirty = false
       },
 
+      createComponent: function(parent, title) {
+        this.activeComponent = parent.create_component(title || 'New Component')
+        this.$set(this.data, this.activeComponent.id(), {hidden: false, threeObjects: []})
+        return this.activeComponent
+      },
+
       activateView: function(view) {
         this.document.activeView = view
       },
 
       activatePose: function(pose) {
         this.document.activePose = pose
-      },
-
-      createComponent: function(parent, title) {
-        this.activeComponent = parent.create_component(title || 'New Component')
-        this.$set(this.data, this.activeComponent.id(), {hidden: false, threeObjects: []})
-        return this.activeComponent
       },
 
       activateComponent: function(comp) {

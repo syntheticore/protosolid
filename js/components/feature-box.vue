@@ -2,25 +2,25 @@
   form.bordered.tipped.feature-box
     //- h1.header Extrude
     .options
-      label(@click="pickProfile")
-        | Profile
-        .picker.one
-      label
-        | Rail
-        .picker.two
-      label
-        | Distance
-        input(type="number" value="2")
-      label
-        | Direction
-        input(type="checkbox")
-      label
-        | Operation
-        select
-          option Join
-          option Cut
-          option Intersect
-          option New Body
+      label(v-for="(fields, key) in settings")
+        | {{ fields.title }}
+        .picker(
+          v-if="fields.type == 'region' || fields.type == 'edge'" @click="pick(fields.type, key)"
+          :class="{active: activePicker == key, filled: data[key]}"
+          :data-color="fields.color"
+        )
+        input(
+          v-if="fields.type == 'length'"
+          type="number"
+          v-model="data[key]"
+        )
+        input(
+          v-if="fields.type == 'bool'"
+          type="checkbox"
+          v-model="data[key]"
+        )
+        select(v-if="fields.type == 'select'")
+          option(v-for="option in fields.options") {{ option }}
 </template>
 
 
@@ -51,36 +51,45 @@
   .picker
     width: 23px
     height: 23px
-    border: 6px solid #caffd7
+    border: 6px solid white
     border-radius: 40px
-    background: #56d556
     cursor: pointer
-    transition: all 0.05s
+    transition: all 0.1s
     &:hover
-      // background: #56d556 * 0.5
+      border-width: 1px
+      // box-shadow: 0 0 5px rgba(white, 0.7)
+    &.active
+      animation: 1s infinite linear rotate
+      border-style: dashed
+      border-width: 2px !important
+    &.filled
       border-width: 0px
-    &.one
-      // animation: 1s infinite linear rotate
-      // border: 2px dashed #caffd7
-    &.two
-      background: #d55662
-      border-color: #ffdbdb
+    &[data-color="pink"]
+      background: #ee3367
+      border-color: lighten(#ee3367, 87%)
+    &[data-color="purple"]
+      background: #dd18dd
+      border-color: lighten(#dd18dd, 87%)
+    &[data-color="orange"]
+      background: #ea6a43
+      border-color: lighten(#ea6a43, 87%)
+    &[data-color="green"]
+      background: #15c115
+      border-color: lighten(#15c115, 87%)
+    &[data-color="blue"]
+      background: #4b8ee3
+      border-color: lighten(#4b8ee3, 87%)
 
   @keyframes rotate
     50%
-      transform: scale(0.8) rotate(-180deg)
-      // border-color: black
-      border-width: 1px
-      border-style: dashed
+      transform: rotate(-180deg)
     100%
-      transform: scale(1) rotate(-360deg)
+      transform: rotate(-360deg)
 
 </style>
 
 
 <script>
-  // import Foo from './foo.vue'
-
   export default {
     name: 'FeatureBox',
 
@@ -92,18 +101,53 @@
 
     data() {
       return {
-
+        settings: {
+          profile: {
+            title: 'Profile',
+            type: 'region',
+            color: 'pink',
+          },
+          distance: {
+            title: 'Distance',
+            type: 'length',
+          },
+          direction: {
+            title: 'Direction',
+            type: 'bool',
+          },
+          operation: {
+            title: 'Operation',
+            type: 'select',
+            options: ['join', 'cut', 'intersect', 'create'],
+          },
+        },
+        data: {
+          profile: null,
+          rail: null,
+          distance: 0,
+          direction: true,
+          operation: 'join',
+        },
+        activePicker: null,
       }
     },
 
     mounted() {},
 
     methods: {
-      pickProfile: function(e) {
-
+      pick: function(type, name) {
+        this.$root.$once('picked-profile', (profile) => {
+          console.log('Picked profile', profile)
+          this.data[name] = profile
+          this.activePicker = null
+        })
+        this.activePicker = name
+        this.$root.$emit('pick-profile')
       },
     },
 
-    beforeDestroy() {},
+    beforeDestroy() {
+      console.log('Feature destroy')
+    },
   }
 </script>

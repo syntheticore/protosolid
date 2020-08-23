@@ -14,7 +14,6 @@
         @click="widgetClicked(widget)"
         :style="{top: widget.pos.y + 'px', left: widget.pos.x + 'px'}"
      )
-        //- @mouseenter="widgetHovered(widget)"
 </template>
 
 
@@ -241,7 +240,6 @@
       })
 
       this.scene.add(this.transformControl)
-      // this.transformControl.attach(mesh)
 
       // View Controls
       this.viewControls = new OrbitControls(camera, renderer.domElement)
@@ -252,7 +250,6 @@
       this.viewControls.zoomSpeed = 0.4
       this.viewControls.screenSpacePanning = true
       this.viewControls.rotateSpeed = 1.2
-      // this.viewControls.autoRotate = true
 
       this.viewControls.addEventListener('change', () => {
         this.render()
@@ -269,7 +266,6 @@
         this.isOrbiting = false
       })
 
-      // lineMaterial = new THREE.LineBasicMaterial({ color: '#2590e1', linewidth: 2, fog: true })
       this.lineMaterial = new LineMaterial({
         color: 'yellow',
         linewidth: 3,
@@ -282,24 +278,6 @@
 
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('white')
-
-      // pointMaterial = new THREE.PointsMaterial({
-      //   color: 'yellow',
-      //   size: 8,
-      //   sizeAttenuation: false,
-      //   map: new THREE.TextureLoader().load('textures/disc.png'),
-      //   alphaTest: 0.01,
-      //   transparent: true
-      // })
-
-      // var dragcontrols = new DragControls([mesh], camera, renderer.domElement)
-      // dragcontrols.addEventListener('hoveron', function(event) {
-      //   this.transformControl.attach(event.object)
-      // })
-
-      window.addEventListener('resize', this.onWindowResize.bind(this), false)
-      this.onWindowResize()
-      this.animate()
 
       this.$root.$on('activate-toolname', (toolName) => {
         if(this.activeTool) this.activeTool.dispose()
@@ -315,15 +293,25 @@
         this.$emit('activate-tool', tool)
       })
 
+      this.$root.$on('pick-profile', () => {
+        this.$emit('activate-tool', new SelectionTool(this.activeComponent, this, (profile) => {
+          this.$root.$emit('picked-profile', profile)
+        }))
+      })
+
       this.$root.$on('component-changed', this.componentChanged)
 
-      window.addEventListener('keydown', (e) => {
+      this.$refs.canvas.addEventListener('keydown', (e) => {
         if(e.keyCode === 46 || e.keyCode === 8) { // Del / Backspace
           if(this.selectedElement) this.deleteElement(this.selectedElement)
         }
       });
 
+      window.addEventListener('resize', this.onWindowResize.bind(this), false)
+      this.onWindowResize()
+
       this.loadTree(this.tree, true)
+      this.animate()
     },
 
     beforeDestroy: function() {
@@ -344,7 +332,8 @@
         const coords = getMouseCoords(e, this.$refs.canvas)
         const vec = this.snapVector(this.fromScreen(coords))
         if(vec) this.activeTool.mouseDown(vec, coords)
-        if(this.activeTool.constructor.name != 'ManipulationTool') this.viewControls.enabled = false
+        const toolName = this.activeTool.constructor.name
+        if(toolName != 'ManipulationTool' && toolName != 'SelectionTool') this.viewControls.enabled = false
         this.lastCoords = coords
       },
 
@@ -396,10 +385,6 @@
         this.activeTool.mouseDown(widget.vec, widget.pos)
       },
 
-      // widgetHovered: function(widget) {
-      //   this.activeTool.mouseMove(widget.vec, widget.pos)
-      // },
-
       updateWidgets: function() {
         this.widgets.forEach((widget, i) => {
           widget.pos = this.toScreen(widget.vec)
@@ -416,9 +401,6 @@
         if(!rendering) return
         requestAnimationFrame(this.animate.bind(this))
         this.viewControls.update()
-        // mesh.rotation.x += 0.01
-        // mesh.rotation.y += 0.01
-        // renderer.shadowMap.needsUpdate = true
       },
 
       onWindowResize: function() {

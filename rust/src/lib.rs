@@ -57,16 +57,16 @@ pub fn main() -> Result<(), JsValue> {
 //   real: Rc<RefCell<dyn SketchElement>>,
 // }
 
-fn vertices_to_js(points: Vec<shapex::Point3>) -> Array {
+fn vertices_to_js(points: Vec<Point3>) -> Array {
   points.iter().map(|p|
     JsValue::from_serde(&(p.x, p.y, p.z)).unwrap()
   ).collect()
 }
 
-fn vertices_from_js(points: Array) -> Vec<shapex::Point3> {
+fn vertices_from_js(points: Array) -> Vec<Point3> {
   points.iter().map(|vertex| {
     let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
-    shapex::Point3::new(vertex.0, vertex.1, vertex.2)
+    Point3::new(vertex.0, vertex.1, vertex.2)
   }).collect()
 }
 
@@ -129,15 +129,15 @@ impl JsSketch {
   }
 
   pub fn add_segment(&self) {
-    let spline = shapex::BezierSpline::new(vec![
-        shapex::Point3::new(0.0, 0.0, 1.0),
-        shapex::Point3::new(1.0, 0.0, 1.25),
-        shapex::Point3::new(1.0, 1.0, 1.5),
-        shapex::Point3::new(0.0, 1.0, 1.75),
-        shapex::Point3::new(0.0, 0.0, 2.0),
-        shapex::Point3::new(1.0, 0.0, 2.25),
-        shapex::Point3::new(1.0, 1.0, 2.5),
-        shapex::Point3::new(0.0, 1.0, 2.75),
+    let spline = BezierSpline::new(vec![
+        Point3::new(0.0, 0.0, 1.0),
+        Point3::new(1.0, 0.0, 1.25),
+        Point3::new(1.0, 1.0, 1.5),
+        Point3::new(0.0, 1.0, 1.75),
+        Point3::new(0.0, 0.0, 2.0),
+        Point3::new(1.0, 0.0, 2.25),
+        Point3::new(1.0, 1.0, 2.5),
+        Point3::new(0.0, 1.0, 2.75),
       ]
     );
     self.real.borrow_mut().elements.push(Rc::new(RefCell::new(spline)));
@@ -187,15 +187,15 @@ impl JsComponent {
   }
 
   pub fn add_segment(&self) {
-    let spline = shapex::BezierSpline::new(vec![
-      shapex::Point3::new(0.0, 0.0, 1.0),
-      shapex::Point3::new(1.0, 0.0, 1.25),
-      shapex::Point3::new(1.0, 1.0, 1.5),
-      shapex::Point3::new(0.0, 1.0, 1.75),
-      shapex::Point3::new(0.0, 0.0, 2.0),
-      shapex::Point3::new(1.0, 0.0, 2.25),
-      shapex::Point3::new(1.0, 1.0, 2.5),
-      shapex::Point3::new(0.0, 1.0, 2.75),
+    let spline = BezierSpline::new(vec![
+      Point3::new(0.0, 0.0, 1.0),
+      Point3::new(1.0, 0.0, 1.25),
+      Point3::new(1.0, 1.0, 1.5),
+      Point3::new(0.0, 1.0, 1.75),
+      Point3::new(0.0, 0.0, 2.0),
+      Point3::new(1.0, 0.0, 2.25),
+      Point3::new(1.0, 1.0, 2.5),
+      Point3::new(0.0, 1.0, 2.75),
     ]);
     self.real.borrow_mut().sketch_elements.push(Rc::new(RefCell::new(spline)));
   }
@@ -203,7 +203,7 @@ impl JsComponent {
   pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsSegment {
     let p1: (f64, f64, f64) = p1.into_serde().unwrap();
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
-    let line = shapex::Line::new((shapex::Point3::from(p1), shapex::Point3::from(p2)));
+    let line = Line::new((Point3::from(p1), Point3::from(p2)));
     let mut real = self.real.borrow_mut();
     real.sketch_elements.push(Rc::new(RefCell::new(line)));
     JsSegment::from(&real.sketch_elements.last().unwrap())
@@ -212,11 +212,20 @@ impl JsComponent {
   pub fn add_spline(&self, vertices: Array) -> JsSegment {
     let points = vertices.iter().map(|vertex| {
       let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
-      shapex::Point3::new(vertex.0, vertex.1, vertex.2)
+      Point3::new(vertex.0, vertex.1, vertex.2)
     }).collect();
-    let spline = shapex::BezierSpline::new(points);
+    let spline = BezierSpline::new(points);
     let mut real = self.real.borrow_mut();
     real.sketch_elements.push(Rc::new(RefCell::new(spline)));
+    JsSegment::from(&real.sketch_elements.last().unwrap())
+  }
+
+  pub fn add_circle(&mut self, center: JsValue, radius: JsValue) -> JsSegment {
+    let center: (f64, f64, f64) = center.into_serde().unwrap();
+    let radius: f64 = radius.into_serde().unwrap();
+    let circle = Circle::new(Point3::from(center), radius);
+    let mut real = self.real.borrow_mut();
+    real.sketch_elements.push(Rc::new(RefCell::new(circle)));
     JsSegment::from(&real.sketch_elements.last().unwrap())
   }
 

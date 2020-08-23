@@ -94,12 +94,16 @@
     mounted() {
       window.addEventListener('keydown', (e) => {
         console.log(e.keyCode)
-        if(e.keyCode === 83) { // S
-          return
-        } else if(e.keyCode === 27) {
+        if(e.keyCode === 27) {
           this.$root.$emit('escape')
         // } else if(e.keyCode === 46 || e.keyCode === 8) { // Del / Backspace
         //   this.$root.$emit('delete')
+        } else if(e.keyCode === 76) { // L
+          this.$root.$emit('activate-toolname', 'Line')
+        } else if(e.keyCode === 67) { // C
+          this.$root.$emit('activate-toolname', 'Circle')
+        } else if(e.keyCode === 83) { // S
+          this.$root.$emit('activate-toolname', 'Spline')
         }
       });
       if(!window.ipcRenderer) return

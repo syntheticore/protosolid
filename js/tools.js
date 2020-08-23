@@ -5,6 +5,58 @@ class Tool {
     this.component = component
     this.viewport = viewport
   }
+
+  click() {}
+
+  mouseDown() {}
+
+  mouseMove() {}
+
+  dispose() {}
+}
+
+export class ManipulationTool extends Tool {
+  click(coords) {
+    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    if(object) return this.viewport.render()
+    if(this.viewport.selectedElement) this.viewport.selectedElement.three.material = this.viewport.lineMaterial
+    this.viewport.$emit('element-selected', null)
+    this.viewport.transformControl.detach()
+    this.viewport.render()
+  }
+
+  mouseDown(vec, coords) {
+    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    if(!object) return
+    if(this.viewport.selectedElement) this.viewport.selectedElement.three.material = this.viewport.lineMaterial
+    object.material = this.viewport.selectionLineMaterial
+    this.viewport.$emit('element-selected', object.element)
+    this.viewport.transformControl.attach(object)
+    this.viewport.render()
+  }
+
+  mouseMove(vec, coords) {
+    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    if(!object) return this.viewport.render()
+    const oldMaterial = object.material
+    object.material = this.viewport.highlightLineMaterial
+    this.viewport.render()
+    object.material = oldMaterial
+  }
+}
+
+export class SelectionTool extends Tool {
+  mouseDown(vec) {
+
+  }
+
+  mouseMove(vec) {
+
+  }
+
+  dispose() {
+
+  }
 }
 
 export class LineTool extends Tool {
@@ -29,6 +81,64 @@ export class LineTool extends Tool {
 }
 
 export class SplineTool extends Tool {
+  mouseDown(vec) {
+    if(this.spline) {
+      let points = this.spline.get_handles()
+      points[points.length - 1] = vec.toArray()
+      points.push(vec.toArray())
+      this.spline.set_handles(points)
+    } else {
+      this.spline = this.component.add_spline([vec.toArray(), vec.toArray()])
+    }
+    this.viewport.elementChanged(this.spline, this.component)
+  }
+
+  mouseMove(vec) {
+    if(!this.spline) return
+    let points = this.spline.get_handles()
+    points[points.length - 1] = vec.toArray()
+    this.spline.set_handles(points)
+    this.viewport.elementChanged(this.spline, this.component)
+  }
+
+  dispose() {
+    if(!this.spline) return
+    let points = this.spline.get_handles()
+    points.pop()
+    this.spline.set_handles(points)
+    this.viewport.elementChanged(this.spline, this.component)
+  }
+}
+
+export class CircleTool extends Tool {
+  mouseDown(vec) {
+    if(this.center) {
+      this.circle = null
+      this.center = null
+    } else {
+      this.center = vec
+    }
+  }
+
+  mouseMove(vec) {
+    if(!this.center) return
+    if(this.circle) this.component.remove_element(this.circle.id())
+    const radius = vec.distanceTo(this.center)
+    this.circle = this.component.add_circle(this.center.toArray(), radius)
+    // this.viewport.elementChanged(this.circle, this.component)
+    this.viewport.componentChanged(this.component)
+  }
+
+  dispose() {
+    if(!this.spline) return
+    let points = this.spline.get_handles()
+    points.pop()
+    this.spline.set_handles(points)
+    this.viewport.elementChanged(this.spline, this.component)
+  }
+}
+
+export class ExtrudeTool extends Tool {
   mouseDown(vec) {
     if(this.spline) {
       let points = this.spline.get_handles()

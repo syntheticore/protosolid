@@ -84,5 +84,34 @@ form
   -webkit-backdrop-filter: blur(8px)
   backdrop-filter: blur(8px)
 
+.tipped
+  position: relative
+  &::before
+    content: ''
+    display: block
+    position: absolute
+    width: 0
+    height: 0
+    triWidth = 7px
+    top: - triWidth
+    left: 16px
+    border-left: triWidth solid transparent
+    border-right: triWidth solid transparent
+    border-bottom: triWidth solid $dark2 * 1.1
+    filter: drop-shadow(0 -1px 0px $dark1 * 1.7) drop-shadow(0 -1px 0px $dark2 * 0.5)
+
+.header
+  text-align: center
+  font-size: 14px
+  font-weight: bold
+  color: $bright1
+  margin: -14px
+  padding: 9px 14px
+  box-shadow: 0 0 8px rgba(black, 0.6)
+  text-shadow: 0 -1px 0px black
+  background: $dark2 * 1.1
+  margin-bottom: 14px
+  border-bottom: 1px solid $dark1 * 1.2
+
 alchemy-editor
   height: 100%

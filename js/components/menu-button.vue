@@ -4,9 +4,9 @@
       fa-icon(:icon="icon" fixed-width)
       fa-icon.expander(icon="angle-down")
     transition(name="fade" mode="out-in")
-      .pop-up.bordered(v-if="isOpen")
+      .pop-up.bordered.tipped(v-if="isOpen")
         .wrapper
-          h1(v-if="title") {{ title }}
+          h1.header(v-if="title") {{ title }}
           slot
 </template>
 
@@ -54,7 +54,7 @@
   .fade-leave-to
     opacity: 0
     transform: translate(0, 12px)
-  
+
   .pop-up
     position: absolute
     z-index: 2
@@ -67,40 +67,14 @@
     font-size: 12px
     margin: 12px
     text-align: left
-    // overflow: hidden
     &::before
-      content: ''
-      display: block
-      position: absolute
-      width: 0
-      height: 0
-      triWidth = 7px
-      top: - triWidth
       right: 20px
-      border-left: triWidth solid transparent
-      border-right: triWidth solid transparent
-      border-bottom: triWidth solid $dark2 * 1.1
-      filter: drop-shadow(0 -1px 0px $dark1 * 1.7) drop-shadow(0 -1px 0px $dark2 * 0.5)
 
   .wrapper
     overflow: hidden
     padding: 14px
     border-radius: 5px
     right: -12px
-  
-  h1
-    // letter-spacing: 0.1em
-    text-align: center
-    font-size: 14px
-    font-weight: bold
-    color: $bright1
-    margin: -14px
-    padding: 9px 14px
-    box-shadow: 0 0 8px rgba(black, 0.6)
-    text-shadow: 0 -1px 0px black
-    background: $dark2 * 1.1
-    margin-bottom: 14px
-    border-bottom: 1px solid $dark1 * 1.2
 </style>
 
 

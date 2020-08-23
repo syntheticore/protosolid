@@ -1,21 +1,33 @@
 <template lang="pug">
-  .bordered.tool-box
-    ul.tabs
-      li(
-        v-for="(tab, index) in tabs"
-        @click="activeTab = index"
-        :class="{active: index == activeTab}"
-      )
-        | {{ tab.title }}
-    ul.tools
-      li.button(v-for="tool in tabs[activeTab].tools" @click="activateTool(tool.title)")
-        fa-icon(:icon="tool.icon" fixed-width)
-        .title(v-html="tool.title")
+  .tool-box
+    .bordered.shelf
+      ul.tabs
+        li(
+          v-for="(tab, index) in tabs"
+          @click="activeTab = index"
+          :class="{active: index == activeTab}"
+        )
+          | {{ tab.title }}
+      ul.tools
+        li.button(
+          v-for="(tool, index) in tabs[activeTab].tools"
+          :class="{active: index == 0}"
+          @click="activateTool(tool.title)"
+        )
+          fa-icon(:icon="tool.icon" fixed-width)
+          .title(v-html="tool.title")
+    FeatureBox()
 </template>
 
 
 <style lang="stylus" scoped>
   .tool-box
+    display: flex
+    flex-direction: column
+    align-items: center
+    // align-items: start
+
+  .shelf
     border-top-left-radius: 3px
     border-top-right-radius: 3px
     border-bottom-left-radius: 6px
@@ -59,7 +71,7 @@
       margin-right: 0
       margin-bottom: 0
       text-shadow: none
-      &:hover
+      &:hover, &.active
         background: $dark1 * 1.15
         svg
           color: $highlight
@@ -77,16 +89,22 @@
         font-size: 11px
         margin-top: 6px
         font-weight: bold
+
+  .feature-box
+    // display: inline-block
+    margin-top: 12px
 </style>
 
 
 <script>
-  // import Foo from './foo.vue'
+  import FeatureBox from './feature-box.vue'
 
   export default {
     name: 'ToolBox',
 
-    components: {},
+    components: {
+      FeatureBox,
+    },
 
     props: {
       activeTool: Object,
@@ -94,7 +112,7 @@
 
     data() {
       return {
-        activeTab: 0,
+        activeTab: 1,
         tabs: [
           {
             title: 'Sketch',

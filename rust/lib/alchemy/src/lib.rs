@@ -4,7 +4,7 @@
 // pub use tools::*;
 // pub use renderer::*;
 
-pub use shapex;
+// pub use shapex;
 
 use core::fmt::Debug;
 use std::rc::Rc;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 // use std::marker::PhantomPinned;
 // use std::pin::Pin;
 // use std::ptr::NonNull;
-use shapex::*;
+pub use shapex::*;
 
 
 trait Constraint {}
@@ -106,6 +106,22 @@ impl Controllable for Line {
   }
 }
 
+impl Controllable for Circle {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+
+  fn get_handles(&self) -> Vec<Point3> {
+    vec![self.center]
+  }
+
+  fn set_handles(&mut self, _handles: Vec<Point3>) {}
+
+  fn get_snap_points(&self) -> Vec<Point3> {
+    vec![self.center]
+  }
+}
+
 impl Controllable for BezierSpline {
   fn id(&self) -> Uuid {
     self.id
@@ -134,8 +150,9 @@ impl Debug for dyn SketchElement {
   }
 }
 
-impl SketchElement for BezierSpline {}
 impl SketchElement for Line {}
+impl SketchElement for Circle {}
+impl SketchElement for BezierSpline {}
 
 
 #[derive(Debug)]

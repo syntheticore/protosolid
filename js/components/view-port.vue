@@ -7,12 +7,14 @@
       @mousemove="mouseMove"
     )
     ul.widgets
+    transition-group.widgets(name="widgets" tag="ul")
       li(
         v-for="widget in widgets"
+        :key="widget.pos.x + '|' + widget.pos.y"
         @click="widgetClicked(widget)"
-        @mouseenter="widgetHovered(widget)"
         :style="{top: widget.pos.y + 'px', left: widget.pos.x + 'px'}"
      )
+        //- @mouseenter="widgetHovered(widget)"
 </template>
 
 
@@ -58,7 +60,7 @@
         width:  7px
         height: 7px
         border-radius: 99px
-        background: #ffefae
+        background: white
       &::after
         position: absolute
         display: block
@@ -77,6 +79,13 @@
         &::after
           transform: scale(1)
           opacity: 1
+
+  .widgets-enter-active
+  .widgets-leave-active
+    transition: all 0.2s
+  .widgets-enter
+  .widgets-leave-to
+    opacity: 0
 </style>
 
 
@@ -90,7 +99,7 @@
   import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
   import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
-  import { LineTool, SplineTool } from './../tools.js'
+  import { ManipulationTool, SelectionTool, LineTool, SplineTool, CircleTool, ExtrudeTool } from './../tools.js'
 
   function getMouseCoords(e, canvas) {
     var coords = new THREE.Vector2()
@@ -101,9 +110,9 @@
   }
 
   var rendering = true
-  var renderer, controls, camera, mesh, lineMaterial, selectionLineMaterial, highlightLineMaterial, pointMaterial, transformControl
+  var renderer, camera, mesh, pointMaterial
 
-  const snapDistance = 11 // px
+  const snapDistance = 10.5 // px
 
   export default {
     name: 'ViewPort',
@@ -172,31 +181,30 @@
       var light = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
       this.scene.add(light)
 
-      // geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2)
-      var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
-      var material = new THREE.MeshStandardMaterial({
-        color: 'coral',
-        roughness: 0,
-        metalness: 0.1,
-      })
+      // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
+      // var material = new THREE.MeshStandardMaterial({
+      //   color: 'coral',
+      //   roughness: 0,
+      //   metalness: 0.1,
+      // })
 
-      mesh = new THREE.Mesh(torusGeometry, material)
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-      // mesh.alcSelectable = true
-      // mesh.visible = false
-      this.scene.add(mesh)
+      // mesh = new THREE.Mesh(torusGeometry, material)
+      // mesh.position.y = 1.8
+      // mesh.castShadow = true
+      // mesh.receiveShadow = true
+      // // mesh.alcSelectable = true
+      // // mesh.visible = false
+      // this.scene.add(mesh)
 
       var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
       groundGeo.rotateX(- Math.PI / 2)
       var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
       ground.receiveShadow = true
-      ground.position.y = -1.85
+      ground.position.y = -0.01
       ground.alcProjectable = true
       this.scene.add(ground)
 
       var grid = new THREE.GridHelper(20, 20)
-      grid.position.y = -1.8
       grid.material.opacity = 0.1
       grid.material.transparent = true
       this.scene.add(grid)
@@ -216,64 +224,64 @@
       })
 
       // Transform Controls
-      transformControl = new TransformControls(camera, renderer.domElement)
-      transformControl.space = 'world'
-      // transformControl.translationSnap = 0.5
-      // transformControl.rotationSnap = THREE.MathUtils.degToRad(10)
-      // transformControl.setMode('rotate')
-      // transformControl.addEventListener('change', () => this.render())
-      transformControl.addEventListener('dragging-changed', (event) => {
-        controls.enabled = !event.value
+      this.transformControl = new TransformControls(camera, renderer.domElement)
+      this.transformControl.space = 'world'
+      // this.transformControl.translationSnap = 0.5
+      // this.transformControl.rotationSnap = THREE.MathUtils.degToRad(10)
+      // this.transformControl.setMode('rotate')
+      // this.transformControl.addEventListener('change', () => this.render())
+      this.transformControl.addEventListener('dragging-changed', (event) => {
+        this.viewControls.enabled = !event.value
       })
 
-      transformControl.addEventListener('objectChange', (event) => {
+      this.transformControl.addEventListener('objectChange', (event) => {
         this.$emit('change-pose')
         renderer.shadowMap.needsUpdate = true
         this.render()
       })
 
-      this.scene.add(transformControl)
-      transformControl.attach(mesh)
+      this.scene.add(this.transformControl)
+      // this.transformControl.attach(mesh)
 
       // View Controls
-      controls = new OrbitControls(camera, renderer.domElement)
-      controls.enableDamping = true
-      controls.dampingFactor = 0.25
-      controls.panSpeed = 1.0
-      controls.keyPanSpeed = 12
-      controls.zoomSpeed = 0.4
-      controls.screenSpacePanning = true
-      controls.rotateSpeed = 1.2
-      // controls.autoRotate = true
+      this.viewControls = new OrbitControls(camera, renderer.domElement)
+      this.viewControls.enableDamping = true
+      this.viewControls.dampingFactor = 0.4
+      this.viewControls.panSpeed = 1.0
+      this.viewControls.keyPanSpeed = 12
+      this.viewControls.zoomSpeed = 0.4
+      this.viewControls.screenSpacePanning = true
+      this.viewControls.rotateSpeed = 1.2
+      // this.viewControls.autoRotate = true
 
-      controls.addEventListener('change', () => {
+      this.viewControls.addEventListener('change', () => {
         this.render()
         this.$emit('change-view')
       })
 
-      controls.addEventListener('start', () => {
-        transformControl.enabled = false
+      this.viewControls.addEventListener('start', () => {
+        this.transformControl.enabled = false
         this.isOrbiting = true
       })
 
-      controls.addEventListener('end', () => {
-        transformControl.enabled = true
+      this.viewControls.addEventListener('end', () => {
+        this.transformControl.enabled = true
         this.isOrbiting = false
       })
 
       // lineMaterial = new THREE.LineBasicMaterial({ color: '#2590e1', linewidth: 2, fog: true })
-      lineMaterial = new LineMaterial({
+      this.lineMaterial = new LineMaterial({
         color: 'yellow',
-        linewidth: 4,
+        linewidth: 3,
         vertexColors: true,
         dashed: false
       })
 
-      selectionLineMaterial = lineMaterial.clone()
-      selectionLineMaterial.color.set('red')
+      this.selectionLineMaterial = this.lineMaterial.clone()
+      this.selectionLineMaterial.color.set('red')
 
-      highlightLineMaterial = lineMaterial.clone()
-      highlightLineMaterial.color.set('white')
+      this.highlightLineMaterial = this.lineMaterial.clone()
+      this.highlightLineMaterial.color.set('white')
 
       // pointMaterial = new THREE.PointsMaterial({
       //   color: 'yellow',
@@ -286,7 +294,7 @@
 
       // var dragcontrols = new DragControls([mesh], camera, renderer.domElement)
       // dragcontrols.addEventListener('hoveron', function(event) {
-      //   transformControl.attach(event.object)
+      //   this.transformControl.attach(event.object)
       // })
 
       window.addEventListener('resize', this.onWindowResize.bind(this), false)
@@ -294,15 +302,16 @@
       this.animate()
 
       this.$root.$on('activate-toolname', (toolName) => {
-        let tool
-        switch(toolName) {
-          case 'Line':
-            tool = new LineTool(this.activeComponent, this)
-            break;
-          case 'Spline':
-            tool = new SplineTool(this.activeComponent, this)
-            break;
+        if(this.activeTool) this.activeTool.dispose()
+        const tools = {
+          Manipulate: ManipulationTool,
+          Select: SelectionTool,
+          Line: LineTool,
+          Spline: SplineTool,
+          Circle: CircleTool,
+          Extrude: ExtrudeTool,
         }
+        const tool = new tools[toolName](this.activeComponent, this)
         this.$emit('activate-tool', tool)
       })
 
@@ -324,34 +333,18 @@
 
     methods: {
       click: function(e) {
-        controls.enabled = true
+        this.viewControls.enabled = true
         const coords = getMouseCoords(e, this.$refs.canvas)
         if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return this.render()
-        const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
-        if(object) return this.render()
-        if(this.selectedElement) this.selectedElement.three.material = lineMaterial
-        this.$emit('element-selected', null)
-        transformControl.detach()
-        this.render()
+        this.activeTool.click(coords)
       },
 
       mouseDown: function(e) {
         if(e.button != 0) return
         const coords = getMouseCoords(e, this.$refs.canvas)
-        if(this.activeTool) {
-          const vec = this.snapVector(this.fromScreen(coords))
-          if(this.activeTool && vec) this.activeTool.mouseDown(vec)
-        } else {
-          const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
-          if(object) {
-            if(this.selectedElement) this.selectedElement.three.material = lineMaterial
-            object.material = selectionLineMaterial
-            this.$emit('element-selected', object.element)
-            transformControl.attach(object)
-            controls.enabled = false
-            this.render()
-          }
-        }
+        const vec = this.snapVector(this.fromScreen(coords))
+        if(vec) this.activeTool.mouseDown(vec, coords)
+        if(this.activeTool.constructor.name != 'ManipulationTool') this.viewControls.enabled = false
         this.lastCoords = coords
       },
 
@@ -361,20 +354,8 @@
         if(e.button != 0) return
         if(this.isOrbiting) return
         const coords = getMouseCoords(e, this.$refs.canvas)
-        if(this.activeTool) {
-          const vec = this.snapVector(this.fromScreen(coords))
-          if(vec) this.activeTool.mouseMove(vec)
-        } else {
-          const object = this.objectsAtScreen(coords, 'alcSelectable')[0]
-          if(object) {
-            const oldMaterial = object.material
-            object.material = highlightLineMaterial
-            this.render()
-            object.material = oldMaterial
-          } else {
-            this.render()
-          }
-        }
+        const vec = this.snapVector(this.fromScreen(coords))
+        if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
       snapVector: function(vec) {
@@ -412,12 +393,12 @@
       },
 
       widgetClicked: function(widget) {
-        if(this.activeTool) this.activeTool.mouseDown(widget.vec)
+        this.activeTool.mouseDown(widget.vec, widget.pos)
       },
 
-      widgetHovered: function(widget) {
-        if(this.activeTool) this.activeTool.mouseMove(widget.vec)
-      },
+      // widgetHovered: function(widget) {
+      //   this.activeTool.mouseMove(widget.vec, widget.pos)
+      // },
 
       updateWidgets: function() {
         this.widgets.forEach((widget, i) => {
@@ -434,7 +415,7 @@
       animate: function() {
         if(!rendering) return
         requestAnimationFrame(this.animate.bind(this))
-        controls.update()
+        this.viewControls.update()
         // mesh.rotation.x += 0.01
         // mesh.rotation.y += 0.01
         // renderer.shadowMap.needsUpdate = true
@@ -447,9 +428,9 @@
         renderer.setSize(parent.offsetWidth, parent.offsetHeight)
         camera.aspect = parent.offsetWidth / parent.offsetHeight
         camera.updateProjectionMatrix()
-        lineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
-        selectionLineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
-        highlightLineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
+        this.lineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
+        this.selectionLineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
+        this.highlightLineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
         this.render()
       },
 
@@ -484,7 +465,7 @@
         var geometry = new LineGeometry()
         geometry.setPositions(vertices.flatMap(vertex => vertex))
         geometry.setColors(Array(vertices.length * 3).fill(1))
-        var line = new Line2(geometry, lineMaterial)
+        var line = new Line2(geometry, this.lineMaterial)
         line.computeLineDistances()
         // line.scale.set(1, 1, 1)
         line.alcSelectable = true
@@ -504,7 +485,7 @@
 
       deleteElement: function(elem) {
         // this.unloadElement(elem, node)
-        transformControl.detach()
+        this.transformControl.detach()
         this.activeComponent.remove_element(elem.id())
         this.componentChanged(this.activeComponent)
         this.$emit('element-selected', null)

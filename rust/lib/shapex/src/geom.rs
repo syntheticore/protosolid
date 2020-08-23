@@ -95,6 +95,39 @@ impl Differentiable for Line {
 }
 
 
+#[derive(Debug)]
+pub struct Circle {
+  pub id: Uuid,
+  pub center: Point3,
+  pub radius: f64,
+}
+
+impl Circle {
+  pub fn new(center: Point3, radius: f64) -> Self {
+    Self {
+      id: Uuid::new_v4(),
+      center,
+      radius,
+    }
+  }
+}
+
+impl Differentiable for Circle {
+  fn sample(&self, t: f64) -> Point3 {
+    let t = t * std::f64::consts::PI * 2.0;
+    Point3::new(
+      self.center.x + t.sin() * self.radius,
+      self.center.y,
+      self.center.z + t.cos() * self.radius,
+    )
+  }
+
+  fn default_tesselation(&self) -> Vec<Point3> {
+    self.tesselate(120)
+  }
+}
+
+
 const LUT_STEPS: i32 = 100;
 
 #[derive(Debug, Default)]

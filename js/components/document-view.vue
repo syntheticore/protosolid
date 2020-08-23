@@ -154,21 +154,22 @@
             const part7 = this.createComponent(assm3, 'Part 7')
             const part8 = this.createComponent(assm3, 'Part 8')
       // part3.create_sketch().add_segment()
-      part3.add_segment()
+      // part3.add_segment()
       // part3.get_sketches()[0].add_segment()
       // console.log(part3.get_sketches()[0].get_segments())
+      this.activeComponent = assm2
     },
 
     mounted() {
       this.$root.$on('escape', () => {
-        if(!this.activeTool) return
-        this.activeTool.dispose()
-        this.activeTool = null
+        // if(!this.activeTool) return
+        if(this.activateTool.constructor.name == 'ManipulationTool') return
+        // this.activeTool.dispose()
+        // this.activeTool = null
+        this.$root.$emit('activate-toolname', 'Manipulate')
       })
 
-      // this.$root.$on('delete', () => {
-      //   this.selectedElement
-      // })
+      this.$root.$emit('activate-toolname', 'Manipulate')
     },
 
     methods: {
@@ -196,15 +197,12 @@
       },
 
       createComponent: function(parent, title) {
-        console.log('cr1')
         this.activeComponent = parent.create_component(title || 'New Component')
-        console.log(this.activeComponent.id())
         this.$set(this.data, this.activeComponent.id(), {hidden: false, threeObjects: []})
         return this.activeComponent
       },
 
       activateComponent: function(comp) {
-        console.log('ac1', comp)
         this.activeComponent = comp
       },
 

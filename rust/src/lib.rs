@@ -162,7 +162,7 @@ impl JsComponent {
   fn from(comp: &Rc<RefCell<Component>>) -> Self {
     JsComponent {
       // title: String::from(&comp.borrow().title),
-      real: comp.clone()
+      real: comp.clone(),
     }
   }
 

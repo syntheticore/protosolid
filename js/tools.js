@@ -55,7 +55,7 @@ export class SelectionTool extends ManipulationTool {
 
   click(coords) {
     const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
-    this.callback(object)
+    this.callback(object && object.element)
   }
 
   mouseDown() {}

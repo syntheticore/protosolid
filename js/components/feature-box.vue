@@ -6,6 +6,7 @@
         | {{ fields.title }}
         .picker(
           v-if="fields.type == 'region' || fields.type == 'edge'" @click="pick(fields.type, key)"
+          :ref="key"
           :class="{active: activePicker == key, filled: data[key]}"
           :data-color="fields.color"
         )
@@ -107,6 +108,11 @@
             type: 'region',
             color: 'pink',
           },
+          rail: {
+            title: 'Rail',
+            type: 'region',
+            color: 'pink',
+          },
           distance: {
             title: 'Distance',
             type: 'length',
@@ -132,7 +138,9 @@
       }
     },
 
-    mounted() {},
+    mounted() {
+      console.log(this.$refs)
+    },
 
     methods: {
       pick: function(type, name) {
@@ -142,7 +150,12 @@
           this.activePicker = null
         })
         this.activePicker = name
-        this.$root.$emit('pick-profile')
+        const picker = this.$refs[name][0]
+        const rect = picker.getBoundingClientRect()
+        this.$root.$emit('pick-profile', {
+          x: rect.left + (rect.width / 2),
+          y: rect.top + (rect.height / 2) - 38,
+        })
       },
     },
 

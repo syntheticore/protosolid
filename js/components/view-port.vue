@@ -3,10 +3,12 @@
     canvas(
       ref="canvas"
       @click="click"
+      @dblclick="doubleClick"
       @mousedown="mouseDown"
       @mousemove="mouseMove"
     )
-    ul.widgets
+    svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
+      path(v-for="path in paths" :d="path.data" stroke="red" stroke-width="2")
     transition-group.widgets(name="widgets" tag="ul")
       li(
         v-for="widget in widgets"
@@ -28,6 +30,16 @@
     display: block
     background: $color * 0.2
     background: radial-gradient(50% 150%, farthest-corner, $color * 0.35, $color * 0.2)
+
+  .drawpad
+    position: absolute
+    left: 0
+    // right: 0
+    top: 0
+    // bottom: 0
+    pointer-events: none
+    width: 100%
+    height: 100%
 
   .widgets
     position: absolute
@@ -137,6 +149,7 @@
     data() {
       return {
         widgets: [],
+        paths: [],
       }
     },
 
@@ -247,7 +260,7 @@
       this.viewControls.dampingFactor = 0.4
       this.viewControls.panSpeed = 1.0
       this.viewControls.keyPanSpeed = 12
-      this.viewControls.zoomSpeed = 0.4
+      this.viewControls.zoomSpeed = 0.6
       this.viewControls.screenSpacePanning = true
       this.viewControls.rotateSpeed = 1.2
 
@@ -279,25 +292,21 @@
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('white')
 
-      this.$root.$on('activate-toolname', (toolName) => {
-        if(this.activeTool) this.activeTool.dispose()
-        const tools = {
-          Manipulate: ManipulationTool,
-          Select: SelectionTool,
-          Line: LineTool,
-          Spline: SplineTool,
-          Circle: CircleTool,
-          Extrude: ExtrudeTool,
-        }
-        const tool = new tools[toolName](this.activeComponent, this)
-        this.$emit('activate-tool', tool)
-      })
-
-      this.$root.$on('pick-profile', () => {
+      this.$root.$on('pick-profile', (pickerCoords) => {
         this.$emit('activate-tool', new SelectionTool(this.activeComponent, this, (profile) => {
           this.$root.$emit('picked-profile', profile)
+          this.$root.$emit('activate-toolname', 'Manipulate')
+          if(!profile) return
+          const target = new THREE.Vector3().fromArray(profile.get_handles()[0])
+          this.paths.push({
+            target,
+            origin: pickerCoords,
+            data: this.buildPath(pickerCoords, target),
+          })
         }))
       })
+
+      this.$root.$on('activate-toolname', this.activateTool)
 
       this.$root.$on('component-changed', this.componentChanged)
 
@@ -307,8 +316,8 @@
         }
       });
 
-      window.addEventListener('resize', this.onWindowResize.bind(this), false)
       this.onWindowResize()
+      window.addEventListener('resize', this.onWindowResize.bind(this), false)
 
       this.loadTree(this.tree, true)
       this.animate()
@@ -320,11 +329,22 @@
     },
 
     methods: {
+      buildPath: function(origin, vec) {
+        const pos = this.toScreen(vec)
+        return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + 150} ${pos.x} ${pos.y - 150} ${pos.x} ${pos.y}`
+      },
+
       click: function(e) {
         this.viewControls.enabled = true
         const coords = getMouseCoords(e, this.$refs.canvas)
         if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return this.render()
         this.activeTool.click(coords)
+      },
+
+      doubleClick: function(e) {
+        const coords = getMouseCoords(e, this.$refs.canvas)
+        this.viewControlsTarget = this.fromScreen(coords)
+        this.render()
       },
 
       mouseDown: function(e) {
@@ -333,13 +353,14 @@
         const vec = this.snapVector(this.fromScreen(coords))
         if(vec) this.activeTool.mouseDown(vec, coords)
         const toolName = this.activeTool.constructor.name
-        if(toolName != 'ManipulationTool' && toolName != 'SelectionTool') this.viewControls.enabled = false
+        // if(toolName != 'ManipulationTool' && toolName != 'SelectionTool') this.viewControls.enabled = false
         this.lastCoords = coords
       },
 
       mouseMove: function(e) {
         this.widgets.length = 0
         this.widgets = this.widgets.slice()
+        // this.widgets = this.widgets.filter(widget => widget.type != 'vertex')
         if(e.button != 0) return
         if(this.isOrbiting) return
         const coords = getMouseCoords(e, this.$refs.canvas)
@@ -390,6 +411,24 @@
           widget.pos = this.toScreen(widget.vec)
           this.$set(this.widgets, i, widget)
         })
+        this.paths.forEach((path, i) => {
+          path.data = this.buildPath(path.origin, path.target)
+          this.$set(this.paths, i, path)
+        })
+      },
+
+      activateTool: function(toolName) {
+        if(this.activeTool) this.activeTool.dispose()
+        const tools = {
+          Manipulate: ManipulationTool,
+          Select: SelectionTool,
+          Line: LineTool,
+          Spline: SplineTool,
+          Circle: CircleTool,
+          Extrude: ExtrudeTool,
+        }
+        const tool = new tools[toolName](this.activeComponent, this)
+        this.$emit('activate-tool', tool)
       },
 
       render: function() {
@@ -401,19 +440,29 @@
         if(!rendering) return
         requestAnimationFrame(this.animate.bind(this))
         this.viewControls.update()
+        // Transition to manual view target
+        if(!this.viewControlsTarget) return
+        if(this.viewControlsTarget.clone().sub(this.viewControls.target).lengthSq() < 0.001) {
+          this.viewControlsTarget = null
+          return
+        }
+        this.viewControls.target.multiplyScalar(0.7).add(this.viewControlsTarget.clone().multiplyScalar(0.3))
       },
 
       onWindowResize: function() {
         const canvas = renderer.domElement
         if(!canvas) return
         const parent = canvas.parentElement
-        renderer.setSize(parent.offsetWidth, parent.offsetHeight)
-        camera.aspect = parent.offsetWidth / parent.offsetHeight
+        const width = parent.offsetWidth
+        const height = parent.offsetHeight
+        renderer.setSize(width, height)
+        camera.aspect = width / height
         camera.updateProjectionMatrix()
-        this.lineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
-        this.selectionLineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
-        this.highlightLineMaterial.resolution.set(parent.offsetWidth, parent.offsetHeight)
+        this.lineMaterial.resolution.set(width, height)
+        this.selectionLineMaterial.resolution.set(width, height)
+        this.highlightLineMaterial.resolution.set(width, height)
         this.render()
+        this.$refs.drawpad.setAttribute('viewBox', '0 0 ' + width + ' ' + height)
       },
 
       fromScreen: function(coords) {

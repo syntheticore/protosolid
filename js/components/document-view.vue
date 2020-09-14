@@ -156,7 +156,7 @@
 
     mounted() {
       this.$root.$on('escape', () => {
-        if(this.activateTool.constructor.name == 'ManipulationTool') return
+        // if(this.activateTool.constructor.name == 'ManipulationTool') return
         this.$root.$emit('activate-toolname', 'Manipulate')
       })
 

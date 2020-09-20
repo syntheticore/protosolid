@@ -4,8 +4,6 @@ use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
 
-// use serde::{Serialize};
-
 use alchemy::*;
 
 #[cfg(feature = "wee_alloc")]
@@ -48,15 +46,6 @@ pub fn main() -> Result<(), JsValue> {
 }
 
 
-// #[derive(Serialize)]
-// pub struct JsSegment {
-//   handles: Vec<(f64, f64, f64)>,
-//   vertices: Vec<(f64, f64, f64)>,
-
-//   #[serde(skip_serializing)]
-//   real: Rc<RefCell<dyn SketchElement>>,
-// }
-
 fn vertices_to_js(points: Vec<Point3>) -> Array {
   points.iter().map(|p|
     JsValue::from_serde(&(p.x, p.y, p.z)).unwrap()
@@ -73,76 +62,84 @@ fn vertices_from_js(points: Array) -> Vec<Point3> {
 
 #[wasm_bindgen]
 pub struct JsSegment {
-  real: Rc<RefCell<dyn SketchElement>>,
+  real: Rc<RefCell<SketchElement>>,
 }
 
 #[wasm_bindgen]
 impl JsSegment {
-  fn from(elem: &Rc<RefCell<dyn SketchElement>>) -> Self {
+  fn from(elem: &Rc<RefCell<SketchElement>>) -> Self {
     Self {
       real: elem.clone()
     }
   }
 
   pub fn id(&self) -> JsValue {
-    JsValue::from_serde(&self.real.borrow().id()).unwrap()
+    JsValue::from_serde(&as_controllable(&mut self.real.borrow_mut()).id()).unwrap()
   }
 
   pub fn get_handles(&self) -> Array {
-    vertices_to_js(self.real.borrow().get_handles())
+    vertices_to_js(as_controllable(&mut self.real.borrow_mut()).get_handles())
   }
 
   pub fn set_handles(&self, handles: Array) {
     let points = vertices_from_js(handles);
-    self.real.borrow_mut().set_handles(points);
+    as_controllable(&mut self.real.borrow_mut()).set_handles(points);
   }
 
   pub fn get_snap_points(&self) -> Array {
-    vertices_to_js(self.real.borrow().get_snap_points())
+    vertices_to_js(as_controllable(&mut self.real.borrow_mut()).get_snap_points())
   }
 
   pub fn tesselate(&self, steps: i32) -> Array {
-    vertices_to_js(self.real.borrow().tesselate(steps))
+    vertices_to_js(self.real.borrow_mut().as_curve().tesselate(steps))
   }
 
   pub fn default_tesselation(&self) -> Array {
-    vertices_to_js(self.real.borrow().default_tesselation())
+    vertices_to_js(self.real.borrow_mut().as_curve().default_tesselation())
   }
 }
 
 
-#[wasm_bindgen]
-pub struct JsSketch {
-  real: Rc<RefCell<Sketch>>,
-}
+// #[wasm_bindgen]
+// pub struct JsSketch {
+//   real: Rc<RefCell<Sketch>>,
+// }
 
-#[wasm_bindgen]
-impl JsSketch {
-  fn from(sketch: &Rc<RefCell<Sketch>>) -> Self {
-    JsSketch {
-      real: sketch.clone(),
-    }
-  }
+// #[wasm_bindgen]
+// impl JsSketch {
+//   fn from(sketch: &Rc<RefCell<Sketch>>) -> Self {
+//     JsSketch {
+//       real: sketch.clone(),
+//     }
+//   }
 
-  pub fn get_segments(&self) -> Array {
-    self.real.borrow().elements.iter().map(|elem| JsValue::from(JsSegment::from(elem)) ).collect()
-  }
+//   pub fn get_segments(&self) -> Array {
+//     self.real.borrow().elements.iter().map(|elem| JsValue::from(JsSegment::from(elem)) ).collect()
+//   }
 
-  pub fn add_segment(&self) {
-    let spline = BezierSpline::new(vec![
-        Point3::new(0.0, 0.0, 1.0),
-        Point3::new(1.0, 0.0, 1.25),
-        Point3::new(1.0, 1.0, 1.5),
-        Point3::new(0.0, 1.0, 1.75),
-        Point3::new(0.0, 0.0, 2.0),
-        Point3::new(1.0, 0.0, 2.25),
-        Point3::new(1.0, 1.0, 2.5),
-        Point3::new(0.0, 1.0, 2.75),
-      ]
-    );
-    self.real.borrow_mut().elements.push(Rc::new(RefCell::new(spline)));
-  }
-}
+//   pub fn add_segment(&self) {
+//     let spline = BezierSpline::new(vec![
+//         Point3::new(0.0, 0.0, 1.0),
+//         Point3::new(1.0, 0.0, 1.25),
+//         Point3::new(1.0, 1.0, 1.5),
+//         Point3::new(0.0, 1.0, 1.75),
+//         Point3::new(0.0, 0.0, 2.0),
+//         Point3::new(1.0, 0.0, 2.25),
+//         Point3::new(1.0, 1.0, 2.5),
+//         Point3::new(0.0, 1.0, 2.75),
+//       ]
+//     );
+//     self.real.borrow_mut().elements.push(Rc::new(RefCell::new(spline)));
+//   }
+// }
+
+// fn foo(elem: &mut SketchElement) -> &mut dyn SketchElement {
+//   match elem {
+//     SketchElement::Line(line) => line as &mut dyn SketchElement,
+//     SketchElement::Circle(circle) => circle as &mut dyn SketchElement,
+//     SketchElement::BezierSpline(spline) => spline as &mut dyn SketchElement,
+//   }
+// }
 
 
 #[wasm_bindgen]
@@ -174,12 +171,14 @@ impl JsComponent {
     JsValue::from_serde(&self.real.borrow().title).unwrap()
   }
 
-  pub fn get_sketches(&self) -> Array {
-    self.real.borrow().sketches.iter().map(|sketch| JsValue::from(JsSketch::from(sketch)) ).collect()
-  }
+  // pub fn get_sketches(&self) -> Array {
+  //   self.real.borrow().sketches.iter().map(|sketch| JsValue::from(JsSketch::from(sketch)) ).collect()
+  // }
 
   pub fn get_sketch_elements(&self) -> Array {
-    self.real.borrow().sketch_elements.iter().map(|elem| JsValue::from(JsSegment::from(elem)) ).collect()
+    self.real.borrow().sketch_elements.iter().map(|elem| {
+      JsValue::from(JsSegment::from(elem))
+    }).collect()
   }
 
   pub fn get_children(&self) -> Array {
@@ -197,7 +196,7 @@ impl JsComponent {
       Point3::new(1.0, 1.0, 2.5),
       Point3::new(0.0, 1.0, 2.75),
     ]);
-    self.real.borrow_mut().sketch_elements.push(Rc::new(RefCell::new(spline)));
+    self.real.borrow_mut().sketch_elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
   }
 
   pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsSegment {
@@ -205,7 +204,7 @@ impl JsComponent {
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
     let line = Line::new((Point3::from(p1), Point3::from(p2)));
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.push(Rc::new(RefCell::new(line)));
+    real.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(line))));
     JsSegment::from(&real.sketch_elements.last().unwrap())
   }
 
@@ -216,7 +215,7 @@ impl JsComponent {
     }).collect();
     let spline = BezierSpline::new(points);
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.push(Rc::new(RefCell::new(spline)));
+    real.sketch_elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
     JsSegment::from(&real.sketch_elements.last().unwrap())
   }
 
@@ -225,24 +224,34 @@ impl JsComponent {
     let radius: f64 = radius.into_serde().unwrap();
     let circle = Circle::new(Point3::from(center), radius);
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.push(Rc::new(RefCell::new(circle)));
+    real.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Circle(circle))));
     JsSegment::from(&real.sketch_elements.last().unwrap())
   }
 
   pub fn remove_element(&mut self, id: JsValue) {
-    let id = id.into_serde().unwrap();
+    let id: uuid::Uuid = id.into_serde().unwrap();
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.retain(|elem| elem.borrow().id() != id);
+    real.sketch_elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id);
   }
 
-  pub fn create_sketch(&mut self) -> JsSketch {
-    let mut sketch = Sketch::new();
-    sketch.title = "Sketch1".to_string();
-    sketch.visible = true;
-    let sketch = Rc::new(RefCell::new(sketch));
-    self.real.borrow_mut().sketches.push(sketch.clone());
-    JsSketch::from(&sketch)
+  pub fn get_regions(&self) -> Array {
+    self.real.borrow().closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
   }
+
+  pub fn get_all_split(&self) -> Array {
+    self.real.borrow().all_split().iter().map(|elem| {
+      JsValue::from(JsSegment::from(&Rc::new(RefCell::new(elem.clone()))))
+    }).collect()
+  }
+
+  // pub fn create_sketch(&mut self) -> JsSketch {
+  //   let mut sketch = Sketch::new();
+  //   sketch.title = "Sketch1".to_string();
+  //   sketch.visible = true;
+  //   let sketch = Rc::new(RefCell::new(sketch));
+  //   self.real.borrow_mut().sketches.push(sketch.clone());
+  //   JsSketch::from(&sketch)
+  // }
 
   pub fn create_component(&mut self, title: &str) -> JsComponent {
     let mut comp = Component::new();
@@ -271,11 +280,6 @@ impl AlchemyProxy {
 
   // pub fn foo(&self) -> Result<f64, JsValue> {
   //   Ok(44.0)
-  // }
-
-  // pub fn create_component(&mut self) -> JsComponent {
-  //   let comp = self.scene.create_component();
-  //   JsComponent::from(&comp)
   // }
 
   pub fn get_main_assembly(&mut self) -> JsComponent {

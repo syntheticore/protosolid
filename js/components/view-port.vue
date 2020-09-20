@@ -527,6 +527,10 @@
         if(this.data[node.id()].hidden) return
         const elements = node.get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
+        const regions = node.get_regions()
+        const splits = node.get_all_split()
+        console.log(splits.map(elem => elem.get_handles()))
+        // console.log(regions)
         if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
       },
 

@@ -1,3 +1,9 @@
-mod geom;
+mod base;
+mod curve;
+mod surface;
+mod solid;
 
-pub use geom::*;
+pub use base::*;
+pub use curve::*;
+pub use surface::*;
+pub use solid::*;

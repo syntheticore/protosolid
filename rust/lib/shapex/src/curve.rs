@@ -1,14 +1,18 @@
 use crate::base::*;
+use cgmath::prelude::*;
 use uuid::Uuid;
 use std::convert::TryInto;
+
+mod intersection;
 
 
 pub type PolyLine = Vec<Point3>;
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SketchElement {
   Line(Line),
+  Arc(Arc),
   Circle(Circle),
   BezierSpline(BezierSpline),
 }
@@ -17,6 +21,7 @@ impl SketchElement {
   pub fn as_curve(&self) -> &dyn Curve {
     match self {
       Self::Line(line) => line,
+      Self::Arc(arc) => arc,
       Self::Circle(circle) => circle,
       Self::BezierSpline(spline) => spline,
     }
@@ -25,8 +30,46 @@ impl SketchElement {
   pub fn as_curve_mut(&mut self) -> &mut dyn Curve {
     match self {
       Self::Line(line) => line,
+      Self::Arc(arc) => arc,
       Self::Circle(circle) => circle,
       Self::BezierSpline(spline) => spline,
+    }
+  }
+
+  pub fn split(&self, cutter: &Self) -> Vec<Self> {
+    match self {
+      // Line
+      Self::Line(line) => line.split_with(cutter).iter().map(|seg| Self::Line(seg.clone())).collect(),
+
+      // Arc
+      Self::Arc(arc) => match cutter {
+        Self::Line(cutter) => arc.split_with_line(cutter),
+        Self::Arc(cutter) => arc.split_with_arc(cutter),
+        Self::Circle(cutter) => arc.split_with_circle(cutter),
+        Self::BezierSpline(cutter) => arc.split_with_spline(cutter),
+      }.iter().map(|seg| Self::Arc(seg.clone())).collect(),
+
+      // Circle
+      Self::Circle(circle) => match cutter {
+        Self::Line(cutter) => if let Some((arc_l, arc_r)) = circle.split_with_line(cutter) {
+          vec![arc_l, arc_r]
+        } else { vec![] },
+        Self::Arc(cutter) => if let Some((arc_l, arc_r)) = circle.split_with_arc(cutter) {
+          vec![arc_l, arc_r]
+        } else { vec![] },
+        Self::Circle(cutter) => if let Some((arc_l, arc_r)) = circle.split_with_circle(cutter) {
+          vec![arc_l, arc_r]
+        } else { vec![] },
+        Self::BezierSpline(cutter) => circle.split_with_spline(cutter),
+      }.iter().map(|seg| Self::Arc(seg.clone())).collect(),
+
+      // Bezier Spline
+      Self::BezierSpline(spline) => match cutter {
+        Self::Line(cutter) => spline.split_with_line(cutter),
+        Self::Arc(cutter) => spline.split_with_arc(cutter),
+        Self::Circle(cutter) => spline.split_with_circle(cutter),
+        Self::BezierSpline(cutter) => spline.split_with_spline(cutter),
+      }.iter().map(|seg| Self::BezierSpline(seg.clone())).collect(),
     }
   }
 }
@@ -37,18 +80,6 @@ pub trait Curve {
   fn default_tesselation(&self) -> Vec<Point3>;
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
-  fn intersect_line(&self, line: &Line) -> Intersection;
-  fn intersect_circle(&self, circle: &Circle) -> Intersection;
-  fn intersect_spline(&self, spline: &BezierSpline) -> Intersection;
-  fn split(&self, elem: &SketchElement) -> Option<Vec<SketchElement>>;
-
-  fn intersect(&self, other: &SketchElement) -> Intersection {
-    match other {
-      SketchElement::Line(other) => self.intersect_line(other),
-      SketchElement::Circle(other) => self.intersect_circle(other),
-      SketchElement::BezierSpline(other) => self.intersect_spline(other),
-    }
-  }
 
   fn tesselate(&self, steps: i32) -> Vec<Point3> {
     (0..steps + 1).map(|i| {
@@ -63,22 +94,24 @@ impl core::fmt::Debug for dyn Curve {
   }
 }
 
-pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
-  vec1.x * vec2.y - vec1.y * vec2.x
-}
 
-
-#[derive(Debug, Clone)]
+/// A finite line segment between two points
+/// # Examples
+///
+/// ```
+/// let x = 5;
+/// ```
+#[derive(Debug, Clone, PartialEq)]
 pub struct Line {
   pub id: Uuid,
   pub points: (Point3, Point3)
 }
 
 impl Line {
-  pub fn new(points: (Point3, Point3)) -> Self {
+  pub fn new(start: Point3, end: Point3) -> Self {
     Self {
       id: Uuid::new_v4(),
-      points: points,
+      points: (start, end),
     }
   }
 
@@ -88,6 +121,24 @@ impl Line {
 
   pub fn tangent(&self) -> Vec3 {
     (self.points.1 - self.points.0).normalize()
+  }
+
+  fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
+    match intersection::intersect(&SketchElement::Line(self.clone()), cutter) {
+      Intersection::None | Intersection::Contained | Intersection::Touch(_) | Intersection::Extended(_) => vec![self.clone()],
+      Intersection::Hit(mut points) => { //XXX points are not sorted along line
+        points.push(self.points.1);
+        let mut segments = vec![Self::new(self.points.0, points[0])];
+        let mut iter = points.iter().peekable();
+        loop {
+          match (iter.next(), iter.peek()) {
+            (Some(p), Some(next_p)) => segments.push(Self::new(*p, **next_p)),
+            _ => break,
+          }
+        }
+        segments
+      },
+    }
   }
 }
 
@@ -108,84 +159,64 @@ impl Curve for Line {
   fn endpoints(&self) -> (Point3, Point3) {
     self.points
   }
+}
 
-  // https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
-  fn intersect_line(&self, other: &Line) -> Intersection {
-    let r = self.points.1 - self.points.0;
-    let s = other.points.1 - other.points.0;
-    let u_numerator = cross_2d(other.points.0 - self.points.0, r);
-    let denominator = cross_2d(r, s);
-    // Lines are coLlinear
-    if u_numerator == 0.0 && denominator == 0.0 {
-      // Lines touch at endpoints
-      if self.points.0 == other.points.0 || self.points.0 == other.points.1 {
-        return Intersection::Touch(self.points.0)
-      } else if self.points.1 == other.points.0 || self.points.1 == other.points.1 {
-        return Intersection::Touch(self.points.1)
-      }
-      // Lines overlap (All point differences in either direction have same sign)
-      let overlap = ![
-        (other.points.0.x - self.points.0.x < 0.0),
-        (other.points.0.x - self.points.1.x < 0.0),
-        (other.points.1.x - self.points.0.x < 0.0),
-        (other.points.1.x - self.points.1.x < 0.0),
-      ].windows(2).all(|w| w[0] == w[1]) || ![
-        (other.points.0.y - self.points.0.y < 0.0),
-        (other.points.0.y - self.points.1.y < 0.0),
-        (other.points.1.y - self.points.0.y < 0.0),
-        (other.points.1.y - self.points.1.y < 0.0),
-      ].windows(2).all(|w| w[0] == w[1]);
-      return if overlap {
-        Intersection::Contained
-      } else {
-        Intersection::None
-      }
-    }
-    if denominator == 0.0 {
-      // Lines are paralell
-      return Intersection::None;
-    }
-    // Lines cross
-    let t = cross_2d(other.points.0 - self.points.0, s) / denominator;
-    let u = u_numerator / denominator;
-    let do_cross = (t >= 0.0) && (t <= 1.0) && (u >= 0.0) && (u <= 1.0);
-    let intersection_point = self.points.0 + r * t;
-    if do_cross {
-      Intersection::Hit(vec![intersection_point])
-    } else {
-      Intersection::Extended(vec![intersection_point])
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Arc {
+  pub id: Uuid,
+  pub center: Point3,
+  pub radius: f64,
+  pub start: f64,
+  pub end: f64,
+}
+
+impl Arc {
+  pub fn new(center: Point3, radius: f64, start: f64, end: f64) -> Self {
+    Self {
+      id: Uuid::new_v4(),
+      center,
+      radius,
+      start,
+      end,
     }
   }
 
-  fn intersect_circle(&self, _circle: &Circle) -> Intersection {
-    Intersection::None
+  pub fn split_with_line(&self, _line: &Line) -> Vec<Arc> { vec![] }
+
+  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Arc> { vec![] }
+
+  pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Arc> { vec![] }
+
+  pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
+}
+
+impl Curve for Arc {
+  fn sample(&self, t: f64) -> Point3 {
+    let t = t * std::f64::consts::PI * 2.0;
+    Point3::new(
+      self.center.x + t.sin() * self.radius,
+      self.center.y,
+      self.center.z + t.cos() * self.radius,
+    )
   }
 
-  fn intersect_spline(&self, _spline: &BezierSpline) -> Intersection {
-    Intersection::None
+  fn default_tesselation(&self) -> Vec<Point3> {
+    self.tesselate(120)
   }
 
-  fn split(&self, cutter: &SketchElement) -> Option<Vec<SketchElement>> {
-    match self.intersect(cutter) {
-      Intersection::None | Intersection::Contained | Intersection::Touch(_) | Intersection::Extended(_) => None,
-      Intersection::Hit(mut points) => { //XXX points are not sorted along line
-        points.push(self.points.1);
-        let mut segments = vec![SketchElement::Line(Self::new((self.points.0, points[0])))];
-        let mut iter = points.iter().peekable();
-        loop {
-          match (iter.next(), iter.peek()) {
-            (Some(p), Some(next_p)) => segments.push(SketchElement::Line(Self::new((*p, **next_p)))),
-            _ => break,
-          }
-        }
-        Some(segments)
-      },
-    }
+  fn length(&self) -> f64 {
+    std::f64::consts::PI * 2.0 * self.radius
+  }
+
+  fn endpoints(&self) -> (Point3, Point3) {
+    let zero = self.sample(0.0);
+    (zero, zero)
   }
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Circle {
   pub id: Uuid,
   pub center: Point3,
@@ -200,6 +231,14 @@ impl Circle {
       radius,
     }
   }
+
+  pub fn split_with_line(&self, _line: &Line) -> Option<(Arc, Arc)> { None }
+
+  pub fn split_with_arc(&self, _arc: &Arc) -> Option<(Arc, Arc)> { None }
+
+  pub fn split_with_circle(&self, _circle: &Circle) -> Option<(Arc, Arc)> { None }
+
+  pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
 }
 
 impl Curve for Circle {
@@ -224,53 +263,12 @@ impl Curve for Circle {
     let zero = self.sample(0.0);
     (zero, zero)
   }
-
-  fn intersect_line(&self, _line: &Line) -> Intersection {
-    Intersection::None
-  }
-
-  fn intersect_circle(&self, _circle: &Circle) -> Intersection {
-    Intersection::None
-  }
-
-  fn intersect_spline(&self, _spline: &BezierSpline) -> Intersection {
-    Intersection::None
-  }
-
-  fn split(&self, _elem: &SketchElement) -> Option<Vec<SketchElement>> {
-    None
-  }
 }
 
 
-// lut = [      [1],           // n=0
-//             [1,1],          // n=1
-//            [1,2,1],         // n=2
-//           [1,3,3,1],        // n=3
-//          [1,4,6,4,1],       // n=4
-//         [1,5,10,10,5,1],    // n=5
-//        [1,6,15,20,15,6,1]]  // n=6
-
-// function binomial(n,k):
-//   while(n >= lut.length):
-//     s = lut.length
-//     nextRow = new array(size=s+1)
-//     nextRow[0] = 1
-//     for(i=1, prev=s-1; i<s; i++):
-//       nextRow[i] = lut[prev][i-1] + lut[prev][i]
-//     nextRow[s] = 1
-//     lut.add(nextRow)
-//   return lut[n][k]
-
-// function Bezier(n,t):
-//   sum = 0
-//   for(k=0; k<=n; k++):
-//     sum += binomial(n,k) * (1-t)^(n-k) * t^(k)
-//   return sum
-
 const LUT_STEPS: usize = 10;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct BezierSpline {
   pub id: Uuid,
   pub vertices: Vec<Point3>,
@@ -306,7 +304,7 @@ impl BezierSpline {
     }
   }
 
-  pub fn split(&self, t: f64) -> (Self, Self) {
+  pub fn split_at(&self, t: f64) -> (Self, Self) {
     let mut left: Vec<Point3> = vec![];
     let mut right: Vec<Point3> = vec![];
     self.real_split(t, &self.vertices, &mut left, &mut right);
@@ -353,7 +351,8 @@ impl BezierSpline {
     derivative
   }
 
-  pub fn closest(&self, point: Point3) -> Point3 {
+  //XXX Provide exact solution
+  pub fn closest_point(&self, point: Point3) -> Point3 {
     let mut mdist = 2_i32.pow(63).into();
     let mut closest = point;
     for &p in &self.lut {
@@ -365,6 +364,14 @@ impl BezierSpline {
     }
     closest
   }
+
+  pub fn split_with_line(&self, _line: &Line) -> Vec<Self> { vec![] }
+
+  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<BezierSpline> { vec![] }
+
+  pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Self> { vec![] }
+
+  pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Self> { vec![] }
 }
 
 impl Curve for BezierSpline {
@@ -383,20 +390,25 @@ impl Curve for BezierSpline {
   fn endpoints(&self) -> (Point3, Point3) {
     (self.vertices[0], *self.vertices.last().unwrap())
   }
+}
 
-  fn intersect_line(&self, _line: &Line) -> Intersection {
-    Intersection::None
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::test_data;
+
+  #[test]
+  fn line_length() {
+    let lines = test_data::parallel_lines();
+    assert_eq!(lines.0.length(), 1.0);
   }
 
-  fn intersect_circle(&self, _circle: &Circle) -> Intersection {
-    Intersection::None
-  }
-
-  fn intersect_spline(&self, _spline: &BezierSpline) -> Intersection {
-    Intersection::None
-  }
-
-  fn split(&self, _elem: &SketchElement) -> Option<Vec<SketchElement>> {
-    None
-  }
+  // #[test]
+  // fn split() {
+  //   let lines = test_data::crossing_lines();
+  //   let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+  //   assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
+  //   assert_eq!(segments[0].length(), 0.5, "Segment had wrong length");
+  // }
 }

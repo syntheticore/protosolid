@@ -1,3 +1,4 @@
+use cgmath::prelude::*;
 use std::ptr;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -6,203 +7,7 @@ use uuid::Uuid;
 pub use shapex::*;
 
 
-trait Constraint {}
-
-
-// #[derive(Debug)]
-// pub struct TreeNode<T> {
-//   pub item: Option<T>,
-//   pub transform: Matrix4,
-//   pub children: Vec<TreeNode<T>>
-// }
-
-// impl<T> TreeNode<T> {
-//   pub fn new(item: Option<T>) -> Self {
-//     Self {
-//       item: item,
-//       transform: Matrix4::from_scale(1.0),
-//       children: Default::default()
-//     }
-//   }
-
-//   pub fn add_child(&mut self, child: T) {
-//     self.children.push(TreeNode::new(Some(child)));
-//   }
-// }
-
-
-// pub struct VertexIterator<'a> {
-//   elem_iter: std::slice::Iter<'a, PolyLine>,
-//   vertex_iter: Option<std::slice::Iter<'a, Point3>>,
-// }
-
-// impl<'a> VertexIterator<'a> {
-//   pub fn new(sketch: &'a Sketch) -> Self {
-//     Self {
-//       elem_iter: sketch.elements.iter(),
-//       vertex_iter: None
-//     }
-//   }
-// }
-
-// impl<'a> Iterator for VertexIterator<'a> {
-//   type Item = &'a Point3;
-
-//   fn next(&mut self) -> Option<&'a Point3> {
-//     if let Some(ref mut vertex_iter) = self.vertex_iter {
-//       let vertex = vertex_iter.next();
-//       if vertex.is_some() {
-//         vertex
-//       } else {
-//         self.vertex_iter = None;
-//         self.next()
-//       }
-//     } else {
-//       if let Some(line) = self.elem_iter.next() {
-//         self.vertex_iter = Some(line.vertices.iter());
-//         self.next()
-//       } else {
-//         None
-//       }
-//     }
-//   }
-// }
-
-
-pub trait Controllable {
-  fn id(&self) -> Uuid;
-  fn get_handles(&self) -> Vec<Point3>;
-  fn set_handles(&mut self, _: Vec<Point3>);
-  fn get_snap_points(&self) -> Vec<Point3>;
-}
-
-impl Controllable for Line {
-  fn id(&self) -> Uuid {
-    self.id
-  }
-
-  fn get_handles(&self) -> Vec<Point3> {
-    vec![self.points.0, self.points.1]
-  }
-
-  fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.points = (handles[0], handles[1]);
-  }
-
-  fn get_snap_points(&self) -> Vec<Point3> {
-    let mut points = self.get_handles();
-    points.push(self.midpoint());
-    points
-  }
-}
-
-impl Controllable for Circle {
-  fn id(&self) -> Uuid {
-    self.id
-  }
-
-  fn get_handles(&self) -> Vec<Point3> {
-    vec![self.center]
-  }
-
-  fn set_handles(&mut self, _handles: Vec<Point3>) {}
-
-  fn get_snap_points(&self) -> Vec<Point3> {
-    vec![self.center]
-  }
-}
-
-impl Controllable for BezierSpline {
-  fn id(&self) -> Uuid {
-    self.id
-  }
-
-  fn get_handles(&self) -> Vec<Point3> {
-    self.vertices.clone()
-  }
-
-  fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.vertices = handles;
-    self.update();
-  }
-
-  fn get_snap_points(&self) -> Vec<Point3> {
-    self.get_handles()
-  }
-}
-
-// pub trait SketchElement: Curve + Controllable {}
-
-// impl core::fmt::Debug for dyn SketchElement {
-//   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//     write!(f, "Sketch elem")
-//   }
-// }
-
-// impl SketchElement for Line {}
-// impl SketchElement for Circle {}
-// impl SketchElement for BezierSpline {}
-
-pub fn as_controllable(elem: &mut SketchElement) -> &mut dyn Controllable {
-  match elem {
-    SketchElement::Line(line) => line,
-    SketchElement::Circle(circle) => circle,
-    SketchElement::BezierSpline(spline) => spline,
-  }
-}
-
-
-// #[derive(Debug)]
-// pub struct Sketch {
-//   pub title: String,
-//   pub plane: Plane,
-//   // pub elements: Vec<PolyLine>,
-//   pub elements: Vec<Rc<RefCell<dyn SketchElement>>>,
-//   // pub constraints: Vec<Box<Constraint>>
-//   pub visible: bool
-// }
-
-// impl Sketch {
-//   pub fn new() -> Self {
-//     Self {
-//       title: "Sketch1".to_string(),
-//       plane: Plane::new(),
-//       elements: vec![],
-//       // constraints: vec![]
-//       visible: true
-//     }
-//   }
-
-//   // pub fn all_vertices(&self) -> VertexIterator {
-//   //   VertexIterator::new(self)
-//   // }
-// }
-
-
-// #[derive(Debug)]
-// pub struct TreeNode<T> {
-//   pub item: T,
-//   pub transform: Matrix4,
-//   pub children: Vec<TreeNode<T>>
-// }
-
-// impl<T> TreeNode<T> {
-//   pub fn new(item: T) -> Self {
-//     Self {
-//       item: item,
-//       transform: Matrix4::from_scale(1.0),
-//       children: Default::default()
-//     }
-//   }
-
-//   pub fn add_child(&mut self, child: T) -> &Self {
-//     self.children.push(Self::new(child));
-//     &self.children.last().unwrap()
-//   }
-// }
-
-
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Component {
   pub id: Uuid,
   pub title: String,
@@ -247,13 +52,7 @@ impl Component {
   fn split_element(elem: &SketchElement, others: &Vec<Rc<RefCell<SketchElement>>>) -> Vec<SketchElement> {
     let mut segments = vec![elem.clone()];
     for other in others.iter() {
-      segments = segments.iter().flat_map(|own| {
-        if let Some(new_segments) = own.as_curve().split(&other.borrow()) {
-          new_segments
-        } else {
-          vec![own.clone()]
-        }
-      }).collect();
+      segments = segments.iter().flat_map(|own| own.split(&other.borrow()) ).collect();
     }
     segments
   }
@@ -275,7 +74,8 @@ impl Component {
 
   fn build_island(start_elem: &SketchElement, mut path: &mut Vec<SketchElement>, all_elements: &Vec<SketchElement>) {
     let (start_point, end_point) = start_elem.as_curve().endpoints();
-    if path.iter().any(|e| e.as_curve().endpoints().0 == start_point ) { return }
+    // if path.iter().any(|e| e.as_curve().endpoints().0 == start_point ) { return }
+    if path.iter().any(|e| e == start_elem ) { return }
     path.push(start_elem.clone());
     for elem in all_elements.iter() {
       let (other_start, other_end) = elem.as_curve().endpoints();
@@ -359,31 +159,168 @@ impl Scene {
   // pub fn edit_sketch(&mut self, sketch: &Rc<RefCell<Sketch>>) {
   //   self.current_sketch = Some(Rc::clone(sketch));
   // }
-
-  // pub fn build_render_tree(&mut self) {
-  //   let origin = Locator::new(Point3::new(0.0, 0.0, 0.0));
-  //   let grid = Grid::new(Plane::new(), 10, 10, 0.1);
-  //   // self.render_tree = TreeNode::new(Some(vec![Box::new(grid), Box::new(origin)]));
-  //   self.render_tree = TreeNode::new(Some(vec![Box::new(grid)]));
-  //   let objects = self.build_render_node(&self.tree);
-  //   self.render_tree.children.push(objects)
-  // }
-
-  // fn build_render_node(&self, node: &TreeNode<Rc<RefCell<Component>>>) -> TreeNode<Vec<Box<dyn Drawable>>> {
-  //   let mut render_node = TreeNode::new(None);
-  //   if let Some(ref comp) = node.item {
-  //     let comp = comp.borrow();
-  //     if comp.sketches.len() >= 1 {
-  //       let drawables = comp.sketches.iter()
-  //                                    .flat_map(|sketch| sketch.borrow().elements.clone() )
-  //                                    .map(|drawable| Box::new(drawable.clone()) as Box<dyn Drawable> )
-  //                                    .collect();
-  //       render_node.item = Some(drawables);
-  //     }
-  //   }
-  //   for child in &node.children {
-  //     render_node.children.push(self.build_render_node(child));
-  //   }
-  //   render_node
-  // }
 }
+
+
+trait Constraint {}
+
+
+pub trait Controllable {
+  fn id(&self) -> Uuid;
+  fn get_handles(&self) -> Vec<Point3>;
+  fn set_handles(&mut self, _: Vec<Point3>);
+  fn get_snap_points(&self) -> Vec<Point3>;
+}
+
+impl Controllable for Line {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+
+  fn get_handles(&self) -> Vec<Point3> {
+    vec![self.points.0, self.points.1]
+  }
+
+  fn set_handles(&mut self, handles: Vec<Point3>) {
+    self.points = (handles[0], handles[1]);
+  }
+
+  fn get_snap_points(&self) -> Vec<Point3> {
+    let mut points = self.get_handles();
+    points.push(self.midpoint());
+    points
+  }
+}
+
+impl Controllable for Arc {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+
+  fn get_handles(&self) -> Vec<Point3> {
+    vec![self.center]
+  }
+
+  fn set_handles(&mut self, handles: Vec<Point3>) {
+    self.center = handles[0];
+    self.radius = handles[0].distance(handles[1]);
+  }
+
+  fn get_snap_points(&self) -> Vec<Point3> {
+    vec![self.center]
+  }
+}
+
+
+impl Controllable for Circle {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+
+  fn get_handles(&self) -> Vec<Point3> {
+    vec![self.center]
+  }
+
+  fn set_handles(&mut self, handles: Vec<Point3>) {
+    self.center = handles[0];
+    self.radius = handles[0].distance(handles[1]);
+  }
+
+  fn get_snap_points(&self) -> Vec<Point3> {
+    vec![self.center]
+  }
+}
+
+
+impl Controllable for BezierSpline {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+
+  fn get_handles(&self) -> Vec<Point3> {
+    self.vertices.clone()
+  }
+
+  fn set_handles(&mut self, handles: Vec<Point3>) {
+    self.vertices = handles;
+    self.update();
+  }
+
+  fn get_snap_points(&self) -> Vec<Point3> {
+    self.get_handles()
+  }
+}
+
+
+pub fn as_controllable(elem: &mut SketchElement) -> &mut dyn Controllable {
+  match elem {
+    SketchElement::Line(line) => line,
+    SketchElement::Arc(arc) => arc,
+    SketchElement::Circle(circle) => circle,
+    SketchElement::BezierSpline(spline) => spline,
+  }
+}
+
+
+// pub struct VertexIterator<'a> {
+//   elem_iter: std::slice::Iter<'a, PolyLine>,
+//   vertex_iter: Option<std::slice::Iter<'a, Point3>>,
+// }
+
+// impl<'a> VertexIterator<'a> {
+//   pub fn new(sketch: &'a Sketch) -> Self {
+//     Self {
+//       elem_iter: sketch.elements.iter(),
+//       vertex_iter: None
+//     }
+//   }
+// }
+
+// impl<'a> Iterator for VertexIterator<'a> {
+//   type Item = &'a Point3;
+
+//   fn next(&mut self) -> Option<&'a Point3> {
+//     if let Some(ref mut vertex_iter) = self.vertex_iter {
+//       let vertex = vertex_iter.next();
+//       if vertex.is_some() {
+//         vertex
+//       } else {
+//         self.vertex_iter = None;
+//         self.next()
+//       }
+//     } else {
+//       if let Some(line) = self.elem_iter.next() {
+//         self.vertex_iter = Some(line.vertices.iter());
+//         self.next()
+//       } else {
+//         None
+//       }
+//     }
+//   }
+// }
+
+// #[derive(Debug)]
+// pub struct Sketch {
+//   pub title: String,
+//   pub plane: Plane,
+//   // pub elements: Vec<PolyLine>,
+//   pub elements: Vec<Rc<RefCell<dyn SketchElement>>>,
+//   // pub constraints: Vec<Box<Constraint>>
+//   pub visible: bool
+// }
+
+// impl Sketch {
+//   pub fn new() -> Self {
+//     Self {
+//       title: "Sketch1".to_string(),
+//       plane: Plane::new(),
+//       elements: vec![],
+//       // constraints: vec![]
+//       visible: true
+//     }
+//   }
+
+//   // pub fn all_vertices(&self) -> VertexIterator {
+//   //   VertexIterator::new(self)
+//   // }
+// }

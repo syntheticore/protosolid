@@ -1,4 +1,5 @@
 use crate::base::*;
+use cgmath::prelude::*;
 
 
 pub trait Surface {
@@ -12,7 +13,7 @@ impl core::fmt::Debug for dyn Surface {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Plane {
   pub origin: Point3,
   pub u: Vec3,
@@ -20,7 +21,7 @@ pub struct Plane {
 }
 
 impl Plane {
-  pub fn new() -> Self {
+  pub fn default() -> Self {
     Self {
       origin: Point3::new(0.0, 0.0, 0.0),
       u: Vec3::new(1.0, 0.0, 0.0),
@@ -67,3 +68,15 @@ impl Plane {
 }
 
 impl Surface for Plane {}
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn plane_normal() {
+    let plane = Plane::default();
+    assert_eq!(plane.normal(), Vec3::new(0.0, -1.0, 0.0));
+  }
+}

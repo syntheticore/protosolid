@@ -202,7 +202,7 @@ impl JsComponent {
   pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsSegment {
     let p1: (f64, f64, f64) = p1.into_serde().unwrap();
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
-    let line = Line::new((Point3::from(p1), Point3::from(p2)));
+    let line = Line::new(Point3::from(p1), Point3::from(p2));
     let mut real = self.real.borrow_mut();
     real.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(line))));
     JsSegment::from(&real.sketch_elements.last().unwrap())

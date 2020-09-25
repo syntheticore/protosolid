@@ -3,12 +3,24 @@ use crate::curve::*;
 use crate::surface::*;
 
 
+/// Boundary representation of a solid body
+/// # Examples
+///
+/// ```
+/// let x = 5;
+/// ```
 #[derive(Debug)]
 pub struct Solid {
   shells: Vec<Shell>, //XXX Should outer shell be handled separately?
 }
 
 
+/// A collection of faces forming a closed volume
+/// # Examples
+///
+/// ```
+/// let x = 5;
+/// ```
 #[derive(Debug)]
 pub struct Shell {
   closed: bool,
@@ -46,6 +58,12 @@ impl Shell {
 }
 
 
+/// A portion of an actual surface, bounded by edge loops
+/// # Examples
+///
+/// ```
+/// let x = 5;
+/// ```
 #[derive(Debug)]
 pub struct Face {
   outer_loop: Vec<OrientedEdge>,
@@ -54,6 +72,12 @@ pub struct Face {
 }
 
 
+/// A portion of an actual curve, bounded by vertices, separating exactly two faces
+/// # Examples
+///
+/// ```
+/// let x = 5;
+/// ```
 #[derive(Debug)]
 pub struct Edge {
   direction: bool,
@@ -77,7 +101,7 @@ pub struct Vertex {
 
 
 pub fn make_solid() -> Solid {
-  let plane = Plane::new();
+  let plane = Plane::default();
   let mut face1 = Face {
     outer_loop: vec![],
     inner_loops: vec![],
@@ -95,7 +119,7 @@ pub fn make_solid() -> Solid {
   let mut edges = vec![
     Edge {
       direction: true,
-      curve: Box::new(Line::new((vertices[0].point, vertices[1].point))),
+      curve: Box::new(Line::new(vertices[0].point, vertices[1].point)),
       vertices: (&mut vertices[0], &mut vertices[1]),
       faces: (&mut face1, &mut face2),
     }

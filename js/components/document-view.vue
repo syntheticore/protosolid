@@ -181,7 +181,7 @@
 
       createComponent: function(parent, title) {
         this.activeComponent = parent.create_component(title || 'New Component')
-        this.$set(this.data, this.activeComponent.id(), {hidden: false, threeObjects: []})
+        this.$set(this.data, this.activeComponent.id(), {hidden: false})
         return this.activeComponent
       },
 

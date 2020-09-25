@@ -9,13 +9,20 @@
     )
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
       path(v-for="path in paths" :d="path.data" stroke="red" stroke-width="2")
-    transition-group.widgets(name="widgets" tag="ul")
+    transition-group.anchors(name="anchors" tag="ul")
       li(
-        v-for="widget in widgets"
-        :key="widget.pos.x + '|' + widget.pos.y"
-        @click="widgetClicked(widget)"
-        :style="{top: widget.pos.y + 'px', left: widget.pos.x + 'px'}"
-     )
+        v-for="anchor in snapAnchors"
+        :key="anchor.vec.x + '|' + anchor.vec.z + anchor.id"
+        :style="{top: anchor.pos.y + 'px', left: anchor.pos.x + 'px'}"
+        @click="anchorClicked(anchor)"
+      )
+    ul.handles
+      li(
+        v-for="handle in allHandles"
+        :key="handle.vec.x + '|' + handle.vec.z + handle.id"
+        :style="{top: handle.pos.y + 'px', left: handle.pos.x + 'px'}"
+        @click="handleClicked(handle)"
+      )
 </template>
 
 
@@ -34,14 +41,12 @@
   .drawpad
     position: absolute
     left: 0
-    // right: 0
     top: 0
-    // bottom: 0
     pointer-events: none
     width: 100%
     height: 100%
 
-  .widgets
+  .handles, .anchors
     position: absolute
     left: 0
     right: 0
@@ -57,8 +62,6 @@
       height: size
       margin-left: -(size / 2)
       margin-top: -(size / 2)
-      pointer-events: auto
-      // cursor: move
       display: flex
       align-items: center
       justify-content: center
@@ -78,24 +81,31 @@
         content: ''
         margin: 0
         padding: 0
-        width:  calc(100% - 4px)
-        height: calc(100% - 4px)
+        width:  calc(100% - 10px)
+        height: calc(100% - 10px)
         border-radius: 99px
         border: 2px solid $highlight * 1.6
         transition: all 0.2s
-        opacity: 0
-        transform: scale(1.5)
         pointer-events: none
-      &:hover
+
+  .anchors li
+    pointer-events: auto
+    &::after
+      opacity: 0
+      transform: scale(2)
+      width:  calc(100% - 2px)
+      height: calc(100% - 2px)
+      border: 2px solid purple * 1.6
+    &:hover
         &::after
           transform: scale(1)
           opacity: 1
 
-  .widgets-enter-active
-  .widgets-leave-active
+  .anchors-enter-active
+  .anchors-leave-active
     transition: all 0.2s
-  .widgets-enter
-  .widgets-leave-to
+  .anchors-enter
+  .anchors-leave-to
     opacity: 0
 </style>
 
@@ -142,15 +152,22 @@
       },
 
       activeTool: function() {
-        this.widgets.length = 0
+        this.snapAnchors.length = 0
       },
     },
 
     data() {
       return {
-        widgets: [],
+        snapAnchors: [],
+        handles: {},
         paths: [],
       }
+    },
+
+    computed: {
+      allHandles: function() {
+        return Object.values(this.handles).map(e => Object.values(e)).flat().flat()
+      },
     },
 
     mounted: function() {
@@ -358,18 +375,18 @@
       },
 
       mouseMove: function(e) {
-        this.widgets.length = 0
-        this.widgets = this.widgets.slice()
-        // this.widgets = this.widgets.filter(widget => widget.type != 'vertex')
+        this.snapAnchors.length = 0
+        this.snapAnchors = this.snapAnchors.slice()
         if(e.button != 0) return
         if(this.isOrbiting) return
         const coords = getMouseCoords(e, this.$refs.canvas)
-        const vec = this.snapVector(this.fromScreen(coords))
+        let vec = this.fromScreen(coords)
+        if(this.activeTool.constructor.name != 'ManipulationTool') vec = this.snapVector(vec)
         if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
       snapVector: function(vec) {
-        this.widgets.length = 0
+        this.snapAnchors.length = 0
         if(!vec) return
         const vecScreen = this.toScreen(vec)
         const sketchElements = this.activeComponent.get_sketch_elements()
@@ -393,24 +410,37 @@
           }
         })
         if(target) {
-          this.widgets.push({
-            type: 'vertex',
+          this.snapAnchors.push({
+            type: 'snap',
             pos: this.toScreen(target),
             vec: target,
+            id: 'snap',
           })
         }
         return target || vec
       },
 
-      widgetClicked: function(widget) {
-        this.activeTool.mouseDown(widget.vec, widget.pos)
+      anchorClicked: function(anchor) {
+        this.activeTool.mouseDown(anchor.vec, anchor.pos)
       },
 
-      updateWidgets: function() {
-        this.widgets.forEach((widget, i) => {
-          widget.pos = this.toScreen(widget.vec)
-          this.$set(this.widgets, i, widget)
+      update_widgets: function() {
+        this.snapAnchors.forEach((anchor, i) => {
+          anchor.pos = this.toScreen(anchor.vec)
+          this.$set(this.snapAnchors, i, anchor)
         })
+
+        for(let node_id in this.handles) {
+          const node_handles = this.handles[node_id]
+          for(let elem_id in node_handles) {
+            const elem_handles = node_handles[elem_id]
+            elem_handles.forEach(handle => {
+              handle.pos = this.toScreen(handle.vec)
+            })
+          }
+          this.handles = Object.assign({}, this.handles)
+        }
+
         this.paths.forEach((path, i) => {
           path.data = this.buildPath(path.origin, path.target)
           this.$set(this.paths, i, path)
@@ -433,7 +463,7 @@
 
       render: function() {
         renderer.render(this.scene, camera)
-        this.updateWidgets()
+        this.update_widgets()
       },
 
       animate: function() {
@@ -500,18 +530,37 @@
         line.computeLineDistances()
         // line.scale.set(1, 1, 1)
         line.alcSelectable = true
-        this.data[node.id()].threeObjects.push(line)
-        elem.three = line
-        line.component = node
+        this.data[elem.id()] = line
+        // line.component = node
         line.element = elem
         this.scene.add(line)
+
+        const node_id = node.id()
+        const elem_id = elem.id()
+        this.handles[node_id] = this.handles[node_id] || {}
+        this.handles[node_id][elem_id] = this.handles[node_id][elem_id] || []
+        elem.get_handles().forEach(handle => {
+          handle = new THREE.Vector3().fromArray(handle)
+          this.handles[node_id][elem_id].push({
+            type: 'handle',
+            pos: this.toScreen(handle),
+            vec: handle,
+            id: elem_id,
+          })
+        })
+
+        this.data[node_id].cachedElements = this.data[node_id].cachedElements || []
+        this.data[node_id].cachedElements.push(elem)
       },
 
       unloadElement: function(elem, node) {
-        this.scene.remove(elem.three)
-        const cache = this.data[node.id()]
-        cache.threeObjects = cache.threeObjects || []
-        cache.threeObjects = cache.threeObjects.filter(obj => obj !== elem.three)
+        this.scene.remove(this.data[elem.id()])
+        const node_id = node.id()
+        const cache = this.data[node_id]
+        if(this.handles[node_id]) delete this.handles[node_id][elem.id()]
+        this.handles = Object.assign({}, this.handles)
+        const cachedElements = this.data[node_id].cachedElements
+        if(cachedElements) this.data[node_id].cachedElements = cachedElements.filter(e => e != elem)
       },
 
       deleteElement: function(elem) {
@@ -527,18 +576,18 @@
         if(this.data[node.id()].hidden) return
         const elements = node.get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
-        const regions = node.get_regions()
-        const splits = node.get_all_split()
-        console.log(splits.map(elem => elem.get_handles()))
+        // const regions = node.get_regions()
+        // const splits = node.get_all_split()
+        // console.log(splits.map(elem => elem.get_handles()))
         // console.log(regions)
         if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
       },
 
       unloadTree: function(node, recursive) {
-        const cache = this.data[node.id()]
-        cache.threeObjects = cache.threeObjects || []
-        cache.threeObjects.forEach(obj => this.scene.remove(obj))
-        cache.threeObjects.length = 0
+        const node_id = node.id()
+        const cache = this.data[node_id]
+        const cachedElements = this.data[node_id].cachedElements
+        cachedElements && cachedElements.forEach(elem => this.unloadElement(elem, node))
         if(recursive) node.get_children().forEach(child => this.unloadTree(child, true))
       },
 

@@ -20,7 +20,9 @@ export class ManipulationTool extends Tool {
   click(coords) {
     const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
     if(object) return this.viewport.render()
-    if(this.viewport.selectedElement) this.viewport.selectedElement.three.material = this.viewport.lineMaterial
+    if(this.viewport.selectedElement) {
+      this.viewport.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
+    }
     this.viewport.$emit('element-selected', null)
     this.viewport.transformControl.detach()
     this.viewport.render()
@@ -29,7 +31,7 @@ export class ManipulationTool extends Tool {
   mouseDown(vec, coords) {
     const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
     if(!object) return
-    if(this.viewport.selectedElement) this.viewport.selectedElement.three.material = this.viewport.lineMaterial
+    if(this.viewport.selectedElement) this.viewport.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
     object.material = this.viewport.selectionLineMaterial
     this.viewport.$emit('element-selected', object.element)
     this.viewport.transformControl.attach(object)
@@ -118,28 +120,22 @@ export class SplineTool extends Tool {
 export class CircleTool extends Tool {
   mouseDown(vec) {
     if(this.center) {
-      this.circle = null
       this.center = null
+      this.circle = null
     } else {
       this.center = vec
+      this.circle = this.component.add_circle(vec.toArray(), 1)
     }
   }
 
   mouseMove(vec) {
     if(!this.center) return
-    if(this.circle) this.component.remove_element(this.circle.id())
-    const radius = vec.distanceTo(this.center)
-    this.circle = this.component.add_circle(this.center.toArray(), radius)
-    // this.viewport.elementChanged(this.circle, this.component)
-    this.viewport.componentChanged(this.component)
-  }
-
-  dispose() {
-    if(!this.spline) return
-    let points = this.spline.get_handles()
-    points.pop()
-    this.spline.set_handles(points)
-    this.viewport.elementChanged(this.spline, this.component)
+    // if(this.circle) this.component.remove_element(this.circle.id())
+    // const radius = vec.distanceTo(this.center)
+    // this.circle = this.component.add_circle(this.center.toArray(), radius)
+    this.circle.set_handles([this.center.toArray(), vec.toArray()])
+    this.viewport.elementChanged(this.circle, this.component)
+    // this.viewport.componentChanged(this.component)
   }
 }
 

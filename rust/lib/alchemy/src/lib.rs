@@ -223,7 +223,10 @@ impl Controllable for Circle {
 
   fn set_handles(&mut self, handles: Vec<Point3>) {
     self.center = handles[0];
-    self.radius = handles[0].distance(handles[1]);
+    if handles.len() > 1 {
+      let p = handles[1];
+      self.radius = handles[0].distance(p);
+    }
   }
 
   fn get_snap_points(&self) -> Vec<Point3> {

@@ -4,24 +4,33 @@
       ref="canvas"
       @click="click"
       @dblclick="doubleClick"
+      @mouseup="mouseUp"
       @mousedown="mouseDown"
       @mousemove="mouseMove"
     )
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
       path(v-for="path in paths" :d="path.data" stroke="red" stroke-width="2")
     transition-group.anchors(name="anchors" tag="ul")
+      //- li(
+      //-   v-for="anchor in snapAnchors"
+      //-   :key="anchor.id"
+      //-   :style="{top: anchor.pos.y + 'px', left: anchor.pos.x + 'px'}"
+      //-   @click="anchorClicked(anchor)"
+      //- )
       li(
-        v-for="anchor in snapAnchors"
-        :key="anchor.vec.x + '|' + anchor.vec.z + anchor.id"
-        :style="{top: anchor.pos.y + 'px', left: anchor.pos.x + 'px'}"
-        @click="anchorClicked(anchor)"
+        v-if="snapAnchor"
+        :key="snapAnchor.id"
+        :style="{top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px'}"
+        @click="anchorClicked(snapAnchor)"
       )
     ul.handles
       li(
         v-for="handle in allHandles"
-        :key="handle.vec.x + '|' + handle.vec.z + handle.id"
+        :key="handle.id"
         :style="{top: handle.pos.y + 'px', left: handle.pos.x + 'px'}"
-        @click="handleClicked(handle)"
+        @mouseup="mouseUp"
+        @mousedown="handleMouseDown($event, handle)"
+        @mousemove="mouseMove"
       )
 </template>
 
@@ -65,6 +74,7 @@
       display: flex
       align-items: center
       justify-content: center
+      // pointer-events: auto
       &::before
         position: absolute
         display: block
@@ -85,21 +95,47 @@
         height: calc(100% - 10px)
         border-radius: 99px
         border: 2px solid $highlight * 1.6
-        transition: all 0.2s
         pointer-events: none
 
   .anchors li
-    pointer-events: auto
+    // pointer-events: auto
     &::after
-      opacity: 0
-      transform: scale(2)
+      // opacity: 0
+      // transform: scale(2)
+      transform: scale(1)
+      opacity: 1
       width:  calc(100% - 2px)
       height: calc(100% - 2px)
       border: 2px solid purple * 1.6
+      // transition: all 0.2s
+      animation-duration: 0.2s
+      animation-name: slidein
+    // &:hover
+    //   &::after
+    //     transform: scale(1)
+    //     opacity: 1
+    @keyframes slidein {
+      from {
+        opacity: 0
+        transform: scale(2)
+      }
+
+      to {
+        transform: scale(1)
+        opacity: 1
+      }
+    }
+
+  .handles li
+    // cursor: move
+    pointer-events: auto
     &:hover
-        &::after
-          transform: scale(1)
-          opacity: 1
+      &::before
+        background: $highlight * 1.6
+    &:active
+      &::before
+        width:  5px
+        height: 5px
 
   .anchors-enter-active
   .anchors-leave-active
@@ -124,9 +160,12 @@
 
   function getMouseCoords(e, canvas) {
     var coords = new THREE.Vector2()
-    var rect = e.target.getBoundingClientRect();
-    coords.x = (e.clientX - rect.left) / canvas.offsetWidth * 2 - 1
-    coords.y = - (e.clientY - rect.top) / canvas.offsetHeight * 2 + 1
+    // var rect = e.target.getBoundingClientRect();
+    // console.log(rect)
+    // coords.x = (e.clientX - rect.left) / canvas.offsetWidth * 2 - 1
+    // coords.y = - (e.clientY - rect.top) / canvas.offsetHeight * 2 + 1
+    coords.x = (e.clientX - 0) / canvas.offsetWidth * 2 - 1
+    coords.y = - (e.clientY - 39) / canvas.offsetHeight * 2 + 1
     return coords
   }
 
@@ -134,6 +173,8 @@
   var renderer, camera, mesh, pointMaterial
 
   const snapDistance = 10.5 // px
+
+  let isDragging = false
 
   export default {
     name: 'ViewPort',
@@ -152,13 +193,13 @@
       },
 
       activeTool: function() {
-        this.snapAnchors.length = 0
+        // this.snapAnchors.length = 0
       },
     },
 
     data() {
       return {
-        snapAnchors: [],
+        snapAnchor: null,
         handles: {},
         paths: [],
       }
@@ -364,6 +405,12 @@
         this.render()
       },
 
+      mouseUp: function(e) {
+        this.activeHandle = null
+        this.snapAnchor = null
+        isDragging = false
+      },
+
       mouseDown: function(e) {
         if(e.button != 0) return
         const coords = getMouseCoords(e, this.$refs.canvas)
@@ -372,21 +419,19 @@
         const toolName = this.activeTool.constructor.name
         // if(toolName != 'ManipulationTool' && toolName != 'SelectionTool') this.viewControls.enabled = false
         this.lastCoords = coords
+        isDragging = true
       },
 
       mouseMove: function(e) {
-        this.snapAnchors.length = 0
-        this.snapAnchors = this.snapAnchors.slice()
         if(e.button != 0) return
         if(this.isOrbiting) return
         const coords = getMouseCoords(e, this.$refs.canvas)
         let vec = this.fromScreen(coords)
-        if(this.activeTool.constructor.name != 'ManipulationTool') vec = this.snapVector(vec)
+        if(this.activeTool.constructor.name != 'ManipulationTool' || isDragging) vec = this.snapVector(vec)
         if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
       snapVector: function(vec) {
-        this.snapAnchors.length = 0
         if(!vec) return
         const vecScreen = this.toScreen(vec)
         const sketchElements = this.activeComponent.get_sketch_elements()
@@ -397,6 +442,11 @@
             const handles = elem.get_handles()
             const lastHandle = new THREE.Vector3().fromArray(handles[handles.length - 1])
             points = points.filter(p => !p.equals(lastHandle))
+          }
+          // Filter out handle actively being dragged
+          if(this.activeHandle && elem.id() == this.activeHandle.elem.id()) {
+            const handlePoint = new THREE.Vector3().fromArray(this.activeHandle.elem.get_handles()[this.activeHandle.index])
+            points = points.filter(p => !p.equals(handlePoint))
           }
           return points
         })
@@ -410,12 +460,15 @@
           }
         })
         if(target) {
-          this.snapAnchors.push({
+          if(this.snapAnchor && this.snapAnchor.vec.equals(target)) return target
+          this.snapAnchor = {
             type: 'snap',
             pos: this.toScreen(target),
             vec: target,
-            id: 'snap',
-          })
+            id: '' + vec.x + vec.y + vec.z,
+          }
+        } else {
+          this.snapAnchor = null
         }
         return target || vec
       },
@@ -424,11 +477,15 @@
         this.activeTool.mouseDown(anchor.vec, anchor.pos)
       },
 
+      handleMouseDown: function(e, handle) {
+        if(this.activeTool.constructor.name == 'ManipulationTool') {
+          this.activeHandle = handle
+        }
+        this.mouseDown(e)
+      },
+
       update_widgets: function() {
-        this.snapAnchors.forEach((anchor, i) => {
-          anchor.pos = this.toScreen(anchor.vec)
-          this.$set(this.snapAnchors, i, anchor)
-        })
+        if(this.snapAnchor) this.snapAnchor.pos = this.toScreen(this.snapAnchor.vec)
 
         for(let node_id in this.handles) {
           const node_handles = this.handles[node_id]
@@ -539,13 +596,15 @@
         const elem_id = elem.id()
         this.handles[node_id] = this.handles[node_id] || {}
         this.handles[node_id][elem_id] = this.handles[node_id][elem_id] || []
-        elem.get_handles().forEach(handle => {
+        elem.get_handles().forEach((handle, i) => {
           handle = new THREE.Vector3().fromArray(handle)
           this.handles[node_id][elem_id].push({
             type: 'handle',
             pos: this.toScreen(handle),
             vec: handle,
-            id: elem_id,
+            id: Math.random(),
+            elem: elem,
+            index: i,
           })
         })
 

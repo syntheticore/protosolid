@@ -88,7 +88,7 @@ pub trait Curve {
   }
 }
 
-impl core::fmt::Debug for dyn Curve {
+impl std::fmt::Debug for dyn Curve {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "Foo")
   }
@@ -418,5 +418,22 @@ mod tests {
     let segments = lines.0.split_with(&SketchElement::Line(lines.1));
     assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
     assert_eq!(segments[0].length(), 2.0, "Segment had wrong length");
+  }
+
+  #[test]
+  fn split_t_section1() {
+    let lines = test_data::t_section();
+    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
+    assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments[1].length(), 1.0, "Segment had wrong length");
+  }
+
+  #[test]
+  fn split_t_section2() {
+    let lines = test_data::t_section();
+    let segments = lines.1.split_with(&SketchElement::Line(lines.0));
+    assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
+    assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
   }
 }

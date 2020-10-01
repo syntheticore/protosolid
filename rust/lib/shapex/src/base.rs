@@ -6,6 +6,21 @@ pub type Point3 = cgmath::Point3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
 
 
+pub trait Almost {
+  const EPS: f64 = core::f64::EPSILON * 100000.0;
+  fn almost(&self, other: Self) -> bool;
+}
+
+
+impl Almost for Point3 {
+  fn almost(&self, other: Self) -> bool {
+    (self.x - other.x).abs() < Self::EPS &&
+    (self.y - other.y).abs() < Self::EPS &&
+    (self.z - other.z).abs() < Self::EPS
+  }
+}
+
+
 #[derive(Debug, PartialEq)]
 pub enum Intersection {
   None,

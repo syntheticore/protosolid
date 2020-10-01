@@ -57,18 +57,42 @@ export class ManipulationTool extends Tool {
 }
 
 
-export class SelectionTool extends ManipulationTool {
+class SelectionTool extends ManipulationTool {
   constructor(component, viewport, callback) {
     super(component, viewport)
     this.callback = callback
   }
 
   click(coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
-    this.callback(object && object.element)
+    const selection = this.select(coords)
+    if(!selection) return
+    const [item, center] = selection
+    this.callback(item, center)
   }
+}
 
-  mouseDown() {}
+
+export class ObjectSelectionTool extends SelectionTool {
+  select(coords) {
+    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    return object && [object.element, new THREE.Vector3().fromArray(object.element.get_handles()[0])]
+  }
+}
+
+
+export class ProfileSelectionTool extends SelectionTool {
+  select(coords) {
+    // const regions = this.component.get_regions()
+    // console.log('Regions', regions)
+    const splits = this.component.get_all_split()
+    console.log('ProfileSelectionTool', splits)
+    // const elems = this.component.get_sketch_elements()
+    // // .map(elem => elem.get_handles())
+    // elems.forEach(elem => {
+    //   this.component.remove_element(elem.id())
+    // })
+    this.viewport.componentChanged(this.component)
+  }
 }
 
 

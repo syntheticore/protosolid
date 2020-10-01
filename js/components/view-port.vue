@@ -156,7 +156,7 @@
   import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
   import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
-  import { ManipulationTool, SelectionTool, LineTool, SplineTool, CircleTool, ExtrudeTool } from './../tools.js'
+  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool, ExtrudeTool } from './../tools.js'
 
   function getMouseCoords(e, canvas) {
     var coords = new THREE.Vector2()
@@ -350,18 +350,25 @@
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('white')
 
-      this.$root.$on('pick-profile', (pickerCoords) => {
-        this.$emit('activate-tool', new SelectionTool(this.activeComponent, this, (profile) => {
-          this.$root.$emit('picked-profile', profile)
+      const handlePick = (pickerCoords, tool) => {
+        this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
+          this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')
-          if(!profile) return
-          const target = new THREE.Vector3().fromArray(profile.get_handles()[0])
+          if(!item) return
           this.paths.push({
-            target,
+            target: center,
             origin: pickerCoords,
-            data: this.buildPath(pickerCoords, target),
+            data: this.buildPath(pickerCoords, center),
           })
         }))
+      }
+
+      this.$root.$on('pick-profile', (pickerCoords) => {
+        handlePick(pickerCoords, ProfileSelectionTool)
+      })
+
+      this.$root.$on('pick-curve', (pickerCoords) => {
+        handlePick(pickerCoords, ObjectSelectionTool)
       })
 
       this.$root.$on('activate-toolname', this.activateTool)
@@ -417,7 +424,7 @@
         const vec = this.snapVector(this.fromScreen(coords))
         if(vec) this.activeTool.mouseDown(vec, coords)
         const toolName = this.activeTool.constructor.name
-        // if(toolName != 'ManipulationTool' && toolName != 'SelectionTool') this.viewControls.enabled = false
+        // if(toolName != 'ManipulationTool' && toolName != 'ObjectSelectionTool') this.viewControls.enabled = false
         this.lastCoords = coords
         isDragging = true
       },
@@ -508,7 +515,6 @@
         if(this.activeTool) this.activeTool.dispose()
         const tools = {
           Manipulate: ManipulationTool,
-          Select: SelectionTool,
           Line: LineTool,
           Spline: SplineTool,
           Circle: CircleTool,
@@ -610,6 +616,13 @@
 
         this.data[node_id].cachedElements = this.data[node_id].cachedElements || []
         this.data[node_id].cachedElements.push(elem)
+
+        // const regions = node.get_regions()
+        // // console.log(regions)
+        // // console.log(splits.map(elem => elem.get_handles()))
+        // regions.forEach(region => {
+
+        // })
       },
 
       unloadElement: function(elem, node) {
@@ -635,11 +648,6 @@
         if(this.data[node.id()].hidden) return
         const elements = node.get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
-        const regions = node.get_regions()
-        // const splits = node.get_all_split()
-        console.log(node.get_sketch_elements().length)
-        // console.log(splits.map(elem => elem.get_handles()))
-        console.log(regions)
         if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
       },
 

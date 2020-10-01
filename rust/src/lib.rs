@@ -239,7 +239,13 @@ impl JsComponent {
   }
 
   pub fn get_all_split(&self) -> Array {
-    self.real.borrow().all_split().iter().map(|elem| {
+    let mut real = self.real.borrow_mut();
+    let splits = real.all_split();
+    real.sketch_elements.clear();
+    for split in splits.iter() {
+      real.sketch_elements.push(Rc::new(RefCell::new(split.clone())));
+    }
+    splits.iter().map(|elem| {
       JsValue::from(JsSegment::from(&Rc::new(RefCell::new(elem.clone()))))
     }).collect()
   }

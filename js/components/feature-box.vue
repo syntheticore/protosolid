@@ -5,7 +5,7 @@
       label(v-for="(fields, key) in settings")
         | {{ fields.title }}
         .picker(
-          v-if="fields.type == 'region' || fields.type == 'edge'" @click="pick(fields.type, key)"
+          v-if="fields.type == 'profile' || fields.type == 'curve'" @click="pick(fields.type, key)"
           :ref="key"
           :class="{active: activePicker == key, filled: data[key]}"
           :data-color="fields.color"
@@ -105,13 +105,13 @@
         settings: {
           profile: {
             title: 'Profile',
-            type: 'region',
+            type: 'profile',
             color: 'pink',
           },
           rail: {
             title: 'Rail',
-            type: 'region',
-            color: 'pink',
+            type: 'curve',
+            color: 'purple',
           },
           distance: {
             title: 'Distance',
@@ -144,18 +144,23 @@
 
     methods: {
       pick: function(type, name) {
-        this.$root.$once('picked-profile', (profile) => {
-          console.log('Picked profile', profile)
-          this.data[name] = profile
+        this.$root.$once('picked', (item) => {
+          console.log('Picked', item)
+          this.data[name] = item
           this.activePicker = null
         })
         this.activePicker = name
         const picker = this.$refs[name][0]
-        const rect = picker.getBoundingClientRect()
-        this.$root.$emit('pick-profile', {
-          x: rect.left + (rect.width / 2),
-          y: rect.top + (rect.height / 2) - 38,
-        })
+        const pickerRect = picker.getBoundingClientRect()
+        const pickerPos = {
+          x: pickerRect.left + (pickerRect.width / 2),
+          y: pickerRect.top + (pickerRect.height / 2) - 38,
+        }
+        if(type == 'profile') {
+          this.$root.$emit('pick-profile', pickerPos)
+        } else if(type == 'curve') {
+          this.$root.$emit('pick-curve', pickerPos)
+        }
       },
     },
 

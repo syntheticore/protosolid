@@ -32,8 +32,11 @@ impl Component {
     let islands = Self::build_islands(&cut_elements);
     let mut regions = vec![];
     for island in islands.iter() {
-      let first = &island[0];
-      regions.append(&mut Self::build_regions(first.as_curve().endpoints().0, first, vec![], &island));
+      for vertex in island.iter() {
+        regions.append(&mut Self::build_regions(vertex.as_curve().endpoints().0, vertex, vec![], &island));
+      }
+      // let first = &island[0];
+      // regions.append(&mut Self::build_regions(first.as_curve().endpoints().0, first, vec![], &island));
     }
     regions
   }
@@ -81,23 +84,23 @@ impl Component {
     for elem in all_elements.iter() {
       let (other_start, other_end) = elem.as_curve().endpoints();
       // We are connected to other element
-      if end_point == other_start || end_point == other_end || start_point == other_start || start_point == other_end {
+      if end_point.almost(other_start) || end_point.almost(other_end) || start_point.almost(other_start) || start_point.almost(other_end) {
         Self::build_island(elem, &mut path, all_elements);
       }
     }
   }
 
-  fn build_regions(start_point: Point3, start_elem: &SketchElement, mut path: Vec<Point3>, all_elements: &Vec<SketchElement>) -> Vec<PolyLine> {
+  fn build_regions(start_point: Point3, start_elem: &SketchElement, mut path: PolyLine, all_elements: &Vec<SketchElement>) -> Vec<PolyLine> {
     path.push(start_point);
     let end_point = Self::other_endpoint(start_elem, &start_point);
     let mut regions: Vec<Vec<Point3>> = vec![];
     for elem in all_elements.iter() {
       let (other_start, other_end) = elem.as_curve().endpoints();
       // We are connected to this other element
-      if (end_point == other_start || end_point == other_end) && as_controllable(elem).id() != as_controllable(start_elem).id() {
+      if (end_point.almost(other_start) || end_point.almost(other_end)) && as_controllable(elem).id() != as_controllable(start_elem).id() {
         // We are closing a loop
         if path.contains(&end_point) {
-          regions.push(path.clone());
+          if path.len() >= 3 && path[0] == end_point { regions.push(path.clone()); }
         } else {
           let mut new_regions = Self::build_regions(end_point, elem, path.clone(), all_elements);
           regions.append(&mut new_regions);
@@ -371,6 +374,19 @@ mod tests {
   }
 
   #[test]
+  fn t_split() {
+    let mut comp = Component::new();
+    let lines = test_data::t_section();
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    let segments = comp.all_split();
+    assert_eq!(segments.len(), 3, "{} segments found instead of 3", segments.len());
+    assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments[2].as_curve().length(), 1.0, "Segment had wrong length");
+  }
+
+  #[test]
   fn region_rect() {
     let mut comp = Component::new();
     let lines = test_data::rectangle();
@@ -383,6 +399,46 @@ mod tests {
     let regions = comp.closed_regions();
     assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
-    assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
+    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
+  }
+
+  #[test]
+  fn region_crossing_rect() {
+    let mut comp = Component::new();
+    let lines = test_data::crossing_rectangle();
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.2))));
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.3))));
+    let cut_elements = comp.all_split();
+    let islands = Component::build_islands(&cut_elements);
+    let regions = comp.closed_regions();
+    comp.sketch_elements.clear();
+    for split in cut_elements.iter() {
+      comp.sketch_elements.push(Rc::new(RefCell::new(split.clone())));
+    }
+    let cut_elements2 = Component::split_all(&comp.sketch_elements);
+    assert_eq!(cut_elements.len(), 8, "{} cut_elements found instead of 8", cut_elements.len());
+    assert_eq!(cut_elements2.len(), 8, "{} cut_elements2 found instead of 8", cut_elements2.len());
+    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
+    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
+  }
+
+  #[test]
+  fn region_crossing_corner() {
+    let mut comp = Component::new();
+    let mut lines = test_data::rectangle();
+    lines.2.points.1.x = -2.0;
+    lines.3.points.0.z = -2.0;
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.2))));
+    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.3))));
+    let cut_elements = comp.all_split();
+    let islands = Component::build_islands(&cut_elements);
+    let regions = comp.closed_regions();
+    assert_eq!(cut_elements.len(), 6, "{} cut_elements found instead of 6", cut_elements.len());
+    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
+    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
   }
 }

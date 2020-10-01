@@ -83,7 +83,7 @@ impl JsSegment {
 
   pub fn set_handles(&self, handles: Array) {
     let points = vertices_from_js(handles);
-    as_controllable(&mut self.real.borrow_mut()).set_handles(points);
+    as_controllable_mut(&mut self.real.borrow_mut()).set_handles(points);
   }
 
   pub fn get_snap_points(&self) -> Array {

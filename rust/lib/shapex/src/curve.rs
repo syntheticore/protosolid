@@ -123,7 +123,7 @@ impl Line {
     (self.points.1 - self.points.0).normalize()
   }
 
-  fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
+  pub fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
     match intersection::intersect(&SketchElement::Line(self.clone()), cutter) {
       Intersection::None | Intersection::Contained | Intersection::Touch(_) | Intersection::Extended(_) => vec![self.clone()],
       Intersection::Hit(mut points) => { //XXX points are not sorted along line
@@ -365,7 +365,7 @@ impl BezierSpline {
     closest
   }
 
-  pub fn split_with_line(&self, _line: &Line) -> Vec<Self> { vec![] }
+  pub fn split_with_line(&self, _line: &Line) -> Vec<Self> { vec![self.clone()] }
 
   pub fn split_with_arc(&self, _arc: &Arc) -> Vec<BezierSpline> { vec![] }
 
@@ -404,11 +404,19 @@ mod tests {
     assert_eq!(lines.0.length(), 1.0);
   }
 
-  // #[test]
-  // fn split() {
-  //   let lines = test_data::crossing_lines();
-  //   let segments = lines.0.split_with(&SketchElement::Line(lines.1));
-  //   assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
-  //   assert_eq!(segments[0].length(), 0.5, "Segment had wrong length");
-  // }
+  #[test]
+  fn split_crossing_lines() {
+    let lines = test_data::crossing_lines();
+    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
+    assert_eq!(segments[0].length(), 0.5, "Segment had wrong length");
+  }
+
+  #[test]
+  fn split_touching_lines() {
+    let lines = test_data::rectangle();
+    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
+    assert_eq!(segments[0].length(), 2.0, "Segment had wrong length");
+  }
 }

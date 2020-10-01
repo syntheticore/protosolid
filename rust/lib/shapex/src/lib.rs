@@ -3,8 +3,8 @@ mod curve;
 mod surface;
 mod solid;
 
-#[cfg(test)]
-mod test_data;
+// #[cfg(test)]
+pub mod test_data;
 
 pub use base::*;
 pub use curve::*;

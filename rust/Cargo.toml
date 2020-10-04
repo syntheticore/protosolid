@@ -10,7 +10,9 @@ edition = "2018"
 crate-type = ["cdylib"]
 
 [profile.release]
-lto = true
+lto = 'fat'
+panic = 'abort'
+codegen-units = 1
 
 [features]
 default = ["wee_alloc"]

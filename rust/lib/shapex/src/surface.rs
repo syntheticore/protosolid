@@ -41,7 +41,7 @@ impl Plane {
     let n = self.normal();
     let u = line.1 - line.0;
     let n_dot_u = n.dot(u);
-    if n_dot_u <= core::f64::EPSILON {
+    if n_dot_u <= EPSILON {
       // Line is parallel to this plane
       if self.contains_point(line.0) {
         // Line lies completely on this plane
@@ -54,7 +54,11 @@ impl Plane {
       let p = line.0 + u * s;
       if s >= 0.0 && s <= 1.0 {
         // Line segment intersects this plane
-        Intersection::Hit(vec![p])
+        if s == 0.0 || s == 1.0 {
+          Intersection::Pierce(vec![p])
+        } else {
+          Intersection::Cross(vec![p])
+        }
       } else {
         // The ray along the given line intersects this plane
         Intersection::Extended(vec![p])
@@ -63,7 +67,7 @@ impl Plane {
   }
 
   pub fn contains_point(&self, p: Point3) -> bool {
-    self.normal().dot(p - self.origin) <= core::f64::EPSILON
+    self.normal().dot(p - self.origin) <= EPSILON
   }
 }
 

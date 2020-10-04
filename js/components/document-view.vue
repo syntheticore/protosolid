@@ -1,11 +1,10 @@
 <template lang="pug">
   main.document-view
     ViewPort(
-      :tree="document.tree"
+      :document="document"
       :active-component="activeComponent"
       :active-tool="activeTool"
       :selected-element="selectedElement"
-      :data="data"
       @change-view="document.isViewDirty = true"
       @change-pose="document.isPoseDirty = true"
       @activate-tool="activateTool"
@@ -18,8 +17,8 @@
     SideBar.bar-left
       TreeView(
         :top="document.tree"
+        :data="document.data"
         :active-component="activeComponent"
-        :data="data"
         @create-component="createComponent"
         @activate-component="activateComponent"
       )
@@ -134,12 +133,11 @@
         activeTool: null,
         activeFeature: null,
         selectedElement: null,
-        data: {},
       }
     },
 
     created() {
-      this.data[this.document.tree.id()] = {}
+      // this.document.data[this.document.tree.id()] = {}
       const part1 = this.createComponent(this.document.tree, 'Part 1')
         const assm1 = this.createComponent(this.document.tree, 'Sub Assembly 1')
           const part2 = this.createComponent(assm1, 'Part 2')
@@ -181,7 +179,9 @@
 
       createComponent: function(parent, title) {
         this.activeComponent = parent.create_component(title || 'New Component')
-        this.$set(this.data, this.activeComponent.id(), {hidden: false})
+        // this.document.data[this.activeComponent.id()] = {hidden: false}
+        // this.$set(this.document, 'data', this.document.data)
+        this.$set(this.document.data, this.activeComponent.id(), {hidden: false})
         return this.activeComponent
       },
 

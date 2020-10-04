@@ -1,5 +1,5 @@
 <template lang="pug">
-  header.tool-bar
+  header.tab-bar
 
     MenuButton.left.app-menu-btn(icon="atom")
       .about
@@ -71,7 +71,7 @@
 
 
 <style lang="stylus" scoped>
-  .tool-bar
+  .tab-bar
     display: flex
     // overflow: hidden
     // background: $dark2
@@ -91,13 +91,13 @@
     .tabs li
       padding: 6px 12px
       height: 23px
-    .tool-bar
+    .tab-bar
       border-top: none
 
   .fullscreen
   .maximized
   [data-platform="browser"]
-    .tool-bar
+    .tab-bar
       padding-left: 0px
       border-radius: 0
       // background: $dark2

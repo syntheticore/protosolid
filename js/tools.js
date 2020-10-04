@@ -21,7 +21,7 @@ export class ManipulationTool extends Tool {
     const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
     if(object) return this.viewport.render()
     if(this.viewport.selectedElement) {
-      this.viewport.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
+      this.viewport.document.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
     }
     this.viewport.$emit('element-selected', null)
     this.viewport.transformControl.detach()
@@ -31,7 +31,7 @@ export class ManipulationTool extends Tool {
   mouseDown(vec, coords) {
     const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
     if(!object) return
-    if(this.viewport.selectedElement) this.viewport.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
+    if(this.viewport.selectedElement) this.viewport.document.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
     object.material = this.viewport.selectionLineMaterial
     this.viewport.$emit('element-selected', object.element)
     this.viewport.transformControl.attach(object)
@@ -101,6 +101,14 @@ export class LineTool extends Tool {
     this.mouseMove(vec)
     this.line = this.component.add_line(vec.toArray(), vec.toArray())
     this.viewport.elementChanged(this.line, this.component)
+    // Restart tool when we close a loop
+    if(this.firstPoint && vec.equals(this.firstPoint)) {
+      this.component.remove_element(this.line.id())
+      this.line = null
+      this.firstPoint = null
+      return
+    }
+    if(!this.firstPoint) this.firstPoint = vec
   }
 
   mouseMove(vec) {

@@ -84,25 +84,30 @@ impl Component {
     for elem in all_elements.iter() {
       let (other_start, other_end) = elem.as_curve().endpoints();
       // We are connected to other element
-      if end_point.almost(other_start) || end_point.almost(other_end) || start_point.almost(other_start) || start_point.almost(other_end) {
+      if end_point == other_start || end_point == other_end || start_point == other_start || start_point == other_end {
         Self::build_island(elem, &mut path, all_elements);
       }
     }
   }
 
-  fn build_regions(start_point: Point3, start_elem: &SketchElement, mut path: PolyLine, all_elements: &Vec<SketchElement>) -> Vec<PolyLine> {
+  fn build_regions(
+    start_point: Point3,
+    start_elem: &SketchElement,
+    mut path: PolyLine,
+    all_elements: &Vec<SketchElement>,
+  ) -> Vec<PolyLine> {
     path.push(start_point);
     let end_point = Self::other_endpoint(start_elem, &start_point);
-    let mut regions: Vec<Vec<Point3>> = vec![];
-    for elem in all_elements.iter() {
-      let (other_start, other_end) = elem.as_curve().endpoints();
-      // We are connected to this other element
-      if (end_point.almost(other_start) || end_point.almost(other_end)) && as_controllable(elem).id() != as_controllable(start_elem).id() {
+    let mut regions: Vec<PolyLine> = vec![];
+    for other_elem in all_elements.iter() {
+      let (other_start, other_end) = other_elem.as_curve().endpoints();
+      // We are connected to other_elem
+      if (end_point == other_start || end_point == other_end) && as_controllable(other_elem).id() != as_controllable(start_elem).id() {
         // We are closing a loop
         if path.contains(&end_point) {
           if path.len() >= 3 && path[0] == end_point { regions.push(path.clone()); }
         } else {
-          let mut new_regions = Self::build_regions(end_point, elem, path.clone(), all_elements);
+          let mut new_regions = Self::build_regions(end_point, other_elem, path.clone(), all_elements);
           regions.append(&mut new_regions);
         }
       }

@@ -15,13 +15,13 @@ module.exports = (env) => {
         ['./js/main-app.js', './styles/main.styl'],
       website: ['./js/main-website.js', './styles/website.styl']
     },
-    devtool: '#source-map',
+    devtool: env.production ? false : '#source-map',
     output: {
       path: dist,
       filename: '[name].js'
     },
     devServer: {
-      openPage: 'dev.html',
+      openPage: 'index.html',
       contentBase: static,
       watchContentBase: true,
       overlay: true,

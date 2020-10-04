@@ -180,20 +180,17 @@
     name: 'ViewPort',
 
     props: {
-      tree: Object,
+      document: Object,
       activeComponent: Object,
       activeTool: Object,
       selectedElement: Object,
-      data: Object,
     },
 
     watch: {
-      tree: function() {
-        this.loadTree(this.tree, true)
-      },
-
-      activeTool: function() {
-        // this.snapAnchors.length = 0
+      document: function(document, oldDocument) {
+        this.unloadTree(oldDocument.tree, oldDocument, true)
+        this.loadTree(document.tree, document, true)
+        this.render()
       },
     },
 
@@ -384,7 +381,7 @@
       this.onWindowResize()
       window.addEventListener('resize', this.onWindowResize.bind(this), false)
 
-      this.loadTree(this.tree, true)
+      this.loadTree(this.document.tree, true)
       this.animate()
     },
 
@@ -584,7 +581,7 @@
       },
 
       loadElement: function(elem, node) {
-        this.unloadElement(elem, node)
+        this.unloadElement(elem, node, this.document)
         const vertices = elem.default_tesselation()
         var geometry = new LineGeometry()
         geometry.setPositions(vertices.flatMap(vertex => vertex))
@@ -593,7 +590,7 @@
         line.computeLineDistances()
         // line.scale.set(1, 1, 1)
         line.alcSelectable = true
-        this.data[elem.id()] = line
+        this.document.data[elem.id()] = line
         // line.component = node
         line.element = elem
         this.scene.add(line)
@@ -614,8 +611,8 @@
           })
         })
 
-        this.data[node_id].cachedElements = this.data[node_id].cachedElements || []
-        this.data[node_id].cachedElements.push(elem)
+        this.document.data[node_id].cachedElements = this.document.data[node_id].cachedElements || []
+        this.document.data[node_id].cachedElements.push(elem)
 
         // const regions = node.get_regions()
         // // console.log(regions)
@@ -625,18 +622,18 @@
         // })
       },
 
-      unloadElement: function(elem, node) {
-        this.scene.remove(this.data[elem.id()])
+      unloadElement: function(elem, node, document) {
+        this.scene.remove(document.data[elem.id()])
         const node_id = node.id()
-        const cache = this.data[node_id]
+        const cache = document.data[node_id]
         if(this.handles[node_id]) delete this.handles[node_id][elem.id()]
         this.handles = Object.assign({}, this.handles)
-        const cachedElements = this.data[node_id].cachedElements
-        if(cachedElements) this.data[node_id].cachedElements = cachedElements.filter(e => e != elem)
+        const cachedElements = document.data[node_id].cachedElements
+        if(cachedElements) document.data[node_id].cachedElements = cachedElements.filter(e => e != elem)
       },
 
       deleteElement: function(elem) {
-        // this.unloadElement(elem, node)
+        // this.unloadElement(elem, node, this.document)
         this.transformControl.detach()
         this.activeComponent.remove_element(elem.id())
         this.componentChanged(this.activeComponent)
@@ -644,19 +641,18 @@
       },
 
       loadTree: function(node, recursive) {
-        this.unloadTree(node, recursive)
-        if(this.data[node.id()].hidden) return
+        this.unloadTree(node, this.document, recursive)
+        if(this.document.data[node.id()].hidden) return
         const elements = node.get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
         if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
       },
 
-      unloadTree: function(node, recursive) {
+      unloadTree: function(node, document, recursive) {
         const node_id = node.id()
-        const cache = this.data[node_id]
-        const cachedElements = this.data[node_id].cachedElements
-        cachedElements && cachedElements.forEach(elem => this.unloadElement(elem, node))
-        if(recursive) node.get_children().forEach(child => this.unloadTree(child, true))
+        const cachedElements = document.data[node_id].cachedElements
+        cachedElements && cachedElements.forEach(elem => this.unloadElement(elem, node, document))
+        if(recursive) node.get_children().forEach(child => this.unloadTree(child, document, true))
       },
 
       componentChanged: function(comp, recursive) {

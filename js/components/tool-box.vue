@@ -1,5 +1,6 @@
 <template lang="pug">
   .tool-box
+
     .bordered.shelf
       ul.tabs
         li(
@@ -11,13 +12,17 @@
       ul.tools
         li.button(
           v-for="(tool, index) in tabs[activeTab].tools"
-          :class="{active: index == 0}"
-          @click="tool.type == 'feature' ? activateFeature(tool.title) : activateTool(tool.title)"
+          :class="{active: activeFeature && tool.feature && activeFeature.constructor.name == tool.feature.name}"
+          @click="tool.feature ? activateFeature(tool.feature) : activateTool(tool.title)"
         )
           fa-icon(:icon="tool.icon" fixed-width)
           .title(v-html="tool.title")
 
-    component(:is="activeFeatureComponent")
+    FeatureBox(
+      v-if="activeFeature"
+      :active-tool="activeTool"
+      :active-feature="activeFeature"
+    )
 </template>
 
 
@@ -92,13 +97,13 @@
         font-weight: bold
 
   .feature-box
-    // display: inline-block
     margin-top: 12px
 </style>
 
 
 <script>
   import FeatureBox from './feature-box.vue'
+  import { ExtrudeFeature } from './../features.js'
 
   export default {
     name: 'ToolBox',
@@ -115,6 +120,7 @@
       return {
         activeTab: 1,
         activeFeatureComponent: null,
+        activeFeature: null,
         tabs: [
           {
             title: 'Sketch',
@@ -129,7 +135,7 @@
           {
             title: 'Create',
             tools: [
-              { title: 'Extrude', icon: 'box', type: 'feature' },
+              { title: 'Extrude', icon: 'box', feature: ExtrudeFeature },
               { title: 'Revolve', icon: 'wave-square' },
               { title: 'Loft', icon: 'layer-group' },
               { title: 'Sweep', icon: 'route' },
@@ -155,17 +161,13 @@
       }
     },
 
-    mounted() {
-      this.activateFeature('FeatureBox')
-    },
-
     methods: {
       activateTool: function(toolName) {
         this.$root.$emit('activate-toolname', toolName)
       },
 
-      activateFeature: function(featureName) {
-        this.activeFeatureComponent = featureName
+      activateFeature: function(feature) {
+        this.activeFeature = new feature()
       },
     },
   }

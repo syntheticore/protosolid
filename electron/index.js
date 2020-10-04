@@ -227,8 +227,8 @@ let splash;
 
 function showSplash() {
   splash = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 300,
+    height: 200,
     transparent: true,
     frame: false,
     // vibrancy: 'ultra-dark',
@@ -238,7 +238,7 @@ function showSplash() {
     }
   })
   splash.loadFile('splash.html')
-  createWindow()
+  setTimeout(createWindow, 500)
 }
 
 // This method will be called when Electron has finished
@@ -283,7 +283,7 @@ ipcMain.on('vue-ready', function() {
   setTimeout(() => {
     splash.destroy()
     mainWindow.show()
-  }, 500)
+  }, 1500)
 });
 
 // In this file you can include the rest of your app's specific main process

@@ -1,39 +1,67 @@
 <template lang="pug">
   form.bordered.tipped.feature-box
-    //- h1.header Extrude
+
     .options
-      label(v-for="(fields, key) in settings")
+      label(v-for="(fields, key) in activeFeature.settings()")
         | {{ fields.title }}
         .picker(
           v-if="fields.type == 'profile' || fields.type == 'curve'" @click="pick(fields.type, key)"
           :ref="key"
-          :class="{active: activePicker == key, filled: data[key]}"
+          :class="{active: activePicker == key, filled: activeFeature[key]}"
           :data-color="fields.color"
         )
         input(
           v-if="fields.type == 'length'"
           type="number"
-          v-model="data[key]"
+          v-model="activeFeature[key]"
         )
         input(
           v-if="fields.type == 'bool'"
           type="checkbox"
-          v-model="data[key]"
+          v-model="activeFeature[key]"
         )
         select(v-if="fields.type == 'select'")
           option(v-for="option in fields.options") {{ option }}
+
+    .confirmation
+      button.ok
+        fa-icon(icon="check-circle" title="Confirm")
+      button.cancel
+        fa-icon(icon="times-circle" title="Cancel")
 </template>
 
 
 <style lang="stylus" scoped>
   .feature-box
     font-size: 12px
-    padding: 10px 14px
-    &::before
-      // left: 96px
+    display: flex
 
   .options
+    margin: 10px
     display: flex
+
+  .confirmation
+    display: flex
+    flex-direction: column
+    justify-content: space-around
+    background: $dark1
+
+  button
+    height: 100%
+    background: none
+    border: none
+    color: $bright1
+    font-size: 16px
+    transition: all 0.15s
+    padding-left: 9px
+    &:hover
+      &.ok
+        color: #b9ff64
+      &.cancel
+        color: #ff6f6f
+    &:active
+      color: $dark2 !important
+      transition: none
 
   label
     display: flex
@@ -58,7 +86,6 @@
     transition: all 0.1s
     &:hover
       border-width: 1px
-      // box-shadow: 0 0 5px rgba(white, 0.7)
     &.active
       animation: 1s infinite linear rotate
       border-style: dashed
@@ -98,42 +125,11 @@
 
     props: {
       activeTool: Object,
+      activeFeature: Object,
     },
 
     data() {
       return {
-        settings: {
-          profile: {
-            title: 'Profile',
-            type: 'profile',
-            color: 'pink',
-          },
-          rail: {
-            title: 'Rail',
-            type: 'curve',
-            color: 'purple',
-          },
-          distance: {
-            title: 'Distance',
-            type: 'length',
-          },
-          direction: {
-            title: 'Direction',
-            type: 'bool',
-          },
-          operation: {
-            title: 'Operation',
-            type: 'select',
-            options: ['join', 'cut', 'intersect', 'create'],
-          },
-        },
-        data: {
-          profile: null,
-          rail: null,
-          distance: 0,
-          direction: true,
-          operation: 'join',
-        },
         activePicker: null,
       }
     },
@@ -145,7 +141,6 @@
     methods: {
       pick: function(type, name) {
         this.$root.$once('picked', (item) => {
-          console.log('Picked', item)
           this.data[name] = item
           this.activePicker = null
         })

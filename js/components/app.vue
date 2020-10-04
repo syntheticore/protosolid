@@ -4,7 +4,7 @@
     :class="{fullscreen: isFullscreen, maximized: isMaximized}"
     :data-platform="platform"
   )
-    ToolBar(
+    TabBar(
       :documents="documents"
       :active-document="activeDocument"
       :is-maximized="isMaximized"
@@ -45,7 +45,7 @@
 
 
 <script>
-  import ToolBar from './tool-bar.vue'
+  import TabBar from './tab-bar.vue'
   import DocumentView from './document-view.vue'
   const wasmP = import('../../rust/pkg/wasm-index.js')
 
@@ -55,7 +55,7 @@
     name: 'app',
 
     components: {
-      ToolBar,
+      TabBar,
       DocumentView,
     },
 
@@ -96,8 +96,6 @@
         // console.log(e.keyCode)
         if(e.keyCode === 27) {
           this.$root.$emit('escape')
-        // } else if(e.keyCode === 46 || e.keyCode === 8) { // Del / Backspace
-        //   this.$root.$emit('delete')
         } else if(e.keyCode === 76) { // L
           this.$root.$emit('activate-toolname', 'Line')
         } else if(e.keyCode === 67) { // C
@@ -134,6 +132,9 @@
               { title: 'Extrude 2', id: lastId++ },
             ],
             tree: tree,
+            data: {
+              [tree.id()]: {},
+            },
             activeView: null,
             activePose: null,
             isViewDirty: false,

@@ -1,24 +1,50 @@
 <template lang="pug">
   footer.footer-view
-    .tool-info.bordered
-      b Select Tool
-      fa-icon(icon="mouse" fixed-width)
-      | Select geometry
-      fa-icon(icon="mouse" fixed-width)
-      | Bring up actions
-    .selection-info.bordered
-      div
-        span # Objects
-        span {{selectedElement ? 1 : 0}}
-      div
-        span Weight
-        span 12.3g
-      div
-        span Volume
-        span 140cm³
-      div
-        span Surface Area
-        span 20cm²
+
+    //- .tool-info.bordered
+    //-   b Select Tool
+    //-   fa-icon(icon="mouse" fixed-width)
+    //-   | Select geometry
+    //-   fa-icon(icon="mouse" fixed-width)
+    //-   | Bring up actions
+
+    transition(name="fade")
+      .selection-info.bordered(v-if="selectedElement")
+        div
+          span # Objects
+          span 1 {{type}}
+
+        div(v-if="type == 'Solid'")
+          span Weight
+          span 12.3 g
+
+        div(v-if="type == 'Solid'")
+          span Volume
+          span 140 cm³
+
+        div(v-if="type == 'Solid'")
+          span Surface Area
+          span 54 cm³
+
+        div(v-if="type == 'Line' || type == 'BezierSpline'")
+          span Length
+          span {{selectedElement.get_length().toFixed(2)}} mm
+
+        div(v-if="type == 'Circle'")
+          span Radius
+          span {{selectedElement.get_radius().toFixed(2)}} mm
+
+        div(v-if="type == 'Circle'")
+          span Diameter
+          span {{(selectedElement.get_radius() * 2).toFixed(2)}} mm
+
+        div(v-if="type == 'Circle'")
+          span Perimeter
+          span {{selectedElement.get_length().toFixed(2)}} mm
+
+        div(v-if="type == 'Circle'")
+          span Area
+          span {{selectedElement.get_area().toFixed(2)}} mm²
 </template>
 
 
@@ -29,7 +55,8 @@
     color: $bright2
     text-shadow: 0 1px 3px black
     display: flex
-    justify-content: space-between
+    // justify-content: space-between
+    justify-content: flex-end
     align-items: flex-end
     pointer-events: none
 
@@ -44,6 +71,7 @@
     // table-layout: fixed
     white-space: nowrap
     padding: 0
+    align-self: flex-end
 
     div
       display: inline-block
@@ -67,6 +95,13 @@
     margin-left: 9px
     margin-right: 3px
     color: $bright1
+
+  .fade-enter-active, .fade-leave-active
+    transition: all 0.4s
+
+  .fade-enter, .fade-leave-to
+    opacity: 0
+    transform: translateY(45px)
 </style>
 
 
@@ -80,6 +115,12 @@
 
     props: {
       selectedElement: Object
+    },
+
+    computed: {
+      type: function() {
+        return this.selectedElement.typename()
+      },
     },
 
     // data() {

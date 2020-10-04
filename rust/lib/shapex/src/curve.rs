@@ -126,7 +126,11 @@ impl Line {
   pub fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
     match intersection::intersect(&SketchElement::Line(self.clone()), cutter) {
       Intersection::None | Intersection::Contained | Intersection::Touch(_) | Intersection::Extended(_) => vec![self.clone()],
-      Intersection::Hit(mut points) => { //XXX points are not sorted along line
+      Intersection::Cross(mut points) | Intersection::Pierce(mut points) => { //XXX points are not sorted along line
+        // Check if intersection goes exactly through endpoint
+        if points[0].almost(self.points.0) || points[0].almost(self.points.1) {
+          return vec![self.clone()];
+        }
         points.push(self.points.1);
         let mut segments = vec![Self::new(self.points.0, points[0])];
         let mut iter = points.iter().peekable();
@@ -232,6 +236,18 @@ impl Circle {
     }
   }
 
+  pub fn diameter(&self) -> f64 {
+    self.radius * 2.0
+  }
+
+  pub fn circumfence(&self) -> f64 {
+    std::f64::consts::PI * 2.0 * self.radius
+  }
+
+  pub fn area(&self) -> f64 {
+    std::f64::consts::PI * self.radius.powf(2.0)
+  }
+
   pub fn split_with_line(&self, _line: &Line) -> Option<(Arc, Arc)> { None }
 
   pub fn split_with_arc(&self, _arc: &Arc) -> Option<(Arc, Arc)> { None }
@@ -256,7 +272,7 @@ impl Curve for Circle {
   }
 
   fn length(&self) -> f64 {
-    std::f64::consts::PI * 2.0 * self.radius
+    self.circumfence()
   }
 
   fn endpoints(&self) -> (Point3, Point3) {

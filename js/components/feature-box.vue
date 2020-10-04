@@ -1,7 +1,11 @@
 <template lang="pug">
-  form.bordered.tipped.feature-box
+  .bordered.tipped.feature-box
 
-    .options
+    //- header
+    //-   fa-icon(icon="box" title="Confirm")
+    //-   .title Extrude
+
+    form.options
       label(v-for="(fields, key) in activeFeature.settings()")
         | {{ fields.title }}
         .picker(
@@ -25,9 +29,9 @@
 
     .confirmation
       button.ok
-        fa-icon(icon="check-circle" title="Confirm")
+        fa-icon(icon="check-circle" title="Confirm" @click="confirm")
       button.cancel
-        fa-icon(icon="times-circle" title="Cancel")
+        fa-icon(icon="times-circle" title="Cancel" @click="cancel")
 </template>
 
 
@@ -35,6 +39,26 @@
   .feature-box
     font-size: 12px
     display: flex
+    &::before
+      left: 24px
+
+  // header
+  //   display: flex
+  //   flex-direction: column
+  //   justify-content: center
+  //   align-items: center
+  //   background: $dark1
+  //   padding: 0 10px
+  //   svg
+  //     font-size: 21px
+  //     color: $bright1
+  //     // transition: all 0.15s
+  //     filter: none
+  //   .title
+  //     color: $bright1
+  //     font-size: 11px
+  //     margin-top: 6px
+  //     font-weight: bold
 
   .options
     margin: 10px
@@ -134,10 +158,6 @@
       }
     },
 
-    mounted() {
-      console.log(this.$refs)
-    },
-
     methods: {
       pick: function(type, name) {
         this.$root.$once('picked', (item) => {
@@ -156,6 +176,14 @@
         } else if(type == 'curve') {
           this.$root.$emit('pick-curve', pickerPos)
         }
+      },
+
+      confirm: function(e) {
+        this.$emit('confirm')
+      },
+
+      cancel: function(e) {
+        this.$emit('cancel')
       },
     },
 

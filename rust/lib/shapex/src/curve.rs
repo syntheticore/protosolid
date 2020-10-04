@@ -123,6 +123,10 @@ impl Line {
     (self.points.1 - self.points.0).normalize()
   }
 
+  pub fn angle_to(&self, other: Self) -> f64 {
+    self.tangent().dot(other.tangent()).acos()
+  }
+
   pub fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
     match intersection::intersect(&SketchElement::Line(self.clone()), cutter) {
       Intersection::None | Intersection::Contained | Intersection::Touch(_) | Intersection::Extended(_) => vec![self.clone()],
@@ -451,5 +455,12 @@ mod tests {
     let segments = lines.1.split_with(&SketchElement::Line(lines.0));
     assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
     assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
+  }
+
+  #[test]
+  fn angle_90() {
+    let lines = test_data::crossing_lines();
+    let angle = lines.0.angle_to(lines.1);
+    assert_eq!(angle, std::f64::consts::PI / 2.0);
   }
 }

@@ -1,5 +1,6 @@
 <template lang="pug">
   .view-port
+
     canvas(
       ref="canvas"
       @click="click"
@@ -8,21 +9,24 @@
       @mousedown="mouseDown"
       @mousemove="mouseMove"
     )
+
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
       path(v-for="path in paths" :d="path.data" stroke="red" stroke-width="2")
+
     transition-group.anchors(name="anchors" tag="ul")
-      //- li(
-      //-   v-for="anchor in snapAnchors"
-      //-   :key="anchor.id"
-      //-   :style="{top: anchor.pos.y + 'px', left: anchor.pos.x + 'px'}"
-      //-   @click="anchorClicked(anchor)"
-      //- )
       li(
         v-if="snapAnchor"
         :key="snapAnchor.id"
         :style="{top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px'}"
         @click="anchorClicked(snapAnchor)"
       )
+      //- li(
+      //-   v-for="anchor in snapAnchors"
+      //-   :key="anchor.id"
+      //-   :style="{top: anchor.pos.y + 'px', left: anchor.pos.x + 'px'}"
+      //-   @click="anchorClicked(anchor)"
+      //- )
+
     ul.handles
       li(
         v-for="handle in allHandles"
@@ -420,8 +424,7 @@
         const coords = getMouseCoords(e, this.$refs.canvas)
         const vec = this.snapVector(this.fromScreen(coords))
         if(vec) this.activeTool.mouseDown(vec, coords)
-        const toolName = this.activeTool.constructor.name
-        // if(toolName != 'ManipulationTool' && toolName != 'ObjectSelectionTool') this.viewControls.enabled = false
+        // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
         this.lastCoords = coords
         isDragging = true
       },
@@ -431,7 +434,7 @@
         if(this.isOrbiting) return
         const coords = getMouseCoords(e, this.$refs.canvas)
         let vec = this.fromScreen(coords)
-        if(this.activeTool.constructor.name != 'ManipulationTool' || isDragging) vec = this.snapVector(vec)
+        if(this.activeTool.constructor != ManipulationTool || isDragging) vec = this.snapVector(vec)
         if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
@@ -482,7 +485,7 @@
       },
 
       handleMouseDown: function(e, handle) {
-        if(this.activeTool.constructor.name == 'ManipulationTool') {
+        if(this.activeTool.constructor == ManipulationTool) {
           this.activeHandle = handle
         }
         this.mouseDown(e)

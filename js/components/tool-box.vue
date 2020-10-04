@@ -1,7 +1,7 @@
 <template lang="pug">
   .tool-box
-
     .bordered.shelf
+
       ul.tabs
         li(
           v-for="(tab, index) in tabs"
@@ -9,20 +9,25 @@
           :class="{active: index == activeTab}"
         )
           | {{ tab.title }}
-      ul.tools
-        li.button(
-          v-for="(tool, index) in tabs[activeTab].tools"
-          :class="{active: activeFeature && tool.feature && activeFeature.constructor.name == tool.feature.name}"
-          @click="tool.feature ? activateFeature(tool.feature) : activateTool(tool.title)"
-        )
-          fa-icon(:icon="tool.icon" fixed-width)
-          .title(v-html="tool.title")
 
-    FeatureBox(
-      v-if="activeFeature"
-      :active-tool="activeTool"
-      :active-feature="activeFeature"
-    )
+      ul.tools
+        li(v-for="(tool, index) in tabs[activeTab].tools")
+
+          button.button(
+            :class="{active: activeFeature && tool.feature && activeFeature.constructor == tool.feature}"
+            @click="tool.feature ? activateFeature(tool.feature) : activateTool(tool.title)"
+          )
+            fa-icon(:icon="tool.icon" fixed-width)
+            .title(v-html="tool.title")
+
+          transition(name="fade")
+            FeatureBox(
+              v-if="activeFeature && tool.feature && activeFeature.constructor == tool.feature"
+              :active-tool="activeTool"
+              :active-feature="activeFeature"
+              @confirm="closeFeature"
+              @cancel="closeFeature"
+            )
 </template>
 
 
@@ -39,7 +44,7 @@
     border-bottom-left-radius: 6px
     border-bottom-right-radius: 6px
     background: rgba($dark2, 0.9)
-    overflow: hidden
+    // overflow: hidden
     // min-width: 405px
 
   .tabs
@@ -66,6 +71,7 @@
     padding-bottom: 4px
     li
       display: inline-block
+    .button
       text-align: center
       // background: $dark1
       background: none
@@ -77,6 +83,7 @@
       margin-right: 0
       margin-bottom: 0
       text-shadow: none
+      position: relative
       &:hover, &.active
         background: $dark1 * 1.15
         svg
@@ -97,7 +104,15 @@
         font-weight: bold
 
   .feature-box
-    margin-top: 12px
+    margin-top: 10px
+    position: absolute
+
+  .fade-enter-active, .fade-leave-active
+    transition: all 0.15s
+
+  .fade-enter, .fade-leave-to
+    opacity: 0
+    transform: translateY(10px)
 </style>
 
 
@@ -119,7 +134,6 @@
     data() {
       return {
         activeTab: 1,
-        activeFeatureComponent: null,
         activeFeature: null,
         tabs: [
           {
@@ -168,6 +182,10 @@
 
       activateFeature: function(feature) {
         this.activeFeature = new feature()
+      },
+
+      closeFeature: function() {
+        this.activeFeature = null
       },
     },
   }

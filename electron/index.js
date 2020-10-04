@@ -115,7 +115,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 450,
     titleBarStyle: 'hiddenInset',
-    devTools: true,
+    devTools: false,
     backgroundColor: isMac ? '#000' : false,
     show: false,
     frame: isMac,
@@ -129,6 +129,22 @@ function createWindow() {
       scrollBounce: true,
     }
   })
+
+  // mainWindow = new BrowserWindow({
+  //   width: 1950,
+  //   height: 850,
+  //   minWidth: 800,
+  //   minHeight: 450,
+  //   titleBarStyle: 'hiddenInset',
+  //   devTools: true,
+  //   backgroundColor: isMac ? '#000' : false,
+  //   show: true,
+  //   webPreferences: {
+  //     preload: path.join(__dirname, 'preload.js'),
+  //     nodeIntegration: false,
+  //     scrollBounce: true,
+  //   }
+  // })
 
   // and load the index.html of the app.
   mainWindow.loadFile('index.html')

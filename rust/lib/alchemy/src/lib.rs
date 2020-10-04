@@ -10,14 +10,10 @@ pub use shapex::*;
 pub struct Component {
   pub id: Uuid,
   pub title: String,
-
   pub bodies: Vec<Solid>,
-
-  // pub sketches: Vec<Rc<RefCell<Sketch>>>,
   pub visible: bool,
   pub children: Vec<Rc<RefCell<Component>>>,
-  // pub sketch_elements: Vec<Rc<RefCell<dyn SketchElement>>>,
-  pub sketch_elements: Vec<Rc<RefCell<SketchElement>>>,
+  pub sketch: Sketch,
 }
 
 impl Component {
@@ -26,9 +22,21 @@ impl Component {
     this.id = Uuid::new_v4();
     this
   }
+}
+
+
+#[derive(Debug, Default)]
+pub struct Sketch {
+  pub elements: Vec<Rc<RefCell<SketchElement>>>,
+}
+
+impl Sketch {
+  pub fn new() -> Self {
+    Default::default()
+  }
 
   pub fn closed_regions(&self) -> Vec<PolyLine> {
-    let cut_elements = Self::split_all(&self.sketch_elements);
+    let cut_elements = Self::split_all(&self.elements);
     let islands = Self::build_islands(&cut_elements);
     let mut regions = vec![];
     for island in islands.iter() {
@@ -42,7 +50,7 @@ impl Component {
   }
 
   pub fn all_split(&self) -> Vec<SketchElement> {
-    Self::split_all(&self.sketch_elements)
+    Self::split_all(&self.elements)
   }
 
   fn split_all(elems: &Vec<Rc<RefCell<SketchElement>>>) -> Vec<SketchElement> {
@@ -62,8 +70,7 @@ impl Component {
   fn build_islands(elements: &Vec<SketchElement>) -> Vec<Vec<SketchElement>> {
     let mut unused_elements = elements.clone();
     let mut islands = vec![];
-    while unused_elements.len() != 0 {
-      let start_elem = unused_elements.pop().unwrap();
+    while let Some(start_elem) = unused_elements.pop() {
       let mut island = vec![];
       Self::build_island(&start_elem, &mut island, &unused_elements);
       for island_elem in island.iter() {
@@ -283,6 +290,108 @@ pub fn as_controllable_mut(elem: &mut SketchElement) -> &mut dyn Controllable {
 }
 
 
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use shapex::test_data;
+
+  #[test]
+  fn split_all_crossing() {
+    let mut sketch = Sketch::new();
+    let lines = test_data::crossing_lines();
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    let segments = sketch.all_split();
+    assert_eq!(segments.len(), 4, "{} segments found instead of 4", segments.len());
+    assert_eq!(segments[0].as_curve().length(), 0.5, "Segment had wrong length");
+    assert_eq!(segments[1].as_curve().length(), 0.5, "Segment had wrong length");
+    assert_eq!(segments[2].as_curve().length(), 0.5, "Segment had wrong length");
+    assert_eq!(segments[3].as_curve().length(), 0.5, "Segment had wrong length");
+  }
+
+  #[test]
+  fn split_all_parallel() {
+    let mut sketch = Sketch::new();
+    let lines = test_data::parallel_lines();
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    let segments = sketch.all_split();
+    assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
+    assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
+  }
+
+  #[test]
+  fn t_split() {
+    let mut sketch = Sketch::new();
+    let lines = test_data::t_section();
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    let segments = sketch.all_split();
+    assert_eq!(segments.len(), 3, "{} segments found instead of 3", segments.len());
+    assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments[2].as_curve().length(), 1.0, "Segment had wrong length");
+  }
+
+  #[test]
+  fn region_rect() {
+    let mut sketch = Sketch::new();
+    let lines = test_data::rectangle();
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.2))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.3))));
+    let cut_elements = Sketch::split_all(&sketch.elements);
+    let islands = Sketch::build_islands(&cut_elements);
+    let regions = sketch.closed_regions();
+    assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
+    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
+    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
+  }
+
+  #[test]
+  fn region_crossing_rect() {
+    let mut sketch = Sketch::new();
+    let lines = test_data::crossing_rectangle();
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.2))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.3))));
+    let cut_elements = sketch.all_split();
+    let islands = Sketch::build_islands(&cut_elements);
+    let regions = sketch.closed_regions();
+    sketch.elements.clear();
+    for split in cut_elements.iter() {
+      sketch.elements.push(Rc::new(RefCell::new(split.clone())));
+    }
+    let cut_elements2 = Sketch::split_all(&sketch.elements);
+    assert_eq!(cut_elements.len(), 8, "{} cut_elements found instead of 8", cut_elements.len());
+    assert_eq!(cut_elements2.len(), 8, "{} cut_elements2 found instead of 8", cut_elements2.len());
+    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
+    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
+  }
+
+  #[test]
+  fn region_crossing_corner() {
+    let mut sketch = Sketch::new();
+    let mut lines = test_data::rectangle();
+    lines.2.points.1.x = -2.0;
+    lines.3.points.0.z = -2.0;
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.2))));
+    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.3))));
+    let cut_elements = sketch.all_split();
+    let islands = Sketch::build_islands(&cut_elements);
+    let regions = sketch.closed_regions();
+    assert_eq!(cut_elements.len(), 6, "{} cut_elements found instead of 6", cut_elements.len());
+    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
+    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
+  }
+}
+
+
 // pub struct VertexIterator<'a> {
 //   elem_iter: std::slice::Iter<'a, PolyLine>,
 //   vertex_iter: Option<std::slice::Iter<'a, Point3>>,
@@ -345,105 +454,3 @@ pub fn as_controllable_mut(elem: &mut SketchElement) -> &mut dyn Controllable {
 //   //   VertexIterator::new(self)
 //   // }
 // }
-
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use shapex::test_data;
-
-  #[test]
-  fn split_all_crossing() {
-    let mut comp = Component::new();
-    let lines = test_data::crossing_lines();
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
-    let segments = comp.all_split();
-    assert_eq!(segments.len(), 4, "{} segments found instead of 4", segments.len());
-    assert_eq!(segments[0].as_curve().length(), 0.5, "Segment had wrong length");
-    assert_eq!(segments[1].as_curve().length(), 0.5, "Segment had wrong length");
-    assert_eq!(segments[2].as_curve().length(), 0.5, "Segment had wrong length");
-    assert_eq!(segments[3].as_curve().length(), 0.5, "Segment had wrong length");
-  }
-
-  #[test]
-  fn split_all_parallel() {
-    let mut comp = Component::new();
-    let lines = test_data::parallel_lines();
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
-    let segments = comp.all_split();
-    assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
-    assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
-    assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
-  }
-
-  #[test]
-  fn t_split() {
-    let mut comp = Component::new();
-    let lines = test_data::t_section();
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
-    let segments = comp.all_split();
-    assert_eq!(segments.len(), 3, "{} segments found instead of 3", segments.len());
-    assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
-    assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
-    assert_eq!(segments[2].as_curve().length(), 1.0, "Segment had wrong length");
-  }
-
-  #[test]
-  fn region_rect() {
-    let mut comp = Component::new();
-    let lines = test_data::rectangle();
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.2))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.3))));
-    let cut_elements = Component::split_all(&comp.sketch_elements);
-    let islands = Component::build_islands(&cut_elements);
-    let regions = comp.closed_regions();
-    assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
-    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
-    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
-  }
-
-  #[test]
-  fn region_crossing_rect() {
-    let mut comp = Component::new();
-    let lines = test_data::crossing_rectangle();
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.2))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.3))));
-    let cut_elements = comp.all_split();
-    let islands = Component::build_islands(&cut_elements);
-    let regions = comp.closed_regions();
-    comp.sketch_elements.clear();
-    for split in cut_elements.iter() {
-      comp.sketch_elements.push(Rc::new(RefCell::new(split.clone())));
-    }
-    let cut_elements2 = Component::split_all(&comp.sketch_elements);
-    assert_eq!(cut_elements.len(), 8, "{} cut_elements found instead of 8", cut_elements.len());
-    assert_eq!(cut_elements2.len(), 8, "{} cut_elements2 found instead of 8", cut_elements2.len());
-    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
-    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
-  }
-
-  #[test]
-  fn region_crossing_corner() {
-    let mut comp = Component::new();
-    let mut lines = test_data::rectangle();
-    lines.2.points.1.x = -2.0;
-    lines.3.points.0.z = -2.0;
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.0))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.1))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.2))));
-    comp.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(lines.3))));
-    let cut_elements = comp.all_split();
-    let islands = Component::build_islands(&cut_elements);
-    let regions = comp.closed_regions();
-    assert_eq!(cut_elements.len(), 6, "{} cut_elements found instead of 6", cut_elements.len());
-    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
-    assert_eq!(regions.len(), 4, "{} regions found instead of 4", regions.len());
-  }
-}

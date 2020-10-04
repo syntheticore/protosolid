@@ -208,7 +208,7 @@ impl JsComponent {
   // }
 
   pub fn get_sketch_elements(&self) -> Array {
-    self.real.borrow().sketch_elements.iter().map(|elem| {
+    self.real.borrow().sketch.elements.iter().map(|elem| {
       JsValue::from(JsSketchElement::from(elem))
     }).collect()
   }
@@ -228,7 +228,7 @@ impl JsComponent {
       Point3::new(1.0, 1.0, 2.5),
       Point3::new(0.0, 1.0, 2.75),
     ]);
-    self.real.borrow_mut().sketch_elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
+    self.real.borrow_mut().sketch.elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
   }
 
   pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsSketchElement {
@@ -236,8 +236,8 @@ impl JsComponent {
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
     let line = Line::new(Point3::from(p1), Point3::from(p2));
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Line(line))));
-    JsSketchElement::from(&real.sketch_elements.last().unwrap())
+    real.sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(line))));
+    JsSketchElement::from(&real.sketch.elements.last().unwrap())
   }
 
   pub fn add_spline(&self, vertices: Array) -> JsSketchElement {
@@ -247,8 +247,8 @@ impl JsComponent {
     }).collect();
     let spline = BezierSpline::new(points);
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
-    JsSketchElement::from(&real.sketch_elements.last().unwrap())
+    real.sketch.elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
+    JsSketchElement::from(&real.sketch.elements.last().unwrap())
   }
 
   pub fn add_circle(&mut self, center: JsValue, radius: JsValue) -> JsSketchElement {
@@ -256,26 +256,26 @@ impl JsComponent {
     let radius: f64 = radius.into_serde().unwrap();
     let circle = Circle::new(Point3::from(center), radius);
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.push(Rc::new(RefCell::new(SketchElement::Circle(circle))));
-    JsSketchElement::from(&real.sketch_elements.last().unwrap())
+    real.sketch.elements.push(Rc::new(RefCell::new(SketchElement::Circle(circle))));
+    JsSketchElement::from(&real.sketch.elements.last().unwrap())
   }
 
   pub fn remove_element(&mut self, id: JsValue) {
     let id: uuid::Uuid = id.into_serde().unwrap();
     let mut real = self.real.borrow_mut();
-    real.sketch_elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id);
+    real.sketch.elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id);
   }
 
   pub fn get_regions(&self) -> Array {
-    self.real.borrow().closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
+    self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
   }
 
   pub fn get_all_split(&self) -> Array {
     let mut real = self.real.borrow_mut();
-    let splits = real.all_split();
-    real.sketch_elements.clear();
+    let splits = real.sketch.all_split();
+    real.sketch.elements.clear();
     for split in splits.iter() {
-      real.sketch_elements.push(Rc::new(RefCell::new(split.clone())));
+      real.sketch.elements.push(Rc::new(RefCell::new(split.clone())));
     }
     splits.iter().map(|elem| {
       JsValue::from(JsSketchElement::from(&Rc::new(RefCell::new(elem.clone()))))

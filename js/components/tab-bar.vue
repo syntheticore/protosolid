@@ -184,7 +184,7 @@
     -webkit-user-select: none
     min-width: 24px
     &.dynamic
-      flex: 1 1 auto
+      flex: 100 1 auto
       min-width: 44px
     &.fixed
       display: none

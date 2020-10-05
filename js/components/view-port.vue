@@ -160,7 +160,7 @@
   import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
   import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
-  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool, ExtrudeTool } from './../tools.js'
+  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool } from './../tools.js'
 
   function getMouseCoords(e, canvas) {
     var coords = new THREE.Vector2()
@@ -215,8 +215,9 @@
     mounted: function() {
       renderer = new THREE.WebGLRenderer({
         canvas: this.$el.querySelector('canvas'),
-        antialias: window.devicePixelRatio <= 1.0,
-        alpha: true
+        // antialias: window.devicePixelRatio <= 1.0,
+        antialias: true,
+        alpha: true,
       })
 
       renderer.setPixelRatio(window.devicePixelRatio)
@@ -518,7 +519,6 @@
           Line: LineTool,
           Spline: SplineTool,
           Circle: CircleTool,
-          Extrude: ExtrudeTool,
         }
         const tool = new tools[toolName](this.activeComponent, this)
         this.$emit('activate-tool', tool)
@@ -566,8 +566,8 @@
       },
 
       toScreen: function(vec) {
-        const widthHalf = 0.5 * renderer.domElement.width
-        const heightHalf = 0.5 * renderer.domElement.height
+        const widthHalf = 0.5 * renderer.domElement.width / window.devicePixelRatio
+        const heightHalf = 0.5 * renderer.domElement.height / window.devicePixelRatio
         // camera.updateMatrixWorld()
         const vector = vec.clone().project(camera)
         return new THREE.Vector2(

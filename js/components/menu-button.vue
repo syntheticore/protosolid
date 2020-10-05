@@ -17,7 +17,7 @@
     display: inline-block
     margin: 4px 5px
     // color: $bright1
-    .fullscreen .tool-bar &
+    .fullscreen .tab-bar &
       margin: 0 4px
       top: -1px
       &:first-child

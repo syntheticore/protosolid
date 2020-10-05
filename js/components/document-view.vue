@@ -75,7 +75,7 @@
       overflow: hidden
     &.bar-right
       right: 14px
-      bottom: 155px
+      bottom: 35px
       display: flex
       flex-direction: column
       h1

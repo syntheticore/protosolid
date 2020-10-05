@@ -95,7 +95,7 @@
       // background: $dark2
       // border-top: none
     .tabs li
-      padding: 10px 12px
+      padding: 11px 12px
     .tab-bar
       border-top: none
     .window-controls button:last-child

@@ -33,7 +33,9 @@
     overflow: hidden
     color: $bright1
     &.fullscreen
-      grid-template-rows: 32px 1fr
+    &.maximized
+    &[data-platform="browser"]
+      grid-template-rows: 33px 1fr
 
   .tool-bar
     grid-area: header

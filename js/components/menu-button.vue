@@ -18,6 +18,8 @@
     margin: 4px 5px
     // color: $bright1
     .fullscreen .tab-bar &
+    .maximized .tab-bar &
+    [data-platform="browser"] .tab-bar &
       // margin: 0 4px
       // top: -1px
       // &:first-child

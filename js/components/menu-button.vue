@@ -18,18 +18,20 @@
     margin: 4px 5px
     // color: $bright1
     .fullscreen .tab-bar &
-      margin: 0 4px
-      top: -1px
-      &:first-child
-        margin-left: 0
-      &:last-child
-        margin-right: 0
+      // margin: 0 4px
+      // top: -1px
+      // &:first-child
+      //   margin-left: 0
+      // &:last-child
+      //   margin-right: 0
+      // button
+      //   padding: 3px 12px
+      //   border-radius: 0
+      //   // height: 23px
+      //   border-top: none
+      //   border-bottom: none
       button
-        padding: 3px 12px
-        border-radius: 0
-        // height: 23px
-        border-top: none
-        border-bottom: none
+        padding: 2px 8px
     &.left
       .pop-up
         right: unset

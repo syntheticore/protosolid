@@ -86,14 +86,6 @@
     > *
       flex: 0 0 auto
 
-
-  .fullscreen
-    .tabs li
-      padding: 6px 12px
-      height: 23px
-    .tab-bar
-      border-top: none
-
   .fullscreen
   .maximized
   [data-platform="browser"]
@@ -102,6 +94,10 @@
       border-radius: 0
       // background: $dark2
       // border-top: none
+    .tabs li
+      padding: 10px 12px
+    .tab-bar
+      border-top: none
     .window-controls button:last-child
       border-radius: 0
 
@@ -146,7 +142,8 @@
       // box-shadow: 0 0 3px black
       // border-bottom: none
       padding: 12px 12px
-      height: 36px
+      // height: 36px
+      height: 100%
       font-size: 12px
       font-weight: bold
       min-width: 120px

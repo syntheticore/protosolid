@@ -33,7 +33,7 @@
     overflow: hidden
     color: $bright1
     &.fullscreen
-      grid-template-rows: 24px 1fr
+      grid-template-rows: 32px 1fr
 
   .tool-bar
     grid-area: header

@@ -12,6 +12,13 @@
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
       path(v-for="path in paths" :d="path.data" stroke="red" stroke-width="2")
+      line(
+        v-for="guide in guides"
+        :x1="guide.start.x"
+        :y1="guide.start.y"
+        :x2="guide.end.x"
+        :y2="guide.end.y"
+      )
 
     transition-group.anchors(name="anchors" tag="ul")
       li(
@@ -58,6 +65,26 @@
     pointer-events: none
     width: 100%
     height: 100%
+    line
+      stroke: white
+      // filter: drop-shadow(0 0 2px $highlight)
+      fill-opacity: 0
+      stroke-width: 2
+      stroke-linecap: round
+      stroke-dasharray: 3, 7
+      animation-duration: 1s
+      animation-name: blink
+      animation-iteration-count: infinite
+      animation-direction: alternate
+    @keyframes blink {
+      from {
+        opacity: 0.35
+      }
+
+      to {
+        opacity: 1
+      }
+    }
 
   .handles, .anchors
     position: absolute
@@ -162,23 +189,27 @@
 
   import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool } from './../tools.js'
 
-  function getMouseCoords(e, canvas) {
-    var coords = new THREE.Vector2()
-    // var rect = e.target.getBoundingClientRect();
-    // console.log(rect)
-    // coords.x = (e.clientX - rect.left) / canvas.offsetWidth * 2 - 1
-    // coords.y = - (e.clientY - rect.top) / canvas.offsetHeight * 2 + 1
-    coords.x = (e.clientX - 0) / canvas.offsetWidth * 2 - 1
-    coords.y = - (e.clientY - 39) / canvas.offsetHeight * 2 + 1
-    return coords
-  }
+  const snapDistance = 10.5 // px
+  const maxSnapReferences = 5
+
+  let isDragging = false
 
   var rendering = true
   var renderer, camera, mesh, pointMaterial
 
-  const snapDistance = 10.5 // px
+  function getCanvasCoords(mouseCoords, canvas) {
+    return new THREE.Vector2(
+      mouseCoords.x / canvas.offsetWidth * 2 - 1,
+      -mouseCoords.y / canvas.offsetHeight * 2 + 1
+    )
+  }
 
-  let isDragging = false
+  function getMouseCoords(e) {
+    // var rect = e.target.getBoundingClientRect();
+    // coords.x = (e.clientX - rect.left)
+    // coords.y = - (e.clientY - rect.top)
+    return new THREE.Vector2(e.clientX, e.clientY - 39)
+  }
 
   export default {
     name: 'ViewPort',
@@ -203,6 +234,7 @@
         snapAnchor: null,
         handles: {},
         paths: [],
+        guides: [],
       }
     },
 
@@ -383,6 +415,8 @@
         }
       });
 
+      this.lastSnaps = []
+
       this.onWindowResize()
       window.addEventListener('resize', this.onWindowResize.bind(this), false)
 
@@ -403,13 +437,13 @@
 
       click: function(e) {
         this.viewControls.enabled = true
-        const coords = getMouseCoords(e, this.$refs.canvas)
+        const coords = getCanvasCoords(getMouseCoords(e), this.$refs.canvas)
         if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return this.render()
         this.activeTool.click(coords)
       },
 
       doubleClick: function(e) {
-        const coords = getMouseCoords(e, this.$refs.canvas)
+        const coords = getCanvasCoords(getMouseCoords(e), this.$refs.canvas)
         this.viewControlsTarget = this.fromScreen(coords)
         this.render()
       },
@@ -417,31 +451,35 @@
       mouseUp: function(e) {
         this.activeHandle = null
         this.snapAnchor = null
+        this.guides = []
         isDragging = false
       },
 
       mouseDown: function(e) {
         if(e.button != 0) return
-        const coords = getMouseCoords(e, this.$refs.canvas)
-        const vec = this.snapVector(this.fromScreen(coords))
-        if(vec) this.activeTool.mouseDown(vec, coords)
+        const [vec, coords, canvasCoords] = this.snap(e)
+        if(vec) this.activeTool.mouseDown(vec, canvasCoords)
         // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
-        this.lastCoords = coords
+        this.lastCoords = canvasCoords
         isDragging = true
       },
 
       mouseMove: function(e) {
         if(e.button != 0) return
         if(this.isOrbiting) return
-        const coords = getMouseCoords(e, this.$refs.canvas)
-        let vec = this.fromScreen(coords)
-        if(this.activeTool.constructor != ManipulationTool || isDragging) vec = this.snapVector(vec)
-        if(vec) this.activeTool.mouseMove(vec, coords)
+        const [vec, coords, canvasCoords] = this.snap(e)
+        if(vec) this.activeTool.mouseMove(vec, canvasCoords)
       },
 
-      snapVector: function(vec) {
-        if(!vec) return
-        const vecScreen = this.toScreen(vec)
+      snap: function(e) {
+        const coords = getMouseCoords(e)
+        const canvasCoords = getCanvasCoords(coords, this.$refs.canvas)
+        let vec = this.fromScreen(canvasCoords)
+        if(this.activeTool.constructor != ManipulationTool || isDragging) vec = this.snapToPoints(coords) || this.snapToGuides(vec) || vec
+        return [vec, coords, canvasCoords]
+      },
+
+      snapToPoints: function(coords) {
         const sketchElements = this.activeComponent.get_sketch_elements()
         const snapPoints = sketchElements.flatMap(elem => {
           let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
@@ -461,7 +499,7 @@
         let closestDist = 99999
         let target
         snapPoints.forEach(p => {
-          const dist = this.toScreen(p).distanceTo(vecScreen)
+          const dist = this.toScreen(p).distanceTo(coords)
           if(dist < snapDistance && dist < closestDist) {
             closestDist = dist
             target = p
@@ -473,12 +511,48 @@
             type: 'snap',
             pos: this.toScreen(target),
             vec: target,
-            id: '' + vec.x + vec.y + vec.z,
+            id: '' + target.x + target.y + target.z,
           }
+          this.lastSnaps.unshift(target)
+          if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
         } else {
           this.snapAnchor = null
         }
-        return target || vec
+        return target
+      },
+
+      snapToGuides: function(vec) {
+        if(!vec) return
+        let snapX
+        this.lastSnaps.some(snap => {
+          if(Math.abs(vec.x - snap.x) < 0.1) {
+            snapX = snap
+            return true
+          }
+        })
+        let snapZ
+        this.lastSnaps.some(snap => {
+          if(Math.abs(vec.z - snap.z) < 0.1) {
+            snapZ = snap
+            return true
+          }
+        })
+        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, 0, snapZ ? snapZ.z : vec.z)
+        const screenSnapVec = this.toScreen(snapVec)
+        this.guides = []
+        if(snapX) {
+          this.guides.push({
+            start: screenSnapVec,
+            end: this.toScreen(snapX),
+          })
+        }
+        if(snapZ) {
+          this.guides.push({
+            start: screenSnapVec,
+            end: this.toScreen(snapZ),
+          })
+        }
+        if(snapX || snapZ) return snapVec
       },
 
       anchorClicked: function(anchor) {

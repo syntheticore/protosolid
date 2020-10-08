@@ -11,28 +11,24 @@
     )
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
-      path(v-for="path in paths" :d="path.data" stroke="red" stroke-width="2")
-      line(
-        v-for="guide in guides"
-        :x1="guide.start.x"
-        :y1="guide.start.y"
-        :x2="guide.end.x"
-        :y2="guide.end.y"
-      )
+      path(v-for="path in paths" :d="path.data" :stroke="path.color")
+      transition-group(name="hide" tag="g")
+        line(
+          v-for="guide in guides"
+          :key="guide.id"
+          :x1="guide.start.x"
+          :y1="guide.start.y"
+          :x2="guide.end.x"
+          :y2="guide.end.y"
+        )
 
-    transition-group.anchors(name="anchors" tag="ul")
+    transition-group.anchors(name="hide" tag="ul")
       li(
         v-if="snapAnchor"
         :key="snapAnchor.id"
         :style="{top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px'}"
         @click="anchorClicked(snapAnchor)"
       )
-      //- li(
-      //-   v-for="anchor in snapAnchors"
-      //-   :key="anchor.id"
-      //-   :style="{top: anchor.pos.y + 'px', left: anchor.pos.x + 'px'}"
-      //-   @click="anchorClicked(anchor)"
-      //- )
 
     ul.handles
       li(
@@ -65,26 +61,15 @@
     pointer-events: none
     width: 100%
     height: 100%
-    line
-      stroke: white
-      // filter: drop-shadow(0 0 2px $highlight)
+    line, path
       fill-opacity: 0
       stroke-width: 2
       stroke-linecap: round
       stroke-dasharray: 3, 7
-      animation-duration: 1s
-      animation-name: blink
-      animation-iteration-count: infinite
-      animation-direction: alternate
-    @keyframes blink {
-      from {
-        opacity: 0.35
-      }
-
-      to {
-        opacity: 1
-      }
-    }
+    line
+      stroke: white
+    path
+      stroke-dasharray: 4, 7
 
   .handles, .anchors
     position: absolute
@@ -129,23 +114,15 @@
         pointer-events: none
 
   .anchors li
-    // pointer-events: auto
     &::after
-      // opacity: 0
-      // transform: scale(2)
       transform: scale(1)
       opacity: 1
       width:  calc(100% - 2px)
       height: calc(100% - 2px)
-      border: 2px solid purple * 1.6
-      // transition: all 0.2s
+      border: 2px solid $highlight * 1.6
       animation-duration: 0.2s
-      animation-name: slidein
-    // &:hover
-    //   &::after
-    //     transform: scale(1)
-    //     opacity: 1
-    @keyframes slidein {
+      animation-name: focus
+    @keyframes focus {
       from {
         opacity: 0
         transform: scale(2)
@@ -158,21 +135,21 @@
     }
 
   .handles li
-    // cursor: move
     pointer-events: auto
     &:hover
       &::before
-        background: $highlight * 1.6
+        width: 5px
+        height: 5px
     &:active
       &::before
         width:  5px
         height: 5px
 
-  .anchors-enter-active
-  .anchors-leave-active
+  .hide-enter-active
+  .hide-leave-active
     transition: all 0.2s
-  .anchors-enter
-  .anchors-leave-to
+  .hide-enter
+  .hide-leave-to
     opacity: 0
 </style>
 
@@ -384,7 +361,7 @@
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('white')
 
-      const handlePick = (pickerCoords, tool) => {
+      const handlePick = (pickerCoords, color, tool) => {
         this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
           this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')
@@ -393,16 +370,17 @@
             target: center,
             origin: pickerCoords,
             data: this.buildPath(pickerCoords, center),
+            color,
           })
         }))
       }
 
-      this.$root.$on('pick-profile', (pickerCoords) => {
-        handlePick(pickerCoords, ProfileSelectionTool)
+      this.$root.$on('pick-profile', (pickerCoords, color) => {
+        handlePick(pickerCoords, color, ProfileSelectionTool)
       })
 
-      this.$root.$on('pick-curve', (pickerCoords) => {
-        handlePick(pickerCoords, ObjectSelectionTool)
+      this.$root.$on('pick-curve', (pickerCoords, color) => {
+        handlePick(pickerCoords, color, ObjectSelectionTool)
       })
 
       this.$root.$on('activate-toolname', this.activateTool)
@@ -475,6 +453,7 @@
         const coords = getMouseCoords(e)
         const canvasCoords = getCanvasCoords(coords, this.$refs.canvas)
         let vec = this.fromScreen(canvasCoords)
+        this.guides = []
         if(this.activeTool.constructor != ManipulationTool || isDragging) vec = this.snapToPoints(coords) || this.snapToGuides(vec) || vec
         return [vec, coords, canvasCoords]
       },
@@ -513,8 +492,10 @@
             vec: target,
             id: '' + target.x + target.y + target.z,
           }
-          this.lastSnaps.unshift(target)
-          if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
+          if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(target))) {
+            this.lastSnaps.unshift(target)
+            if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
+          }
         } else {
           this.snapAnchor = null
         }
@@ -539,17 +520,20 @@
         })
         const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, 0, snapZ ? snapZ.z : vec.z)
         const screenSnapVec = this.toScreen(snapVec)
-        this.guides = []
         if(snapX) {
+          const end = this.toScreen(snapX)
           this.guides.push({
+            id: '' + end.x + end.y,
             start: screenSnapVec,
-            end: this.toScreen(snapX),
+            end,
           })
         }
         if(snapZ) {
+          const end = this.toScreen(snapZ)
           this.guides.push({
+            id: '' + end.x + end.y,
             start: screenSnapVec,
-            end: this.toScreen(snapZ),
+            end,
           })
         }
         if(snapX || snapZ) return snapVec

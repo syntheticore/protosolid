@@ -9,7 +9,7 @@
       label(v-for="(fields, key) in activeFeature.settings()")
         | {{ fields.title }}
         .picker(
-          v-if="fields.type == 'profile' || fields.type == 'curve'" @click="pick(fields.type, key)"
+          v-if="fields.type == 'profile' || fields.type == 'curve'" @click="pick(fields.type, key, fields.color)"
           :ref="key"
           :class="{active: activePicker == key, filled: activeFeature[key]}"
           :data-color="fields.color"
@@ -159,9 +159,9 @@
     },
 
     methods: {
-      pick: function(type, name) {
+      pick: function(type, name, color) {
         this.$root.$once('picked', (item) => {
-          this.data[name] = item
+          this.activeFeature[name] = item
           this.activePicker = null
         })
         this.activePicker = name
@@ -172,9 +172,9 @@
           y: pickerRect.top + (pickerRect.height / 2) - 38,
         }
         if(type == 'profile') {
-          this.$root.$emit('pick-profile', pickerPos)
+          this.$root.$emit('pick-profile', pickerPos, color)
         } else if(type == 'curve') {
-          this.$root.$emit('pick-curve', pickerPos)
+          this.$root.$emit('pick-curve', pickerPos, color)
         }
       },
 

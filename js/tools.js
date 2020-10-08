@@ -63,7 +63,9 @@ class SelectionTool extends ManipulationTool {
     this.callback = callback
   }
 
-  click(coords) {
+  click() {}
+
+  mouseDown(vec, coords) {
     const selection = this.select(coords)
     if(!selection) return
     const [item, center] = selection

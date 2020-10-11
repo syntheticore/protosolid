@@ -356,10 +356,10 @@
       })
 
       this.selectionLineMaterial = this.lineMaterial.clone()
-      this.selectionLineMaterial.color.set('red')
+      this.selectionLineMaterial.color.set('#2590e1')
 
       this.highlightLineMaterial = this.lineMaterial.clone()
-      this.highlightLineMaterial.color.set('white')
+      this.highlightLineMaterial.color.set('#2590e1')
 
       const handlePick = (pickerCoords, color, tool) => {
         this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
@@ -422,7 +422,7 @@
 
       doubleClick: function(e) {
         const coords = getCanvasCoords(getMouseCoords(e), this.$refs.canvas)
-        this.viewControlsTarget = this.fromScreen(coords)
+        this.viewControlsTarget = this.fromScreen(coords).multiplyScalar(0.3) // pre multiply for lerp
         this.render()
       },
 
@@ -523,7 +523,7 @@
         if(snapX) {
           const end = this.toScreen(snapX)
           this.guides.push({
-            id: '' + end.x + end.y,
+            id: 'v' + end.x + end.y,
             start: screenSnapVec,
             end,
           })
@@ -531,7 +531,7 @@
         if(snapZ) {
           const end = this.toScreen(snapZ)
           this.guides.push({
-            id: '' + end.x + end.y,
+            id: 'h' + end.x + end.y,
             start: screenSnapVec,
             end,
           })
@@ -550,7 +550,7 @@
         this.mouseDown(e)
       },
 
-      update_widgets: function() {
+      updateWidgets: function() {
         if(this.snapAnchor) this.snapAnchor.pos = this.toScreen(this.snapAnchor.vec)
 
         for(let node_id in this.handles) {
@@ -584,7 +584,7 @@
 
       render: function() {
         renderer.render(this.scene, camera)
-        this.update_widgets()
+        this.updateWidgets()
       },
 
       animate: function() {
@@ -597,7 +597,7 @@
           this.viewControlsTarget = null
           return
         }
-        this.viewControls.target.multiplyScalar(0.7).add(this.viewControlsTarget.clone().multiplyScalar(0.3))
+        this.viewControls.target.multiplyScalar(0.7).add(this.viewControlsTarget)
       },
 
       onWindowResize: function() {

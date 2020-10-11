@@ -108,7 +108,7 @@
     position: absolute
 
   .fade-enter-active, .fade-leave-active
-    transition: all 0.15s
+    transition: all 0.15s ease-out
 
   .fade-enter, .fade-leave-to
     opacity: 0

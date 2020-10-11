@@ -66,10 +66,14 @@ impl Shell {
 /// ```
 #[derive(Debug)]
 pub struct Face {
-  outer_loop: Vec<OrientedEdge>,
-  inner_loops: Vec<Vec<OrientedEdge>>,
+  outer_loop: Loop,
+  inner_loops: Vec<Loop>,
   surface: Box<dyn Surface>,
+  normal_direction: bool,
 }
+
+
+pub type Loop = Vec<OrientedEdge>;
 
 
 /// A portion of an actual curve, bounded by vertices, separating exactly two faces
@@ -94,7 +98,7 @@ pub struct OrientedEdge {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Vertex {
   point: Point3,
 }
@@ -102,20 +106,22 @@ pub struct Vertex {
 
 pub fn make_solid() -> Solid {
   let plane = Plane::default();
+  let mut vertices = vec![
+    Vertex { point: Point3::new(0.0, 0.0, 0.0) },
+    Vertex { point: Point3::new(1.0, 0.0, 0.0) },
+  ];
   let mut face1 = Face {
     outer_loop: vec![],
     inner_loops: vec![],
     surface: Box::new(plane.clone()),
+    normal_direction: true,
   };
   let mut face2 = Face {
     outer_loop: vec![],
     inner_loops: vec![],
     surface: Box::new(plane),
+    normal_direction: true,
   };
-  let mut vertices = vec![
-    Vertex { point: Point3::new(0.0, 0.0, 0.0) },
-    Vertex { point: Point3::new(1.0, 0.0, 0.0) },
-  ];
   let mut edges = vec![
     Edge {
       direction: true,

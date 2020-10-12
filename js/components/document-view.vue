@@ -62,6 +62,7 @@
     position: absolute
     margin-top: 12px
     max-width: calc(100% - 450px)
+    z-index: 2
 
   .side-bar
     position: absolute

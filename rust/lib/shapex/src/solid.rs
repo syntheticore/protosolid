@@ -73,7 +73,7 @@ pub struct Face {
 }
 
 
-pub type Loop = Vec<OrientedEdge>;
+// pub type Loop = Vec<OrientedEdge>;
 
 
 /// A portion of an actual curve, bounded by vertices, separating exactly two faces
@@ -104,6 +104,56 @@ pub struct Vertex {
 }
 
 
+#[derive(Debug)]
+pub struct Loop {
+  edges: Vec<OrientedEdge>
+}
+
+impl Loop {
+  pub fn new() -> Self {
+    Self {
+      edges: vec![],
+    }
+  }
+
+  pub fn iter(&self) -> impl Iterator<Item = *mut Vertex> + '_  {
+    unsafe {
+      self.edges.iter().map(|oedge| {
+        let vertices = (*oedge.edge).vertices;
+        if oedge.orientation {
+          vertices.0
+        } else {
+          vertices.1
+        }
+      })
+    }
+  }
+}
+
+// impl<'a> Iterator for Loop {
+//   type Item = &'a Vertex;
+
+//   fn next(&mut self) -> Option<&'a Vertex> {
+//     if let Some(ref mut vertex_iter) = self.vertex_iter {
+//       let vertex = vertex_iter.next();
+//       if vertex.is_some() {
+//         vertex
+//       } else {
+//         self.vertex_iter = None;
+//         self.next()
+//       }
+//     } else {
+//       if let Some(line) = self.elem_iter.next() {
+//         self.vertex_iter = Some(line.vertices.iter());
+//         self.next()
+//       } else {
+//         None
+//       }
+//     }
+//   }
+// }
+
+
 pub fn make_solid() -> Solid {
   let plane = Plane::default();
   let mut vertices = vec![
@@ -111,13 +161,13 @@ pub fn make_solid() -> Solid {
     Vertex { point: Point3::new(1.0, 0.0, 0.0) },
   ];
   let mut face1 = Face {
-    outer_loop: vec![],
+    outer_loop: Loop::new(),
     inner_loops: vec![],
     surface: Box::new(plane.clone()),
     normal_direction: true,
   };
   let mut face2 = Face {
-    outer_loop: vec![],
+    outer_loop: Loop::new(),
     inner_loops: vec![],
     surface: Box::new(plane),
     normal_direction: true,
@@ -130,7 +180,7 @@ pub fn make_solid() -> Solid {
       faces: (&mut face1, &mut face2),
     }
   ];
-  face1.outer_loop.push(OrientedEdge {
+  face1.outer_loop.edges.push(OrientedEdge {
     edge: &mut edges[0],
     orientation: true,
   });

@@ -66,10 +66,14 @@ impl Shell {
 /// ```
 #[derive(Debug)]
 pub struct Face {
-  outer_loop: Vec<OrientedEdge>,
-  inner_loops: Vec<Vec<OrientedEdge>>,
+  outer_loop: Loop,
+  inner_loops: Vec<Loop>,
   surface: Box<dyn Surface>,
+  normal_direction: bool,
 }
+
+
+// pub type Loop = Vec<OrientedEdge>;
 
 
 /// A portion of an actual curve, bounded by vertices, separating exactly two faces
@@ -94,9 +98,36 @@ pub struct OrientedEdge {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Vertex {
   point: Point3,
+}
+
+
+#[derive(Debug)]
+pub struct Loop {
+  edges: Vec<OrientedEdge>
+}
+
+impl Loop {
+  pub fn new() -> Self {
+    Self {
+      edges: vec![],
+    }
+  }
+
+  pub fn iter(&self) -> impl Iterator<Item = *mut Vertex> + '_  {
+    unsafe {
+      self.edges.iter().map(|oedge| {
+        let vertices = (*oedge.edge).vertices;
+        if oedge.orientation {
+          vertices.0
+        } else {
+          vertices.1
+        }
+      })
+    }
+  }
 }
 
 
@@ -116,22 +147,48 @@ impl Mesh {
 }
 
 
+// impl<'a> Iterator for Loop {
+//   type Item = &'a Vertex;
+
+//   fn next(&mut self) -> Option<&'a Vertex> {
+//     if let Some(ref mut vertex_iter) = self.vertex_iter {
+//       let vertex = vertex_iter.next();
+//       if vertex.is_some() {
+//         vertex
+//       } else {
+//         self.vertex_iter = None;
+//         self.next()
+//       }
+//     } else {
+//       if let Some(line) = self.elem_iter.next() {
+//         self.vertex_iter = Some(line.vertices.iter());
+//         self.next()
+//       } else {
+//         None
+//       }
+//     }
+//   }
+// }
+
+
 pub fn make_solid() -> Solid {
   let plane = Plane::default();
-  let mut face1 = Face {
-    outer_loop: vec![],
-    inner_loops: vec![],
-    surface: Box::new(plane.clone()),
-  };
-  let mut face2 = Face {
-    outer_loop: vec![],
-    inner_loops: vec![],
-    surface: Box::new(plane),
-  };
   let mut vertices = vec![
     Vertex { point: Point3::new(0.0, 0.0, 0.0) },
     Vertex { point: Point3::new(1.0, 0.0, 0.0) },
   ];
+  let mut face1 = Face {
+    outer_loop: Loop::new(),
+    inner_loops: vec![],
+    surface: Box::new(plane.clone()),
+    normal_direction: true,
+  };
+  let mut face2 = Face {
+    outer_loop: Loop::new(),
+    inner_loops: vec![],
+    surface: Box::new(plane),
+    normal_direction: true,
+  };
   let mut edges = vec![
     Edge {
       direction: true,
@@ -140,7 +197,7 @@ pub fn make_solid() -> Solid {
       faces: (&mut face1, &mut face2),
     }
   ];
-  face1.outer_loop.push(OrientedEdge {
+  face1.outer_loop.edges.push(OrientedEdge {
     edge: &mut edges[0],
     orientation: true,
   });

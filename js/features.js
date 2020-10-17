@@ -23,7 +23,7 @@ export class ExtrudeFeature extends Feature {
       rail: {
         title: 'Rail',
         type: 'curve',
-        color: 'green',
+        color: 'purple',
       },
       distance: {
         title: 'Distance',

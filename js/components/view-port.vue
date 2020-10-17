@@ -11,9 +11,18 @@
     )
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
-      path(v-for="path in paths" :d="path.data" stroke="red" stroke-width="2")
+      path(v-for="path in paths" :d="path.data" :stroke="path.color")
+      transition-group(name="hide" tag="g")
+        line(
+          v-for="guide in guides"
+          :key="guide.id"
+          :x1="guide.start.x"
+          :y1="guide.start.y"
+          :x2="guide.end.x"
+          :y2="guide.end.y"
+        )
 
-    transition-group.anchors(name="anchors" tag="ul")
+    transition-group.anchors(name="hide" tag="ul")
       li(
         v-if="snapAnchor"
         :key="snapAnchor.id"
@@ -52,6 +61,15 @@
     pointer-events: none
     width: 100%
     height: 100%
+    line, path
+      fill-opacity: 0
+      stroke-width: 2
+      stroke-linecap: round
+      stroke-dasharray: 3, 7
+    line
+      stroke: white
+    path
+      stroke-dasharray: 4, 7
 
   .handles, .anchors
     position: absolute
@@ -96,23 +114,15 @@
         pointer-events: none
 
   .anchors li
-    // pointer-events: auto
     &::after
-      // opacity: 0
-      // transform: scale(2)
       transform: scale(1)
       opacity: 1
       width:  calc(100% - 2px)
       height: calc(100% - 2px)
-      border: 2px solid purple * 1.6
-      // transition: all 0.2s
+      border: 2px solid $highlight * 1.6
       animation-duration: 0.2s
-      animation-name: slidein
-    // &:hover
-    //   &::after
-    //     transform: scale(1)
-    //     opacity: 1
-    @keyframes slidein {
+      animation-name: focus
+    @keyframes focus {
       from {
         opacity: 0
         transform: scale(2)
@@ -125,21 +135,21 @@
     }
 
   .handles li
-    // cursor: move
     pointer-events: auto
     &:hover
       &::before
-        background: $highlight * 1.6
+        width: 5px
+        height: 5px
     &:active
       &::before
         width:  5px
         height: 5px
 
-  .anchors-enter-active
-  .anchors-leave-active
+  .hide-enter-active
+  .hide-leave-active
     transition: all 0.2s
-  .anchors-enter
-  .anchors-leave-to
+  .hide-enter
+  .hide-leave-to
     opacity: 0
 </style>
 
@@ -154,25 +164,29 @@
   import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
   import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
-  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool, ExtrudeTool } from './../tools.js'
+  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool } from './../tools.js'
 
-  function getMouseCoords(e, canvas) {
-    var coords = new THREE.Vector2()
-    // var rect = e.target.getBoundingClientRect();
-    // console.log(rect)
-    // coords.x = (e.clientX - rect.left) / canvas.offsetWidth * 2 - 1
-    // coords.y = - (e.clientY - rect.top) / canvas.offsetHeight * 2 + 1
-    coords.x = (e.clientX - 0) / canvas.offsetWidth * 2 - 1
-    coords.y = - (e.clientY - 39) / canvas.offsetHeight * 2 + 1
-    return coords
-  }
+  const snapDistance = 10.5 // px
+  const maxSnapReferences = 5
+
+  let isDragging = false
 
   var rendering = true
   var renderer, camera, mesh, pointMaterial
 
-  const snapDistance = 10.5 // px
+  function getCanvasCoords(mouseCoords, canvas) {
+    return new THREE.Vector2(
+      mouseCoords.x / canvas.offsetWidth * 2 - 1,
+      -mouseCoords.y / canvas.offsetHeight * 2 + 1
+    )
+  }
 
-  let isDragging = false
+  function getMouseCoords(e) {
+    // var rect = e.target.getBoundingClientRect();
+    // coords.x = (e.clientX - rect.left)
+    // coords.y = - (e.clientY - rect.top)
+    return new THREE.Vector2(e.clientX, e.clientY - 39)
+  }
 
   export default {
     name: 'ViewPort',
@@ -197,6 +211,7 @@
         snapAnchor: null,
         handles: {},
         paths: [],
+        guides: [],
       }
     },
 
@@ -209,8 +224,9 @@
     mounted: function() {
       renderer = new THREE.WebGLRenderer({
         canvas: this.$el.querySelector('canvas'),
-        antialias: window.devicePixelRatio <= 1.0,
-        alpha: true
+        // antialias: window.devicePixelRatio <= 1.0,
+        antialias: true,
+        alpha: true,
       })
 
       renderer.setPixelRatio(window.devicePixelRatio)
@@ -340,12 +356,12 @@
       })
 
       this.selectionLineMaterial = this.lineMaterial.clone()
-      this.selectionLineMaterial.color.set('red')
+      this.selectionLineMaterial.color.set('#2590e1')
 
       this.highlightLineMaterial = this.lineMaterial.clone()
-      this.highlightLineMaterial.color.set('white')
+      this.highlightLineMaterial.color.set('#2590e1')
 
-      const handlePick = (pickerCoords, tool) => {
+      const handlePick = (pickerCoords, color, tool) => {
         this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
           this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')
@@ -354,16 +370,17 @@
             target: center,
             origin: pickerCoords,
             data: this.buildPath(pickerCoords, center),
+            color,
           })
         }))
       }
 
-      this.$root.$on('pick-profile', (pickerCoords) => {
-        handlePick(pickerCoords, ProfileSelectionTool)
+      this.$root.$on('pick-profile', (pickerCoords, color) => {
+        handlePick(pickerCoords, color, ProfileSelectionTool)
       })
 
-      this.$root.$on('pick-curve', (pickerCoords) => {
-        handlePick(pickerCoords, ObjectSelectionTool)
+      this.$root.$on('pick-curve', (pickerCoords, color) => {
+        handlePick(pickerCoords, color, ObjectSelectionTool)
       })
 
       this.$root.$on('activate-toolname', this.activateTool)
@@ -376,11 +393,12 @@
         }
       });
 
+      this.lastSnaps = []
+
       this.onWindowResize()
       window.addEventListener('resize', this.onWindowResize.bind(this), false)
 
       this.loadTree(this.document.tree, true)
-      this.animate()
     },
 
     beforeDestroy: function() {
@@ -396,45 +414,55 @@
 
       click: function(e) {
         this.viewControls.enabled = true
-        const coords = getMouseCoords(e, this.$refs.canvas)
+        const coords = getCanvasCoords(getMouseCoords(e), this.$refs.canvas)
         if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return this.render()
         this.activeTool.click(coords)
       },
 
       doubleClick: function(e) {
-        const coords = getMouseCoords(e, this.$refs.canvas)
+        const coords = getCanvasCoords(getMouseCoords(e), this.$refs.canvas)
         this.viewControlsTarget = this.fromScreen(coords)
-        this.render()
+        this.animate()
       },
 
       mouseUp: function(e) {
         this.activeHandle = null
         this.snapAnchor = null
-        isDragging = false
+        this.guides = []
+        // Make sure we keep animating long enough for view dampening to settle
+        setTimeout(() => {
+          isDragging = false
+          console.log('finish drag')
+        }, 500)
       },
 
       mouseDown: function(e) {
         if(e.button != 0) return
-        const coords = getMouseCoords(e, this.$refs.canvas)
-        const vec = this.snapVector(this.fromScreen(coords))
-        if(vec) this.activeTool.mouseDown(vec, coords)
+        const [vec, coords, canvasCoords] = this.snap(e)
+        if(vec) this.activeTool.mouseDown(vec, canvasCoords)
         // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
-        this.lastCoords = coords
+        this.lastCoords = canvasCoords
         isDragging = true
+        this.animate()
       },
 
       mouseMove: function(e) {
         if(e.button != 0) return
         if(this.isOrbiting) return
-        const coords = getMouseCoords(e, this.$refs.canvas)
-        let vec = this.fromScreen(coords)
-        if(this.activeTool.constructor != ManipulationTool || isDragging) vec = this.snapVector(vec)
-        if(vec) this.activeTool.mouseMove(vec, coords)
+        const [vec, coords, canvasCoords] = this.snap(e)
+        if(vec) this.activeTool.mouseMove(vec, canvasCoords)
       },
 
-      snapVector: function(vec) {
-        if(!vec) return
-        const vecScreen = this.toScreen(vec)
+      snap: function(e) {
+        const coords = getMouseCoords(e)
+        const canvasCoords = getCanvasCoords(coords, this.$refs.canvas)
+        let vec = this.fromScreen(canvasCoords)
+        this.guides = []
+        if(this.activeTool.constructor != ManipulationTool || isDragging) vec = this.snapToPoints(coords) || this.snapToGuides(vec) || vec
+        return [vec, coords, canvasCoords]
+      },
+
+      snapToPoints: function(coords) {
         const sketchElements = this.activeComponent.get_sketch_elements()
         const snapPoints = sketchElements.flatMap(elem => {
           let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
@@ -454,7 +482,7 @@
         let closestDist = 99999
         let target
         snapPoints.forEach(p => {
-          const dist = this.toScreen(p).distanceTo(vecScreen)
+          const dist = this.toScreen(p).distanceTo(coords)
           if(dist < snapDistance && dist < closestDist) {
             closestDist = dist
             target = p
@@ -466,12 +494,53 @@
             type: 'snap',
             pos: this.toScreen(target),
             vec: target,
-            id: '' + vec.x + vec.y + vec.z,
+            id: '' + target.x + target.y + target.z,
+          }
+          if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(target))) {
+            this.lastSnaps.unshift(target)
+            if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
           }
         } else {
           this.snapAnchor = null
         }
-        return target || vec
+        return target
+      },
+
+      snapToGuides: function(vec) {
+        if(!vec) return
+        let snapX
+        this.lastSnaps.some(snap => {
+          if(Math.abs(vec.x - snap.x) < 0.1) {
+            snapX = snap
+            return true
+          }
+        })
+        let snapZ
+        this.lastSnaps.some(snap => {
+          if(Math.abs(vec.z - snap.z) < 0.1) {
+            snapZ = snap
+            return true
+          }
+        })
+        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, 0, snapZ ? snapZ.z : vec.z)
+        const screenSnapVec = this.toScreen(snapVec)
+        if(snapX) {
+          const end = this.toScreen(snapX)
+          this.guides.push({
+            id: 'v' + end.x + end.y,
+            start: screenSnapVec,
+            end,
+          })
+        }
+        if(snapZ) {
+          const end = this.toScreen(snapZ)
+          this.guides.push({
+            id: 'h' + end.x + end.y,
+            start: screenSnapVec,
+            end,
+          })
+        }
+        if(snapX || snapZ) return snapVec
       },
 
       anchorClicked: function(anchor) {
@@ -485,7 +554,7 @@
         this.mouseDown(e)
       },
 
-      update_widgets: function() {
+      updateWidgets: function() {
         if(this.snapAnchor) this.snapAnchor.pos = this.toScreen(this.snapAnchor.vec)
 
         for(let node_id in this.handles) {
@@ -512,7 +581,6 @@
           Line: LineTool,
           Spline: SplineTool,
           Circle: CircleTool,
-          Extrude: ExtrudeTool,
         }
         const tool = new tools[toolName](this.activeComponent, this)
         this.$emit('activate-tool', tool)
@@ -520,13 +588,13 @@
 
       render: function() {
         renderer.render(this.scene, camera)
-        this.update_widgets()
+        this.updateWidgets()
       },
 
       animate: function() {
         if(!rendering) return
-        requestAnimationFrame(this.animate.bind(this))
         this.viewControls.update()
+        if(isDragging || this.viewControlsTarget) requestAnimationFrame(this.animate.bind(this))
         // Transition to manual view target
         if(!this.viewControlsTarget) return
         if(this.viewControlsTarget.clone().sub(this.viewControls.target).lengthSq() < 0.001) {
@@ -560,8 +628,8 @@
       },
 
       toScreen: function(vec) {
-        const widthHalf = 0.5 * renderer.domElement.width
-        const heightHalf = 0.5 * renderer.domElement.height
+        const widthHalf = 0.5 * renderer.domElement.width / window.devicePixelRatio
+        const heightHalf = 0.5 * renderer.domElement.height / window.devicePixelRatio
         // camera.updateMatrixWorld()
         const vector = vec.clone().project(camera)
         return new THREE.Vector2(

@@ -3,34 +3,37 @@
     header
       fa-icon.expander(
         icon="caret-down"
-        :class="{blank: !isAssembly || isTop, closed: !expanded}"
+        :class="{blank: !isAssembly && false || isTop, closed: !expanded}"
         @click="toggle()"
         fixed-width
       )
       .box(:class="{hidden: !isVisible, selected: node.id() == activeNode.id()}")
         fa-icon.eye(icon="eye" fixed-width @click="hidden = !hidden" v-if="!isTop")
-        fa-icon.assembly(icon="boxes"  v-if="isAssembly")
-        fa-icon.part(icon="box"  v-else)
+        fa-icon.assembly(icon="boxes" v-if="isAssembly")
+        fa-icon.part(icon="box" v-else)
         span.name {{ node.get_title() }}
         .controls
           fa-icon.activate(icon="check-circle" fixed-width title="Activate" @click="activateComponent(node)")
           fa-icon.new-component(icon="plus-circle" fixed-width title="Create Component" @click="createComponent(node)")
           fa-icon.new-sketch(icon="edit" fixed-width title="Create Sketch" @click="createSketch(node)")
-          fa-icon.new-sketch(icon="sliders-h" fixed-width title="Create Variable" @click="createVariable(node)")
-    //- ul.children(v-show="isAssembly && expanded")
-    transition(name="fade" mode="out-in")
-      transition-group.children(name="list" tag="ul" v-show="expanded" v-if="isAssembly")
-        li(
-          is="tree-item"
-          v-for="child in node.get_children()"
-          :key="child.id()"
-          :node="child"
-          :active-node="activeNode"
-          :parent-hidden="!isVisible"
-          :data="data"
-          v-on="$listeners"
-        )
-        //- @activate="activate"
+          fa-icon.new-variable(icon="sliders-h" fixed-width title="Create Variable" @click="createVariable(node)")
+    ul.content(v-if="expanded")
+      li
+        fa-icon(icon="atom")
+        span COG
+    //- transition(name="fade" mode="out-in")
+    //- transition-group.children(name="list" tag="ul" v-show="expanded" v-if="isAssembly")
+    transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
+      li(
+        is="tree-item"
+        v-for="child in node.get_children()"
+        :key="child.id()"
+        :node="child"
+        :active-node="activeNode"
+        :parent-hidden="!isVisible"
+        :data="data"
+        v-on="$listeners"
+      )
 </template>
 
 
@@ -119,13 +122,20 @@
     // svg
     //   margin-bottom: 1px
 
-  .fade-enter-active
-    transition: all 0.6s
-  .fade-leave-active
-    transition: all 0.2s
-  .fade-enter
-  .fade-leave-to
-    opacity: 0
+  .content
+    margin-left: 25px
+    li
+      display: flex
+      font-size: 12px
+      align-items: center
+
+  // .fade-enter-active
+  //   transition: all 0.6s
+  // .fade-leave-active
+  //   transition: all 0.2s
+  // .fade-enter
+  // .fade-leave-to
+  //   opacity: 0
 
   .list-enter-active
   .list-leave-active

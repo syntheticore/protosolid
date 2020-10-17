@@ -14,7 +14,7 @@
       :active-tool="activeTool"
       @activate-tool="activateTool"
     )
-    SideBar.bar-left
+    .side-bar.left
       TreeView(
         :top="document.tree"
         :data="document.data"
@@ -22,7 +22,7 @@
         @create-component="createComponent"
         @activate-component="activateComponent"
       )
-    SideBar.bar-right
+    .side-bar.right
       h1 Views
       ListChooser(
         :list="document.views"
@@ -62,20 +62,30 @@
     position: absolute
     margin-top: 12px
     max-width: calc(100% - 450px)
+    z-index: 2
 
   .side-bar
     position: absolute
     top: 0
     bottom: 55px
     padding-top: 14px
+    pointer-events: none
     h1
       text-align: center
-    &.bar-left
+      color: $bright2
+      color: gray * 1.5
+      font-size: 13px
+      font-weight: bold
+      letter-spacing: 1px
+      margin-bottom: 8px
+      text-transform: uppercase
+      text-shadow: 0 1px 2px rgba(0,0,0, 0.7)
+    &.left
       left: 0
       overflow: hidden
-    &.bar-right
+    &.right
       right: 14px
-      bottom: 155px
+      bottom: 35px
       display: flex
       flex-direction: column
       h1
@@ -96,7 +106,6 @@
 
 
 <script>
-  import SideBar from './side-bar.vue'
   import ViewPort from './view-port.vue'
   import TreeView from './tree-view.vue'
   import ToolBox from './tool-box.vue'
@@ -109,7 +118,6 @@
     name: 'DocumentView',
 
     components: {
-      SideBar,
       ViewPort,
       TreeView,
       ToolBox,

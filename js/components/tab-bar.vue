@@ -77,22 +77,15 @@
     // background: $dark2
     background: linear-gradient(top, $dark1 * 0.9, $dark2 * 0.95)
     // background: linear-gradient(top, rgba($dark1, 0.92), rgba($dark2, 0.92))
-    border-top: 1px solid $dark1 * 1.3
+    // border-top: 1px solid $dark1 * 1.3
     border-bottom: 1px solid black
-    border-radius: 5px 5px 0px 0px
+    border-radius: 4px 4px 0px 0px
     max-width: 100vw
+    align-items: center
     [data-platform="darwin"] &
       padding-left: 74px
     > *
       flex: 0 0 auto
-
-
-  .fullscreen
-    .tabs li
-      padding: 6px 12px
-      height: 23px
-    .tab-bar
-      border-top: none
 
   .fullscreen
   .maximized
@@ -100,8 +93,9 @@
     .tab-bar
       padding-left: 0px
       border-radius: 0
-      // background: $dark2
       // border-top: none
+    .tab-bar
+      border-top: none
     .window-controls button:last-child
       border-radius: 0
 
@@ -131,25 +125,30 @@
     min-height: 200px
 
   .tabs
-    display: inline-block
+    // display: inline-block
+    display: flex
     flex: 1 1 auto
     white-space: nowrap
     overflow: auto
     -ms-overflow-style: none
     scrollbar-width: none
+    height: 100%
     &::-webkit-scrollbar
       display: none
     li
-      display: inline-block
+      // display: inline-block
+      display: flex
+      align-items: center
       border-left: 1px solid $dark1 * 1.2
       // border-right: 1px solid black //#353535
       // box-shadow: 0 0 3px black
       // border-bottom: none
-      padding: 12px 12px
-      height: 36px
+      padding: 0 12px
+      // height: 36px
+      height: 100%
       font-size: 12px
       font-weight: bold
-      min-width: 120px
+      // min-width: 120px
       transition: all 0.2s
       color: $bright2
       text-shadow: 0 -1px 0px black
@@ -171,7 +170,7 @@
         color: $bright2
         cursor: pointer
         transition: all 0.2s
-        float: right
+        // float: right
         filter: drop-shadow(0 1px 0px rgba(0,0,0, 0.9))
         opacity: 0
         // transition-delay: 0.1s
@@ -183,13 +182,17 @@
     -webkit-app-region: drag
     -webkit-user-select: none
     min-width: 24px
+    height: 100%
     &.dynamic
-      flex: 1 1 auto
+      flex: 100 1 auto
       min-width: 44px
     &.fixed
       display: none
       [data-platform="win32"] &
         display: block
+
+  .menu-button
+    z-index: 3
 
   .window-controls
     display: none

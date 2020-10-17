@@ -63,7 +63,9 @@ class SelectionTool extends ManipulationTool {
     this.callback = callback
   }
 
-  click(coords) {
+  click() {}
+
+  mouseDown(vec, coords) {
     const selection = this.select(coords)
     if(!selection) return
     const [item, center] = selection
@@ -172,5 +174,29 @@ export class CircleTool extends Tool {
     if(!this.center) return
     this.circle.set_handles([this.center.toArray(), vec.toArray()])
     this.viewport.elementChanged(this.circle, this.component)
+  }
+}
+
+
+export class ArcTool extends Tool {
+  mouseDown(vec) {
+    if(this.start && this.end && this.middle) {
+      this.start = null
+      this.end = null
+      this.middle = null
+    } else if(this.start && this.end) {
+      this.middle = vec
+    } else if(this.start) {
+      this.end = vec
+    } else {
+      this.start = vec
+      this.arc = this.component.add_arc(vec.toArray(), vec.toArray(), vec.toArray())
+    }
+  }
+
+  mouseMove(vec) {
+    if(!this.start) return
+    this.arc.set_handles([this.center.toArray(), vec.toArray()])
+    this.viewport.elementChanged(this.arc, this.component)
   }
 }

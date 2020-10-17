@@ -19,6 +19,7 @@
           )
             fa-icon(:icon="tool.icon" fixed-width)
             .title(v-html="tool.title")
+            .hot-key(v-if="tool.hotKey") {{ tool.hotKey }}
 
           transition(name="fade")
             FeatureBox(
@@ -92,16 +93,27 @@
           color: $bright1
       &:active
         background: $dark1 * 0.9
-      svg
-        font-size: 21px
-        color: $bright1
-        // transition: all 0.15s
-        filter: none
-      .title
-        color: $bright2
-        font-size: 11px
-        margin-top: 6px
-        font-weight: bold
+    svg
+      font-size: 21px
+      color: $bright1
+      // transition: all 0.15s
+      filter: none
+    .title
+      color: $bright2
+      font-size: 11px
+      margin-top: 6px
+      font-weight: bold
+    .hot-key
+      position: absolute
+      top: 1px
+      right: 1px
+      font-size: 9px
+      color: $bright2
+      background: $dark1
+      padding: 0
+      width: 12px
+      border-radius: 2px
+      border: 0.5px solid $dark1 * 1.4
 
   .feature-box
     margin-top: 10px
@@ -139,21 +151,21 @@
           {
             title: 'Sketch',
             tools: [
-              { title: 'Line', icon: 'project-diagram' },
-              { title: 'Rectangle', icon: 'vector-square' },
+              { title: 'Line', icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
+              { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 76 },
               { title: 'Arc', icon: 'bezier-curve' },
-              { title: 'Circle', icon: 'ban' },
-              { title: 'Spline', icon: 'route' },
+              { title: 'Circle', icon: 'ban', hotKey: 'C', keyCode: 76 },
+              { title: 'Spline', icon: 'route', hotKey: 'S', keyCode: 76 },
             ]
           },
           {
             title: 'Create',
             tools: [
-              { title: 'Extrude', icon: 'box', feature: ExtrudeFeature },
-              { title: 'Revolve', icon: 'wave-square' },
+              { title: 'Extrude', icon: 'box', feature: ExtrudeFeature, hotKey: 'E', keyCode: 69 },
+              { title: 'Revolve', icon: 'wave-square', hotKey: 'V', keyCode: 82 },
               { title: 'Loft', icon: 'layer-group' },
               { title: 'Sweep', icon: 'route' },
-              { title: 'Mirror', icon: 'band-aid' },
+              { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 76 },
               { title: 'Array', icon: 'th' },
             ],
           },
@@ -162,8 +174,8 @@
             tools: [
               { title: 'Shell', icon: 'magnet' },
               { title: 'Boolean', icon: 'boxes' },
-              { title: 'Fillet', icon: 'clone' },
-              { title: 'Chamfer', icon: 'screwdriver' },
+              { title: 'Fillet', icon: 'clone', hotKey: 'F', keyCode: 76 },
+              { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 76 },
               { title: 'Split', icon: 'code-branch' },
             ],
           },

@@ -69,6 +69,7 @@
     flex-direction: column
     justify-content: space-around
     background: $dark1
+    border-radius: 0 4px 4px 0
 
   button
     height: 100%

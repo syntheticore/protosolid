@@ -191,6 +191,9 @@
       [data-platform="win32"] &
         display: block
 
+  .menu-button
+    z-index: 3
+
   .window-controls
     display: none
     [data-platform="win32"] &

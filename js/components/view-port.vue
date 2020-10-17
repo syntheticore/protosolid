@@ -399,7 +399,6 @@
       window.addEventListener('resize', this.onWindowResize.bind(this), false)
 
       this.loadTree(this.document.tree, true)
-      this.animate()
     },
 
     beforeDestroy: function() {
@@ -422,15 +421,19 @@
 
       doubleClick: function(e) {
         const coords = getCanvasCoords(getMouseCoords(e), this.$refs.canvas)
-        this.viewControlsTarget = this.fromScreen(coords).multiplyScalar(0.3) // pre multiply for lerp
-        this.render()
+        this.viewControlsTarget = this.fromScreen(coords)
+        this.animate()
       },
 
       mouseUp: function(e) {
         this.activeHandle = null
         this.snapAnchor = null
         this.guides = []
-        isDragging = false
+        // Make sure we keep animating long enough for view dampening to settle
+        setTimeout(() => {
+          isDragging = false
+          console.log('finish drag')
+        }, 500)
       },
 
       mouseDown: function(e) {
@@ -440,6 +443,7 @@
         // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
         this.lastCoords = canvasCoords
         isDragging = true
+        this.animate()
       },
 
       mouseMove: function(e) {
@@ -589,15 +593,15 @@
 
       animate: function() {
         if(!rendering) return
-        requestAnimationFrame(this.animate.bind(this))
         this.viewControls.update()
+        if(isDragging || this.viewControlsTarget) requestAnimationFrame(this.animate.bind(this))
         // Transition to manual view target
         if(!this.viewControlsTarget) return
         if(this.viewControlsTarget.clone().sub(this.viewControls.target).lengthSq() < 0.001) {
           this.viewControlsTarget = null
           return
         }
-        this.viewControls.target.multiplyScalar(0.7).add(this.viewControlsTarget)
+        this.viewControls.target.multiplyScalar(0.7).add(this.viewControlsTarget.clone().multiplyScalar(0.3))
       },
 
       onWindowResize: function() {

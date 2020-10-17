@@ -72,6 +72,11 @@ impl SketchElement {
       }.iter().map(|seg| Self::BezierSpline(seg.clone())).collect(),
     }
   }
+
+  pub fn other_endpoint(&self, point: &Point3) -> Point3 {
+    let (start, end) = self.as_curve().endpoints();
+    if *point == start { end } else { start }
+  }
 }
 
 
@@ -81,10 +86,14 @@ pub trait Curve {
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
 
-  fn tesselate(&self, steps: i32) -> Vec<Point3> {
+  fn tesselate_fixed(&self, steps: i32) -> Vec<Point3> {
     (0..steps + 1).map(|i| {
       self.sample(1.0 / steps as f64 * i as f64)
     }).collect()
+  }
+
+  fn tesselate_relative(&self, steps_per_mm: f64) -> Vec<Point3> {
+    self.tesselate_fixed((steps_per_mm * self.length()).round() as i32)
   }
 }
 
@@ -157,7 +166,7 @@ impl Curve for Line {
   }
 
   fn default_tesselation(&self) -> Vec<Point3> {
-    self.tesselate(1)
+    self.tesselate_fixed(1)
   }
 
   fn length(&self) -> f64 {
@@ -210,7 +219,7 @@ impl Curve for Arc {
   }
 
   fn default_tesselation(&self) -> Vec<Point3> {
-    self.tesselate(120)
+    self.tesselate_fixed(120)
   }
 
   fn length(&self) -> f64 {
@@ -272,7 +281,7 @@ impl Curve for Circle {
   }
 
   fn default_tesselation(&self) -> Vec<Point3> {
-    self.tesselate(120)
+    self.tesselate_fixed(120)
   }
 
   fn length(&self) -> f64 {
@@ -307,7 +316,7 @@ impl BezierSpline {
   }
 
   pub fn update(&mut self) {
-    self.lut = self.tesselate((self.vertices.len() * LUT_STEPS).try_into().unwrap())
+    self.lut = self.tesselate_fixed((self.vertices.len() * LUT_STEPS).try_into().unwrap())
   }
 
   // de Casteljau's algorithm

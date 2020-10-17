@@ -179,16 +179,14 @@
       },
 
       confirm: function(e) {
+        this.activeFeature.confirm()
         this.$emit('confirm')
       },
 
       cancel: function(e) {
+        this.activeFeature.cancel()
         this.$emit('cancel')
       },
-    },
-
-    beforeDestroy() {
-      console.log('Feature destroy')
     },
   }
 </script>

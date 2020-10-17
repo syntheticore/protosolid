@@ -119,7 +119,7 @@ impl JsSketchElement {
   }
 
   pub fn tesselate(&self, steps: i32) -> Array {
-    vertices_to_js(self.real.borrow_mut().as_curve().tesselate(steps))
+    vertices_to_js(self.real.borrow_mut().as_curve().tesselate_relative(steps.into()))
   }
 
   pub fn default_tesselation(&self) -> Array {
@@ -128,6 +128,24 @@ impl JsSketchElement {
 
   pub fn get_length(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().as_curve().length()).unwrap()
+  }
+}
+
+
+#[wasm_bindgen]
+pub struct JsBufferGeometry {
+  position: Vec<f64>,
+  normal: Vec<f64>,
+}
+
+#[wasm_bindgen]
+impl JsBufferGeometry {
+  pub fn position(&self) -> JsValue {
+    JsValue::from_serde(&self.position).unwrap()
+  }
+
+  pub fn normal(&self) -> JsValue {
+    JsValue::from_serde(&self.normal).unwrap()
   }
 }
 
@@ -267,7 +285,10 @@ impl JsComponent {
   }
 
   pub fn get_regions(&self) -> Array {
-    self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
+    // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
+    self.real.borrow().sketch.closed_regions().iter()
+      .map(|region| JsValue::from(JsBufferGeometry{ data: geom2d::tesselate_polygon(region.clone()).to_buffer_geometry()}) )
+      .collect()
   }
 
   pub fn get_all_split(&self) -> Array {

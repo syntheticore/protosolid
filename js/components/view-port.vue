@@ -20,12 +20,6 @@
         :style="{top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px'}"
         @click="anchorClicked(snapAnchor)"
       )
-      //- li(
-      //-   v-for="anchor in snapAnchors"
-      //-   :key="anchor.id"
-      //-   :style="{top: anchor.pos.y + 'px', left: anchor.pos.x + 'px'}"
-      //-   @click="anchorClicked(anchor)"
-      //- )
 
     ul.handles
       li(
@@ -586,10 +580,10 @@
       loadElement: function(elem, node) {
         this.unloadElement(elem, node, this.document)
         const vertices = elem.default_tesselation()
-        var geometry = new LineGeometry()
+        const geometry = new LineGeometry()
         geometry.setPositions(vertices.flatMap(vertex => vertex))
         geometry.setColors(Array(vertices.length * 3).fill(1))
-        var line = new Line2(geometry, this.lineMaterial)
+        const line = new Line2(geometry, this.lineMaterial)
         line.computeLineDistances()
         // line.scale.set(1, 1, 1)
         line.alcSelectable = true
@@ -617,12 +611,20 @@
         this.document.data[node_id].cachedElements = this.document.data[node_id].cachedElements || []
         this.document.data[node_id].cachedElements.push(elem)
 
-        // const regions = node.get_regions()
-        // // console.log(regions)
+        const regions = node.get_regions()
+        console.log(regions)
         // // console.log(splits.map(elem => elem.get_handles()))
-        // regions.forEach(region => {
+        regions.forEach(region => {
+          const geometry = new THREE.BufferGeometry();
+          const vertices = new Float32Array(region.data())
+          console.log(vertices)
+          geometry.setAttribute('position', new THREE.BufferAttribute(region.data(), 3));
+          geometry.setAttribute('color', Array(vertices.length).fill(1));
 
-        // })
+          const material = new THREE.MeshBasicMaterial({color: 0xff0000});
+          const mesh = new THREE.Mesh(geometry, material );
+          this.scene.add(mesh)
+        })
       },
 
       unloadElement: function(elem, node, document) {

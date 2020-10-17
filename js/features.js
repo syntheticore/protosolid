@@ -1,5 +1,6 @@
 class Feature {
-
+  confirm() {}
+  cancel() {}
 }
 
 export class ExtrudeFeature extends Feature {

@@ -1,11 +1,10 @@
 <template lang="pug">
-  .tool-box
-    .bordered.shelf
+  .tool-box.bordered
 
       ul.tabs
         li(
           v-for="(tab, index) in tabs"
-          @click="activeTab = index"
+          @click="activateTab(index)"
           :class="{active: index == activeTab}"
         )
           | {{ tab.title }}
@@ -33,28 +32,21 @@
 
 <style lang="stylus" scoped>
   .tool-box
-    display: flex
-    flex-direction: column
-    align-items: center
-    // align-items: start
-
-  .shelf
     border-top-left-radius: 3px
     border-top-right-radius: 3px
     border-bottom-left-radius: 6px
     border-bottom-right-radius: 6px
     background: rgba($dark2, 0.9)
     // overflow: hidden
-    // min-width: 405px
 
   .tabs
-    box-shadow: 0 0 4px rgba(black, 0.6)
+    // box-shadow: 0 0 4px rgba(black, 0.6)
     border-bottom: 1px solid $dark1 * 1.15
     display: flex
     overflow-x: auto
     li
       padding: 5px 10px
-      background: $dark2
+      background: $dark2 * 0.85
       font-size: 12px
       text-align: center
       transition: all 0.2s
@@ -176,6 +168,11 @@
     },
 
     methods: {
+      activateTab: function(index) {
+        this.closeFeature()
+        this.activeTab = index
+      },
+
       activateTool: function(toolName) {
         this.$root.$emit('activate-toolname', toolName)
       },

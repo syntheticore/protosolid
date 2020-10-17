@@ -104,7 +104,7 @@ impl Sketch {
     all_elements: &Vec<SketchElement>,
   ) -> Vec<PolyLine> {
     path.push(start_point);
-    let end_point = Self::other_endpoint(start_elem, &start_point);
+    let end_point = start_elem.other_endpoint(&start_point);
     let mut regions: Vec<PolyLine> = vec![];
     for other_elem in all_elements.iter() {
       let (other_start, other_end) = other_elem.as_curve().endpoints();
@@ -120,11 +120,6 @@ impl Sketch {
       }
     }
     regions
-  }
-
-  fn other_endpoint(elem: &SketchElement, point: &Point3) -> Point3 {
-    let (start, end) = elem.as_curve().endpoints();
-    if *point == start { end } else { start }
   }
 }
 

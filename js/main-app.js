@@ -7,4 +7,6 @@ Vue.config.devtools = false;
 
 new Vue({
   render: function (h) { return h(App) }
-}).$mount('#app');
+}).$mount('#app')
+
+document.body.setAttribute('data-platform', window.electronPlatform || 'browser')

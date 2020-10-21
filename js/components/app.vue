@@ -2,7 +2,6 @@
   #app(
     v-if="activeDocument"
     :class="{fullscreen: isFullscreen, maximized: isMaximized}"
-    :data-platform="platform"
   )
     TabBar(
       :documents="documents"
@@ -34,7 +33,7 @@
     color: $bright1
     &.fullscreen
     &.maximized
-    &[data-platform="browser"]
+    [data-platform="browser"] &
       grid-template-rows: 33px 1fr
 
   .tool-bar
@@ -65,7 +64,6 @@
       return {
         isFullscreen: false,
         isMaximized: false,
-        platform: window.electronPlatform || 'browser',
         activeDocument: null,
         documents: [],
       }

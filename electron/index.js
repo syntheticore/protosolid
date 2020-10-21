@@ -116,12 +116,12 @@ function createWindow() {
     minHeight: 450,
     titleBarStyle: 'hiddenInset',
     devTools: false,
-    // backgroundColor: isMac ? '#000' : false,
+    backgroundColor: isMac ? false : '#000',
     show: false,
     frame: isMac,
     // vibrancy: 'ultra-dark',
     // vibrancy: isMac ? 'dark' : undefined,
-    transparent: !isMac,
+    // transparent: !isMac,
     // opacity: 0.9,
     // fullscreenWindowTitle: true,
     webPreferences: {
@@ -237,7 +237,7 @@ function createWindow() {
     }.bind(mainWindow)
   }
 
-  mainWindow.removeMenu()
+  // mainWindow.removeMenu()
 }
 
 let splash;

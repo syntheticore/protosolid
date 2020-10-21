@@ -7,16 +7,16 @@ body
   background: none
   overflow: hidden
   font-family: arial, sans-serif
-  background: $dark2
-  border: 1px solid $dark2
-  border-top: 1px solid black
-  border-radius: 4px
 
-[data-platform="browser"]
-[data-platform="darwin"]
-  body
-    background: $dark1
+  &[data-platform="win32"]
+    border: 1px solid $dark1 * 1.45
+
+  &[data-platform="darwin"]
     // background: rgba($dark1, 0)
+    background: $dark2
+    border: 1px solid $dark2
+    border-top: 1px solid black
+    border-radius: 4px
 
 form
   fieldset

@@ -79,10 +79,10 @@
     // background: linear-gradient(top, rgba($dark1, 0.92), rgba($dark2, 0.92))
     // border-top: 1px solid $dark1 * 1.3
     border-bottom: 1px solid black
-    border-radius: 4px 4px 0px 0px
     max-width: 100vw
     align-items: center
     [data-platform="darwin"] &
+      border-radius: 4px 4px 0px 0px
       padding-left: 74px
     > *
       flex: 0 0 auto
@@ -196,6 +196,7 @@
 
   .window-controls
     display: none
+    height: 100%
     [data-platform="win32"] &
       display: block
     button
@@ -208,7 +209,7 @@
       height: 100%
       transition: all 0.15s
       &:last-child
-        border-radius: 0px 5px 0px 0px
+        // border-radius: 0px 4px 0px 0px
       &:hover
         background: $dark1
         color: white

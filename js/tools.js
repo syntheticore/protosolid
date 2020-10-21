@@ -34,7 +34,7 @@ export class ManipulationTool extends Tool {
     if(this.viewport.selectedElement) this.viewport.document.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
     object.material = this.viewport.selectionLineMaterial
     this.viewport.$emit('element-selected', object.element)
-    this.viewport.transformControl.attach(object)
+    // this.viewport.transformControl.attach(object)
     this.viewport.render()
   }
 

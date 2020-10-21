@@ -22,10 +22,9 @@
           :y2="guide.end.y"
         )
 
-    transition-group.anchors(name="hide" tag="ul")
-      li(
+    .anchors
+      div(
         v-if="snapAnchor"
-        :key="snapAnchor.id"
         :style="{top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px'}"
         @click="anchorClicked(snapAnchor)"
       )
@@ -43,16 +42,19 @@
 
 
 <style lang="stylus" scoped>
-  $color = desaturate($highlight, 35%)
+  // $color = desaturate($highlight, 35%)
   .view-port
     position: relative
     overflow: hidden
-    border-top: 1px solid $color * 0.375
+    // border-top: 1px solid $color * 0.375
+    border-top: 1px solid #2d3840
 
   canvas
     display: block
-    background: $color * 0.2
-    background: radial-gradient(50% 150%, farthest-corner, $color * 0.35, $color * 0.2)
+    // background: $color * 0.2
+    // background: radial-gradient(50% 150%, farthest-corner, $color * 0.35, $color * 0.2)
+    // background: #1c2127
+    background: radial-gradient(50% 150%, farthest-corner, #333333, #1c2127)
 
   .drawpad
     position: absolute
@@ -78,7 +80,7 @@
     top: 0
     bottom: 0
     pointer-events: none
-    li
+    > *
       size = 21px
       // padding: 7px
       position: absolute
@@ -113,19 +115,19 @@
         border: 2px solid $highlight * 1.6
         pointer-events: none
 
-  .anchors li
+  .anchors > *
     &::after
       transform: scale(1)
       opacity: 1
       width:  calc(100% - 2px)
       height: calc(100% - 2px)
       border: 2px solid $highlight * 1.6
-      animation-duration: 0.2s
+      animation-duration: 0.15s
       animation-name: focus
     @keyframes focus {
       from {
         opacity: 0
-        transform: scale(2)
+        transform: scale(1.7)
       }
 
       to {
@@ -134,7 +136,7 @@
       }
     }
 
-  .handles li
+  .handles > *
     pointer-events: auto
     &:hover
       &::before
@@ -179,13 +181,6 @@
       mouseCoords.x / canvas.offsetWidth * 2 - 1,
       -mouseCoords.y / canvas.offsetHeight * 2 + 1
     )
-  }
-
-  function getMouseCoords(e) {
-    // var rect = e.target.getBoundingClientRect();
-    // coords.x = (e.clientX - rect.left)
-    // coords.y = - (e.clientY - rect.top)
-    return new THREE.Vector2(e.clientX, e.clientY - 39)
   }
 
   export default {
@@ -356,7 +351,7 @@
       })
 
       this.selectionLineMaterial = this.lineMaterial.clone()
-      this.selectionLineMaterial.color.set('#2590e1')
+      this.selectionLineMaterial.color.set('#0070ff')
 
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('#2590e1')
@@ -388,15 +383,24 @@
       this.$root.$on('component-changed', this.componentChanged)
 
       this.$refs.canvas.addEventListener('keydown', (e) => {
-        if(e.keyCode === 46 || e.keyCode === 8) { // Del / Backspace
+        if(e.keyCode == 46 || e.keyCode == 8) { // Del / Backspace
           if(this.selectedElement) this.deleteElement(this.selectedElement)
+        } else if(e.keyCode == 18) {
+          this.altPressed = true
         }
-      });
+      })
+
+      this.$refs.canvas.addEventListener('keyup', (e) => {
+        if(e.keyCode == 18) {
+          this.altPressed = false
+        }
+      })
 
       this.lastSnaps = []
 
-      this.onWindowResize()
+      setTimeout(() => this.onWindowResize(), 500)
       window.addEventListener('resize', this.onWindowResize.bind(this), false)
+      this.onWindowResize()
 
       this.loadTree(this.document.tree, true)
     },
@@ -412,15 +416,21 @@
         return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + 150} ${pos.x} ${pos.y - 150} ${pos.x} ${pos.y}`
       },
 
+      getMouseCoords: function(e) {
+        var rect = this.$refs.canvas.getBoundingClientRect();
+        return new THREE.Vector2(e.clientX, e.clientY - rect.top)
+      },
+
       click: function(e) {
         this.viewControls.enabled = true
-        const coords = getCanvasCoords(getMouseCoords(e), this.$refs.canvas)
+        const coords = getCanvasCoords(this.getMouseCoords(e), this.$refs.canvas)
         if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return this.render()
+        if(this.altPressed) return
         this.activeTool.click(coords)
       },
 
       doubleClick: function(e) {
-        const coords = getCanvasCoords(getMouseCoords(e), this.$refs.canvas)
+        const coords = getCanvasCoords(this.getMouseCoords(e), this.$refs.canvas)
         this.viewControlsTarget = this.fromScreen(coords)
         this.animate()
       },
@@ -432,12 +442,12 @@
         // Make sure we keep animating long enough for view dampening to settle
         setTimeout(() => {
           isDragging = false
-          console.log('finish drag')
         }, 500)
       },
 
       mouseDown: function(e) {
         if(e.button != 0) return
+        if(this.altPressed) return
         const [vec, coords, canvasCoords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, canvasCoords)
         // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
@@ -449,12 +459,13 @@
       mouseMove: function(e) {
         if(e.button != 0) return
         if(this.isOrbiting) return
+        if(this.altPressed) return
         const [vec, coords, canvasCoords] = this.snap(e)
         if(vec) this.activeTool.mouseMove(vec, canvasCoords)
       },
 
       snap: function(e) {
-        const coords = getMouseCoords(e)
+        const coords = this.getMouseCoords(e)
         const canvasCoords = getCanvasCoords(coords, this.$refs.canvas)
         let vec = this.fromScreen(canvasCoords)
         this.guides = []
@@ -557,10 +568,10 @@
       updateWidgets: function() {
         if(this.snapAnchor) this.snapAnchor.pos = this.toScreen(this.snapAnchor.vec)
 
-        for(let node_id in this.handles) {
-          const node_handles = this.handles[node_id]
-          for(let elem_id in node_handles) {
-            const elem_handles = node_handles[elem_id]
+        for(let nodeId in this.handles) {
+          const node_handles = this.handles[nodeId]
+          for(let elemId in node_handles) {
+            const elem_handles = node_handles[elemId]
             elem_handles.forEach(handle => {
               handle.pos = this.toScreen(handle.vec)
             })
@@ -660,13 +671,13 @@
         line.element = elem
         this.scene.add(line)
 
-        const node_id = node.id()
-        const elem_id = elem.id()
-        this.handles[node_id] = this.handles[node_id] || {}
-        this.handles[node_id][elem_id] = this.handles[node_id][elem_id] || []
+        const nodeId = node.id()
+        const elemId = elem.id()
+        this.handles[nodeId] = this.handles[nodeId] || {}
+        this.handles[nodeId][elemId] = this.handles[nodeId][elemId] || []
         elem.get_handles().forEach((handle, i) => {
           handle = new THREE.Vector3().fromArray(handle)
-          this.handles[node_id][elem_id].push({
+          this.handles[nodeId][elemId].push({
             type: 'handle',
             pos: this.toScreen(handle),
             vec: handle,
@@ -676,11 +687,11 @@
           })
         })
 
-        this.document.data[node_id].cachedElements = this.document.data[node_id].cachedElements || []
-        this.document.data[node_id].cachedElements.push(elem)
+        this.document.data[nodeId].cachedElements = this.document.data[nodeId].cachedElements || []
+        this.document.data[nodeId].cachedElements.push(elem)
 
         const regions = node.get_regions()
-        console.log(regions)
+        // console.log(regions)
         // // console.log(splits.map(elem => elem.get_handles()))
         regions.forEach(region => {
           const geometry = new THREE.BufferGeometry();
@@ -697,12 +708,12 @@
 
       unloadElement: function(elem, node, document) {
         this.scene.remove(document.data[elem.id()])
-        const node_id = node.id()
-        const cache = document.data[node_id]
-        if(this.handles[node_id]) delete this.handles[node_id][elem.id()]
+        const nodeId = node.id()
+        const cache = document.data[nodeId]
+        if(this.handles[nodeId]) delete this.handles[nodeId][elem.id()]
         this.handles = Object.assign({}, this.handles)
-        const cachedElements = document.data[node_id].cachedElements
-        if(cachedElements) document.data[node_id].cachedElements = cachedElements.filter(e => e != elem)
+        const cachedElements = document.data[nodeId].cachedElements
+        if(cachedElements) document.data[nodeId].cachedElements = cachedElements.filter(e => e != elem)
       },
 
       deleteElement: function(elem) {
@@ -722,8 +733,8 @@
       },
 
       unloadTree: function(node, document, recursive) {
-        const node_id = node.id()
-        const cachedElements = document.data[node_id].cachedElements
+        const nodeId = node.id()
+        const cachedElements = document.data[nodeId].cachedElements
         cachedElements && cachedElements.forEach(elem => this.unloadElement(elem, node, document))
         if(recursive) node.get_children().forEach(child => this.unloadTree(child, document, true))
       },

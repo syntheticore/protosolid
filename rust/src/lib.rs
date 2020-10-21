@@ -286,8 +286,11 @@ impl JsComponent {
 
   pub fn get_regions(&self) -> Array {
     // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
-    self.real.borrow().sketch.closed_regions().iter()
-      .map(|region| JsValue::from(JsBufferGeometry{ data: geom2d::tesselate_polygon(region.clone()).to_buffer_geometry()}) )
+    self.real.borrow().sketch.closed_regions().into_iter()
+      .map(|region| JsValue::from(JsBufferGeometry {
+        position: geom2d::tesselate_polygon(region).to_buffer_geometry(),
+        normal: vec![],
+      }))
       .collect()
   }
 
@@ -298,8 +301,8 @@ impl JsComponent {
     for split in splits.iter() {
       real.sketch.elements.push(Rc::new(RefCell::new(split.clone())));
     }
-    splits.iter().map(|elem| {
-      JsValue::from(JsSketchElement::from(&Rc::new(RefCell::new(elem.clone()))))
+    splits.into_iter().map(|elem| {
+      JsValue::from(JsSketchElement::from(&Rc::new(RefCell::new(elem))))
     }).collect()
   }
 

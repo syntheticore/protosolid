@@ -10,3 +10,6 @@ new Vue({
 }).$mount('#app')
 
 document.body.setAttribute('data-platform', window.electronPlatform || 'browser')
+if(window.electronPlatform == 'darwin' && window.electronPlatformVersion < "18.0.0") {
+  document.body.setAttribute('data-darwin-old', true)
+}

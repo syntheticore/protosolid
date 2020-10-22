@@ -72,10 +72,7 @@
     created() {
       this.createDocument().then(() => this.changeDocument(this.documents[0]) )
 
-      if(!window.ipcRenderer) {
-        // this.isFullscreen = true
-        return
-      }
+      if(!window.ipcRenderer) return
 
       window.ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
         this.isFullscreen = isFullscreen
@@ -85,10 +82,13 @@
         this.isMaximized = isMaximized
       })
 
-      window.ipcRenderer.on('pong', (e, arg) => {
-        console.log('pong', arg)
+      window.ipcRenderer.on('dark-mode', (e, darkMode) => {
+        if(darkMode) {
+          document.body.setAttribute('data-dark-mode', true)
+        } else {
+          document.body.removeAttribute('data-dark-mode')
+        }
       })
-      window.ipcRenderer.send('ping')
     },
 
     mounted() {
@@ -107,6 +107,7 @@
       if(!window.ipcRenderer) return
       window.ipcRenderer.send('vue-ready')
       console.log(window.electronPlatform)
+      console.log(window.electronPlatformVersion)
     },
 
     methods: {

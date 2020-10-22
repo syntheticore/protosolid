@@ -1,4 +1,4 @@
-const {app, ipcMain, BrowserWindow, Menu, screen} = require('electron')
+const { app, ipcMain, BrowserWindow, Menu, screen, nativeTheme } = require('electron')
 const path = require('path')
 
 const isMac = process.platform === 'darwin'
@@ -154,34 +154,34 @@ function createWindow() {
   // mainWindow.webContents.openDevTools()
 
   // Emitted when the window is closed.
-  mainWindow.on('closed', function () {
+  mainWindow.on('closed', function() {
     // Dereference the window object, usually you would store windows
     // in an array if your app supports multi windows, this is the time
     // when you should delete the corresponding element.
     mainWindow = null
   })
 
-  mainWindow.on('enter-full-screen', function () {
+  mainWindow.on('enter-full-screen', function() {
     mainWindow.webContents.send('fullscreen-changed', true)
   })
 
-  mainWindow.on('enter-html-full-screen', function () {
+  mainWindow.on('enter-html-full-screen', function() {
     mainWindow.webContents.send('fullscreen-changed', true)
   })
 
-  mainWindow.on('leave-full-screen', function () {
+  mainWindow.on('leave-full-screen', function() {
     mainWindow.webContents.send('fullscreen-changed', false)
   })
 
-  mainWindow.on('leave-html-full-screen', function () {
+  mainWindow.on('leave-html-full-screen', function() {
     mainWindow.webContents.send('fullscreen-changed', false)
   })
 
-  mainWindow.on('maximize', function () {
+  mainWindow.on('maximize', function() {
     mainWindow.webContents.send('maximize-changed', true)
   })
 
-  mainWindow.on('unmaximize', function () {
+  mainWindow.on('unmaximize', function() {
     mainWindow.webContents.send('maximize-changed', false)
   })
 
@@ -191,7 +191,7 @@ function createWindow() {
     let resizable = mainWindow.isResizable()
     let normalBounds = mainWindow.getNormalBounds ? mainWindow.getNormalBounds() : mainWindow.getBounds()
 
-    mainWindow.getNormalBounds = function () {
+    mainWindow.getNormalBounds = function() {
       if (!this.isMaximized()) {
         if (BrowserWindow.prototype.getNormalBounds) {
           normalBounds = BrowserWindow.prototype.getNormalBounds.call(this)
@@ -202,7 +202,7 @@ function createWindow() {
       return normalBounds
     }.bind(mainWindow)
 
-    mainWindow.maximize = function () {
+    mainWindow.maximize = function() {
       normalBounds = this.getNormalBounds() // store the bounds of normal window
       resizable = this.isResizable() // store resizable value
       BrowserWindow.prototype.maximize.call(this)
@@ -213,7 +213,7 @@ function createWindow() {
       this.setResizable(false) // disable resize when the window is maximized
     }.bind(mainWindow)
 
-    mainWindow.unmaximize = function () {
+    mainWindow.unmaximize = function() {
       const fromMaximized = BrowserWindow.prototype.isMaximized.call(this)
       BrowserWindow.prototype.unmaximize.call(this)
       if (!fromMaximized) {
@@ -223,7 +223,7 @@ function createWindow() {
       this.setResizable(resizable) // restore resizable
     }.bind(mainWindow)
 
-    mainWindow.isMaximized = function () {
+    mainWindow.isMaximized = function() {
       const nativeIsMaximized = BrowserWindow.prototype.isMaximized.call(this)
       if (!nativeIsMaximized) {
         // determine whether the window is full of the screen work area
@@ -258,27 +258,29 @@ function showSplash() {
   setTimeout(createWindow, 500)
 }
 
+function setDarkMode() {
+  mainWindow.webContents.send('dark-mode', nativeTheme.shouldUseDarkColors)
+}
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', showSplash)
 
 // Quit when all windows are closed.
-app.on('window-all-closed', function () {
+app.on('window-all-closed', function() {
   // On macOS it is common for applications and their menu bar
   // to stay active until the user quits explicitly with Cmd + Q
   if(!isMac) app.quit()
 })
 
-app.on('activate', function () {
+app.on('activate', function() {
   // On macOS it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
   if (mainWindow === null) createWindow()
 })
 
-ipcMain.on('ping', function() {
-  mainWindow.webContents.send('pong')
-});
+nativeTheme.on('updated', setDarkMode)
 
 ipcMain.on('maximize', function() {
   mainWindow.maximize()
@@ -297,6 +299,7 @@ ipcMain.on('close', function() {
 });
 
 ipcMain.on('vue-ready', function() {
+  setDarkMode()
   setTimeout(() => {
     splash.destroy()
     mainWindow.show()

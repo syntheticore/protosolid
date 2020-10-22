@@ -81,8 +81,9 @@
     border-bottom: 1px solid black
     max-width: 100vw
     align-items: center
-    [data-platform="darwin"] &
+    [data-platform="darwin"]:not([data-darwin-old]) &
       border-radius: 4px 4px 0px 0px
+    [data-platform="darwin"] &
       padding-left: 74px
     > *
       flex: 0 0 auto

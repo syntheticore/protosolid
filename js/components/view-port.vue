@@ -333,14 +333,25 @@
         this.$emit('change-view')
       })
 
+      let dampingTimeout
+
       this.viewControls.addEventListener('start', () => {
         this.transformControl.enabled = false
         this.isOrbiting = true
+        clearTimeout(dampingTimeout)
+        if(!this.isAnimating) {
+          this.isAnimating = true
+          this.animate()
+        }
       })
 
       this.viewControls.addEventListener('end', () => {
         this.transformControl.enabled = true
         this.isOrbiting = false
+        // Make sure we keep animating long enough for view damping to settle
+        dampingTimeout = setTimeout(() => {
+          this.isAnimating = false
+        }, 500)
       })
 
       this.lineMaterial = new LineMaterial({
@@ -439,10 +450,7 @@
         this.activeHandle = null
         this.snapAnchor = null
         this.guides = []
-        // Make sure we keep animating long enough for view dampening to settle
-        setTimeout(() => {
-          isDragging = false
-        }, 500)
+        isDragging = false
       },
 
       mouseDown: function(e) {
@@ -452,8 +460,18 @@
         if(vec) this.activeTool.mouseDown(vec, canvasCoords)
         // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
         this.lastCoords = canvasCoords
-        isDragging = true
-        this.animate()
+      },
+
+      anchorClicked: function(anchor) {
+        this.activeTool.mouseDown(anchor.vec, anchor.pos)
+      },
+
+      handleMouseDown: function(e, handle) {
+        if(this.activeTool.constructor == ManipulationTool) {
+          this.activeHandle = handle
+          isDragging = true
+        }
+        this.mouseDown(e)
       },
 
       mouseMove: function(e) {
@@ -554,17 +572,6 @@
         if(snapX || snapZ) return snapVec
       },
 
-      anchorClicked: function(anchor) {
-        this.activeTool.mouseDown(anchor.vec, anchor.pos)
-      },
-
-      handleMouseDown: function(e, handle) {
-        if(this.activeTool.constructor == ManipulationTool) {
-          this.activeHandle = handle
-        }
-        this.mouseDown(e)
-      },
-
       updateWidgets: function() {
         if(this.snapAnchor) this.snapAnchor.pos = this.toScreen(this.snapAnchor.vec)
 
@@ -605,7 +612,7 @@
       animate: function() {
         if(!rendering) return
         this.viewControls.update()
-        if(isDragging || this.viewControlsTarget) requestAnimationFrame(this.animate.bind(this))
+        if(this.isAnimating || this.viewControlsTarget) requestAnimationFrame(this.animate.bind(this))
         // Transition to manual view target
         if(!this.viewControlsTarget) return
         if(this.viewControlsTarget.clone().sub(this.viewControls.target).lengthSq() < 0.001) {

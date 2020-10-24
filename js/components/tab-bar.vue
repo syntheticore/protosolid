@@ -93,7 +93,7 @@
   [data-platform="browser"]
     .tab-bar
       padding-left: 0px
-      border-radius: 0
+      border-radius: 0 !important
       // border-top: none
     .tab-bar
       border-top: none

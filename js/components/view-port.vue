@@ -398,9 +398,9 @@
 
       this.lastSnaps = []
 
-      setTimeout(() => this.onWindowResize(), 500)
-      window.addEventListener('resize', this.onWindowResize.bind(this), false)
       this.onWindowResize()
+      setTimeout(() => this.onWindowResize(), 500)
+      this.$root.$on('resize', () => this.onWindowResize() )
 
       this.loadTree(this.document.tree, true)
     },

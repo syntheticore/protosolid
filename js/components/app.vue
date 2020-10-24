@@ -88,7 +88,12 @@
         } else {
           document.body.removeAttribute('data-dark-mode')
         }
+        this.$root.$emit('resize')
       })
+
+      window.addEventListener('resize', () => {
+        this.$root.$emit('resize')
+      }, false)
     },
 
     mounted() {

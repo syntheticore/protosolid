@@ -72,11 +72,6 @@ impl SketchElement {
       }.iter().map(|seg| Self::BezierSpline(seg.clone())).collect(),
     }
   }
-
-  pub fn other_endpoint(&self, point: &Point3) -> Point3 {
-    let (start, end) = self.as_curve().endpoints();
-    if *point == start { end } else { start }
-  }
 }
 
 
@@ -85,6 +80,11 @@ pub trait Curve {
   fn default_tesselation(&self) -> Vec<Point3>;
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
+
+  fn other_endpoint(&self, point: &Point3) -> Point3 {
+    let (start, end) = self.endpoints();
+    if *point == start { end } else { start }
+  }
 
   fn tesselate_fixed(&self, steps: i32) -> Vec<Point3> {
     (0..steps + 1).map(|i| {
@@ -469,6 +469,20 @@ mod tests {
   #[test]
   fn angle_90() {
     let lines = test_data::crossing_lines();
+    let angle = lines.0.angle_to(lines.1);
+    assert_eq!(angle, std::f64::consts::PI / 2.0);
+  }
+
+  #[test]
+  fn angle_left() {
+    let lines = test_data::angle_left();
+    let angle = lines.0.angle_to(lines.1);
+    assert_eq!(angle, std::f64::consts::PI / 2.0);
+  }
+
+  #[test]
+  fn angle_right() {
+    let lines = test_data::angle_right();
     let angle = lines.0.angle_to(lines.1);
     assert_eq!(angle, std::f64::consts::PI / 2.0);
   }

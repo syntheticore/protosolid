@@ -29,6 +29,20 @@ pub fn t_section() -> (Line, Line) {
   )
 }
 
+pub fn angle_left() -> (Line, Line) {
+  (
+    Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0)),
+    Line::new(Point3::new(0.0, 0.0, 1.0), Point3::new(-1.0, 0.0, 1.0)),
+  )
+}
+
+pub fn angle_right() -> (Line, Line) {
+  (
+    Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0)),
+    Line::new(Point3::new(0.0, 0.0, 1.0), Point3::new(1.0, 0.0, 1.0)),
+  )
+}
+
 pub fn rectangle() -> (Line, Line, Line, Line) {
   let upper_left = Point3::new(-1.0, 0.0, 1.0);
   let upper_right = Point3::new(1.0, 0.0, 1.0);

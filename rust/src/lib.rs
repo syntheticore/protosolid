@@ -74,7 +74,7 @@ impl JsSketchElement {
   }
 
   pub fn id(&self) -> JsValue {
-    JsValue::from_serde(&as_controllable(&mut self.real.borrow_mut()).id()).unwrap()
+    JsValue::from_serde(&as_controllable(&mut self.real.borrow()).id()).unwrap()
   }
 
   pub fn typename(&self) -> JsValue {
@@ -106,7 +106,7 @@ impl JsSketchElement {
   }
 
   pub fn get_handles(&self) -> Array {
-    vertices_to_js(as_controllable(&mut self.real.borrow_mut()).get_handles())
+    vertices_to_js(as_controllable(&mut self.real.borrow()).get_handles())
   }
 
   pub fn set_handles(&self, handles: Array) {
@@ -115,15 +115,15 @@ impl JsSketchElement {
   }
 
   pub fn get_snap_points(&self) -> Array {
-    vertices_to_js(as_controllable(&mut self.real.borrow_mut()).get_snap_points())
+    vertices_to_js(as_controllable(&mut self.real.borrow()).get_snap_points())
   }
 
   pub fn tesselate(&self, steps: i32) -> Array {
-    vertices_to_js(self.real.borrow_mut().as_curve().tesselate_relative(steps.into()))
+    vertices_to_js(self.real.borrow().as_curve().tesselate_relative(steps.into()))
   }
 
   pub fn default_tesselation(&self) -> Array {
-    vertices_to_js(self.real.borrow_mut().as_curve().default_tesselation())
+    vertices_to_js(self.real.borrow().as_curve().default_tesselation())
   }
 
   pub fn get_length(&self) -> JsValue {
@@ -286,7 +286,7 @@ impl JsComponent {
 
   pub fn get_regions(&self) -> Array {
     // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
-    self.real.borrow().sketch.closed_regions().into_iter()
+    self.real.borrow().sketch.poly_regions().into_iter()
       .map(|region| JsValue::from(JsBufferGeometry {
         position: geom2d::tesselate_polygon(region).to_buffer_geometry(),
         normal: vec![],
@@ -296,7 +296,7 @@ impl JsComponent {
 
   pub fn get_all_split(&self) -> Array {
     let mut real = self.real.borrow_mut();
-    let splits = real.sketch.all_split();
+    let splits = real.sketch.split_all();
     real.sketch.elements.clear();
     for split in splits.iter() {
       real.sketch.elements.push(Rc::new(RefCell::new(split.clone())));

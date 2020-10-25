@@ -10,7 +10,7 @@
           a(href="#") Downloads
           a(href="#") Documentation
     main
-      
+
       section.hero
         .content
           div.text
@@ -19,7 +19,7 @@
             p Alchemy is a cross-platform, open-source, mechanical design software with a new twist on parametric modeling
           figure
             img(src="img/screenshot-1.png")
-      
+
       section.benefits
         .content
           .benefit
@@ -30,7 +30,7 @@
 
             h3 Constant Productivity
             h3 Poses
-            h3 Configurations
+            h3 Configurations (of variable sets)
             h3 Pretended History
           .benefit
             h2 Workflow
@@ -65,11 +65,11 @@
             <br>
             Direct modeling applications try to solve these problems, but don't address the loss of parametrism.
             <br>
-            Alchemy offers a new approach that combines the best of both worlds. By applying dimensions and constraints directly to geometry, instead of the sketches that created it, parametric updates can occur without the need for recalculating the whole model, resulting in a much more interactive workflow. 
+            Alchemy offers a new approach that combines the best of both worlds. By applying dimensions and constraints directly to geometry, instead of the sketches that created it, parametric updates can occur without the need for recalculating the whole model, resulting in a much more interactive workflow.
           h3 Poses
           h3 Configurations
           h3 Pretended History
-      
+
       section.workflow
         .content
           h2 Workflow
@@ -87,7 +87,7 @@
           h3 Selection Sets
           h3 Visibility Sets
           h3 Saved Views
-      
+
       section.performance
         .content
           h2 Performance
@@ -172,7 +172,7 @@
       font-family: 'Quicksand'
       font-size: 18px
       line-height: 1.4
-      
+
 
   .hero
     padding-top: 120px
@@ -271,7 +271,7 @@
     methods: {
 
     },
-    
+
     data() {
       return {}
     }

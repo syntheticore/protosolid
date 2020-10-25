@@ -36,8 +36,3 @@ pub enum Intersection {
   Extended(Vec<Point3>), // Intersections outside geometric bounds
   Contained, // Overlap, Infinite intersections
 }
-
-
-pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
-  vec1.x * vec2.z - vec1.z * vec2.x
-}

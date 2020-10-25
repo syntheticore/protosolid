@@ -171,9 +171,6 @@
   const snapDistance = 10.5 // px
   const maxSnapReferences = 5
 
-  let isDragging = false
-
-  var rendering = true
   var renderer, camera, mesh, pointMaterial
 
   function getCanvasCoords(mouseCoords, canvas) {
@@ -417,7 +414,7 @@
     },
 
     beforeDestroy: function() {
-      rendering = false
+      this.animating = false
       window.removeEventListener('resize', this.onWindowResize, false)
     },
 
@@ -428,7 +425,7 @@
       },
 
       getMouseCoords: function(e) {
-        var rect = this.$refs.canvas.getBoundingClientRect();
+        var rect = this.$refs.canvas.getBoundingClientRect()
         return new THREE.Vector2(e.clientX, e.clientY - rect.top)
       },
 
@@ -450,7 +447,7 @@
         this.activeHandle = null
         this.snapAnchor = null
         this.guides = []
-        isDragging = false
+        this.isDragging = false
       },
 
       mouseDown: function(e) {
@@ -468,8 +465,9 @@
 
       handleMouseDown: function(e, handle) {
         if(this.activeTool.constructor == ManipulationTool) {
+          this.lastSnaps = []
           this.activeHandle = handle
-          isDragging = true
+          this.isDragging = true
         }
         this.mouseDown(e)
       },
@@ -487,7 +485,7 @@
         const canvasCoords = getCanvasCoords(coords, this.$refs.canvas)
         let vec = this.fromScreen(canvasCoords)
         this.guides = []
-        if(this.activeTool.constructor != ManipulationTool || isDragging) vec = this.snapToPoints(coords) || this.snapToGuides(vec) || vec
+        if(this.activeTool.constructor != ManipulationTool || this.isDragging) vec = this.snapToPoints(coords) || this.snapToGuides(vec) || vec
         return [vec, coords, canvasCoords]
       },
 
@@ -594,6 +592,7 @@
 
       activateTool: function(toolName) {
         if(this.activeTool) this.activeTool.dispose()
+        this.lastSnaps = []
         const tools = {
           Manipulate: ManipulationTool,
           Line: LineTool,
@@ -602,6 +601,7 @@
         }
         const tool = new tools[toolName](this.activeComponent, this)
         this.$emit('activate-tool', tool)
+        this.render()
       },
 
       render: function() {
@@ -610,7 +610,6 @@
       },
 
       animate: function() {
-        if(!rendering) return
         this.viewControls.update()
         if(this.isAnimating || this.viewControlsTarget) requestAnimationFrame(this.animate.bind(this))
         // Transition to manual view target
@@ -700,17 +699,23 @@
         const regions = node.get_regions()
         // console.log(regions)
         // // console.log(splits.map(elem => elem.get_handles()))
-        regions.forEach(region => {
-          const geometry = new THREE.BufferGeometry();
-          const vertices = new Float32Array(region.data())
-          console.log(vertices)
-          geometry.setAttribute('position', new THREE.BufferAttribute(region.data(), 3));
-          geometry.setAttribute('color', Array(vertices.length).fill(1));
+        // regions.forEach(region => {
+        //   const geometry = new THREE.BufferGeometry()
+        //   const vertices = new Float32Array(region.position())
+        //   const normals = new Float32Array(Array(vertices.length).fill(1))
+        //   const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
+        //   console.log(vertices)
+        //   console.log(normals)
+        //   console.log(uvs)
+        //   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+        //   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+        //   // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
+        //   geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
 
-          const material = new THREE.MeshBasicMaterial({color: 0xff0000});
-          const mesh = new THREE.Mesh(geometry, material );
-          this.scene.add(mesh)
-        })
+        //   const material = new THREE.MeshBasicMaterial({color: 0xff0000})
+        //   const mesh = new THREE.Mesh(geometry, material )
+        //   // this.scene.add(mesh)
+        // })
       },
 
       unloadElement: function(elem, node, document) {

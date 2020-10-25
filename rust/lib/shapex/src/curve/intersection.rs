@@ -1,4 +1,4 @@
-use crate::base::*;
+use crate::geom2d::*;
 use crate::curve::*;
 
 

@@ -45,7 +45,7 @@ pub fn line_line(own: &Line, other: &Line) -> Intersection {
   let u_numerator = cross_2d(other.points.0 - own.points.0, r);
   let denominator = cross_2d(r, s);
   // Lines are colinear
-  if u_numerator == 0.0 && denominator == 0.0 {
+  if u_numerator.almost(0.0) && denominator.almost(0.0) {
     // Lines overlap (All point differences in either direction have same sign)
     let overlap = ![
       (other.points.0.x - own.points.0.x < 0.0),
@@ -65,12 +65,12 @@ pub fn line_line(own: &Line, other: &Line) -> Intersection {
     }
   }
   // Lines touch at endpoints
-  if own.points.0 == other.points.0 || own.points.0 == other.points.1 {
+  if own.points.0.almost(other.points.0) || own.points.0.almost(other.points.1) {
     return Intersection::Touch(own.points.0)
-  } else if own.points.1 == other.points.0 || own.points.1 == other.points.1 {
+  } else if own.points.1.almost(other.points.0) || own.points.1.almost(other.points.1) {
     return Intersection::Touch(own.points.1)
   }
-  if denominator == 0.0 {
+  if denominator.almost(0.0) {
     // Lines are paralell
     return Intersection::None;
   }
@@ -80,7 +80,7 @@ pub fn line_line(own: &Line, other: &Line) -> Intersection {
   let do_cross = (t >= 0.0) && (t <= 1.0) && (u >= 0.0) && (u <= 1.0);
   let intersection_point = own.points.0 + r * t;
   if do_cross {
-    if t == 0.0 || t == 1.0 || u == 0.0 || u == 1.0 {
+    if t.almost(0.0) || t.almost(1.0) || u.almost(0.0) || u.almost(1.0) {
       Intersection::Pierce(vec![intersection_point])
     } else {
       Intersection::Cross(vec![intersection_point])
@@ -93,9 +93,9 @@ pub fn line_line(own: &Line, other: &Line) -> Intersection {
 pub fn line_spline(line: &Line, spline: &BezierSpline) -> Intersection {
   let spline_end_points = spline.endpoints();
   // Curves touch at endpoints
-  return if line.points.0 == spline_end_points.0 || line.points.0 == spline_end_points.1 {
+  return if line.points.0.almost(spline_end_points.0) || line.points.0.almost(spline_end_points.1) {
     Intersection::Touch(line.points.0)
-  } else if line.points.1 == spline_end_points.0 || line.points.1 == spline_end_points.1 {
+  } else if line.points.1.almost(spline_end_points.0) || line.points.1.almost(spline_end_points.1) {
     Intersection::Touch(line.points.1)
   } else {
     Intersection::None

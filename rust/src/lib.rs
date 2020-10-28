@@ -1,5 +1,6 @@
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::HashSet;
 
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
@@ -284,14 +285,39 @@ impl JsComponent {
     real.sketch.elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id);
   }
 
-  pub fn get_regions(&self) -> Array {
+  // pub fn get_regions(&self) -> Array {
+  //   // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
+  //   self.real.borrow().sketch.poly_regions().into_iter()
+  //     .map(|region| JsValue::from(JsBufferGeometry {
+  //       position: geom2d::tesselate_polygon(region).to_buffer_geometry(),
+  //       normal: vec![],
+  //     }))
+  //     .collect()
+  // }
+
+  pub fn get_regions(&self) -> JsFoo {
     // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
-    self.real.borrow().sketch.poly_regions().into_iter()
-      .map(|region| JsValue::from(JsBufferGeometry {
-        position: geom2d::tesselate_polygon(region).to_buffer_geometry(),
-        normal: vec![],
-      }))
-      .collect()
+    let sketch = &self.real.borrow().sketch;
+    // sketch.closed_regions();
+    let cut_elements = Sketch::all_split(&sketch.elements);
+    let islands = Sketch::build_islands(&cut_elements);
+    let mut regions: Vec<Vec<Rc<RefCell<SketchElement>>>> = vec![];
+    for island in islands.iter() {
+      let start_elem = &island[0];
+      let start_point = start_elem.owned.as_curve().endpoints().0;
+      let loops = Sketch::build_loops(&start_point, &start_elem, vec![], island, &mut HashSet::new(), &mut HashSet::new());
+      let mut new_regions = loops.iter().map(|loopy| {
+        loopy.iter().map(|derived| {
+          derived.original.clone()
+        }).collect()
+      }).collect();
+      regions.append(&mut new_regions);
+    }
+    JsFoo {
+      cut: cut_elements.len(),
+      islands: islands.len(),
+      regions: regions.len(),
+    }
   }
 
   pub fn get_all_split(&self) -> Array {
@@ -323,6 +349,14 @@ impl JsComponent {
     self.real.borrow_mut().children.push(comp.clone());
     JsComponent::from(&comp)
   }
+}
+
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct JsFoo {
+  pub cut: usize,
+  pub islands: usize,
+  pub regions: usize,
 }
 
 

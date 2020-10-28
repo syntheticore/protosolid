@@ -1,7 +1,7 @@
-use crate::base::*;
-use cgmath::prelude::*;
 use uuid::Uuid;
 use std::convert::TryInto;
+use cgmath::prelude::*;
+use crate::base::*;
 
 mod intersection;
 
@@ -83,7 +83,7 @@ pub trait Curve {
 
   fn other_endpoint(&self, point: &Point3) -> Point3 {
     let (start, end) = self.endpoints();
-    if *point == start { end } else { start }
+    if point.almost(start) { end } else { start }
   }
 
   fn tesselate_fixed(&self, steps: i32) -> Vec<Point3> {

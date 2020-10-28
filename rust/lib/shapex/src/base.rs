@@ -5,13 +5,12 @@ pub type Point2 = cgmath::Point2<f64>;
 pub type Point3 = cgmath::Point3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
 
-pub const EPSILON: f64 = core::f64::EPSILON * 10.0;
+pub const EPSILON: f64 = core::f64::EPSILON * 10000.0;
 
 pub trait Almost {
   // const EPS: f64 = core::f64::EPSILON * 100000.0;
   fn almost(&self, other: Self) -> bool;
 }
-
 
 impl Almost for Point3 {
   fn almost(&self, other: Self) -> bool {
@@ -27,6 +26,7 @@ impl Almost for f64 {
   }
 }
 
+
 #[derive(Debug, PartialEq)]
 pub enum Intersection {
   None,
@@ -35,4 +35,9 @@ pub enum Intersection {
   Cross(Vec<Point3>), // Actual intersections
   Extended(Vec<Point3>), // Intersections outside geometric bounds
   Contained, // Overlap, Infinite intersections
+}
+
+
+pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
+  vec![tuple.0, tuple.1]
 }

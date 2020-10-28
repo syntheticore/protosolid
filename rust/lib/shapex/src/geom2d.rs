@@ -19,7 +19,7 @@ pub fn tesselate_polygon(vertices: PolyLine) -> Mesh {
 
 // Check if two line segments turn clockwise
 // Returns values > 0 when clockwise, < 0 when anti-clockwise and 0 when segments are colinear
-pub fn is_clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
+pub fn clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
   let v1 = p2 - p1;
   let v2 = p3 - p1;
   cross_2d(v1, v2)

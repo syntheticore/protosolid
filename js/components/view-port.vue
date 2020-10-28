@@ -395,6 +395,7 @@
           if(this.selectedElement) this.deleteElement(this.selectedElement)
         } else if(e.keyCode == 18) {
           this.altPressed = true
+          // this.guides = []
         }
       })
 
@@ -549,25 +550,25 @@
             return true
           }
         })
-        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, 0, snapZ ? snapZ.z : vec.z)
+        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, vec.y, snapZ ? snapZ.z : vec.z)
         const screenSnapVec = this.toScreen(snapVec)
         if(snapX) {
-          const end = this.toScreen(snapX)
+          const start = this.toScreen(snapX)
           this.guides.push({
-            id: 'v' + end.x + end.y,
-            start: screenSnapVec,
-            end,
+            id: 'v' + start.x + start.y,
+            start,
+            end: screenSnapVec,
           })
         }
         if(snapZ) {
-          const end = this.toScreen(snapZ)
+          const start = this.toScreen(snapZ)
           this.guides.push({
-            id: 'h' + end.x + end.y,
-            start: screenSnapVec,
-            end,
+            id: 'h' + start.x + start.y,
+            start,
+            end: screenSnapVec,
           })
         }
-        if(snapX || snapZ) return snapVec
+        if(snapX || snapZ) return snapVec
       },
 
       updateWidgets: function() {
@@ -695,27 +696,6 @@
 
         this.document.data[nodeId].cachedElements = this.document.data[nodeId].cachedElements || []
         this.document.data[nodeId].cachedElements.push(elem)
-
-        const regions = node.get_regions()
-        // console.log(regions)
-        // // console.log(splits.map(elem => elem.get_handles()))
-        // regions.forEach(region => {
-        //   const geometry = new THREE.BufferGeometry()
-        //   const vertices = new Float32Array(region.position())
-        //   const normals = new Float32Array(Array(vertices.length).fill(1))
-        //   const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
-        //   console.log(vertices)
-        //   console.log(normals)
-        //   console.log(uvs)
-        //   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
-        //   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
-        //   // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
-        //   geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
-
-        //   const material = new THREE.MeshBasicMaterial({color: 0xff0000})
-        //   const mesh = new THREE.Mesh(geometry, material )
-        //   // this.scene.add(mesh)
-        // })
       },
 
       unloadElement: function(elem, node, document) {
@@ -757,6 +737,33 @@
       },
 
       elementChanged: function(elem, comp) {
+        const elements = comp.get_sketch_elements()
+        // console.log(elements.map(elem => elem.get_handles()))
+        const regions = comp.get_regions()
+        console.log('regions', {
+          cut: regions.cut,
+          islands: regions.islands,
+          regions: regions.regions,
+        })
+        // console.log(regions)
+        // // console.log(splits.map(elem => elem.get_handles()))
+        // regions.forEach(region => {
+        //   const geometry = new THREE.BufferGeometry()
+        //   const vertices = new Float32Array(region.position())
+        //   const normals = new Float32Array(Array(vertices.length / 3).fill([0,1,0]).flatten())
+        //   const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
+        //   console.log(vertices)
+        //   console.log(normals)
+        //   console.log(uvs)
+        //   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+        //   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+        //   // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
+        //   // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+
+        //   const material = new THREE.MeshBasicMaterial({color: 0xff0000})
+        //   const mesh = new THREE.Mesh(geometry, material )
+        //   // this.scene.add(mesh)
+        // })
         this.loadElement(elem, comp)
         this.render()
       },

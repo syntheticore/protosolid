@@ -72,6 +72,10 @@
     created() {
       this.createDocument().then(() => this.changeDocument(this.documents[0]) )
 
+      window.addEventListener('resize', () => {
+        this.$root.$emit('resize')
+      }, false)
+
       if(!window.ipcRenderer) return
 
       window.ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
@@ -90,10 +94,6 @@
         }
         this.$root.$emit('resize')
       })
-
-      window.addEventListener('resize', () => {
-        this.$root.$emit('resize')
-      }, false)
     },
 
     mounted() {

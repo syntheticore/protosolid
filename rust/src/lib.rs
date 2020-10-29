@@ -270,9 +270,8 @@ impl JsComponent {
     JsSketchElement::from(&real.sketch.elements.last().unwrap())
   }
 
-  pub fn add_circle(&mut self, center: JsValue, radius: JsValue) -> JsSketchElement {
+  pub fn add_circle(&mut self, center: JsValue, radius: f64) -> JsSketchElement {
     let center: (f64, f64, f64) = center.into_serde().unwrap();
-    let radius: f64 = radius.into_serde().unwrap();
     let circle = Circle::new(Point3::from(center), radius);
     let mut real = self.real.borrow_mut();
     real.sketch.elements.push(Rc::new(RefCell::new(SketchElement::Circle(circle))));
@@ -285,33 +284,28 @@ impl JsComponent {
     real.sketch.elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id);
   }
 
-  // pub fn get_regions(&self) -> Array {
-  //   // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
-  //   self.real.borrow().sketch.poly_regions().into_iter()
-  //     .map(|region| JsValue::from(JsBufferGeometry {
-  //       position: geom2d::tesselate_polygon(region).to_buffer_geometry(),
-  //       normal: vec![],
-  //     }))
-  //     .collect()
-  // }
+  pub fn get_regions(&self, include_outer: bool) -> Array {
+    // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
+    self.real.borrow().sketch.get_loops(include_outer).into_iter()
+      .map(|region| JsValue::from(JsBufferGeometry {
+        position: geom2d::tesselate_polygon(region).to_buffer_geometry(),
+        normal: vec![],
+      }))
+      .collect()
+  }
 
-  pub fn get_regions(&self) -> JsFoo {
+  pub fn get_region_info(&self) -> JsFoo {
     // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
     let sketch = &self.real.borrow().sketch;
     // sketch.closed_regions();
     let cut_elements = Sketch::all_split(&sketch.elements);
     let islands = Sketch::build_islands(&cut_elements);
-    let mut regions: Vec<Vec<Rc<RefCell<SketchElement>>>> = vec![];
+    let mut regions = vec![];
     for island in islands.iter() {
       let start_elem = &island[0];
       let start_point = start_elem.owned.as_curve().endpoints().0;
-      let loops = Sketch::build_loops(&start_point, &start_elem, vec![], island, &mut HashSet::new(), &mut HashSet::new());
-      let mut new_regions = loops.iter().map(|loopy| {
-        loopy.iter().map(|derived| {
-          derived.original.clone()
-        }).collect()
-      }).collect();
-      regions.append(&mut new_regions);
+      let mut loops = Sketch::build_loops(&start_point, &start_elem, vec![], island, &mut HashSet::new(), &mut HashSet::new());
+      regions.append(&mut loops);
     }
     JsFoo {
       cut: cut_elements.len(),

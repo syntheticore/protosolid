@@ -737,33 +737,38 @@
       },
 
       elementChanged: function(elem, comp) {
-        const elements = comp.get_sketch_elements()
+        // const elements = comp.get_sketch_elements()
         // console.log(elements.map(elem => elem.get_handles()))
-        const regions = comp.get_regions()
-        console.log('regions', {
-          cut: regions.cut,
-          islands: regions.islands,
-          regions: regions.regions,
-        })
-        // console.log(regions)
-        // // console.log(splits.map(elem => elem.get_handles()))
-        // regions.forEach(region => {
-        //   const geometry = new THREE.BufferGeometry()
-        //   const vertices = new Float32Array(region.position())
-        //   const normals = new Float32Array(Array(vertices.length / 3).fill([0,1,0]).flatten())
-        //   const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
-        //   console.log(vertices)
-        //   console.log(normals)
-        //   console.log(uvs)
-        //   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
-        //   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
-        //   // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
-        //   // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
-
-        //   const material = new THREE.MeshBasicMaterial({color: 0xff0000})
-        //   const mesh = new THREE.Mesh(geometry, material )
-        //   // this.scene.add(mesh)
+        // const regionInfo = comp.get_region_info()
+        // console.log('regionInfo', {
+        //   cut: regionInfo.cut,
+        //   islands: regionInfo.islands,
+        //   regions: regionInfo.regions,
         // })
+        const regions_without = comp.get_regions(false)
+        const regions = comp.get_regions(true)
+        console.log(regions.length, regions_without.length)
+        this.regionMeshes = this.regionMeshes || []
+        this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
+        this.regionMeshes = regions.map(region => {
+          const geometry = new THREE.BufferGeometry()
+          const vertices = new Float32Array(region.position())
+          const normals = new Float32Array(Array(vertices.length / 3).fill([0,1,0]).flat())
+          const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
+          // console.log(vertices)
+          // console.log(normals)
+          // console.log(uvs)
+          geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+          geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+          // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
+          // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+
+          const material = new THREE.MeshBasicMaterial({color: new THREE.Color(Math.random(), Math.random(), Math.random()), opacity: 0.2})
+          material.side = THREE.DoubleSide
+          const mesh = new THREE.Mesh(geometry, material )
+          this.scene.add(mesh)
+          return mesh
+        })
         this.loadElement(elem, comp)
         this.render()
       },

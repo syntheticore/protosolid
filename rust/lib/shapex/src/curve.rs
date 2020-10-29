@@ -88,7 +88,7 @@ pub trait Curve {
 
   fn tesselate_fixed(&self, steps: i32) -> Vec<Point3> {
     (0..steps + 1).map(|i| {
-      self.sample(1.0 / steps as f64 * i as f64)
+      self.sample(i as f64 / steps as f64)
     }).collect()
   }
 
@@ -132,7 +132,7 @@ impl Line {
     (self.points.1 - self.points.0).normalize()
   }
 
-  pub fn angle_to(&self, other: Self) -> f64 {
+  pub fn angle_to(&self, other: &Self) -> f64 {
     self.tangent().dot(other.tangent()).acos()
   }
 
@@ -430,13 +430,13 @@ mod tests {
   #[test]
   fn line_length() {
     let lines = test_data::parallel_lines();
-    assert_eq!(lines.0.length(), 1.0);
+    assert_eq!(lines[0].length(), 1.0);
   }
 
   #[test]
   fn split_crossing_lines() {
     let lines = test_data::crossing_lines();
-    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    let segments = lines[0].split_with(&SketchElement::Line(lines[1].clone()));
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
     assert_eq!(segments[0].length(), 0.5, "Segment had wrong length");
   }
@@ -444,7 +444,7 @@ mod tests {
   #[test]
   fn split_touching_lines() {
     let lines = test_data::rectangle();
-    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    let segments = lines[0].split_with(&SketchElement::Line(lines[1].clone()));
     assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
     assert_eq!(segments[0].length(), 2.0, "Segment had wrong length");
   }
@@ -452,7 +452,7 @@ mod tests {
   #[test]
   fn split_t_section1() {
     let lines = test_data::t_section();
-    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    let segments = lines[0].split_with(&SketchElement::Line(lines[1].clone()));
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
     assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
     assert_eq!(segments[1].length(), 1.0, "Segment had wrong length");
@@ -461,7 +461,7 @@ mod tests {
   #[test]
   fn split_t_section2() {
     let lines = test_data::t_section();
-    let segments = lines.1.split_with(&SketchElement::Line(lines.0));
+    let segments = lines[1].split_with(&SketchElement::Line(lines[0].clone()));
     assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
     assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
   }
@@ -469,21 +469,21 @@ mod tests {
   #[test]
   fn angle_90() {
     let lines = test_data::crossing_lines();
-    let angle = lines.0.angle_to(lines.1);
+    let angle = lines[0].angle_to(&lines[1]);
     assert_eq!(angle, std::f64::consts::PI / 2.0);
   }
 
   #[test]
   fn angle_left() {
     let lines = test_data::angle_left();
-    let angle = lines.0.angle_to(lines.1);
+    let angle = lines[0].angle_to(&lines[1]);
     assert_eq!(angle, std::f64::consts::PI / 2.0);
   }
 
   #[test]
   fn angle_right() {
     let lines = test_data::angle_right();
-    let angle = lines.0.angle_to(lines.1);
+    let angle = lines[0].angle_to(&lines[1]);
     assert_eq!(angle, std::f64::consts::PI / 2.0);
   }
 }

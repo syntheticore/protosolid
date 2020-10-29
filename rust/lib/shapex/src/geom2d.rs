@@ -24,3 +24,17 @@ pub fn clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
   let v2 = p3 - p1;
   cross_2d(v1, v2)
 }
+
+pub fn is_clockwise(closed_loop: PolyLine) -> bool {
+  let mut iter = closed_loop.iter().peekable();
+  let mut sum = 0.0;
+  while let Some(p) = iter.next() {
+    let next_p = if let Some(next_p) = iter.peek() {
+      next_p
+    } else {
+      &closed_loop[0]
+    };
+    sum += (next_p.x - p.x) * (next_p.y + p.y);
+  }
+  sum > 0.0
+}

@@ -111,28 +111,28 @@ mod tests {
   #[test]
   fn crossing_lines() {
     let lines = test_data::crossing_lines();
-    let hit = intersection::line_line(&lines.0, &lines.1);
+    let hit = intersection::line_line(&lines[0], &lines[1]);
     assert_eq!(hit, Intersection::Cross(vec![Point3::new(0.0, 0.0, 0.0)]));
   }
 
   #[test]
   fn parallel_lines() {
     let lines = test_data::parallel_lines();
-    let hit = intersection::line_line(&lines.0, &lines.1);
+    let hit = intersection::line_line(&lines[0], &lines[1]);
     assert_eq!(hit, Intersection::None);
   }
 
   #[test]
   fn overlapping_lines() {
     let lines = test_data::overlapping_lines();
-    let hit = intersection::line_line(&lines.0, &lines.1);
+    let hit = intersection::line_line(&lines[0], &lines[1]);
     assert_eq!(hit, Intersection::Contained);
   }
 
   #[test]
   fn touching_lines() {
     let lines = test_data::rectangle();
-    let hit = intersection::line_line(&lines.0, &lines.1);
+    let hit = intersection::line_line(&lines[0], &lines[1]);
     assert_eq!(hit, Intersection::Touch(Point3::new(1.0, 0.0, 1.0)));
   }
 }

@@ -5,7 +5,7 @@ pub type Point2 = cgmath::Point2<f64>;
 pub type Point3 = cgmath::Point3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
 
-pub const EPSILON: f64 = core::f64::EPSILON * 10000.0;
+pub const EPSILON: f64 = core::f64::EPSILON * 1000.0;
 
 pub trait Almost {
   // const EPS: f64 = core::f64::EPSILON * 100000.0;

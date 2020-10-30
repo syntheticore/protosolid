@@ -13,10 +13,10 @@ pub use shapex::*;
 pub struct Component {
   pub id: Uuid,
   pub title: String,
-  pub bodies: Vec<Solid>,
   pub visible: bool,
-  pub children: Vec<Rc<RefCell<Component>>>,
   pub sketch: Sketch,
+  pub bodies: Vec<Solid>,
+  pub children: Vec<Rc<RefCell<Component>>>,
 }
 
 impl Component {
@@ -60,6 +60,18 @@ impl Sketch {
   pub fn get_loops(&self, include_outer: bool) -> Vec<PolyLine> {
     let regions = self.build_regions(include_outer);
     regions.iter().map(|region| Self::poly_from_loop(region) ).collect()
+  }
+
+  pub fn get_fooloops(&self, include_outer: bool) -> Vec<PolyLine> {
+    let mut polys = self.get_loops(include_outer);
+    for (i, poly) in polys.iter_mut().enumerate() {
+      // let y = rand::random::<f64>() / 6.0;
+      let y = i as f64 / -600.0;
+      for p in &mut *poly {
+        p.y = y;
+      }
+    }
+    polys
   }
 
   fn poly_from_loop(loopy: &DerivedLoop) -> PolyLine {
@@ -212,9 +224,14 @@ impl Sketch {
 
   fn remove_outer_loop(loops: &mut Vec<DerivedLoop>) {
     if loops.len() <= 1 { return }
-    loops.retain(|loopy| {
-      !geom2d::is_clockwise(Self::poly_from_loop(loopy))
-    })
+    loops.sort_by(|a, b| {
+      if geom2d::polygon_area(Self::poly_from_loop(a)) < geom2d::polygon_area(Self::poly_from_loop(b))
+      { Ordering::Less } else { Ordering:: Greater }
+    });
+    loops.pop();
+    // loops.retain(|loopy| {
+    //   !geom2d::is_clockwise(Self::poly_from_loop(loopy))
+    // })
   }
 
   fn remove_dangling_segments(island: &mut Vec<DerivedSketchElement>) {

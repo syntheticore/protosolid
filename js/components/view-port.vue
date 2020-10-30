@@ -745,9 +745,7 @@
         //   islands: regionInfo.islands,
         //   regions: regionInfo.regions,
         // })
-        const regions_without = comp.get_regions(false)
-        const regions = comp.get_regions(true)
-        console.log(regions.length, regions_without.length)
+        const regions = comp.get_regions(false)
         this.regionMeshes = this.regionMeshes || []
         this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
         this.regionMeshes = regions.map(region => {

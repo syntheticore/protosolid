@@ -25,16 +25,33 @@ pub fn clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
   cross_2d(v1, v2)
 }
 
-pub fn is_clockwise(closed_loop: PolyLine) -> bool {
-  let mut iter = closed_loop.iter().peekable();
+pub fn is_clockwise(closed_loop: &PolyLine) -> bool {
   let mut sum = 0.0;
+  let mut iter = closed_loop.iter().peekable();
   while let Some(p) = iter.next() {
     let next_p = if let Some(next_p) = iter.peek() {
       next_p
     } else {
       &closed_loop[0]
     };
-    sum += (next_p.x - p.x) * (next_p.y + p.y);
+    sum += (next_p.x - p.x) * (next_p.z + p.z);
   }
   sum > 0.0
+}
+
+pub fn polygon_area(mut closed_loop: PolyLine) -> f64 {
+  if is_clockwise(&closed_loop) {
+    closed_loop.reverse();
+  }
+  let mut sum = 0.0;
+  let mut iter = closed_loop.iter().peekable();
+  while let Some(p) = iter.next() {
+    let next_p = if let Some(next_p) = iter.peek() {
+      next_p
+    } else {
+      &closed_loop[0]
+    };
+    sum += (p.x * next_p.z) - (p.z * next_p.x);
+  }
+  sum / 2.0
 }

@@ -334,8 +334,8 @@ impl BezierSpline {
   }
 
   pub fn split_at(&self, t: f64) -> (Self, Self) {
-    let mut left: Vec<Point3> = vec![];
-    let mut right: Vec<Point3> = vec![];
+    let mut left = vec![];
+    let mut right = vec![];
     self.real_split(t, &self.vertices, &mut left, &mut right);
     (Self::new(left), Self::new(right))
   }

@@ -286,7 +286,7 @@ impl JsComponent {
 
   pub fn get_regions(&self, include_outer: bool) -> Array {
     // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
-    self.real.borrow().sketch.get_loops(include_outer).into_iter()
+    self.real.borrow().sketch.get_fooloops(include_outer).into_iter()
       .map(|region| JsValue::from(JsBufferGeometry {
         position: geom2d::tesselate_polygon(region).to_buffer_geometry(),
         normal: vec![],
@@ -304,7 +304,7 @@ impl JsComponent {
     for island in islands.iter() {
       let start_elem = &island[0];
       let start_point = start_elem.owned.as_curve().endpoints().0;
-      let mut loops = Sketch::build_loops(&start_point, &start_elem, vec![], island, &mut HashSet::new(), &mut HashSet::new());
+      let mut loops = Sketch::build_loops(&start_point, &start_elem, vec![], &start_point, island, &mut HashSet::new(), &mut HashSet::new());
       regions.append(&mut loops);
     }
     JsFoo {
@@ -314,16 +314,21 @@ impl JsComponent {
     }
   }
 
-  pub fn get_all_split(&self) -> Array {
+  pub fn get_all_split(&self) {
     let mut real = self.real.borrow_mut();
-    let splits = real.sketch.split_all();
+    // let splits = real.sketch.split_all();
+    let mut splits = Sketch::all_split(&real.sketch.elements);
+    Sketch::remove_dangling_segments(&mut splits);
+    let islands = Sketch::build_islands(&splits);
+    let islands: Vec<DerivedSketchElement> = islands.into_iter().flatten().collect();
+
     real.sketch.elements.clear();
-    for split in splits.iter() {
-      real.sketch.elements.push(Rc::new(RefCell::new(split.clone())));
+    for split in islands.iter() {
+      real.sketch.elements.push(Rc::new(RefCell::new(split.owned.clone())));
     }
-    splits.into_iter().map(|elem| {
-      JsValue::from(JsSketchElement::from(&Rc::new(RefCell::new(elem))))
-    }).collect()
+    // splits.into_iter().map(|elem| {
+    //   JsValue::from(JsSketchElement::from(&Rc::new(RefCell::new(elem))))
+    // }).collect()
   }
 
   // pub fn create_sketch(&mut self) -> JsSketch {

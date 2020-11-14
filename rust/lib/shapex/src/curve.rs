@@ -9,6 +9,13 @@ mod intersection;
 pub type PolyLine = Vec<Point3>;
 
 
+#[derive(Debug, Clone)]
+pub struct TrimmedSketchElement {
+  pub base: SketchElement,
+  pub bounds: (f64, f64),
+}
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SketchElement {
   Line(Line),

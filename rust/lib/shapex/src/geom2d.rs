@@ -1,6 +1,7 @@
 use crate::base::*;
-use crate::curve::PolyLine;
-use crate::solid::Mesh;
+use crate::PolyLine;
+use crate::Mesh;
+use crate::SketchElement;
 use earcutr;
 
 
@@ -9,7 +10,7 @@ pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
 }
 
 pub fn tesselate_polygon(vertices: PolyLine) -> Mesh {
-  let flat_vertices: Vec<f64> = vertices.iter().flat_map(|vertex| vec![vertex.x, vertex.z] ).collect();
+  let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.z] ).collect();
   let triangles: Vec<usize> = earcutr::earcut(&flat_vertices, &vec![], 2);
   Mesh {
     vertices: vertices,
@@ -26,24 +27,15 @@ pub fn clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
 }
 
 pub fn is_clockwise(closed_loop: &PolyLine) -> bool {
-  let mut sum = 0.0;
-  let mut iter = closed_loop.iter().peekable();
-  while let Some(p) = iter.next() {
-    let next_p = if let Some(next_p) = iter.peek() {
-      next_p
-    } else {
-      &closed_loop[0]
-    };
-    sum += (next_p.x - p.x) * (next_p.z + p.z);
-  }
-  sum > 0.0
+  signed_polygon_area(&closed_loop) > 0.0
 }
 
-pub fn polygon_area(mut closed_loop: PolyLine) -> f64 {
-  if is_clockwise(&closed_loop) {
-    closed_loop.reverse();
-  }
-  let mut sum = 0.0;
+pub fn polygon_area(closed_loop: &PolyLine) -> f64 {
+  signed_polygon_area(&closed_loop).abs() / 2.0
+}
+
+pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
+  let mut signed_area = 0.0;
   let mut iter = closed_loop.iter().peekable();
   while let Some(p) = iter.next() {
     let next_p = if let Some(next_p) = iter.peek() {
@@ -51,7 +43,50 @@ pub fn polygon_area(mut closed_loop: PolyLine) -> f64 {
     } else {
       &closed_loop[0]
     };
-    sum += (p.x * next_p.z) - (p.z * next_p.x);
+    signed_area += (next_p.x - p.x) * (next_p.z + p.z);
   }
-  sum / 2.0
+  signed_area
+}
+
+pub fn poly_from_loop(loopy: Vec<SketchElement>) -> PolyLine {
+  let mut polyline = vec![];
+  let mut iter = loopy.iter().peekable();
+  while let Some(elem) = iter.next() {
+    let endpoints = elem.as_curve().endpoints();
+    if polyline.len() == 0 {
+      let next_elem = iter.peek().unwrap();
+      let next_endpoints = next_elem.as_curve().endpoints();
+      if endpoints.0.almost(next_endpoints.0) || endpoints.0.almost(next_endpoints.1) {
+        polyline.push(endpoints.1);
+        polyline.push(endpoints.0);
+      } else {
+        polyline.push(endpoints.0);
+        polyline.push(endpoints.1);
+      }
+    } else {
+      polyline.push(elem.as_curve().other_endpoint(polyline.last().unwrap()));
+    }
+  }
+  polyline
+}
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::test_data;
+
+  #[test]
+  fn compare_areas() {
+    let rect = test_data::rectangle();
+    let rect: Vec<SketchElement> = rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
+    let rect_poly = poly_from_loop(rect);
+
+    let reverse_rect = test_data::reverse_rectangle();
+    let reverse_rect: Vec<SketchElement> = reverse_rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
+    let reverse_rect_poly = poly_from_loop(reverse_rect);
+
+    assert!(signed_polygon_area(&rect_poly) > 0.0);
+    assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
+  }
 }

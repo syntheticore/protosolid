@@ -271,7 +271,7 @@
 
       var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
       groundGeo.rotateX(- Math.PI / 2)
-      var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
+      var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2, side: THREE.DoubleSide}))
       ground.receiveShadow = true
       ground.position.y = -0.01
       ground.alcProjectable = true
@@ -363,6 +363,13 @@
 
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('#2590e1')
+
+      this.highlightRegionMaterial = new THREE.MeshBasicMaterial({
+        color: new THREE.Color('blue'),
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.5,
+      })
 
       const handlePick = (pickerCoords, color, tool) => {
         this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
@@ -486,13 +493,14 @@
         const canvasCoords = getCanvasCoords(coords, this.$refs.canvas)
         let vec = this.fromScreen(canvasCoords)
         this.guides = []
-        if(this.activeTool.constructor != ManipulationTool || this.isDragging) vec = this.snapToPoints(coords) || this.snapToGuides(vec) || vec
+        this.catchSnapPoints(coords)
+        if(this.activeTool.constructor != ManipulationTool || this.isDragging) vec = this.snapToGuides(vec) || vec
         return [vec, coords, canvasCoords]
       },
 
-      snapToPoints: function(coords) {
+      getSnapPoints: function() {
         const sketchElements = this.activeComponent.get_sketch_elements()
-        const snapPoints = sketchElements.flatMap(elem => {
+        return sketchElements.flatMap(elem => {
           let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
           // Filter out last point of the sketch element actively being drawn
           if(elem == sketchElements.slice(-1)[0]) {
@@ -507,6 +515,10 @@
           }
           return points
         })
+      },
+
+      catchSnapPoints: function(coords) {
+        const snapPoints = this.getSnapPoints()
         let closestDist = 99999
         let target
         snapPoints.forEach(p => {
@@ -516,22 +528,11 @@
             target = p
           }
         })
-        if(target) {
-          if(this.snapAnchor && this.snapAnchor.vec.equals(target)) return target
-          this.snapAnchor = {
-            type: 'snap',
-            pos: this.toScreen(target),
-            vec: target,
-            id: '' + target.x + target.y + target.z,
-          }
-          if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(target))) {
-            this.lastSnaps.unshift(target)
-            if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
-          }
-        } else {
-          this.snapAnchor = null
+        if(!target) return
+        if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(target))) {
+          this.lastSnaps.unshift(target)
+          if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
         }
-        return target
       },
 
       snapToGuides: function(vec) {
@@ -567,6 +568,18 @@
             start,
             end: screenSnapVec,
           })
+        }
+        if(snapX && snapZ) {
+          if(this.snapAnchor && this.snapAnchor.vec.equals(snapVec)) return snapVec
+          this.snapAnchor = {
+            type: 'snap',
+            pos: this.toScreen(snapVec),
+            vec: snapVec,
+            id: '' + snapVec.x + snapVec.y + snapVec.z,
+          }
+          return snapVec
+        } else {
+          this.snapAnchor = null
         }
         if(snapX || snapZ) return snapVec
       },
@@ -746,6 +759,7 @@
         //   regions: regionInfo.regions,
         // })
         const regions = comp.get_regions(false)
+        console.log(regions.length)
         this.regionMeshes = this.regionMeshes || []
         this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
         this.regionMeshes = regions.map(region => {
@@ -761,9 +775,10 @@
           // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
           // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
 
-          const material = new THREE.MeshBasicMaterial({color: new THREE.Color(Math.random(), Math.random(), Math.random()), opacity: 0.2})
+          const material = new THREE.MeshBasicMaterial({color: new THREE.Color(Math.random(), Math.random(), Math.random())})
           material.side = THREE.DoubleSide
-          const mesh = new THREE.Mesh(geometry, material )
+          const mesh = new THREE.Mesh(geometry, material)
+          mesh.alcRegion = region
           this.scene.add(mesh)
           return mesh
         })

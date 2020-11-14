@@ -41,3 +41,21 @@ pub enum Intersection {
 pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
   vec![tuple.0, tuple.1]
 }
+
+
+#[derive(Debug, Clone)]
+pub struct Axis {
+  origin: Point3,
+  direction: Vec3,
+}
+
+// #[derive(Debug)]
+// pub struct Transform {
+//   matrix: Matrix4,
+// }
+
+// impl Transform {
+//   pub fn mirror(&mut self, axis: &Axis) {
+//      self.matrix = Matrix4::from_nonuniform_scale(axis.direction.x, axis.direction.y, axis.direction.z);
+//   }
+// }

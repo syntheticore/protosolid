@@ -46,10 +46,10 @@ export class ManipulationTool extends Tool {
       handle.elem.set_handles(handles)
       this.viewport.elementChanged(handle.elem, this.component)
     } else {
-      const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+      const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0] || this.viewport.objectsAtScreen(coords, 'alcRegion')[0]
       if(!object) return this.viewport.render()
       const oldMaterial = object.material
-      object.material = this.viewport.highlightLineMaterial
+      object.material = object.alcSelectable ? this.viewport.highlightLineMaterial : this.viewport.highlightRegionMaterial
       this.viewport.render()
       object.material = oldMaterial
     }
@@ -87,13 +87,14 @@ export class ProfileSelectionTool extends SelectionTool {
     // const regions = this.component.get_regions()
     // console.log('Regions', regions)
     const splits = this.component.get_all_split()
-    console.log('ProfileSelectionTool', splits)
     // const elems = this.component.get_sketch_elements()
     // // .map(elem => elem.get_handles())
     // elems.forEach(elem => {
     //   this.component.remove_element(elem.id())
     // })
     this.viewport.componentChanged(this.component)
+    const object = this.viewport.objectsAtScreen(coords, 'alcRegion')[0]
+    return object && [object.alcRegion, new THREE.Vector3().fromArray(object.alcRegion.position())]
   }
 }
 

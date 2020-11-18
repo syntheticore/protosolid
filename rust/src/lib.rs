@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::collections::HashSet;
+// use std::collections::HashSet;
 
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
@@ -151,46 +151,22 @@ impl JsBufferGeometry {
 }
 
 
-// #[wasm_bindgen]
-// pub struct JsSketch {
-//   real: Rc<RefCell<Sketch>>,
-// }
+#[wasm_bindgen]
+pub struct JsRegion {
+  region: Region,
+  component: Rc<RefCell<Component>>,
+}
 
-// #[wasm_bindgen]
-// impl JsSketch {
-//   fn from(sketch: &Rc<RefCell<Sketch>>) -> Self {
-//     JsSketch {
-//       real: sketch.clone(),
-//     }
-//   }
-
-//   pub fn get_segments(&self) -> Array {
-//     self.real.borrow().elements.iter().map(|elem| JsValue::from(JsSketchElement::from(elem)) ).collect()
-//   }
-
-//   pub fn add_segment(&self) {
-//     let spline = BezierSpline::new(vec![
-//         Point3::new(0.0, 0.0, 1.0),
-//         Point3::new(1.0, 0.0, 1.25),
-//         Point3::new(1.0, 1.0, 1.5),
-//         Point3::new(0.0, 1.0, 1.75),
-//         Point3::new(0.0, 0.0, 2.0),
-//         Point3::new(1.0, 0.0, 2.25),
-//         Point3::new(1.0, 1.0, 2.5),
-//         Point3::new(0.0, 1.0, 2.75),
-//       ]
-//     );
-//     self.real.borrow_mut().elements.push(Rc::new(RefCell::new(spline)));
-//   }
-// }
-
-// fn foo(elem: &mut SketchElement) -> &mut dyn SketchElement {
-//   match elem {
-//     SketchElement::Line(line) => line as &mut dyn SketchElement,
-//     SketchElement::Circle(circle) => circle as &mut dyn SketchElement,
-//     SketchElement::BezierSpline(spline) => spline as &mut dyn SketchElement,
-//   }
-// }
+#[wasm_bindgen]
+impl JsRegion {
+  pub fn get_polyline(&self) -> JsValue {
+    let poly = geom2d::poly_from_loop(self.region.iter().map(|elem| elem.cache.clone() ).collect());
+    JsValue::from(JsBufferGeometry {
+      position: geom2d::tesselate_polygon(poly).to_buffer_geometry(),
+      normal: vec![],
+    })
+  }
+}
 
 
 #[wasm_bindgen]
@@ -221,10 +197,6 @@ impl JsComponent {
   pub fn get_title(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().title).unwrap()
   }
-
-  // pub fn get_sketches(&self) -> Array {
-  //   self.real.borrow().sketches.iter().map(|sketch| JsValue::from(JsSketch::from(sketch)) ).collect()
-  // }
 
   pub fn get_sketch_elements(&self) -> Array {
     self.real.borrow().sketch.elements.iter().map(|elem| {
@@ -284,35 +256,35 @@ impl JsComponent {
     real.sketch.elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id);
   }
 
-  pub fn get_regions(&self, include_outer: bool) -> Array {
-    // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
-    self.real.borrow().sketch.get_fooloops(include_outer).into_iter()
-      .map(|region| JsValue::from(JsBufferGeometry {
-        position: geom2d::tesselate_polygon(region).to_buffer_geometry(),
-        normal: vec![],
+  pub fn get_regions(&self) -> Array {
+    self.real.borrow().sketch.get_regions().into_iter()
+      .map(|region| JsValue::from(JsRegion {
+        region: region,
+        component: self.real.clone(),
       }))
       .collect()
   }
 
-  pub fn get_region_info(&self) -> JsFoo {
-    // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
-    let sketch = &self.real.borrow().sketch;
-    // sketch.closed_regions();
-    let cut_elements = Sketch::all_split(&sketch.elements);
-    let islands = Sketch::build_islands(&cut_elements);
-    let mut regions = vec![];
-    for island in islands.iter() {
-      let start_elem = &island[0];
-      let start_point = start_elem.owned.as_curve().endpoints().0;
-      let mut loops = Sketch::build_loops(&start_point, &start_elem, vec![], &start_point, island, &mut HashSet::new(), &mut HashSet::new());
-      regions.append(&mut loops);
-    }
-    JsFoo {
-      cut: cut_elements.len(),
-      islands: islands.len(),
-      regions: regions.len(),
-    }
-  }
+  // pub fn get_region_info(&self) -> JsFoo {
+  //   // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
+  //   let sketch = &self.real.borrow().sketch;
+  //   // sketch.closed_regions();
+  //   let cut_elements = Sketch::all_split(&sketch.elements);
+  //   Sketch::remove_dangling_segments(&mut splits);
+  //   let islands = Sketch::build_islands(&cut_elements);
+  //   let mut regions = vec![];
+  //   for island in islands.iter() {
+  //     let start_elem = &island[0];
+  //     let start_point = start_elem.owned.as_curve().endpoints().0;
+  //     let mut loops = Sketch::build_loops(&start_point, &start_elem, vec![], &start_point, island, &mut HashSet::new(), &mut HashSet::new());
+  //     regions.append(&mut loops);
+  //   }
+  //   JsFoo {
+  //     cut: cut_elements.len(),
+  //     islands: islands.len(),
+  //     regions: regions.len(),
+  //   }
+  // }
 
   pub fn get_all_split(&self) {
     let mut real = self.real.borrow_mut();
@@ -326,19 +298,7 @@ impl JsComponent {
     for split in islands.iter() {
       real.sketch.elements.push(Rc::new(RefCell::new(split.owned.clone())));
     }
-    // splits.into_iter().map(|elem| {
-    //   JsValue::from(JsSketchElement::from(&Rc::new(RefCell::new(elem))))
-    // }).collect()
   }
-
-  // pub fn create_sketch(&mut self) -> JsSketch {
-  //   let mut sketch = Sketch::new();
-  //   sketch.title = "Sketch1".to_string();
-  //   sketch.visible = true;
-  //   let sketch = Rc::new(RefCell::new(sketch));
-  //   self.real.borrow_mut().sketches.push(sketch.clone());
-  //   JsSketch::from(&sketch)
-  // }
 
   pub fn create_component(&mut self, title: &str) -> JsComponent {
     let mut comp = Component::new();

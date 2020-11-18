@@ -1,6 +1,10 @@
-use uuid::Uuid;
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::convert::TryInto;
+
+use uuid::Uuid;
 use cgmath::prelude::*;
+
 use crate::base::*;
 
 mod intersection;
@@ -11,8 +15,10 @@ pub type PolyLine = Vec<Point3>;
 
 #[derive(Debug, Clone)]
 pub struct TrimmedSketchElement {
-  pub base: SketchElement,
-  pub bounds: (f64, f64),
+  pub base: Rc<RefCell<SketchElement>>,
+  // pub bounds: (f64, f64),
+  pub bounds: (Point3, Point3),
+  pub cache: SketchElement,
 }
 
 
@@ -220,8 +226,8 @@ impl Curve for Arc {
     let t = t * std::f64::consts::PI * 2.0;
     Point3::new(
       self.center.x + t.sin() * self.radius,
-      self.center.y,
-      self.center.z + t.cos() * self.radius,
+      self.center.y + t.cos() * self.radius,
+      self.center.z,
     )
   }
 
@@ -282,8 +288,8 @@ impl Curve for Circle {
     let t = t * std::f64::consts::PI * 2.0;
     Point3::new(
       self.center.x + t.sin() * self.radius,
-      self.center.y,
-      self.center.z + t.cos() * self.radius,
+      self.center.y + t.cos() * self.radius,
+      self.center.z,
     )
   }
 

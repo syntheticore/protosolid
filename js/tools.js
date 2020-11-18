@@ -94,7 +94,7 @@ export class ProfileSelectionTool extends SelectionTool {
     // })
     this.viewport.componentChanged(this.component)
     const object = this.viewport.objectsAtScreen(coords, 'alcRegion')[0]
-    return object && [object.alcRegion, new THREE.Vector3().fromArray(object.alcRegion.position())]
+    return object && [object.alcRegion, new THREE.Vector3().fromArray(object.alcRegion.get_polyline().position())]
   }
 }
 

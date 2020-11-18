@@ -11,7 +11,7 @@ use crate::surface::*;
 
 #[derive(Debug)]
 pub struct Solid {
-  shells: Vec<Shell>, // Shell 0 is outer shell
+  pub shells: Vec<Shell>, // Shell 0 is outer shell
 }
 
 #[derive(Debug)]
@@ -21,6 +21,7 @@ pub struct Shell {
   faces: Vec<Face>,
   edges: Vec<Edge>,
   vertices: Vec<Vertex>,
+  solid: *mut Solid,
 }
 
 #[derive(Debug)]
@@ -29,7 +30,7 @@ pub struct Face {
   outer_ring: *mut HalfEdge, // clockwise
   inner_rings: Vec<*mut HalfEdge>, // counter-clockwise
   surface: Box<dyn Surface>,
-  // shell: *mut Shell,
+  shell: *mut Shell,
 }
 
 // #[derive(Debug)]
@@ -62,6 +63,18 @@ pub struct Vertex {
   // id: Uuid,
   point: Point3,
   half_edge: *mut HalfEdge, // half_edge emanating from this vertex
+}
+
+
+impl Solid {
+  pub fn boolean_add(&self, _other: &Self) -> Solid {
+    Self { shells: vec![] }
+  }
+
+  pub fn fillet_edge(&self, edge: &Edge) -> *mut Solid {
+    let _foo = unsafe {(*(*edge.left_half.face).shell).solid};
+    _foo
+  }
 }
 
 
@@ -251,6 +264,9 @@ impl Vertex {
 // Winged-Edge Data Structure
 
 pub mod winged_edge {
+  use std::rc::Rc;
+  use std::cell::RefCell;
+
   use crate::base::*;
   use crate::curve::*;
   use crate::surface::*;
@@ -401,9 +417,12 @@ pub mod winged_edge {
       surface: Box::new(plane),
       normal_direction: true,
     };
+    let line = SketchElement::Line(Line::new(vertices[0].point, vertices[1].point));
     let mut curve1 = TrimmedSketchElement  {
-      base: SketchElement::Line(Line::new(vertices[0].point, vertices[1].point)),
-      bounds: (0.0, 1.0),
+      base: Rc::new(RefCell::new(line.clone())),
+      // bounds: (0.0, 1.0),
+      bounds: (vertices[0].point, vertices[1].point),
+      cache: line,
     };
     let mut edges = vec![
       Edge {

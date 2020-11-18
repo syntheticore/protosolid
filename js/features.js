@@ -5,7 +5,7 @@ class Feature {
 }
 
 export class ExtrudeFeature extends Feature {
-  constructor() {
+  constructor(component) {
     super()
 
     this.profile = null

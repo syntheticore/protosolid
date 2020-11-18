@@ -279,6 +279,7 @@ version = "0.1.0"
 dependencies = [
  "cgmath 0.16.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "earcutr 0.1.0 (git+https://github.com/donbright/earcutr)",
+ "rand 0.7.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

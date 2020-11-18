@@ -34,8 +34,9 @@ pub struct DerivedSketchElement {
   pub original: Rc<RefCell<SketchElement>>,
 }
 
-type Loop = Vec<Rc<RefCell<SketchElement>>>;
-type DerivedLoop = Vec<DerivedSketchElement>;
+
+type DerivedRegion = Vec<DerivedSketchElement>;
+pub type Region = Vec<TrimmedSketchElement>;
 
 
 #[derive(Debug, Default)]
@@ -48,59 +49,39 @@ impl Sketch {
     Default::default()
   }
 
-  pub fn get_regions(&self) -> Vec<Loop> {
+  pub fn get_regions(&self) -> Vec<Region> {
     let regions = self.build_regions(false);
-    regions.iter().map(|region| Self::get_originals(region) ).collect()
+    regions.into_iter().map({|region|
+      region.into_iter().map({|derived|
+        TrimmedSketchElement {
+          base: derived.original,
+          bounds: derived.owned.as_curve().endpoints(),
+          cache: derived.owned,
+        }
+      }).collect()
+    }).collect()
   }
 
-  fn get_originals(loopy: &DerivedLoop) -> Loop {
-    loopy.iter().map(|derived| derived.original.clone() ).collect()
-  }
-
-  pub fn get_loops(&self, include_outer: bool) -> Vec<PolyLine> {
-    let regions = self.build_regions(include_outer);
-    regions.iter().map(|region| Self::poly_from_derived_loop(region) ).collect()
-  }
-
-  pub fn get_fooloops(&self, include_outer: bool) -> Vec<PolyLine> {
-    let mut polys = self.get_loops(include_outer);
-    for (i, poly) in polys.iter_mut().enumerate() {
-      // let y = rand::random::<f64>() / 6.0;
-      let y = i as f64 / 100.0;
-      for p in &mut *poly {
-        p.y = y;
-      }
-    }
-    polys
-  }
-
-  fn poly_from_derived_loop(loopy: &DerivedLoop) -> PolyLine {
-    geom2d::poly_from_loop(loopy.iter().map(|elem| elem.owned.clone() ).collect())
-  }
-
-  fn build_regions(&self, include_outer: bool) -> Vec<DerivedLoop> {
+  fn build_regions(&self, include_outer: bool) -> Vec<DerivedRegion> {
     let mut cut_elements = Self::all_split(&self.elements);
     Self::remove_dangling_segments(&mut cut_elements);
     let islands = Self::build_islands(&cut_elements);
     islands.iter().flat_map(|island| Self::build_loops_from_island(island, include_outer) ).collect()
   }
 
-  fn build_loops_from_island(island: &Vec<DerivedSketchElement>, include_outer: bool) -> Vec<DerivedLoop> {
+  fn build_loops_from_island(island: &Vec<DerivedSketchElement>, include_outer: bool) -> Vec<DerivedRegion> {
     let mut regions = vec![];
-    // let start_elem = &island[if rand::random::<f64>() > 0.5 {0} else {1}];
-    // let start_elem = &island[0];
     let mut used_forward = HashSet::new();
     let mut used_backward = HashSet::new();
     for i in 0..2 {
       for start_elem in island.iter() {
-      // let start_point = if rand::random::<f64>() > 0.5 {start_elem.owned.as_curve().endpoints().0} else {start_elem.owned.as_curve().endpoints().1};
         let points = start_elem.owned.as_curve().endpoints();
         let start_point = if i == 0 { points.0 } else { points.1 };
         let mut loops = Self::build_loop(&start_point, &start_elem, vec![], &start_point, island, &mut used_forward, &mut used_backward);
         regions.append(&mut loops);
       }
     }
-    // if !include_outer { Self::remove_outer_loop(&mut regions) }
+    if !include_outer { Self::remove_outer_loop(&mut regions) }
     regions
   }
 
@@ -145,7 +126,6 @@ impl Sketch {
         let island_elem_id = as_controllable(&island_elem.owned).id();
         unused_elements.retain(|elem| as_controllable(&elem.owned).id() != island_elem_id );
       }
-      // Self::remove_dangling_segments(&mut island);
       if island.len() > 0 { islands.push(island) }
     }
     islands
@@ -167,12 +147,12 @@ impl Sketch {
   pub fn build_loop<'a>(
     start_point: &Point3,
     start_elem: &'a DerivedSketchElement,
-    mut path: DerivedLoop,
+    mut path: DerivedRegion,
     path_start_point: &Point3,
     all_elements: &'a Vec<DerivedSketchElement>,
     used_forward: &mut HashSet<Uuid>,
     used_backward: &mut HashSet<Uuid>,
-  ) -> Vec<DerivedLoop> {
+  ) -> Vec<DerivedRegion> {
     let mut regions = vec![];
     // Traverse edges only once in every direction
     let start_elem_id = as_controllable(&start_elem.owned).id();
@@ -202,8 +182,8 @@ impl Sketch {
       // Follow the leftmost segment to complete loop in anti-clockwise order
       let next_elem = connected_elems[0];
       // if path[0].owned == next_elem.owned {
-      if as_controllable(&path[0].owned).id() == as_controllable(&next_elem.owned).id() {
       // if path_start_point.almost(end_point) {
+      if as_controllable(&path[0].owned).id() == as_controllable(&next_elem.owned).id() {
         // We are closing a loop
         regions.push(path);
       } else {
@@ -220,69 +200,14 @@ impl Sketch {
     regions
   }
 
-  // pub fn build_loops<'a>(
-  //   start_point: &Point3,
-  //   start_elem: &'a DerivedSketchElement,
-  //   mut path: DerivedLoop,
-  //   path_start_point: &Point3,
-  //   all_elements: &'a Vec<DerivedSketchElement>,
-  //   used_forward: &mut HashSet<Uuid>,
-  //   used_backward: &mut HashSet<Uuid>,
-  // ) -> Vec<DerivedLoop> {
-  //   let mut regions = vec![];
-  //   // Traverse edges only once in every direction
-  //   let start_elem_id = as_controllable(&start_elem.owned).id();
-  //   if start_point.almost(start_elem.owned.as_curve().endpoints().0) {
-  //     if used_forward.contains(&start_elem_id) { return regions }
-  //     used_forward.insert(start_elem_id);
-  //   } else {
-  //     if used_backward.contains(&start_elem_id) { return regions }
-  //     used_backward.insert(start_elem_id);
-  //   }
-  //   // Add start_elem to path
-  //   path.push(start_elem.clone());
-  //   // Find connected segments
-  //   let end_point = start_elem.owned.as_curve().other_endpoint(&start_point);
-  //   let mut connected_elems: Vec<&DerivedSketchElement> = all_elements.iter().filter(|other_elem| {
-  //     let (other_start, other_end) = other_elem.owned.as_curve().endpoints();
-  //     (end_point.almost(other_start) || end_point.almost(other_end)) && as_controllable(&other_elem.owned).id() != start_elem_id
-  //   }).collect();
-  //   if connected_elems.len() > 0 {
-  //     // Sort connected segments in clockwise order
-  //     connected_elems.sort_by(|a, b| {
-  //       let final_point_a = a.owned.as_curve().other_endpoint(&end_point);
-  //       let final_point_b = b.owned.as_curve().other_endpoint(&end_point);
-  //       if geom2d::clockwise(*start_point, end_point, final_point_a) < geom2d::clockwise(*start_point, end_point, final_point_b) { Ordering::Less } else { Ordering:: Greater }
-  //     });
-  //     // Follow the leftmost segment to complete loop in anti-clockwise order
-  //     let next_elem = connected_elems[0];
-  //     if path[0].owned == next_elem.owned {
-  //     // if path_start_point.almost(end_point) {
-  //       // We are closing a loop
-  //       regions.push(path);
-  //     } else {
-  //       // Follow loop
-  //       let mut new_regions = Self::build_loops(&end_point, &next_elem, path, path_start_point, all_elements, used_forward, used_backward);
-  //       regions.append(&mut new_regions);
-  //     }
-  //     // Begin a fresh loop for all other forks
-  //     for &connected_elem in connected_elems.iter().skip(1) {
-  //       let mut new_regions = Self::build_loops(&end_point, &connected_elem, vec![], &end_point, all_elements, used_forward, used_backward);
-  //       regions.append(&mut new_regions);
-  //     }
-  //   }
-  //   regions
-  // }
+  fn poly_from_region(loopy: &DerivedRegion) -> PolyLine {
+    geom2d::poly_from_loop(loopy.iter().map(|elem| elem.owned.clone() ).collect())
+  }
 
-  fn remove_outer_loop(loops: &mut Vec<DerivedLoop>) {
+  fn remove_outer_loop(loops: &mut Vec<DerivedRegion>) {
     if loops.len() <= 1 { return }
-    // loops.sort_by(|a, b| {
-    //   if geom2d::polygon_area(&Self::poly_from_derived_loop(a)) < geom2d::polygon_area(&Self::poly_from_derived_loop(b))
-    //   { Ordering::Less } else { Ordering:: Greater }
-    // });
-    // loops.pop();
     loops.retain(|loopy| {
-      geom2d::is_clockwise(&Self::poly_from_derived_loop(loopy))
+      geom2d::is_clockwise(&Self::poly_from_region(loopy))
     })
   }
 
@@ -309,8 +234,6 @@ impl Sketch {
 pub struct Scene {
   pub tree: Rc<RefCell<Component>>,
   pub current_component: Rc<RefCell<Component>>,
-  // pub render_tree: TreeNode<Vec<Box<dyn Drawable>>>,
-  // pub current_sketch: Option<Rc<RefCell<Sketch>>>
 }
 
 impl Scene {
@@ -531,9 +454,7 @@ mod tests {
     for split in cut_elements.iter() {
       sketch.elements.push(Rc::new(RefCell::new(split.owned.clone())));
     }
-    let cut_elements2 = sketch.split_all();
     assert_eq!(cut_elements.len(), 8, "{} cut_elements found instead of 8", cut_elements.len());
-    assert_eq!(cut_elements2.len(), 8, "{} cut_elements2 found instead of 8", cut_elements2.len());
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
@@ -542,7 +463,7 @@ mod tests {
   fn region_crossing_corner() {
     let mut lines = test_data::rectangle();
     lines[2].points.1.x = -2.0;
-    lines[3].points.0.z = -2.0;
+    lines[3].points.0.y = -2.0;
     let sketch = make_sketch(&lines);
     let cut_elements = Sketch::all_split(&sketch.elements);
     let islands = Sketch::build_islands(&cut_elements);

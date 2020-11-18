@@ -6,11 +6,11 @@ use earcutr;
 
 
 pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
-  vec1.x * vec2.z - vec1.z * vec2.x
+  vec1.x * vec2.y - vec1.y * vec2.x
 }
 
 pub fn tesselate_polygon(vertices: PolyLine) -> Mesh {
-  let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.z] ).collect();
+  let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.y] ).collect();
   let triangles: Vec<usize> = earcutr::earcut(&flat_vertices, &vec![], 2);
   Mesh {
     vertices: vertices,
@@ -27,6 +27,7 @@ pub fn clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
 }
 
 pub fn is_clockwise(closed_loop: &PolyLine) -> bool {
+  println!("signed_polygon_area {}", signed_polygon_area(&closed_loop) );
   signed_polygon_area(&closed_loop) > 0.0
 }
 
@@ -43,7 +44,7 @@ pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
     } else {
       &closed_loop[0]
     };
-    signed_area += (next_p.x - p.x) * (next_p.z + p.z);
+    signed_area += (next_p.x - p.x) * (next_p.y + p.y);
   }
   signed_area
 }
@@ -67,6 +68,10 @@ pub fn poly_from_loop(loopy: Vec<SketchElement>) -> PolyLine {
       polyline.push(elem.as_curve().other_endpoint(polyline.last().unwrap()));
     }
   }
+  let z = rand::random::<f64>() / 6.0;
+  for p in &mut polyline {
+    p.z = z;
+  }
   polyline
 }
 
@@ -86,7 +91,30 @@ mod tests {
     let reverse_rect: Vec<SketchElement> = reverse_rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
     let reverse_rect_poly = poly_from_loop(reverse_rect);
 
-    assert!(signed_polygon_area(&rect_poly) > 0.0);
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
+  }
+
+  #[test]
+  fn rectangle_clockwise() {
+    let rect = test_data::rectangle();
+    let rect: Vec<SketchElement> = rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
+    let rect_poly = poly_from_loop(rect.clone());
+    println!("Foo{:?}", rect_poly);
+
+    assert!(is_clockwise(&rect_poly));
+  }
+
+  #[test]
+  fn angle_clockwise() {
+    let angle = test_data::angle_right();
+
+    assert!(clockwise(angle[0].points.0, angle[0].points.1, angle[1].points.1) < 0.0);
+  }
+
+  #[test]
+  fn angle_anti_clockwise() {
+    let angle = test_data::angle_left();
+
+    assert!(clockwise(angle[0].points.0, angle[0].points.1, angle[1].points.1) > 0.0);
   }
 }

@@ -214,6 +214,8 @@
     },
 
     mounted: function() {
+      THREE.Object3D.DefaultUp = new THREE.Vector3(0, 0, 1)
+
       renderer = new THREE.WebGLRenderer({
         canvas: this.$el.querySelector('canvas'),
         // antialias: window.devicePixelRatio <= 1.0,
@@ -270,14 +272,15 @@
       // this.scene.add(mesh)
 
       var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
-      groundGeo.rotateX(- Math.PI / 2)
+      // groundGeo.rotateX(- Math.PI / 2)
       var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2, side: THREE.DoubleSide}))
       ground.receiveShadow = true
-      ground.position.y = -0.01
+      ground.position.z = -0.01
       ground.alcProjectable = true
       this.scene.add(ground)
 
       var grid = new THREE.GridHelper(20, 20)
+      grid.rotateX(Math.PI / 2)
       grid.material.opacity = 0.1
       grid.material.transparent = true
       this.scene.add(grid)
@@ -544,14 +547,14 @@
             return true
           }
         })
-        let snapZ
+        let snapY
         this.lastSnaps.some(snap => {
-          if(Math.abs(vec.z - snap.z) < 0.1) {
-            snapZ = snap
+          if(Math.abs(vec.y - snap.y) < 0.1) {
+            snapY = snap
             return true
           }
         })
-        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, vec.y, snapZ ? snapZ.z : vec.z)
+        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, snapY ? snapY.y : vec.y, vec.z)
         const screenSnapVec = this.toScreen(snapVec)
         if(snapX) {
           const start = this.toScreen(snapX)
@@ -561,15 +564,15 @@
             end: screenSnapVec,
           })
         }
-        if(snapZ) {
-          const start = this.toScreen(snapZ)
+        if(snapY) {
+          const start = this.toScreen(snapY)
           this.guides.push({
             id: 'h' + start.x + start.y,
             start,
             end: screenSnapVec,
           })
         }
-        if(snapX && snapZ) {
+        if(snapX && snapY) {
           if(this.snapAnchor && this.snapAnchor.vec.equals(snapVec)) return snapVec
           this.snapAnchor = {
             type: 'snap',
@@ -581,7 +584,7 @@
         } else {
           this.snapAnchor = null
         }
-        if(snapX || snapZ) return snapVec
+        if(snapX || snapY) return snapVec
       },
 
       updateWidgets: function() {
@@ -763,8 +766,9 @@
         this.regionMeshes = this.regionMeshes || []
         this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
         this.regionMeshes = regions.map(region => {
+          const poly = region.get_polyline();
           const geometry = new THREE.BufferGeometry()
-          const vertices = new Float32Array(region.position())
+          const vertices = new Float32Array(poly.position())
           const normals = new Float32Array(Array(vertices.length / 3).fill([0,1,0]).flat())
           const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
           // console.log(vertices)

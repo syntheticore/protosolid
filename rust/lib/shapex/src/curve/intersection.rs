@@ -53,10 +53,10 @@ pub fn line_line(own: &Line, other: &Line) -> Intersection {
       (other.points.1.x - own.points.0.x < 0.0),
       (other.points.1.x - own.points.1.x < 0.0),
     ].windows(2).all(|w| w[0] == w[1]) || ![
-      (other.points.0.z - own.points.0.z < 0.0),
-      (other.points.0.z - own.points.1.z < 0.0),
-      (other.points.1.z - own.points.0.z < 0.0),
-      (other.points.1.z - own.points.1.z < 0.0),
+      (other.points.0.y - own.points.0.y < 0.0),
+      (other.points.0.y - own.points.1.y < 0.0),
+      (other.points.1.y - own.points.0.y < 0.0),
+      (other.points.1.y - own.points.1.y < 0.0),
     ].windows(2).all(|w| w[0] == w[1]);
     return if overlap {
       Intersection::Contained
@@ -133,6 +133,6 @@ mod tests {
   fn touching_lines() {
     let lines = test_data::rectangle();
     let hit = intersection::line_line(&lines[0], &lines[1]);
-    assert_eq!(hit, Intersection::Touch(Point3::new(1.0, 0.0, 1.0)));
+    assert_eq!(hit, Intersection::Touch(Point3::new(1.0, 1.0, 0.0)));
   }
 }

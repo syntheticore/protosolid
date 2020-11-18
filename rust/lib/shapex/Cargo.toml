@@ -6,6 +6,7 @@ authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-cgmath = "^0.16.1"
+rand = "0.7.3"
 uuid = { version = "0.8", features = ["v4"] }
+cgmath = "^0.16.1"
 earcutr = { git = "https://github.com/donbright/earcutr" }

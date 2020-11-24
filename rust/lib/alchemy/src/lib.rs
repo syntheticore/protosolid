@@ -3,10 +3,12 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
+
 use uuid::Uuid;
 use cgmath::prelude::*;
 
 pub use shapex::*;
+use shapex::solid::*;
 
 
 #[derive(Debug, Default)]
@@ -21,9 +23,11 @@ pub struct Component {
 
 impl Component {
   pub fn new() -> Self {
-    let mut this: Self = Default::default();
-    this.id = Uuid::new_v4();
-    this
+    Default::default()
+  }
+
+  pub fn boolean_all(&self, _tool: &Solid) {
+
   }
 }
 
@@ -54,7 +58,7 @@ impl Sketch {
     regions.into_iter().map({|region|
       region.into_iter().map({|derived|
         TrimmedSketchElement {
-          base: derived.original,
+          base: derived.original.borrow().clone(),
           bounds: derived.owned.as_curve().endpoints(),
           cache: derived.owned,
         }
@@ -176,7 +180,11 @@ impl Sketch {
       connected_elems.sort_by(|a, b| {
         let final_point_a = a.owned.as_curve().other_endpoint(&end_point);
         let final_point_b = b.owned.as_curve().other_endpoint(&end_point);
-        if geom2d::clockwise(*start_point, end_point, final_point_a) < geom2d::clockwise(*start_point, end_point, final_point_b) { Ordering::Less } else { Ordering:: Greater }
+        if geom2d::clockwise(*start_point, end_point, final_point_a) > geom2d::clockwise(*start_point, end_point, final_point_b) {
+          Ordering::Less
+        } else {
+          Ordering:: Greater
+        }
         // if geom2d::clockwise(end_point, final_point_a, final_point_b) < 0.0 { Ordering::Less } else { Ordering:: Greater }
       });
       // Follow the leftmost segment to complete loop in anti-clockwise order
@@ -247,7 +255,7 @@ impl Scene {
   }
 
   pub fn create_component(&mut self) -> Rc<RefCell<Component>> {
-    let mut comp = Component::new();
+    let mut comp: Component = Default::default();
     comp.title = "New Component".to_string();
     comp.visible = true;
     let comp = Rc::new(RefCell::new(comp));

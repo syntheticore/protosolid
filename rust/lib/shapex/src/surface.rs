@@ -1,5 +1,8 @@
-use crate::base::*;
 use cgmath::prelude::*;
+
+use crate::base::*;
+use crate::curve::*;
+use crate::curve::intersection::Intersection;
 
 
 pub trait Surface {
@@ -10,6 +13,15 @@ impl core::fmt::Debug for dyn Surface {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "Foo")
   }
+}
+
+
+type Wire = Vec<TrimmedSketchElement>;
+
+#[derive(Debug)]
+pub struct TrimmedSurface {
+  base: Box<dyn Surface>,
+  bounds: Vec<Wire>,
 }
 
 
@@ -25,7 +37,7 @@ impl Plane {
     Self {
       origin: Point3::new(0.0, 0.0, 0.0),
       u: Vec3::new(1.0, 0.0, 0.0),
-      v: Vec3::new(0.0, 0.0, 1.0),
+      v: Vec3::new(0.0, 1.0, 0.0),
     }
   }
 

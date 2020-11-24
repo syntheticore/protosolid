@@ -1,13 +1,12 @@
-use std::rc::Rc;
-use std::cell::RefCell;
+pub mod intersection;
+
 use std::convert::TryInto;
 
 use uuid::Uuid;
 use cgmath::prelude::*;
 
 use crate::base::*;
-
-mod intersection;
+use intersection::Intersection;
 
 
 pub type PolyLine = Vec<Point3>;
@@ -15,7 +14,7 @@ pub type PolyLine = Vec<Point3>;
 
 #[derive(Debug, Clone)]
 pub struct TrimmedSketchElement {
-  pub base: Rc<RefCell<SketchElement>>,
+  pub base: SketchElement,
   // pub bounds: (f64, f64),
   pub bounds: (Point3, Point3),
   pub cache: SketchElement,
@@ -240,8 +239,7 @@ impl Curve for Arc {
   }
 
   fn endpoints(&self) -> (Point3, Point3) {
-    let zero = self.sample(0.0);
-    (zero, zero)
+    (self.sample(0.0), self.sample(1.0))
   }
 }
 

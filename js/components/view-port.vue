@@ -239,7 +239,7 @@
       this.raycaster = new THREE.Raycaster()
 
       camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
-      camera.position.set(3, 2, 3)
+      camera.position.set(6, 4, 6)
 
       this.scene = new THREE.Scene()
       // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
@@ -253,8 +253,8 @@
       sun.shadow.camera = new THREE.OrthographicCamera(-shadowFrustum, shadowFrustum, shadowFrustum, -shadowFrustum, 1, 200)
       this.scene.add(sun)
 
-      var light = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
-      this.scene.add(light)
+      var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
+      this.scene.add(atmosphere)
 
       // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
       // var material = new THREE.MeshStandardMaterial({
@@ -422,6 +422,9 @@
       this.$root.$on('resize', () => this.onWindowResize() )
 
       this.loadTree(this.document.tree, true)
+
+      document._debug = {} || document._debug
+      document._debug.viewport = this
     },
 
     beforeDestroy: function() {

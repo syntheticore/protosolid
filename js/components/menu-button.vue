@@ -45,6 +45,8 @@
   button
     margin: 0
     color: inherit
+    font-size: 16px
+    font-weight: normal
     &.pressed
     &:active
       .expander

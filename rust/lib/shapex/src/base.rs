@@ -1,9 +1,13 @@
+use std::rc::{Rc, Weak};
+use std::cell::RefCell;
+
 pub type Vec2 = cgmath::Vector2<f64>;
 pub type Vec3 = cgmath::Vector3<f64>;
 pub type Vec4 = cgmath::Vector4<f64>;
 pub type Point2 = cgmath::Point2<f64>;
 pub type Point3 = cgmath::Point3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
+
 
 pub const EPSILON: f64 = core::f64::EPSILON * 1000.0;
 
@@ -27,35 +31,14 @@ impl Almost for f64 {
 }
 
 
-#[derive(Debug, PartialEq)]
-pub enum Intersection {
-  None,
-  Touch(Point3), // Touching endpoints
-  Pierce(Vec<Point3>), // Endpoint touching curve/surface
-  Cross(Vec<Point3>), // Actual intersections
-  Extended(Vec<Point3>), // Intersections outside geometric bounds
-  Contained, // Overlap, Infinite intersections
-}
-
-
 pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
   vec![tuple.0, tuple.1]
 }
 
 
-#[derive(Debug, Clone)]
-pub struct Axis {
-  origin: Point3,
-  direction: Vec3,
+pub type Ref<T> = Rc<RefCell<T>>;
+pub type WeakRef<T> = Weak<RefCell<T>>;
+
+pub fn rc<T>(arg: T) -> Rc<RefCell<T>> {
+  Rc::new(RefCell::new(arg))
 }
-
-// #[derive(Debug)]
-// pub struct Transform {
-//   matrix: Matrix4,
-// }
-
-// impl Transform {
-//   pub fn mirror(&mut self, axis: &Axis) {
-//      self.matrix = Matrix4::from_nonuniform_scale(axis.direction.x, axis.direction.y, axis.direction.z);
-//   }
-// }

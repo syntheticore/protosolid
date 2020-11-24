@@ -48,6 +48,7 @@
       )
     FooterView(
       :selected-element="selectedElement"
+      :active-component="activeComponent"
     )
 </template>
 

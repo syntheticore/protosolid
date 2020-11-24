@@ -153,7 +153,7 @@ impl JsBufferGeometry {
 
 #[wasm_bindgen]
 pub struct JsRegion {
-  region: Region,
+  region: Vec<TrimmedSketchElement>,
   component: Rc<RefCell<Component>>,
 }
 
@@ -165,6 +165,11 @@ impl JsRegion {
       position: geom2d::tesselate_polygon(poly).to_buffer_geometry(),
       normal: vec![],
     })
+  }
+
+  pub fn extrude(&self, distance: f64) {
+    let solid = features::extrude_region(self.region.clone(), distance);
+    self.component.borrow().boolean_all(&solid);
   }
 }
 
@@ -258,11 +263,11 @@ impl JsComponent {
 
   pub fn get_regions(&self) -> Array {
     self.real.borrow().sketch.get_regions().into_iter()
-      .map(|region| JsValue::from(JsRegion {
-        region: region,
-        component: self.real.clone(),
-      }))
-      .collect()
+    .map(|region| JsValue::from(JsRegion {
+      region: region,
+      component: self.real.clone(),
+    }))
+    .collect()
   }
 
   // pub fn get_region_info(&self) -> JsFoo {

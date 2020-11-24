@@ -1,8 +1,9 @@
+use earcutr;
+
 use crate::base::*;
 use crate::PolyLine;
-use crate::Mesh;
 use crate::SketchElement;
-use earcutr;
+use crate::solid::Mesh;
 
 
 pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
@@ -68,7 +69,7 @@ pub fn poly_from_loop(loopy: Vec<SketchElement>) -> PolyLine {
       polyline.push(elem.as_curve().other_endpoint(polyline.last().unwrap()));
     }
   }
-  let z = rand::random::<f64>() / 6.0;
+  let z = rand::random::<f64>() / -6.0;
   for p in &mut polyline {
     p.z = z;
   }
@@ -99,7 +100,6 @@ mod tests {
     let rect = test_data::rectangle();
     let rect: Vec<SketchElement> = rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
     let rect_poly = poly_from_loop(rect.clone());
-    println!("Foo{:?}", rect_poly);
 
     assert!(is_clockwise(&rect_poly));
   }

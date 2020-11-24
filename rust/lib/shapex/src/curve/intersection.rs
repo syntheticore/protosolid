@@ -2,6 +2,17 @@ use crate::geom2d::*;
 use crate::curve::*;
 
 
+#[derive(Debug, PartialEq)]
+pub enum Intersection {
+  None,
+  Touch(Point3), // Touching endpoints
+  Pierce(Vec<Point3>), // Endpoint touching curve/surface
+  Cross(Vec<Point3>), // Actual intersections
+  Extended(Vec<Point3>), // Intersections outside geometric bounds
+  Contained, // Overlap, Infinite intersections
+}
+
+
 pub fn intersect(own: &SketchElement, other: &SketchElement) -> Intersection {
   match own {
     // Line

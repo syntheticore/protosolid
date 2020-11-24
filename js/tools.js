@@ -84,15 +84,6 @@ export class ObjectSelectionTool extends SelectionTool {
 
 export class ProfileSelectionTool extends SelectionTool {
   select(coords) {
-    // const regions = this.component.get_regions()
-    // console.log('Regions', regions)
-    const splits = this.component.get_all_split()
-    // const elems = this.component.get_sketch_elements()
-    // // .map(elem => elem.get_handles())
-    // elems.forEach(elem => {
-    //   this.component.remove_element(elem.id())
-    // })
-    this.viewport.componentChanged(this.component)
     const object = this.viewport.objectsAtScreen(coords, 'alcRegion')[0]
     return object && [object.alcRegion, new THREE.Vector3().fromArray(object.alcRegion.get_polyline().position())]
   }

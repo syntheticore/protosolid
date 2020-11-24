@@ -43,5 +43,6 @@ export class ExtrudeFeature extends Feature {
 
   update() {
     console.log(this.profile)
+    this.profile.extrude(this.distance * (this.direction ? 1 : -1))
   }
 }

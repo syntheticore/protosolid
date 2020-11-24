@@ -45,6 +45,9 @@
         div(v-if="type == 'Circle'")
           span Area
           span {{selectedElement.get_area().toFixed(2)}} mm²
+
+    .debug-panel
+      button.button(@click="splitAll") Split all
 </template>
 
 
@@ -96,6 +99,12 @@
     margin-right: 3px
     color: $bright1
 
+  .debug-panel
+    position: absolute
+    left: 5px
+    bottom: 7px
+    pointer-events: all
+
   .fade-enter-active, .fade-leave-active
     transition: all 0.4s
 
@@ -114,7 +123,8 @@
     components: {},
 
     props: {
-      selectedElement: Object
+      selectedElement: Object,
+      activeComponent: Object,
     },
 
     computed: {
@@ -123,10 +133,18 @@
       },
     },
 
-    // data() {
-    //   return {}
-    // },
-
-    // mounted() {},
+    methods: {
+      splitAll: function() {
+        // const regions = this.activeComponent.get_regions()
+        // console.log('Regions', regions)
+        const splits = this.activeComponent.get_all_split()
+        // const elems = this.activeComponent.get_sketch_elements()
+        // // .map(elem => elem.get_handles())
+        // elems.forEach(elem => {
+        //   this.activeComponent.remove_element(elem.id())
+        // })
+        document._debug.viewport.componentChanged(this.activeComponent)
+      },
+    },
   }
 </script>

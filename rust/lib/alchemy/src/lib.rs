@@ -15,7 +15,7 @@ use shapex::solid::*;
 pub struct Component {
   pub id: Uuid,
   pub title: String,
-  pub visible: bool,
+  // pub visible: bool,
   pub sketch: Sketch,
   pub bodies: Vec<Solid>,
   pub children: Vec<Rc<RefCell<Component>>>,
@@ -23,7 +23,9 @@ pub struct Component {
 
 impl Component {
   pub fn new() -> Self {
-    Default::default()
+    let mut this: Self = Default::default();
+    this.id = Uuid::new_v4();
+    this
   }
 
   pub fn boolean_all(&self, _tool: &Solid) {
@@ -248,7 +250,7 @@ impl Scene {
   pub fn new() -> Self {
     let mut comp = Component::new();
     comp.title = "Main Assembly".to_string();
-    comp.visible = true;
+    // comp.visible = true;
     let tree = Rc::new(RefCell::new(comp));
     let current_component = Rc::clone(&tree);
     Self { tree, current_component }
@@ -257,7 +259,7 @@ impl Scene {
   pub fn create_component(&mut self) -> Rc<RefCell<Component>> {
     let mut comp: Component = Default::default();
     comp.title = "New Component".to_string();
-    comp.visible = true;
+    // comp.visible = true;
     let comp = Rc::new(RefCell::new(comp));
     {
       let mut current_component = self.current_component.borrow_mut();

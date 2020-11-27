@@ -4,7 +4,6 @@ use std::rc::{Rc, Weak};
 // use uuid::Uuid;
 
 use crate::base::*;
-use crate::curve::*;
 use crate::surface::*;
 
 
@@ -36,9 +35,18 @@ pub struct Shell {
 #[derive(Debug)]
 pub struct Face {
   // pub id: Uuid,
-  pub outer_ring: Ref<HalfEdge>, // clockwise
-  pub inner_rings: Vec<Ref<HalfEdge>>, // counter-clockwise
-  pub surface: TrimmedSurface,
+  // pub outer_ring: Ref<Ring>, // clockwise
+  // pub inner_rings: Vec<Ref<Ring>>, // counter-clockwise
+  pub outer_ring: Ref<Ring>,
+  pub rings: Vec<Ref<Ring>>,
+  pub surface: Box<dyn Surface>,
+}
+
+
+#[derive(Debug)]
+pub struct Ring {
+  pub half_edge: Ref<HalfEdge>,
+  pub face: WeakRef<Face>,
 }
 
 
@@ -46,8 +54,8 @@ pub struct Face {
 pub struct Edge {
   pub left_half: Ref<HalfEdge>,
   pub right_half: Ref<HalfEdge>,
-  pub curve: TrimmedSketchElement,
-  pub curve_direction: bool, // true means forward according to left_half
+  // pub curve: TrimmedSketchElement,
+  // pub curve_direction: bool, // true means forward according to left_half
 }
 
 
@@ -56,8 +64,8 @@ pub struct HalfEdge {
   pub next: WeakRef<Self>,
   pub previous: WeakRef<Self>,
   pub origin: Ref<Vertex>,
-  pub face: WeakRef<Face>,
   pub edge: WeakRef<Edge>,
+  pub ring: WeakRef<Ring>,
 }
 
 
@@ -71,12 +79,12 @@ pub struct Vertex {
 
 impl Solid {
   pub fn new() -> Self {
-    Solid {
+    Self {
       shells: vec![],
     }
   }
 
-  pub fn mvfs(&mut self, p: Point3, surface: TrimmedSurface) -> &Shell {
+  pub fn mvfs(&mut self, p: Point3, surface: Box<dyn Surface>) -> &Shell {
     let mut shell = Shell {
       closed: true,
       faces: vec![],
@@ -91,20 +99,25 @@ impl Solid {
       previous: Weak::new(),
       next: Weak::new(),
       origin: vertex.clone(),
-      face: Weak::new(),
-      edge: Weak::new(),
+      ring: Weak::new(),
+      edge: Weak::new(), // Left empty
     });
     vertex.borrow_mut().half_edge = Rc::downgrade(&he);
+    let ring = rc(Ring {
+      half_edge: he.clone(),
+      face: Weak::new(),
+    });
     let face = rc(Face {
-      outer_ring: he.clone(),
-      inner_rings: vec![],
+      outer_ring: ring.clone(),
+      rings: vec![ring.clone()],
       surface,
     });
+    ring.borrow_mut().face = Rc::downgrade(&face);
     {
       let mut heb = he.borrow_mut();
       heb.previous = Rc::downgrade(&he);
       heb.next = Rc::downgrade(&he);
-      heb.face = Rc::downgrade(&face);
+      heb.ring = Rc::downgrade(&ring);
     }
     shell.vertices.push(vertex);
     shell.faces.push(face);
@@ -125,7 +138,7 @@ impl Solid {
 impl Shell {
   pub fn euler_characteristics(&self) -> i32 {
     let num_faces = self.faces.len();
-    let num_loops = self.faces.iter().fold(0, |acc, face| acc + 1 + face.borrow().inner_rings.len());
+    let num_loops = self.faces.iter().fold(0, |acc, face| acc + face.borrow().rings.len());
     (num_faces - self.edges.len() + self.vertices.len() + (num_faces - num_loops)) as i32
   }
 
@@ -140,7 +153,7 @@ impl Shell {
 
   // Topological type (Number of handles on a sphere)
   pub fn genus(&self) -> i32 {
-    if !self.closed { panic!("Open Shell"); }
+    if !self.closed { panic!("Open Shell") } //XXX should return error
     let h = self.connectivity();
     if h >= 3 {
       (h - 1) / 2
@@ -149,13 +162,117 @@ impl Shell {
     }
   }
 
-  pub fn lmev(&mut self) {
+  pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
+    let vertex = rc(Vertex {
+      point: p,
+      half_edge: Weak::new(),
+    });
+    let mut he = he1.clone();
+    while !Rc::ptr_eq(&he, he2) {
+      he = {
+        let mut heb = he.borrow_mut();
+        heb.origin = vertex.clone();
+        let mate = heb.mate();
+        let next = &mate.borrow().next;
+        next.upgrade().unwrap().clone()
+      }
+    }
+    let he2b = he2.borrow_mut();
+    let edge = rc(Edge {
+      left_half: HalfEdge::new_at(&vertex, he2),
+      right_half: HalfEdge::new_at(&he2b.origin, he1),
+    });
+    {
+      let e = edge.borrow();
+      e.left_half.borrow_mut().edge = Rc::downgrade(&edge);
+      e.right_half.borrow_mut().edge = Rc::downgrade(&edge);
+    }
+    vertex.borrow_mut().half_edge = he2b.previous.clone();
+    he2b.origin.borrow_mut().half_edge = Rc::downgrade(he2);
+    self.vertices.push(vertex.clone());
+    self.edges.push(edge.clone());
+    (edge, vertex)
+  }
 
+  pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, surface: Box<dyn Surface>) -> (Ref<Edge>, Ref<Face>) {
+    let he1b = he1.borrow_mut();
+    let he2b = he2.borrow_mut();
+    let nhe1 = HalfEdge::new_at(&he2b.origin, he1);
+    let nhe2 = HalfEdge::new_at(&he1b.origin, he2);
+    let edge = rc(Edge {
+      left_half: nhe2.clone(),
+      right_half: nhe1.clone(),
+    });
+    let ring = rc(Ring {
+      half_edge: nhe1.clone(),
+      face: Weak::new(),
+    });
+    let face = rc(Face {
+      outer_ring: ring.clone(),
+      rings: vec![ring.clone()],
+      surface,
+    });
+    ring.borrow_mut().face = Rc::downgrade(&face);
+    let mut he = he1.clone();
+    while !Rc::ptr_eq(&he, he2) {
+      he = {
+        let mut heb = he.borrow_mut();
+        heb.ring = Rc::downgrade(&ring);
+        heb.next.upgrade().unwrap().clone()
+      }
+    }
+    {
+      let mut nhe1b = nhe1.borrow_mut();
+      let mut nhe2b = nhe2.borrow_mut();
+      nhe1b.ring = Rc::downgrade(&ring);
+      nhe1b.previous.upgrade().unwrap().borrow_mut().next = Rc::downgrade(&nhe2);
+      nhe2b.previous.upgrade().unwrap().borrow_mut().next = Rc::downgrade(&nhe1);
+      let temp = nhe1b.previous.clone();
+      nhe1b.previous = nhe2b.previous.clone();
+      nhe2b.previous = temp;
+    }
+    he2b.ring.upgrade().unwrap().borrow_mut().half_edge = nhe2;
+    self.edges.push(edge.clone());
+    self.faces.push(face.clone());
+    (edge, face)
   }
 }
 
 
 impl HalfEdge {
+  pub fn new_at(vertex: &Ref<Vertex>, at: &Ref<Self>) -> Ref<Self> {
+    let mut atb = at.borrow_mut();
+    if let Some(_) = atb.edge.upgrade() {
+      let he = rc(Self {
+        next: Rc::downgrade(at),
+        previous: atb.previous.clone(),
+        origin: vertex.clone(),
+        ring: atb.ring.clone(),
+        edge: Weak::new(),
+      });
+      atb.previous.upgrade().unwrap().borrow_mut().next = Rc::downgrade(&he);
+      atb.previous = Rc::downgrade(&he);
+      he
+    } else {
+      atb.origin = vertex.clone();
+      at.clone()
+    }
+  }
+
+  pub fn remove(&mut self) -> WeakRef<Self> {
+    if !self.edge.upgrade().is_some() {
+      Weak::new()
+    } else if ptr::eq(self, &*self.next.upgrade().unwrap().borrow()) {
+      let this = Rc::downgrade(&self.mate().borrow().mate());
+      self.edge = Weak::new();
+      this
+    } else {
+      self.previous.upgrade().unwrap().borrow_mut().next = self.next.clone();
+      self.next.upgrade().unwrap().borrow_mut().previous = self.previous.clone();
+      self.previous.clone()
+    }
+  }
+
   pub fn mate(&self) -> Ref<Self> {
     let edge = self.edge.upgrade().unwrap();
     let edge = edge.borrow();
@@ -220,7 +337,6 @@ pub struct VertexEdgesIterator {
 impl VertexEdgesIterator {
   fn new(start_vertex: &Vertex) -> Self {
     let he = &start_vertex.half_edge.upgrade().unwrap();
-    // let he = &*he.borrow();
     Self {
       start_edge: (*he).clone(),
       current_edge: (*he).clone(),

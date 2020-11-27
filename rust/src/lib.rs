@@ -308,7 +308,7 @@ impl JsComponent {
   pub fn create_component(&mut self, title: &str) -> JsComponent {
     let mut comp = Component::new();
     comp.title = title.to_string();
-    comp.visible = true;
+    // comp.visible = true;
     let comp = Rc::new(RefCell::new(comp));
     self.real.borrow_mut().children.push(comp.clone());
     JsComponent::from(&comp)

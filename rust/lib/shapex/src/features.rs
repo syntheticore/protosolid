@@ -33,8 +33,8 @@ pub fn extrude_region(region: Vec<TrimmedSketchElement>, _distance: f64) -> Soli
     let edge = rc(Edge {
       left_half: left_he.clone(),
       right_half: left_he.clone(),
-      // curve: elem.clone(),
-      // curve_direction: true, //XXX
+      curve: elem.clone(),
+      curve_direction: true, //XXX
     });
     left_he.borrow_mut().edge = Rc::downgrade(&edge);
     let right_he = left_he.borrow().clone();
@@ -62,13 +62,66 @@ pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {
 
 }
 
-pub fn make_cube() -> Solid {
-  let mut solid = Solid::new();
-  let surface = Box::new(Plane::default());
-  let shell = solid.mvfs(Point3::new(0.0, 0.0, 0.0), surface);
-  //3x shell.mev()
-  //1x shell.mef() to make lamina
+
+pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
+  let mut top = Box::new(Plane::default());
+  let mut bottom = top.clone();
+  bottom.flip();
+  top.origin.z = dz;
+  let points = [
+    Point3::new(0.0, 0.0, 0.0),
+    Point3::new(dx, 0.0, 0.0),
+    Point3::new(dx, dy, 0.0),
+    Point3::new(0.0, dy, 0.0),
+  ];
+  // Create solid from bottom face with empty loop
+  let mut solid = Solid::new(points[0], bottom);
+  let shell = &mut solid.shells[0];
+  let he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
+  // Front edge
+  let (front_edge, _) = shell.lmev(&he, &he, make_trimmed(points[1], points[0]), points[1]);
+  let he = &front_edge.borrow().left_half;
+  // Right edge
+  let (right_edge, _) = shell.lmev(he, he, make_trimmed(points[2], points[1]), points[2]);
+  let he = &right_edge.borrow().left_half;
+  // Back edge
+  let (back_edge, _) = shell.lmev(he, he, make_trimmed(points[3], points[2]), points[3]);
+  // Close left edge to create top face
+  let (_, _top_face) = shell.lmef(&front_edge.borrow().right_half, &back_edge.borrow().left_half, make_trimmed(points[0], points[3]), top);
   //4x shell.mev()
   //4x shell.mef() side faces
   solid
+}
+
+pub fn make_cube2(dx: f64, dy: f64, dz: f64) -> Solid {
+  let points = [
+    Point3::new(0.0, 0.0, 0.0),
+    Point3::new(dx, 0.0, 0.0),
+    Point3::new(dx, dy, 0.0),
+    Point3::new(0.0, dy, 0.0),
+  ];
+  let mut region = vec![];
+  let mut iter = points.iter().peekable();
+  while let Some(&p) = iter.next() {
+    let next = if let Some(&next) = iter.peek() {
+      next
+    } else {
+      &points[0]
+    };
+    region.push(make_trimmed(p, *next));
+  }
+  let mut solid = Solid::new_lamina(region, Plane::default());
+  let shell = &mut solid.shells[0];
+  shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, dz));
+  solid
+}
+
+
+fn make_trimmed(p1: Point3, p2: Point3) -> TrimmedSketchElement {
+  let line = Line::new(p1, p2);
+  TrimmedSketchElement {
+    bounds: line.endpoints(),
+    base: SketchElement::Line(line.clone()),
+    cache: SketchElement::Line(line),
+  }
 }

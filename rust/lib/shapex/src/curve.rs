@@ -6,7 +6,7 @@ use uuid::Uuid;
 use cgmath::prelude::*;
 
 use crate::base::*;
-use intersection::Intersection;
+use intersection::CurveIntersection;
 
 
 pub type PolyLine = Vec<Point3>;
@@ -150,8 +150,15 @@ impl Line {
 
   pub fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
     match intersection::intersect(&SketchElement::Line(self.clone()), cutter) {
-      Intersection::None | Intersection::Contained | Intersection::Touch(_) | Intersection::Extended(_) => vec![self.clone()],
-      Intersection::Cross(mut points) | Intersection::Pierce(mut points) => { //XXX points are not sorted along line
+      CurveIntersection::None
+      | CurveIntersection::Contained
+      | CurveIntersection::Touch(_)
+      | CurveIntersection::Extended(_)
+      => vec![self.clone()],
+
+      CurveIntersection::Cross(mut points)
+      | CurveIntersection::Pierce(mut points)
+      => { //XXX points are not sorted along line
         // Check if intersection goes exactly through endpoint
         if points[0].almost(self.points.0) || points[0].almost(self.points.1) {
           return vec![self.clone()];

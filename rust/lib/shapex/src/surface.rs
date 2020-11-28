@@ -2,11 +2,12 @@ use cgmath::prelude::*;
 
 use crate::base::*;
 use crate::curve::*;
-use crate::curve::intersection::Intersection;
+use crate::curve::intersection::CurveIntersection;
 
 
 pub trait Surface {
-  // fn sample(&self, u: f64, v: f64) -> Point3;
+  fn sample(&self, u: f64, v: f64) -> Point3;
+  fn normal_at(&self, u: f64, v: f64) -> Vec3;
 }
 
 impl core::fmt::Debug for dyn Surface {
@@ -41,15 +42,15 @@ impl Plane {
     }
   }
 
-  pub fn sample(&self, u: f64, v: f64) -> Point3 {
-    self.origin + self.u * u + self.v * v
-  }
-
   pub fn normal(&self) -> Vec3 {
     self.u.cross(self.v)
   }
 
-  pub fn intersect_line(&self, line: (Point3, Point3)) -> Intersection {
+  pub fn flip(&mut self) {
+    self.v = -self.v;
+  }
+
+  pub fn intersect_line(&self, line: (Point3, Point3)) -> CurveIntersection {
     let n = self.normal();
     let u = line.1 - line.0;
     let n_dot_u = n.dot(u);
@@ -57,9 +58,9 @@ impl Plane {
       // Line is parallel to this plane
       if self.contains_point(line.0) {
         // Line lies completely on this plane
-        Intersection::Contained
+        CurveIntersection::Contained
       } else {
-        Intersection::None
+        CurveIntersection::None
       }
     } else {
       let s = n.dot(self.origin - line.0) / n_dot_u;
@@ -67,13 +68,13 @@ impl Plane {
       if s >= 0.0 && s <= 1.0 {
         // Line segment intersects this plane
         if s == 0.0 || s == 1.0 {
-          Intersection::Pierce(vec![p])
+          CurveIntersection::Pierce(vec![p])
         } else {
-          Intersection::Cross(vec![p])
+          CurveIntersection::Cross(vec![p])
         }
       } else {
         // The ray along the given line intersects this plane
-        Intersection::Extended(vec![p])
+        CurveIntersection::Extended(vec![p])
       }
     }
   }
@@ -83,7 +84,15 @@ impl Plane {
   }
 }
 
-impl Surface for Plane {}
+impl Surface for Plane {
+  fn sample(&self, u: f64, v: f64) -> Point3 {
+    self.origin + self.u * u + self.v * v
+  }
+
+  fn normal_at(&self, _u: f64, _v: f64) -> Vec3 {
+    self.normal()
+  }
+}
 
 
 #[cfg(test)]
@@ -93,6 +102,6 @@ mod tests {
   #[test]
   fn plane_normal() {
     let plane = Plane::default();
-    assert_eq!(plane.normal(), Vec3::new(0.0, -1.0, 0.0));
+    assert_eq!(plane.normal(), Vec3::new(0.0, 0.0, 1.0));
   }
 }

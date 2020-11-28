@@ -4,6 +4,7 @@ use std::rc::{Rc, Weak};
 // use uuid::Uuid;
 
 use crate::base::*;
+use crate::curve::*;
 use crate::surface::*;
 
 
@@ -54,8 +55,8 @@ pub struct Ring {
 pub struct Edge {
   pub left_half: Ref<HalfEdge>,
   pub right_half: Ref<HalfEdge>,
-  // pub curve: TrimmedSketchElement,
-  // pub curve_direction: bool, // true means forward according to left_half
+  pub curve: TrimmedSketchElement,
+  pub curve_direction: bool, // true means forward according to left_half
 }
 
 
@@ -78,13 +79,42 @@ pub struct Vertex {
 
 
 impl Solid {
-  pub fn new() -> Self {
-    Self {
-      shells: vec![],
-    }
+  pub fn new(p: Point3, surface: Box<dyn Surface>) -> Self {
+    let mut this = Self { shells: vec![] };
+    this.mvfs(p, surface);
+    this
   }
 
-  pub fn mvfs(&mut self, p: Point3, surface: Box<dyn Surface>) -> &Shell {
+  //XXX region is possibly not anti-clockwise and elems may change direction
+  pub fn new_lamina(region: Vec<TrimmedSketchElement>, top_plane: Plane) -> Self {
+    let mut bottom = top_plane.clone();
+    bottom.flip();
+    // Create shell from bottom face with empty ring
+    let first_elem = region.first().unwrap().clone();
+    let mut this = Self::new(first_elem.bounds.0, Box::new(bottom));
+    let shell = &mut this.shells[0];
+    let mut he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
+    // Complete ring of bottom face
+    let n = region.len() - 1;
+    for elem in region.into_iter().take(n) {
+      let points = elem.bounds;
+      let (new_edge, _) = shell.lmev(&he, &he, elem.clone(), points.1);
+      he = new_edge.borrow().left_half.clone();
+    }
+    // Create top face
+    let he1 = shell.edges[0].borrow().right_half.clone();
+    let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
+    shell.lmef(&he1, &he2, first_elem, Box::new(top_plane));
+    this
+  }
+
+  // https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/model/euler.html
+  pub fn euler_characteristics(&self) -> i32 {
+    let genus = self.shells.first().unwrap().genus(); //XXX should we fold over all shells?
+    self.shells.iter().fold(0, |acc, shell| acc + shell.euler_characteristics() ) - 2 * (self.shells.len() as i32 - genus)
+  }
+
+  pub fn mvfs(&mut self, p: Point3, surface: Box<dyn Surface>) -> (Ref<Vertex>, Ref<Face>, &mut Shell) {
     let mut shell = Shell {
       closed: true,
       faces: vec![],
@@ -119,10 +149,10 @@ impl Solid {
       heb.next = Rc::downgrade(&he);
       heb.ring = Rc::downgrade(&ring);
     }
-    shell.vertices.push(vertex);
-    shell.faces.push(face);
+    shell.vertices.push(vertex.clone());
+    shell.faces.push(face.clone());
     self.shells.push(shell);
-    self.shells.last().unwrap()
+    (vertex, face, self.shells.last_mut().unwrap())
   }
 
   pub fn boolean(&mut self, _tool: Self, _op: BooleanType) -> Vec<Solid> {
@@ -162,7 +192,7 @@ impl Shell {
     }
   }
 
-  pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
+  pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: TrimmedSketchElement, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
     let vertex = rc(Vertex {
       point: p,
       half_edge: Weak::new(),
@@ -181,6 +211,8 @@ impl Shell {
     let edge = rc(Edge {
       left_half: HalfEdge::new_at(&vertex, he2),
       right_half: HalfEdge::new_at(&he2b.origin, he1),
+      curve_direction: curve.bounds.0.almost(p),
+      curve,
     });
     {
       let e = edge.borrow();
@@ -194,7 +226,7 @@ impl Shell {
     (edge, vertex)
   }
 
-  pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, surface: Box<dyn Surface>) -> (Ref<Edge>, Ref<Face>) {
+  pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: TrimmedSketchElement, surface: Box<dyn Surface>) -> (Ref<Edge>, Ref<Face>) {
     let he1b = he1.borrow_mut();
     let he2b = he2.borrow_mut();
     let nhe1 = HalfEdge::new_at(&he2b.origin, he1);
@@ -202,6 +234,8 @@ impl Shell {
     let edge = rc(Edge {
       left_half: nhe2.clone(),
       right_half: nhe1.clone(),
+      curve,
+      curve_direction: true, //XXX
     });
     let ring = rc(Ring {
       half_edge: nhe1.clone(),
@@ -235,6 +269,10 @@ impl Shell {
     self.edges.push(edge.clone());
     self.faces.push(face.clone());
     (edge, face)
+  }
+
+  pub fn sweep(&mut self, _face: &Ref<Face>, _vec: Vec3) {
+    //XXX move surface by vec
   }
 }
 

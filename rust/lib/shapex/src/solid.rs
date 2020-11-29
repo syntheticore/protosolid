@@ -6,6 +6,8 @@ use std::rc::{Rc, Weak};
 use crate::base::*;
 use crate::curve::*;
 use crate::surface::*;
+use crate::mesh::*;
+use crate::geom2d;
 
 
 #[derive(Debug)]
@@ -36,8 +38,6 @@ pub struct Shell {
 #[derive(Debug)]
 pub struct Face {
   // pub id: Uuid,
-  // pub outer_ring: Ref<Ring>, // clockwise
-  // pub inner_rings: Vec<Ref<Ring>>, // counter-clockwise
   pub outer_ring: Ref<Ring>,
   pub rings: Vec<Ref<Ring>>,
   pub surface: Box<dyn Surface>,
@@ -159,8 +159,16 @@ impl Solid {
     vec![Self { shells: vec![] }]
   }
 
-  pub fn boolean_all(_tool: Self, _others: &Vec<&mut Self>, _op: BooleanType) {
+  pub fn boolean_all(tool: Self, others: &mut Vec<Solid>, _op: BooleanType) {
+    others.push(tool);
+  }
 
+  pub fn tesselate(&self) -> Mesh {
+    let mut mesh = Mesh::default();
+    for face in &self.shells[0].faces {
+      mesh.append(face.borrow().tesselate());
+    }
+    mesh
   }
 }
 
@@ -271,8 +279,72 @@ impl Shell {
     (edge, face)
   }
 
-  pub fn sweep(&mut self, _face: &Ref<Face>, _vec: Vec3) {
-    //XXX move surface by vec
+  pub fn sweep(&mut self, face: &Ref<Face>, vec: Vec3) {
+    for ring in &face.borrow().rings {
+      let first = &ring.borrow().half_edge;
+      let mut scan = first.borrow().next.upgrade().unwrap().clone();
+      self.sweep_mev(&scan, vec);
+      while !Rc::ptr_eq(&scan, &first) {
+        scan = {
+          let scanb = scan.borrow();
+          self.sweep_mev(&scanb.next.upgrade().unwrap(), vec);
+          self.sweep_mef(&scan, vec);
+          scanb.next.upgrade().unwrap().borrow().mate().borrow().next.upgrade().unwrap().clone()
+        }
+      }
+      self.sweep_mef(&scan, vec);
+    }
+    //XXX move top surface by vec
+  }
+
+  fn sweep_mev(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
+    let vertex = &scan.borrow().origin;
+    let point = vertex.borrow().point;
+    let new_point = point + vec;
+    let line = SketchElement::Line(Line::new(new_point, point));
+    self.lmev(
+      scan, scan,
+      TrimmedSketchElement::new(line),
+      new_point,
+    );
+  }
+
+  fn sweep_mef(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
+    let scanb = scan.borrow();
+    let mut curve = scanb.edge.upgrade().unwrap().borrow().curve.clone();
+    curve.base.as_curve_mut().transform(vec);
+    curve.cache.as_curve_mut().transform(vec);
+    curve.bounds = curve.cache.as_curve().endpoints();
+    let next = scanb.next.upgrade().unwrap(); // Neccessary as next has changed because of lmev
+    self.lmef(
+      // New edge is oriented from..
+      &scanb.previous.upgrade().unwrap(), // ..this half edge's vertex..
+      &next.borrow().next.upgrade().unwrap(), // ..to this half edge's vertex
+      curve,
+      Box::new(Plane::default()), //XXX
+    );
+  }
+}
+
+
+impl Face {
+  pub fn tesselate(&self) -> Mesh {
+    let wire = self.outer_ring.borrow().get_wire();
+    let polyline = geom2d::poly_from_wire(wire);
+    geom2d::tesselate_polygon(polyline)
+  }
+}
+
+
+impl Ring {
+  pub fn get_wire(&self) -> Vec<SketchElement> {
+    self.half_edge.borrow().ring_iter().map(|he|
+      he.borrow().edge.upgrade().unwrap().borrow().curve.cache.clone()
+    ).collect()
+  }
+
+  pub fn iter(&self) -> RingIterator  {
+    RingIterator::new(self.half_edge.clone())
   }
 }
 
@@ -358,7 +430,7 @@ impl Iterator for RingIterator {
   fn next(&mut self) -> Option<Self::Item> {
     let current_edge = self.current_edge.clone();
     self.current_edge = current_edge.borrow().next.upgrade().unwrap().clone();
-    if Rc::ptr_eq(&current_edge, &self.start_edge) {
+    if Rc::ptr_eq(&self.current_edge, &self.start_edge) {
       None
     } else {
       Some(current_edge)
@@ -388,26 +460,10 @@ impl Iterator for VertexEdgesIterator {
   fn next(&mut self) -> Option<Self::Item> {
     let current_edge = self.current_edge.clone();
     self.current_edge = current_edge.borrow().mate().borrow().next.upgrade().unwrap().clone();
-    if Rc::ptr_eq(&current_edge, &self.start_edge) {
+    if Rc::ptr_eq(&self.current_edge, &self.start_edge) {
       None
     } else {
       Some(current_edge)
     }
-  }
-}
-
-
-#[derive(Debug, Default)]
-pub struct Mesh {
-  pub vertices: Vec<Point3>,
-  pub faces: Vec<usize>,
-}
-
-impl Mesh {
-  pub fn to_buffer_geometry(&self) -> Vec<f64> {
-    self.faces.iter()
-      .map(|&face| &self.vertices[face] )
-      .flat_map(|vertex| vec![vertex.x, vertex.y, vertex.z] )
-      .collect()
   }
 }

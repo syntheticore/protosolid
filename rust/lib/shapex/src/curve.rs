@@ -20,6 +20,16 @@ pub struct TrimmedSketchElement {
   pub cache: SketchElement,
 }
 
+impl TrimmedSketchElement {
+  pub fn new(elem: SketchElement) -> Self {
+    TrimmedSketchElement {
+      bounds: elem.as_curve().endpoints(),
+      base: elem.clone(),
+      cache: elem,
+    }
+  }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SketchElement {
@@ -92,6 +102,7 @@ pub trait Curve {
   fn default_tesselation(&self) -> Vec<Point3>;
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
+  fn transform(&mut self, vec: Vec3);
 
   fn other_endpoint(&self, point: &Point3) -> Point3 {
     let (start, end) = self.endpoints();
@@ -195,6 +206,11 @@ impl Curve for Line {
   fn endpoints(&self) -> (Point3, Point3) {
     self.points
   }
+
+  fn transform(&mut self, vec: Vec3) {
+    self.points.0 += vec;
+    self.points.1 += vec;
+  }
 }
 
 
@@ -247,6 +263,10 @@ impl Curve for Arc {
 
   fn endpoints(&self) -> (Point3, Point3) {
     (self.sample(0.0), self.sample(1.0))
+  }
+
+  fn transform(&mut self, vec: Vec3) {
+    self.center += vec;
   }
 }
 
@@ -309,6 +329,10 @@ impl Curve for Circle {
   fn endpoints(&self) -> (Point3, Point3) {
     let zero = self.sample(0.0);
     (zero, zero)
+  }
+
+  fn transform(&mut self, vec: Vec3) {
+    self.center += vec;
   }
 }
 
@@ -436,6 +460,12 @@ impl Curve for BezierSpline {
 
   fn endpoints(&self) -> (Point3, Point3) {
     (self.vertices[0], *self.vertices.last().unwrap())
+  }
+
+  fn transform(&mut self, vec: Vec3) {
+    for p in &mut self.vertices {
+      *p += vec;
+    }
   }
 }
 

@@ -3,7 +3,7 @@ use earcutr;
 use crate::base::*;
 use crate::PolyLine;
 use crate::SketchElement;
-use crate::solid::Mesh;
+use crate::mesh::Mesh;
 
 
 pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
@@ -50,7 +50,7 @@ pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   signed_area
 }
 
-pub fn poly_from_loop(loopy: Vec<SketchElement>) -> PolyLine {
+pub fn poly_from_wire(loopy: Vec<SketchElement>) -> PolyLine {
   let mut polyline = vec![];
   let mut iter = loopy.iter().peekable();
   while let Some(elem) = iter.next() {
@@ -86,11 +86,11 @@ mod tests {
   fn compare_areas() {
     let rect = test_data::rectangle();
     let rect: Vec<SketchElement> = rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
-    let rect_poly = poly_from_loop(rect);
+    let rect_poly = poly_from_wire(rect);
 
     let reverse_rect = test_data::reverse_rectangle();
     let reverse_rect: Vec<SketchElement> = reverse_rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
-    let reverse_rect_poly = poly_from_loop(reverse_rect);
+    let reverse_rect_poly = poly_from_wire(reverse_rect);
 
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
   }
@@ -99,7 +99,7 @@ mod tests {
   fn rectangle_clockwise() {
     let rect = test_data::rectangle();
     let rect: Vec<SketchElement> = rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
-    let rect_poly = poly_from_loop(rect.clone());
+    let rect_poly = poly_from_wire(rect.clone());
 
     assert!(is_clockwise(&rect_poly));
   }

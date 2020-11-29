@@ -160,7 +160,7 @@ pub struct JsRegion {
 #[wasm_bindgen]
 impl JsRegion {
   pub fn get_polyline(&self) -> JsValue {
-    let poly = geom2d::poly_from_loop(self.region.iter().map(|elem| elem.cache.clone() ).collect());
+    let poly = geom2d::poly_from_wire(self.region.iter().map(|elem| elem.cache.clone() ).collect());
     JsValue::from(JsBufferGeometry {
       position: geom2d::tesselate_polygon(poly).to_buffer_geometry(),
       normal: vec![],
@@ -168,8 +168,8 @@ impl JsRegion {
   }
 
   pub fn extrude(&self, distance: f64) {
-    let solid = features::extrude_region(self.region.clone(), distance);
-    self.component.borrow().boolean_all(&solid);
+    let tool = features::extrude(self.region.clone(), Vec3::new(0.0, 0.0, distance));
+    Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
   }
 }
 
@@ -211,6 +211,13 @@ impl JsComponent {
 
   pub fn get_children(&self) -> Array {
     self.real.borrow().children.iter().map(|child| JsValue::from(JsComponent::from(child)) ).collect()
+  }
+
+  pub fn get_mesh(&self) -> JsValue {
+    JsValue::from(JsBufferGeometry {
+      position: self.real.borrow().bodies[0].tesselate().to_buffer_geometry(),
+      normal: vec![],
+    })
   }
 
   pub fn add_segment(&self) {

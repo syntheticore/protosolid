@@ -8,7 +8,6 @@ use uuid::Uuid;
 use cgmath::prelude::*;
 
 pub use shapex::*;
-use shapex::solid::*;
 
 
 #[derive(Debug, Default)]
@@ -26,10 +25,6 @@ impl Component {
     let mut this: Self = Default::default();
     this.id = Uuid::new_v4();
     this
-  }
-
-  pub fn boolean_all(&self, _tool: &Solid) {
-
   }
 }
 
@@ -211,7 +206,7 @@ impl Sketch {
   }
 
   fn poly_from_region(loopy: &DerivedRegion) -> PolyLine {
-    geom2d::poly_from_loop(loopy.iter().map(|elem| elem.owned.clone() ).collect())
+    geom2d::poly_from_wire(loopy.iter().map(|elem| elem.owned.clone() ).collect())
   }
 
   fn remove_outer_loop(loops: &mut Vec<DerivedRegion>) {

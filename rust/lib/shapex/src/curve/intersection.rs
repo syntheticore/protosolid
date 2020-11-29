@@ -13,15 +13,6 @@ pub enum CurveIntersection {
 }
 
 
-#[derive(Debug, PartialEq)]
-pub enum SurfaceIntersection {
-  None,
-  Bounded(SketchElement),
-  Infinite(SketchElement),
-  Contained, // Overlap, Infinite intersections
-}
-
-
 pub fn intersect(own: &SketchElement, other: &SketchElement) -> CurveIntersection {
   match own {
     // Line

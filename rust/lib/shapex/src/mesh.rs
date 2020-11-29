@@ -14,4 +14,10 @@ impl Mesh {
       .flat_map(|vertex| vec![vertex.x, vertex.y, vertex.z] )
       .collect()
   }
+
+  pub fn append(&mut self, mut other: Self) {
+    let offset = self.vertices.len();
+    self.vertices.append(&mut other.vertices);
+    self.faces.append(&mut other.faces.iter().map(|i| i + offset ).collect())
+  }
 }

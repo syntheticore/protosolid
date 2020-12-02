@@ -97,53 +97,6 @@ pub fn trim(elem: &SketchElement, cutters: &Vec<SketchElement>, p: Point3) {
 }
 
 
-// Iterate through an unordered list of connected sketch elements
-// in an orderly fashion. Returned trim bounds are consistently oriented.
-//XXX needs to iterate anti-clockwise for #new_lamina
-pub struct WireIterator<'a> {
-  wire: &'a Vec<TrimmedSketchElement>,
-  elem: Option<&'a TrimmedSketchElement>,
-  first_elem: &'a TrimmedSketchElement,
-  point: Point3,
-}
-
-impl<'a> WireIterator<'a> {
-  pub fn new(wire: &'a Vec<TrimmedSketchElement>) -> Self {
-    Self {
-      wire,
-      elem: Some(&wire[0]),
-      first_elem: &wire[0],
-      point: wire[0].bounds.0,
-    }
-  }
-}
-
-impl<'a> Iterator for WireIterator<'a> {
-  type Item = TrimmedSketchElement;
-
-  fn next(&mut self) -> Option<Self::Item> {
-    if let Some(elem) = self.elem {
-      let mut output = elem.clone();
-      self.point = if elem.bounds.0.almost(self.point) {
-        elem.bounds.1
-      } else {
-        // Reverse bounds, such that output item bounds are consistently oriented
-        output.bounds = (output.bounds.1, output.bounds.0);
-        elem.bounds.0
-      };
-      self.elem = self.wire.iter().find(|other_elem| {
-        (other_elem.bounds.0.almost(self.point) || other_elem.bounds.1.almost(self.point))
-        && !ptr::eq(elem, *other_elem)
-        && !ptr::eq(elem, self.first_elem)
-      });
-      Some(output)
-    } else {
-      None
-    }
-  }
-}
-
-
 #[cfg(test)]
 mod tests {
   use super::*;

@@ -8,7 +8,6 @@ use crate::curve::*;
 use crate::surface::*;
 use crate::mesh::*;
 use crate::geom2d;
-use crate::geom2d::WireIterator;
 
 
 #[derive(Debug)]

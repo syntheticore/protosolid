@@ -1,8 +1,9 @@
+use std::ptr;
+
 use earcutr;
 
 use crate::base::*;
-use crate::PolyLine;
-use crate::SketchElement;
+use crate::curve::*;
 use crate::mesh::Mesh;
 
 
@@ -50,9 +51,9 @@ pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   signed_area
 }
 
-pub fn poly_from_wire(loopy: Vec<SketchElement>) -> PolyLine {
+pub fn poly_from_wire(wire: &Vec<SketchElement>) -> PolyLine {
   let mut polyline = vec![];
-  let mut iter = loopy.iter().peekable();
+  let mut iter = wire.iter().peekable();
   while let Some(elem) = iter.next() {
     let endpoints = elem.as_curve().endpoints();
     if polyline.len() == 0 {
@@ -76,6 +77,72 @@ pub fn poly_from_wire(loopy: Vec<SketchElement>) -> PolyLine {
   polyline
 }
 
+pub fn split_element(elem: &SketchElement, others: &Vec<SketchElement>) -> Vec<SketchElement> {
+  let mut segments = vec![elem.clone()];
+  for other in others.iter() {
+    if ptr::eq(elem, &*other) { continue }
+    segments = segments.iter().flat_map(|own| {
+      own.split(&other)
+    }).collect();
+  }
+  segments
+}
+
+pub fn trim(elem: &SketchElement, cutters: &Vec<SketchElement>, p: Point3) {
+  // let splits = split_element(elem, cutters);
+  // splits.sort_by(|a, b| {
+  //   let a = a.as_curve();
+  //   p.distance(a.closest_point(p))
+  // })
+}
+
+
+// Iterate through an unordered list of connected sketch elements
+// in an orderly fashion. Returned trim bounds are consistently oriented.
+//XXX needs to iterate anti-clockwise for #new_lamina
+pub struct WireIterator<'a> {
+  wire: &'a Vec<TrimmedSketchElement>,
+  elem: Option<&'a TrimmedSketchElement>,
+  first_elem: &'a TrimmedSketchElement,
+  point: Point3,
+}
+
+impl<'a> WireIterator<'a> {
+  pub fn new(wire: &'a Vec<TrimmedSketchElement>) -> Self {
+    Self {
+      wire,
+      elem: Some(&wire[0]),
+      first_elem: &wire[0],
+      point: wire[0].bounds.0,
+    }
+  }
+}
+
+impl<'a> Iterator for WireIterator<'a> {
+  type Item = TrimmedSketchElement;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    if let Some(elem) = self.elem {
+      let mut output = elem.clone();
+      self.point = if elem.bounds.0.almost(self.point) {
+        elem.bounds.1
+      } else {
+        // Reverse bounds, such that output item bounds are consistently oriented
+        output.bounds = (output.bounds.1, output.bounds.0);
+        elem.bounds.0
+      };
+      self.elem = self.wire.iter().find(|other_elem| {
+        (other_elem.bounds.0.almost(self.point) || other_elem.bounds.1.almost(self.point))
+        && !ptr::eq(elem, *other_elem)
+        && !ptr::eq(elem, self.first_elem)
+      });
+      Some(output)
+    } else {
+      None
+    }
+  }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -85,12 +152,12 @@ mod tests {
   #[test]
   fn compare_areas() {
     let rect = test_data::rectangle();
-    let rect: Vec<SketchElement> = rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
-    let rect_poly = poly_from_wire(rect);
+    let rect: Vec<SketchElement> = rect.into_iter().map(|l| l.into_enum() ).collect();
+    let rect_poly = poly_from_wire(&rect);
 
     let reverse_rect = test_data::reverse_rectangle();
-    let reverse_rect: Vec<SketchElement> = reverse_rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
-    let reverse_rect_poly = poly_from_wire(reverse_rect);
+    let reverse_rect: Vec<SketchElement> = reverse_rect.into_iter().map(|l| l.into_enum() ).collect();
+    let reverse_rect_poly = poly_from_wire(&reverse_rect);
 
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
   }
@@ -98,8 +165,8 @@ mod tests {
   #[test]
   fn rectangle_clockwise() {
     let rect = test_data::rectangle();
-    let rect: Vec<SketchElement> = rect.into_iter().map(|l| SketchElement::Line(l) ).collect();
-    let rect_poly = poly_from_wire(rect.clone());
+    let rect: Vec<SketchElement> = rect.into_iter().map(|l| l.into_enum() ).collect();
+    let rect_poly = poly_from_wire(&rect);
 
     assert!(is_clockwise(&rect_poly));
   }

@@ -9,18 +9,16 @@ use crate::solid::*;
 pub trait Feature {}
 
 
-pub fn extrude(region: Vec<TrimmedSketchElement>, vec: Vec3) -> Solid {
+pub fn extrude(region: Vec<TrimmedSketchElement>, distance: f64) -> Solid {
   let mut solid = Solid::new_lamina(region, Plane::default());
   let shell = &mut solid.shells[0];
-  shell.sweep(&shell.faces.last().unwrap().clone(), vec);
+  shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
   solid
 }
-
 
 pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {
 
 }
-
 
 pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
   let mut top = Box::new(Plane::default());
@@ -38,20 +36,19 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
   let shell = &mut solid.shells[0];
   let he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
   // Front edge
-  let (front_edge, _) = shell.lmev(&he, &he, make_trimmed(points[1], points[0]), points[1]);
+  let (front_edge, _) = shell.lmev(&he, &he, make_line(points[1], points[0]), points[1]);
   let he = &front_edge.borrow().left_half;
   // Right edge
-  let (right_edge, _) = shell.lmev(he, he, make_trimmed(points[2], points[1]), points[2]);
+  let (right_edge, _) = shell.lmev(he, he, make_line(points[2], points[1]), points[2]);
   let he = &right_edge.borrow().left_half;
   // Back edge
-  let (back_edge, _) = shell.lmev(he, he, make_trimmed(points[3], points[2]), points[3]);
+  let (back_edge, _) = shell.lmev(he, he, make_line(points[3], points[2]), points[3]);
   // Close left edge to create top face
-  let (_, _top_face) = shell.lmef(&front_edge.borrow().right_half, &back_edge.borrow().left_half, make_trimmed(points[0], points[3]), top);
+  let (_, _top_face) = shell.lmef(&front_edge.borrow().right_half, &back_edge.borrow().left_half, make_line(points[0], points[3]), top);
   //4x shell.mev()
   //4x shell.mef() side faces
   solid
 }
-
 
 pub fn make_cube2(dx: f64, dy: f64, dz: f64) -> Solid {
   let points = [
@@ -68,7 +65,7 @@ pub fn make_cube2(dx: f64, dy: f64, dz: f64) -> Solid {
     } else {
       &points[0]
     };
-    region.push(make_trimmed(p, *next));
+    region.push(TrimmedSketchElement::new(make_line(p, *next)));
   }
   let mut solid = Solid::new_lamina(region, Plane::default());
   let shell = &mut solid.shells[0];
@@ -76,12 +73,9 @@ pub fn make_cube2(dx: f64, dy: f64, dz: f64) -> Solid {
   solid
 }
 
-
-fn make_trimmed(p1: Point3, p2: Point3) -> TrimmedSketchElement {
-  let line = Line::new(p1, p2);
-  TrimmedSketchElement::new(SketchElement::Line(line))
+fn make_line(p1: Point3, p2: Point3) -> SketchElement {
+  Line::new(p1, p2).into_enum()
 }
-
 
 // pub fn extrude_region(region: Vec<TrimmedSketchElement>, _distance: f64) -> Solid {
 //   let shell = Shell {

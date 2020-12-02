@@ -8,6 +8,7 @@ use crate::curve::*;
 use crate::surface::*;
 use crate::mesh::*;
 use crate::geom2d;
+use crate::geom2d::WireIterator;
 
 
 #[derive(Debug)]
@@ -55,7 +56,7 @@ pub struct Ring {
 pub struct Edge {
   pub left_half: Ref<HalfEdge>,
   pub right_half: Ref<HalfEdge>,
-  pub curve: TrimmedSketchElement,
+  pub curve: SketchElement,
   pub curve_direction: bool, // true means forward according to left_half
 }
 
@@ -85,7 +86,6 @@ impl Solid {
     this
   }
 
-  //XXX region is possibly not anti-clockwise and elems may change direction
   pub fn new_lamina(region: Vec<TrimmedSketchElement>, top_plane: Plane) -> Self {
     let mut bottom = top_plane.clone();
     bottom.flip();
@@ -96,15 +96,16 @@ impl Solid {
     let mut he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
     // Complete ring of bottom face
     let n = region.len() - 1;
-    for elem in region.into_iter().take(n) {
+    // for elem in region.into_iter().take(n) {
+    for elem in WireIterator::new(&region).take(n) {
       let points = elem.bounds;
-      let (new_edge, _) = shell.lmev(&he, &he, elem.clone(), points.1);
+      let (new_edge, _) = shell.lmev(&he, &he, elem.base.clone(), points.1);
       he = new_edge.borrow().left_half.clone();
     }
     // Create top face
     let he1 = shell.edges[0].borrow().right_half.clone();
     let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
-    shell.lmef(&he1, &he2, first_elem, Box::new(top_plane));
+    shell.lmef(&he1, &he2, first_elem.base, Box::new(top_plane));
     this
   }
 
@@ -200,7 +201,7 @@ impl Shell {
     }
   }
 
-  pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: TrimmedSketchElement, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
+  pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: SketchElement, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
     let vertex = rc(Vertex {
       point: p,
       half_edge: Weak::new(),
@@ -219,7 +220,7 @@ impl Shell {
     let edge = rc(Edge {
       left_half: HalfEdge::new_at(&vertex, he2),
       right_half: HalfEdge::new_at(&he2b.origin, he1),
-      curve_direction: curve.bounds.0.almost(p),
+      curve_direction: curve.as_curve().endpoints().0.almost(p),
       curve,
     });
     {
@@ -234,7 +235,7 @@ impl Shell {
     (edge, vertex)
   }
 
-  pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: TrimmedSketchElement, surface: Box<dyn Surface>) -> (Ref<Edge>, Ref<Face>) {
+  pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: SketchElement, surface: Box<dyn Surface>) -> (Ref<Edge>, Ref<Face>) {
     let he1b = he1.borrow_mut();
     let he2b = he2.borrow_mut();
     let nhe1 = HalfEdge::new_at(&he2b.origin, he1);
@@ -301,20 +302,14 @@ impl Shell {
     let vertex = &scan.borrow().origin;
     let point = vertex.borrow().point;
     let new_point = point + vec;
-    let line = SketchElement::Line(Line::new(new_point, point));
-    self.lmev(
-      scan, scan,
-      TrimmedSketchElement::new(line),
-      new_point,
-    );
+    let line = Line::new(new_point, point).into_enum();
+    self.lmev(scan, scan, line, new_point);
   }
 
   fn sweep_mef(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
     let scanb = scan.borrow();
     let mut curve = scanb.edge.upgrade().unwrap().borrow().curve.clone();
-    curve.base.as_curve_mut().transform(vec);
-    curve.cache.as_curve_mut().transform(vec);
-    curve.bounds = curve.cache.as_curve().endpoints();
+    curve.as_curve_mut().transform(vec);
     let next = scanb.next.upgrade().unwrap(); // Neccessary as next has changed because of lmev
     self.lmef(
       // New edge is oriented from..
@@ -330,7 +325,7 @@ impl Shell {
 impl Face {
   pub fn tesselate(&self) -> Mesh {
     let wire = self.outer_ring.borrow().get_wire();
-    let polyline = geom2d::poly_from_wire(wire);
+    let polyline = geom2d::poly_from_wire(&wire);
     geom2d::tesselate_polygon(polyline)
   }
 }
@@ -339,7 +334,7 @@ impl Face {
 impl Ring {
   pub fn get_wire(&self) -> Vec<SketchElement> {
     self.half_edge.borrow().ring_iter().map(|he|
-      he.borrow().edge.upgrade().unwrap().borrow().curve.cache.clone()
+      he.borrow().edge.upgrade().unwrap().borrow().curve.clone()
     ).collect()
   }
 
@@ -457,6 +452,7 @@ impl VertexEdgesIterator {
 impl Iterator for VertexEdgesIterator {
   type Item = Ref<HalfEdge>;
 
+  //XXX last element is never returned
   fn next(&mut self) -> Option<Self::Item> {
     let current_edge = self.current_edge.clone();
     self.current_edge = current_edge.borrow().mate().borrow().next.upgrade().unwrap().clone();

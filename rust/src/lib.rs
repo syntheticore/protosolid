@@ -47,17 +47,21 @@ pub fn main() -> Result<(), JsValue> {
 }
 
 
+fn point_to_js(p: Point3) -> JsValue {
+  JsValue::from_serde(&(p.x, p.y, p.z)).unwrap()
+}
+
 fn vertices_to_js(points: Vec<Point3>) -> Array {
-  points.iter().map(|p|
-    JsValue::from_serde(&(p.x, p.y, p.z)).unwrap()
-  ).collect()
+  points.into_iter().map(point_to_js).collect()
+}
+
+fn point_from_js(p: JsValue) -> Point3 {
+  let p: (f64, f64, f64) = p.into_serde().unwrap();
+  Point3::new(p.0, p.1, p.2)
 }
 
 fn vertices_from_js(points: Array) -> Vec<Point3> {
-  points.iter().map(|vertex| {
-    let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
-    Point3::new(vertex.0, vertex.1, vertex.2)
-  }).collect()
+  points.iter().map(point_from_js).collect()
 }
 
 
@@ -160,7 +164,7 @@ pub struct JsRegion {
 #[wasm_bindgen]
 impl JsRegion {
   pub fn get_polyline(&self) -> JsValue {
-    let poly = geom2d::poly_from_wire(self.region.iter().map(|elem| elem.cache.clone() ).collect());
+    let poly = geom2d::poly_from_wire(&self.region.iter().map(|elem| elem.cache.clone() ).collect());
     JsValue::from(JsBufferGeometry {
       position: geom2d::tesselate_polygon(poly).to_buffer_geometry(),
       normal: vec![],
@@ -168,7 +172,7 @@ impl JsRegion {
   }
 
   pub fn extrude(&self, distance: f64) {
-    let tool = features::extrude(self.region.clone(), Vec3::new(0.0, 0.0, distance));
+    let tool = features::extrude(self.region.clone(), distance);
     Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
   }
 }
@@ -176,48 +180,22 @@ impl JsRegion {
 
 #[wasm_bindgen]
 #[derive(Default)]
-pub struct JsComponent {
-  // title: String,
-  real: Rc<RefCell<Component>>,
+pub struct JsSketch {
+  real: Ref<Component>,
 }
 
 #[wasm_bindgen]
-impl JsComponent {
-  #[wasm_bindgen(constructor)]
-  pub fn new() -> Self {
-    Default::default()
-  }
-
-  fn from(comp: &Rc<RefCell<Component>>) -> Self {
-    JsComponent {
-      // title: String::from(&comp.borrow().title),
+impl JsSketch {
+  fn from(comp: &Ref<Component>) -> Self {
+    JsSketch {
       real: comp.clone(),
     }
-  }
-
-  pub fn id(&self) -> JsValue {
-    JsValue::from_serde(&self.real.borrow().id).unwrap()
-  }
-
-  pub fn get_title(&self) -> JsValue {
-    JsValue::from_serde(&self.real.borrow().title).unwrap()
   }
 
   pub fn get_sketch_elements(&self) -> Array {
     self.real.borrow().sketch.elements.iter().map(|elem| {
       JsValue::from(JsSketchElement::from(elem))
     }).collect()
-  }
-
-  pub fn get_children(&self) -> Array {
-    self.real.borrow().children.iter().map(|child| JsValue::from(JsComponent::from(child)) ).collect()
-  }
-
-  pub fn get_mesh(&self) -> JsValue {
-    JsValue::from(JsBufferGeometry {
-      position: self.real.borrow().bodies[0].tesselate().to_buffer_geometry(),
-      normal: vec![],
-    })
   }
 
   pub fn add_segment(&self) {
@@ -239,7 +217,7 @@ impl JsComponent {
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
     let line = Line::new(Point3::from(p1), Point3::from(p2));
     let mut real = self.real.borrow_mut();
-    real.sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(line))));
+    real.sketch.elements.push(Rc::new(RefCell::new(line.into_enum())));
     JsSketchElement::from(&real.sketch.elements.last().unwrap())
   }
 
@@ -265,13 +243,13 @@ impl JsComponent {
   pub fn remove_element(&mut self, id: JsValue) {
     let id: uuid::Uuid = id.into_serde().unwrap();
     let mut real = self.real.borrow_mut();
-    real.sketch.elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id);
+    real.sketch.elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id );
   }
 
   pub fn get_regions(&self) -> Array {
     self.real.borrow().sketch.get_regions().into_iter()
     .map(|region| JsValue::from(JsRegion {
-      region: region,
+      region,
       component: self.real.clone(),
     }))
     .collect()
@@ -312,6 +290,79 @@ impl JsComponent {
     }
   }
 
+  pub fn get_trimmed(&self, elem: JsSketchElement, _p: JsValue) -> Array {
+    let splits = Sketch::split_element(&elem.real.borrow(), &self.real.borrow().sketch.elements);
+    splits.into_iter().map(|split| {
+      JsValue::from(JsSketchElement::from(&rc(split)))
+    }).collect()
+  }
+}
+
+
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct JsComponent {
+  // title: String,
+  real: Ref<Component>,
+}
+
+#[wasm_bindgen]
+impl JsComponent {
+  #[wasm_bindgen(constructor)]
+  pub fn new() -> Self {
+    Default::default()
+  }
+
+  fn from(comp: &Rc<RefCell<Component>>) -> Self {
+    JsComponent {
+      // title: String::from(&comp.borrow().title),
+      real: comp.clone(),
+    }
+  }
+
+  pub fn id(&self) -> JsValue {
+    JsValue::from_serde(&self.real.borrow().id).unwrap()
+  }
+
+  pub fn get_title(&self) -> JsValue {
+    JsValue::from_serde(&self.real.borrow().title).unwrap()
+  }
+
+  pub fn get_sketch(&self) -> JsSketch {
+    JsSketch::from(&self.real)
+  }
+
+  // pub fn get_sketch_elements(&self) -> Array {
+  //   self.real.borrow().sketch.elements.iter().map(|elem| {
+  //     JsValue::from(JsSketchElement::from(elem))
+  //   }).collect()
+  // }
+
+  pub fn get_children(&self) -> Array {
+    self.real.borrow().children.iter().map(|child| JsValue::from(JsComponent::from(child)) ).collect()
+  }
+
+  pub fn get_mesh(&self) -> JsValue {
+    JsValue::from(JsBufferGeometry {
+      position: self.real.borrow().bodies[0].tesselate().to_buffer_geometry(),
+      normal: vec![],
+    })
+  }
+
+  pub fn add_segment(&self) {
+    let spline = BezierSpline::new(vec![
+      Point3::new(0.0, 0.0, 1.0),
+      Point3::new(1.0, 0.0, 1.25),
+      Point3::new(1.0, 1.0, 1.5),
+      Point3::new(0.0, 1.0, 1.75),
+      Point3::new(0.0, 0.0, 2.0),
+      Point3::new(1.0, 0.0, 2.25),
+      Point3::new(1.0, 1.0, 2.5),
+      Point3::new(0.0, 1.0, 2.75),
+    ]);
+    self.real.borrow_mut().sketch.elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
+  }
+
   pub fn create_component(&mut self, title: &str) -> JsComponent {
     let mut comp = Component::new();
     comp.title = title.to_string();
@@ -321,6 +372,7 @@ impl JsComponent {
     JsComponent::from(&comp)
   }
 }
+
 
 #[wasm_bindgen]
 #[derive(Default)]

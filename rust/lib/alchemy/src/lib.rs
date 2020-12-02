@@ -17,7 +17,7 @@ pub struct Component {
   // pub visible: bool,
   pub sketch: Sketch,
   pub bodies: Vec<Solid>,
-  pub children: Vec<Rc<RefCell<Component>>>,
+  pub children: Vec<Ref<Component>>,
 }
 
 impl Component {
@@ -32,7 +32,7 @@ impl Component {
 #[derive(Debug, Clone)]
 pub struct DerivedSketchElement {
   pub owned: SketchElement,
-  pub original: Rc<RefCell<SketchElement>>,
+  pub original: Ref<SketchElement>,
 }
 
 
@@ -42,7 +42,7 @@ pub type Region = Vec<TrimmedSketchElement>;
 
 #[derive(Debug, Default)]
 pub struct Sketch {
-  pub elements: Vec<Rc<RefCell<SketchElement>>>,
+  pub elements: Vec<Ref<SketchElement>>,
 }
 
 impl Sketch {
@@ -92,28 +92,23 @@ impl Sketch {
     .collect()
   }
 
-  pub fn all_split(elements: &Vec<Rc<RefCell<SketchElement>>>) -> Vec<DerivedSketchElement> {
+  pub fn all_split(elements: &Vec<Ref<SketchElement>>) -> Vec<DerivedSketchElement> {
     elements.iter().flat_map(|elem| {
-      Self::split_element(elem.clone(), &elements)
+      let splits = Self::split_element(&elem.borrow(), &elements);
+      Self::mark_as_derived(splits, elem)
     }).collect()
   }
 
-  fn split_element(elem: Rc<RefCell<SketchElement>>, others: &Vec<Rc<RefCell<SketchElement>>>) -> Vec<DerivedSketchElement> {
-    let mut segments = vec![DerivedSketchElement {
-      original: elem.clone(),
-      owned: elem.borrow().clone(),
-    }];
-    for other in others.iter() {
-      if ptr::eq(&*elem.borrow(), &*other.borrow()) { continue }
-      segments = segments.iter().flat_map(|own| {
-        let splits = own.owned.split(&other.borrow());
-        splits.into_iter().map(move |split| DerivedSketchElement {
-          owned: split,
-          original: own.original.clone(),
-        })
-      }).collect();
-    }
-    segments
+  fn mark_as_derived(elems: Vec<SketchElement>, original: &Ref<SketchElement>) -> Vec<DerivedSketchElement> {
+    elems.into_iter().map(|elem| DerivedSketchElement {
+      owned: elem,
+      original: original.clone(),
+    }).collect()
+  }
+
+  pub fn split_element(elem: &SketchElement, others: &Vec<Ref<SketchElement>>) -> Vec<SketchElement> {
+    let others = others.iter().map(|other| other.borrow().clone() ).collect();
+    geom2d::split_element(elem, &others)
   }
 
   pub fn build_islands(elements: &Vec<DerivedSketchElement>) -> Vec<Vec<DerivedSketchElement>> {
@@ -205,14 +200,14 @@ impl Sketch {
     regions
   }
 
-  fn poly_from_region(loopy: &DerivedRegion) -> PolyLine {
-    geom2d::poly_from_wire(loopy.iter().map(|elem| elem.owned.clone() ).collect())
+  fn poly_from_region(wire: &DerivedRegion) -> PolyLine {
+    geom2d::poly_from_wire(&wire.iter().map(|elem| elem.owned.clone() ).collect())
   }
 
   fn remove_outer_loop(loops: &mut Vec<DerivedRegion>) {
     if loops.len() <= 1 { return }
-    loops.retain(|loopy| {
-      geom2d::is_clockwise(&Self::poly_from_region(loopy))
+    loops.retain(|wire| {
+      geom2d::is_clockwise(&Self::poly_from_region(wire))
     })
   }
 
@@ -237,8 +232,8 @@ impl Sketch {
 
 
 pub struct Scene {
-  pub tree: Rc<RefCell<Component>>,
-  pub current_component: Rc<RefCell<Component>>,
+  pub tree: Ref<Component>,
+  pub current_component: Ref<Component>,
 }
 
 impl Scene {
@@ -251,7 +246,7 @@ impl Scene {
     Self { tree, current_component }
   }
 
-  pub fn create_component(&mut self) -> Rc<RefCell<Component>> {
+  pub fn create_component(&mut self) -> Ref<Component> {
     let mut comp: Component = Default::default();
     comp.title = "New Component".to_string();
     // comp.visible = true;
@@ -264,7 +259,7 @@ impl Scene {
     comp
   }
 
-  // pub fn create_sketch(&mut self) -> Rc<RefCell<Sketch>> {
+  // pub fn create_sketch(&mut self) -> Ref<Sketch> {
   //   let mut sketch: Sketch = Sketch::new();
   //   sketch.title = "Sketch1".to_string();
   //   sketch.visible = true;
@@ -273,11 +268,11 @@ impl Scene {
   //   sketch
   // }
 
-  pub fn activate(&mut self, comp: Rc<RefCell<Component>>) {
+  pub fn activate(&mut self, comp: Ref<Component>) {
     self.current_component = comp;
   }
 
-  // pub fn edit_sketch(&mut self, sketch: &Rc<RefCell<Sketch>>) {
+  // pub fn edit_sketch(&mut self, sketch: &Ref<Sketch>) {
   //   self.current_sketch = Some(Rc::clone(sketch));
   // }
 }
@@ -403,7 +398,7 @@ mod tests {
   fn make_sketch(lines: &Vec<Line>) -> Sketch {
     let mut sketch = Sketch::new();
     for line in lines {
-      sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(line.clone()))));
+      sketch.elements.push(Rc::new(RefCell::new(line.clone().into_enum())));
     }
     sketch
   }
@@ -482,7 +477,7 @@ mod tests {
   fn dangling_segment() {
     let mut sketch = Sketch::new();
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0));
-    sketch.elements.push(Rc::new(RefCell::new(SketchElement::Line(line))));
+    sketch.elements.push(Rc::new(RefCell::new(line.into_enum())));
     let _regions = sketch.get_regions();
   }
 }
@@ -530,7 +525,7 @@ mod tests {
 //   pub title: String,
 //   pub plane: Plane,
 //   // pub elements: Vec<PolyLine>,
-//   pub elements: Vec<Rc<RefCell<dyn SketchElement>>>,
+//   pub elements: Vec<Ref<dynSketchElement>>>,
 //   // pub constraints: Vec<Box<Constraint>>
 //   pub visible: bool
 // }

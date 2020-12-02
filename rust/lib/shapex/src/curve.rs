@@ -94,11 +94,16 @@ impl SketchElement {
       }.iter().map(|seg| Self::BezierSpline(seg.clone())).collect(),
     }
   }
+
+  // pub fn trim(&self, at: f64, side: bool) {
+
+  // }
 }
 
 
 pub trait Curve {
   fn sample(&self, t: f64) -> Point3;
+  // fn unsample(&self, p: Point3) -> f64;
   fn default_tesselation(&self) -> Vec<Point3>;
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
@@ -118,6 +123,10 @@ pub trait Curve {
   fn tesselate_relative(&self, steps_per_mm: f64) -> Vec<Point3> {
     self.tesselate_fixed((steps_per_mm * self.length()).round() as i32)
   }
+
+  // fn closest_point(&self, p: Point3) -> Point3 {
+  //   self.sample(self.unsample(p))
+  // }
 }
 
 impl std::fmt::Debug for dyn Curve {
@@ -160,7 +169,7 @@ impl Line {
   }
 
   pub fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
-    match intersection::intersect(&SketchElement::Line(self.clone()), cutter) {
+    match intersection::intersect(&self.clone().into_enum(), cutter) {
       CurveIntersection::None
       | CurveIntersection::Contained
       | CurveIntersection::Touch(_)
@@ -186,6 +195,10 @@ impl Line {
         segments
       },
     }
+  }
+
+  pub fn into_enum(self) -> SketchElement {
+    SketchElement::Line(self)
   }
 }
 
@@ -428,7 +441,7 @@ impl BezierSpline {
     let mut closest = point;
     for &p in &self.lut {
       let d = point.distance(p);
-      if point.distance(p) < mdist {
+      if point.distance2(p) < mdist {
         mdist = d;
         closest = p;
       }
@@ -484,7 +497,7 @@ mod tests {
   #[test]
   fn split_crossing_lines() {
     let lines = test_data::crossing_lines();
-    let segments = lines[0].split_with(&SketchElement::Line(lines[1].clone()));
+    let segments = lines[0].split_with(&lines[1].clone().into_enum());
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
     assert_eq!(segments[0].length(), 0.5, "Segment had wrong length");
   }
@@ -492,7 +505,7 @@ mod tests {
   #[test]
   fn split_touching_lines() {
     let lines = test_data::rectangle();
-    let segments = lines[0].split_with(&SketchElement::Line(lines[1].clone()));
+    let segments = lines[0].split_with(&lines[1].clone().into_enum());
     assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
     assert_eq!(segments[0].length(), 2.0, "Segment had wrong length");
   }
@@ -500,7 +513,7 @@ mod tests {
   #[test]
   fn split_t_section1() {
     let lines = test_data::t_section();
-    let segments = lines[0].split_with(&SketchElement::Line(lines[1].clone()));
+    let segments = lines[0].split_with(&lines[1].clone().into_enum());
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
     assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
     assert_eq!(segments[1].length(), 1.0, "Segment had wrong length");
@@ -509,7 +522,7 @@ mod tests {
   #[test]
   fn split_t_section2() {
     let lines = test_data::t_section();
-    let segments = lines[1].split_with(&SketchElement::Line(lines[0].clone()));
+    let segments = lines[1].split_with(&lines[0].clone().into_enum());
     assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
     assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
   }

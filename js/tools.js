@@ -57,6 +57,30 @@ export class ManipulationTool extends Tool {
 }
 
 
+export class TrimTool extends Tool {
+  click(coords) {
+    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    if(object) return this.viewport.render()
+
+    this.viewport.render()
+  }
+
+  mouseDown(vec, coords) {
+    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    if(!object) return this.viewport.render()
+
+    this.viewport.render()
+  }
+
+  mouseMove(vec, coords) {
+    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    if(!object) return this.viewport.render()
+
+    this.viewport.render()
+  }
+}
+
+
 class SelectionTool extends ManipulationTool {
   constructor(component, viewport, callback) {
     super(component, viewport)
@@ -93,7 +117,7 @@ export class ProfileSelectionTool extends SelectionTool {
 export class LineTool extends Tool {
   mouseDown(vec) {
     this.mouseMove(vec)
-    this.line = this.component.add_line(vec.toArray(), vec.toArray())
+    this.line = this.component.get_sketch().add_line(vec.toArray(), vec.toArray())
     this.viewport.elementChanged(this.line, this.component)
     // Restart tool when we close a loop
     if(this.firstPoint && vec.equals(this.firstPoint)) {
@@ -114,7 +138,7 @@ export class LineTool extends Tool {
 
   dispose() {
     if(!this.line) return
-    this.component.remove_element(this.line.id())
+    this.component.get_sketch().remove_element(this.line.id())
     this.viewport.componentChanged(this.component)
   }
 }
@@ -128,7 +152,7 @@ export class SplineTool extends Tool {
       points.push(vec.toArray())
       this.spline.set_handles(points)
     } else {
-      this.spline = this.component.add_spline([vec.toArray(), vec.toArray()])
+      this.spline = this.component.get_sketch().add_spline([vec.toArray(), vec.toArray()])
     }
     this.viewport.elementChanged(this.spline, this.component)
   }
@@ -158,7 +182,7 @@ export class CircleTool extends Tool {
       this.circle = null
     } else {
       this.center = vec
-      this.circle = this.component.add_circle(vec.toArray(), 1)
+      this.circle = this.component.get_sketch().add_circle(vec.toArray(), 1)
     }
   }
 
@@ -182,7 +206,7 @@ export class ArcTool extends Tool {
       this.end = vec
     } else {
       this.start = vec
-      this.arc = this.component.add_arc(vec.toArray(), vec.toArray(), vec.toArray())
+      this.arc = this.component.get_sketch().add_arc(vec.toArray(), vec.toArray(), vec.toArray())
     }
   }
 

@@ -505,7 +505,7 @@
       },
 
       getSnapPoints: function() {
-        const sketchElements = this.activeComponent.get_sketch_elements()
+        const sketchElements = this.activeComponent.get_sketch().get_sketch_elements()
         return sketchElements.flatMap(elem => {
           let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
           // Filter out last point of the sketch element actively being drawn
@@ -738,7 +738,7 @@
       loadTree: function(node, recursive) {
         this.unloadTree(node, this.document, recursive)
         if(this.document.data[node.id()].hidden) return
-        const elements = node.get_sketch_elements()
+        const elements = node.get_sketch().get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
         if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
       },
@@ -756,7 +756,7 @@
       },
 
       elementChanged: function(elem, comp) {
-        // const elements = comp.get_sketch_elements()
+        // const elements = comp.get_sketch().get_sketch_elements()
         // console.log(elements.map(elem => elem.get_handles()))
         // const regionInfo = comp.get_region_info()
         // console.log('regionInfo', {
@@ -764,7 +764,7 @@
         //   islands: regionInfo.islands,
         //   regions: regionInfo.regions,
         // })
-        const regions = comp.get_regions(false)
+        const regions = comp.get_sketch().get_regions(false)
         console.log(regions.length)
         this.regionMeshes = this.regionMeshes || []
         this.regionMeshes.forEach(mesh => this.scene.remove(mesh))

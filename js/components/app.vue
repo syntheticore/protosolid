@@ -72,6 +72,10 @@
     created() {
       this.createDocument().then(() => this.changeDocument(this.documents[0]) )
 
+      window.addEventListener('resize', () => {
+        this.$root.$emit('resize')
+      }, false)
+
       if(!window.ipcRenderer) return
 
       window.ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
@@ -88,6 +92,7 @@
         } else {
           document.body.removeAttribute('data-dark-mode')
         }
+        this.$root.$emit('resize')
       })
     },
 

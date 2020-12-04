@@ -2,12 +2,17 @@ mod base;
 mod curve;
 mod surface;
 mod solid;
-pub mod geom2d;
-
-// #[cfg(test)]
-pub mod test_data;
+mod mesh;
 
 pub use base::*;
 pub use curve::*;
 pub use surface::*;
 pub use solid::*;
+pub use mesh::*;
+
+pub mod geom2d;
+pub mod geom3d;
+pub mod features;
+
+// #[cfg(test)]
+pub mod test_data;

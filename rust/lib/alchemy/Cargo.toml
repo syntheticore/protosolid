@@ -8,4 +8,5 @@ edition = "2018"
 [dependencies]
 cgmath = "0.16.1"
 uuid = { version = "0.8", features = ["v4"] }
+rand = "0.7.3"
 shapex = { path = "../shapex" }

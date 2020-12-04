@@ -13,7 +13,7 @@ module.exports = (env) => {
       main: env.wc ?
         ['./js/main-wc.js', './styles/main.styl'] :
         ['./js/main-app.js', './styles/main.styl'],
-      website: ['./js/main-website.js', './styles/website.styl']
+      // website: ['./js/main-website.js', './styles/website.styl']
     },
     devtool: env.production ? false : '#source-map',
     output: {

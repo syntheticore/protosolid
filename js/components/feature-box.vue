@@ -6,7 +6,7 @@
     //-   .title Extrude
 
     form.options
-      label(v-for="(fields, key) in activeFeature.settings()")
+      label(v-for="(fields, key) in activeFeature.settings")
         | {{ fields.title }}
         .picker(
           v-if="fields.type == 'profile' || fields.type == 'curve'" @click="pick(fields.type, key, fields.color)"
@@ -163,6 +163,7 @@
       pick: function(type, name, color) {
         this.$root.$once('picked', (item) => {
           this.activeFeature[name] = item
+          this.activeFeature.update()
           this.activePicker = null
         })
         this.activePicker = name

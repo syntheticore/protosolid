@@ -1,12 +1,35 @@
-use crate::base::*;
-use cgmath::prelude::*;
-use uuid::Uuid;
+use std::ptr;
 use std::convert::TryInto;
 
-mod intersection;
+use uuid::Uuid;
+use cgmath::prelude::*;
+
+use crate::base::*;
+use intersection::CurveIntersection;
+
+pub mod intersection;
 
 
 pub type PolyLine = Vec<Point3>;
+
+
+#[derive(Debug, Clone)]
+pub struct TrimmedSketchElement {
+  pub base: SketchElement,
+  // pub bounds: (f64, f64),
+  pub bounds: (Point3, Point3),
+  pub cache: SketchElement,
+}
+
+impl TrimmedSketchElement {
+  pub fn new(elem: SketchElement) -> Self {
+    TrimmedSketchElement {
+      bounds: elem.as_curve().endpoints(),
+      base: elem.clone(),
+      cache: elem,
+    }
+  }
+}
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,28 +96,38 @@ impl SketchElement {
     }
   }
 
-  pub fn other_endpoint(&self, point: &Point3) -> Point3 {
-    let (start, end) = self.as_curve().endpoints();
-    if *point == start { end } else { start }
-  }
+  // pub fn trim(&self, at: f64, side: bool) {
+
+  // }
 }
 
 
 pub trait Curve {
   fn sample(&self, t: f64) -> Point3;
+  // fn unsample(&self, p: Point3) -> f64;
   fn default_tesselation(&self) -> Vec<Point3>;
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
+  fn transform(&mut self, vec: Vec3);
+
+  fn other_endpoint(&self, point: &Point3) -> Point3 {
+    let (start, end) = self.endpoints();
+    if point.almost(start) { end } else { start }
+  }
 
   fn tesselate_fixed(&self, steps: i32) -> Vec<Point3> {
     (0..steps + 1).map(|i| {
-      self.sample(1.0 / steps as f64 * i as f64)
+      self.sample(i as f64 / steps as f64)
     }).collect()
   }
 
   fn tesselate_relative(&self, steps_per_mm: f64) -> Vec<Point3> {
     self.tesselate_fixed((steps_per_mm * self.length()).round() as i32)
   }
+
+  // fn closest_point(&self, p: Point3) -> Point3 {
+  //   self.sample(self.unsample(p))
+  // }
 }
 
 impl std::fmt::Debug for dyn Curve {
@@ -132,14 +165,21 @@ impl Line {
     (self.points.1 - self.points.0).normalize()
   }
 
-  pub fn angle_to(&self, other: Self) -> f64 {
+  pub fn angle_to(&self, other: &Self) -> f64 {
     self.tangent().dot(other.tangent()).acos()
   }
 
   pub fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
-    match intersection::intersect(&SketchElement::Line(self.clone()), cutter) {
-      Intersection::None | Intersection::Contained | Intersection::Touch(_) | Intersection::Extended(_) => vec![self.clone()],
-      Intersection::Cross(mut points) | Intersection::Pierce(mut points) => { //XXX points are not sorted along line
+    match intersection::intersect(&self.clone().into_enum(), cutter) {
+      CurveIntersection::None
+      | CurveIntersection::Contained
+      | CurveIntersection::Touch(_)
+      | CurveIntersection::Extended(_)
+      => vec![self.clone()],
+
+      CurveIntersection::Cross(mut points)
+      | CurveIntersection::Pierce(mut points)
+      => { //XXX points are not sorted along line
         // Check if intersection goes exactly through endpoint
         if points[0].almost(self.points.0) || points[0].almost(self.points.1) {
           return vec![self.clone()];
@@ -156,6 +196,10 @@ impl Line {
         segments
       },
     }
+  }
+
+  pub fn into_enum(self) -> SketchElement {
+    SketchElement::Line(self)
   }
 }
 
@@ -175,6 +219,11 @@ impl Curve for Line {
 
   fn endpoints(&self) -> (Point3, Point3) {
     self.points
+  }
+
+  fn transform(&mut self, vec: Vec3) {
+    self.points.0 += vec;
+    self.points.1 += vec;
   }
 }
 
@@ -213,8 +262,8 @@ impl Curve for Arc {
     let t = t * std::f64::consts::PI * 2.0;
     Point3::new(
       self.center.x + t.sin() * self.radius,
-      self.center.y,
-      self.center.z + t.cos() * self.radius,
+      self.center.y + t.cos() * self.radius,
+      self.center.z,
     )
   }
 
@@ -227,8 +276,11 @@ impl Curve for Arc {
   }
 
   fn endpoints(&self) -> (Point3, Point3) {
-    let zero = self.sample(0.0);
-    (zero, zero)
+    (self.sample(0.0), self.sample(1.0))
+  }
+
+  fn transform(&mut self, vec: Vec3) {
+    self.center += vec;
   }
 }
 
@@ -275,8 +327,8 @@ impl Curve for Circle {
     let t = t * std::f64::consts::PI * 2.0;
     Point3::new(
       self.center.x + t.sin() * self.radius,
-      self.center.y,
-      self.center.z + t.cos() * self.radius,
+      self.center.y + t.cos() * self.radius,
+      self.center.z,
     )
   }
 
@@ -291,6 +343,10 @@ impl Curve for Circle {
   fn endpoints(&self) -> (Point3, Point3) {
     let zero = self.sample(0.0);
     (zero, zero)
+  }
+
+  fn transform(&mut self, vec: Vec3) {
+    self.center += vec;
   }
 }
 
@@ -334,8 +390,8 @@ impl BezierSpline {
   }
 
   pub fn split_at(&self, t: f64) -> (Self, Self) {
-    let mut left: Vec<Point3> = vec![];
-    let mut right: Vec<Point3> = vec![];
+    let mut left = vec![];
+    let mut right = vec![];
     self.real_split(t, &self.vertices, &mut left, &mut right);
     (Self::new(left), Self::new(right))
   }
@@ -386,7 +442,7 @@ impl BezierSpline {
     let mut closest = point;
     for &p in &self.lut {
       let d = point.distance(p);
-      if point.distance(p) < mdist {
+      if point.distance2(p) < mdist {
         mdist = d;
         closest = p;
       }
@@ -419,6 +475,59 @@ impl Curve for BezierSpline {
   fn endpoints(&self) -> (Point3, Point3) {
     (self.vertices[0], *self.vertices.last().unwrap())
   }
+
+  fn transform(&mut self, vec: Vec3) {
+    for p in &mut self.vertices {
+      *p += vec;
+    }
+  }
+}
+
+
+// Iterate through an unordered list of connected sketch elements
+// in an orderly fashion. Returned trim bounds are consistently oriented.
+//XXX needs to iterate anti-clockwise for #new_lamina
+pub struct WireIterator<'a> {
+  wire: &'a Vec<TrimmedSketchElement>,
+  elem: Option<&'a TrimmedSketchElement>,
+  first_elem: &'a TrimmedSketchElement,
+  point: Point3,
+}
+
+impl<'a> WireIterator<'a> {
+  pub fn new(wire: &'a Vec<TrimmedSketchElement>) -> Self {
+    Self {
+      wire,
+      elem: Some(&wire[0]),
+      first_elem: &wire[0],
+      point: wire[0].bounds.0,
+    }
+  }
+}
+
+impl<'a> Iterator for WireIterator<'a> {
+  type Item = TrimmedSketchElement;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    if let Some(elem) = self.elem {
+      let mut output = elem.clone();
+      self.point = if elem.bounds.0.almost(self.point) {
+        elem.bounds.1
+      } else {
+        // Reverse bounds, such that output item bounds are consistently oriented
+        output.bounds = (output.bounds.1, output.bounds.0);
+        elem.bounds.0
+      };
+      self.elem = self.wire.iter().find(|other_elem| {
+        (other_elem.bounds.0.almost(self.point) || other_elem.bounds.1.almost(self.point))
+        && !ptr::eq(elem, *other_elem)
+        && !ptr::eq(elem, self.first_elem)
+      });
+      Some(output)
+    } else {
+      None
+    }
+  }
 }
 
 
@@ -430,13 +539,13 @@ mod tests {
   #[test]
   fn line_length() {
     let lines = test_data::parallel_lines();
-    assert_eq!(lines.0.length(), 1.0);
+    assert_eq!(lines[0].length(), 1.0);
   }
 
   #[test]
   fn split_crossing_lines() {
     let lines = test_data::crossing_lines();
-    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    let segments = lines[0].split_with(&lines[1].clone().into_enum());
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
     assert_eq!(segments[0].length(), 0.5, "Segment had wrong length");
   }
@@ -444,7 +553,7 @@ mod tests {
   #[test]
   fn split_touching_lines() {
     let lines = test_data::rectangle();
-    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    let segments = lines[0].split_with(&lines[1].clone().into_enum());
     assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
     assert_eq!(segments[0].length(), 2.0, "Segment had wrong length");
   }
@@ -452,7 +561,7 @@ mod tests {
   #[test]
   fn split_t_section1() {
     let lines = test_data::t_section();
-    let segments = lines.0.split_with(&SketchElement::Line(lines.1));
+    let segments = lines[0].split_with(&lines[1].clone().into_enum());
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
     assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
     assert_eq!(segments[1].length(), 1.0, "Segment had wrong length");
@@ -461,7 +570,7 @@ mod tests {
   #[test]
   fn split_t_section2() {
     let lines = test_data::t_section();
-    let segments = lines.1.split_with(&SketchElement::Line(lines.0));
+    let segments = lines[1].split_with(&lines[0].clone().into_enum());
     assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
     assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
   }
@@ -469,7 +578,21 @@ mod tests {
   #[test]
   fn angle_90() {
     let lines = test_data::crossing_lines();
-    let angle = lines.0.angle_to(lines.1);
+    let angle = lines[0].angle_to(&lines[1]);
+    assert_eq!(angle, std::f64::consts::PI / 2.0);
+  }
+
+  #[test]
+  fn angle_left() {
+    let lines = test_data::angle_left();
+    let angle = lines[0].angle_to(&lines[1]);
+    assert_eq!(angle, std::f64::consts::PI / 2.0);
+  }
+
+  #[test]
+  fn angle_right() {
+    let lines = test_data::angle_right();
+    let angle = lines[0].angle_to(&lines[1]);
     assert_eq!(angle, std::f64::consts::PI / 2.0);
   }
 }

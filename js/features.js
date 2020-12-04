@@ -1,20 +1,20 @@
 class Feature {
   confirm() {}
   cancel() {}
+  update() {}
 }
 
 export class ExtrudeFeature extends Feature {
-  constructor() {
+  constructor(component) {
     super()
+
     this.profile = null
     this.rail = null
     this.distance = 0
     this.direction = true
     this.operation = 'join'
-  }
 
-  settings() {
-    return {
+    this.settings = {
       profile: {
         title: 'Profile',
         type: 'profile',
@@ -39,5 +39,10 @@ export class ExtrudeFeature extends Feature {
         options: ['join', 'cut', 'intersect', 'create'],
       },
     }
+  }
+
+  update() {
+    console.log(this.profile)
+    this.profile.extrude(this.distance * (this.direction ? 1 : -1))
   }
 }

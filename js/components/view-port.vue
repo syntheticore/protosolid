@@ -218,6 +218,8 @@
     },
 
     mounted: function() {
+      THREE.Object3D.DefaultUp = new THREE.Vector3(0, 0, 1)
+
       renderer = new THREE.WebGLRenderer({
         canvas: this.$el.querySelector('canvas'),
         // antialias: window.devicePixelRatio <= 1.0,
@@ -241,7 +243,7 @@
       this.raycaster = new THREE.Raycaster()
 
       camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
-      camera.position.set(3, 2, 3)
+      camera.position.set(6, 4, 6)
 
       cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
       cameraOrtho.position.set(0, 10, 0)
@@ -261,8 +263,8 @@
       sun.shadow.camera = new THREE.OrthographicCamera(-shadowFrustum, shadowFrustum, shadowFrustum, -shadowFrustum, 1, 200)
       this.scene.add(sun)
 
-      var light = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
-      this.scene.add(light)
+      var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
+      this.scene.add(atmosphere)
 
       // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
       // var material = new THREE.MeshStandardMaterial({
@@ -280,14 +282,15 @@
       // this.scene.add(mesh)
 
       var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
-      groundGeo.rotateX(- Math.PI / 2)
-      var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
+      // groundGeo.rotateX(- Math.PI / 2)
+      var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2, side: THREE.DoubleSide}))
       ground.receiveShadow = true
-      ground.position.y = -0.01
+      ground.position.z = -0.01
       ground.alcProjectable = true
       this.scene.add(ground)
 
       var grid = new THREE.GridHelper(20, 20)
+      grid.rotateX(Math.PI / 2)
       grid.material.opacity = 0.1
       grid.material.transparent = true
       this.scene.add(grid)
@@ -345,14 +348,25 @@
           this.$emit('change-view')
         })
 
+        let dampingTimeout
+
         this.viewControls.addEventListener('start', () => {
           this.transformControl.enabled = false
           this.isOrbiting = true
+          clearTimeout(dampingTimeout)
+          if(!this.isAnimating) {
+            this.isAnimating = true
+            this.animate()
+          }
         })
 
         this.viewControls.addEventListener('end', () => {
           this.transformControl.enabled = true
           this.isOrbiting = false
+          // Make sure we keep animating long enough for view damping to settle
+          dampingTimeout = setTimeout(() => {
+            this.isAnimating = false
+          }, 500)
         })
 
         activeCamera = camera
@@ -373,6 +387,13 @@
 
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('#2590e1')
+
+      this.highlightRegionMaterial = new THREE.MeshBasicMaterial({
+        color: new THREE.Color('blue'),
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.5,
+      })
 
       // Picking
       const handlePick = (pickerCoords, color, tool) => {
@@ -406,6 +427,7 @@
           if(this.selectedElement) this.deleteElement(this.selectedElement)
         } else if(e.keyCode == 18) {
           this.altPressed = true
+          // this.guides = []
         }
       })
 
@@ -421,15 +443,18 @@
 
       setActiveCamera(cameraOrtho)
 
-      setTimeout(() => this.onWindowResize(), 500)
-      window.addEventListener('resize', this.onWindowResize.bind(this), false)
       this.onWindowResize()
+      setTimeout(() => this.onWindowResize(), 500)
+      this.$root.$on('resize', () => this.onWindowResize() )
 
       this.loadTree(this.document.tree, true)
+
+      document._debug = {} || document._debug
+      document._debug.viewport = this
     },
 
     beforeDestroy: function() {
-      rendering = false
+      this.animating = false
       window.removeEventListener('resize', this.onWindowResize, false)
     },
 
@@ -462,10 +487,7 @@
         this.activeHandle = null
         this.snapAnchor = null
         this.guides = []
-        // Make sure we keep animating long enough for view dampening to settle
-        setTimeout(() => {
-          isDragging = false
-        }, 500)
+        this.isDragging = false
       },
 
       mouseDown: function(e) {
@@ -475,8 +497,19 @@
         if(vec) this.activeTool.mouseDown(vec, canvasCoords)
         // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
         this.lastCoords = canvasCoords
-        isDragging = true
-        this.animate()
+      },
+
+      anchorClicked: function(anchor) {
+        this.activeTool.mouseDown(anchor.vec, anchor.pos)
+      },
+
+      handleMouseDown: function(e, handle) {
+        if(this.activeTool.constructor == ManipulationTool) {
+          this.lastSnaps = []
+          this.activeHandle = handle
+          this.isDragging = true
+        }
+        this.mouseDown(e)
       },
 
       mouseMove: function(e) {
@@ -492,13 +525,14 @@
         const canvasCoords = getCanvasCoords(coords, this.$refs.canvas)
         let vec = this.fromScreen(canvasCoords)
         this.guides = []
-        if(this.activeTool.constructor != ManipulationTool || isDragging) vec = this.snapToPoints(coords) || this.snapToGuides(vec) || vec
+        this.catchSnapPoints(coords)
+        if(this.activeTool.constructor != ManipulationTool || this.isDragging) vec = this.snapToGuides(vec) || vec
         return [vec, coords, canvasCoords]
       },
 
-      snapToPoints: function(coords) {
-        const sketchElements = this.activeComponent.get_sketch_elements()
-        const snapPoints = sketchElements.flatMap(elem => {
+      getSnapPoints: function() {
+        const sketchElements = this.activeComponent.get_sketch().get_sketch_elements()
+        return sketchElements.flatMap(elem => {
           let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
           // Filter out last point of the sketch element actively being drawn
           if(elem == sketchElements.slice(-1)[0]) {
@@ -513,6 +547,10 @@
           }
           return points
         })
+      },
+
+      catchSnapPoints: function(coords) {
+        const snapPoints = this.getSnapPoints()
         let closestDist = 99999
         let target
         snapPoints.forEach(p => {
@@ -522,22 +560,11 @@
             target = p
           }
         })
-        if(target) {
-          if(this.snapAnchor && this.snapAnchor.vec.equals(target)) return target
-          this.snapAnchor = {
-            type: 'snap',
-            pos: this.toScreen(target),
-            vec: target,
-            id: '' + target.x + target.y + target.z,
-          }
-          if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(target))) {
-            this.lastSnaps.unshift(target)
-            if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
-          }
-        } else {
-          this.snapAnchor = null
+        if(!target) return
+        if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(target))) {
+          this.lastSnaps.unshift(target)
+          if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
         }
-        return target
       },
 
       snapToGuides: function(vec) {
@@ -549,43 +576,44 @@
             return true
           }
         })
-        let snapZ
+        let snapY
         this.lastSnaps.some(snap => {
-          if(Math.abs(vec.z - snap.z) < 0.1) {
-            snapZ = snap
+          if(Math.abs(vec.y - snap.y) < 0.1) {
+            snapY = snap
             return true
           }
         })
-        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, 0, snapZ ? snapZ.z : vec.z)
+        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, snapY ? snapY.y : vec.y, vec.z)
         const screenSnapVec = this.toScreen(snapVec)
         if(snapX) {
-          const end = this.toScreen(snapX)
+          const start = this.toScreen(snapX)
           this.guides.push({
-            id: 'v' + end.x + end.y,
-            start: screenSnapVec,
-            end,
+            id: 'v' + start.x + start.y,
+            start,
+            end: screenSnapVec,
           })
         }
-        if(snapZ) {
-          const end = this.toScreen(snapZ)
+        if(snapY) {
+          const start = this.toScreen(snapY)
           this.guides.push({
-            id: 'h' + end.x + end.y,
-            start: screenSnapVec,
-            end,
+            id: 'h' + start.x + start.y,
+            start,
+            end: screenSnapVec,
           })
         }
-        if(snapX || snapZ) return snapVec
-      },
-
-      anchorClicked: function(anchor) {
-        this.activeTool.mouseDown(anchor.vec, anchor.pos)
-      },
-
-      handleMouseDown: function(e, handle) {
-        if(this.activeTool.constructor == ManipulationTool) {
-          this.activeHandle = handle
+        if(snapX && snapY) {
+          if(this.snapAnchor && this.snapAnchor.vec.equals(snapVec)) return snapVec
+          this.snapAnchor = {
+            type: 'snap',
+            pos: this.toScreen(snapVec),
+            vec: snapVec,
+            id: '' + snapVec.x + snapVec.y + snapVec.z,
+          }
+          return snapVec
+        } else {
+          this.snapAnchor = null
         }
-        this.mouseDown(e)
+        if(snapX || snapY) return snapVec
       },
 
       updateWidgets: function() {
@@ -610,6 +638,7 @@
 
       activateTool: function(toolName) {
         if(this.activeTool) this.activeTool.dispose()
+        this.lastSnaps = []
         const tools = {
           Manipulate: ManipulationTool,
           Line: LineTool,
@@ -618,6 +647,7 @@
         }
         const tool = new tools[toolName](this.activeComponent, this)
         this.$emit('activate-tool', tool)
+        this.render()
       },
 
       render: function() {
@@ -626,9 +656,8 @@
       },
 
       animate: function() {
-        if(!rendering) return
         this.viewControls.update()
-        if(isDragging || this.viewControlsTarget) requestAnimationFrame(this.animate.bind(this))
+        if(this.isAnimating || this.viewControlsTarget) requestAnimationFrame(this.animate.bind(this))
         // Transition to manual view target
         if(!this.viewControlsTarget) return
         if(this.viewControlsTarget.clone().sub(this.viewControls.target).lengthSq() < 0.001) {
@@ -723,21 +752,6 @@
 
         this.document.data[nodeId].cachedElements = this.document.data[nodeId].cachedElements || []
         this.document.data[nodeId].cachedElements.push(elem)
-
-        const regions = node.get_regions()
-        // console.log(regions)
-        // // console.log(splits.map(elem => elem.get_handles()))
-        regions.forEach(region => {
-          const geometry = new THREE.BufferGeometry()
-          const vertices = new Float32Array(region.data())
-          console.log(vertices)
-          geometry.setAttribute('position', new THREE.BufferAttribute(region.data(), 3))
-          geometry.setAttribute('color', Array(vertices.length).fill(1))
-
-          const material = new THREE.MeshBasicMaterial({color: 0xff0000})
-          const mesh = new THREE.Mesh(geometry, material )
-          this.scene.add(mesh)
-        })
       },
 
       unloadElement: function(elem, node, document) {
@@ -761,7 +775,7 @@
       loadTree: function(node, recursive) {
         this.unloadTree(node, this.document, recursive)
         if(this.document.data[node.id()].hidden) return
-        const elements = node.get_sketch_elements()
+        const elements = node.get_sketch().get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
         if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
       },
@@ -779,6 +793,39 @@
       },
 
       elementChanged: function(elem, comp) {
+        // const elements = comp.get_sketch().get_sketch_elements()
+        // console.log(elements.map(elem => elem.get_handles()))
+        // const regionInfo = comp.get_region_info()
+        // console.log('regionInfo', {
+        //   cut: regionInfo.cut,
+        //   islands: regionInfo.islands,
+        //   regions: regionInfo.regions,
+        // })
+        const regions = comp.get_sketch().get_regions(false)
+        console.log(regions.length)
+        this.regionMeshes = this.regionMeshes || []
+        this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
+        this.regionMeshes = regions.map(region => {
+          const poly = region.get_polyline();
+          const geometry = new THREE.BufferGeometry()
+          const vertices = new Float32Array(poly.position())
+          const normals = new Float32Array(Array(vertices.length / 3).fill([0,1,0]).flat())
+          const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
+          // console.log(vertices)
+          // console.log(normals)
+          // console.log(uvs)
+          geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+          geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+          // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
+          // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+
+          const material = new THREE.MeshBasicMaterial({color: new THREE.Color(Math.random(), Math.random(), Math.random())})
+          material.side = THREE.DoubleSide
+          const mesh = new THREE.Mesh(geometry, material)
+          mesh.alcRegion = region
+          this.scene.add(mesh)
+          return mesh
+        })
         this.loadElement(elem, comp)
         this.render()
       },

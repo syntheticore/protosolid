@@ -3,7 +3,7 @@
     header
       fa-icon.expander(
         icon="caret-down"
-        :class="{blank: !isAssembly && false || isTop, closed: !expanded}"
+        :class="{blank: !isAssembly || isTop, closed: !expanded}"
         @click="toggle()"
         fixed-width
       )
@@ -18,9 +18,9 @@
           fa-icon.new-sketch(icon="edit" fixed-width title="Create Sketch" @click="createSketch(node)")
           fa-icon.new-variable(icon="sliders-h" fixed-width title="Create Variable" @click="createVariable(node)")
     ul.content(v-if="expanded")
-      li
-        fa-icon(icon="atom")
-        span COG
+      //- li
+      //-   fa-icon(icon="atom")
+      //-   span COG
     //- transition(name="fade" mode="out-in")
     //- transition-group.children(name="list" tag="ul" v-show="expanded" v-if="isAssembly")
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")

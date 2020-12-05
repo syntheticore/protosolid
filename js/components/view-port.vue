@@ -274,6 +274,7 @@
       var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
       // groundGeo.rotateX(- Math.PI / 2)
       var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2, side: THREE.DoubleSide}))
+      ground.material.depthWrite = false
       ground.receiveShadow = true
       ground.position.z = -0.01
       ground.alcProjectable = true
@@ -283,6 +284,7 @@
       grid.rotateX(Math.PI / 2)
       grid.material.opacity = 0.1
       grid.material.transparent = true
+      grid.material.depthWrite = false
       this.scene.add(grid)
 
       var pmremGenerator = new THREE.PMREMGenerator(renderer)
@@ -373,6 +375,7 @@
         transparent: true,
         opacity: 0.5,
       })
+      this.highlightRegionMaterial.side = THREE.DoubleSide
 
       const handlePick = (pickerCoords, color, tool) => {
         this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
@@ -730,7 +733,7 @@
       deleteElement: function(elem) {
         // this.unloadElement(elem, node, this.document)
         this.transformControl.detach()
-        this.activeComponent.remove_element(elem.id())
+        this.activeComponent.get_sketch().remove_element(elem.id())
         this.componentChanged(this.activeComponent)
         this.$emit('element-selected', null)
       },
@@ -738,6 +741,12 @@
       loadTree: function(node, recursive) {
         this.unloadTree(node, this.document, recursive)
         if(this.document.data[node.id()].hidden) return
+        // Load bodies
+        // let mesh = node.get_mesh()
+        // console.log(mesh)
+        let wireframe = node.get_wireframe()
+        console.log(wireframe)
+        // Load sketch elements
         const elements = node.get_sketch().get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
         if(recursive) node.get_children().forEach(child => this.loadTree(child, true))

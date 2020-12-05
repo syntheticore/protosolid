@@ -12,6 +12,7 @@
     )
     ToolBox(
       :active-tool="activeTool"
+      :active-component="activeComponent"
       @activate-tool="activateTool"
     )
     .side-bar.left
@@ -140,7 +141,7 @@
       return {
         activeComponent: this.document.tree,
         activeTool: null,
-        activeFeature: null,
+        // activeFeature: null,
         selectedElement: null,
       }
     },

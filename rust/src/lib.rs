@@ -51,7 +51,7 @@ fn point_to_js(p: Point3) -> JsValue {
   JsValue::from_serde(&(p.x, p.y, p.z)).unwrap()
 }
 
-fn vertices_to_js(points: Vec<Point3>) -> Array {
+fn points_to_js(points: Vec<Point3>) -> Array {
   points.into_iter().map(point_to_js).collect()
 }
 
@@ -111,7 +111,7 @@ impl JsSketchElement {
   }
 
   pub fn get_handles(&self) -> Array {
-    vertices_to_js(as_controllable(&mut self.real.borrow()).get_handles())
+    points_to_js(as_controllable(&mut self.real.borrow()).get_handles())
   }
 
   pub fn set_handles(&self, handles: Array) {
@@ -120,15 +120,15 @@ impl JsSketchElement {
   }
 
   pub fn get_snap_points(&self) -> Array {
-    vertices_to_js(as_controllable(&mut self.real.borrow()).get_snap_points())
+    points_to_js(as_controllable(&mut self.real.borrow()).get_snap_points())
   }
 
   pub fn tesselate(&self, steps: i32) -> Array {
-    vertices_to_js(self.real.borrow().as_curve().tesselate_relative(steps.into()))
+    points_to_js(self.real.borrow().as_curve().tesselate_relative(steps.into()))
   }
 
   pub fn default_tesselation(&self) -> Array {
-    vertices_to_js(self.real.borrow().as_curve().default_tesselation())
+    points_to_js(self.real.borrow().as_curve().default_tesselation())
   }
 
   pub fn get_length(&self) -> JsValue {
@@ -153,6 +153,46 @@ impl JsBufferGeometry {
     JsValue::from_serde(&self.normal).unwrap()
   }
 }
+
+
+// #[wasm_bindgen]
+// pub struct JsSolid {
+//   // faces: Array,
+//   edges: Array,
+//   vertices: Array,
+//   half_edges: Array,
+// }
+
+// #[wasm_bindgen]
+// impl JsSolid {
+//   fn from(solid: &Solid) -> Self {
+//     let shell = solid.shells[0];
+//     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
+//     let edges = shell.edges.iter().map(|e| {
+//       let left = e.borrow().left_half.borrow().origin.borrow().point;
+//       let right = e.borrow().right_half.borrow().origin.borrow().point;
+//       points_to_js(vec![
+//         left,
+//         right
+//       ])
+//     });
+//     // let faces = shell.faces.map(|f| {
+
+//     // });
+//     Self {
+//       edges,
+//       vertices,
+//     }
+//   }
+
+//   pub fn position(&self) -> JsValue {
+//     JsValue::from_serde(&self.position).unwrap()
+//   }
+
+//   pub fn normal(&self) -> JsValue {
+//     JsValue::from_serde(&self.normal).unwrap()
+//   }
+// }
 
 
 #[wasm_bindgen]
@@ -247,7 +287,7 @@ impl JsSketch {
   }
 
   pub fn get_regions(&self) -> Array {
-    self.real.borrow().sketch.get_regions().into_iter()
+    self.real.borrow().sketch.get_regions(false).into_iter()
     .map(|region| JsValue::from(JsRegion {
       region,
       component: self.real.clone(),
@@ -256,7 +296,7 @@ impl JsSketch {
   }
 
   // pub fn get_region_info(&self) -> JsFoo {
-  //   // self.real.borrow().sketch.closed_regions().iter().map(|region| vertices_to_js(region.clone()) ).collect()
+  //   // self.real.borrow().sketch.closed_regions().iter().map(|region| points_to_js(region.clone()) ).collect()
   //   let sketch = &self.real.borrow().sketch;
   //   // sketch.closed_regions();
   //   let cut_elements = Sketch::all_split(&sketch.elements);
@@ -282,11 +322,11 @@ impl JsSketch {
     let mut splits = Sketch::all_split(&real.sketch.elements);
     Sketch::remove_dangling_segments(&mut splits);
     let islands = Sketch::build_islands(&splits);
-    let islands: Vec<DerivedSketchElement> = islands.into_iter().flatten().collect();
+    let islands: Vec<TrimmedSketchElement> = islands.into_iter().flatten().collect();
 
     real.sketch.elements.clear();
     for split in islands.iter() {
-      real.sketch.elements.push(Rc::new(RefCell::new(split.owned.clone())));
+      real.sketch.elements.push(Rc::new(RefCell::new(split.cache.clone())));
     }
   }
 
@@ -343,10 +383,38 @@ impl JsComponent {
   }
 
   pub fn get_mesh(&self) -> JsValue {
+    let bodies = &self.real.borrow().bodies;
     JsValue::from(JsBufferGeometry {
-      position: self.real.borrow().bodies[0].tesselate().to_buffer_geometry(),
+      position: if bodies.len() > 0 { bodies[0].tesselate().to_buffer_geometry() } else { vec![] },
       normal: vec![],
     })
+  }
+
+  pub fn get_wireframe(&self) -> Array {
+    let bodies = &self.real.borrow().bodies;
+    if bodies.len() == 0 {
+      let out = Array::new_with_length(0);
+      return out;
+      // return vec![];
+    }
+    bodies[0].shells[0].edges.iter().map(|edge| {
+      let edge = edge.borrow();
+      // let line = Line::new(
+      //   edge.left_half.borrow().origin.borrow().point,
+      //   edge.right_half.borrow().origin.borrow().point
+      // ).into_enum();
+      // JsValue::from(JsSketchElement::from(&rc(line)))
+      let left = edge.left_half.borrow().origin.borrow().point;
+      let right = edge.right_half.borrow().origin.borrow().point;
+      points_to_js(vec![
+        left,
+        right
+      ])
+    }).collect()
+    // bodies[0].shells[0].vertices.iter().map(|vertex| {
+    //   let vertex = vertex.borrow();
+    //   point_to_js(vertex.point)
+    // }).collect()
   }
 
   pub fn add_segment(&self) {

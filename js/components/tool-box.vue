@@ -133,6 +133,7 @@
 
     props: {
       activeTool: Object,
+      activeComponent: Object,
     },
 
     data() {
@@ -190,7 +191,7 @@
       },
 
       activateFeature: function(feature) {
-        this.activeFeature = new feature()
+        this.activeFeature = new feature(this.activeComponent)
       },
 
       closeFeature: function() {

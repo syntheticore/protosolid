@@ -1,4 +1,3 @@
-use std::ptr;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -29,14 +28,6 @@ impl Component {
 }
 
 
-#[derive(Debug, Clone)]
-pub struct DerivedSketchElement {
-  pub owned: SketchElement,
-  pub original: Ref<SketchElement>,
-}
-
-
-type DerivedRegion = Vec<DerivedSketchElement>;
 pub type Region = Vec<TrimmedSketchElement>;
 
 
@@ -50,33 +41,20 @@ impl Sketch {
     Default::default()
   }
 
-  pub fn get_regions(&self) -> Vec<Region> {
-    let regions = self.build_regions(false);
-    regions.into_iter().map({|region|
-      region.into_iter().map({|derived|
-        TrimmedSketchElement {
-          base: derived.original.borrow().clone(),
-          bounds: derived.owned.as_curve().endpoints(),
-          cache: derived.owned,
-        }
-      }).collect()
-    }).collect()
-  }
-
-  fn build_regions(&self, include_outer: bool) -> Vec<DerivedRegion> {
+  pub fn get_regions(&self, include_outer: bool) -> Vec<Region> {
     let mut cut_elements = Self::all_split(&self.elements);
     Self::remove_dangling_segments(&mut cut_elements);
     let islands = Self::build_islands(&cut_elements);
     islands.iter().flat_map(|island| Self::build_loops_from_island(island, include_outer) ).collect()
   }
 
-  fn build_loops_from_island(island: &Vec<DerivedSketchElement>, include_outer: bool) -> Vec<DerivedRegion> {
+  fn build_loops_from_island(island: &Vec<TrimmedSketchElement>, include_outer: bool) -> Vec<Region> {
     let mut regions = vec![];
     let mut used_forward = HashSet::new();
     let mut used_backward = HashSet::new();
     for i in 0..2 {
       for start_elem in island.iter() {
-        let points = start_elem.owned.as_curve().endpoints();
+        let points = start_elem.bounds;
         let start_point = if i == 0 { points.0 } else { points.1 };
         let mut loops = Self::build_loop(&start_point, &start_elem, vec![], &start_point, island, &mut used_forward, &mut used_backward);
         regions.append(&mut loops);
@@ -88,21 +66,18 @@ impl Sketch {
 
   pub fn split_all(&self) -> Vec<SketchElement> {
     Self::all_split(&self.elements).into_iter()
-    .map(|elem| elem.owned )
+    .map(|elem| elem.cache )
     .collect()
   }
 
-  pub fn all_split(elements: &Vec<Ref<SketchElement>>) -> Vec<DerivedSketchElement> {
+  pub fn all_split(elements: &Vec<Ref<SketchElement>>) -> Vec<TrimmedSketchElement> {
     elements.iter().flat_map(|elem| {
       let splits = Self::split_element(&elem.borrow(), &elements);
-      Self::mark_as_derived(splits, elem)
-    }).collect()
-  }
-
-  fn mark_as_derived(elems: Vec<SketchElement>, original: &Ref<SketchElement>) -> Vec<DerivedSketchElement> {
-    elems.into_iter().map(|elem| DerivedSketchElement {
-      owned: elem,
-      original: original.clone(),
+      splits.into_iter().map(|split| TrimmedSketchElement {
+        base: (*elem.borrow()).clone(),
+        bounds: split.as_curve().endpoints(),
+        cache: split,
+      }).collect::<Region>()
     }).collect()
   }
 
@@ -111,28 +86,26 @@ impl Sketch {
     geom2d::split_element(elem, &others)
   }
 
-  pub fn build_islands(elements: &Vec<DerivedSketchElement>) -> Vec<Vec<DerivedSketchElement>> {
+  pub fn build_islands(elements: &Vec<TrimmedSketchElement>) -> Vec<Vec<TrimmedSketchElement>> {
     let mut unused_elements = elements.clone();
     let mut islands = vec![];
     while let Some(start_elem) = unused_elements.pop() {
       let mut island = vec![];
       Self::build_island(&start_elem, &mut island, &unused_elements);
       for island_elem in island.iter() {
-        // unused_elements.retain(|elem| !ptr::eq(elem, island_elem));
-        let island_elem_id = as_controllable(&island_elem.owned).id();
-        unused_elements.retain(|elem| as_controllable(&elem.owned).id() != island_elem_id );
+        unused_elements.retain(|elem| elem.bounds != island_elem.bounds);
       }
       if island.len() > 0 { islands.push(island) }
     }
     islands
   }
 
-  fn build_island(start_elem: &DerivedSketchElement, mut path: &mut Vec<DerivedSketchElement>, all_elements: &Vec<DerivedSketchElement>) {
-    if path.iter().any(|e| e.owned == start_elem.owned ) { return }
-    let (start_point, end_point) = start_elem.owned.as_curve().endpoints();
+  fn build_island(start_elem: &TrimmedSketchElement, mut path: &mut Vec<TrimmedSketchElement>, all_elements: &Vec<TrimmedSketchElement>) {
+    if path.iter().any(|e| e == start_elem ) { return }
+    let (start_point, end_point) = start_elem.bounds;
     path.push(start_elem.clone());
     for elem in all_elements.iter() {
-      let (other_start, other_end) = elem.owned.as_curve().endpoints();
+      let (other_start, other_end) = elem.bounds;
       // We are connected to other element
       if end_point.almost(other_start) || end_point.almost(other_end) || start_point.almost(other_start) || start_point.almost(other_end) {
         Self::build_island(&elem, &mut path, all_elements);
@@ -140,19 +113,20 @@ impl Sketch {
     }
   }
 
+  // https://stackoverflow.com/questions/838076/small-cycle-finding-in-a-planar-graph
   pub fn build_loop<'a>(
     start_point: &Point3,
-    start_elem: &'a DerivedSketchElement,
-    mut path: DerivedRegion,
+    start_elem: &'a TrimmedSketchElement,
+    mut path: Region,
     path_start_point: &Point3,
-    all_elements: &'a Vec<DerivedSketchElement>,
+    all_elements: &'a Vec<TrimmedSketchElement>,
     used_forward: &mut HashSet<Uuid>,
     used_backward: &mut HashSet<Uuid>,
-  ) -> Vec<DerivedRegion> {
+  ) -> Vec<Region> {
     let mut regions = vec![];
     // Traverse edges only once in every direction
-    let start_elem_id = as_controllable(&start_elem.owned).id();
-    if start_point.almost(start_elem.owned.as_curve().endpoints().0) {
+    let start_elem_id = as_controllable(&start_elem.cache).id();
+    if start_point.almost(start_elem.cache.as_curve().endpoints().0) {
       if used_forward.contains(&start_elem_id) { return regions }
       used_forward.insert(start_elem_id);
     } else {
@@ -162,16 +136,16 @@ impl Sketch {
     // Add start_elem to path
     path.push(start_elem.clone());
     // Find connected segments
-    let end_point = start_elem.owned.as_curve().other_endpoint(&start_point);
-    let mut connected_elems: Vec<&DerivedSketchElement> = all_elements.iter().filter(|other_elem| {
-      let (other_start, other_end) = other_elem.owned.as_curve().endpoints();
-      (end_point.almost(other_start) || end_point.almost(other_end)) && as_controllable(&other_elem.owned).id() != start_elem_id
+    let end_point = start_elem.cache.as_curve().other_endpoint(&start_point);
+    let mut connected_elems: Vec<&TrimmedSketchElement> = all_elements.iter().filter(|other_elem| {
+      let (other_start, other_end) = other_elem.cache.as_curve().endpoints();
+      (end_point.almost(other_start) || end_point.almost(other_end)) && as_controllable(&other_elem.cache).id() != start_elem_id
     }).collect();
     if connected_elems.len() > 0 {
       // Sort connected segments in clockwise order
       connected_elems.sort_by(|a, b| {
-        let final_point_a = a.owned.as_curve().other_endpoint(&end_point);
-        let final_point_b = b.owned.as_curve().other_endpoint(&end_point);
+        let final_point_a = a.cache.as_curve().other_endpoint(&end_point);
+        let final_point_b = b.cache.as_curve().other_endpoint(&end_point);
         if geom2d::clockwise(*start_point, end_point, final_point_a) > geom2d::clockwise(*start_point, end_point, final_point_b) {
           Ordering::Less
         } else {
@@ -181,9 +155,9 @@ impl Sketch {
       });
       // Follow the leftmost segment to complete loop in anti-clockwise order
       let next_elem = connected_elems[0];
-      // if path[0].owned == next_elem.owned {
+      // if path[0].cache == next_elem.cache {
       // if path_start_point.almost(end_point) {
-      if as_controllable(&path[0].owned).id() == as_controllable(&next_elem.owned).id() {
+      if as_controllable(&path[0].cache).id() == as_controllable(&next_elem.cache).id() {
         // We are closing a loop
         regions.push(path);
       } else {
@@ -200,29 +174,28 @@ impl Sketch {
     regions
   }
 
-  fn poly_from_region(wire: &DerivedRegion) -> PolyLine {
-    geom2d::poly_from_wire(&wire.iter().map(|elem| elem.owned.clone() ).collect())
+  fn poly_from_region(wire: &Region) -> PolyLine {
+    geom2d::poly_from_wire(&wire.iter().map(|elem| elem.cache.clone() ).collect())
   }
 
-  fn remove_outer_loop(loops: &mut Vec<DerivedRegion>) {
+  fn remove_outer_loop(loops: &mut Vec<Region>) {
     if loops.len() <= 1 { return }
     loops.retain(|wire| {
-      geom2d::is_clockwise(&Self::poly_from_region(wire))
+      !geom2d::is_clockwise(&Self::poly_from_region(wire))
     })
   }
 
-  pub fn remove_dangling_segments(island: &mut Vec<DerivedSketchElement>) {
+  pub fn remove_dangling_segments(island: &mut Vec<TrimmedSketchElement>) {
     let others = island.clone();
     let start_len = island.len();
     island.retain(|elem| {
-      if elem.owned.as_curve().length().almost(0.0) { return false }
-      let elem_id = as_controllable(&elem.owned).id();
-      let (start_point, end_point) = elem.owned.as_curve().endpoints();
+      if elem.cache.as_curve().length().almost(0.0) { return false }
+      let (start_point, end_point) = elem.bounds;
       [start_point, end_point].iter().all(|endpoint| {
         others.iter().any(|other_elem| {
-          let (other_start, other_end) = other_elem.owned.as_curve().endpoints();
+          let (other_start, other_end) = other_elem.bounds;
           (endpoint.almost(other_start) || endpoint.almost(other_end))
-          && as_controllable(&other_elem.owned).id() != elem_id
+          && other_elem.bounds != elem.bounds
         })
       })
     });
@@ -438,7 +411,7 @@ mod tests {
     let sketch = make_sketch(&test_data::rectangle());
     let cut_elements = Sketch::all_split(&sketch.elements);
     let islands = Sketch::build_islands(&cut_elements);
-    let regions = sketch.get_regions();
+    let regions = sketch.get_regions(false);
     assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
@@ -446,14 +419,10 @@ mod tests {
 
   #[test]
   fn region_crossing_rect() {
-    let mut sketch = make_sketch(&test_data::crossing_rectangle());
+    let sketch = make_sketch(&test_data::crossing_rectangle());
     let cut_elements = Sketch::all_split(&sketch.elements);
     let islands = Sketch::build_islands(&cut_elements);
-    let regions = sketch.get_regions();
-    sketch.elements.clear();
-    for split in cut_elements.iter() {
-      sketch.elements.push(Rc::new(RefCell::new(split.owned.clone())));
-    }
+    let regions = sketch.get_regions(false);
     assert_eq!(cut_elements.len(), 8, "{} cut_elements found instead of 8", cut_elements.len());
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
@@ -467,7 +436,7 @@ mod tests {
     let sketch = make_sketch(&lines);
     let cut_elements = Sketch::all_split(&sketch.elements);
     let islands = Sketch::build_islands(&cut_elements);
-    let regions = sketch.get_regions();
+    let regions = sketch.get_regions(false);
     assert_eq!(cut_elements.len(), 6, "{} cut_elements found instead of 6", cut_elements.len());
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
@@ -478,7 +447,7 @@ mod tests {
     let mut sketch = Sketch::new();
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0));
     sketch.elements.push(Rc::new(RefCell::new(line.into_enum())));
-    let _regions = sketch.get_regions();
+    let _regions = sketch.get_regions(false);
   }
 }
 

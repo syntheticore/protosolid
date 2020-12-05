@@ -151,6 +151,7 @@
     props: {
       activeTool: Object,
       activeFeature: Object,
+      activeComponent: Object,
     },
 
     data() {
@@ -164,6 +165,7 @@
         this.$root.$once('picked', (item) => {
           this.activeFeature[name] = item
           this.activeFeature.update()
+          this.$root.$emit('component-changed', this.activeFeature.component)
           this.activePicker = null
         })
         this.activePicker = name

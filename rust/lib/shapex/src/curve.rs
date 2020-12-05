@@ -13,7 +13,7 @@ pub mod intersection;
 pub type PolyLine = Vec<Point3>;
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TrimmedSketchElement {
   pub base: SketchElement,
   // pub bounds: (f64, f64),
@@ -515,13 +515,14 @@ impl<'a> Iterator for WireIterator<'a> {
         elem.bounds.1
       } else {
         // Reverse bounds, such that output item bounds are consistently oriented
+        // panic!("Should not happen");
         output.bounds = (output.bounds.1, output.bounds.0);
         elem.bounds.0
       };
       self.elem = self.wire.iter().find(|other_elem| {
         (other_elem.bounds.0.almost(self.point) || other_elem.bounds.1.almost(self.point))
-        && !ptr::eq(elem, *other_elem)
-        && !ptr::eq(elem, self.first_elem)
+        && !ptr::eq(*other_elem, elem)
+        && !ptr::eq(*other_elem, self.first_elem)
       });
       Some(output)
     } else {

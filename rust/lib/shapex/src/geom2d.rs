@@ -39,19 +39,20 @@ pub fn polygon_area(closed_loop: &PolyLine) -> f64 {
 
 pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   let mut signed_area = 0.0;
-  let mut iter = closed_loop.iter().peekable();
-  while let Some(p) = iter.next() {
-    let next_p = if let Some(next_p) = iter.peek() {
-      next_p
-    } else {
-      &closed_loop[0]
-    };
+  let len = closed_loop.len();
+  for i in 0..len {
+    let j = (i + 1) % len;
+    let p = closed_loop[i];
+    let next_p = closed_loop[j];
     signed_area += (next_p.x - p.x) * (next_p.y + p.y);
   }
   signed_area
 }
 
 pub fn poly_from_wire(wire: &Vec<SketchElement>) -> PolyLine {
+  if wire.len() == 1 {
+    panic!("PolyLine has length one {:?}", wire);
+  }
   let mut polyline = vec![];
   let mut iter = wire.iter().peekable();
   while let Some(elem) = iter.next() {
@@ -88,7 +89,7 @@ pub fn split_element(elem: &SketchElement, others: &Vec<SketchElement>) -> Vec<S
   segments
 }
 
-pub fn trim(elem: &SketchElement, cutters: &Vec<SketchElement>, p: Point3) {
+pub fn trim(_elem: &SketchElement, _cutters: &Vec<SketchElement>, _p: Point3) {
   // let splits = split_element(elem, cutters);
   // splits.sort_by(|a, b| {
   //   let a = a.as_curve();

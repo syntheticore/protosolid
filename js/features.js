@@ -1,4 +1,8 @@
 class Feature {
+  constructor(component) {
+    this.component = component
+  }
+
   confirm() {}
   cancel() {}
   update() {}
@@ -6,7 +10,7 @@ class Feature {
 
 export class ExtrudeFeature extends Feature {
   constructor(component) {
-    super()
+    super(component)
 
     this.profile = null
     this.rail = null

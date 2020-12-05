@@ -121,7 +121,7 @@ export class LineTool extends Tool {
     this.viewport.elementChanged(this.line, this.component)
     // Restart tool when we close a loop
     if(this.firstPoint && vec.equals(this.firstPoint)) {
-      this.component.remove_element(this.line.id())
+      this.component.get_sketch().remove_element(this.line.id())
       this.line = null
       this.firstPoint = null
       return

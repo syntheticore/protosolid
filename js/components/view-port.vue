@@ -170,8 +170,12 @@
 
   const snapDistance = 10.5 // px
   const maxSnapReferences = 5
+  const frustumSize = 10
 
-  var renderer, camera, mesh, pointMaterial
+  let isDragging = false
+
+  let rendering = true
+  let renderer, camera, cameraOrtho, activeCamera, mesh, pointMaterial
 
   function getCanvasCoords(mouseCoords, canvas) {
     return new THREE.Vector2(
@@ -241,7 +245,13 @@
       camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
       camera.position.set(6, 4, 6)
 
+      cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
+      cameraOrtho.position.set(0, 10, 0)
+
+      activeCamera = camera
+
       this.scene = new THREE.Scene()
+      cameraOrtho.lookAt( this.scene.position )
       // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
       // this.scene.add(new THREE.AmbientLight(0x666666))
       var sun = new THREE.DirectionalLight(0xdfebff, 1)
@@ -321,41 +331,52 @@
       this.scene.add(this.transformControl)
 
       // View Controls
-      this.viewControls = new OrbitControls(camera, renderer.domElement)
-      this.viewControls.enableDamping = true
-      this.viewControls.dampingFactor = 0.4
-      this.viewControls.panSpeed = 1.0
-      this.viewControls.keyPanSpeed = 12
-      this.viewControls.zoomSpeed = 0.6
-      this.viewControls.screenSpacePanning = true
-      this.viewControls.rotateSpeed = 1.2
+      const setActiveCamera = (camera) => {
+        if(this.viewControls) this.viewControls.dispose()
+        this.viewControls = new OrbitControls(camera, renderer.domElement)
+        this.viewControls.enableDamping = true
+        this.viewControls.dampingFactor = 0.4
+        this.viewControls.panSpeed = 1.0
+        this.viewControls.keyPanSpeed = 12
+        this.viewControls.zoomSpeed = 0.6
+        this.viewControls.screenSpacePanning = true
+        this.viewControls.rotateSpeed = 1.2
 
-      this.viewControls.addEventListener('change', () => {
-        this.render()
-        this.$emit('change-view')
-      })
+        this.viewControls.minPolarAngle = - Math.PI
+        this.viewControls.maxPolarAngle = Math.PI * 2
 
-      let dampingTimeout
+        this.viewControls.addEventListener('change', () => {
+          this.render()
+          this.$emit('change-view')
+        })
 
-      this.viewControls.addEventListener('start', () => {
-        this.transformControl.enabled = false
-        this.isOrbiting = true
-        clearTimeout(dampingTimeout)
-        if(!this.isAnimating) {
-          this.isAnimating = true
-          this.animate()
-        }
-      })
+        let dampingTimeout
 
-      this.viewControls.addEventListener('end', () => {
-        this.transformControl.enabled = true
-        this.isOrbiting = false
-        // Make sure we keep animating long enough for view damping to settle
-        dampingTimeout = setTimeout(() => {
-          this.isAnimating = false
-        }, 500)
-      })
+        this.viewControls.addEventListener('start', () => {
+          this.transformControl.enabled = false
+          this.isOrbiting = true
+          clearTimeout(dampingTimeout)
+          if(!this.isAnimating) {
+            this.isAnimating = true
+            this.animate()
+          }
+        })
 
+        this.viewControls.addEventListener('end', () => {
+          this.transformControl.enabled = true
+          this.isOrbiting = false
+          // Make sure we keep animating long enough for view damping to settle
+          dampingTimeout = setTimeout(() => {
+            this.isAnimating = false
+          }, 500)
+        })
+
+        activeCamera = camera
+
+        this.onWindowResize()
+      }
+
+      // Line Materials
       this.lineMaterial = new LineMaterial({
         color: 'yellow',
         linewidth: 3,
@@ -377,6 +398,7 @@
       })
       this.highlightRegionMaterial.side = THREE.DoubleSide
 
+      // Picking
       const handlePick = (pickerCoords, color, tool) => {
         this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
           this.$root.$emit('picked', item)
@@ -415,10 +437,14 @@
       this.$refs.canvas.addEventListener('keyup', (e) => {
         if(e.keyCode == 18) {
           this.altPressed = false
+        } else if(e.keyCode == 79) { // o
+          setActiveCamera(activeCamera == cameraOrtho ? camera : cameraOrtho)
         }
       })
 
       this.lastSnaps = []
+
+      setActiveCamera(cameraOrtho)
 
       this.onWindowResize()
       setTimeout(() => this.onWindowResize(), 500)
@@ -628,7 +654,7 @@
       },
 
       render: function() {
-        renderer.render(this.scene, camera)
+        renderer.render(this.scene, activeCamera)
         this.updateWidgets()
       },
 
@@ -647,21 +673,32 @@
       onWindowResize: function() {
         const canvas = renderer.domElement
         if(!canvas) return
+        // Set canvas size
         const parent = canvas.parentElement
         const width = parent.offsetWidth
         const height = parent.offsetHeight
         renderer.setSize(width, height)
-        camera.aspect = width / height
-        camera.updateProjectionMatrix()
+        this.$refs.drawpad.setAttribute('viewBox', '0 0 ' + width + ' ' + height)
+        // Update camera projection
+        const aspect = width / height
+        if(activeCamera == camera) {
+          camera.aspect = aspect
+        } else {
+          cameraOrtho.left = - 0.5 * frustumSize * aspect / 2
+          cameraOrtho.right = 0.5 * frustumSize * aspect / 2
+          cameraOrtho.top = frustumSize / 2
+          cameraOrtho.bottom = - frustumSize / 2
+        }
+        activeCamera.updateProjectionMatrix()
+        // Update line materials
         this.lineMaterial.resolution.set(width, height)
         this.selectionLineMaterial.resolution.set(width, height)
         this.highlightLineMaterial.resolution.set(width, height)
         this.render()
-        this.$refs.drawpad.setAttribute('viewBox', '0 0 ' + width + ' ' + height)
       },
 
       fromScreen: function(coords) {
-        this.raycaster.setFromCamera(coords, camera)
+        this.raycaster.setFromCamera(coords, activeCamera)
         const intersects = this.raycaster.intersectObjects(this.scene.children)
         const hit = intersects.filter(obj => obj.object.alcProjectable)[0]
         return hit && hit.point
@@ -671,7 +708,7 @@
         const widthHalf = 0.5 * renderer.domElement.width / window.devicePixelRatio
         const heightHalf = 0.5 * renderer.domElement.height / window.devicePixelRatio
         // camera.updateMatrixWorld()
-        const vector = vec.clone().project(camera)
+        const vector = vec.clone().project(activeCamera)
         return new THREE.Vector2(
           (vector.x * widthHalf) + widthHalf,
           - (vector.y * heightHalf) + heightHalf
@@ -679,7 +716,7 @@
       },
 
       objectsAtScreen: function(coords, filter) {
-        this.raycaster.setFromCamera(coords, camera)
+        this.raycaster.setFromCamera(coords, activeCamera)
         const intersects = this.raycaster.intersectObjects(this.scene.children)
         const objects = Array.from(new Set(intersects.map(obj => obj.object)))
         return objects.filter(obj => obj[filter])

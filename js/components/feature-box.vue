@@ -151,7 +151,6 @@
     props: {
       activeTool: Object,
       activeFeature: Object,
-      activeComponent: Object,
     },
 
     data() {

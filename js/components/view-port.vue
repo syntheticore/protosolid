@@ -248,8 +248,6 @@
       cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
       cameraOrtho.position.set(0, 10, 0)
 
-      activeCamera = camera
-
       this.scene = new THREE.Scene()
       cameraOrtho.lookAt( this.scene.position )
       // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
@@ -444,7 +442,7 @@
 
       this.lastSnaps = []
 
-      setActiveCamera(cameraOrtho)
+      setActiveCamera(camera)
 
       this.onWindowResize()
       setTimeout(() => this.onWindowResize(), 500)

@@ -53,6 +53,7 @@ pub struct Ring {
 
 #[derive(Debug)]
 pub struct Edge {
+  pub id: Uuid,
   pub left_half: Ref<HalfEdge>,
   pub right_half: Ref<HalfEdge>,
   pub curve: SketchElement,
@@ -62,6 +63,7 @@ pub struct Edge {
 
 #[derive(Debug, Clone)]
 pub struct HalfEdge {
+  pub id: Uuid,
   pub next: WeakRef<Self>,
   pub previous: WeakRef<Self>,
   pub origin: Ref<Vertex>,
@@ -85,7 +87,7 @@ impl Solid {
 
   pub fn new_lamina(region: Vec<TrimmedSketchElement>, top_plane: Plane) -> Self {
     println!("Creating Lamina:");
-    println!("{:?}", region.iter().map(|r| r.bounds).collect::<Vec<(Point3, Point3)>>());
+    // println!("{:?}", region.iter().map(|r| r.bounds).collect::<Vec<(Point3, Point3)>>());
     let mut bottom = top_plane.clone();
     bottom.flip();
     // Create shell from bottom face with empty ring
@@ -97,7 +99,7 @@ impl Solid {
     let mut he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
     for elem in WireIterator::new(&region).take(region.len() - 1) {
       let points = elem.bounds;
-      println!("lmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
+      println!("\nlmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
       let (new_edge, _) = shell.lmev(&he, &he, elem.base.clone(), points.1);
       he = new_edge.borrow().left_half.clone();
     }
@@ -127,6 +129,7 @@ impl Solid {
     });
     println!("Made initial Half Edge");
     let he = rc(HalfEdge {
+      id: Uuid::new_v4(),
       previous: Weak::new(),
       next: Weak::new(),
       origin: vertex.clone(),
@@ -144,7 +147,6 @@ impl Solid {
       rings: vec![ring.clone()],
       surface,
     });
-    println!("Made initial face {:?}", face.borrow().id);
     ring.borrow_mut().face = Rc::downgrade(&face);
     {
       let mut heb = he.borrow_mut();
@@ -152,6 +154,9 @@ impl Solid {
       heb.next = Rc::downgrade(&he);
       heb.ring = Rc::downgrade(&ring);
     }
+    println!("Made initial face {:?}", face.borrow().id);
+    face.borrow().print();
+
     shell.vertices.push(vertex.clone());
     shell.faces.push(face.clone());
     self.shells.push(shell);
@@ -222,9 +227,18 @@ impl Shell {
       }
     }
     let origin = he2.borrow().origin.clone();
+    let right_half = if he1.borrow().edge.upgrade().is_some() {
+      HalfEdge::new_at(&origin, he1)
+    } else {
+      // Use empty loop half edge as left half
+      he1.borrow_mut().origin = origin.clone();
+      he1.clone()
+    };
+    let left_half = HalfEdge::new_at(&vertex, he2);
     let edge = rc(Edge {
-      left_half: HalfEdge::new_at(&vertex, he2),
-      right_half: HalfEdge::new_at(&origin, he1),
+      id: Uuid::new_v4(),
+      left_half: left_half,
+      right_half: right_half,
       curve_direction: curve.as_curve().endpoints().0.almost(p),
       curve,
     });
@@ -233,6 +247,9 @@ impl Shell {
       e.left_half.borrow_mut().edge = Rc::downgrade(&edge);
       e.right_half.borrow_mut().edge = Rc::downgrade(&edge);
     }
+    println!("Made edge");
+    self.faces[0].borrow().print();
+
     let he2b = he2.borrow_mut();
     vertex.borrow_mut().half_edge = he2b.previous.clone();
     he2b.origin.borrow_mut().half_edge = Rc::downgrade(he2);
@@ -247,6 +264,7 @@ impl Shell {
     let nhe1 = HalfEdge::new_at(&he2_origin, he1);
     let nhe2 = HalfEdge::new_at(&he1_origin, he2);
     let edge = rc(Edge {
+      id: Uuid::new_v4(),
       left_half: nhe2.clone(),
       right_half: nhe1.clone(),
       curve,
@@ -351,8 +369,7 @@ impl Face {
 
   pub fn print(&self) {
     println!("\nFace {:?}:", self.id);
-    for (i, he) in self.outer_ring.borrow().half_edge.borrow().ring_iter().enumerate() {
-      println!("  Half Edge {:?}:", i);
+    for he in self.outer_ring.borrow().half_edge.borrow().ring_iter() {
       he.borrow().print();
     }
   }
@@ -376,10 +393,10 @@ impl Ring {
 
 impl HalfEdge {
   pub fn new_at(vertex: &Ref<Vertex>, at: &Ref<Self>) -> Ref<Self> {
-    let edge = &at.borrow().edge.upgrade();
-    if let Some(_) = edge {
-      println!("Made half edge");
+    // let edge = &at.borrow().edge.upgrade();
+    // if let Some(_) = edge {
       let he = rc(Self {
+        id: Uuid::new_v4(),
         next: Rc::downgrade(at),
         previous: at.borrow().previous.clone(),
         origin: vertex.clone(),
@@ -389,12 +406,13 @@ impl HalfEdge {
       let previous = at.borrow().previous.upgrade().unwrap();
       previous.borrow_mut().next = Rc::downgrade(&he);
       at.borrow_mut().previous = Rc::downgrade(&he);
+      println!("Made half edge");
       he
-    } else {
-      println!("Reused initial half edge");
-      at.borrow_mut().origin = vertex.clone();
-      at.clone()
-    }
+    // } else {
+    //   println!("Reused initial half edge");
+    //   // at.borrow_mut().origin = vertex.clone();
+    //   at.clone()
+    // }
   }
 
   pub fn remove(&mut self) -> WeakRef<Self> {
@@ -437,11 +455,14 @@ impl HalfEdge {
   }
 
   pub fn print(&self) {
+    println!("\n  Half Edge {:?}:", self.id);
     println!("    origin   {:?}", self.origin.borrow().point);
-    println!("    face     {:?}", self.get_face().borrow().id);
-    println!("    edge     {:?}", self.edge.upgrade().is_some());
-    println!("    previous {:?}", self.previous.upgrade().is_some());
-    println!("    next     {:?}", self.next.upgrade().is_some());
+    // println!("    face     {:?}", self.get_face().borrow().id);
+    if let Some(edge) = self.edge.upgrade() {
+      println!("    edge     {:?}", edge.borrow().id);
+    }
+    // println!("    previous {:?}", self.previous.upgrade().is_some());
+    // println!("    next     {:?}", self.next.upgrade().is_some());
   }
 }
 

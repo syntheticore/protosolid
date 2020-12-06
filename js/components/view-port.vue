@@ -345,7 +345,7 @@
       })
 
       // Grid
-      var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
+      var groundGeo = new THREE.PlaneBufferGeometry(200, 200)
       // groundGeo.rotateX(- Math.PI / 2)
       var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
       ground.material.depthWrite = false
@@ -843,6 +843,7 @@
       componentChanged: function(comp, recursive) {
         this.scene.remove(this.previewMesh)
         this.loadTree(comp, recursive)
+        this.paths = []
         this.render()
       },
 

@@ -103,10 +103,10 @@ impl Solid {
       let (new_edge, _) = shell.lmev(&he, &he, elem.base.clone(), points.1);
       he = new_edge.borrow().left_half.clone();
     }
-    // // Create top face
-    // let he1 = shell.edges[0].borrow().right_half.clone();
-    // let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
-    // shell.lmef(&he1, &he2, first_elem.base, Box::new(top_plane));
+    // Create top face
+    let he1 = shell.edges[0].borrow().right_half.clone();
+    let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
+    shell.lmef(&he1, &he2, first_elem.base, Box::new(top_plane));
     this
   }
 
@@ -457,9 +457,11 @@ impl HalfEdge {
   pub fn print(&self) {
     println!("\n  Half Edge {:?}:", self.id);
     println!("    origin   {:?}", self.origin.borrow().point);
-    // println!("    face     {:?}", self.get_face().borrow().id);
+    println!("    face     {:?}", self.get_face().borrow().id);
     if let Some(edge) = self.edge.upgrade() {
       println!("    edge     {:?}", edge.borrow().id);
+    } else {
+      println!("    edge     none");
     }
     // println!("    previous {:?}", self.previous.upgrade().is_some());
     // println!("    next     {:?}", self.next.upgrade().is_some());

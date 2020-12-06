@@ -220,6 +220,9 @@
     mounted: function() {
       THREE.Object3D.DefaultUp = new THREE.Vector3(0, 0, 1)
 
+      this.lastSnaps = []
+
+      // Renderer
       renderer = new THREE.WebGLRenderer({
         canvas: this.$el.querySelector('canvas'),
         // antialias: window.devicePixelRatio <= 1.0,
@@ -240,6 +243,7 @@
       // renderer.toneMappingExposure = 1.2
       // renderer.setClearColor(0x263238)
 
+      // Camera
       this.raycaster = new THREE.Raycaster()
 
       camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
@@ -248,6 +252,7 @@
       cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
       cameraOrtho.position.set(0, 10, 0)
 
+      // Scene
       this.scene = new THREE.Scene()
       cameraOrtho.lookAt( this.scene.position )
       // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
@@ -264,21 +269,54 @@
       var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
       this.scene.add(atmosphere)
 
-      // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
-      // var material = new THREE.MeshStandardMaterial({
-      //   color: 'coral',
-      //   roughness: 0,
-      //   metalness: 0.1,
-      // })
+      var pmremGenerator = new THREE.PMREMGenerator(renderer)
+      pmremGenerator.compileCubemapShader()
 
-      // mesh = new THREE.Mesh(torusGeometry, material)
-      // mesh.position.y = 1.8
-      // mesh.castShadow = true
-      // mesh.receiveShadow = true
-      // // mesh.alcSelectable = true
-      // // mesh.visible = false
-      // this.scene.add(mesh)
+      new HDRCubeTextureLoader()
+      .setPath('textures/cubemap/')
+      .setDataType(THREE.UnsignedByteType)
+      .load(['px.hdr', 'nx.hdr', 'py.hdr', 'ny.hdr', 'pz.hdr', 'nz.hdr'], (texture) => {
+        var envMap = pmremGenerator.fromCubemap(texture).texture
+        this.scene.environment = envMap
+        texture.dispose()
+        pmremGenerator.dispose()
+        this.render()
+      })
 
+      // Materials
+      this.lineMaterial = new LineMaterial({
+        color: 'yellow',
+        linewidth: 3,
+        vertexColors: true,
+        dashed: false
+      })
+
+      this.selectionLineMaterial = this.lineMaterial.clone()
+      this.selectionLineMaterial.color.set('#0070ff')
+
+      this.highlightLineMaterial = this.lineMaterial.clone()
+      this.highlightLineMaterial.color.set('#2590e1')
+
+      this.regionMaterial = new THREE.MeshBasicMaterial({
+        side: THREE.DoubleSide,
+        color: new THREE.Color(Math.random(), Math.random(), Math.random()),
+      })
+
+      this.highlightRegionMaterial = new THREE.MeshBasicMaterial({
+        side: THREE.DoubleSide,
+        color: new THREE.Color('mint'),
+        transparent: true,
+        opacity: 0.5,
+      })
+
+      this.surfaceMaterial = new THREE.MeshStandardMaterial({
+        side: THREE.DoubleSide,
+        color: 'coral',
+        roughness: 0.15,
+        metalness: 0.1,
+      })
+
+      // Grid
       var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
       // groundGeo.rotateX(- Math.PI / 2)
       var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2, side: THREE.DoubleSide}))
@@ -295,19 +333,14 @@
       grid.material.depthWrite = false
       this.scene.add(grid)
 
-      var pmremGenerator = new THREE.PMREMGenerator(renderer)
-      pmremGenerator.compileCubemapShader()
-
-      new HDRCubeTextureLoader()
-      .setPath('textures/cubemap/')
-      .setDataType(THREE.UnsignedByteType)
-      .load(['px.hdr', 'nx.hdr', 'py.hdr', 'ny.hdr', 'pz.hdr', 'nz.hdr'], (texture) => {
-        var envMap = pmremGenerator.fromCubemap(texture).texture
-        this.scene.environment = envMap
-        texture.dispose()
-        pmremGenerator.dispose()
-        this.render()
-      })
+      // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
+      // mesh = new THREE.Mesh(torusGeometry, material)
+      // mesh.position.y = 1.8
+      // mesh.castShadow = true
+      // mesh.receiveShadow = true
+      // // mesh.alcSelectable = true
+      // // mesh.visible = false
+      // this.scene.add(mesh)
 
       // Transform Controls
       this.transformControl = new TransformControls(camera, renderer.domElement)
@@ -374,29 +407,7 @@
         this.onWindowResize()
       }
 
-      // Line Materials
-      this.lineMaterial = new LineMaterial({
-        color: 'yellow',
-        linewidth: 3,
-        vertexColors: true,
-        dashed: false
-      })
-
-      this.selectionLineMaterial = this.lineMaterial.clone()
-      this.selectionLineMaterial.color.set('#0070ff')
-
-      this.highlightLineMaterial = this.lineMaterial.clone()
-      this.highlightLineMaterial.color.set('#2590e1')
-
-      this.highlightRegionMaterial = new THREE.MeshBasicMaterial({
-        color: new THREE.Color('blue'),
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.5,
-      })
-      this.highlightRegionMaterial.side = THREE.DoubleSide
-
-      // Picking
+      // Events
       const handlePick = (pickerCoords, color, tool) => {
         this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
           this.$root.$emit('picked', item)
@@ -440,15 +451,14 @@
         }
       })
 
-      this.lastSnaps = []
-
-      setActiveCamera(camera)
-
-      this.onWindowResize()
-      setTimeout(() => this.onWindowResize(), 500)
       this.$root.$on('resize', () => this.onWindowResize() )
 
+      // Init tree
       this.loadTree(this.document.tree, true)
+
+      setActiveCamera(camera)
+      this.onWindowResize()
+      setTimeout(() => this.onWindowResize(), 500)
 
       document._debug = {} || document._debug
       document._debug.viewport = this
@@ -777,10 +787,11 @@
         this.unloadTree(node, this.document, recursive)
         if(this.document.data[node.id()].hidden) return
         // Load bodies
-        // let mesh = node.get_mesh()
-        // console.log(mesh)
-        let wireframe = node.get_wireframe()
-        console.log(wireframe)
+        let mesh = node.get_mesh()
+        console.log(mesh)
+        this.scene.add(this.convertMesh(mesh, this.surfaceMaterial))
+        // let wireframe = node.get_wireframe()
+        // console.log(wireframe)
         // Load sketch elements
         const elements = node.get_sketch().get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
@@ -799,36 +810,25 @@
         this.render()
       },
 
+      convertMesh: function(bufferGeometry, material) {
+        const geometry = new THREE.BufferGeometry()
+        const vertices = new Float32Array(bufferGeometry.position())
+        const normals = new Float32Array(Array(vertices.length / 3).fill([0,1,0]).flat())
+        const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
+        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+        // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
+        // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+        return new THREE.Mesh(geometry, material)
+      },
+
       elementChanged: function(elem, comp) {
-        // const elements = comp.get_sketch().get_sketch_elements()
-        // console.log(elements.map(elem => elem.get_handles()))
-        // const regionInfo = comp.get_region_info()
-        // console.log('regionInfo', {
-        //   cut: regionInfo.cut,
-        //   islands: regionInfo.islands,
-        //   regions: regionInfo.regions,
-        // })
         const regions = comp.get_sketch().get_regions(false)
-        console.log(regions.length)
+        console.log('# regions: ', regions.length)
         this.regionMeshes = this.regionMeshes || []
         this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
         this.regionMeshes = regions.map(region => {
-          const poly = region.get_polyline();
-          const geometry = new THREE.BufferGeometry()
-          const vertices = new Float32Array(poly.position())
-          const normals = new Float32Array(Array(vertices.length / 3).fill([0,1,0]).flat())
-          const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
-          // console.log(vertices)
-          // console.log(normals)
-          // console.log(uvs)
-          geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
-          geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
-          // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
-          // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
-
-          const material = new THREE.MeshBasicMaterial({color: new THREE.Color(Math.random(), Math.random(), Math.random())})
-          material.side = THREE.DoubleSide
-          const mesh = new THREE.Mesh(geometry, material)
+          const mesh = this.convertMesh(region.get_mesh(), this.highlightSurfaceMaterial)
           mesh.alcRegion = region
           this.scene.add(mesh)
           return mesh

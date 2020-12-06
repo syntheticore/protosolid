@@ -203,7 +203,7 @@ pub struct JsRegion {
 
 #[wasm_bindgen]
 impl JsRegion {
-  pub fn get_polyline(&self) -> JsValue {
+  pub fn get_mesh(&self) -> JsValue {
     let poly = geom2d::poly_from_wire(&self.region.iter().map(|elem| elem.cache.clone() ).collect());
     JsValue::from(JsBufferGeometry {
       position: geom2d::tesselate_polygon(poly).to_buffer_geometry(),

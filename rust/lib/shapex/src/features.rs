@@ -9,19 +9,44 @@ use crate::solid::*;
 pub trait Feature {}
 
 
-pub fn extrude(_region: Vec<TrimmedSketchElement>, _distance: f64) -> Solid {
-  // let mut solid = Solid::new_lamina(region, Plane::default());
+pub fn extrude(region: Vec<TrimmedSketchElement>, _distance: f64) -> Solid {
+  let solid = Solid::new_lamina(region, Plane::default());
   // let shell = &mut solid.shells[0];
   // shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
-  // solid
-  make_cube2(1.0, 1.0, 1.0)
+  solid
+  // make_cube(1.0, 1.0, 1.0)
 }
 
 pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {
 
 }
 
-pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
+pub fn make_cube(dx: f64, dy: f64, _dz: f64) -> Solid {
+  let points = [
+    Point3::new(0.0, 0.0, 0.0),
+    Point3::new(dx, 0.0, 0.0),
+    Point3::new(dx, dy, 0.0),
+    Point3::new(0.0, dy, 0.0),
+  ];
+  let mut region = vec![];
+  let mut iter = points.iter().peekable();
+  while let Some(&p) = iter.next() {
+    let next = if let Some(&next) = iter.peek() {
+      next
+    } else {
+      &points[0]
+    };
+    region.push(TrimmedSketchElement::new(make_line(p, *next)));
+  }
+  // let mut solid = Solid::new();
+  // solid.mvfs(points[0], Box::new(Plane::default()));
+  let solid = Solid::new_lamina(region, Plane::default());
+  // let shell = &mut solid.shells[0];
+  // shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, _dz));
+  solid
+}
+
+pub fn make_cube2(dx: f64, dy: f64, dz: f64) -> Solid {
   let mut top = Box::new(Plane::default());
   let mut bottom = top.clone();
   bottom.flip();
@@ -52,121 +77,9 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
   solid
 }
 
-pub fn make_cube2(dx: f64, dy: f64, _dz: f64) -> Solid {
-  let points = [
-    Point3::new(0.0, 0.0, 0.0),
-    Point3::new(dx, 0.0, 0.0),
-    Point3::new(dx, dy, 0.0),
-    Point3::new(0.0, dy, 0.0),
-  ];
-  let mut region = vec![];
-  let mut iter = points.iter().peekable();
-  while let Some(&p) = iter.next() {
-    let next = if let Some(&next) = iter.peek() {
-      next
-    } else {
-      &points[0]
-    };
-    region.push(TrimmedSketchElement::new(make_line(p, *next)));
-  }
-  // let mut solid = Solid::new();
-  // solid.mvfs(points[0], Box::new(Plane::default()));
-  let solid = Solid::new_lamina(region, Plane::default());
-  // let shell = &mut solid.shells[0];
-  // shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, _dz));
-  solid
-}
-
-// pub fn make_cube3(dx: f64, dy: f64, _dz: f64) -> Solid {
-//   let points = [
-//     Point3::new(0.0, 0.0, 0.0),
-//     Point3::new(dx, 0.0, 0.0),
-//     Point3::new(dx, dy, 0.0),
-//     Point3::new(0.0, dy, 0.0),
-//   ];
-//   let shell = Shell {
-//     closed: true,
-//     faces: vec![],
-//     edges: vec![],
-//     vertices: vec![],
-//   };
-
-//   // let mut region = vec![];
-//   // let mut half_edges = vec![];
-//   let mut iter = points.iter().peekable();
-//   while let Some(&_p) = iter.next() {
-//     let _next = if let Some(&next) = iter.peek() {
-//       next
-//     } else {
-//       &points[0]
-//     };
-//     // region.push(make_line(p, *next));
-
-//   }
-//   // let ring = rc(Ring {
-//   //   half_edge: he.clone(),
-//   //   face: Weak::new(),
-//   // });
-//   // let face = rc(Face {
-//   //   outer_ring: ring.clone(),
-//   //   rings: vec![ring.clone()],
-//   //   surface,
-//   // });
-//   let solid = Solid { shells: vec![shell] };
-//   solid
-// }
-
 fn make_line(p1: Point3, p2: Point3) -> SketchElement {
   Line::new(p1, p2).into_enum()
 }
-
-// pub fn extrude_region(region: Vec<TrimmedSketchElement>, _distance: f64) -> Solid {
-//   let shell = Shell {
-//     closed: true,
-//     faces: vec![],
-//     edges: vec![],
-//     vertices: vec![],
-//   };
-
-//   for elem in region {
-//     let vertex = rc(Vertex {
-//       point: elem.bounds.0,
-//       half_edge: Weak::new(),
-//     });
-//     let left_he = rc(HalfEdge {
-//       next: Weak::new(), //XXX
-//       previous: Weak::new(), //XXX
-//       origin: vertex.clone(),
-//       ring: Weak::new(), //XXX
-//       edge: Weak::new(),
-//     });
-//     vertex.borrow_mut().half_edge = Rc::downgrade(&left_he);
-//     let edge = rc(Edge {
-//       left_half: left_he.clone(),
-//       right_half: left_he.clone(),
-//       curve: elem.clone(),
-//       curve_direction: true, //XXX
-//     });
-//     left_he.borrow_mut().edge = Rc::downgrade(&edge);
-//     let right_he = left_he.borrow().clone();
-//     // right_he.next =
-//     let _right_he = rc(right_he);
-//   }
-
-//   // let bottom = Face {
-//   //   outer_ring: region_edges[0].clone(),
-//   //   inner_rings: vec![],
-//   //   surface: TrimmedSurface {
-//   //     base: Box::new(Plane::default()),
-//   //     bounds: vec![region],
-//   //   },
-//   // };
-//   // shell.faces.push(bottom);
-
-//   Solid {
-//     shells: vec![shell],
-//   }
-// }
 
 
 #[cfg(test)]

@@ -145,6 +145,17 @@ pub struct JsBufferGeometry {
 
 #[wasm_bindgen]
 impl JsBufferGeometry {
+  pub fn from(buffer_geometry: Vec<f64>) -> Self {
+    Self {
+      position: buffer_geometry,
+      normal: vec![],
+    }
+  }
+
+  fn from_body(body: &Solid) -> Self {
+    Self::from(body.tesselate().to_buffer_geometry())
+  }
+
   pub fn position(&self) -> JsValue {
     JsValue::from_serde(&self.position).unwrap()
   }
@@ -205,15 +216,24 @@ pub struct JsRegion {
 impl JsRegion {
   pub fn get_mesh(&self) -> JsValue {
     let poly = geom2d::poly_from_wire(&self.region.iter().map(|elem| elem.cache.clone() ).collect());
-    JsValue::from(JsBufferGeometry {
-      position: geom2d::tesselate_polygon(poly).to_buffer_geometry(),
-      normal: vec![],
-    })
+    JsValue::from(JsBufferGeometry::from(geom2d::tesselate_polygon(poly).to_buffer_geometry()))
+  }
+
+  pub fn get_center(&self) -> JsValue {
+    let center = self.region.iter().fold(
+      Point3::new(0.0, 0.0, 0.0),
+      |acc, elem| acc + elem.bounds.0.to_vec() + elem.bounds.1.to_vec()
+    ) / (self.region.len() as f64 * 2.0);
+    point_to_js(center)
   }
 
   pub fn extrude(&self, distance: f64) {
     let tool = features::extrude(self.region.clone(), distance);
     Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
+  }
+
+  pub fn extrude_preview(&self, distance: f64) -> JsValue {
+    JsValue::from(JsBufferGeometry::from_body(&features::extrude(self.region.clone(), distance)))
   }
 }
 
@@ -236,20 +256,6 @@ impl JsSketch {
     self.real.borrow().sketch.elements.iter().map(|elem| {
       JsValue::from(JsSketchElement::from(elem))
     }).collect()
-  }
-
-  pub fn add_segment(&self) {
-    let spline = BezierSpline::new(vec![
-      Point3::new(0.0, 0.0, 1.0),
-      Point3::new(1.0, 0.0, 1.25),
-      Point3::new(1.0, 1.0, 1.5),
-      Point3::new(0.0, 1.0, 1.75),
-      Point3::new(0.0, 0.0, 2.0),
-      Point3::new(1.0, 0.0, 2.25),
-      Point3::new(1.0, 1.0, 2.5),
-      Point3::new(0.0, 1.0, 2.75),
-    ]);
-    self.real.borrow_mut().sketch.elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
   }
 
   pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsSketchElement {
@@ -318,14 +324,6 @@ impl JsSketch {
 }
 
 
-fn js_mesh_from_body(body: &Solid) -> JsValue {
-  JsValue::from(JsBufferGeometry {
-    position: body.tesselate().to_buffer_geometry(),
-    normal: vec![],
-  })
-}
-
-
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct JsComponent {
@@ -366,7 +364,11 @@ impl JsComponent {
   pub fn get_mesh(&self) -> JsValue {
     let bodies = &self.real.borrow().bodies;
     if bodies.len() > 0 {
-      js_mesh_from_body(&bodies[0])
+      let mut mesh = JsBufferGeometry::from_body(&bodies[0]);
+      for body in bodies.iter().skip(1) {
+        mesh.position.append(&mut body.tesselate().to_buffer_geometry())
+      }
+      JsValue::from(mesh)
     } else { JsValue::UNDEFINED }
   }
 
@@ -375,7 +377,7 @@ impl JsComponent {
     if bodies.len() == 0 {
       return Array::new_with_length(0);
     }
-    bodies[0].shells[0].edges.iter().map(|edge| {
+    bodies.iter().flat_map(|body| &body.shells[0].edges ).map(|edge| {
       let edge = edge.borrow();
       let left = edge.left_half.borrow().origin.borrow().point;
       let right = edge.right_half.borrow().origin.borrow().point;

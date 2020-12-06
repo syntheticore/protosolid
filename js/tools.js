@@ -109,7 +109,7 @@ export class ObjectSelectionTool extends SelectionTool {
 export class ProfileSelectionTool extends SelectionTool {
   select(coords) {
     const object = this.viewport.objectsAtScreen(coords, 'alcRegion')[0]
-    return object && [object.alcRegion, new THREE.Vector3().fromArray(object.alcRegion.get_mesh().position())]
+    return object && [object.alcRegion, new THREE.Vector3().fromArray(object.alcRegion.get_center())]
   }
 }
 

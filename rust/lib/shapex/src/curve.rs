@@ -2,7 +2,6 @@ use std::ptr;
 use std::convert::TryInto;
 
 use uuid::Uuid;
-use cgmath::prelude::*;
 
 use crate::base::*;
 use intersection::CurveIntersection;

@@ -9,20 +9,23 @@
       label(v-for="(fields, key) in activeFeature.settings")
         | {{ fields.title }}
         .picker(
-          v-if="fields.type == 'profile' || fields.type == 'curve'" @click="pick(fields.type, key, fields.color)"
+          v-if="fields.type == 'profile' || fields.type == 'curve'"
           :ref="key"
           :class="{active: activePicker == key, filled: activeFeature[key]}"
           :data-color="fields.color"
+          @click="pick(fields.type, key, fields.color)"
         )
         input(
           v-if="fields.type == 'length'"
           type="number"
           v-model="activeFeature[key]"
+          @change="update"
         )
         input(
           v-if="fields.type == 'bool'"
           type="checkbox"
           v-model="activeFeature[key]"
+          @change="update"
         )
         select(v-if="fields.type == 'select'")
           option(v-for="option in fields.options") {{ option }}
@@ -163,8 +166,7 @@
       pick: function(type, name, color) {
         this.$root.$once('picked', (item) => {
           this.activeFeature[name] = item
-          this.activeFeature.update()
-          this.$root.$emit('component-changed', this.activeFeature.component)
+          this.update()
           this.activePicker = null
         })
         this.activePicker = name
@@ -181,13 +183,20 @@
         }
       },
 
+      update: function() {
+        const mesh = this.activeFeature.update()
+        this.$root.$emit('preview-feature', this.activeFeature.component, mesh)
+      },
+
       confirm: function(e) {
         this.activeFeature.confirm()
+        this.$root.$emit('component-changed', this.activeFeature.component)
         this.$emit('confirm')
       },
 
       cancel: function(e) {
         this.activeFeature.cancel()
+        this.$root.$emit('component-changed', this.activeFeature.component)
         this.$emit('cancel')
       },
     },

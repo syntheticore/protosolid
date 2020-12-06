@@ -297,9 +297,13 @@
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('#2590e1')
 
+      this.wireMaterial = this.lineMaterial.clone()
+      this.wireMaterial.color.set('gray')
+      this.wireMaterial.linewidth = 2
+
       // Line Materials
       this.lineBasicMaterial = new THREE.LineBasicMaterial({
-        color: 'black',
+        color: 'gray',
         dashed: false
       })
 
@@ -320,10 +324,24 @@
 
       // Surface Materials
       this.surfaceMaterial = new THREE.MeshStandardMaterial({
-        side: THREE.DoubleSide,
-        color: 'coral',
+        side: THREE.DoubleSide, //XXX remove
+        color: 'gray',
         roughness: 0.15,
-        metalness: 0.1,
+        metalness: 0.2,
+      })
+
+      this.previewAddSurfaceMaterial = new THREE.MeshStandardMaterial({
+        side: THREE.DoubleSide, //XXX remove
+        color: '#0090ff',
+        transparent: true,
+        opacity: 0.4,
+      })
+
+      this.previewSubtractSurfaceMaterial = new THREE.MeshStandardMaterial({
+        side: THREE.DoubleSide, //XXX remove
+        color: 'red',
+        transparent: true,
+        opacity: 0.4,
       })
 
       // Grid
@@ -444,6 +462,9 @@
 
       this.$root.$on('component-changed', this.componentChanged)
 
+      this.$root.$on('preview-feature', this.previewFeature)
+
+      // Key presses
       this.$refs.canvas.addEventListener('keydown', (e) => {
         if(e.keyCode == 46 || e.keyCode == 8) { // Del / Backspace
           if(this.selectedElement) this.deleteElement(this.selectedElement)
@@ -461,14 +482,14 @@
         }
       })
 
-      this.$root.$on('resize', () => this.onWindowResize() )
-
       // Init tree
       this.loadTree(this.document.tree, true)
 
+      // Init viewport
       setActiveCamera(camera)
       this.onWindowResize()
       setTimeout(() => this.onWindowResize(), 500)
+      this.$root.$on('resize', () => this.onWindowResize() )
 
       document._debug = {} || document._debug
       document._debug.viewport = this
@@ -712,6 +733,7 @@
         this.lineMaterial.resolution.set(width, height)
         this.selectionLineMaterial.resolution.set(width, height)
         this.highlightLineMaterial.resolution.set(width, height)
+        this.wireMaterial.resolution.set(width, height)
         this.render()
       },
 
@@ -786,18 +808,24 @@
       },
 
       loadTree: function(node, recursive) {
+        const nodeId = node.id()
         this.unloadTree(node, this.document, recursive)
-        if(this.document.data[node.id()].hidden) return
-        // Load bodies
+        if(this.document.data[nodeId].hidden) return
+        // Load mesh
         let mesh = node.get_mesh()
-        if(mesh) this.scene.add(this.convertMesh(mesh, this.surfaceMaterial))
-
+        if(mesh) {
+          mesh = this.convertMesh(mesh, this.surfaceMaterial)
+          this.scene.add(mesh)
+          this.document.data[nodeId].mesh = mesh
+        }
+        // Load wireframe
+        this.document.data[nodeId].wireframe = []
         let wireframe = node.get_wireframe()
         wireframe.forEach(edge => {
-          const line = this.convertLineBasic(edge, this.lineMaterial)
+          const line = this.convertLine(edge, this.wireMaterial)
           this.scene.add(line)
+          this.document.data[nodeId].wireframe.push(line)
         })
-
         // Load sketch elements
         const elements = node.get_sketch().get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
@@ -807,12 +835,22 @@
       unloadTree: function(node, document, recursive) {
         const nodeId = node.id()
         document.data[nodeId].cachedElements.forEach(elem => this.unloadElement(elem, node, document))
+        document.data[nodeId].wireframe.forEach(edge => this.scene.remove(edge))
+        this.scene.remove(document.data[nodeId].mesh)
         if(recursive) node.get_children().forEach(child => this.unloadTree(child, document, true))
       },
 
       componentChanged: function(comp, recursive) {
+        this.scene.remove(this.previewMesh)
         this.loadTree(comp, recursive)
         this.render()
+      },
+
+      previewFeature: function(comp, mesh) {
+        this.scene.remove(this.previewMesh)
+        this.previewMesh = this.convertMesh(mesh, this.previewAddSurfaceMaterial);
+        this.scene.add(this.previewMesh)
+        this.render();
       },
 
       convertLine: function(vertices, material) {
@@ -828,7 +866,7 @@
       convertLineBasic: function(line, material) {
         var geometry = new THREE.Geometry();
         geometry.vertices = line.map(vertex => new THREE.Vector3().fromArray(vertex))
-        return new THREE.Line(geometry, this.lineBasicMaterial);
+        return new THREE.Line(geometry, material);
       },
 
       convertMesh: function(bufferGeometry, material) {

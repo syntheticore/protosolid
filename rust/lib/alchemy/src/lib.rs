@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use uuid::Uuid;
-use cgmath::prelude::*;
 
 pub use shapex::*;
 

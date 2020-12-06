@@ -1,5 +1,3 @@
-use cgmath::prelude::*;
-
 use crate::base::*;
 use crate::curve::*;
 use crate::curve::intersection::CurveIntersection;

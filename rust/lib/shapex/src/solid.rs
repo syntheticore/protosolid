@@ -414,26 +414,19 @@ impl Edge {
 
 impl HalfEdge {
   pub fn new_at(vertex: &Ref<Vertex>, at: &Ref<Self>) -> Ref<Self> {
-    // let edge = &at.borrow().edge.upgrade();
-    // if let Some(_) = edge {
-      let he = rc(Self {
-        id: Uuid::new_v4(),
-        next: Rc::downgrade(at),
-        previous: at.borrow().previous.clone(),
-        origin: vertex.clone(),
-        ring: at.borrow().ring.clone(),
-        edge: Weak::new(),
-      });
-      let previous = at.borrow().previous.upgrade().unwrap();
-      previous.borrow_mut().next = Rc::downgrade(&he);
-      at.borrow_mut().previous = Rc::downgrade(&he);
-      println!("  Made half edge");
-      he
-    // } else {
-    //   println!("Reused initial half edge");
-    //   // at.borrow_mut().origin = vertex.clone();
-    //   at.clone()
-    // }
+    let he = rc(Self {
+      id: Uuid::new_v4(),
+      next: Rc::downgrade(at),
+      previous: at.borrow().previous.clone(),
+      origin: vertex.clone(),
+      ring: at.borrow().ring.clone(),
+      edge: Weak::new(),
+    });
+    let previous = at.borrow().previous.upgrade().unwrap();
+    previous.borrow_mut().next = Rc::downgrade(&he);
+    at.borrow_mut().previous = Rc::downgrade(&he);
+    println!("  Made half edge");
+    he
   }
 
   pub fn remove(&mut self) -> WeakRef<Self> {

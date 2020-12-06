@@ -195,6 +195,8 @@
       integrateComponent: function(comp) {
         this.$set(this.document.data, comp.id(), {
           hidden: false,
+          mesh: null,
+          wireframe: [],
           cachedElements: [],
         })
       },

@@ -137,7 +137,7 @@
       splitAll: function() {
         // const regions = this.activeComponent.get_regions()
         // console.log('Regions', regions)
-        const splits = this.activeComponent.get_all_split()
+        const splits = this.activeComponent.get_sketch().get_all_split()
         // const elems = this.activeComponent.get_sketch_elements()
         // // .map(elem => elem.get_handles())
         // elems.forEach(elem => {

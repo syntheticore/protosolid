@@ -99,14 +99,14 @@ impl Solid {
     let mut he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
     for elem in WireIterator::new(&region).take(region.len() - 1) {
       let points = elem.bounds;
-      println!("\nlmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
-      let (new_edge, _) = shell.lmev(&he, &he, elem.base.clone(), points.1);
+      println!("\n-> lmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
+      let (new_edge, _) = shell.lmev(&he, &he, elem.cache.clone(), points.1); //XXX cache -> base
       he = new_edge.borrow().left_half.clone();
     }
     // Create top face
     let he1 = shell.edges[0].borrow().right_half.clone();
     let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
-    shell.lmef(&he1, &he2, first_elem.base, Box::new(top_plane));
+    shell.lmef(&he1, &he2, first_elem.cache, Box::new(top_plane)); //XXX cache -> base
     this
   }
 
@@ -247,18 +247,33 @@ impl Shell {
       e.left_half.borrow_mut().edge = Rc::downgrade(&edge);
       e.right_half.borrow_mut().edge = Rc::downgrade(&edge);
     }
-    println!("Made edge");
-    self.faces[0].borrow().print();
-
-    let he2b = he2.borrow_mut();
-    vertex.borrow_mut().half_edge = he2b.previous.clone();
-    he2b.origin.borrow_mut().half_edge = Rc::downgrade(he2);
+    {
+      let he2b = he2.borrow_mut();
+      vertex.borrow_mut().half_edge = he2b.previous.clone();
+      he2b.origin.borrow_mut().half_edge = Rc::downgrade(he2);
+    }
     self.vertices.push(vertex.clone());
     self.edges.push(edge.clone());
+    println!("<- completed lmev");
+    self.print();
     (edge, vertex)
   }
 
   pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: SketchElement, surface: Box<dyn Surface>) -> (Ref<Edge>, Ref<Face>) {
+    let ring = rc(Ring {
+      // half_edge: nhe1.clone(),
+      half_edge: he1.clone(), // using he1 as dummy, just to be able to create the ring...
+      face: Weak::new(),
+    });
+    //XXX this should happen before #new_at
+    let mut he = he1.clone();
+    while !Rc::ptr_eq(&he, he2) {
+      he = {
+        let mut heb = he.borrow_mut();
+        heb.ring = Rc::downgrade(&ring);
+        heb.next.upgrade().unwrap().clone()
+      }
+    }
     let he1_origin = he1.borrow().origin.clone();
     let he2_origin = he2.borrow().origin.clone();
     let nhe1 = HalfEdge::new_at(&he2_origin, he1);
@@ -270,26 +285,20 @@ impl Shell {
       curve,
       curve_direction: true, //XXX
     });
-    let ring = rc(Ring {
-      half_edge: nhe1.clone(),
-      face: Weak::new(),
-    });
+    {
+      let e = edge.borrow();
+      e.left_half.borrow_mut().edge = Rc::downgrade(&edge);
+      e.right_half.borrow_mut().edge = Rc::downgrade(&edge);
+    }
+    ring.borrow_mut().half_edge = nhe1.clone(); // ... now assigning real value
     let face = rc(Face {
       id: Uuid::new_v4(),
       outer_ring: ring.clone(),
       rings: vec![ring.clone()],
       surface,
     });
-    println!("Made face {:?}", face.borrow().id);
+    println!("  Made face {:?}", face.borrow().id);
     ring.borrow_mut().face = Rc::downgrade(&face);
-    let mut he = he1.clone();
-    while !Rc::ptr_eq(&he, he2) {
-      he = {
-        let mut heb = he.borrow_mut();
-        heb.ring = Rc::downgrade(&ring);
-        heb.next.upgrade().unwrap().clone()
-      }
-    }
     {
       let previous = nhe1.borrow().previous.upgrade().unwrap();
       previous.borrow_mut().next = Rc::downgrade(&nhe2);
@@ -300,7 +309,7 @@ impl Shell {
       let temp = nhe1b.previous.clone();
       nhe1b.previous = nhe2b.previous.clone();
       nhe2b.previous = temp;
-      nhe1b.ring = Rc::downgrade(&ring);
+      // nhe1b.ring = Rc::downgrade(&ring);
     }
     he2.borrow().ring.upgrade().unwrap().borrow_mut().half_edge = nhe2;
     self.edges.push(edge.clone());
@@ -350,10 +359,14 @@ impl Shell {
   }
 
   pub fn print(&self) {
-    println!("\nDebug Info: Shell");
-    println!("Faces {:?}, Edges {:?}, Vertices {:?}", self.faces.len(), self.edges.len(), self.vertices.len());
-    for face in self.faces.iter() {
+    println!("\n  Debug Info: Shell");
+    println!("  -------------------");
+    println!("  Faces {:?}, Edges {:?}, Vertices {:?}", self.faces.len(), self.edges.len(), self.vertices.len());
+    for face in &self.faces {
       face.borrow().print();
+    }
+    for edge in &self.edges {
+      edge.borrow().print();
     }
   }
 }
@@ -368,7 +381,7 @@ impl Face {
   }
 
   pub fn print(&self) {
-    println!("\nFace {:?}:", self.id);
+    println!("\n  Face {:?}:", self.id);
     for he in self.outer_ring.borrow().half_edge.borrow().ring_iter() {
       he.borrow().print();
     }
@@ -391,6 +404,15 @@ impl Ring {
 }
 
 
+impl Edge {
+  pub fn print(&self) {
+    println!("\n  Edge {:?}", self.id);
+    println!("    left_half {:?}", self.left_half.borrow().id);
+    println!("    right_half {:?}", self.right_half.borrow().id);
+  }
+}
+
+
 impl HalfEdge {
   pub fn new_at(vertex: &Ref<Vertex>, at: &Ref<Self>) -> Ref<Self> {
     // let edge = &at.borrow().edge.upgrade();
@@ -406,7 +428,7 @@ impl HalfEdge {
       let previous = at.borrow().previous.upgrade().unwrap();
       previous.borrow_mut().next = Rc::downgrade(&he);
       at.borrow_mut().previous = Rc::downgrade(&he);
-      println!("Made half edge");
+      println!("  Made half edge");
       he
     // } else {
     //   println!("Reused initial half edge");
@@ -455,13 +477,13 @@ impl HalfEdge {
   }
 
   pub fn print(&self) {
-    println!("\n  Half Edge {:?}:", self.id);
-    println!("    origin   {:?}", self.origin.borrow().point);
-    println!("    face     {:?}", self.get_face().borrow().id);
+    println!("\n    Half Edge {:?}:", self.id);
+    println!("      origin   {:?}", self.origin.borrow().point);
+    println!("      face     {:?}", self.get_face().borrow().id);
     if let Some(edge) = self.edge.upgrade() {
-      println!("    edge     {:?}", edge.borrow().id);
+      println!("      edge     {:?}", edge.borrow().id);
     } else {
-      println!("    edge     none");
+      println!("      edge     none");
     }
     // println!("    previous {:?}", self.previous.upgrade().is_some());
     // println!("    next     {:?}", self.next.upgrade().is_some());

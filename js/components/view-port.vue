@@ -232,6 +232,7 @@
 
       renderer.setPixelRatio(window.devicePixelRatio)
       renderer.outputEncoding = THREE.sRGBEncoding
+      renderer.toneMapping = THREE.ACESFilmicToneMapping
       renderer.physicallyCorrectLights = true
       renderer.shadowMap.enabled = true
       renderer.shadowMap.autoUpdate = false
@@ -239,7 +240,6 @@
       // renderer.shadowMap.type = THREE.VSMShadowMap
       // renderer.toneMapping = THREE.ReinhardToneMapping
       // renderer.toneMapping = THREE.LinearToneMapping
-      renderer.toneMapping = THREE.ACESFilmicToneMapping
       // renderer.toneMappingExposure = 1.2
       // renderer.setClearColor(0x263238)
 
@@ -247,10 +247,10 @@
       this.raycaster = new THREE.Raycaster()
 
       camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
-      camera.position.set(6, 4, 6)
+      camera.position.set(6, 6, 4)
 
       cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
-      cameraOrtho.position.set(0, 10, 0)
+      cameraOrtho.position.set(0, 0, 10)
 
       // Scene
       this.scene = new THREE.Scene()
@@ -258,7 +258,7 @@
       // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
       // this.scene.add(new THREE.AmbientLight(0x666666))
       var sun = new THREE.DirectionalLight(0xdfebff, 1)
-      sun.position.set(0, 100, 0)
+      sun.position.set(0, 0, 100)
       sun.castShadow = true
       sun.shadow.mapSize.width = 4096
       sun.shadow.mapSize.height = 4096
@@ -299,14 +299,14 @@
 
       this.regionMaterial = new THREE.MeshBasicMaterial({
         side: THREE.DoubleSide,
-        color: new THREE.Color(Math.random(), Math.random(), Math.random()),
+        color: new THREE.Color('coral'),
+        transparent: true,
+        opacity: 0.2,
       })
 
       this.highlightRegionMaterial = new THREE.MeshBasicMaterial({
         side: THREE.DoubleSide,
-        color: new THREE.Color('mint'),
-        transparent: true,
-        opacity: 0.5,
+        color: new THREE.Color('#0090ff'),
       })
 
       this.surfaceMaterial = new THREE.MeshStandardMaterial({
@@ -319,10 +319,9 @@
       // Grid
       var groundGeo = new THREE.PlaneBufferGeometry(20, 20)
       // groundGeo.rotateX(- Math.PI / 2)
-      var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2, side: THREE.DoubleSide}))
+      var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
       ground.material.depthWrite = false
       ground.receiveShadow = true
-      ground.position.z = -0.01
       ground.alcProjectable = true
       this.scene.add(ground)
 
@@ -331,16 +330,17 @@
       grid.material.opacity = 0.1
       grid.material.transparent = true
       grid.material.depthWrite = false
+      grid.position.z = 0.01
       this.scene.add(grid)
 
-      // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
-      // mesh = new THREE.Mesh(torusGeometry, material)
-      // mesh.position.y = 1.8
-      // mesh.castShadow = true
-      // mesh.receiveShadow = true
-      // // mesh.alcSelectable = true
-      // // mesh.visible = false
-      // this.scene.add(mesh)
+      var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
+      mesh = new THREE.Mesh(torusGeometry, this.surfaceMaterial)
+      mesh.position.z = 1
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      // mesh.alcSelectable = true
+      // mesh.visible = false
+      this.scene.add(mesh)
 
       // Transform Controls
       this.transformControl = new TransformControls(camera, renderer.domElement)
@@ -828,7 +828,9 @@
         this.regionMeshes = this.regionMeshes || []
         this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
         this.regionMeshes = regions.map(region => {
-          const mesh = this.convertMesh(region.get_mesh(), this.highlightSurfaceMaterial)
+          let material = this.regionMaterial.clone()
+          material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
+          const mesh = this.convertMesh(region.get_mesh(), material)
           mesh.alcRegion = region
           this.scene.add(mesh)
           return mesh

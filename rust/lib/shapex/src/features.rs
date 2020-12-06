@@ -88,10 +88,11 @@ mod tests {
   // use crate::test_data;
 
   #[test]
-  fn make_cube() {
-    let cube = make_cube2(1.5, 1.5, 1.5);
+  fn cube() {
+    let cube = make_cube(1.5, 1.5, 1.5);
     let shell = &cube.shells[0];
+    println!("\nCube finished");
     shell.print();
-    panic!("");
+    panic!("Test trap");
   }
 }

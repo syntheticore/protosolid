@@ -6,13 +6,10 @@ use crate::surface::*;
 use crate::solid::*;
 
 
-pub trait Feature {}
-
-
-pub fn extrude(region: Vec<TrimmedSketchElement>, _distance: f64) -> Solid {
-  let solid = Solid::new_lamina(region, Plane::default());
-  // let shell = &mut solid.shells[0];
-  // shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
+pub fn extrude(region: Vec<TrimmedSketchElement>, distance: f64) -> Solid {
+  let mut solid = Solid::new_lamina(region, Plane::default());
+  let shell = &mut solid.shells[0];
+  shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
   solid
   // make_cube(1.0, 1.0, 1.0)
 }
@@ -40,9 +37,9 @@ pub fn make_cube(dx: f64, dy: f64, _dz: f64) -> Solid {
   }
   // let mut solid = Solid::new();
   // solid.mvfs(points[0], Box::new(Plane::default()));
-  let solid = Solid::new_lamina(region, Plane::default());
-  // let shell = &mut solid.shells[0];
-  // shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, _dz));
+  let mut solid = Solid::new_lamina(region, Plane::default());
+  let shell = &mut solid.shells[0];
+  shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, _dz));
   solid
 }
 

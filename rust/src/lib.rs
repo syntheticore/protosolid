@@ -295,27 +295,6 @@ impl JsSketch {
     .collect()
   }
 
-  // pub fn get_region_info(&self) -> JsFoo {
-  //   // self.real.borrow().sketch.closed_regions().iter().map(|region| points_to_js(region.clone()) ).collect()
-  //   let sketch = &self.real.borrow().sketch;
-  //   // sketch.closed_regions();
-  //   let cut_elements = Sketch::all_split(&sketch.elements);
-  //   Sketch::remove_dangling_segments(&mut splits);
-  //   let islands = Sketch::build_islands(&cut_elements);
-  //   let mut regions = vec![];
-  //   for island in islands.iter() {
-  //     let start_elem = &island[0];
-  //     let start_point = start_elem.owned.as_curve().endpoints().0;
-  //     let mut loops = Sketch::build_loops(&start_point, &start_elem, vec![], &start_point, island, &mut HashSet::new(), &mut HashSet::new());
-  //     regions.append(&mut loops);
-  //   }
-  //   JsFoo {
-  //     cut: cut_elements.len(),
-  //     islands: islands.len(),
-  //     regions: regions.len(),
-  //   }
-  // }
-
   pub fn get_all_split(&self) {
     let mut real = self.real.borrow_mut();
     // let splits = real.sketch.split_all();
@@ -336,6 +315,14 @@ impl JsSketch {
       JsValue::from(JsSketchElement::from(&rc(split)))
     }).collect()
   }
+}
+
+
+fn js_mesh_from_body(body: &Solid) -> JsValue {
+  JsValue::from(JsBufferGeometry {
+    position: body.tesselate().to_buffer_geometry(),
+    normal: vec![],
+  })
 }
 
 
@@ -372,38 +359,24 @@ impl JsComponent {
     JsSketch::from(&self.real)
   }
 
-  // pub fn get_sketch_elements(&self) -> Array {
-  //   self.real.borrow().sketch.elements.iter().map(|elem| {
-  //     JsValue::from(JsSketchElement::from(elem))
-  //   }).collect()
-  // }
-
   pub fn get_children(&self) -> Array {
     self.real.borrow().children.iter().map(|child| JsValue::from(JsComponent::from(child)) ).collect()
   }
 
   pub fn get_mesh(&self) -> JsValue {
     let bodies = &self.real.borrow().bodies;
-    JsValue::from(JsBufferGeometry {
-      position: if bodies.len() > 0 { bodies[0].tesselate().to_buffer_geometry() } else { vec![] },
-      normal: vec![],
-    })
+    if bodies.len() > 0 {
+      js_mesh_from_body(&bodies[0])
+    } else { JsValue::UNDEFINED }
   }
 
   pub fn get_wireframe(&self) -> Array {
     let bodies = &self.real.borrow().bodies;
     if bodies.len() == 0 {
-      let out = Array::new_with_length(0);
-      return out;
-      // return vec![];
+      return Array::new_with_length(0);
     }
     bodies[0].shells[0].edges.iter().map(|edge| {
       let edge = edge.borrow();
-      // let line = Line::new(
-      //   edge.left_half.borrow().origin.borrow().point,
-      //   edge.right_half.borrow().origin.borrow().point
-      // ).into_enum();
-      // JsValue::from(JsSketchElement::from(&rc(line)))
       let left = edge.left_half.borrow().origin.borrow().point;
       let right = edge.right_half.borrow().origin.borrow().point;
       points_to_js(vec![
@@ -411,10 +384,6 @@ impl JsComponent {
         right
       ])
     }).collect()
-    // bodies[0].shells[0].vertices.iter().map(|vertex| {
-    //   let vertex = vertex.borrow();
-    //   point_to_js(vertex.point)
-    // }).collect()
   }
 
   pub fn add_segment(&self) {
@@ -432,11 +401,8 @@ impl JsComponent {
   }
 
   pub fn create_component(&mut self, title: &str) -> JsComponent {
-    let mut comp = Component::new();
-    comp.title = title.to_string();
-    // comp.visible = true;
-    let comp = Rc::new(RefCell::new(comp));
-    self.real.borrow_mut().children.push(comp.clone());
+    let comp = self.real.borrow_mut().create_component();
+    comp.borrow_mut().title = title.to_string();
     JsComponent::from(&comp)
   }
 }
@@ -453,7 +419,7 @@ pub struct JsFoo {
 
 #[wasm_bindgen]
 pub struct AlchemyProxy {
-  scene: Scene,
+  tree: Ref<Component>,
 }
 
 #[wasm_bindgen]
@@ -461,8 +427,9 @@ impl AlchemyProxy {
 
   #[wasm_bindgen(constructor)]
   pub fn new() -> Self {
-    let scene = Scene::new();
-    Self { scene }
+    let mut tree = Component::new();
+    tree.title = "Main Assembly".to_string();
+    Self { tree: rc(tree) }
   }
 
   // pub fn foo(&self) -> Result<f64, JsValue> {
@@ -470,6 +437,6 @@ impl AlchemyProxy {
   // }
 
   pub fn get_main_assembly(&mut self) -> JsComponent {
-    JsComponent::from(&self.scene.tree)
+    JsComponent::from(&self.tree)
   }
 }

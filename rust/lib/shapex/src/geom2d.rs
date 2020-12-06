@@ -71,10 +71,10 @@ pub fn poly_from_wire(wire: &Vec<SketchElement>) -> PolyLine {
       polyline.push(elem.as_curve().other_endpoint(polyline.last().unwrap()));
     }
   }
-  let z = rand::random::<f64>() / -6.0;
-  for p in &mut polyline {
-    p.z = z;
-  }
+  // let z = rand::random::<f64>() / -6.0;
+  // for p in &mut polyline {
+  //   p.z = z;
+  // }
   polyline
 }
 

@@ -728,3 +728,66 @@ pub fn make_solid() -> Solid {
     shells: vec![shell],
   }
 }
+
+// pub struct VertexIterator<'a> {
+//   elem_iter: std::slice::Iter<'a, PolyLine>,
+//   vertex_iter: Option<std::slice::Iter<'a, Point3>>,
+// }
+
+// impl<'a> VertexIterator<'a> {
+//   pub fn new(sketch: &'a Sketch) -> Self {
+//     Self {
+//       elem_iter: sketch.elements.iter(),
+//       vertex_iter: None
+//     }
+//   }
+// }
+
+// impl<'a> Iterator for VertexIterator<'a> {
+//   type Item = &'a Point3;
+
+//   fn next(&mut self) -> Option<&'a Point3> {
+//     if let Some(ref mut vertex_iter) = self.vertex_iter {
+//       let vertex = vertex_iter.next();
+//       if vertex.is_some() {
+//         vertex
+//       } else {
+//         self.vertex_iter = None;
+//         self.next()
+//       }
+//     } else {
+//       if let Some(line) = self.elem_iter.next() {
+//         self.vertex_iter = Some(line.vertices.iter());
+//         self.next()
+//       } else {
+//         None
+//       }
+//     }
+//   }
+// }
+
+// #[derive(Debug)]
+// pub struct Sketch {
+//   pub title: String,
+//   pub plane: Plane,
+//   // pub elements: Vec<PolyLine>,
+//   pub elements: Vec<Ref<dynSketchElement>>>,
+//   // pub constraints: Vec<Box<Constraint>>
+//   pub visible: bool
+// }
+
+// impl Sketch {
+//   pub fn new() -> Self {
+//     Self {
+//       title: "Sketch1".to_string(),
+//       plane: Plane::new(),
+//       elements: vec![],
+//       // constraints: vec![]
+//       visible: true
+//     }
+//   }
+
+//   // pub fn all_vertices(&self) -> VertexIterator {
+//   //   VertexIterator::new(self)
+//   // }
+// }

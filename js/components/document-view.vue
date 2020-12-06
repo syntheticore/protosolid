@@ -147,7 +147,7 @@
     },
 
     created() {
-      // this.document.data[this.document.tree.id()] = {}
+      this.integrateComponent(this.document.tree)
       const part1 = this.createComponent(this.document.tree, 'Part 1')
         const assm1 = this.createComponent(this.document.tree, 'Sub Assembly 1')
           const part2 = this.createComponent(assm1, 'Part 2')
@@ -188,10 +188,15 @@
 
       createComponent: function(parent, title) {
         this.activeComponent = parent.create_component(title || 'New Component')
-        // this.document.data[this.activeComponent.id()] = {hidden: false}
-        // this.$set(this.document, 'data', this.document.data)
-        this.$set(this.document.data, this.activeComponent.id(), {hidden: false})
+        this.integrateComponent(this.activeComponent)
         return this.activeComponent
+      },
+
+      integrateComponent: function(comp) {
+        this.$set(this.document.data, comp.id(), {
+          hidden: false,
+          cachedElements: [],
+        })
       },
 
       activateView: function(view) {

@@ -1,5 +1,3 @@
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
@@ -16,7 +14,7 @@ pub struct Component {
   // pub visible: bool,
   pub sketch: Sketch,
   pub bodies: Vec<Solid>,
-  pub children: Vec<Ref<Component>>,
+  pub children: Vec<Ref<Self>>,
 }
 
 impl Component {
@@ -24,6 +22,15 @@ impl Component {
     let mut this: Self = Default::default();
     this.id = Uuid::new_v4();
     this
+  }
+
+  pub fn create_component(&mut self) -> Ref<Self> {
+    let mut comp = Self::new();
+    comp.title = "New Component".to_string();
+    // comp.visible = true;
+    let comp = rc(comp);
+    self.children.push(comp.clone());
+    comp
   }
 }
 
@@ -204,53 +211,6 @@ impl Sketch {
 }
 
 
-pub struct Scene {
-  pub tree: Ref<Component>,
-  pub current_component: Ref<Component>,
-}
-
-impl Scene {
-  pub fn new() -> Self {
-    let mut comp = Component::new();
-    comp.title = "Main Assembly".to_string();
-    // comp.visible = true;
-    let tree = Rc::new(RefCell::new(comp));
-    let current_component = Rc::clone(&tree);
-    Self { tree, current_component }
-  }
-
-  pub fn create_component(&mut self) -> Ref<Component> {
-    let mut comp: Component = Default::default();
-    comp.title = "New Component".to_string();
-    // comp.visible = true;
-    let comp = Rc::new(RefCell::new(comp));
-    {
-      let mut current_component = self.current_component.borrow_mut();
-      current_component.children.push(Rc::clone(&comp));
-    }
-    self.current_component = Rc::clone(&comp);
-    comp
-  }
-
-  // pub fn create_sketch(&mut self) -> Ref<Sketch> {
-  //   let mut sketch: Sketch = Sketch::new();
-  //   sketch.title = "Sketch1".to_string();
-  //   sketch.visible = true;
-  //   let sketch = Rc::new(RefCell::new(sketch));
-  //   self.current_component.borrow_mut().sketches.push(Rc::clone(&sketch));
-  //   sketch
-  // }
-
-  pub fn activate(&mut self, comp: Ref<Component>) {
-    self.current_component = comp;
-  }
-
-  // pub fn edit_sketch(&mut self, sketch: &Ref<Sketch>) {
-  //   self.current_sketch = Some(Rc::clone(sketch));
-  // }
-}
-
-
 trait Constraint {}
 
 
@@ -371,7 +331,7 @@ mod tests {
   fn make_sketch(lines: &Vec<Line>) -> Sketch {
     let mut sketch = Sketch::new();
     for line in lines {
-      sketch.elements.push(Rc::new(RefCell::new(line.clone().into_enum())));
+      sketch.elements.push(rc(line.clone().into_enum()));
     }
     sketch
   }
@@ -446,71 +406,7 @@ mod tests {
   fn dangling_segment() {
     let mut sketch = Sketch::new();
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0));
-    sketch.elements.push(Rc::new(RefCell::new(line.into_enum())));
+    sketch.elements.push(rc(line.into_enum()));
     let _regions = sketch.get_regions(false);
   }
 }
-
-
-// pub struct VertexIterator<'a> {
-//   elem_iter: std::slice::Iter<'a, PolyLine>,
-//   vertex_iter: Option<std::slice::Iter<'a, Point3>>,
-// }
-
-// impl<'a> VertexIterator<'a> {
-//   pub fn new(sketch: &'a Sketch) -> Self {
-//     Self {
-//       elem_iter: sketch.elements.iter(),
-//       vertex_iter: None
-//     }
-//   }
-// }
-
-// impl<'a> Iterator for VertexIterator<'a> {
-//   type Item = &'a Point3;
-
-//   fn next(&mut self) -> Option<&'a Point3> {
-//     if let Some(ref mut vertex_iter) = self.vertex_iter {
-//       let vertex = vertex_iter.next();
-//       if vertex.is_some() {
-//         vertex
-//       } else {
-//         self.vertex_iter = None;
-//         self.next()
-//       }
-//     } else {
-//       if let Some(line) = self.elem_iter.next() {
-//         self.vertex_iter = Some(line.vertices.iter());
-//         self.next()
-//       } else {
-//         None
-//       }
-//     }
-//   }
-// }
-
-// #[derive(Debug)]
-// pub struct Sketch {
-//   pub title: String,
-//   pub plane: Plane,
-//   // pub elements: Vec<PolyLine>,
-//   pub elements: Vec<Ref<dynSketchElement>>>,
-//   // pub constraints: Vec<Box<Constraint>>
-//   pub visible: bool
-// }
-
-// impl Sketch {
-//   pub fn new() -> Self {
-//     Self {
-//       title: "Sketch1".to_string(),
-//       plane: Plane::new(),
-//       elements: vec![],
-//       // constraints: vec![]
-//       visible: true
-//     }
-//   }
-
-//   // pub fn all_vertices(&self) -> VertexIterator {
-//   //   VertexIterator::new(self)
-//   // }
-// }

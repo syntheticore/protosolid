@@ -261,7 +261,6 @@ impl Shell {
 
   pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: SketchElement, surface: Box<dyn Surface>) -> (Ref<Edge>, Ref<Face>) {
     let ring = rc(Ring {
-      // half_edge: nhe1.clone(),
       half_edge: he1.clone(), // using he1 as dummy, just to be able to create the ring...
       face: Weak::new(),
     });

@@ -14,7 +14,7 @@ export class ExtrudeFeature extends Feature {
 
     this.profile = null
     this.rail = null
-    this.distance = 0
+    this.distance = 2
     this.direction = true
     this.operation = 'join'
 
@@ -46,7 +46,7 @@ export class ExtrudeFeature extends Feature {
   }
 
   update() {
-    console.log(this.profile)
+    console.log('Extruding ' + this.distance + 'mm')
     this.profile.extrude(this.distance * (this.direction ? 1 : -1))
   }
 }

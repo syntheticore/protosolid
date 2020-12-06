@@ -283,7 +283,7 @@
         this.render()
       })
 
-      // Materials
+      // Fat Line Materials
       this.lineMaterial = new LineMaterial({
         color: 'yellow',
         linewidth: 3,
@@ -297,18 +297,28 @@
       this.highlightLineMaterial = this.lineMaterial.clone()
       this.highlightLineMaterial.color.set('#2590e1')
 
+      // Line Materials
+      this.lineBasicMaterial = new THREE.LineBasicMaterial({
+        color: 'black',
+        dashed: false
+      })
+
+      // Region materials
       this.regionMaterial = new THREE.MeshBasicMaterial({
         side: THREE.DoubleSide,
         color: new THREE.Color('coral'),
         transparent: true,
-        opacity: 0.2,
+        opacity: 0.1,
       })
 
       this.highlightRegionMaterial = new THREE.MeshBasicMaterial({
         side: THREE.DoubleSide,
         color: new THREE.Color('#0090ff'),
+        transparent: true,
+        opacity: 0.4,
       })
 
+      // Surface Materials
       this.surfaceMaterial = new THREE.MeshStandardMaterial({
         side: THREE.DoubleSide,
         color: 'coral',
@@ -330,17 +340,17 @@
       grid.material.opacity = 0.1
       grid.material.transparent = true
       grid.material.depthWrite = false
-      grid.position.z = 0.01
+      grid.position.z = 0.0001
       this.scene.add(grid)
 
-      var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
-      mesh = new THREE.Mesh(torusGeometry, this.surfaceMaterial)
-      mesh.position.z = 1
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-      // mesh.alcSelectable = true
-      // mesh.visible = false
-      this.scene.add(mesh)
+      // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
+      // mesh = new THREE.Mesh(torusGeometry, this.surfaceMaterial)
+      // mesh.position.z = 1
+      // mesh.castShadow = true
+      // mesh.receiveShadow = true
+      // // mesh.alcSelectable = true
+      // // mesh.visible = false
+      // this.scene.add(mesh)
 
       // Transform Controls
       this.transformControl = new TransformControls(camera, renderer.domElement)
@@ -733,12 +743,7 @@
       loadElement: function(elem, node) {
         this.unloadElement(elem, node, this.document)
         const vertices = elem.default_tesselation()
-        const geometry = new LineGeometry()
-        geometry.setPositions(vertices.flatMap(vertex => vertex))
-        geometry.setColors(Array(vertices.length * 3).fill(1))
-        const line = new Line2(geometry, this.lineMaterial)
-        line.computeLineDistances()
-        // line.scale.set(1, 1, 1)
+        const line = this.convertLine(vertices, this.lineMaterial)
         line.alcSelectable = true
         this.document.data[elem.id()] = line
         // line.component = node
@@ -760,19 +765,16 @@
             index: i,
           })
         })
-
-        this.document.data[nodeId].cachedElements = this.document.data[nodeId].cachedElements || []
         this.document.data[nodeId].cachedElements.push(elem)
       },
 
       unloadElement: function(elem, node, document) {
         this.scene.remove(document.data[elem.id()])
         const nodeId = node.id()
-        const cache = document.data[nodeId]
         if(this.handles[nodeId]) delete this.handles[nodeId][elem.id()]
         this.handles = Object.assign({}, this.handles)
         const cachedElements = document.data[nodeId].cachedElements
-        if(cachedElements) document.data[nodeId].cachedElements = cachedElements.filter(e => e != elem)
+        document.data[nodeId].cachedElements = cachedElements.filter(e => e != elem)
       },
 
       deleteElement: function(elem) {
@@ -788,10 +790,14 @@
         if(this.document.data[node.id()].hidden) return
         // Load bodies
         let mesh = node.get_mesh()
-        console.log(mesh)
-        this.scene.add(this.convertMesh(mesh, this.surfaceMaterial))
-        // let wireframe = node.get_wireframe()
-        // console.log(wireframe)
+        if(mesh) this.scene.add(this.convertMesh(mesh, this.surfaceMaterial))
+
+        let wireframe = node.get_wireframe()
+        wireframe.forEach(edge => {
+          const line = this.convertLineBasic(edge, this.lineMaterial)
+          this.scene.add(line)
+        })
+
         // Load sketch elements
         const elements = node.get_sketch().get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))
@@ -800,14 +806,29 @@
 
       unloadTree: function(node, document, recursive) {
         const nodeId = node.id()
-        const cachedElements = document.data[nodeId].cachedElements
-        cachedElements && cachedElements.forEach(elem => this.unloadElement(elem, node, document))
+        document.data[nodeId].cachedElements.forEach(elem => this.unloadElement(elem, node, document))
         if(recursive) node.get_children().forEach(child => this.unloadTree(child, document, true))
       },
 
       componentChanged: function(comp, recursive) {
         this.loadTree(comp, recursive)
         this.render()
+      },
+
+      convertLine: function(vertices, material) {
+        const geometry = new LineGeometry()
+        const positions = vertices.flat();
+        geometry.setPositions(positions)
+        geometry.setColors(Array(positions.length * 3).fill(1))
+        const line = new Line2(geometry, material)
+        line.computeLineDistances()
+        return line
+      },
+
+      convertLineBasic: function(line, material) {
+        var geometry = new THREE.Geometry();
+        geometry.vertices = line.map(vertex => new THREE.Vector3().fromArray(vertex))
+        return new THREE.Line(geometry, this.lineBasicMaterial);
       },
 
       convertMesh: function(bufferGeometry, material) {
@@ -819,7 +840,10 @@
         geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
         // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
         // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
-        return new THREE.Mesh(geometry, material)
+        const mesh = new THREE.Mesh(geometry, material)
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+        return mesh
       },
 
       elementChanged: function(elem, comp) {
@@ -829,7 +853,7 @@
         this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
         this.regionMeshes = regions.map(region => {
           let material = this.regionMaterial.clone()
-          material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
+          // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
           const mesh = this.convertMesh(region.get_mesh(), material)
           mesh.alcRegion = region
           this.scene.add(mesh)

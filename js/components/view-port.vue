@@ -304,7 +304,6 @@
       // Line Materials
       this.lineBasicMaterial = new THREE.LineBasicMaterial({
         color: 'gray',
-        dashed: false
       })
 
       // Region materials
@@ -858,7 +857,7 @@
         const geometry = new LineGeometry()
         const positions = vertices.flat();
         geometry.setPositions(positions)
-        geometry.setColors(Array(positions.length * 3).fill(1))
+        geometry.setColors(Array(positions.length).fill(1))
         const line = new Line2(geometry, material)
         line.computeLineDistances()
         return line

@@ -1,7 +1,9 @@
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
-pub use cgmath::prelude::*;
+pub use cgmath::prelude::InnerSpace;
+pub use cgmath::prelude::MetricSpace;
+pub use cgmath::prelude::EuclideanSpace;
 
 pub type Vec2 = cgmath::Vector2<f64>;
 pub type Vec3 = cgmath::Vector3<f64>;

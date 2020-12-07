@@ -7,7 +7,7 @@ use crate::solid::*;
 
 
 pub fn extrude(region: Vec<TrimmedSketchElement>, distance: f64) -> Solid {
-  let mut solid = Solid::new_lamina(region, Plane::default());
+  let mut solid = Solid::new_lamina(region, Plane::new());
   let shell = &mut solid.shells[0];
   shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
   solid
@@ -37,14 +37,14 @@ pub fn make_cube(dx: f64, dy: f64, _dz: f64) -> Solid {
   }
   // let mut solid = Solid::new();
   // solid.mvfs(points[0], Box::new(Plane::default()));
-  let mut solid = Solid::new_lamina(region, Plane::default());
+  let mut solid = Solid::new_lamina(region, Plane::new());
   let shell = &mut solid.shells[0];
   shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, _dz));
   solid
 }
 
 pub fn make_cube2(dx: f64, dy: f64, dz: f64) -> Solid {
-  let mut top = Box::new(Plane::default());
+  let mut top = Box::new(Plane::new());
   let mut bottom = top.clone();
   bottom.flip();
   top.origin.z = dz;

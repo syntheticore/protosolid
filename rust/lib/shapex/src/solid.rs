@@ -332,7 +332,7 @@ impl Shell {
       }
       self.sweep_mef(&scan, vec);
     }
-    //XXX move top surface by vec
+    face.borrow_mut().surface.translate(vec);
   }
 
   fn sweep_mev(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
@@ -346,14 +346,19 @@ impl Shell {
     let mut curve = scan.borrow().edge.upgrade().unwrap().borrow().curve.clone();
     curve.as_curve_mut().transform(vec);
     let scan_previous = scan.borrow().previous.upgrade().unwrap();
-    let next = scan.borrow().next.upgrade().unwrap(); // Neccessary as next has changed because of lmev
+    let next = scan.borrow().next.upgrade().unwrap();
     let next_next = next.borrow().next.upgrade().unwrap();
+    let point = scan_previous.borrow().origin.borrow().point;
     self.lmef(
       // New edge is oriented from..
       &scan_previous, // ..this half edge's vertex..
       &next_next, // ..to this half edge's vertex
       curve,
-      Box::new(Plane::default()), //XXX
+      Box::new(Plane::from_triangle(
+        point,
+        point + vec,
+        next_next.borrow().origin.borrow().point
+      )),
     );
   }
 

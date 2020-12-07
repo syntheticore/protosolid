@@ -1,9 +1,10 @@
 use crate::base::*;
 use crate::curve::*;
 use crate::curve::intersection::CurveIntersection;
+use crate::geom3d::*;
 
 
-pub trait Surface {
+pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
 }
@@ -16,6 +17,7 @@ impl core::fmt::Debug for dyn Surface {
 
 
 type Wire = Vec<TrimmedSketchElement>;
+
 
 #[derive(Debug)]
 pub struct TrimmedSurface {
@@ -32,11 +34,22 @@ pub struct Plane {
 }
 
 impl Plane {
-  pub fn default() -> Self {
+  pub fn new() -> Self {
     Self {
       origin: Point3::new(0.0, 0.0, 0.0),
       u: Vec3::new(1.0, 0.0, 0.0),
       v: Vec3::new(0.0, 1.0, 0.0),
+    }
+  }
+
+  pub fn from_triangle(p1: Point3, p2: Point3, p3: Point3) -> Self {
+    let u = p2 - p1;
+    let pre_v = p3 - p1;
+    let normal = u.cross(pre_v);
+    Self {
+      origin: p1,
+      u,
+      v: u.cross(normal),
     }
   }
 
@@ -92,6 +105,12 @@ impl Surface for Plane {
   }
 }
 
+impl Transformable for Plane {
+  fn transform(&mut self, transform: &Transform) {
+    self.origin = transform.apply(self.origin);
+  }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -99,7 +118,7 @@ mod tests {
 
   #[test]
   fn plane_normal() {
-    let plane = Plane::default();
+    let plane = Plane::new();
     assert_eq!(plane.normal(), Vec3::new(0.0, 0.0, 1.0));
   }
 }

@@ -310,6 +310,7 @@
       this.regionMaterial = new THREE.MeshBasicMaterial({
         side: THREE.DoubleSide,
         color: new THREE.Color('coral'),
+        depthTest: false,
         transparent: true,
         opacity: 0.1,
       })
@@ -324,7 +325,7 @@
       // Surface Materials
       this.surfaceMaterial = new THREE.MeshStandardMaterial({
         side: THREE.DoubleSide, //XXX remove
-        color: 'gray',
+        color: 'cyan',
         roughness: 0.15,
         metalness: 0.2,
       })
@@ -359,6 +360,8 @@
       grid.material.depthWrite = false
       grid.position.z = 0.0001
       this.scene.add(grid)
+
+      this.scene.add(new THREE.AxesHelper(0.5));
 
       // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
       // mesh = new THREE.Mesh(torusGeometry, this.surfaceMaterial)

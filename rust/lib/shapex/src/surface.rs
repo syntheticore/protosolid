@@ -16,9 +16,6 @@ impl core::fmt::Debug for dyn Surface {
 }
 
 
-type Wire = Vec<TrimmedSketchElement>;
-
-
 #[derive(Debug)]
 pub struct TrimmedSurface {
   base: Box<dyn Surface>,

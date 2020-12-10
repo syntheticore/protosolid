@@ -34,9 +34,6 @@ impl Component {
 }
 
 
-pub type Region = Vec<TrimmedSketchElement>;
-
-
 #[derive(Debug, Default)]
 pub struct Sketch {
   pub elements: Vec<Ref<SketchElement>>,
@@ -51,7 +48,9 @@ impl Sketch {
     let mut cut_elements = Self::all_split(&self.elements);
     Self::remove_dangling_segments(&mut cut_elements);
     let islands = Self::build_islands(&cut_elements);
-    islands.iter().flat_map(|island| Self::build_loops_from_island(island, include_outer) ).collect()
+    islands.iter()
+    .flat_map(|island| Self::build_loops_from_island(island, include_outer) )
+    .collect()
   }
 
   fn build_loops_from_island(island: &Vec<TrimmedSketchElement>, include_outer: bool) -> Vec<Region> {
@@ -63,6 +62,7 @@ impl Sketch {
         let points = start_elem.bounds;
         let start_point = if i == 0 { points.0 } else { points.1 };
         let mut loops = Self::build_loop(&start_point, &start_elem, vec![], &start_point, island, &mut used_forward, &mut used_backward);
+        for region in &mut loops { geom2d::straighten_bounds(region) }
         regions.append(&mut loops);
       }
     }
@@ -89,7 +89,7 @@ impl Sketch {
 
   pub fn split_element(elem: &SketchElement, others: &Vec<Ref<SketchElement>>) -> Vec<SketchElement> {
     let others = others.iter().map(|other| other.borrow().clone() ).collect();
-    geom2d::split_element(elem, &others)
+    elem.split_multi(&others)
   }
 
   pub fn build_islands(elements: &Vec<TrimmedSketchElement>) -> Vec<Vec<TrimmedSketchElement>> {
@@ -132,7 +132,7 @@ impl Sketch {
     let mut regions = vec![];
     // Traverse edges only once in every direction
     let start_elem_id = as_controllable(&start_elem.cache).id();
-    if start_point.almost(start_elem.cache.as_curve().endpoints().0) {
+    if start_point.almost(start_elem.bounds.0) {
       if used_forward.contains(&start_elem_id) { return regions }
       used_forward.insert(start_elem_id);
     } else {
@@ -142,16 +142,16 @@ impl Sketch {
     // Add start_elem to path
     path.push(start_elem.clone());
     // Find connected segments
-    let end_point = start_elem.cache.as_curve().other_endpoint(&start_point);
+    let end_point = start_elem.other_bound(&start_point);
     let mut connected_elems: Vec<&TrimmedSketchElement> = all_elements.iter().filter(|other_elem| {
-      let (other_start, other_end) = other_elem.cache.as_curve().endpoints();
+      let (other_start, other_end) = other_elem.bounds;
       (end_point.almost(other_start) || end_point.almost(other_end)) && as_controllable(&other_elem.cache).id() != start_elem_id
     }).collect();
     if connected_elems.len() > 0 {
       // Sort connected segments in clockwise order
       connected_elems.sort_by(|a, b| {
-        let final_point_a = a.cache.as_curve().other_endpoint(&end_point);
-        let final_point_b = b.cache.as_curve().other_endpoint(&end_point);
+        let final_point_a = a.other_bound(&end_point);
+        let final_point_b = b.other_bound(&end_point);
         if geom2d::clockwise(*start_point, end_point, final_point_a) > geom2d::clockwise(*start_point, end_point, final_point_b) {
           Ordering::Less
         } else {
@@ -180,14 +180,10 @@ impl Sketch {
     regions
   }
 
-  fn poly_from_region(wire: &Region) -> PolyLine {
-    geom2d::poly_from_wire(&wire.iter().map(|elem| elem.cache.clone() ).collect())
-  }
-
   fn remove_outer_loop(loops: &mut Vec<Region>) {
     if loops.len() <= 1 { return }
-    loops.retain(|wire| {
-      !geom2d::is_clockwise(&Self::poly_from_region(wire))
+    loops.retain(|region| {
+      !geom2d::is_clockwise(&geom2d::poly_from_wire(region))
     })
   }
 

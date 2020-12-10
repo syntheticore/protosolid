@@ -1,5 +1,3 @@
-use std::ptr;
-
 use earcutr;
 
 use crate::base::*;
@@ -49,28 +47,9 @@ pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   signed_area
 }
 
-pub fn poly_from_wire(wire: &Vec<SketchElement>) -> PolyLine {
-  if wire.len() == 1 {
-    panic!("PolyLine has length one {:?}", wire);
-  }
-  let mut polyline = vec![];
-  let mut iter = wire.iter().peekable();
-  while let Some(elem) = iter.next() {
-    let endpoints = elem.as_curve().endpoints();
-    if polyline.len() == 0 {
-      let next_elem = iter.peek().unwrap();
-      let next_endpoints = next_elem.as_curve().endpoints();
-      if endpoints.0.almost(next_endpoints.0) || endpoints.0.almost(next_endpoints.1) {
-        polyline.push(endpoints.1);
-        polyline.push(endpoints.0);
-      } else {
-        polyline.push(endpoints.0);
-        polyline.push(endpoints.1);
-      }
-    } else {
-      polyline.push(elem.as_curve().other_endpoint(polyline.last().unwrap()));
-    }
-  }
+pub fn poly_from_wire(wire: &Wire) -> PolyLine {
+  let mut polyline: PolyLine = wire.iter().map(|elem| elem.bounds.0 ).collect();
+  polyline.push(wire.first().unwrap().bounds.0); //XXX first elem may not start at zero
   // let z = rand::random::<f64>() / -6.0;
   // for p in &mut polyline {
   //   p.z = z;
@@ -78,16 +57,49 @@ pub fn poly_from_wire(wire: &Vec<SketchElement>) -> PolyLine {
   polyline
 }
 
-pub fn split_element(elem: &SketchElement, others: &Vec<SketchElement>) -> Vec<SketchElement> {
-  let mut segments = vec![elem.clone()];
-  for other in others.iter() {
-    if ptr::eq(elem, &*other) { continue }
-    segments = segments.iter().flat_map(|own| {
-      own.split(&other)
-    }).collect();
+pub fn straighten_bounds(wire: &mut Wire) {
+  let bounds = wire[0].bounds;
+  let next_bounds = wire[1].bounds;
+  let mut point = if bounds.0.almost(next_bounds.0) || bounds.0.almost(next_bounds.1) {
+    bounds.1
+  } else {
+    bounds.0
+  };
+  for elem in wire {
+    if elem.bounds.1.almost(point) {
+      point = elem.bounds.0;
+      elem.bounds = (elem.bounds.1, elem.bounds.0);
+    } else {
+      point = elem.bounds.1;
+    }
   }
-  segments
 }
+
+// // Returned loops are oriented counter-clockwise
+// pub fn poly_from_wire(wire: &Vec<SketchElement>) -> PolyLine {
+//   if wire.len() == 1 {
+//     panic!("PolyLine has length one {:?}", wire);
+//   }
+//   let mut polyline = vec![];
+//   let mut iter = wire.iter().peekable();
+//   while let Some(elem) = iter.next() {
+//     let endpoints = elem.as_curve().endpoints();
+//     if polyline.len() == 0 {
+//       let next_elem = iter.peek().unwrap();
+//       let next_endpoints = next_elem.as_curve().endpoints();
+//       if endpoints.0.almost(next_endpoints.0) || endpoints.0.almost(next_endpoints.1) {
+//         polyline.push(endpoints.1);
+//         polyline.push(endpoints.0);
+//       } else {
+//         polyline.push(endpoints.0);
+//         polyline.push(endpoints.1);
+//       }
+//     } else {
+//       polyline.push(elem.as_curve().other_endpoint(polyline.last().unwrap()));
+//     }
+//   }
+//   polyline
+// }
 
 pub fn trim(_elem: &SketchElement, _cutters: &Vec<SketchElement>, _p: Point3) {
   // let splits = split_element(elem, cutters);
@@ -103,15 +115,19 @@ mod tests {
   use super::*;
   use crate::test_data;
 
+  fn make_trimmed(elems: Vec<SketchElement>) -> Region {
+    elems.into_iter().map(|elem| TrimmedSketchElement::new(elem)).collect()
+  }
+
   #[test]
   fn compare_areas() {
     let rect = test_data::rectangle();
     let rect: Vec<SketchElement> = rect.into_iter().map(|l| l.into_enum() ).collect();
-    let rect_poly = poly_from_wire(&rect);
+    let rect_poly = poly_from_wire(&make_trimmed(rect));
 
     let reverse_rect = test_data::reverse_rectangle();
     let reverse_rect: Vec<SketchElement> = reverse_rect.into_iter().map(|l| l.into_enum() ).collect();
-    let reverse_rect_poly = poly_from_wire(&reverse_rect);
+    let reverse_rect_poly = poly_from_wire(&make_trimmed(reverse_rect));
 
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
   }
@@ -120,7 +136,7 @@ mod tests {
   fn rectangle_clockwise() {
     let rect = test_data::rectangle();
     let rect: Vec<SketchElement> = rect.into_iter().map(|l| l.into_enum() ).collect();
-    let rect_poly = poly_from_wire(&rect);
+    let rect_poly = poly_from_wire(&make_trimmed(rect));
 
     assert!(is_clockwise(&rect_poly));
   }

@@ -85,19 +85,21 @@ impl Solid {
     Default::default()
   }
 
-  pub fn new_lamina(region: Vec<TrimmedSketchElement>, top_plane: Plane) -> Self {
+  pub fn new_lamina(region: Region, top_plane: Plane) -> Self {
     println!("Creating Lamina:");
     // println!("{:?}", region.iter().map(|r| r.bounds).collect::<Vec<(Point3, Point3)>>());
     let mut bottom = top_plane.clone();
     bottom.flip();
-    // Create shell from bottom face with empty ring
     let mut this = Self::new();
+    // Create shell from bottom face with empty ring
+    // geom2d::straighten_bounds(&mut region);
+    //XXX iterate anti-clockwise
     let first_elem = region.first().unwrap().clone();
     this.mvfs(first_elem.bounds.0, Box::new(bottom));
     let shell = &mut this.shells[0];
     // Complete ring of bottom face
     let mut he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
-    for elem in WireIterator::new(&region).take(region.len() - 1) {
+    for elem in region {
       let points = elem.bounds;
       println!("\n-> lmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
       let (new_edge, _) = shell.lmev(&he, &he, elem.cache.clone(), points.1); //XXX cache -> base
@@ -173,10 +175,7 @@ impl Solid {
 
   pub fn tesselate(&self) -> Mesh {
     let mut mesh = Mesh::default();
-    // panic!("Num faces {:?}", self.shells[0].faces.len());
     for face in &self.shells[0].faces {
-      // let wire = face.borrow().outer_ring.borrow().get_wire();
-      // panic!("{:?}", wire);
       mesh.append(face.borrow().tesselate());
     }
     mesh
@@ -344,20 +343,21 @@ impl Shell {
 
   fn sweep_mef(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
     let mut curve = scan.borrow().edge.upgrade().unwrap().borrow().curve.clone();
-    curve.as_curve_mut().transform(vec);
+    curve.as_curve_mut().translate(vec);
     let scan_previous = scan.borrow().previous.upgrade().unwrap();
     let next = scan.borrow().next.upgrade().unwrap();
     let next_next = next.borrow().next.upgrade().unwrap();
-    let point = scan_previous.borrow().origin.borrow().point;
+    let p1 = scan_previous.borrow().origin.borrow().point;
+    let p2 = next_next.borrow().origin.borrow().point;
     self.lmef(
       // New edge is oriented from..
       &scan_previous, // ..this half edge's vertex..
       &next_next, // ..to this half edge's vertex
       curve,
       Box::new(Plane::from_triangle(
-        point,
-        point + vec,
-        next_next.borrow().origin.borrow().point
+        p1,
+        p1 + vec,
+        p2,
       )),
     );
   }
@@ -379,7 +379,6 @@ impl Shell {
 impl Face {
   pub fn tesselate(&self) -> Mesh {
     let wire = self.outer_ring.borrow().get_wire();
-    // panic!("WIOTEHJGHJ{:?}", wire);
     let polyline = geom2d::poly_from_wire(&wire);
     geom2d::tesselate_polygon(polyline)
   }
@@ -394,12 +393,15 @@ impl Face {
 
 
 impl Ring {
-  pub fn get_wire(&self) -> Vec<SketchElement> {
-    self.half_edge.borrow().ring_iter().filter_map(|he|
-      if let Some(edge) = he.borrow().edge.upgrade() {
-        Some(edge.borrow().curve.clone())
+  pub fn get_wire(&self) -> Vec<TrimmedSketchElement> {
+    self.iter().filter_map(|he| {
+      let he = he.borrow();
+      if let Some(edge) = he.edge.upgrade() {
+        let mut curve = TrimmedSketchElement::new(edge.borrow().curve.clone());
+        curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
+        Some(curve)
       } else { None }
-    ).collect()
+    }).collect()
   }
 
   pub fn iter(&self) -> RingIterator  {

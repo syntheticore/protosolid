@@ -4,12 +4,10 @@ use std::convert::TryInto;
 use uuid::Uuid;
 
 use crate::base::*;
+use crate::geom3d::*;
 use intersection::CurveIntersection;
 
 pub mod intersection;
-
-
-pub type PolyLine = Vec<Point3>;
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +26,25 @@ impl TrimmedSketchElement {
       cache: elem,
     }
   }
+
+  pub fn other_bound(&self, p: &Point3) -> Point3 {
+    let (start, end) = self.bounds;
+    if p.almost(start) { end } else { start }
+  }
 }
+
+
+pub type PolyLine = Vec<Point3>;
+
+
+/// Elements in a region are connected by their endpoints
+/// and already sorted in a closed loop
+pub type Region = Vec<TrimmedSketchElement>;
+
+
+/// Wires fulfill all properties of regions, but their elements
+/// run clockwise and their bounds are ordered in the direction of the loop
+pub type Wire = Vec<TrimmedSketchElement>;
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,7 +85,7 @@ impl SketchElement {
         Self::Arc(cutter) => arc.split_with_arc(cutter),
         Self::Circle(cutter) => arc.split_with_circle(cutter),
         Self::BezierSpline(cutter) => arc.split_with_spline(cutter),
-      }.iter().map(|seg| Self::Arc(seg.clone())).collect(),
+      }.iter().map(|seg| Self::Arc(seg.clone()) ).collect(),
 
       // Circle
       Self::Circle(circle) => match cutter {
@@ -95,19 +111,29 @@ impl SketchElement {
     }
   }
 
+  pub fn split_multi(&self, others: &Vec<Self>) -> Vec<Self> {
+    let mut segments = vec![self.clone()];
+    for other in others.iter() {
+      if ptr::eq(self, &*other) { continue }
+      segments = segments.iter().flat_map(|own| {
+        own.split(&other)
+      }).collect();
+    }
+    segments
+  }
+
   // pub fn trim(&self, at: f64, side: bool) {
 
   // }
 }
 
 
-pub trait Curve {
+pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
   // fn unsample(&self, p: Point3) -> f64;
   fn default_tesselation(&self) -> Vec<Point3>;
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
-  fn transform(&mut self, vec: Vec3);
 
   fn other_endpoint(&self, point: &Point3) -> Point3 {
     let (start, end) = self.endpoints();
@@ -219,10 +245,14 @@ impl Curve for Line {
   fn endpoints(&self) -> (Point3, Point3) {
     self.points
   }
+}
 
-  fn transform(&mut self, vec: Vec3) {
-    self.points.0 += vec;
-    self.points.1 += vec;
+impl Transformable for Line {
+  fn transform(&mut self, transform: &Transform) {
+    self.points = (
+      transform.apply(self.points.0),
+      transform.apply(self.points.1)
+    );
   }
 }
 
@@ -277,9 +307,11 @@ impl Curve for Arc {
   fn endpoints(&self) -> (Point3, Point3) {
     (self.sample(0.0), self.sample(1.0))
   }
+}
 
-  fn transform(&mut self, vec: Vec3) {
-    self.center += vec;
+impl Transformable for Arc {
+  fn transform(&mut self, transform: &Transform) {
+    self.center = transform.apply(self.center);
   }
 }
 
@@ -343,9 +375,11 @@ impl Curve for Circle {
     let zero = self.sample(0.0);
     (zero, zero)
   }
+}
 
-  fn transform(&mut self, vec: Vec3) {
-    self.center += vec;
+impl Transformable for Circle {
+  fn transform(&mut self, transform: &Transform) {
+    self.center = transform.apply(self.center);
   }
 }
 
@@ -474,10 +508,12 @@ impl Curve for BezierSpline {
   fn endpoints(&self) -> (Point3, Point3) {
     (self.vertices[0], *self.vertices.last().unwrap())
   }
+}
 
-  fn transform(&mut self, vec: Vec3) {
-    for p in &mut self.vertices {
-      *p += vec;
+impl Transformable for BezierSpline {
+  fn transform(&mut self, transform: &Transform) {
+    for v in  &mut self.vertices {
+      *v = transform.apply(*v);
     }
   }
 }
@@ -485,26 +521,25 @@ impl Curve for BezierSpline {
 
 // Iterate through an unordered list of connected sketch elements
 // in an orderly fashion. Returned trim bounds are consistently oriented.
-//XXX needs to iterate anti-clockwise for #new_lamina
-pub struct WireIterator<'a> {
-  wire: &'a Vec<TrimmedSketchElement>,
+pub struct RegionIterator<'a> {
+  region: &'a Vec<TrimmedSketchElement>,
   elem: Option<&'a TrimmedSketchElement>,
   first_elem: &'a TrimmedSketchElement,
   point: Point3,
 }
 
-impl<'a> WireIterator<'a> {
-  pub fn new(wire: &'a Vec<TrimmedSketchElement>) -> Self {
+impl<'a> RegionIterator<'a> {
+  pub fn new(region: &'a Vec<TrimmedSketchElement>) -> Self {
     Self {
-      wire,
-      elem: Some(&wire[0]),
-      first_elem: &wire[0],
-      point: wire[0].bounds.0,
+      region,
+      elem: Some(&region[0]),
+      first_elem: &region[0],
+      point: region[0].bounds.0,
     }
   }
 }
 
-impl<'a> Iterator for WireIterator<'a> {
+impl<'a> Iterator for RegionIterator<'a> {
   type Item = TrimmedSketchElement;
 
   fn next(&mut self) -> Option<Self::Item> {
@@ -514,11 +549,10 @@ impl<'a> Iterator for WireIterator<'a> {
         elem.bounds.1
       } else {
         // Reverse bounds, such that output item bounds are consistently oriented
-        // panic!("Should not happen");
         output.bounds = (output.bounds.1, output.bounds.0);
         elem.bounds.0
       };
-      self.elem = self.wire.iter().find(|other_elem| {
+      self.elem = self.region.iter().find(|other_elem| {
         (other_elem.bounds.0.almost(self.point) || other_elem.bounds.1.almost(self.point))
         && !ptr::eq(*other_elem, elem)
         && !ptr::eq(*other_elem, self.first_elem)
@@ -529,6 +563,62 @@ impl<'a> Iterator for WireIterator<'a> {
     }
   }
 }
+
+
+// // Iterate through an unordered list of connected sketch elements
+// // in an orderly fashion. Returned trim bounds are consistently oriented.
+// pub struct WireIterator<'a> {
+//   wire: &'a Vec<TrimmedSketchElement>,
+//   elem: Option<&'a TrimmedSketchElement>,
+//   first_elem: &'a TrimmedSketchElement,
+//   point: Point3,
+// }
+
+// impl<'a> WireIterator<'a> {
+//   pub fn new(wire: &'a Vec<TrimmedSketchElement>) -> Self {
+//     //XXX this assumes elems are already ordered...
+//     let bounds = wire[0].bounds;
+//     let next_bounds = wire[1].bounds;
+//     let first_point = if bounds.0.almost(next_bounds.0) || bounds.0.almost(next_bounds.1) {
+//       bounds.1
+//     } else {
+//       bounds.0
+//     };
+//     Self {
+//       wire,
+//       elem: Some(&wire[0]),
+//       first_elem: &wire[0],
+//       point: first_point,
+//       // point: wire[0].bounds.0,
+//     }
+//   }
+// }
+
+// impl<'a> Iterator for WireIterator<'a> {
+//   type Item = TrimmedSketchElement;
+
+//   fn next(&mut self) -> Option<Self::Item> {
+//     if let Some(elem) = self.elem {
+//       let mut output = elem.clone();
+//       self.point = if elem.bounds.0.almost(self.point) {
+//         elem.bounds.1
+//       } else {
+//         // Reverse bounds, such that output item bounds are consistently oriented
+//         output.bounds = (output.bounds.1, output.bounds.0);
+//         elem.bounds.0
+//       };
+//       //XXX ... this assumes unordered
+//       self.elem = self.wire.iter().find(|other_elem| {
+//         (other_elem.bounds.0.almost(self.point) || other_elem.bounds.1.almost(self.point))
+//         && !ptr::eq(*other_elem, elem)
+//         && !ptr::eq(*other_elem, self.first_elem)
+//       });
+//       Some(output)
+//     } else {
+//       None
+//     }
+//   }
+// }
 
 
 #[cfg(test)]

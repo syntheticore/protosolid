@@ -214,9 +214,11 @@ pub struct JsRegion {
 
 #[wasm_bindgen]
 impl JsRegion {
-  pub fn get_mesh(&self) -> JsValue {
-    let poly = geom2d::poly_from_wire(&self.region.iter().map(|elem| elem.cache.clone() ).collect());
-    JsValue::from(JsBufferGeometry::from(geom2d::tesselate_polygon(poly).to_buffer_geometry()))
+  pub fn get_mesh(&mut self) -> JsValue {
+    let poly = geom2d::poly_from_wire(&self.region);
+    JsValue::from(JsBufferGeometry::from(
+      geom2d::tesselate_polygon(poly).to_buffer_geometry()
+    ))
   }
 
   pub fn get_center(&self) -> JsValue {
@@ -358,17 +360,19 @@ impl JsComponent {
   }
 
   pub fn get_children(&self) -> Array {
-    self.real.borrow().children.iter().map(|child| JsValue::from(JsComponent::from(child)) ).collect()
+    self.real.borrow().children.iter().map(|child|
+      JsValue::from(JsComponent::from(child))
+    ).collect()
   }
 
   pub fn get_mesh(&self) -> JsValue {
     let bodies = &self.real.borrow().bodies;
     if bodies.len() > 0 {
-      let mut mesh = JsBufferGeometry::from_body(&bodies[0]);
+      let mut geom = JsBufferGeometry::from_body(&bodies[0]);
       for body in bodies.iter().skip(1) {
-        mesh.position.append(&mut body.tesselate().to_buffer_geometry())
+        geom.position.append(&mut body.tesselate().to_buffer_geometry())
       }
-      JsValue::from(mesh)
+      JsValue::from(geom)
     } else { JsValue::UNDEFINED }
   }
 
@@ -386,20 +390,6 @@ impl JsComponent {
         right
       ])
     }).collect()
-  }
-
-  pub fn add_segment(&self) {
-    let spline = BezierSpline::new(vec![
-      Point3::new(0.0, 0.0, 1.0),
-      Point3::new(1.0, 0.0, 1.25),
-      Point3::new(1.0, 1.0, 1.5),
-      Point3::new(0.0, 1.0, 1.75),
-      Point3::new(0.0, 0.0, 2.0),
-      Point3::new(1.0, 0.0, 2.25),
-      Point3::new(1.0, 1.0, 2.5),
-      Point3::new(0.0, 1.0, 2.75),
-    ]);
-    self.real.borrow_mut().sketch.elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
   }
 
   pub fn create_component(&mut self, title: &str) -> JsComponent {

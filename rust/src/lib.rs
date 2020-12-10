@@ -392,6 +392,12 @@ impl JsComponent {
     }).collect()
   }
 
+  pub fn export_stl(&self) -> String {
+    let comp = self.real.borrow();
+    let mesh = comp.bodies[0].tesselate();
+    export::stl(&mesh, &comp.title)
+  }
+
   pub fn create_component(&mut self, title: &str) -> JsComponent {
     let comp = self.real.borrow_mut().create_component();
     comp.borrow_mut().title = title.to_string();

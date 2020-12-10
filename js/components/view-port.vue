@@ -889,7 +889,7 @@
 
       elementChanged: function(elem, comp) {
         const regions = comp.get_sketch().get_regions(false)
-        console.log('# regions: ', regions.length)
+        // console.log('# regions: ', regions.length)
         this.regionMeshes = this.regionMeshes || []
         this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
         this.regionMeshes = regions.map(region => {

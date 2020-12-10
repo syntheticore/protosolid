@@ -48,6 +48,7 @@
 
     .debug-panel
       button.button(@click="splitAll") Split all
+      button.button(@click="exportStl") Export STL
 </template>
 
 
@@ -144,6 +145,25 @@
         //   this.activeComponent.remove_element(elem.id())
         // })
         document._debug.viewport.componentChanged(this.activeComponent)
+      },
+
+      saveFile: function(data, filename, type) {
+        var file = new Blob([data], {type: type});
+        const a = document.createElement("a")
+        const url = URL.createObjectURL(file);
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() {
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        }, 0);
+      },
+
+      exportStl: function() {
+        const stl = this.activeComponent.export_stl()
+        this.saveFile(stl, this.activeComponent.get_title(), 'STL')
       },
     },
   }

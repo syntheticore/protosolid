@@ -5,6 +5,7 @@ use crate::base::*;
 pub struct Mesh {
   pub vertices: Vec<Point3>,
   pub faces: Vec<usize>,
+  // pub normals: Vec<Vec3>,
 }
 
 impl Mesh {

@@ -276,7 +276,7 @@ export class Renderer {
   //   this.segments = this.getSegments(node)
   //   this.handles = this.segments.flatMap(seg => seg.get_handles())
   //   this.segments.forEach(segment => {
-  //     const vertices = segment.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
+  //     const vertices = segment.tesselate().map(vertex => new THREE.Vector3().fromArray(vertex))
   //     // const handles = segment.get_handles().map(handle => new THREE.Vector3().fromArray(handle))
   //     // var lineGeom = new THREE.BufferGeometry().setFromPoints(vertices)
   //     // // var pointGeom = new THREE.BufferGeometry().setFromPoints(handles)
@@ -305,7 +305,7 @@ export class Renderer {
     const segments = node.get_sketch_elements()
     // this.handles = segments.flatMap(seg => seg.get_handles())
     segments.forEach(segment => {
-      const vertices = segment.default_tesselation().map(vertex => new THREE.Vector3().fromArray(vertex))
+      const vertices = segment.tesselate().map(vertex => new THREE.Vector3().fromArray(vertex))
       var geometry = new LineGeometry()
       geometry.setPositions(vertices.flatMap(vertex => vertex.toArray()))
       geometry.setColors(Array(vertices.length * 3).fill(1))

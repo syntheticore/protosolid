@@ -36,14 +36,10 @@ impl Component {
 
 #[derive(Debug, Default)]
 pub struct Sketch {
-  pub elements: Vec<Ref<SketchElement>>,
+  pub elements: Vec<Ref<CurveType>>,
 }
 
 impl Sketch {
-  pub fn new() -> Self {
-    Default::default()
-  }
-
   pub fn get_regions(&self, include_outer: bool) -> Vec<Region> {
     let mut cut_elements = Self::all_split(&self.elements);
     Self::remove_dangling_segments(&mut cut_elements);
@@ -53,7 +49,7 @@ impl Sketch {
     .collect()
   }
 
-  fn build_loops_from_island(island: &Vec<TrimmedSketchElement>, include_outer: bool) -> Vec<Region> {
+  fn build_loops_from_island(island: &Vec<TrimmedCurve>, include_outer: bool) -> Vec<Region> {
     let mut regions = vec![];
     let mut used_forward = HashSet::new();
     let mut used_backward = HashSet::new();
@@ -70,16 +66,16 @@ impl Sketch {
     regions
   }
 
-  pub fn split_all(&self) -> Vec<SketchElement> {
+  pub fn split_all(&self) -> Vec<CurveType> {
     Self::all_split(&self.elements).into_iter()
     .map(|elem| elem.cache )
     .collect()
   }
 
-  pub fn all_split(elements: &Vec<Ref<SketchElement>>) -> Vec<TrimmedSketchElement> {
+  pub fn all_split(elements: &Vec<Ref<CurveType>>) -> Vec<TrimmedCurve> {
     elements.iter().flat_map(|elem| {
       let splits = Self::split_element(&elem.borrow(), &elements);
-      splits.into_iter().map(|split| TrimmedSketchElement {
+      splits.into_iter().map(|split| TrimmedCurve {
         base: (*elem.borrow()).clone(),
         bounds: split.as_curve().endpoints(),
         cache: split,
@@ -87,12 +83,12 @@ impl Sketch {
     }).collect()
   }
 
-  pub fn split_element(elem: &SketchElement, others: &Vec<Ref<SketchElement>>) -> Vec<SketchElement> {
+  pub fn split_element(elem: &CurveType, others: &Vec<Ref<CurveType>>) -> Vec<CurveType> {
     let others = others.iter().map(|other| other.borrow().clone() ).collect();
     elem.split_multi(&others)
   }
 
-  pub fn build_islands(elements: &Vec<TrimmedSketchElement>) -> Vec<Vec<TrimmedSketchElement>> {
+  pub fn build_islands(elements: &Vec<TrimmedCurve>) -> Vec<Vec<TrimmedCurve>> {
     let mut unused_elements = elements.clone();
     let mut islands = vec![];
     while let Some(start_elem) = unused_elements.pop() {
@@ -106,7 +102,7 @@ impl Sketch {
     islands
   }
 
-  fn build_island(start_elem: &TrimmedSketchElement, mut path: &mut Vec<TrimmedSketchElement>, all_elements: &Vec<TrimmedSketchElement>) {
+  fn build_island(start_elem: &TrimmedCurve, mut path: &mut Vec<TrimmedCurve>, all_elements: &Vec<TrimmedCurve>) {
     if path.iter().any(|e| e == start_elem ) { return }
     let (start_point, end_point) = start_elem.bounds;
     path.push(start_elem.clone());
@@ -122,10 +118,10 @@ impl Sketch {
   // https://stackoverflow.com/questions/838076/small-cycle-finding-in-a-planar-graph
   pub fn build_loop<'a>(
     start_point: &Point3,
-    start_elem: &'a TrimmedSketchElement,
+    start_elem: &'a TrimmedCurve,
     mut path: Region,
     path_start_point: &Point3,
-    all_elements: &'a Vec<TrimmedSketchElement>,
+    all_elements: &'a Vec<TrimmedCurve>,
     used_forward: &mut HashSet<Uuid>,
     used_backward: &mut HashSet<Uuid>,
   ) -> Vec<Region> {
@@ -143,7 +139,7 @@ impl Sketch {
     path.push(start_elem.clone());
     // Find connected segments
     let end_point = start_elem.other_bound(&start_point);
-    let mut connected_elems: Vec<&TrimmedSketchElement> = all_elements.iter().filter(|other_elem| {
+    let mut connected_elems: Vec<&TrimmedCurve> = all_elements.iter().filter(|other_elem| {
       let (other_start, other_end) = other_elem.bounds;
       (end_point.almost(other_start) || end_point.almost(other_end)) && as_controllable(&other_elem.cache).id() != start_elem_id
     }).collect();
@@ -187,7 +183,7 @@ impl Sketch {
     })
   }
 
-  pub fn remove_dangling_segments(island: &mut Vec<TrimmedSketchElement>) {
+  pub fn remove_dangling_segments(island: &mut Vec<TrimmedCurve>) {
     let others = island.clone();
     let start_len = island.len();
     island.retain(|elem| {
@@ -299,21 +295,21 @@ impl Controllable for BezierSpline {
 }
 
 
-pub fn as_controllable(elem: &SketchElement) -> &dyn Controllable {
+pub fn as_controllable(elem: &CurveType) -> &dyn Controllable {
   match elem {
-    SketchElement::Line(line) => line,
-    SketchElement::Arc(arc) => arc,
-    SketchElement::Circle(circle) => circle,
-    SketchElement::BezierSpline(spline) => spline,
+    CurveType::Line(line) => line,
+    CurveType::Arc(arc) => arc,
+    CurveType::Circle(circle) => circle,
+    CurveType::BezierSpline(spline) => spline,
   }
 }
 
-pub fn as_controllable_mut(elem: &mut SketchElement) -> &mut dyn Controllable {
+pub fn as_controllable_mut(elem: &mut CurveType) -> &mut dyn Controllable {
   match elem {
-    SketchElement::Line(line) => line,
-    SketchElement::Arc(arc) => arc,
-    SketchElement::Circle(circle) => circle,
-    SketchElement::BezierSpline(spline) => spline,
+    CurveType::Line(line) => line,
+    CurveType::Arc(arc) => arc,
+    CurveType::Circle(circle) => circle,
+    CurveType::BezierSpline(spline) => spline,
   }
 }
 
@@ -324,7 +320,7 @@ mod tests {
   use shapex::test_data;
 
   fn make_sketch(lines: &Vec<Line>) -> Sketch {
-    let mut sketch = Sketch::new();
+    let mut sketch = Sketch::default();
     for line in lines {
       sketch.elements.push(rc(line.clone().into_enum()));
     }
@@ -399,7 +395,7 @@ mod tests {
 
   #[test]
   fn dangling_segment() {
-    let mut sketch = Sketch::new();
+    let mut sketch = Sketch::default();
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0));
     sketch.elements.push(rc(line.into_enum()));
     let _regions = sketch.get_regions(false);

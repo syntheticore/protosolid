@@ -7,7 +7,6 @@ use crate::base::*;
 use crate::curve::*;
 use crate::surface::*;
 use crate::mesh::*;
-use crate::geom2d;
 
 
 #[derive(Debug)]
@@ -40,7 +39,7 @@ pub struct Face {
   pub id: Uuid,
   pub outer_ring: Ref<Ring>,
   pub rings: Vec<Ref<Ring>>,
-  pub surface: Box<dyn Surface>,
+  pub surface: SurfaceType,
 }
 
 
@@ -56,7 +55,7 @@ pub struct Edge {
   pub id: Uuid,
   pub left_half: Ref<HalfEdge>,
   pub right_half: Ref<HalfEdge>,
-  pub curve: SketchElement,
+  pub curve: CurveType,
   pub curve_direction: bool, // true means forward according to left_half
 }
 
@@ -81,21 +80,17 @@ pub struct Vertex {
 
 
 impl Solid {
-  pub fn new() -> Self {
-    Default::default()
-  }
-
-  pub fn new_lamina(region: Region, top_plane: Plane) -> Self {
+  pub fn new_lamina(region: Region, top_surface: SurfaceType) -> Self {
     println!("Creating Lamina:");
     // println!("{:?}", region.iter().map(|r| r.bounds).collect::<Vec<(Point3, Point3)>>());
-    let mut bottom = top_plane.clone();
-    bottom.flip();
-    let mut this = Self::new();
+    let mut bottom = top_surface.clone();
+    bottom.as_surface_mut().flip();
+    let mut this = Self::default();
     // Create shell from bottom face with empty ring
     // geom2d::straighten_bounds(&mut region);
     //XXX iterate anti-clockwise
     let first_elem = region.first().unwrap().clone();
-    this.mvfs(first_elem.bounds.0, Box::new(bottom));
+    this.mvfs(first_elem.bounds.0, bottom);
     let shell = &mut this.shells[0];
     // Complete ring of bottom face
     let mut he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
@@ -108,7 +103,7 @@ impl Solid {
     // Create top face
     let he1 = shell.edges[0].borrow().right_half.clone();
     let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
-    shell.lmef(&he1, &he2, first_elem.cache, Box::new(top_plane)); //XXX cache -> base
+    shell.lmef(&he1, &he2, first_elem.cache, top_surface); //XXX cache -> base
     this
   }
 
@@ -118,7 +113,7 @@ impl Solid {
     self.shells.iter().fold(0, |acc, shell| acc + shell.euler_characteristics() ) - 2 * (self.shells.len() as i32 - genus)
   }
 
-  pub fn mvfs(&mut self, p: Point3, surface: Box<dyn Surface>) -> (Ref<Vertex>, Ref<Face>, &mut Shell) {
+  pub fn mvfs(&mut self, p: Point3, surface: SurfaceType) -> (Ref<Vertex>, Ref<Face>, &mut Shell) {
     let mut shell = Shell {
       closed: true,
       faces: vec![],
@@ -175,9 +170,15 @@ impl Solid {
 
   pub fn tesselate(&self) -> Mesh {
     let mut mesh = Mesh::default();
-    for face in &self.shells[0].faces {
-      mesh.append(face.borrow().tesselate());
+    for shell in &self.shells {
+      let is_inner = !ptr::eq(shell, &self.shells[0]);
+      for face in &shell.faces {
+        let mut face_mesh = face.borrow().tesselate();
+        if is_inner { face_mesh.invert_normals() }
+        mesh.append(face_mesh);
+      }
     }
+    mesh.heal();
     mesh
   }
 }
@@ -210,7 +211,7 @@ impl Shell {
     }
   }
 
-  pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: SketchElement, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
+  pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: CurveType, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
     let vertex = rc(Vertex {
       point: p,
       half_edge: Weak::new(),
@@ -258,7 +259,7 @@ impl Shell {
     (edge, vertex)
   }
 
-  pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: SketchElement, surface: Box<dyn Surface>) -> (Ref<Edge>, Ref<Face>) {
+  pub fn lmef(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: CurveType, surface: SurfaceType) -> (Ref<Edge>, Ref<Face>) {
     let ring = rc(Ring {
       half_edge: he1.clone(), // using he1 as dummy, just to be able to create the ring...
       face: Weak::new(),
@@ -331,7 +332,7 @@ impl Shell {
       }
       self.sweep_mef(&scan, vec);
     }
-    face.borrow_mut().surface.translate(vec);
+    face.borrow_mut().surface.as_surface_mut().translate(vec);
   }
 
   fn sweep_mev(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
@@ -354,11 +355,11 @@ impl Shell {
       &scan_previous, // ..this half edge's vertex..
       &next_next, // ..to this half edge's vertex
       curve,
-      Box::new(Plane::from_triangle(
+      Plane::from_triangle(
         p1,
         p1 + vec,
         p2,
-      )),
+      ).into_enum(),
     );
   }
 
@@ -378,9 +379,12 @@ impl Shell {
 
 impl Face {
   pub fn tesselate(&self) -> Mesh {
+    self.get_surface().tesselate()
+  }
+
+  pub fn get_surface(&self) -> TrimmedSurface {
     let wire = self.outer_ring.borrow().get_wire();
-    let polyline = geom2d::poly_from_wire(&wire);
-    geom2d::tesselate_polygon(polyline)
+    TrimmedSurface::new(self.surface.clone(), wire)
   }
 
   pub fn print(&self) {
@@ -393,11 +397,11 @@ impl Face {
 
 
 impl Ring {
-  pub fn get_wire(&self) -> Vec<TrimmedSketchElement> {
+  pub fn get_wire(&self) -> Wire {
     self.iter().filter_map(|he| {
       let he = he.borrow();
       if let Some(edge) = he.edge.upgrade() {
-        let mut curve = TrimmedSketchElement::new(edge.borrow().curve.clone());
+        let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
         curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
         Some(curve)
       } else { None }
@@ -467,12 +471,13 @@ impl HalfEdge {
     self.mate().borrow().origin.clone()
   }
 
-  pub fn ring_iter(&self) -> RingIterator  {
-    RingIterator::new(self.mate().borrow().mate())
+  pub fn get_face(&self) -> Ref<Face> {
+    self.ring.upgrade().unwrap().borrow()
+    .face.upgrade().unwrap()
   }
 
-  pub fn get_face(&self) -> Ref<Face> {
-    self.ring.upgrade().unwrap().borrow().face.upgrade().unwrap()
+  pub fn ring_iter(&self) -> RingIterator  {
+    RingIterator::new(self.mate().borrow().mate())
   }
 
   pub fn print(&self) {

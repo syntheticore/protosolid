@@ -76,7 +76,7 @@ pub fn straighten_bounds(wire: &mut Wire) {
 }
 
 // // Returned loops are oriented counter-clockwise
-// pub fn poly_from_wire(wire: &Vec<SketchElement>) -> PolyLine {
+// pub fn poly_from_wire(wire: &Vec<CurveType>) -> PolyLine {
 //   if wire.len() == 1 {
 //     panic!("PolyLine has length one {:?}", wire);
 //   }
@@ -101,7 +101,7 @@ pub fn straighten_bounds(wire: &mut Wire) {
 //   polyline
 // }
 
-pub fn trim(_elem: &SketchElement, _cutters: &Vec<SketchElement>, _p: Point3) {
+pub fn trim(_elem: &CurveType, _cutters: &Vec<CurveType>, _p: Point3) {
   // let splits = split_element(elem, cutters);
   // splits.sort_by(|a, b| {
   //   let a = a.as_curve();
@@ -115,18 +115,18 @@ mod tests {
   use super::*;
   use crate::test_data;
 
-  fn make_trimmed(elems: Vec<SketchElement>) -> Region {
-    elems.into_iter().map(|elem| TrimmedSketchElement::new(elem)).collect()
+  fn make_trimmed(elems: Vec<CurveType>) -> Region {
+    elems.into_iter().map(|elem| TrimmedCurve::new(elem)).collect()
   }
 
   #[test]
   fn compare_areas() {
     let rect = test_data::rectangle();
-    let rect: Vec<SketchElement> = rect.into_iter().map(|l| l.into_enum() ).collect();
+    let rect: Vec<CurveType> = rect.into_iter().map(|l| l.into_enum() ).collect();
     let rect_poly = poly_from_wire(&make_trimmed(rect));
 
     let reverse_rect = test_data::reverse_rectangle();
-    let reverse_rect: Vec<SketchElement> = reverse_rect.into_iter().map(|l| l.into_enum() ).collect();
+    let reverse_rect: Vec<CurveType> = reverse_rect.into_iter().map(|l| l.into_enum() ).collect();
     let reverse_rect_poly = poly_from_wire(&make_trimmed(reverse_rect));
 
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
@@ -135,7 +135,7 @@ mod tests {
   #[test]
   fn rectangle_clockwise() {
     let rect = test_data::rectangle();
-    let rect: Vec<SketchElement> = rect.into_iter().map(|l| l.into_enum() ).collect();
+    let rect: Vec<CurveType> = rect.into_iter().map(|l| l.into_enum() ).collect();
     let rect_poly = poly_from_wire(&make_trimmed(rect));
 
     assert!(is_clockwise(&rect_poly));

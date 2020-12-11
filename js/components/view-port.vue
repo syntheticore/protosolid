@@ -766,7 +766,7 @@
 
       loadElement: function(elem, node) {
         this.unloadElement(elem, node, this.document)
-        const vertices = elem.default_tesselation()
+        const vertices = elem.tesselate()
         const line = this.convertLine(vertices, this.lineMaterial)
         line.alcSelectable = true
         this.document.data[elem.id()] = line

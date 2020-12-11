@@ -90,7 +90,7 @@ pub struct Edge {
   faces: (*mut Face, *mut Face),
   vertices: (*mut Vertex, *mut Vertex),
   // curve: Box<dyn Curve>,
-  curve: *mut TrimmedSketchElement,
+  curve: *mut TrimmedCurve,
 }
 
 
@@ -151,8 +151,8 @@ pub fn make_solid() -> Solid {
     surface: Box::new(plane),
     normal_direction: true,
   };
-  let line = SketchElement::Line(Line::new(vertices[0].point, vertices[1].point));
-  let mut curve1 = TrimmedSketchElement  {
+  let line = CurveType::Line(Line::new(vertices[0].point, vertices[1].point));
+  let mut curve1 = TrimmedCurve  {
     base: Rc::new(RefCell::new(line.clone())),
     // bounds: (0.0, 1.0),
     bounds: (vertices[0].point, vertices[1].point),

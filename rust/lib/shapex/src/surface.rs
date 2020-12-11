@@ -1,12 +1,16 @@
 use crate::base::*;
 use crate::curve::*;
 use crate::curve::intersection::CurveIntersection;
+use crate::geom2d;
 use crate::geom3d::*;
+use crate::mesh::Mesh;
 
 
 pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
+  fn tesselate(&self, bounds: &Wire) -> Mesh;
+  fn flip(&mut self);
 }
 
 impl core::fmt::Debug for dyn Surface {
@@ -16,10 +20,44 @@ impl core::fmt::Debug for dyn Surface {
 }
 
 
+#[derive(Debug, Clone)]
+pub enum SurfaceType {
+  Plane(Plane),
+}
+
+impl SurfaceType {
+  pub fn as_surface(&self) -> &dyn Surface {
+    match self {
+      Self::Plane(plane) => plane,
+    }
+  }
+
+  pub fn as_surface_mut(&mut self) -> &mut dyn Surface {
+    match self {
+      Self::Plane(plane) => plane,
+    }
+  }
+}
+
+
 #[derive(Debug)]
 pub struct TrimmedSurface {
-  base: Box<dyn Surface>,
-  bounds: Vec<Wire>,
+  pub base: SurfaceType,
+  pub bounds: Vec<Wire>,
+}
+
+impl TrimmedSurface {
+  pub fn new(surf: SurfaceType, outer_bounds: Wire) -> Self {
+    Self {
+      base: surf,
+      bounds: vec![outer_bounds],
+    }
+  }
+
+  pub fn tesselate(&self) -> Mesh {
+    let wire = &self.bounds[0];
+    self.base.as_surface().tesselate(wire)
+  }
 }
 
 
@@ -42,7 +80,7 @@ impl Plane {
   pub fn from_triangle(p1: Point3, p2: Point3, p3: Point3) -> Self {
     let u = p2 - p1;
     let pre_v = p3 - p1;
-    let normal = u.cross(pre_v);
+    let normal = u.cross(pre_v).normalize();
     Self {
       origin: p1,
       u,
@@ -52,10 +90,6 @@ impl Plane {
 
   pub fn normal(&self) -> Vec3 {
     self.u.cross(self.v)
-  }
-
-  pub fn flip(&mut self) {
-    self.v = -self.v;
   }
 
   pub fn intersect_line(&self, line: (Point3, Point3)) -> CurveIntersection {
@@ -90,6 +124,27 @@ impl Plane {
   pub fn contains_point(&self, p: Point3) -> bool {
     self.normal().dot(p - self.origin) <= EPSILON
   }
+
+  #[allow(dead_code)]
+  fn normal_to_uv(normal: Vec3) -> (Vec3, Vec3) {
+    let u = normal.cross(Vec3::unit_z()).normalize();
+    let v = normal.cross(u);
+    (u, v)
+  }
+
+  // https://math.stackexchange.com/questions/1956699/getting-a-transformation-matrix-from-a-normal-vector
+  pub fn as_transform(&self) -> Transform {
+    Transform::from_matrix(Matrix4::from_cols(
+      self.u.extend(1.0),
+      self.v.extend(1.0),
+      self.normal().extend(1.0),
+      Vec4::unit_w()
+    ).transpose())
+  }
+
+  pub fn into_enum(self) -> SurfaceType {
+    SurfaceType::Plane(self)
+  }
 }
 
 impl Surface for Plane {
@@ -100,11 +155,30 @@ impl Surface for Plane {
   fn normal_at(&self, _u: f64, _v: f64) -> Vec3 {
     self.normal()
   }
+
+  fn tesselate(&self, bounds: &Wire) -> Mesh {
+    let trans = self.as_transform();
+    let lay_flat = trans.invert();
+    let mut flat_bounds: Wire = bounds.iter().cloned().collect();
+    for curve in &mut flat_bounds {
+      curve.transform(&lay_flat)
+    }
+    let polyline = geom2d::poly_from_wire(&flat_bounds);
+    let mut mesh = geom2d::tesselate_polygon(polyline);
+    mesh.transform(&trans);
+    mesh
+  }
+
+  fn flip(&mut self) {
+    self.v = -self.v;
+  }
 }
 
 impl Transformable for Plane {
   fn transform(&mut self, transform: &Transform) {
     self.origin = transform.apply(self.origin);
+    self.u = transform.apply_vec(self.u);
+    self.v = transform.apply_vec(self.v);
   }
 }
 

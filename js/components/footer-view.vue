@@ -147,8 +147,8 @@
         document._debug.viewport.componentChanged(this.activeComponent)
       },
 
-      saveFile: function(data, filename, type) {
-        var file = new Blob([data], {type: type});
+      saveFile: function(data, filename, filetype) {
+        var file = new Blob([data], {filetype});
         const a = document.createElement("a")
         const url = URL.createObjectURL(file);
         a.href = url;
@@ -163,7 +163,8 @@
 
       exportStl: function() {
         const stl = this.activeComponent.export_stl()
-        this.saveFile(stl, this.activeComponent.get_title(), 'STL')
+        const title = this.activeComponent.get_title().replace(' ', '_') + '.stl'
+        this.saveFile(stl, title, 'STL')
       },
     },
   }

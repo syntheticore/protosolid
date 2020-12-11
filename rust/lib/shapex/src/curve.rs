@@ -10,52 +10,49 @@ use intersection::CurveIntersection;
 pub mod intersection;
 
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TrimmedSketchElement {
-  pub base: SketchElement,
-  // pub bounds: (f64, f64),
-  pub bounds: (Point3, Point3),
-  pub cache: SketchElement,
-}
+pub trait Curve: Transformable {
+  fn sample(&self, t: f64) -> Point3;
+  // fn unsample(&self, p: Point3) -> f64;
+  fn tesselate(&self) -> PolyLine;
+  fn length(&self) -> f64;
+  fn endpoints(&self) -> (Point3, Point3);
 
-impl TrimmedSketchElement {
-  pub fn new(elem: SketchElement) -> Self {
-    TrimmedSketchElement {
-      bounds: elem.as_curve().endpoints(),
-      base: elem.clone(),
-      cache: elem,
-    }
+  fn other_endpoint(&self, point: &Point3) -> Point3 {
+    let (start, end) = self.endpoints();
+    if point.almost(start) { end } else { start }
   }
 
-  pub fn other_bound(&self, p: &Point3) -> Point3 {
-    let (start, end) = self.bounds;
-    if p.almost(start) { end } else { start }
+  fn tesselate_fixed(&self, steps: i32) -> Vec<Point3> {
+    (0..steps + 1).map(|i| {
+      self.sample(i as f64 / steps as f64)
+    }).collect()
   }
+
+  fn tesselate_adaptive(&self, steps_per_mm: f64) -> Vec<Point3> {
+    self.tesselate_fixed((steps_per_mm * self.length()).round() as i32)
+  }
+
+  // fn closest_point(&self, p: Point3) -> Point3 {
+  //   self.sample(self.unsample(p))
+  // }
 }
 
-
-pub type PolyLine = Vec<Point3>;
-
-
-/// Elements in a region are connected by their endpoints
-/// and already sorted in a closed loop
-pub type Region = Vec<TrimmedSketchElement>;
-
-
-/// Wires fulfill all properties of regions, but their elements
-/// run clockwise and their bounds are ordered in the direction of the loop
-pub type Wire = Vec<TrimmedSketchElement>;
+impl std::fmt::Debug for dyn Curve {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    write!(f, "Foo")
+  }
+}
 
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SketchElement {
+pub enum CurveType {
   Line(Line),
   Arc(Arc),
   Circle(Circle),
   BezierSpline(BezierSpline),
 }
 
-impl SketchElement {
+impl CurveType {
   pub fn as_curve(&self) -> &dyn Curve {
     match self {
       Self::Line(line) => line,
@@ -128,45 +125,57 @@ impl SketchElement {
 }
 
 
-pub trait Curve: Transformable {
-  fn sample(&self, t: f64) -> Point3;
-  // fn unsample(&self, p: Point3) -> f64;
-  fn default_tesselation(&self) -> Vec<Point3>;
-  fn length(&self) -> f64;
-  fn endpoints(&self) -> (Point3, Point3);
-
-  fn other_endpoint(&self, point: &Point3) -> Point3 {
-    let (start, end) = self.endpoints();
-    if point.almost(start) { end } else { start }
-  }
-
-  fn tesselate_fixed(&self, steps: i32) -> Vec<Point3> {
-    (0..steps + 1).map(|i| {
-      self.sample(i as f64 / steps as f64)
-    }).collect()
-  }
-
-  fn tesselate_relative(&self, steps_per_mm: f64) -> Vec<Point3> {
-    self.tesselate_fixed((steps_per_mm * self.length()).round() as i32)
-  }
-
-  // fn closest_point(&self, p: Point3) -> Point3 {
-  //   self.sample(self.unsample(p))
-  // }
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrimmedCurve {
+  pub base: CurveType,
+  // pub bounds: (f64, f64),
+  pub bounds: (Point3, Point3),
+  pub cache: CurveType,
 }
 
-impl std::fmt::Debug for dyn Curve {
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "Foo")
+impl TrimmedCurve {
+  pub fn new(elem: CurveType) -> Self {
+    Self {
+      bounds: elem.as_curve().endpoints(),
+      base: elem.clone(),
+      cache: elem,
+    }
+  }
+
+  pub fn other_bound(&self, p: &Point3) -> Point3 {
+    let (start, end) = self.bounds;
+    if p.almost(start) { end } else { start }
   }
 }
+
+impl Transformable for TrimmedCurve {
+  fn transform(&mut self, transform: &Transform) {
+    self.base.as_curve_mut().transform(transform);
+    self.cache.as_curve_mut().transform(transform);
+    self.bounds = (transform.apply(self.bounds.0), transform.apply(self.bounds.1));
+  }
+}
+
+
+pub type PolyLine = Vec<Point3>;
+
+
+/// Elements in a region are connected by their endpoints
+/// and already sorted in a closed loop
+pub type Region = Vec<TrimmedCurve>;
+
+
+/// Wires fulfill all properties of regions, but their elements
+/// run clockwise and their bounds are ordered in the direction of the loop
+pub type Wire = Vec<TrimmedCurve>;
 
 
 /// A finite line segment between two points
 /// # Examples
 ///
 /// ```
-/// let x = 5;
+/// let line = Line.new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
+/// assert_eq!(line.midpoint(), Point3::new(0.5, 0.0, 0.0))
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line {
@@ -194,7 +203,7 @@ impl Line {
     self.tangent().dot(other.tangent()).acos()
   }
 
-  pub fn split_with(&self, cutter: &SketchElement) -> Vec<Line> {
+  pub fn split_with(&self, cutter: &CurveType) -> Vec<Line> {
     match intersection::intersect(&self.clone().into_enum(), cutter) {
       CurveIntersection::None
       | CurveIntersection::Contained
@@ -214,7 +223,7 @@ impl Line {
         let mut iter = points.iter().peekable();
         loop {
           match (iter.next(), iter.peek()) {
-            (Some(p), Some(next_p)) => segments.push(Self::new(*p, **next_p)),
+            (Some(p), Some(&next_p)) => segments.push(Self::new(*p, *next_p)),
             _ => break,
           }
         }
@@ -223,8 +232,8 @@ impl Line {
     }
   }
 
-  pub fn into_enum(self) -> SketchElement {
-    SketchElement::Line(self)
+  pub fn into_enum(self) -> CurveType {
+    CurveType::Line(self)
   }
 }
 
@@ -234,7 +243,7 @@ impl Curve for Line {
     self.points.0 + vec * t
   }
 
-  fn default_tesselation(&self) -> Vec<Point3> {
+  fn tesselate(&self) -> Vec<Point3> {
     self.tesselate_fixed(1)
   }
 
@@ -296,7 +305,7 @@ impl Curve for Arc {
     )
   }
 
-  fn default_tesselation(&self) -> Vec<Point3> {
+  fn tesselate(&self) -> Vec<Point3> {
     self.tesselate_fixed(120)
   }
 
@@ -363,7 +372,7 @@ impl Curve for Circle {
     )
   }
 
-  fn default_tesselation(&self) -> Vec<Point3> {
+  fn tesselate(&self) -> Vec<Point3> {
     self.tesselate_fixed(120)
   }
 
@@ -497,7 +506,7 @@ impl Curve for BezierSpline {
     self.real_sample(t, &self.vertices)
   }
 
-  fn default_tesselation(&self) -> Vec<Point3> {
+  fn tesselate(&self) -> Vec<Point3> {
     self.lut.clone()
   }
 
@@ -522,14 +531,14 @@ impl Transformable for BezierSpline {
 // Iterate through an unordered list of connected sketch elements
 // in an orderly fashion. Returned trim bounds are consistently oriented.
 pub struct RegionIterator<'a> {
-  region: &'a Vec<TrimmedSketchElement>,
-  elem: Option<&'a TrimmedSketchElement>,
-  first_elem: &'a TrimmedSketchElement,
+  region: &'a Vec<TrimmedCurve>,
+  elem: Option<&'a TrimmedCurve>,
+  first_elem: &'a TrimmedCurve,
   point: Point3,
 }
 
 impl<'a> RegionIterator<'a> {
-  pub fn new(region: &'a Vec<TrimmedSketchElement>) -> Self {
+  pub fn new(region: &'a Vec<TrimmedCurve>) -> Self {
     Self {
       region,
       elem: Some(&region[0]),
@@ -540,7 +549,7 @@ impl<'a> RegionIterator<'a> {
 }
 
 impl<'a> Iterator for RegionIterator<'a> {
-  type Item = TrimmedSketchElement;
+  type Item = TrimmedCurve;
 
   fn next(&mut self) -> Option<Self::Item> {
     if let Some(elem) = self.elem {
@@ -568,14 +577,14 @@ impl<'a> Iterator for RegionIterator<'a> {
 // // Iterate through an unordered list of connected sketch elements
 // // in an orderly fashion. Returned trim bounds are consistently oriented.
 // pub struct WireIterator<'a> {
-//   wire: &'a Vec<TrimmedSketchElement>,
-//   elem: Option<&'a TrimmedSketchElement>,
-//   first_elem: &'a TrimmedSketchElement,
+//   wire: &'a Vec<TrimmedCurve>,
+//   elem: Option<&'a TrimmedCurve>,
+//   first_elem: &'a TrimmedCurve,
 //   point: Point3,
 // }
 
 // impl<'a> WireIterator<'a> {
-//   pub fn new(wire: &'a Vec<TrimmedSketchElement>) -> Self {
+//   pub fn new(wire: &'a Vec<TrimmedCurve>) -> Self {
 //     //XXX this assumes elems are already ordered...
 //     let bounds = wire[0].bounds;
 //     let next_bounds = wire[1].bounds;
@@ -595,7 +604,7 @@ impl<'a> Iterator for RegionIterator<'a> {
 // }
 
 // impl<'a> Iterator for WireIterator<'a> {
-//   type Item = TrimmedSketchElement;
+//   type Item = TrimmedCurve;
 
 //   fn next(&mut self) -> Option<Self::Item> {
 //     if let Some(elem) = self.elem {

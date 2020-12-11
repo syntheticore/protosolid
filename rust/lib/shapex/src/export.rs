@@ -2,10 +2,9 @@ use crate::mesh::Mesh;
 
 
 pub fn stl(mesh: &Mesh, name: &str) -> String {
-  let mut file = "solid ".to_string();
-  file.push_str(name);
+  let mut file = format!("solid {}", name);
   for i in (0..mesh.faces.len() - 2).step_by(3) {
-    file.push_str("\nfacet normal 0.0 0.0 0.0");
+    file.push_str(&format!("\nfacet normal {} {} {}", 0.0, 0.0, 0.0));
     file.push_str("\nouter loop");
     for j in i ..= i + 2 {
       let vertex = mesh.vertices[mesh.faces[j]];
@@ -14,8 +13,7 @@ pub fn stl(mesh: &Mesh, name: &str) -> String {
     file.push_str("\nendloop");
     file.push_str("\nendfacet");
   }
-  file.push_str("\nendsolid ");
-  file.push_str(name);
+  file.push_str(&format!("\nendsolid {}", name));
   file
 }
 

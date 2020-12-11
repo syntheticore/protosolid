@@ -66,13 +66,13 @@ fn vertices_from_js(points: Array) -> Vec<Point3> {
 
 
 #[wasm_bindgen]
-pub struct JsSketchElement {
-  real: Rc<RefCell<SketchElement>>,
+pub struct JsCurve {
+  real: Rc<RefCell<CurveType>>,
 }
 
 #[wasm_bindgen]
-impl JsSketchElement {
-  fn from(elem: &Rc<RefCell<SketchElement>>) -> Self {
+impl JsCurve {
+  fn from(elem: &Rc<RefCell<CurveType>>) -> Self {
     Self {
       real: elem.clone()
     }
@@ -85,10 +85,10 @@ impl JsSketchElement {
   pub fn typename(&self) -> JsValue {
     JsValue::from_serde(
       match *self.real.borrow() {
-        SketchElement::Line(_) => "Line",
-        SketchElement::Arc(_) => "Arc",
-        SketchElement::Circle(_) => "Circle",
-        SketchElement::BezierSpline(_) => "BezierSpline",
+        CurveType::Line(_) => "Line",
+        CurveType::Arc(_) => "Arc",
+        CurveType::Circle(_) => "Circle",
+        CurveType::BezierSpline(_) => "BezierSpline",
       }
     ).unwrap()
   }
@@ -96,7 +96,7 @@ impl JsSketchElement {
   pub fn get_radius(&self) -> JsValue {
     JsValue::from_serde(
       match &*self.real.borrow() {
-        SketchElement::Circle(c) => &c.radius,
+        CurveType::Circle(c) => &c.radius,
         _ => &0.0
       }
     ).unwrap()
@@ -104,7 +104,7 @@ impl JsSketchElement {
 
   pub fn get_area(&self) -> JsValue {
     let area = match &*self.real.borrow() {
-      SketchElement::Circle(c) => c.area(),
+      CurveType::Circle(c) => c.area(),
       _ => 0.0
     };
    JsValue::from_serde(&area).unwrap()
@@ -123,12 +123,12 @@ impl JsSketchElement {
     points_to_js(as_controllable(&mut self.real.borrow()).get_snap_points())
   }
 
-  pub fn tesselate(&self, steps: i32) -> Array {
-    points_to_js(self.real.borrow().as_curve().tesselate_relative(steps.into()))
+  pub fn tesselate_adaptive(&self, steps: i32) -> Array {
+    points_to_js(self.real.borrow().as_curve().tesselate_adaptive(steps.into()))
   }
 
-  pub fn default_tesselation(&self) -> Array {
-    points_to_js(self.real.borrow().as_curve().default_tesselation())
+  pub fn tesselate(&self) -> Array {
+    points_to_js(self.real.borrow().as_curve().tesselate())
   }
 
   pub fn get_length(&self) -> JsValue {
@@ -208,7 +208,7 @@ impl JsBufferGeometry {
 
 #[wasm_bindgen]
 pub struct JsRegion {
-  region: Vec<TrimmedSketchElement>,
+  region: Vec<TrimmedCurve>,
   component: Rc<RefCell<Component>>,
 }
 
@@ -256,36 +256,36 @@ impl JsSketch {
 
   pub fn get_sketch_elements(&self) -> Array {
     self.real.borrow().sketch.elements.iter().map(|elem| {
-      JsValue::from(JsSketchElement::from(elem))
+      JsValue::from(JsCurve::from(elem))
     }).collect()
   }
 
-  pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsSketchElement {
+  pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsCurve {
     let p1: (f64, f64, f64) = p1.into_serde().unwrap();
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
     let line = Line::new(Point3::from(p1), Point3::from(p2));
     let mut real = self.real.borrow_mut();
     real.sketch.elements.push(Rc::new(RefCell::new(line.into_enum())));
-    JsSketchElement::from(&real.sketch.elements.last().unwrap())
+    JsCurve::from(&real.sketch.elements.last().unwrap())
   }
 
-  pub fn add_spline(&self, vertices: Array) -> JsSketchElement {
+  pub fn add_spline(&self, vertices: Array) -> JsCurve {
     let points = vertices.iter().map(|vertex| {
       let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
       Point3::new(vertex.0, vertex.1, vertex.2)
     }).collect();
     let spline = BezierSpline::new(points);
     let mut real = self.real.borrow_mut();
-    real.sketch.elements.push(Rc::new(RefCell::new(SketchElement::BezierSpline(spline))));
-    JsSketchElement::from(&real.sketch.elements.last().unwrap())
+    real.sketch.elements.push(Rc::new(RefCell::new(CurveType::BezierSpline(spline))));
+    JsCurve::from(&real.sketch.elements.last().unwrap())
   }
 
-  pub fn add_circle(&mut self, center: JsValue, radius: f64) -> JsSketchElement {
+  pub fn add_circle(&mut self, center: JsValue, radius: f64) -> JsCurve {
     let center: (f64, f64, f64) = center.into_serde().unwrap();
     let circle = Circle::new(Point3::from(center), radius);
     let mut real = self.real.borrow_mut();
-    real.sketch.elements.push(Rc::new(RefCell::new(SketchElement::Circle(circle))));
-    JsSketchElement::from(&real.sketch.elements.last().unwrap())
+    real.sketch.elements.push(Rc::new(RefCell::new(CurveType::Circle(circle))));
+    JsCurve::from(&real.sketch.elements.last().unwrap())
   }
 
   pub fn remove_element(&mut self, id: JsValue) {
@@ -309,7 +309,7 @@ impl JsSketch {
     let mut splits = Sketch::all_split(&real.sketch.elements);
     Sketch::remove_dangling_segments(&mut splits);
     let islands = Sketch::build_islands(&splits);
-    let islands: Vec<TrimmedSketchElement> = islands.into_iter().flatten().collect();
+    let islands: Vec<TrimmedCurve> = islands.into_iter().flatten().collect();
 
     real.sketch.elements.clear();
     for split in islands.iter() {
@@ -317,10 +317,10 @@ impl JsSketch {
     }
   }
 
-  pub fn get_trimmed(&self, elem: JsSketchElement, _p: JsValue) -> Array {
+  pub fn get_trimmed(&self, elem: JsCurve, _p: JsValue) -> Array {
     let splits = Sketch::split_element(&elem.real.borrow(), &self.real.borrow().sketch.elements);
     splits.into_iter().map(|split| {
-      JsValue::from(JsSketchElement::from(&rc(split)))
+      JsValue::from(JsCurve::from(&rc(split)))
     }).collect()
   }
 }

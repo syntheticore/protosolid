@@ -49,13 +49,13 @@ pub enum Intersection {
 
 
 #[derive(Debug, Clone)]
-pub enum SketchElement {
+pub enum CurveType {
   Line(Line),
   Circle(Circle),
   BezierSpline(BezierSpline),
 }
 
-impl SketchElement {
+impl CurveType {
   pub fn as_curve(&self) -> &dyn Curve {
     match self {
       Self::Line(line) => line,
@@ -76,19 +76,19 @@ impl SketchElement {
 
 pub trait Curve {
   fn sample(&self, t: f64) -> Point3;
-  fn default_tesselation(&self) -> Vec<Point3>;
+  fn tesselate(&self) -> Vec<Point3>;
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
   fn intersect_line(&self, line: &Line) -> Intersection;
   fn intersect_circle(&self, circle: &Circle) -> Intersection;
   fn intersect_spline(&self, spline: &BezierSpline) -> Intersection;
-  fn split(&self, elem: &SketchElement) -> Option<Vec<SketchElement>>;
+  fn split(&self, elem: &CurveType) -> Option<Vec<CurveType>>;
 
-  fn intersect(&self, other: &SketchElement) -> Intersection {
+  fn intersect(&self, other: &CurveType) -> Intersection {
     match other {
-      SketchElement::Line(other) => self.intersect_line(other),
-      SketchElement::Circle(other) => self.intersect_circle(other),
-      SketchElement::BezierSpline(other) => self.intersect_spline(other),
+      CurveType::Line(other) => self.intersect_line(other),
+      CurveType::Circle(other) => self.intersect_circle(other),
+      CurveType::BezierSpline(other) => self.intersect_spline(other),
     }
   }
 
@@ -233,7 +233,7 @@ impl Curve for Line {
     self.points.0 + vec * t
   }
 
-  fn default_tesselation(&self) -> Vec<Point3> {
+  fn tesselate(&self) -> Vec<Point3> {
     self.tesselate(1)
   }
 
@@ -309,16 +309,16 @@ impl Curve for Line {
     Intersection::None
   }
 
-  fn split(&self, cutter: &SketchElement) -> Option<Vec<SketchElement>> {
+  fn split(&self, cutter: &CurveType) -> Option<Vec<CurveType>> {
     match self.intersect(cutter) {
       Intersection::None | Intersection::Contained | Intersection::Touch(_) | Intersection::Extended(_) => None,
       Intersection::Hit(mut points) => { //XXX points are not sorted along line
         points.push(self.points.1);
-        let mut segments = vec![SketchElement::Line(Self::new((self.points.0, points[0])))];
+        let mut segments = vec![CurveType::Line(Self::new((self.points.0, points[0])))];
         let mut iter = points.iter().peekable();
         loop {
           match (iter.next(), iter.peek()) {
-            (Some(p), Some(next_p)) => segments.push(SketchElement::Line(Self::new((*p, **next_p)))),
+            (Some(p), Some(next_p)) => segments.push(CurveType::Line(Self::new((*p, **next_p)))),
             _ => break,
           }
         }
@@ -356,7 +356,7 @@ impl Curve for Circle {
     )
   }
 
-  fn default_tesselation(&self) -> Vec<Point3> {
+  fn tesselate(&self) -> Vec<Point3> {
     self.tesselate(120)
   }
 
@@ -381,7 +381,7 @@ impl Curve for Circle {
     Intersection::None
   }
 
-  fn split(&self, _elem: &SketchElement) -> Option<Vec<SketchElement>> {
+  fn split(&self, _elem: &CurveType) -> Option<Vec<CurveType>> {
     None
   }
 }
@@ -491,7 +491,7 @@ impl Curve for BezierSpline {
     self.real_sample(t, &self.vertices)
   }
 
-  fn default_tesselation(&self) -> Vec<Point3> {
+  fn tesselate(&self) -> Vec<Point3> {
     self.lut.clone()
   }
 
@@ -515,7 +515,7 @@ impl Curve for BezierSpline {
     Intersection::None
   }
 
-  fn split(&self, _elem: &SketchElement) -> Option<Vec<SketchElement>> {
+  fn split(&self, _elem: &CurveType) -> Option<Vec<CurveType>> {
     None
   }
 }
@@ -771,7 +771,7 @@ pub fn make_solid() -> Solid {
 //   pub title: String,
 //   pub plane: Plane,
 //   // pub elements: Vec<PolyLine>,
-//   pub elements: Vec<Ref<dynSketchElement>>>,
+//   pub elements: Vec<Ref<dynCurveType>>>,
 //   // pub constraints: Vec<Box<Constraint>>
 //   pub visible: bool
 // }

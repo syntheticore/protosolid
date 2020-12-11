@@ -13,38 +13,38 @@ pub enum CurveIntersection {
 }
 
 
-pub fn intersect(own: &SketchElement, other: &SketchElement) -> CurveIntersection {
+pub fn intersect(own: &CurveType, other: &CurveType) -> CurveIntersection {
   match own {
     // Line
-    SketchElement::Line(line) => match other {
-      SketchElement::Line(other) => line_line(line, other),
-      SketchElement::Circle(_other) => CurveIntersection::None,
-      SketchElement::Arc(_other) => CurveIntersection::None,
-      SketchElement::BezierSpline(other) => line_spline(line, other),
+    CurveType::Line(line) => match other {
+      CurveType::Line(other) => line_line(line, other),
+      CurveType::Circle(_other) => CurveIntersection::None,
+      CurveType::Arc(_other) => CurveIntersection::None,
+      CurveType::BezierSpline(other) => line_spline(line, other),
     },
 
     // Arc
-    SketchElement::Circle(_circle) => match other {
-      SketchElement::Line(_other) => CurveIntersection::None,
-      SketchElement::Circle(_other) => CurveIntersection::None,
-      SketchElement::Arc(_other) => CurveIntersection::None,
-      SketchElement::BezierSpline(_other) => CurveIntersection::None,
+    CurveType::Circle(_circle) => match other {
+      CurveType::Line(_other) => CurveIntersection::None,
+      CurveType::Circle(_other) => CurveIntersection::None,
+      CurveType::Arc(_other) => CurveIntersection::None,
+      CurveType::BezierSpline(_other) => CurveIntersection::None,
     },
 
     // Circle
-    SketchElement::Arc(_arc) => match other {
-      SketchElement::Line(_other) => CurveIntersection::None,
-      SketchElement::Circle(_other) => CurveIntersection::None,
-      SketchElement::Arc(_other) => CurveIntersection::None,
-      SketchElement::BezierSpline(_other) => CurveIntersection::None,
+    CurveType::Arc(_arc) => match other {
+      CurveType::Line(_other) => CurveIntersection::None,
+      CurveType::Circle(_other) => CurveIntersection::None,
+      CurveType::Arc(_other) => CurveIntersection::None,
+      CurveType::BezierSpline(_other) => CurveIntersection::None,
     },
 
     // Bezier Spline
-    SketchElement::BezierSpline(spline) => match other {
-      SketchElement::Line(other) => line_spline(other, spline),
-      SketchElement::Circle(_other) => CurveIntersection::None,
-      SketchElement::Arc(_other) => CurveIntersection::None,
-      SketchElement::BezierSpline(_other) => CurveIntersection::None,
+    CurveType::BezierSpline(spline) => match other {
+      CurveType::Line(other) => line_spline(other, spline),
+      CurveType::Circle(_other) => CurveIntersection::None,
+      CurveType::Arc(_other) => CurveIntersection::None,
+      CurveType::BezierSpline(_other) => CurveIntersection::None,
     },
   }
 }

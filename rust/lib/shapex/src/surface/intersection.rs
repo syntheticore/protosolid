@@ -4,8 +4,8 @@
 #[derive(Debug, PartialEq)]
 pub enum SurfaceIntersection {
   None,
-  Bounded(SketchElement),
-  Infinite(SketchElement),
+  Bounded(CurveType),
+  Infinite(CurveType),
   Contained, // Overlap, Infinite intersections
 }
 

@@ -78,7 +78,7 @@ impl Plane {
   }
 
   pub fn from_triangle(p1: Point3, p2: Point3, p3: Point3) -> Self {
-    let u = p2 - p1;
+    let u = (p2 - p1).normalize();
     let pre_v = p3 - p1;
     let normal = u.cross(pre_v).normalize();
     Self {
@@ -164,7 +164,7 @@ impl Surface for Plane {
       curve.transform(&lay_flat)
     }
     let polyline = geom2d::poly_from_wire(&flat_bounds);
-    let mut mesh = geom2d::tesselate_polygon(polyline);
+    let mut mesh = geom2d::tesselate_polygon(polyline, self.normal());
     mesh.transform(&trans);
     mesh
   }

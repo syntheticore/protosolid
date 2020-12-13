@@ -163,8 +163,8 @@
 
       exportStl: function() {
         const stl = this.activeComponent.export_stl()
-        const title = this.activeComponent.get_title().replace(' ', '_') + '.stl'
-        this.saveFile(stl, title, 'STL')
+        const title = this.activeComponent.get_title().replace(new RegExp(' ', 'g'), '_')
+        this.saveFile(stl, title + '.stl', 'STL')
       },
     },
   }

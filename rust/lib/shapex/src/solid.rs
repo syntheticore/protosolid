@@ -82,12 +82,10 @@ pub struct Vertex {
 impl Solid {
   pub fn new_lamina(region: Region, top_surface: SurfaceType) -> Self {
     println!("Creating Lamina:");
-    // println!("{:?}", region.iter().map(|r| r.bounds).collect::<Vec<(Point3, Point3)>>());
     let mut bottom = top_surface.clone();
     bottom.as_surface_mut().flip();
     let mut this = Self::default();
     // Create shell from bottom face with empty ring
-    // geom2d::straighten_bounds(&mut region);
     //XXX iterate anti-clockwise
     let first_elem = region.first().unwrap().clone();
     this.mvfs(first_elem.bounds.0, bottom);
@@ -178,7 +176,6 @@ impl Solid {
         mesh.append(face_mesh);
       }
     }
-    mesh.heal();
     mesh
   }
 }

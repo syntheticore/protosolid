@@ -9,12 +9,17 @@ pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
   vec1.x * vec2.y - vec1.y * vec2.x
 }
 
-pub fn tesselate_polygon(vertices: PolyLine) -> Mesh {
+pub fn tesselate_polygon(vertices: PolyLine, normal: Vec3) -> Mesh {
   let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.y] ).collect();
-  let triangles: Vec<usize> = earcutr::earcut(&flat_vertices, &vec![], 2);
+  let faces: Vec<usize> = earcutr::earcut(&flat_vertices, &vec![], 2);
+  let mut normals = Vec::with_capacity(vertices.len());
+  for _ in &vertices {
+    normals.push(normal);
+  }
   Mesh {
-    vertices: vertices,
-    faces: triangles,
+    vertices,
+    faces,
+    normals,
   }
 }
 

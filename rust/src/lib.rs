@@ -1,6 +1,5 @@
 use std::rc::Rc;
 use std::cell::RefCell;
-// use std::collections::HashSet;
 
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
@@ -153,7 +152,10 @@ impl JsBufferGeometry {
   }
 
   fn from_body(body: &Solid) -> Self {
-    Self::from(body.tesselate().to_buffer_geometry())
+    web_sys::console::time_with_label("Tesselation");
+    let mesh = body.tesselate();
+    web_sys::console::time_end_with_label("Tesselation");
+    Self::from(mesh.to_buffer_geometry())
   }
 
   pub fn position(&self) -> JsValue {
@@ -217,7 +219,7 @@ impl JsRegion {
   pub fn get_mesh(&mut self) -> JsValue {
     let poly = geom2d::poly_from_wire(&self.region);
     JsValue::from(JsBufferGeometry::from(
-      geom2d::tesselate_polygon(poly).to_buffer_geometry()
+      geom2d::tesselate_polygon(poly, Vec3::unit_z()).to_buffer_geometry()
     ))
   }
 
@@ -230,8 +232,10 @@ impl JsRegion {
   }
 
   pub fn extrude(&self, distance: f64) {
+    web_sys::console::time_with_label("BREP extrude");
     let tool = features::extrude(self.region.clone(), distance);
     Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
+    web_sys::console::time_end_with_label("BREP extrude");
   }
 
   pub fn extrude_preview(&self, distance: f64) -> JsValue {
@@ -395,6 +399,7 @@ impl JsComponent {
   pub fn export_stl(&self) -> String {
     let comp = self.real.borrow();
     let mesh = comp.bodies[0].tesselate();
+    log!("{:?}", mesh);
     export::stl(&mesh, &comp.title)
   }
 

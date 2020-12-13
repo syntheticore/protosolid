@@ -11,7 +11,6 @@ pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Solid {
   let shell = &mut solid.shells[0];
   shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
   solid
-  // make_cube(1.0, 1.0, 1.0)
 }
 
 pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {

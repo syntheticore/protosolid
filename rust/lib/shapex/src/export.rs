@@ -7,13 +7,13 @@ pub fn stl(mesh: &Mesh, name: &str) -> String {
     file.push_str(&format!("\nfacet normal {} {} {}", 0.0, 0.0, 0.0));
     file.push_str("\nouter loop");
     for j in i ..= i + 2 {
-      let vertex = mesh.vertices[mesh.faces[j]];
+      let vertex = mesh.vertices[mesh.faces[j]] * 10.0;
       file.push_str(&format!("\nvertex {} {} {}", vertex.x, vertex.y, vertex.z));
     }
     file.push_str("\nendloop");
     file.push_str("\nendfacet");
   }
-  file.push_str(&format!("\nendsolid {}", name));
+  file.push_str(&format!("\nendsolid {}\n", name));
   file
 }
 

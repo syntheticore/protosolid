@@ -819,6 +819,7 @@
           mesh = this.convertMesh(mesh, this.surfaceMaterial)
           this.scene.add(mesh)
           this.document.data[nodeId].mesh = mesh
+
         }
         // Load wireframe
         this.document.data[nodeId].wireframe = []
@@ -872,19 +873,33 @@
         return new THREE.Line(geometry, material);
       },
 
-      convertMesh: function(bufferGeometry, material) {
+      convertBufferGeometry: function(bufferGeometry, material) {
         const geometry = new THREE.BufferGeometry()
         const vertices = new Float32Array(bufferGeometry.position())
-        const normals = new Float32Array(Array(vertices.length / 3).fill([0,1,0]).flat())
-        const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
+        // const normals = new Float32Array(Array(vertices.length / 3).fill([1.0, 0.0, 1.0]).flat())
+        // const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
         geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
-        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+        // geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
         // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
         // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+        geometry.computeFaceNormals()
+        geometry.computeVertexNormals()
+        return geometry
+      },
+
+      convertMesh: function(bufferGeometry, material) {
+        const geometry = this.convertBufferGeometry(bufferGeometry)
         const mesh = new THREE.Mesh(geometry, material)
         mesh.castShadow = true
         mesh.receiveShadow = true
         return mesh
+      },
+
+      convertWireMesh: function(bufferGeometry, material) {
+        const geometry = this.convertBufferGeometry(bufferGeometry)
+        const wireframe = new THREE.WireframeGeometry(geometry);
+        const line = new THREE.LineSegments(wireframe);
+        return line
       },
 
       elementChanged: function(elem, comp) {

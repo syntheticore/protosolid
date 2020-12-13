@@ -94,7 +94,7 @@ impl Solid {
     let shell = &mut this.shells[0];
     // Complete ring of bottom face
     let mut he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
-    for elem in region {
+    for elem in region.iter().take(region.len() - 1) {
       let points = elem.bounds;
       println!("\n-> lmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
       let (new_edge, _) = shell.lmev(&he, &he, elem.cache.clone(), points.1); //XXX cache -> base

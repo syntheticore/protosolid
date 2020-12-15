@@ -258,8 +258,9 @@
       // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
       // this.scene.add(new THREE.AmbientLight(0x666666))
       var sun = new THREE.DirectionalLight(0xdfebff, 1)
-      sun.position.set(0, 100, 100)
+      sun.position.set(2, 50, 100)
       sun.castShadow = true
+      sun.shadow.bias = - 0.001
       sun.shadow.mapSize.width = 4096
       sun.shadow.mapSize.height = 4096
       let shadowFrustum = 20 / 2

@@ -316,6 +316,8 @@
         depthTest: false,
         transparent: true,
         opacity: 0.1,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
       })
 
       this.highlightRegionMaterial = new THREE.MeshBasicMaterial({
@@ -323,6 +325,8 @@
         color: new THREE.Color('#0090ff'),
         transparent: true,
         opacity: 0.4,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
       })
 
       // Surface Materials
@@ -343,6 +347,8 @@
         color: '#0090ff',
         transparent: true,
         opacity: 0.4,
+        polygonOffset: true,
+        polygonOffsetFactor: -0.2,
       })
 
       this.previewSubtractSurfaceMaterial = new THREE.MeshStandardMaterial({
@@ -350,6 +356,8 @@
         color: 'red',
         transparent: true,
         opacity: 0.4,
+        polygonOffset: true,
+        polygonOffsetFactor: -0.2,
       })
 
       this.sketchPlane = new THREE.Object3D()

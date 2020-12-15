@@ -16,12 +16,38 @@ class Tool {
 }
 
 
-export class ManipulationTool extends Tool {
+class HighlightTool extends Tool {
+  constructor(component, viewport, selectors) {
+    super(component, viewport)
+    this.selectors = selectors
+  }
+
+  mouseMove(vec, coords) {
+    const object = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    if(!object) return this.viewport.render()
+    const oldMaterial = object.material
+    object.material = {
+      curve: this.viewport.highlightLineMaterial,
+      region: this.viewport.highlightRegionMaterial,
+      face: this.viewport.highlightSurfaceMaterial,
+    }[object.alcType]
+    this.viewport.render()
+    object.material = oldMaterial
+  }
+}
+
+
+export class ManipulationTool extends HighlightTool {
+  constructor(component, viewport) {
+    super(component, viewport, ['curve'])
+  }
+
   click(coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    const object = this.viewport.objectsAtScreen(coords, this.selectors)[0]
     if(object) return this.viewport.render()
     if(this.viewport.selectedElement) {
-      this.viewport.document.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
+      const mesh = this.viewport.document.data[this.viewport.selectedElement.id()]
+      mesh.material = this.viewport.lineMaterial
     }
     this.viewport.$emit('element-selected', null)
     this.viewport.transformControl.detach()
@@ -29,11 +55,14 @@ export class ManipulationTool extends Tool {
   }
 
   mouseDown(vec, coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    const object = this.viewport.objectsAtScreen(coords, this.selectors)[0]
     if(!object) return
-    if(this.viewport.selectedElement) this.viewport.document.data[this.viewport.selectedElement.id()].material = this.viewport.lineMaterial
+    if(this.viewport.selectedElement) {
+      const mesh = this.viewport.document.data[this.viewport.selectedElement.id()]
+      mesh.material = this.viewport.lineMaterial
+    }
     object.material = this.viewport.selectionLineMaterial
-    this.viewport.$emit('element-selected', object.element)
+    this.viewport.$emit('element-selected', object.alcElement)
     // this.viewport.transformControl.attach(object)
     this.viewport.render()
   }
@@ -46,12 +75,7 @@ export class ManipulationTool extends Tool {
       handle.elem.set_handles(handles)
       this.viewport.elementChanged(handle.elem, this.component)
     } else {
-      const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0] || this.viewport.objectsAtScreen(coords, 'alcRegion')[0]
-      if(!object) return this.viewport.render()
-      const oldMaterial = object.material
-      object.material = object.alcSelectable ? this.viewport.highlightLineMaterial : this.viewport.highlightRegionMaterial
-      this.viewport.render()
-      object.material = oldMaterial
+      super.mouseMove(vec, coords)
     }
   }
 }
@@ -59,21 +83,21 @@ export class ManipulationTool extends Tool {
 
 export class TrimTool extends Tool {
   click(coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    const object = this.viewport.objectsAtScreen(coords, 'curve')[0]
     if(object) return this.viewport.render()
 
     this.viewport.render()
   }
 
   mouseDown(vec, coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    const object = this.viewport.objectsAtScreen(coords, 'curve')[0]
     if(!object) return this.viewport.render()
 
     this.viewport.render()
   }
 
   mouseMove(vec, coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
+    const object = this.viewport.objectsAtScreen(coords, 'curve')[0]
     if(!object) return this.viewport.render()
 
     this.viewport.render()
@@ -81,35 +105,50 @@ export class TrimTool extends Tool {
 }
 
 
-class SelectionTool extends ManipulationTool {
-  constructor(component, viewport, callback) {
-    super(component, viewport)
+class SelectionTool extends HighlightTool {
+  constructor(component, viewport, selectors, callback) {
+    super(component, viewport, selectors)
     this.callback = callback
   }
 
-  click() {}
-
   mouseDown(vec, coords) {
-    const selection = this.select(coords)
-    if(!selection) return
-    const [item, center] = selection
-    this.callback(item, center)
+    const mesh = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    if(!mesh) return
+    const selection = this.select(mesh)
+    this.callback(selection, mesh)
   }
 }
 
 
 export class ObjectSelectionTool extends SelectionTool {
-  select(coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'alcSelectable')[0]
-    return object && [object.element, new THREE.Vector3().fromArray(object.element.get_handles()[0])]
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['curve'], callback)
+  }
+
+  select(mesh) {
+    return mesh.alcElement
   }
 }
 
 
 export class ProfileSelectionTool extends SelectionTool {
-  select(coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'alcRegion')[0]
-    return object && [object.alcRegion, new THREE.Vector3().fromArray(object.alcRegion.get_center())]
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['region'], callback)
+  }
+
+  select(mesh) {
+    return mesh.alcRegion
+  }
+}
+
+
+export class FaceSelectionTool extends SelectionTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['face'], callback)
+  }
+
+  select(mesh) {
+    return mesh.alcFaceId
   }
 }
 

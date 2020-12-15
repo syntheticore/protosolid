@@ -20,6 +20,7 @@ pub enum BooleanType {
 
 #[derive(Debug, Default)]
 pub struct Solid {
+  pub id: Uuid,
   pub shells: Vec<Shell>, // Shell 0 is outer shell
 }
 
@@ -86,7 +87,6 @@ impl Solid {
     bottom.as_surface_mut().flip();
     let mut this = Self::default();
     // Create shell from bottom face with empty ring
-    //XXX iterate anti-clockwise
     let first_elem = region.first().unwrap().clone();
     this.mvfs(first_elem.bounds.0, bottom);
     let shell = &mut this.shells[0];
@@ -159,7 +159,7 @@ impl Solid {
   }
 
   pub fn boolean(&mut self, _tool: Self, _op: BooleanType) -> Vec<Solid> {
-    vec![Self { shells: vec![] }]
+    vec![Self::default()]
   }
 
   pub fn boolean_all(tool: Self, others: &mut Vec<Solid>, _op: BooleanType) {

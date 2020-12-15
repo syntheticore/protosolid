@@ -137,114 +137,6 @@ impl JsCurve {
 
 
 #[wasm_bindgen]
-pub struct JsBufferGeometry {
-  position: Vec<f64>,
-  normal: Vec<f64>,
-}
-
-#[wasm_bindgen]
-impl JsBufferGeometry {
-  pub fn from(buffer_geometry: Vec<f64>) -> Self {
-    Self {
-      position: buffer_geometry,
-      normal: vec![],
-    }
-  }
-
-  fn from_body(body: &Solid) -> Self {
-    web_sys::console::time_with_label("Tesselation");
-    let mesh = body.tesselate();
-    web_sys::console::time_end_with_label("Tesselation");
-    Self::from(mesh.to_buffer_geometry())
-  }
-
-  pub fn position(&self) -> JsValue {
-    JsValue::from_serde(&self.position).unwrap()
-  }
-
-  pub fn normal(&self) -> JsValue {
-    JsValue::from_serde(&self.normal).unwrap()
-  }
-}
-
-
-// #[wasm_bindgen]
-// pub struct JsSolid {
-//   // faces: Array,
-//   edges: Array,
-//   vertices: Array,
-//   half_edges: Array,
-// }
-
-// #[wasm_bindgen]
-// impl JsSolid {
-//   fn from(solid: &Solid) -> Self {
-//     let shell = solid.shells[0];
-//     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
-//     let edges = shell.edges.iter().map(|e| {
-//       let left = e.borrow().left_half.borrow().origin.borrow().point;
-//       let right = e.borrow().right_half.borrow().origin.borrow().point;
-//       points_to_js(vec![
-//         left,
-//         right
-//       ])
-//     });
-//     // let faces = shell.faces.map(|f| {
-
-//     // });
-//     Self {
-//       edges,
-//       vertices,
-//     }
-//   }
-
-//   pub fn position(&self) -> JsValue {
-//     JsValue::from_serde(&self.position).unwrap()
-//   }
-
-//   pub fn normal(&self) -> JsValue {
-//     JsValue::from_serde(&self.normal).unwrap()
-//   }
-// }
-
-
-#[wasm_bindgen]
-pub struct JsRegion {
-  region: Vec<TrimmedCurve>,
-  component: Rc<RefCell<Component>>,
-}
-
-#[wasm_bindgen]
-impl JsRegion {
-  pub fn get_mesh(&mut self) -> JsValue {
-    let poly = geom2d::poly_from_wire(&self.region);
-    JsValue::from(JsBufferGeometry::from(
-      geom2d::tesselate_polygon(poly, Vec3::unit_z()).to_buffer_geometry()
-    ))
-  }
-
-  pub fn get_center(&self) -> JsValue {
-    let center = self.region.iter().fold(
-      Point3::new(0.0, 0.0, 0.0),
-      |acc, elem| acc + elem.bounds.0.to_vec() + elem.bounds.1.to_vec()
-    ) / (self.region.len() as f64 * 2.0);
-    point_to_js(center)
-  }
-
-  pub fn extrude(&self, distance: f64) {
-    web_sys::console::time_with_label("BREP extrude");
-    let tool = features::extrude(self.region.clone(), distance);
-    Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
-    web_sys::console::time_end_with_label("BREP extrude");
-  }
-
-  pub fn extrude_preview(&self, distance: f64) -> JsValue {
-    JsValue::from(JsBufferGeometry::from_body(&features::extrude(self.region.clone(), distance)))
-  }
-}
-
-
-#[wasm_bindgen]
 #[derive(Default)]
 pub struct JsSketch {
   real: Ref<Component>,
@@ -331,6 +223,142 @@ impl JsSketch {
 
 
 #[wasm_bindgen]
+pub struct JsBufferGeometry {
+  position: Vec<f64>,
+  normal: Vec<f64>,
+}
+
+#[wasm_bindgen]
+impl JsBufferGeometry {
+  pub fn from(buffer_geometry: Vec<f64>) -> Self {
+    Self {
+      position: buffer_geometry,
+      normal: vec![],
+    }
+  }
+
+  fn from_solid(solid: &Solid) -> Self {
+    web_sys::console::time_with_label("Tesselation");
+    let mesh = solid.tesselate();
+    web_sys::console::time_end_with_label("Tesselation");
+    Self::from(mesh.to_buffer_geometry())
+  }
+
+  pub fn position(&self) -> JsValue {
+    JsValue::from_serde(&self.position).unwrap()
+  }
+
+  pub fn normal(&self) -> JsValue {
+    JsValue::from_serde(&self.normal).unwrap()
+  }
+}
+
+
+#[wasm_bindgen]
+pub struct JsRegion {
+  region: Vec<TrimmedCurve>,
+  component: Rc<RefCell<Component>>,
+}
+
+#[wasm_bindgen]
+impl JsRegion {
+  pub fn get_mesh(&mut self) -> JsValue {
+    let poly = geom2d::poly_from_wire(&self.region);
+    JsValue::from(JsBufferGeometry::from(
+      geom2d::tesselate_polygon(poly, Vec3::unit_z()).to_buffer_geometry()
+    ))
+  }
+
+  pub fn get_center(&self) -> JsValue {
+    let center = self.region.iter().fold(
+      Point3::new(0.0, 0.0, 0.0),
+      |acc, elem| acc + elem.bounds.0.to_vec() + elem.bounds.1.to_vec()
+    ) / (self.region.len() as f64 * 2.0);
+    point_to_js(center)
+  }
+
+  pub fn extrude(&self, distance: f64) {
+    web_sys::console::time_with_label("BREP extrude");
+    let tool = features::extrude(self.region.clone(), distance);
+    Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
+    web_sys::console::time_end_with_label("BREP extrude");
+  }
+
+  pub fn extrude_preview(&self, distance: f64) -> JsValue {
+    JsValue::from(JsBufferGeometry::from_solid(&features::extrude(self.region.clone(), distance)))
+  }
+}
+
+
+#[wasm_bindgen]
+pub struct JsFace {
+  real: Ref<Face>,
+}
+
+#[wasm_bindgen]
+impl JsFace {
+  fn from(face: &Ref<Face>) -> Self {
+    Self {
+      real: face.clone(),
+    }
+  }
+
+  pub fn get_id(&self) -> JsValue {
+    JsValue::from_serde(&self.real.borrow().id).unwrap()
+  }
+
+  pub fn get_surface_type(&self) -> String {
+    match self.real.borrow().surface {
+      SurfaceType::Plane(_) => "Plane".to_string(),
+    }
+  }
+
+  pub fn tesselate(&self) -> JsValue {
+    let this = self.real.borrow();
+    JsValue::from(JsBufferGeometry::from(
+      this.tesselate().to_buffer_geometry()
+    ))
+  }
+}
+
+
+#[wasm_bindgen]
+pub struct JsSolid {
+  faces: Array,
+  edges: Array,
+  vertices: Array,
+}
+
+#[wasm_bindgen]
+impl JsSolid {
+  fn from(solid: &Solid) -> Self {
+    let shell = &solid.shells[0];
+    let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
+    let edges = shell.edges.iter().map(|e| {
+      let left = e.borrow().left_half.borrow().origin.borrow().point;
+      let right = e.borrow().right_half.borrow().origin.borrow().point;
+      points_to_js(vec![
+        left,
+        right
+      ])
+    }).collect();
+    let faces = shell.faces.iter().map(|f| {
+      JsValue::from(JsFace::from(f))
+    }).collect();
+    Self {
+      faces,
+      edges,
+      vertices,
+    }
+  }
+
+  pub fn get_faces(&self) -> Array {
+    self.faces.clone()
+  }
+}
+
+
+#[wasm_bindgen]
 #[derive(Default)]
 pub struct JsComponent {
   // title: String,
@@ -369,18 +397,24 @@ impl JsComponent {
     ).collect()
   }
 
-  pub fn get_mesh(&self) -> JsValue {
-    let bodies = &self.real.borrow().bodies;
-    if bodies.len() > 0 {
-      let mut geom = JsBufferGeometry::from_body(&bodies[0]);
-      for body in bodies.iter().skip(1) {
-        geom.position.append(&mut body.tesselate().to_buffer_geometry())
-      }
-      JsValue::from(geom)
-    } else { JsValue::UNDEFINED }
+  pub fn get_solids(&self) -> Array {
+    self.real.borrow().bodies.iter().map(|body|
+      JsValue::from(JsSolid::from(body))
+    ).collect()
   }
 
-  pub fn get_wireframe(&self) -> Array {
+  // pub fn get_mesh(&self) -> JsValue { //XXX per JsSolid
+  //   let bodies = &self.real.borrow().bodies;
+  //   if bodies.len() > 0 {
+  //     let mut geom = JsBufferGeometry::from_solid(&bodies[0]);
+  //     for body in bodies.iter().skip(1) {
+  //       geom.position.append(&mut body.tesselate().to_buffer_geometry())
+  //     }
+  //     JsValue::from(geom)
+  //   } else { JsValue::UNDEFINED }
+  // }
+
+  pub fn get_wireframe(&self) -> Array { //XXX per JsSolid
     let bodies = &self.real.borrow().bodies;
     if bodies.len() == 0 {
       return Array::new_with_length(0);

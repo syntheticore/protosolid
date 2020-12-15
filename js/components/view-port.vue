@@ -325,9 +325,14 @@
       // Surface Materials
       this.surfaceMaterial = new THREE.MeshStandardMaterial({
         side: THREE.DoubleSide, //XXX remove
-        color: 'cyan',
-        roughness: 0.15,
+        color: '#53a3e1',
+        roughness: 0.25,
         metalness: 0.2,
+      })
+
+      this.highlightSurfaceMaterial = new THREE.MeshStandardMaterial({
+        side: THREE.DoubleSide, //XXX remove
+        color: '#0070ff',
       })
 
       this.previewAddSurfaceMaterial = new THREE.MeshStandardMaterial({
@@ -368,7 +373,6 @@
       // mesh.position.z = 1
       // mesh.castShadow = true
       // mesh.receiveShadow = true
-      // // mesh.alcSelectable = true
       // // mesh.visible = false
       // this.scene.add(mesh)
 
@@ -439,10 +443,11 @@
 
       // Events
       const handlePick = (pickerCoords, color, tool) => {
-        this.$emit('activate-tool', new tool(this.activeComponent, this, (item, center) => {
+        this.$emit('activate-tool', new tool(this.activeComponent, this, (item, mesh) => {
           this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')
-          if(!item) return
+          mesh.geometry.computeBoundingBox();
+          const center = mesh.geometry.boundingBox.getCenter();
           this.paths.push({
             target: center,
             origin: pickerCoords,
@@ -739,10 +744,16 @@
         this.render()
       },
 
-      fromScreen: function(coords) {
+      hitTestByProp: function(coords, prop) {
         this.raycaster.setFromCamera(coords, activeCamera)
-        const intersects = this.raycaster.intersectObjects(this.scene.children)
-        const hit = intersects.filter(obj => obj.object.alcProjectable)[0]
+        return this.raycaster.intersectObjects(
+          this.scene.children.filter(obj => obj[prop])
+        )
+      },
+
+      fromScreen: function(coords) {
+        const intersects = this.hitTestByProp(coords, 'alcProjectable')
+        const hit = intersects[0]
         return hit && hit.point
       },
 
@@ -757,21 +768,22 @@
         )
       },
 
-      objectsAtScreen: function(coords, filter) {
+      objectsAtScreen: function(coords, types) {
         this.raycaster.setFromCamera(coords, activeCamera)
-        const intersects = this.raycaster.intersectObjects(this.scene.children)
-        const objects = Array.from(new Set(intersects.map(obj => obj.object)))
-        return objects.filter(obj => obj[filter])
+        const intersects = this.raycaster.intersectObjects(
+          this.scene.children.filter(obj => types.some(t => obj.alcType == t))
+        )
+        return Array.from(new Set(intersects.map(obj => obj.object)))
       },
 
       loadElement: function(elem, node) {
         this.unloadElement(elem, node, this.document)
         const vertices = elem.tesselate()
         const line = this.convertLine(vertices, this.lineMaterial)
-        line.alcSelectable = true
+        line.alcType = 'curve'
         this.document.data[elem.id()] = line
         // line.component = node
-        line.element = elem
+        line.alcElement = elem
         this.scene.add(line)
 
         const nodeId = node.id()
@@ -814,13 +826,25 @@
         this.unloadTree(node, this.document, recursive)
         if(this.document.data[nodeId].hidden) return
         // Load mesh
-        let mesh = node.get_mesh()
-        if(mesh) {
-          mesh = this.convertMesh(mesh, this.surfaceMaterial)
-          this.scene.add(mesh)
-          this.document.data[nodeId].mesh = mesh
-
-        }
+        // let mesh = node.get_mesh()
+        // if(mesh) {
+        //   mesh = this.convertMesh(mesh, this.surfaceMaterial)
+        //   this.scene.add(mesh)
+        //   this.document.data[nodeId].mesh = mesh
+        // }
+        let solids = node.get_solids()
+        solids.forEach(solid => {
+          const faces = solid.get_faces()
+          faces.forEach(face => {
+            const faceMesh = this.convertMesh(face.tesselate(), this.surfaceMaterial)
+            faceMesh.alcType = 'face'
+            faceMesh.alcFace = face
+            faceMesh.alcComponent = node
+            faceMesh.alcProjectable = true
+            this.scene.add(faceMesh)
+            this.document.data[nodeId].faces.push(faceMesh)
+          })
+        })
         // Load wireframe
         this.document.data[nodeId].wireframe = []
         let wireframe = node.get_wireframe()
@@ -839,7 +863,8 @@
         const nodeId = node.id()
         document.data[nodeId].cachedElements.forEach(elem => this.unloadElement(elem, node, document))
         document.data[nodeId].wireframe.forEach(edge => this.scene.remove(edge))
-        this.scene.remove(document.data[nodeId].mesh)
+        document.data[nodeId].faces.forEach(faceMesh => this.scene.remove(faceMesh))
+        // this.scene.remove(document.data[nodeId].mesh)
         if(recursive) node.get_children().forEach(child => this.unloadTree(child, document, true))
       },
 
@@ -850,9 +875,9 @@
         this.render()
       },
 
-      previewFeature: function(comp, mesh) {
+      previewFeature: function(comp, bufferGeometry) {
         this.scene.remove(this.previewMesh)
-        this.previewMesh = this.convertMesh(mesh, this.previewAddSurfaceMaterial);
+        this.previewMesh = this.convertMesh(bufferGeometry, this.previewAddSurfaceMaterial);
         this.scene.add(this.previewMesh)
         this.render();
       },
@@ -911,6 +936,7 @@
           let material = this.regionMaterial.clone()
           // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
           const mesh = this.convertMesh(region.get_mesh(), material)
+          mesh.alcType = 'region'
           mesh.alcRegion = region
           this.scene.add(mesh)
           return mesh

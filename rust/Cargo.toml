@@ -1,5 +1,5 @@
 [package]
-name = "alchemy-web"
+name = "alchemy"
 version = "0.1.0"
 description = "Direct parametrics for the web"
 authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
@@ -28,7 +28,7 @@ wasm-bindgen = { version = "^0.2.50", features = ["serde-serialize"] }
 js-sys = "^0.3.27"
 uuid = { version = "0.8", features = ["serde", "v4", "wasm-bindgen"] }
 wee_alloc = { version = "^0.4.2", optional = true }
-alchemy = { path = "lib/alchemy" }
+solvo = { path = "lib/solvo" }
 
 [dependencies.web-sys]
 version = "^0.3.22"

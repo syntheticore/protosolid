@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
 
-use alchemy::*;
+use solvo::*;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]

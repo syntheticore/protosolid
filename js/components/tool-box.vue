@@ -144,11 +144,12 @@
           {
             title: 'Sketch',
             tools: [
+              { title: 'Set Plane', icon: 'edit', hotKey: 'S', keyCode: 76 },
               { title: 'Line', icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
               { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 76 },
               { title: 'Arc', icon: 'bezier-curve' },
               { title: 'Circle', icon: 'ban', hotKey: 'C', keyCode: 76 },
-              { title: 'Spline', icon: 'route', hotKey: 'S', keyCode: 76 },
+              { title: 'Spline', icon: 'route', hotKey: 'B', keyCode: 76 },
             ]
           },
           {

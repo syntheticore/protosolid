@@ -166,7 +166,7 @@
   import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
   import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
-  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool } from './../tools.js'
+  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool, SetPlaneTool } from './../tools.js'
 
   const snapDistance = 10.5 // px
   const maxSnapReferences = 5
@@ -175,7 +175,7 @@
   let isDragging = false
 
   let rendering = true
-  let renderer, camera, cameraOrtho, activeCamera, mesh, pointMaterial
+  let camera, cameraOrtho, activeCamera, mesh, pointMaterial
 
   function getCanvasCoords(mouseCoords, canvas) {
     return new THREE.Vector2(
@@ -223,25 +223,25 @@
       this.lastSnaps = []
 
       // Renderer
-      renderer = new THREE.WebGLRenderer({
+      this.renderer = new THREE.WebGLRenderer({
         canvas: this.$el.querySelector('canvas'),
         // antialias: window.devicePixelRatio <= 1.0,
         antialias: true,
         alpha: true,
       })
 
-      renderer.setPixelRatio(window.devicePixelRatio)
-      renderer.outputEncoding = THREE.sRGBEncoding
-      renderer.toneMapping = THREE.ACESFilmicToneMapping
-      renderer.physicallyCorrectLights = true
-      renderer.shadowMap.enabled = true
-      renderer.shadowMap.autoUpdate = false
-      renderer.shadowMap.needsUpdate = true
-      // renderer.shadowMap.type = THREE.VSMShadowMap
-      // renderer.toneMapping = THREE.ReinhardToneMapping
-      // renderer.toneMapping = THREE.LinearToneMapping
-      // renderer.toneMappingExposure = 1.2
-      // renderer.setClearColor(0x263238)
+      this.renderer.setPixelRatio(window.devicePixelRatio)
+      this.renderer.outputEncoding = THREE.sRGBEncoding
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+      this.renderer.physicallyCorrectLights = true
+      this.renderer.shadowMap.enabled = true
+      this.renderer.shadowMap.autoUpdate = false
+      this.renderer.shadowMap.needsUpdate = true
+      // this.renderer.shadowMap.type = THREE.VSMShadowMap
+      // this.renderer.toneMapping = THREE.ReinhardToneMapping
+      // this.renderer.toneMapping = THREE.LinearToneMapping
+      // this.renderer.toneMappingExposure = 1.2
+      // this.renderer.setClearColor(0x263238)
 
       // Camera
       this.raycaster = new THREE.Raycaster()
@@ -258,7 +258,7 @@
       // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
       // this.scene.add(new THREE.AmbientLight(0x666666))
       var sun = new THREE.DirectionalLight(0xdfebff, 1)
-      sun.position.set(0, 0, 100)
+      sun.position.set(0, 100, 100)
       sun.castShadow = true
       sun.shadow.mapSize.width = 4096
       sun.shadow.mapSize.height = 4096
@@ -269,7 +269,7 @@
       var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
       this.scene.add(atmosphere)
 
-      var pmremGenerator = new THREE.PMREMGenerator(renderer)
+      var pmremGenerator = new THREE.PMREMGenerator(this.renderer)
       pmremGenerator.compileCubemapShader()
 
       new HDRCubeTextureLoader()
@@ -288,7 +288,9 @@
         color: 'yellow',
         linewidth: 3,
         vertexColors: true,
-        dashed: false
+        dashed: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
       })
 
       this.selectionLineMaterial = this.lineMaterial.clone()
@@ -349,6 +351,7 @@
         opacity: 0.4,
       })
 
+      this.sketchPlane = new THREE.Object3D()
       // Grid
       var groundGeo = new THREE.PlaneBufferGeometry(200, 200)
       // groundGeo.rotateX(- Math.PI / 2)
@@ -356,7 +359,7 @@
       ground.material.depthWrite = false
       ground.receiveShadow = true
       ground.alcProjectable = true
-      this.scene.add(ground)
+      this.sketchPlane.add(ground)
 
       var grid = new THREE.GridHelper(20, 20)
       grid.rotateX(Math.PI / 2)
@@ -364,9 +367,11 @@
       grid.material.transparent = true
       grid.material.depthWrite = false
       grid.position.z = 0.0001
-      this.scene.add(grid)
+      this.sketchPlane.add(grid)
 
-      this.scene.add(new THREE.AxesHelper(0.5));
+      this.sketchPlane.add(new THREE.AxesHelper(0.5));
+
+      this.scene.add(this.sketchPlane)
 
       // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
       // mesh = new THREE.Mesh(torusGeometry, this.surfaceMaterial)
@@ -377,7 +382,7 @@
       // this.scene.add(mesh)
 
       // Transform Controls
-      this.transformControl = new TransformControls(camera, renderer.domElement)
+      this.transformControl = new TransformControls(camera, this.renderer.domElement)
       this.transformControl.space = 'world'
       // this.transformControl.translationSnap = 0.5
       // this.transformControl.rotationSnap = THREE.MathUtils.degToRad(10)
@@ -389,7 +394,7 @@
 
       this.transformControl.addEventListener('objectChange', (event) => {
         this.$emit('change-pose')
-        renderer.shadowMap.needsUpdate = true
+        this.renderer.shadowMap.needsUpdate = true
         this.render()
       })
 
@@ -398,7 +403,7 @@
       // View Controls
       const setActiveCamera = (camera) => {
         if(this.viewControls) this.viewControls.dispose()
-        this.viewControls = new OrbitControls(camera, renderer.domElement)
+        this.viewControls = new OrbitControls(camera, this.renderer.domElement)
         this.viewControls.enableDamping = true
         this.viewControls.dampingFactor = 0.4
         this.viewControls.panSpeed = 1.0
@@ -475,15 +480,13 @@
       this.$refs.canvas.addEventListener('keydown', (e) => {
         if(e.keyCode == 46 || e.keyCode == 8) { // Del / Backspace
           if(this.selectedElement) this.deleteElement(this.selectedElement)
-        } else if(e.keyCode == 18) {
-          this.altPressed = true
+        } else if(e.keyCode == 18) { // alt
           // this.guides = []
         }
       })
 
       this.$refs.canvas.addEventListener('keyup', (e) => {
-        if(e.keyCode == 18) {
-          this.altPressed = false
+        if(e.keyCode == 18) { // alt
         } else if(e.keyCode == 79) { // o
           setActiveCamera(activeCamera == cameraOrtho ? camera : cameraOrtho)
         }
@@ -522,7 +525,7 @@
         this.viewControls.enabled = true
         const coords = getCanvasCoords(this.getMouseCoords(e), this.$refs.canvas)
         if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return this.render()
-        if(this.altPressed) return
+        if(e.altKey) return
         this.activeTool.click(coords)
       },
 
@@ -541,7 +544,7 @@
 
       mouseDown: function(e) {
         if(e.button != 0) return
-        if(this.altPressed) return
+        if(e.altKey) return
         const [vec, coords, canvasCoords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, canvasCoords)
         // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
@@ -564,7 +567,7 @@
       mouseMove: function(e) {
         if(e.button != 0) return
         if(this.isOrbiting) return
-        if(this.altPressed) return
+        if(e.altKey) return
         const [vec, coords, canvasCoords] = this.snap(e)
         if(vec) this.activeTool.mouseMove(vec, canvasCoords)
       },
@@ -689,6 +692,7 @@
         if(this.activeTool) this.activeTool.dispose()
         this.lastSnaps = []
         const tools = {
+          'Set Plane': SetPlaneTool,
           Manipulate: ManipulationTool,
           Line: LineTool,
           Spline: SplineTool,
@@ -700,7 +704,7 @@
       },
 
       render: function() {
-        renderer.render(this.scene, activeCamera)
+        this.renderer.render(this.scene, activeCamera)
         this.updateWidgets()
       },
 
@@ -717,13 +721,13 @@
       },
 
       onWindowResize: function() {
-        const canvas = renderer.domElement
+        const canvas = this.renderer.domElement
         if(!canvas) return
         // Set canvas size
         const parent = canvas.parentElement
         const width = parent.offsetWidth
         const height = parent.offsetHeight
-        renderer.setSize(width, height)
+        this.renderer.setSize(width, height)
         this.$refs.drawpad.setAttribute('viewBox', '0 0 ' + width + ' ' + height)
         // Update camera projection
         const aspect = width / height
@@ -744,22 +748,20 @@
         this.render()
       },
 
-      hitTestByProp: function(coords, prop) {
+      hitTest: function(coords) {
         this.raycaster.setFromCamera(coords, activeCamera)
-        return this.raycaster.intersectObjects(
-          this.scene.children.filter(obj => obj[prop])
-        )
+        return this.raycaster.intersectObjects(this.scene.children, true)
       },
 
       fromScreen: function(coords) {
-        const intersects = this.hitTestByProp(coords, 'alcProjectable')
+        const intersects = this.hitTest(coords).filter(obj => obj.object.alcProjectable)
         const hit = intersects[0]
         return hit && hit.point
       },
 
       toScreen: function(vec) {
-        const widthHalf = 0.5 * renderer.domElement.width / window.devicePixelRatio
-        const heightHalf = 0.5 * renderer.domElement.height / window.devicePixelRatio
+        const widthHalf = 0.5 * this.renderer.domElement.width / window.devicePixelRatio
+        const heightHalf = 0.5 * this.renderer.domElement.height / window.devicePixelRatio
         // camera.updateMatrixWorld()
         const vector = vec.clone().project(activeCamera)
         return new THREE.Vector2(
@@ -769,11 +771,9 @@
       },
 
       objectsAtScreen: function(coords, types) {
-        this.raycaster.setFromCamera(coords, activeCamera)
-        const intersects = this.raycaster.intersectObjects(
-          this.scene.children.filter(obj => types.some(t => obj.alcType == t))
-        )
-        return Array.from(new Set(intersects.map(obj => obj.object)))
+        const intersects = this.hitTest(coords)
+        const objects = Array.from(new Set(intersects.map(obj => obj.object)))
+        return objects.filter(obj => types.some(t => obj.alcType == t))
       },
 
       loadElement: function(elem, node) {
@@ -841,10 +841,13 @@
             faceMesh.alcFace = face
             faceMesh.alcComponent = node
             faceMesh.alcProjectable = true
+            faceMesh.castShadow = true
+            faceMesh.receiveShadow = true
             this.scene.add(faceMesh)
             this.document.data[nodeId].faces.push(faceMesh)
           })
         })
+        this.renderer.shadowMap.needsUpdate = true
         // Load wireframe
         this.document.data[nodeId].wireframe = []
         let wireframe = node.get_wireframe()
@@ -915,8 +918,6 @@
       convertMesh: function(bufferGeometry, material) {
         const geometry = this.convertBufferGeometry(bufferGeometry)
         const mesh = new THREE.Mesh(geometry, material)
-        mesh.castShadow = true
-        mesh.receiveShadow = true
         return mesh
       },
 

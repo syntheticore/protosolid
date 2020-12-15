@@ -307,6 +307,12 @@ impl JsFace {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
   }
 
+  pub fn get_origin(&self) -> JsValue {
+    match &self.real.borrow().surface {
+      SurfaceType::Plane(plane) => point_to_js(plane.origin),
+    }
+  }
+
   pub fn get_surface_type(&self) -> String {
     match self.real.borrow().surface {
       SurfaceType::Plane(_) => "Plane".to_string(),

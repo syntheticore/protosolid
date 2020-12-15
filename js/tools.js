@@ -43,8 +43,8 @@ export class ManipulationTool extends HighlightTool {
   }
 
   click(coords) {
-    const object = this.viewport.objectsAtScreen(coords, this.selectors)[0]
-    if(object) return this.viewport.render()
+    const curve = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    if(curve) return this.viewport.render()
     if(this.viewport.selectedElement) {
       const mesh = this.viewport.document.data[this.viewport.selectedElement.id()]
       mesh.material = this.viewport.lineMaterial
@@ -55,14 +55,14 @@ export class ManipulationTool extends HighlightTool {
   }
 
   mouseDown(vec, coords) {
-    const object = this.viewport.objectsAtScreen(coords, this.selectors)[0]
-    if(!object) return
+    const curve = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    if(!curve) return
     if(this.viewport.selectedElement) {
       const mesh = this.viewport.document.data[this.viewport.selectedElement.id()]
       mesh.material = this.viewport.lineMaterial
     }
-    object.material = this.viewport.selectionLineMaterial
-    this.viewport.$emit('element-selected', object.alcElement)
+    curve.material = this.viewport.selectionLineMaterial
+    this.viewport.$emit('element-selected', curve.alcElement)
     // this.viewport.transformControl.attach(object)
     this.viewport.render()
   }
@@ -81,24 +81,46 @@ export class ManipulationTool extends HighlightTool {
 }
 
 
+export class SetPlaneTool extends HighlightTool {
+  constructor(component, viewport) {
+    super(component, viewport, ['face'])
+  }
+
+  click(coords) {
+    const face = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    if(face) {
+      if(face.alcFace.get_surface_type() == 'Plane') {
+        this.viewport.sketchPlane.position.z = face.alcFace.get_origin()[2]
+      }
+    }
+    this.viewport.render()
+  }
+
+  mouseDown(vec, coords) {
+    const face = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    this.viewport.render()
+  }
+}
+
+
 export class TrimTool extends Tool {
   click(coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'curve')[0]
-    if(object) return this.viewport.render()
+    const curve = this.viewport.objectsAtScreen(coords, 'curve')[0]
+    if(curve) return this.viewport.render()
 
     this.viewport.render()
   }
 
   mouseDown(vec, coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'curve')[0]
-    if(!object) return this.viewport.render()
+    const curve = this.viewport.objectsAtScreen(coords, 'curve')[0]
+    if(!curve) return this.viewport.render()
 
     this.viewport.render()
   }
 
   mouseMove(vec, coords) {
-    const object = this.viewport.objectsAtScreen(coords, 'curve')[0]
-    if(!object) return this.viewport.render()
+    const curve = this.viewport.objectsAtScreen(coords, 'curve')[0]
+    if(!curve) return this.viewport.render()
 
     this.viewport.render()
   }

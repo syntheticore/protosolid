@@ -6,6 +6,9 @@ authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
 readme = "README.md"
 edition = "2018"
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3", "--enable-mutable-globals"]
+
 [lib]
 crate-type = ["cdylib"]
 
@@ -21,17 +24,18 @@ opt-level = 3
 default = ["wee_alloc"]
 
 [dependencies]
-rand = "^0.3.14"
-serde = { version = "1.0.80", features = ["derive"] }
-serde_derive = "^1.0.59"
-wasm-bindgen = { version = "^0.2.50", features = ["serde-serialize"] }
-js-sys = "^0.3.27"
-uuid = { version = "0.8", features = ["serde", "v4", "wasm-bindgen"] }
-wee_alloc = { version = "^0.4.2", optional = true }
+rand = "0.7.3"
+serde = { version = "1.0.118", features = ["derive"] }
+serde_derive = "1.0.118"
+wasm-bindgen = { version = "0.2.69", features = ["serde-serialize"] }
+js-sys = "0.3.46"
+uuid = { version = "0.8.1", features = ["serde", "v4", "wasm-bindgen"] }
+wee_alloc = { version = "0.4.5", optional = true }
+
 solvo = { path = "lib/solvo" }
 
 [dependencies.web-sys]
-version = "^0.3.22"
+version = "0.3.46"
 features = [
   "console",
   "Headers",
@@ -46,13 +50,13 @@ features = [
 ]
 
 [target."cfg(debug_assertions)".dependencies]
-console_error_panic_hook = "^0.1.5"
+console_error_panic_hook = "0.1.6"
 
-[dev-dependencies]
-futures = "^0.1.27"
-js-sys = "^0.3.22"
-wasm-bindgen-test = "^0.2.45"
-wasm-bindgen-futures = "^0.3.22"
+# [dev-dependencies]
+# futures = "0.1.27"
+# js-sys = "0.3.46"
+# wasm-bindgen-test = "^0.2.45"
+# wasm-bindgen-futures = "^0.3.22"
 
 [package.metadata.bundle]
 name = "Alchemy"

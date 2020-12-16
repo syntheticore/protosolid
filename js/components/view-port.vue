@@ -348,7 +348,7 @@
         transparent: true,
         opacity: 0.4,
         polygonOffset: true,
-        polygonOffsetFactor: -0.2,
+        polygonOffsetFactor: -1,
       })
 
       this.previewSubtractSurfaceMaterial = new THREE.MeshStandardMaterial({
@@ -357,7 +357,7 @@
         transparent: true,
         opacity: 0.4,
         polygonOffset: true,
-        polygonOffsetFactor: -0.2,
+        polygonOffsetFactor: -1,
       })
 
       this.sketchPlane = new THREE.Object3D()
@@ -823,7 +823,6 @@
       },
 
       deleteElement: function(elem) {
-        // this.unloadElement(elem, node, this.document)
         this.transformControl.detach()
         this.activeComponent.get_sketch().remove_element(elem.id())
         this.componentChanged(this.activeComponent)
@@ -834,13 +833,6 @@
         const nodeId = node.id()
         this.unloadTree(node, this.document, recursive)
         if(this.document.data[nodeId].hidden) return
-        // Load mesh
-        // let mesh = node.get_mesh()
-        // if(mesh) {
-        //   mesh = this.convertMesh(mesh, this.surfaceMaterial)
-        //   this.scene.add(mesh)
-        //   this.document.data[nodeId].mesh = mesh
-        // }
         let solids = node.get_solids()
         solids.forEach(solid => {
           const faces = solid.get_faces()
@@ -872,12 +864,13 @@
       },
 
       unloadTree: function(node, document, recursive) {
-        const nodeId = node.id()
-        document.data[nodeId].cachedElements.forEach(elem => this.unloadElement(elem, node, document))
-        document.data[nodeId].wireframe.forEach(edge => this.scene.remove(edge))
-        document.data[nodeId].faces.forEach(faceMesh => this.scene.remove(faceMesh))
-        // this.scene.remove(document.data[nodeId].mesh)
-        if(recursive) node.get_children().forEach(child => this.unloadTree(child, document, true))
+        const nodeData = document.data[node.id()]
+        nodeData.cachedElements.forEach(elem => this.unloadElement(elem, node, document))
+        nodeData.wireframe.forEach(edge => this.scene.remove(edge))
+        nodeData.faces.forEach(faceMesh => this.scene.remove(faceMesh))
+        if(recursive) node.get_children().forEach(child =>
+          this.unloadTree(child, document, true)
+        )
       },
 
       componentChanged: function(comp, recursive) {
@@ -891,7 +884,7 @@
         this.scene.remove(this.previewMesh)
         this.previewMesh = this.convertMesh(bufferGeometry, this.previewAddSurfaceMaterial);
         this.scene.add(this.previewMesh)
-        this.render();
+        this.render()
       },
 
       convertLine: function(vertices, material) {

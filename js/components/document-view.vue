@@ -134,6 +134,7 @@
     watch: {
       document: function() {
         this.activeComponent = this.document.tree
+        this.integrateComponent(this.activeComponent)
       },
     },
 
@@ -206,9 +207,9 @@
       },
 
       integrateComponent: function(comp) {
-        this.$set(this.document.data, comp.id(), {
+        const id = comp.id()
+        if(!this.document.data[id]) this.$set(this.document.data, id, {
           hidden: false,
-          // mesh: null,
           faces: [],
           wireframe: [],
           cachedElements: [],

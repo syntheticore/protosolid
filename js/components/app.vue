@@ -126,9 +126,7 @@
               { title: 'Extrude 2', id: lastId++ },
             ],
             tree: tree,
-            data: {
-              [tree.id()]: {},
-            },
+            data: {},
             activeView: null,
             activePose: null,
             isViewDirty: false,

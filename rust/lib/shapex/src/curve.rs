@@ -353,7 +353,12 @@ impl Circle {
     std::f64::consts::PI * self.radius.powf(2.0)
   }
 
-  pub fn split_with_line(&self, _line: &Line) -> Option<(Arc, Arc)> { None }
+  pub fn split_with_line(&self, _line: &Line) -> Option<(Arc, Arc)> {
+    Some((
+      Arc::new(self.center, self.radius, 0.0, 1.0),
+      Arc::new(self.center, self.radius, 0.0, 1.0)
+    ))
+  }
 
   pub fn split_with_arc(&self, _arc: &Arc) -> Option<(Arc, Arc)> { None }
 
@@ -494,7 +499,7 @@ impl BezierSpline {
 
   pub fn split_with_line(&self, _line: &Line) -> Vec<Self> { vec![self.clone()] }
 
-  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<BezierSpline> { vec![] }
+  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Self> { vec![] }
 
   pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Self> { vec![] }
 

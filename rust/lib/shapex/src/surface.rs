@@ -9,7 +9,7 @@ use crate::mesh::Mesh;
 pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
-  fn tesselate(&self, bounds: &Wire) -> Mesh;
+  fn tesselate(&self, resolution: i32, bounds: &Wire) -> Mesh;
   fn flip(&mut self);
 }
 
@@ -22,19 +22,22 @@ impl core::fmt::Debug for dyn Surface {
 
 #[derive(Debug, Clone)]
 pub enum SurfaceType {
-  Plane(Plane),
+  Planar(Plane),
+  Cylindrical(CylindricalSurface),
 }
 
 impl SurfaceType {
   pub fn as_surface(&self) -> &dyn Surface {
     match self {
-      Self::Plane(plane) => plane,
+      Self::Planar(plane) => plane,
+      Self::Cylindrical(surf) => surf,
     }
   }
 
   pub fn as_surface_mut(&mut self) -> &mut dyn Surface {
     match self {
-      Self::Plane(plane) => plane,
+      Self::Planar(plane) => plane,
+      Self::Cylindrical(surf) => surf,
     }
   }
 }
@@ -56,7 +59,7 @@ impl TrimmedSurface {
 
   pub fn tesselate(&self) -> Mesh {
     let wire = &self.bounds[0];
-    self.base.as_surface().tesselate(wire)
+    self.base.as_surface().tesselate(10, wire)
   }
 }
 
@@ -143,7 +146,7 @@ impl Plane {
   }
 
   pub fn into_enum(self) -> SurfaceType {
-    SurfaceType::Plane(self)
+    SurfaceType::Planar(self)
   }
 }
 
@@ -156,7 +159,7 @@ impl Surface for Plane {
     self.normal()
   }
 
-  fn tesselate(&self, bounds: &Wire) -> Mesh {
+  fn tesselate(&self, _resolution: i32, bounds: &Wire) -> Mesh {
     let trans = self.as_transform();
     let lay_flat = trans.invert();
     let mut flat_bounds: Wire = bounds.iter().cloned().collect();
@@ -179,6 +182,68 @@ impl Transformable for Plane {
     self.origin = transform.apply(self.origin);
     self.u = transform.apply_vec(self.u);
     self.v = transform.apply_vec(self.v);
+  }
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CylindricalSurface {
+  pub origin: Point3,
+  pub radius: f64,
+  pub direction: Vec3,
+  pub bounds: (f64, f64),
+}
+
+impl CylindricalSurface {
+  pub fn new() -> Self {
+    Self {
+      origin: Point3::new(0.0, 0.0, 0.0),
+      radius: 1.0,
+      direction: Vec3::new(0.0, 0.0, 1.0),
+      bounds: (0.0, 1.0),
+    }
+  }
+
+  pub fn into_enum(self) -> SurfaceType {
+    SurfaceType::Cylindrical(self)
+  }
+}
+
+impl Surface for CylindricalSurface {
+  fn sample(&self, u: f64, v: f64) -> Point3 {
+    let u = u * std::f64::consts::PI * 2.0;
+    Point3::new(
+      self.origin.x + u.sin() * self.radius,
+      self.origin.y + u.cos() * self.radius,
+      self.origin.z + self.direction.z * v,
+    )
+  }
+
+  fn normal_at(&self, u: f64, _v: f64) -> Vec3 {
+    (self.sample(u, 0.0) - self.origin).normalize()
+  }
+
+  fn tesselate(&self, resolution: i32, _bounds: &Wire) -> Mesh {
+    for u in 0..resolution {
+      let u = u as f64 / resolution as f64;
+      let u = self.bounds.0 + u * (self.bounds.1 - self.bounds.0);
+      for v in 0..resolution {
+        let v = v as f64 / resolution as f64;
+        self.sample(u, v);
+      }
+    }
+    Mesh::default()
+  }
+
+  fn flip(&mut self) {
+    self.bounds = (self.bounds.1, self.bounds.0);
+  }
+}
+
+impl Transformable for CylindricalSurface {
+  fn transform(&mut self, transform: &Transform) {
+    self.origin = transform.apply(self.origin);
+    self.direction = transform.apply_vec(self.direction);
   }
 }
 

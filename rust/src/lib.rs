@@ -6,6 +6,7 @@ use js_sys::Array;
 
 use solvo::*;
 
+
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -21,27 +22,13 @@ extern {
   fn alert(s: &str);
 }
 
-// #[wasm_bindgen]
-// #[allow(non_snake_case)]
-// pub fn getAlchemy() -> AlchemyProxy {
-//   AlchemyProxy::new()
-// }
-
 #[wasm_bindgen(start)]
 pub fn main() -> Result<(), JsValue> {
   #[cfg(debug_assertions)]
   console_error_panic_hook::set_once();
 
-  let document = web_sys::window().unwrap().document().unwrap();
-  let _body = document.body().expect("Document should have a body");
-
-  // let val = document.create_element("p")?;
-  // val.set_inner_html("Hello from Rust!");
-  // body.append_child(&val)?;
-
-  // setup_canvas(&document);
-
   log!("Alchemy running");
+
   Ok(())
 }
 
@@ -309,13 +296,15 @@ impl JsFace {
 
   pub fn get_origin(&self) -> JsValue {
     match &self.real.borrow().surface {
-      SurfaceType::Plane(plane) => point_to_js(plane.origin),
+      SurfaceType::Planar(plane) => point_to_js(plane.origin),
+      SurfaceType::Cylindrical(cyl) => point_to_js(cyl.origin),
     }
   }
 
   pub fn get_surface_type(&self) -> String {
     match self.real.borrow().surface {
-      SurfaceType::Plane(_) => "Plane".to_string(),
+      SurfaceType::Planar(_) => "Planar".to_string(),
+      SurfaceType::Cylindrical(_) => "Cylindrical".to_string(),
     }
   }
 
@@ -409,17 +398,6 @@ impl JsComponent {
     ).collect()
   }
 
-  // pub fn get_mesh(&self) -> JsValue { //XXX per JsSolid
-  //   let bodies = &self.real.borrow().bodies;
-  //   if bodies.len() > 0 {
-  //     let mut geom = JsBufferGeometry::from_solid(&bodies[0]);
-  //     for body in bodies.iter().skip(1) {
-  //       geom.position.append(&mut body.tesselate().to_buffer_geometry())
-  //     }
-  //     JsValue::from(geom)
-  //   } else { JsValue::UNDEFINED }
-  // }
-
   pub fn get_wireframe(&self) -> Array { //XXX per JsSolid
     let bodies = &self.real.borrow().bodies;
     if bodies.len() == 0 {
@@ -452,15 +430,6 @@ impl JsComponent {
 
 
 #[wasm_bindgen]
-#[derive(Default)]
-pub struct JsFoo {
-  pub cut: usize,
-  pub islands: usize,
-  pub regions: usize,
-}
-
-
-#[wasm_bindgen]
 pub struct AlchemyProxy {
   tree: Ref<Component>,
 }
@@ -474,10 +443,6 @@ impl AlchemyProxy {
     tree.title = "Main Assembly".to_string();
     Self { tree: rc(tree) }
   }
-
-  // pub fn foo(&self) -> Result<f64, JsValue> {
-  //   Ok(44.0)
-  // }
 
   pub fn get_main_assembly(&mut self) -> JsComponent {
     JsComponent::from(&self.tree)

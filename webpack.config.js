@@ -39,7 +39,7 @@ module.exports = (env) => {
         crateDirectory: path.resolve(__dirname, 'rust'),
         watchDirectories: [
           path.resolve(__dirname, 'rust/lib/shapex/src/'),
-          path.resolve(__dirname, 'rust/lib/alchemy/src/'),
+          path.resolve(__dirname, 'rust/lib/solvo/src/'),
         ],
         extraArgs: '--out-name wasm-index',
       }),

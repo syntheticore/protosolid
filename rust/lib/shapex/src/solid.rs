@@ -345,19 +345,35 @@ impl Shell {
     let scan_previous = scan.borrow().previous.upgrade().unwrap();
     let next = scan.borrow().next.upgrade().unwrap();
     let next_next = next.borrow().next.upgrade().unwrap();
-    let p1 = scan_previous.borrow().origin.borrow().point;
-    let p2 = next_next.borrow().origin.borrow().point;
+    let surface = Self::sweep_surface(&curve, vec);
     self.lmef(
       // New edge is oriented from..
       &scan_previous, // ..this half edge's vertex..
       &next_next, // ..to this half edge's vertex
       curve,
-      Plane::from_triangle(
-        p1,
-        p1 + vec,
-        p2,
-      ).into_enum(),
+      surface,
     );
+  }
+
+  fn sweep_surface(curve: &CurveType, vec: Vec3) -> SurfaceType {
+    match curve {
+      CurveType::Line(line) => {
+        Plane::from_triangle(
+          line.points.0,
+          line.points.0 + vec,
+          line.points.1,
+        ).into_enum()
+      },
+      CurveType::Circle(circle) => {
+        CylindricalSurface {
+          origin: circle.center,
+          radius: circle.radius,
+          direction: vec,
+          bounds: (0.0, 1.0),
+        }.into_enum()
+      },
+      _ => { Plane::new().into_enum() }
+    }
   }
 
   pub fn print(&self) {

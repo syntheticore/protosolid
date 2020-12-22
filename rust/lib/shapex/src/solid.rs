@@ -415,7 +415,9 @@ impl Ring {
       let he = he.borrow();
       if let Some(edge) = he.edge.upgrade() {
         let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
-        curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
+        // curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
+        curve.bounds = edge.borrow().curve.as_curve().endpoints();
+        curve.bounds = (curve.bounds.1, curve.bounds.0);
         Some(curve)
       } else { None }
     }).collect()

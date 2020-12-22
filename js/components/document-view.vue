@@ -212,7 +212,8 @@
           hidden: false,
           faces: [],
           wireframe: [],
-          cachedElements: [],
+          regions: [],
+          curves: [],
         })
       },
 

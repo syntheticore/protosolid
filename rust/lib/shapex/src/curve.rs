@@ -86,17 +86,25 @@ impl CurveType {
 
       // Circle
       Self::Circle(circle) => match cutter {
-        Self::Line(cutter) => if let Some((arc_l, arc_r)) = circle.split_with_line(cutter) {
-          vec![arc_l, arc_r]
-        } else { vec![] },
-        Self::Arc(cutter) => if let Some((arc_l, arc_r)) = circle.split_with_arc(cutter) {
-          vec![arc_l, arc_r]
-        } else { vec![] },
-        Self::Circle(cutter) => if let Some((arc_l, arc_r)) = circle.split_with_circle(cutter) {
-          vec![arc_l, arc_r]
-        } else { vec![] },
-        Self::BezierSpline(cutter) => circle.split_with_spline(cutter),
-      }.iter().map(|seg| Self::Arc(seg.clone())).collect(),
+        Self::Line(cutter)
+        => if let Some((arc_l, arc_r)) = circle.split_with_line(cutter) {
+          vec![arc_l.into_enum(), arc_r.into_enum()]
+        } else { vec![self.clone()] },
+
+        Self::Arc(cutter)
+        => if let Some((arc_l, arc_r)) = circle.split_with_arc(cutter) {
+          vec![arc_l.into_enum(), arc_r.into_enum()]
+        } else { vec![self.clone()] },
+
+        Self::Circle(cutter)
+        => if let Some((arc_l, arc_r)) = circle.split_with_circle(cutter) {
+          vec![arc_l.into_enum(), arc_r.into_enum()]
+        } else { vec![self.clone()] },
+
+        Self::BezierSpline(cutter)
+        => circle.split_with_spline(cutter)
+        .iter().map(|seg| seg.clone().into_enum() ).collect(),
+      }
 
       // Bezier Spline
       Self::BezierSpline(spline) => match cutter {
@@ -293,6 +301,10 @@ impl Arc {
   pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Arc> { vec![] }
 
   pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
+
+  pub fn into_enum(self) -> CurveType {
+    CurveType::Arc(self)
+  }
 }
 
 impl Curve for Arc {
@@ -365,6 +377,10 @@ impl Circle {
   pub fn split_with_circle(&self, _circle: &Circle) -> Option<(Arc, Arc)> { None }
 
   pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
+
+  pub fn into_enum(self) -> CurveType {
+    CurveType::Circle(self)
+  }
 }
 
 impl Curve for Circle {
@@ -504,6 +520,10 @@ impl BezierSpline {
   pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Self> { vec![] }
 
   pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Self> { vec![] }
+
+  pub fn into_enum(self) -> CurveType {
+    CurveType::BezierSpline(self)
+  }
 }
 
 impl Curve for BezierSpline {

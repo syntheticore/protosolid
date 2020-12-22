@@ -189,6 +189,8 @@ impl Sketch {
     island.retain(|elem| {
       if elem.cache.as_curve().length().almost(0.0) { return false }
       let (start_point, end_point) = elem.bounds;
+      // Keep closed circles, arcs and splines
+      if start_point == end_point { return true }
       [start_point, end_point].iter().all(|endpoint| {
         others.iter().any(|other_elem| {
           let (other_start, other_end) = other_elem.bounds;

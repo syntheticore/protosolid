@@ -52,9 +52,33 @@ pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   signed_area
 }
 
+// pub fn poly_from_wire(wire: &Wire) -> PolyLine {
+//   let mut polyline: PolyLine = wire.iter().map(|elem| elem.bounds.0 ).collect();
+//   polyline.push(wire.first().unwrap().bounds.0); //XXX first elem may not start at zero
+//   // let z = rand::random::<f64>() / -6.0;
+//   // for p in &mut polyline {
+//   //   p.z = z;
+//   // }
+//   polyline
+// }
+
 pub fn poly_from_wire(wire: &Wire) -> PolyLine {
-  let mut polyline: PolyLine = wire.iter().map(|elem| elem.bounds.0 ).collect();
-  polyline.push(wire.first().unwrap().bounds.0); //XXX first elem may not start at zero
+  // let mut wire = wire.clone();
+  // straighten_bounds(&mut wire);
+  let mut polyline: PolyLine = wire.iter()
+  .flat_map(|curve| {
+    let poly = curve.cache.as_curve().tesselate(); //XXX cache -> base
+    // assert!((curve.bounds.0.almost(poly[0]) && curve.bounds.1.almost(poly[1])) ||
+      // (curve.bounds.1.almost(poly[0]) && curve.bounds.0.almost(poly[1])), "{:?} vs {:?}", curve.bounds, poly);
+    let poly = if curve.bounds.0.almost(poly[0]) {
+      poly
+    } else {
+      poly.into_iter().rev().collect()
+    };
+    let n = poly.len() - 1;
+    poly.into_iter().take(n).collect::<PolyLine>()
+  }).collect();
+  polyline.push(wire.first().unwrap().bounds.0);
   // let z = rand::random::<f64>() / -6.0;
   // for p in &mut polyline {
   //   p.z = z;

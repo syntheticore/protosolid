@@ -726,7 +726,9 @@
           this.viewControlsTarget = null
           return
         }
-        this.viewControls.target.multiplyScalar(0.7).add(this.viewControlsTarget.clone().multiplyScalar(0.3))
+        this.viewControls.target.multiplyScalar(0.7).add(
+          this.viewControlsTarget.clone().multiplyScalar(0.3)
+        )
       },
 
       onWindowResize: function() {
@@ -810,7 +812,7 @@
             index: i,
           })
         })
-        this.document.data[nodeId].cachedElements.push(elem)
+        this.document.data[nodeId].curves.push(elem)
       },
 
       unloadElement: function(elem, node, document) {
@@ -818,8 +820,8 @@
         const nodeId = node.id()
         if(this.handles[nodeId]) delete this.handles[nodeId][elem.id()]
         this.handles = Object.assign({}, this.handles)
-        const cachedElements = document.data[nodeId].cachedElements
-        document.data[nodeId].cachedElements = cachedElements.filter(e => e != elem)
+        const curves = document.data[nodeId].curves
+        document.data[nodeId].curves = curves.filter(e => e != elem)
       },
 
       deleteElement: function(elem) {
@@ -830,9 +832,11 @@
       },
 
       loadTree: function(node, recursive) {
-        const nodeId = node.id()
+        const compData = this.document.data[node.id()]
         this.unloadTree(node, this.document, recursive)
-        if(this.document.data[nodeId].hidden) return
+        this.renderer.shadowMap.needsUpdate = true
+        compData.regions.forEach(mesh => this.scene.remove(mesh))
+        if(compData.hidden) return
         let solids = node.get_solids()
         solids.forEach(solid => {
           const faces = solid.get_faces()
@@ -845,17 +849,16 @@
             faceMesh.castShadow = true
             faceMesh.receiveShadow = true
             this.scene.add(faceMesh)
-            this.document.data[nodeId].faces.push(faceMesh)
+            compData.faces.push(faceMesh)
           })
         })
-        this.renderer.shadowMap.needsUpdate = true
+        this.updateRegions(node)
         // Load wireframe
-        this.document.data[nodeId].wireframe = []
         let wireframe = node.get_wireframe()
-        wireframe.forEach(edge => {
+        compData.wireframe = wireframe.map(edge => {
           const line = this.convertLine(edge, this.wireMaterial)
           this.scene.add(line)
-          this.document.data[nodeId].wireframe.push(line)
+          return line
         })
         // Load sketch elements
         const elements = node.get_sketch().get_sketch_elements()
@@ -865,7 +868,7 @@
 
       unloadTree: function(node, document, recursive) {
         const nodeData = document.data[node.id()]
-        nodeData.cachedElements.forEach(elem => this.unloadElement(elem, node, document))
+        nodeData.curves.forEach(elem => this.unloadElement(elem, node, document))
         nodeData.wireframe.forEach(edge => this.scene.remove(edge))
         nodeData.faces.forEach(faceMesh => this.scene.remove(faceMesh))
         if(recursive) node.get_children().forEach(child =>
@@ -878,6 +881,28 @@
         this.loadTree(comp, recursive)
         this.paths = []
         this.render()
+      },
+
+      elementChanged: function(elem, comp) {
+        this.updateRegions(comp)
+        this.loadElement(elem, comp)
+        this.render()
+      },
+
+      updateRegions: function(comp) {
+        const compData = this.document.data[comp.id()]
+        const regions = comp.get_sketch().get_regions(false)
+        // console.log('# regions: ', regions.length)
+        compData.regions.forEach(mesh => this.scene.remove(mesh))
+        compData.regions = regions.map(region => {
+          let material = this.regionMaterial.clone()
+          // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
+          const mesh = this.convertMesh(region.get_mesh(), material)
+          mesh.alcType = 'region'
+          mesh.alcRegion = region
+          this.scene.add(mesh)
+          return mesh
+        })
       },
 
       previewFeature: function(comp, bufferGeometry) {
@@ -928,24 +953,6 @@
         const wireframe = new THREE.WireframeGeometry(geometry);
         const line = new THREE.LineSegments(wireframe);
         return line
-      },
-
-      elementChanged: function(elem, comp) {
-        const regions = comp.get_sketch().get_regions(false)
-        // console.log('# regions: ', regions.length)
-        this.regionMeshes = this.regionMeshes || []
-        this.regionMeshes.forEach(mesh => this.scene.remove(mesh))
-        this.regionMeshes = regions.map(region => {
-          let material = this.regionMaterial.clone()
-          // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
-          const mesh = this.convertMesh(region.get_mesh(), material)
-          mesh.alcType = 'region'
-          mesh.alcRegion = region
-          this.scene.add(mesh)
-          return mesh
-        })
-        this.loadElement(elem, comp)
-        this.render()
       },
     }
   }

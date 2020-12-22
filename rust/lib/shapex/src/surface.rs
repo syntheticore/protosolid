@@ -160,13 +160,13 @@ impl Surface for Plane {
   }
 
   fn tesselate(&self, _resolution: i32, bounds: &Wire) -> Mesh {
+    let mut bounds = bounds.clone();
     let trans = self.as_transform();
     let lay_flat = trans.invert();
-    let mut flat_bounds: Wire = bounds.iter().cloned().collect();
-    for curve in &mut flat_bounds {
+    for curve in &mut bounds {
       curve.transform(&lay_flat)
     }
-    let polyline = geom2d::poly_from_wire(&flat_bounds);
+    let polyline = geom2d::poly_from_wire(&bounds);
     let mut mesh = geom2d::tesselate_polygon(polyline, self.normal());
     mesh.transform(&trans);
     mesh

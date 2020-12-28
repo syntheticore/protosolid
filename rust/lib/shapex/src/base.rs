@@ -1,5 +1,6 @@
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::fmt::Debug;
 
 pub use cgmath::prelude::Matrix;
 pub use cgmath::prelude::SquareMatrix;
@@ -34,6 +35,12 @@ impl Almost for Point3 {
 impl Almost for f64 {
   fn almost(&self, other: Self) -> bool {
     (self - other).abs() < EPSILON
+  }
+}
+
+pub fn almost_eq<T: Almost + Debug + Copy>(first: T, second: T) {
+  if !first.almost(second) {
+    panic!("\n\n{:?} != {:?}\n\n", first, second);
   }
 }
 

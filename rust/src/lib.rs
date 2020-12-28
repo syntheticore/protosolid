@@ -105,6 +105,12 @@ impl JsCurve {
     as_controllable_mut(&mut self.real.borrow_mut()).set_handles(points);
   }
 
+  pub fn set_initial_handles(&self, handles: Array) {
+    let mut real = self.real.borrow_mut();
+    let points = vertices_from_js(handles);
+    as_controllable_mut(&mut real).set_initial_handles(points);
+  }
+
   pub fn get_snap_points(&self) -> Array {
     points_to_js(as_controllable(&mut self.real.borrow()).get_snap_points())
   }
@@ -167,7 +173,17 @@ impl JsSketch {
     let center: (f64, f64, f64) = center.into_serde().unwrap();
     let circle = Circle::new(Point3::from(center), radius);
     let mut real = self.real.borrow_mut();
-    real.sketch.elements.push(Rc::new(RefCell::new(CurveType::Circle(circle))));
+    real.sketch.elements.push(rc(CurveType::Circle(circle)));
+    JsCurve::from(&real.sketch.elements.last().unwrap())
+  }
+
+  pub fn add_arc(&mut self, p1: JsValue, p2: JsValue, p3: JsValue) -> JsCurve {
+    let p1: (f64, f64, f64) = p1.into_serde().unwrap();
+    let p2: (f64, f64, f64) = p2.into_serde().unwrap();
+    let p3: (f64, f64, f64) = p3.into_serde().unwrap();
+    let arc = Arc::from_points(Point3::from(p1), Point3::from(p2), Point3::from(p3)).unwrap();
+    let mut real = self.real.borrow_mut();
+    real.sketch.elements.push(rc(arc.into_enum()));
     JsCurve::from(&real.sketch.elements.last().unwrap())
   }
 

@@ -19,7 +19,7 @@ impl Mesh {
 
   pub fn append(&mut self, mut other: Self) {
     let offset = self.vertices.len() as i32;
-    let mut other_faces: Vec<i32> = other.faces.iter().map(|&f| f as i32 ).collect();
+    let other_faces: Vec<i32> = other.faces.iter().map(|&f| f as i32 ).collect();
     // for (i, vertex) in self.vertices.iter().enumerate() {
     //   for (j, other_vertex) in other.vertices.iter().enumerate() {
     //     if vertex == other_vertex {

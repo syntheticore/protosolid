@@ -89,6 +89,6 @@ mod tests {
     let shell = &cube.shells[0];
     println!("\nCube finished");
     shell.print();
-    panic!("Test trap");
+    // panic!("Test trap");
   }
 }

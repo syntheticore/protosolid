@@ -166,7 +166,7 @@
   import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
   import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
-  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool, SetPlaneTool } from './../tools.js'
+  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool, ArcTool, SetPlaneTool } from './../tools.js'
 
   const snapDistance = 10.5 // px
   const maxSnapReferences = 5
@@ -706,6 +706,7 @@
           Line: LineTool,
           Spline: SplineTool,
           Circle: CircleTool,
+          Arc: ArcTool,
         }
         const tool = new tools[toolName](this.activeComponent, this)
         this.$emit('activate-tool', tool)

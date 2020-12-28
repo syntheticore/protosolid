@@ -793,6 +793,22 @@ pub fn make_solid() -> Solid {
 // }
 
 
+// use std::{error::Error, fmt};
+
+// #[derive(Debug)]
+// struct Thing;
+
+// impl Error for Thing {}
+
+// impl fmt::Display for Thing {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         write!(f, "Oh no, something bad went down")
+//     }
+// }
+
+// pub struct GeometricError(String);
+
+
 // others
 use smallvec::SmallVec;
 // pbrt

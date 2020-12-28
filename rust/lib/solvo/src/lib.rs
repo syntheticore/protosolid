@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
@@ -210,8 +211,12 @@ trait Constraint {}
 pub trait Controllable {
   fn id(&self) -> Uuid;
   fn get_handles(&self) -> Vec<Point3>;
-  fn set_handles(&mut self, _: Vec<Point3>);
+  fn set_handles(&mut self, handles: Vec<Point3>);
   fn get_snap_points(&self) -> Vec<Point3>;
+
+  fn set_initial_handles(&mut self, handles: Vec<Point3>) {
+    self.set_handles(handles);
+  }
 }
 
 impl Controllable for Line {
@@ -240,16 +245,33 @@ impl Controllable for Arc {
   }
 
   fn get_handles(&self) -> Vec<Point3> {
-    vec![self.center]
+    let endpoints = self.endpoints();
+    vec![self.center, endpoints.0, endpoints.1]
   }
 
+  // Three points on arc
+  fn set_initial_handles(&mut self, handles: Vec<Point3>) {
+    let [p1, p2, p3]: [Point3; 3] = handles.try_into().unwrap();
+    let circle = Circle::from_points(p1, p2, p3).unwrap();
+    self.center = circle.center;
+    self.radius = circle.radius;
+    self.start = circle.unsample(&p1);
+    self.end = circle.unsample(&p3);
+  }
+
+  // Endpoints + center
   fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.center = handles[0];
-    self.radius = handles[0].distance(handles[1]);
+    let [center, start, end]: [Point3; 3] = handles.try_into().unwrap();
+    self.center = center;
+    self.radius = (start - center).magnitude();
+    let circle = Circle::new(self.center, self.radius);
+    self.start = circle.unsample(&start);
+    self.end = circle.unsample(&end);
   }
 
   fn get_snap_points(&self) -> Vec<Point3> {
-    vec![self.center]
+    let endpoints = self.endpoints();
+    vec![self.center, endpoints.0, endpoints.1]
   }
 }
 

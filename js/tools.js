@@ -257,23 +257,21 @@ export class CircleTool extends Tool {
 
 export class ArcTool extends Tool {
   mouseDown(vec) {
-    if(this.start && this.end && this.middle) {
+    if(this.start && this.end) {
       this.start = null
       this.end = null
-      this.middle = null
-    } else if(this.start && this.end) {
-      this.middle = vec
+      this.arc = null
     } else if(this.start) {
       this.end = vec
     } else {
       this.start = vec
-      this.arc = this.component.get_sketch().add_arc(vec.toArray(), vec.toArray(), vec.toArray())
     }
   }
 
   mouseMove(vec) {
-    if(!this.start) return
-    this.arc.set_handles([this.center.toArray(), vec.toArray()])
+    if(!this.start || !this.end) return
+    this.arc = this.arc || this.component.get_sketch().add_arc(this.start.toArray(), vec.toArray(), this.end.toArray())
+    this.arc.set_initial_handles([this.start.toArray(), vec.toArray(), this.end.toArray()])
     this.viewport.elementChanged(this.arc, this.component)
   }
 }

@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::base::*;
 use crate::geom3d::*;
+use crate::geom2d;
 use intersection::CurveIntersection;
 
 pub mod intersection;
@@ -12,7 +13,7 @@ pub mod intersection;
 
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
-  // fn unsample(&self, p: Point3) -> f64;
+  fn unsample(&self, p: &Point3) -> f64;
   fn tesselate(&self) -> PolyLine;
   fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
@@ -182,7 +183,8 @@ pub type Wire = Vec<TrimmedCurve>;
 /// # Examples
 ///
 /// ```
-/// let line = Line.new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
+/// use shapex::*;
+/// let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
 /// assert_eq!(line.midpoint(), Point3::new(0.5, 0.0, 0.0))
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -251,6 +253,10 @@ impl Curve for Line {
     self.points.0 + vec * t
   }
 
+  fn unsample(&self, _p: &Point3) -> f64 {
+    0.0 //XXX
+  }
+
   fn tesselate(&self) -> Vec<Point3> {
     self.tesselate_fixed(1)
   }
@@ -294,6 +300,11 @@ impl Arc {
     }
   }
 
+  pub fn from_points(p1: Point3, p2: Point3, p3: Point3) -> Result<Self, String> {
+    let circle = Circle::from_points(p1, p2, p3)?;
+    Ok(Self::new(circle.center, circle.radius, circle.unsample(&p1), circle.unsample(&p3)))
+  }
+
   pub fn split_with_line(&self, _line: &Line) -> Vec<Arc> { vec![] }
 
   pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Arc> { vec![] }
@@ -308,13 +319,22 @@ impl Arc {
 }
 
 impl Curve for Arc {
-  fn sample(&self, t: f64) -> Point3 {
-    let t = t * std::f64::consts::PI * 2.0;
+  fn sample(&self, mut t: f64) -> Point3 {
+    let range = self.end - self.start;
+    t = self.start + t * range;
+    t = t * std::f64::consts::PI * 2.0;
     Point3::new(
       self.center.x + t.sin() * self.radius,
       self.center.y + t.cos() * self.radius,
       self.center.z,
     )
+  }
+
+  fn unsample(&self, p: &Point3) -> f64 {
+    let circle = Circle::new(self.center, self.radius);
+    let param = circle.unsample(p);
+    let range = self.end - self.start;
+    (param - self.start) / range
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -353,6 +373,23 @@ impl Circle {
     }
   }
 
+  pub fn from_points(p1: Point3, p2: Point3, p3: Point3) -> Result<Self, String> {
+    let d1 = Vec3::new(p2.y - p1.y, p1.x - p2.x, 0.0);
+    let d2 = Vec3::new(p3.y - p2.y, p2.x - p3.x, 0.0);
+    let k = geom2d::cross_2d(d2, d1);
+    if k.almost(0.0) {
+      return Err("Points may not lie on the same line".to_string());
+    }
+    let s1 = (p1 + p2.to_vec()) / 2.0;
+    let s2 = (p2 + p3.to_vec()) / 2.0;
+    let l = d1.x * (s2.y - s1.y) - d1.y * (s2.x - s1.x);
+    let m = l / k;
+    let center = s2 + d2 * m;
+    let d = center - p1;
+    let radius = (d.x * d.x + d.y * d.y).sqrt();
+    Ok(Self::new(center, radius))
+  }
+
   pub fn diameter(&self) -> f64 {
     self.radius * 2.0
   }
@@ -365,11 +402,23 @@ impl Circle {
     std::f64::consts::PI * self.radius.powf(2.0)
   }
 
-  pub fn split_with_line(&self, _line: &Line) -> Option<(Arc, Arc)> {
-    Some((
-      Arc::new(self.center, self.radius, 0.0, 1.0),
-      Arc::new(self.center, self.radius, 0.0, 1.0)
-    ))
+  pub fn split_with_line(&self, line: &Line) -> Option<(Arc, Arc)> {
+    let intersection = intersection::line_circle(line, self);
+    match intersection {
+      CurveIntersection::Cross(points) => {
+        if points.len() == 2 {
+          let t1 = self.unsample(&points[0]);
+          let t2 = self.unsample(&points[1]);
+          Some((
+            Arc::new(self.center, self.radius, t1, t2),
+            Arc::new(self.center, self.radius, t2, t1),
+          ))
+        } else {
+          None
+        }
+      },
+      _ => None,
+    }
   }
 
   pub fn split_with_arc(&self, _arc: &Arc) -> Option<(Arc, Arc)> { None }
@@ -391,6 +440,16 @@ impl Curve for Circle {
       self.center.y + t.cos() * self.radius,
       self.center.z,
     )
+  }
+
+  fn unsample(&self, p: &Point3) -> f64 {
+    let p = p - self.center;
+    let atan2 = p.x.atan2(p.y) / std::f64::consts::PI / 2.0;
+    if atan2 < 0.0 {
+      1.0 + atan2
+    } else {
+      atan2
+    }
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -529,6 +588,10 @@ impl BezierSpline {
 impl Curve for BezierSpline {
   fn sample(&self, t: f64) -> Point3 {
     self.real_sample(t, &self.vertices)
+  }
+
+  fn unsample(&self, _p: &Point3) -> f64 {
+    0.0 //XXX
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -718,5 +781,43 @@ mod tests {
     let lines = test_data::angle_right();
     let angle = lines[0].angle_to(&lines[1]);
     assert_eq!(angle, std::f64::consts::PI / 2.0);
+  }
+
+  #[test]
+  fn unsample_arc() {
+    let arc = Arc::from_points(
+      Point3::new(1.0, 0.0, 0.0),
+      Point3::new(1.5, 0.1, 0.0),
+      Point3::new(2.0, 0.0, 0.0),
+    ).unwrap();
+    almost_eq(arc.sample(0.0), Point3::new(1.0, 0.0, 0.0));
+    almost_eq(arc.sample(1.0), Point3::new(2.0, 0.0, 0.0));
+    almost_eq(arc.unsample(&Point3::new(1.0, 0.0, 0.0)), 0.0);
+    almost_eq(arc.unsample(&Point3::new(2.0, 0.0, 0.0)), 1.0);
+  }
+
+  #[test]
+  fn unsample_circle() {
+    let circle = Circle::new(Point3::new(0.0, 0.0, 0.0), 1.0);
+
+    almost_eq(circle.sample(0.000), Point3::new(0.0,  1.0, 0.0));
+    almost_eq(circle.sample(0.125), Point3::new(0.7071067811865475, 0.7071067811865476, 0.0));
+    almost_eq(circle.sample(0.250), Point3::new(1.0,  0.0, 0.0));
+    almost_eq(circle.sample(0.375), Point3::new(0.7071067811865476, -0.7071067811865475, 0.0));
+    almost_eq(circle.sample(0.500), Point3::new(0.0, -1.0, 0.0));
+    almost_eq(circle.sample(0.625), Point3::new(-0.7071067811865475, -0.7071067811865477, 0.0));
+    almost_eq(circle.sample(0.750), Point3::new(-1.0, 0.0, 0.0));
+    almost_eq(circle.sample(0.875), Point3::new(-0.7071067811865477, 0.7071067811865475, 0.0));
+    almost_eq(circle.sample(1.000), Point3::new(0.0,  1.0, 0.0));
+
+    almost_eq(circle.unsample(&Point3::new(0.0, 1.0, 0.0)),                                 0.000);
+    almost_eq(circle.unsample(&Point3::new(0.7071067811865475, 0.7071067811865476, 0.0)),   0.125);
+    almost_eq(circle.unsample(&Point3::new(1.0, 0.0, 0.0)),                                 0.250);
+    almost_eq(circle.unsample(&Point3::new(0.7071067811865476, -0.7071067811865475, 0.0)),  0.375);
+    almost_eq(circle.unsample(&Point3::new(0.0, -1.0, 0.0)),                                0.500);
+    almost_eq(circle.unsample(&Point3::new(-0.7071067811865475, -0.7071067811865477, 0.0)), 0.625);
+    almost_eq(circle.unsample(&Point3::new(-1.0, 0.0, 0.0)),                                0.750);
+    almost_eq(circle.unsample(&Point3::new(-0.7071067811865477, 0.7071067811865475, 0.0)),  0.875);
+    almost_eq(circle.unsample(&Point3::new(0.0, 1.0, 0.0)),                                 0.000);
   }
 }

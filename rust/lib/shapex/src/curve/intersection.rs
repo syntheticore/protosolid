@@ -113,6 +113,39 @@ pub fn line_spline(line: &Line, spline: &BezierSpline) -> CurveIntersection {
   }
 }
 
+pub fn line_circle(line: &Line, circle: &Circle) -> CurveIntersection {
+  let direction = line.points.1 - line.points.0;
+  let f = line.points.0 - circle.center;
+  let a = direction.dot(direction);
+  let b = f.dot(direction) * 2.0;
+  let c = f.dot(f) - (circle.radius * circle.radius);
+
+  let discriminant = b * b - 4.0 * a * c;
+  if discriminant < 0.0 {
+    CurveIntersection::None
+  } else {
+    let discriminant = discriminant.sqrt();
+
+    let t1 = (-b - discriminant) / (2.0 * a);
+    let t2 = (-b + discriminant) / (2.0 * a);
+
+    let mut intersections = vec![];
+    if t1 >= 0.0 && t1 <= 1.0 {
+      intersections.push(line.points.0 + direction * t1);
+    }
+
+    if t2 >= 0.0 && t2 <= 1.0 {
+      intersections.push(line.points.0 + direction * t2);
+    }
+
+    if intersections.len() > 0 {
+      CurveIntersection::Cross(intersections)
+    } else {
+      CurveIntersection::None
+    }
+  }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -145,5 +178,21 @@ mod tests {
     let lines = test_data::rectangle();
     let hit = intersection::line_line(&lines[0], &lines[1]);
     assert_eq!(hit, CurveIntersection::Touch(Point3::new(1.0, 1.0, 0.0)));
+  }
+
+  #[test]
+  fn circle_cross() {
+    let circle = Circle::new(Point3::new(0.0, 0.0, 0.0), 1.0);
+    let line = Line::new(Point3::new(-2.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0));
+    let hit = intersection::line_circle(&line, &circle);
+    assert_eq!(hit, CurveIntersection::Cross(vec![Point3::new(-1.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0)]));
+  }
+
+  #[test]
+  fn circle_pass() {
+    let circle = Circle::new(Point3::new(0.0, 0.0, 0.0), 1.0);
+    let line = Line::new(Point3::new(-2.0, 2.0, 0.0), Point3::new(2.0, 2.0, 0.0));
+    let hit = intersection::line_circle(&line, &circle);
+    assert_eq!(hit, CurveIntersection::None);
   }
 }

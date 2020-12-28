@@ -80,3 +80,16 @@ pub fn crossing_rectangle() -> Vec<Line> {
   rect[3].points.1 += displacement;
   rect
 }
+
+pub fn arc_rectangle() -> Vec<CurveType> {
+  let upper_left = Point3::new(-1.0, 1.0, 0.0);
+  let upper_right = Point3::new(1.0, 1.0, 0.0);
+  let lower_right = Point3::new(1.0, -1.0, 0.0);
+  let lower_left = Point3::new(-1.0, -1.0, 0.0);
+  vec![
+    Arc::from_points(upper_left, upper_left + Vec3::new(0.0, 0.1, 0.0), upper_right).unwrap().into_enum(),
+    Line::new(upper_right, lower_right).into_enum(),
+    Line::new(lower_right, lower_left).into_enum(),
+    Line::new(lower_left, upper_left).into_enum(),
+  ]
+}

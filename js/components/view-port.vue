@@ -893,7 +893,7 @@
       updateRegions: function(comp) {
         const compData = this.document.data[comp.id()]
         const regions = comp.get_sketch().get_regions(false)
-        // console.log('# regions: ', regions.length)
+        console.log('# regions: ', regions.length)
         compData.regions.forEach(mesh => this.scene.remove(mesh))
         compData.regions = regions.map(region => {
           let material = this.regionMaterial.clone()

@@ -18,13 +18,13 @@ pub fn intersect(own: &CurveType, other: &CurveType) -> CurveIntersection {
     // Line
     CurveType::Line(line) => match other {
       CurveType::Line(other) => line_line(line, other),
-      CurveType::Circle(_other) => CurveIntersection::None,
+      CurveType::Circle(other) => line_circle(line, other),
       CurveType::Arc(_other) => CurveIntersection::None,
       CurveType::BezierSpline(other) => line_spline(line, other),
     },
 
     // Arc
-    CurveType::Circle(_circle) => match other {
+    CurveType::Arc(_arc) => match other {
       CurveType::Line(_other) => CurveIntersection::None,
       CurveType::Circle(_other) => CurveIntersection::None,
       CurveType::Arc(_other) => CurveIntersection::None,
@@ -32,8 +32,8 @@ pub fn intersect(own: &CurveType, other: &CurveType) -> CurveIntersection {
     },
 
     // Circle
-    CurveType::Arc(_arc) => match other {
-      CurveType::Line(_other) => CurveIntersection::None,
+    CurveType::Circle(circle) => match other {
+      CurveType::Line(other) => line_circle(other, circle),
       CurveType::Circle(_other) => CurveIntersection::None,
       CurveType::Arc(_other) => CurveIntersection::None,
       CurveType::BezierSpline(_other) => CurveIntersection::None,

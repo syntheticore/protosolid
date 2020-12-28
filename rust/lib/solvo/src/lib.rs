@@ -418,6 +418,22 @@ mod tests {
   }
 
   #[test]
+  fn region_arc_rect() {
+    let data = test_data::arc_rectangle();
+    let mut sketch = Sketch::default();
+    for curve in data {
+      sketch.elements.push(rc(curve));
+    }
+    let cut_elements = Sketch::all_split(&sketch.elements);
+    let islands = Sketch::build_islands(&cut_elements);
+    let regions = sketch.get_regions(false);
+    assert_eq!(sketch.elements.len(), 4, "{} elements found instead of 4", cut_elements.len());
+    assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
+    assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
+    assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
+  }
+
+  #[test]
   fn dangling_segment() {
     let mut sketch = Sketch::default();
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0));

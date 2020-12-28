@@ -346,12 +346,19 @@ impl Shell {
     let next = scan.borrow().next.upgrade().unwrap();
     let next_next = next.borrow().next.upgrade().unwrap();
     let surface = Self::sweep_surface(&curve, vec);
+    // let p1 = scan_previous.borrow().origin.borrow().point;
+    // let p2 = next_next.borrow().origin.borrow().point;
     self.lmef(
       // New edge is oriented from..
       &scan_previous, // ..this half edge's vertex..
       &next_next, // ..to this half edge's vertex
       curve,
       surface,
+      // Plane::from_triangle(
+      //   p1,
+      //   p1 + vec,
+      //   p2,
+      // ).into_enum(),
     );
   }
 
@@ -415,9 +422,9 @@ impl Ring {
       let he = he.borrow();
       if let Some(edge) = he.edge.upgrade() {
         let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
-        // curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
-        curve.bounds = edge.borrow().curve.as_curve().endpoints();
-        curve.bounds = (curve.bounds.1, curve.bounds.0);
+        curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
+        // curve.bounds = edge.borrow().curve.as_curve().endpoints();
+        // curve.bounds = (curve.bounds.1, curve.bounds.0);
         Some(curve)
       } else { None }
     }).collect()

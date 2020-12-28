@@ -17,7 +17,7 @@ pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {
 
 }
 
-pub fn make_cube(dx: f64, dy: f64, _dz: f64) -> Solid {
+pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
   let points = [
     Point3::new(0.0, 0.0, 0.0),
     Point3::new(dx, 0.0, 0.0),
@@ -38,7 +38,7 @@ pub fn make_cube(dx: f64, dy: f64, _dz: f64) -> Solid {
   // solid.mvfs(points[0], Box::new(Plane::default()));
   let mut solid = Solid::new_lamina(region, Plane::new().into_enum());
   let shell = &mut solid.shells[0];
-  shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, _dz));
+  shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, dz));
   solid
 }
 

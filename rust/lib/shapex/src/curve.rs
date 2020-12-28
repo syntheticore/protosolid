@@ -83,28 +83,28 @@ impl CurveType {
         Self::Arc(cutter) => arc.split_with_arc(cutter),
         Self::Circle(cutter) => arc.split_with_circle(cutter),
         Self::BezierSpline(cutter) => arc.split_with_spline(cutter),
-      }.iter().map(|seg| Self::Arc(seg.clone()) ).collect(),
+      }.iter().map(|seg| seg.clone().into_enum() ).collect(),
 
       // Circle
       Self::Circle(circle) => match cutter {
         Self::Line(cutter)
-        => if let Some((arc_l, arc_r)) = circle.split_with_line(cutter) {
-          vec![arc_l.into_enum(), arc_r.into_enum()]
-        } else { vec![self.clone()] },
+          => if let Some((arc_l, arc_r)) = circle.split_with_line(cutter) {
+            vec![arc_l.into_enum(), arc_r.into_enum()]
+          } else { vec![self.clone()] },
 
         Self::Arc(cutter)
-        => if let Some((arc_l, arc_r)) = circle.split_with_arc(cutter) {
-          vec![arc_l.into_enum(), arc_r.into_enum()]
-        } else { vec![self.clone()] },
+          => if let Some((arc_l, arc_r)) = circle.split_with_arc(cutter) {
+            vec![arc_l.into_enum(), arc_r.into_enum()]
+          } else { vec![self.clone()] },
 
         Self::Circle(cutter)
-        => if let Some((arc_l, arc_r)) = circle.split_with_circle(cutter) {
-          vec![arc_l.into_enum(), arc_r.into_enum()]
-        } else { vec![self.clone()] },
+          => if let Some((arc_l, arc_r)) = circle.split_with_circle(cutter) {
+            vec![arc_l.into_enum(), arc_r.into_enum()]
+          } else { vec![self.clone()] },
 
         Self::BezierSpline(cutter)
-        => circle.split_with_spline(cutter)
-        .iter().map(|seg| seg.clone().into_enum() ).collect(),
+          => circle.split_with_spline(cutter)
+          .iter().map(|seg| seg.clone().into_enum() ).collect(),
       }
 
       // Bezier Spline
@@ -120,7 +120,7 @@ impl CurveType {
   pub fn split_multi(&self, others: &Vec<Self>) -> Vec<Self> {
     let mut segments = vec![self.clone()];
     for other in others.iter() {
-      if ptr::eq(self, &*other) { continue }
+      if self == other { continue } //OPTIMIZE Compare by ID
       segments = segments.iter().flat_map(|own| {
         own.split(&other)
       }).collect();
@@ -305,9 +305,9 @@ impl Arc {
     Ok(Self::new(circle.center, circle.radius, circle.unsample(&p1), circle.unsample(&p3)))
   }
 
-  pub fn split_with_line(&self, _line: &Line) -> Vec<Arc> { vec![] }
+  pub fn split_with_line(&self, _line: &Line) -> Vec<Arc> { vec![self.clone()] }
 
-  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Arc> { vec![] }
+  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Arc> { vec![self.clone()] }
 
   pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Arc> { vec![] }
 

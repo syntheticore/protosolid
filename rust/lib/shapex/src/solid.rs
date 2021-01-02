@@ -87,7 +87,7 @@ impl Solid {
     bottom.as_surface_mut().flip();
     let mut this = Self::default();
     // Create shell from bottom face with empty ring
-    let first_elem = region.first().unwrap().clone();
+    let first_elem = region[0].clone();
     this.mvfs(first_elem.bounds.0, bottom);
     let shell = &mut this.shells[0];
     // Complete ring of bottom face
@@ -101,7 +101,7 @@ impl Solid {
     // Create top face
     let he1 = shell.edges[0].borrow().right_half.clone();
     let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
-    shell.lmef(&he1, &he2, first_elem.cache, top_surface); //XXX cache -> base
+    shell.lmef(&he1, &he2, region.last().unwrap().clone().cache, top_surface); //XXX cache -> base
     this
   }
 
@@ -171,7 +171,7 @@ impl Solid {
     for shell in &self.shells {
       let is_inner = !ptr::eq(shell, &self.shells[0]);
       for face in &shell.faces {
-        let mut face_mesh = face.borrow().tesselate();
+        let mut face_mesh = face.borrow().get_surface().tesselate();
         if is_inner { face_mesh.invert_normals() }
         mesh.append(face_mesh);
       }
@@ -261,7 +261,6 @@ impl Shell {
       half_edge: he1.clone(), // using he1 as dummy, just to be able to create the ring...
       face: Weak::new(),
     });
-    //XXX this should happen before #new_at
     let mut he = he1.clone();
     while !Rc::ptr_eq(&he, he2) {
       he = {
@@ -340,11 +339,11 @@ impl Shell {
   }
 
   fn sweep_mef(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
-    let mut curve = scan.borrow().edge.upgrade().unwrap().borrow().curve.clone();
-    curve.as_curve_mut().translate(vec);
     let scan_previous = scan.borrow().previous.upgrade().unwrap();
     let next = scan.borrow().next.upgrade().unwrap();
     let next_next = next.borrow().next.upgrade().unwrap();
+    let mut curve = scan.borrow().edge.upgrade().unwrap().borrow().curve.clone();
+    curve.as_curve_mut().translate(vec);
     let surface = Self::sweep_surface(&curve, vec);
     // let p1 = scan_previous.borrow().origin.borrow().point;
     // let p2 = next_next.borrow().origin.borrow().point;
@@ -398,9 +397,9 @@ impl Shell {
 
 
 impl Face {
-  pub fn tesselate(&self) -> Mesh {
-    self.get_surface().tesselate()
-  }
+  // pub fn tesselate(&self) -> Mesh {
+  //   self.get_surface().tesselate()
+  // }
 
   pub fn get_surface(&self) -> TrimmedSurface {
     let wire = self.outer_ring.borrow().get_wire();
@@ -423,8 +422,6 @@ impl Ring {
       if let Some(edge) = he.edge.upgrade() {
         let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
         curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
-        // curve.bounds = edge.borrow().curve.as_curve().endpoints();
-        // curve.bounds = (curve.bounds.1, curve.bounds.0);
         Some(curve)
       } else { None }
     }).collect()

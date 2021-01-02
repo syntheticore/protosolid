@@ -285,6 +285,7 @@ impl JsRegion {
     let tool = features::extrude(self.region.clone(), distance);
     Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
     web_sys::console::time_end_with_label("BREP extrude");
+
   }
 
   pub fn extrude_preview(&self, distance: f64) -> JsValue {
@@ -344,7 +345,9 @@ pub struct JsSolid {
 impl JsSolid {
   fn from(solid: &Solid) -> Self {
     let shell = &solid.shells[0];
+    // Vertices
     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
+    // Edges
     let edges = shell.edges.iter().map(|e| {
       // let left = e.borrow().left_half.borrow().origin.borrow().point;
       // let right = e.borrow().right_half.borrow().origin.borrow().point;
@@ -354,13 +357,14 @@ impl JsSolid {
       // ])
       points_to_js(e.borrow().curve.as_curve().tesselate())
     }).collect();
+    // Faces
     let faces = shell.faces.iter().map(|f| {
       JsValue::from(JsFace::from(f))
     }).collect();
     Self {
-      faces,
-      edges,
       vertices,
+      edges,
+      faces,
     }
   }
 

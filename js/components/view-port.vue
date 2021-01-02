@@ -854,6 +854,7 @@
           })
           const wireframe = solid.get_edges()
           compData.wireframe = wireframe.map(edge => {
+            // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
             const line = this.convertLine(edge, this.wireMaterial)
             this.scene.add(line)
             return line

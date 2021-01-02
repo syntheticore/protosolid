@@ -328,7 +328,7 @@ impl JsFace {
   pub fn tesselate(&self) -> JsValue {
     let this = self.real.borrow();
     JsValue::from(JsBufferGeometry::from(
-      this.tesselate().to_buffer_geometry()
+      this.get_surface().tesselate().to_buffer_geometry()
     ))
   }
 }
@@ -374,6 +374,10 @@ impl JsSolid {
 
   pub fn get_edges(&self) -> Array {
     self.edges.clone()
+  }
+
+  pub fn get_vertices(&self) -> Array {
+    self.vertices.clone()
   }
 }
 

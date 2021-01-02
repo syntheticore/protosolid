@@ -42,12 +42,23 @@ pub struct Sketch {
 
 impl Sketch {
   pub fn get_regions(&self, include_outer: bool) -> Vec<Region> {
-    let mut cut_elements = Self::all_split(&self.elements);
-    Self::remove_dangling_segments(&mut cut_elements);
-    let islands = Self::build_islands(&cut_elements);
-    islands.iter()
-    .flat_map(|island| Self::build_loops_from_island(island, include_outer) )
-    .collect()
+    let cut_elements = Self::all_split(&self.elements);
+    let mut circles = vec![];
+    let mut others = vec![];
+    for elem in cut_elements {
+      match elem.base {
+        CurveType::Circle(_) => circles.push(elem),
+        _ => others.push(elem),
+      }
+    }
+    Self::remove_dangling_segments(&mut others);
+    let islands = Self::build_islands(&others);
+    let mut regions: Vec<Region> = islands.iter()
+    .flat_map(|island| Self::build_loops_from_island(island, include_outer) ).collect();
+    let mut circle_regions = circles
+    .into_iter().map(|circle| vec![circle] ).collect();
+    regions.append(&mut circle_regions);
+    regions
   }
 
   fn build_loops_from_island(island: &Vec<TrimmedCurve>, include_outer: bool) -> Vec<Region> {

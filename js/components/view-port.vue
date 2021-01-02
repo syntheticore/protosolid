@@ -852,15 +852,14 @@
             this.scene.add(faceMesh)
             compData.faces.push(faceMesh)
           })
+          const wireframe = solid.get_edges()
+          compData.wireframe = wireframe.map(edge => {
+            const line = this.convertLine(edge, this.wireMaterial)
+            this.scene.add(line)
+            return line
+          })
         })
         this.updateRegions(node)
-        // Load wireframe
-        let wireframe = node.get_wireframe()
-        compData.wireframe = wireframe.map(edge => {
-          const line = this.convertLine(edge, this.wireMaterial)
-          this.scene.add(line)
-          return line
-        })
         // Load sketch elements
         const elements = node.get_sketch().get_sketch_elements()
         elements.forEach(element => this.loadElement(element, node))

@@ -346,12 +346,13 @@ impl JsSolid {
     let shell = &solid.shells[0];
     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
     let edges = shell.edges.iter().map(|e| {
-      let left = e.borrow().left_half.borrow().origin.borrow().point;
-      let right = e.borrow().right_half.borrow().origin.borrow().point;
-      points_to_js(vec![
-        left,
-        right
-      ])
+      // let left = e.borrow().left_half.borrow().origin.borrow().point;
+      // let right = e.borrow().right_half.borrow().origin.borrow().point;
+      // points_to_js(vec![
+      //   left,
+      //   right
+      // ])
+      points_to_js(e.borrow().curve.as_curve().tesselate())
     }).collect();
     let faces = shell.faces.iter().map(|f| {
       JsValue::from(JsFace::from(f))
@@ -365,6 +366,10 @@ impl JsSolid {
 
   pub fn get_faces(&self) -> Array {
     self.faces.clone()
+  }
+
+  pub fn get_edges(&self) -> Array {
+    self.edges.clone()
   }
 }
 
@@ -412,22 +417,6 @@ impl JsComponent {
     self.real.borrow().bodies.iter().map(|body|
       JsValue::from(JsSolid::from(body))
     ).collect()
-  }
-
-  pub fn get_wireframe(&self) -> Array { //XXX per JsSolid
-    let bodies = &self.real.borrow().bodies;
-    if bodies.len() == 0 {
-      return Array::new_with_length(0);
-    }
-    bodies.iter().flat_map(|body| &body.shells[0].edges ).map(|edge| {
-      let edge = edge.borrow();
-      let left = edge.left_half.borrow().origin.borrow().point;
-      let right = edge.right_half.borrow().origin.borrow().point;
-      points_to_js(vec![
-        left,
-        right
-      ])
-    }).collect()
   }
 
   pub fn export_stl(&self) -> String {

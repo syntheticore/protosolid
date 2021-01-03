@@ -57,7 +57,7 @@ pub struct Edge {
   pub left_half: Ref<HalfEdge>,
   pub right_half: Ref<HalfEdge>,
   pub curve: CurveType,
-  pub curve_direction: bool, // true means forward according to left_half
+  // pub curve_direction: bool, // true means forward according to left_half
 }
 
 
@@ -236,7 +236,7 @@ impl Shell {
       id: Uuid::new_v4(),
       left_half: left_half,
       right_half: right_half,
-      curve_direction: curve.as_curve().endpoints().0.almost(p),
+      // curve_direction: curve.as_curve().endpoints().0.almost(p),
       curve,
     });
     {
@@ -277,8 +277,8 @@ impl Shell {
       id: Uuid::new_v4(),
       left_half: nhe2.clone(),
       right_half: nhe1.clone(),
+      // curve_direction: curve.as_curve().endpoints().0.almost(he1_origin.borrow().point),
       curve,
-      curve_direction: true, //XXX
     });
     {
       let e = edge.borrow();
@@ -344,7 +344,7 @@ impl Shell {
     let next_next = next.borrow().next.upgrade().unwrap();
     let mut curve = scan.borrow().edge.upgrade().unwrap().borrow().curve.clone();
     curve.as_curve_mut().translate(vec);
-    let surface = Self::sweep_surface(&curve, vec);
+    let surface = Self::sweep_surface(&scan.borrow().get_curve(), vec);
     // let p1 = scan_previous.borrow().origin.borrow().point;
     // let p2 = next_next.borrow().origin.borrow().point;
     self.lmef(
@@ -353,21 +353,16 @@ impl Shell {
       &next_next, // ..to this half edge's vertex
       curve,
       surface,
-      // Plane::from_triangle(
-      //   p1,
-      //   p1 + vec,
-      //   p2,
-      // ).into_enum(),
     );
   }
 
-  fn sweep_surface(curve: &CurveType, vec: Vec3) -> SurfaceType {
-    match curve {
-      CurveType::Line(line) => {
+  fn sweep_surface(curve: &TrimmedCurve, vec: Vec3) -> SurfaceType {
+    match &curve.base {
+      CurveType::Line(_) => {
         Plane::from_triangle(
-          line.points.0,
-          line.points.0 + vec,
-          line.points.1,
+          curve.bounds.0,
+          curve.bounds.0 + vec,
+          curve.bounds.1,
         ).into_enum()
       },
       CurveType::Circle(circle) => {
@@ -417,14 +412,18 @@ impl Face {
 
 impl Ring {
   pub fn get_wire(&self) -> Wire {
-    self.iter().filter_map(|he| {
-      let he = he.borrow();
-      if let Some(edge) = he.edge.upgrade() {
-        let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
-        curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
-        Some(curve)
-      } else { None }
-    }).collect()
+    // self.iter().filter_map(|he| {
+    //   let he = he.borrow();
+    //   if let Some(edge) = he.edge.upgrade() {
+    //     // let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
+    //     // curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
+    //     let curve = edge.borrow().get_curve();
+    //     Some(curve)
+    //   } else { None }
+    // }).collect()
+    self.iter().map(|he|
+      he.borrow().get_curve()
+    ).collect()
   }
 
   pub fn iter(&self) -> RingIterator  {
@@ -434,6 +433,18 @@ impl Ring {
 
 
 impl Edge {
+  // pub fn get_curve(&self) -> TrimmedCurve {
+  //   let mut curve = TrimmedCurve::new(self.curve.clone());
+  //   let left_origin = self.left_half.borrow().origin.borrow().point;
+  //   let right_origin = self.right_half.borrow().origin.borrow().point;
+  //   if self.curve_direction {
+  //     curve.bounds = (left_origin, right_origin);
+  //   } else {
+  //     curve.bounds = (right_origin, left_origin);
+  //   }
+  //   curve
+  // }
+
   pub fn print(&self) {
     println!("\n  Edge {:?}", self.id);
     println!("    left_half {:?}", self.left_half.borrow().id);
@@ -484,6 +495,13 @@ impl HalfEdge {
     } else {
       self.origin.borrow().half_edge.upgrade().unwrap()
     }
+  }
+
+  pub fn get_curve(&self) -> TrimmedCurve {
+    let edge = self.edge.upgrade().unwrap();
+    let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
+    curve.bounds = (self.origin.borrow().point, self.mate().borrow().origin.borrow().point);
+    curve
   }
 
   pub fn end_vertex(&self) -> Ref<Vertex> {

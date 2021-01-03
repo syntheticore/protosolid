@@ -338,7 +338,7 @@ impl Curve for Arc {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_fixed(120)
+    self.tesselate_fixed(60)
   }
 
   fn length(&self) -> f64 {
@@ -453,7 +453,7 @@ impl Curve for Circle {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_fixed(120)
+    self.tesselate_fixed(80)
   }
 
   fn length(&self) -> f64 {

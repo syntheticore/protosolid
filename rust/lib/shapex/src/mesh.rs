@@ -10,11 +10,15 @@ pub struct Mesh {
 }
 
 impl Mesh {
-  pub fn to_buffer_geometry(&self) -> Vec<f64> {
-    self.faces.iter()
+  pub fn to_buffer_geometry(&self) -> (Vec<f64>, Vec<f64>) {
+    let positions = self.faces.iter()
     .map(|&face| &self.vertices[face] )
     .flat_map(|vertex| vec![vertex.x, vertex.y, vertex.z] )
-    .collect()
+    .collect();
+    let normals = self.normals.iter()
+    .flat_map(|normal| vec![normal.x, normal.y, normal.z] )
+    .collect();
+    (positions, normals)
   }
 
   pub fn append(&mut self, mut other: Self) {
@@ -36,7 +40,8 @@ impl Mesh {
     // }
     //XXX remove duplicate vertices from other
     self.vertices.append(&mut other.vertices);
-    self.faces.append(&mut other_faces.iter().map(|&f| (f + offset) as usize ).collect())
+    self.faces.append(&mut other_faces.iter().map(|&f| (f + offset) as usize ).collect());
+    self.normals.append(&mut other.normals);
   }
 
   pub fn invert_normals(&mut self) { todo!() }
@@ -49,5 +54,8 @@ impl Transformable for Mesh {
     for vertex in &mut self.vertices {
       *vertex = transform.apply(*vertex);
     }
+    // for normal in &mut self.normals {
+    //   *normal = transform.apply_vec(*normal);
+    // }
   }
 }

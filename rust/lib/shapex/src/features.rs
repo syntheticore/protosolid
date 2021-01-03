@@ -90,5 +90,8 @@ mod tests {
     println!("\nCube finished");
     shell.print();
     // panic!("Test trap");
+    assert_eq!(shell.vertices.len(), 8);
+    assert_eq!(shell.edges.len(), 12);
+    assert_eq!(shell.faces.len(), 6);
   }
 }

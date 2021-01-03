@@ -138,9 +138,9 @@ impl Plane {
   // https://math.stackexchange.com/questions/1956699/getting-a-transformation-matrix-from-a-normal-vector
   pub fn as_transform(&self) -> Transform {
     Transform::from_matrix(Matrix4::from_cols(
-      self.u.extend(1.0),
-      self.v.extend(1.0),
-      self.normal().extend(1.0),
+      self.u.extend(self.origin.x),
+      self.v.extend(self.origin.y),
+      self.normal().extend(self.origin.z),
       Vec4::unit_w()
     ).transpose())
   }
@@ -167,6 +167,7 @@ impl Surface for Plane {
       curve.transform(&lay_flat)
     }
     let polyline = geom2d::poly_from_wire(&bounds);
+    // let mut mesh = geom2d::tesselate_polygon(polyline, Vec3::new(0.0, 0.0, 1.0).normalize());
     let mut mesh = geom2d::tesselate_polygon(polyline, self.normal());
     mesh.transform(&trans);
     mesh

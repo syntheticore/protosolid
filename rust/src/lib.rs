@@ -233,10 +233,10 @@ pub struct JsBufferGeometry {
 
 #[wasm_bindgen]
 impl JsBufferGeometry {
-  pub fn from(buffer_geometry: Vec<f64>) -> Self {
+  fn from(buffer_geometry: (Vec<f64>, Vec<f64>)) -> Self {
     Self {
-      position: buffer_geometry,
-      normal: vec![],
+      position: buffer_geometry.0,
+      normal: buffer_geometry.1,
     }
   }
 
@@ -312,10 +312,20 @@ impl JsFace {
   }
 
   pub fn get_origin(&self) -> JsValue {
+    point_to_js(self.make_origin())
+  }
+
+  fn make_origin(&self) -> Point3 {
     match &self.real.borrow().surface {
-      SurfaceType::Planar(plane) => point_to_js(plane.origin),
-      SurfaceType::Cylindrical(cyl) => point_to_js(cyl.origin),
+      SurfaceType::Planar(plane) => plane.origin,
+      SurfaceType::Cylindrical(cyl) => cyl.origin,
     }
+  }
+
+  pub fn get_normal(&self) -> Array {
+    let normal = self.real.borrow().surface.as_surface().normal_at(0.0, 0.0);
+    let origin = self.make_origin();
+    points_to_js(vec![origin, origin + normal])
   }
 
   pub fn get_surface_type(&self) -> String {

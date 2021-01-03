@@ -174,9 +174,6 @@
 
   let isDragging = false
 
-  let rendering = true
-  let camera, cameraOrtho, activeCamera, mesh, pointMaterial
-
   function getCanvasCoords(mouseCoords, canvas) {
     return new THREE.Vector2(
       mouseCoords.x / canvas.offsetWidth * 2 - 1,
@@ -246,16 +243,16 @@
       // Camera
       this.raycaster = new THREE.Raycaster()
 
-      camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
-      camera.position.set(6, 6, 4)
+      this.camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
+      this.camera.position.set(6, 6, 4)
 
-      cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
-      cameraOrtho.position.set(0, 0, 10)
+      this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
+      this.cameraOrtho.position.set(0, 0, 10)
 
       // Scene
       this.scene = new THREE.Scene()
-      cameraOrtho.lookAt( this.scene.position )
-      // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 20)
+      this.cameraOrtho.lookAt( this.scene.position )
+      // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 80)
       // this.scene.add(new THREE.AmbientLight(0x666666))
       var sun = new THREE.DirectionalLight(0xdfebff, 1)
       sun.position.set(2, 50, 100)
@@ -362,7 +359,7 @@
 
       this.sketchPlane = new THREE.Object3D()
       // Grid
-      var groundGeo = new THREE.PlaneBufferGeometry(200, 200)
+      var groundGeo = new THREE.PlaneBufferGeometry(100, 100)
       // groundGeo.rotateX(- Math.PI / 2)
       var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
       ground.material.depthWrite = false
@@ -374,7 +371,7 @@
       grid.rotateX(Math.PI / 2)
       grid.material.opacity = 0.1
       grid.material.transparent = true
-      grid.material.depthWrite = false
+      // grid.material.depthWrite = false
       grid.position.z = 0.0001
       this.sketchPlane.add(grid)
 
@@ -383,7 +380,7 @@
       this.scene.add(this.sketchPlane)
 
       // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
-      // mesh = new THREE.Mesh(torusGeometry, this.surfaceMaterial)
+      // const mesh = new THREE.Mesh(torusGeometry, this.surfaceMaterial)
       // mesh.position.z = 1
       // mesh.castShadow = true
       // mesh.receiveShadow = true
@@ -391,7 +388,7 @@
       // this.scene.add(mesh)
 
       // Transform Controls
-      this.transformControl = new TransformControls(camera, this.renderer.domElement)
+      this.transformControl = new TransformControls(this.camera, this.renderer.domElement)
       this.transformControl.space = 'world'
       // this.transformControl.translationSnap = 0.5
       // this.transformControl.rotationSnap = THREE.MathUtils.degToRad(10)
@@ -450,7 +447,7 @@
           }, 500)
         })
 
-        activeCamera = camera
+        this.activeCamera = camera
 
         this.onWindowResize()
       }
@@ -497,7 +494,7 @@
       this.$refs.canvas.addEventListener('keyup', (e) => {
         if(e.keyCode == 18) { // alt
         } else if(e.keyCode == 79) { // o
-          setActiveCamera(activeCamera == cameraOrtho ? camera : cameraOrtho)
+          setActiveCamera(this.activeCamera == this.cameraOrtho ? this.camera : this.cameraOrtho)
         }
       })
 
@@ -505,7 +502,7 @@
       this.loadTree(this.document.tree, true)
 
       // Init viewport
-      setActiveCamera(camera)
+      setActiveCamera(this.camera)
       this.onWindowResize()
       setTimeout(() => this.onWindowResize(), 500)
       this.$root.$on('resize', () => this.onWindowResize() )
@@ -714,7 +711,7 @@
       },
 
       render: function() {
-        this.renderer.render(this.scene, activeCamera)
+        this.renderer.render(this.scene, this.activeCamera)
         this.updateWidgets()
       },
 
@@ -743,15 +740,15 @@
         this.$refs.drawpad.setAttribute('viewBox', '0 0 ' + width + ' ' + height)
         // Update camera projection
         const aspect = width / height
-        if(activeCamera == camera) {
-          camera.aspect = aspect
+        if(this.activeCamera == this.camera) {
+          this.camera.aspect = aspect
         } else {
-          cameraOrtho.left = - 0.5 * frustumSize * aspect / 2
-          cameraOrtho.right = 0.5 * frustumSize * aspect / 2
-          cameraOrtho.top = frustumSize / 2
-          cameraOrtho.bottom = - frustumSize / 2
+          this.cameraOrtho.left = - 0.5 * frustumSize * aspect / 2
+          this.cameraOrtho.right = 0.5 * frustumSize * aspect / 2
+          this.cameraOrtho.top = frustumSize / 2
+          this.cameraOrtho.bottom = - frustumSize / 2
         }
-        activeCamera.updateProjectionMatrix()
+        this.activeCamera.updateProjectionMatrix()
         // Update line materials
         this.lineMaterial.resolution.set(width, height)
         this.selectionLineMaterial.resolution.set(width, height)
@@ -761,7 +758,7 @@
       },
 
       hitTest: function(coords) {
-        this.raycaster.setFromCamera(coords, activeCamera)
+        this.raycaster.setFromCamera(coords, this.activeCamera)
         return this.raycaster.intersectObjects(this.scene.children, true)
       },
 
@@ -772,10 +769,11 @@
       },
 
       toScreen: function(vec) {
+        if(!this.activeCamera) return
         const widthHalf = 0.5 * this.renderer.domElement.width / window.devicePixelRatio
         const heightHalf = 0.5 * this.renderer.domElement.height / window.devicePixelRatio
-        // camera.updateMatrixWorld()
-        const vector = vec.clone().project(activeCamera)
+        // this.camera.updateMatrixWorld()
+        const vector = vec.clone().project(this.activeCamera)
         return new THREE.Vector2(
           (vector.x * widthHalf) + widthHalf,
           - (vector.y * heightHalf) + heightHalf
@@ -851,6 +849,8 @@
             faceMesh.receiveShadow = true
             this.scene.add(faceMesh)
             compData.faces.push(faceMesh)
+            const line = this.convertLine(face.get_normal(), this.selectionLineMaterial)
+            this.scene.add(line)
           })
           const wireframe = solid.get_edges()
           compData.wireframe = wireframe.map(edge => {
@@ -917,6 +917,7 @@
         const geometry = new LineGeometry()
         const positions = vertices.flat();
         geometry.setPositions(positions)
+        // geometry.setColors(positions.map((pos, i) => i / positions.length ))
         geometry.setColors(Array(positions.length).fill(1))
         const line = new Line2(geometry, material)
         line.computeLineDistances()
@@ -932,14 +933,15 @@
       convertBufferGeometry: function(bufferGeometry, material) {
         const geometry = new THREE.BufferGeometry()
         const vertices = new Float32Array(bufferGeometry.position())
-        // const normals = new Float32Array(Array(vertices.length / 3).fill([1.0, 0.0, 1.0]).flat())
+        const normals = new Float32Array(bufferGeometry.normal())
+        console.log(normals)
         // const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
         geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
-        // geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
         // geometry.setAttribute('color', new THREE.BufferAttribute(vertices, 3) Array(vertices.length).fill(1))
         // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
-        geometry.computeFaceNormals()
-        geometry.computeVertexNormals()
+        // geometry.computeFaceNormals()
+        // geometry.computeVertexNormals()
         return geometry
       },
 

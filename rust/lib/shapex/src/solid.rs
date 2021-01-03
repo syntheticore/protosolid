@@ -99,8 +99,10 @@ impl Solid {
       he = new_edge.borrow().left_half.clone();
     }
     // Create top face
-    let he1 = shell.edges[0].borrow().right_half.clone();
-    let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
+    // let he1 = shell.edges[0].borrow().right_half.clone();
+    // let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
+    let he1 = shell.vertices[0].borrow().half_edge.upgrade().unwrap().clone();
+    let he2 = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap().clone();
     shell.lmef(&he1, &he2, region.last().unwrap().clone().cache, top_surface); //XXX cache -> base
     this
   }
@@ -227,8 +229,8 @@ impl Shell {
     let right_half = if he1.borrow().edge.upgrade().is_some() {
       HalfEdge::new_at(&origin, he1)
     } else {
-      // Use empty loop half edge as left half
-      he1.borrow_mut().origin = origin.clone();
+      // Use empty loop half edge as right half
+      // he1.borrow_mut().origin = origin.clone();
       he1.clone()
     };
     let left_half = HalfEdge::new_at(&vertex, he2);
@@ -272,7 +274,12 @@ impl Shell {
     let he1_origin = he1.borrow().origin.clone();
     let he2_origin = he2.borrow().origin.clone();
     let nhe1 = HalfEdge::new_at(&he2_origin, he1);
-    let nhe2 = HalfEdge::new_at(&he1_origin, he2);
+    let nhe2 = if he1.borrow().edge.upgrade().is_some() {
+      HalfEdge::new_at(&he1_origin, he2)
+    } else {
+      // Use empty loop half edge as right half
+      he1.clone()
+    };
     let edge = rc(Edge {
       id: Uuid::new_v4(),
       left_half: nhe2.clone(),

@@ -357,16 +357,21 @@
         polygonOffsetFactor: -1,
       })
 
+      this.shadowCatcherMaterial = new THREE.ShadowMaterial({
+        opacity: 0.2,
+      })
+
+      // Sketch Plane
       this.sketchPlane = new THREE.Object3D()
-      // Grid
       var groundGeo = new THREE.PlaneBufferGeometry(100, 100)
       // groundGeo.rotateX(- Math.PI / 2)
-      var ground = new THREE.Mesh(groundGeo, new THREE.ShadowMaterial({opacity: 0.2}))
+      var ground = new THREE.Mesh(groundGeo, this.shadowCatcherMaterial)
       ground.material.depthWrite = false
       ground.receiveShadow = true
       ground.alcProjectable = true
       this.sketchPlane.add(ground)
 
+      // Grid
       var grid = new THREE.GridHelper(20, 20)
       grid.rotateX(Math.PI / 2)
       grid.material.opacity = 0.1
@@ -375,8 +380,8 @@
       grid.position.z = 0.0001
       this.sketchPlane.add(grid)
 
+      // Axis Helper
       this.sketchPlane.add(new THREE.AxesHelper(0.5));
-
       this.scene.add(this.sketchPlane)
 
       // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
@@ -763,7 +768,9 @@
       },
 
       fromScreen: function(coords) {
+        this.shadowCatcherMaterial.side = THREE.DoubleSide
         const intersects = this.hitTest(coords).filter(obj => obj.object.alcProjectable)
+        this.shadowCatcherMaterial.side = THREE.FrontSide
         const hit = intersects[0]
         return hit && hit.point
       },

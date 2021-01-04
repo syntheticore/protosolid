@@ -160,6 +160,10 @@ impl Solid {
     (vertex, face, self.shells.last_mut().unwrap())
   }
 
+  pub fn validate(&self) -> bool {
+    self.shells.iter().all(|shell| shell.validate() )
+  }
+
   pub fn boolean(&mut self, _tool: Self, _op: BooleanType) -> Vec<Solid> {
     vec![Self::default()]
   }

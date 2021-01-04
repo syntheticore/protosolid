@@ -1,7 +1,7 @@
 import Vue from 'vue'
 import wrap from '@vue/web-component-wrapper'
 
-import './main-common.js'
+import './icons.js'
 import App from './components/app.vue'
 
 Vue.config.productionTip = false

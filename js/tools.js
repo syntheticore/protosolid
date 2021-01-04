@@ -11,6 +11,8 @@ class Tool {
 
   mouseDown() {}
 
+  mouseUp() {}
+
   mouseMove() {}
 
   dispose() {}
@@ -24,6 +26,7 @@ class HighlightTool extends Tool {
   }
 
   mouseMove(vec, coords) {
+    if(this.viewport.hoveredHandle) return this.viewport.render()
     const object = this.viewport.objectsAtScreen(coords, this.selectors)[0]
     if(!object) return this.viewport.render()
     const oldMaterial = object.material
@@ -41,7 +44,6 @@ class HighlightTool extends Tool {
 export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, ['curve'])
-    this.enableSnapping = true
   }
 
   click(vec, coords) {
@@ -57,6 +59,10 @@ export class ManipulationTool extends HighlightTool {
   }
 
   mouseDown(vec, coords) {
+    if(this.viewport.activeHandle) {
+      this.enableSnapping = true
+      return
+    }
     const curve = this.viewport.objectsAtScreen(coords, this.selectors)[0]
     if(!curve) return
     if(this.viewport.selectedElement) {
@@ -67,6 +73,10 @@ export class ManipulationTool extends HighlightTool {
     this.viewport.$emit('element-selected', curve.alcElement)
     // this.viewport.transformControl.attach(object)
     this.viewport.render()
+  }
+
+  mouseUp(vec, coords) {
+    this.enableSnapping = false
   }
 
   mouseMove(vec, coords) {

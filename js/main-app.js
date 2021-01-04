@@ -1,5 +1,5 @@
 import Vue from 'vue';
-import './main-common.js';
+import './icons.js';
 import App from './components/app.vue';
 
 Vue.config.productionTip = false;

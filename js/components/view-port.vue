@@ -35,7 +35,7 @@
         :style="{top: handle.pos.y + 'px', left: handle.pos.x + 'px'}"
         @mouseup="mouseUp"
         @mousedown="handleMouseDown($event, handle)"
-        @mousemove="mouseMove"
+        @mousemove="handleMouseMove($event, handle)"
       )
 </template>
 
@@ -165,10 +165,18 @@
   import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
   import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
-  import { ManipulationTool, ObjectSelectionTool, ProfileSelectionTool, LineTool, SplineTool, CircleTool, ArcTool, SetPlaneTool } from './../tools.js'
+  import { Snapper } from './../snapping.js'
+  import {
+    ManipulationTool,
+    ObjectSelectionTool,
+    ProfileSelectionTool,
+    LineTool,
+    SplineTool,
+    CircleTool,
+    ArcTool,
+    SetPlaneTool
+  } from './../tools.js'
 
-  const snapDistance = 10.5 // px
-  const maxSnapReferences = 5
   const frustumSize = 10
 
   export default {
@@ -206,8 +214,6 @@
 
     mounted: function() {
       THREE.Object3D.DefaultUp = new THREE.Vector3(0, 0, 1)
-
-      this.lastSnaps = []
 
       // Renderer
       this.renderer = new THREE.WebGLRenderer({
@@ -492,11 +498,19 @@
         }
       })
 
+      // Snapping
+      this.snapper = new Snapper(this, (guides, anchor) => {
+        this.guides = guides
+        this.snapAnchor = anchor
+      })
+
       // Init tree
       this.loadTree(this.document.tree, true)
 
       // Init viewport
       setActiveCamera(this.camera)
+
+      // Window Resize
       this.onWindowResize()
       setTimeout(() => this.onWindowResize(), 500)
       this.$root.$on('resize', () => this.onWindowResize() )
@@ -537,8 +551,9 @@
 
       mouseUp: function(e) {
         this.activeHandle = null
-        this.snapAnchor = null
-        this.guides = []
+        const [vec, coords] = this.snap(e)
+        if(vec) this.activeTool.mouseUp(vec, coords)
+        this.snapper.reset()
       },
 
       mouseDown: function(e) {
@@ -546,16 +561,19 @@
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, coords)
-        // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
         this.lastCoords = coords
       },
 
       handleMouseDown: function(e, handle) {
-        if(this.activeTool.constructor == ManipulationTool) {
-          this.lastSnaps = []
-          this.activeHandle = handle
-        }
+        this.activeHandle = handle
         this.mouseDown(e)
+        this.snapper.reset()
+      },
+
+      handleMouseMove: function(e, handle) {
+        this.hoveredHandle = handle
+        this.mouseMove(e)
+        this.hoveredHandle = null
       },
 
       mouseMove: function(e) {
@@ -569,102 +587,13 @@
       snap: function(e) {
         const coords = this.getMouseCoords(e)
         let vec = this.fromScreen(coords)
-        this.guides = []
-        this.catchSnapPoints(coords)
-        // if(this.activeTool.constructor != ManipulationTool || this.isDragging) vec = this.snapToGuides(vec) || vec
-        if(this.activeTool.enableSnapping || this.activeHandle) vec = this.snapToGuides(vec) || vec
-        return [vec, coords]
-      },
-
-      getSnapPoints: function() {
-        const sketchElements = this.activeComponent.get_sketch().get_sketch_elements()
-        return sketchElements.flatMap(elem => {
-          let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
-          // Filter out last point of the sketch element actively being drawn
-          if(elem == sketchElements.slice(-1)[0]) {
-            const handles = elem.get_handles()
-            const lastHandle = new THREE.Vector3().fromArray(handles[handles.length - 1])
-            points = points.filter(p => !p.equals(lastHandle))
-          }
-          // Filter out handle actively being dragged
-          if(this.activeHandle && elem.id() == this.activeHandle.elem.id()) {
-            const handlePoint = new THREE.Vector3().fromArray(this.activeHandle.elem.get_handles()[this.activeHandle.index])
-            points = points.filter(p => !p.equals(handlePoint))
-          }
-          return points
-        })
-      },
-
-      catchSnapPoints: function(coords) {
-        const snapPoints = this.getSnapPoints()
-        let closestDist = 99999
-        let target
-        snapPoints.forEach(p => {
-          const dist = this.toScreen(p).distanceTo(coords)
-          if(dist < snapDistance && dist < closestDist) {
-            closestDist = dist
-            target = p
-          }
-        })
-        if(!target) return
-        if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(target))) {
-          this.lastSnaps.unshift(target)
-          if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
-        }
-      },
-
-      snapToGuides: function(vec) {
-        if(!vec) return
-        let snapX
-        this.lastSnaps.some(snap => {
-          if(Math.abs(vec.x - snap.x) < 0.1) {
-            snapX = snap
-            return true
-          }
-        })
-        let snapY
-        this.lastSnaps.some(snap => {
-          if(Math.abs(vec.y - snap.y) < 0.1) {
-            snapY = snap
-            return true
-          }
-        })
-        const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, snapY ? snapY.y : vec.y, vec.z)
-        const screenSnapVec = this.toScreen(snapVec)
-        if(snapX) {
-          const start = this.toScreen(snapX)
-          this.guides.push({
-            id: 'v' + start.x + start.y,
-            start,
-            end: screenSnapVec,
-          })
-        }
-        if(snapY) {
-          const start = this.toScreen(snapY)
-          this.guides.push({
-            id: 'h' + start.x + start.y,
-            start,
-            end: screenSnapVec,
-          })
-        }
-        if(snapX && snapY) {
-          if(this.snapAnchor && this.snapAnchor.vec.equals(snapVec)) return snapVec
-          this.snapAnchor = {
-            type: 'snap',
-            pos: this.toScreen(snapVec),
-            vec: snapVec,
-            id: '' + snapVec.x + snapVec.y + snapVec.z,
-          }
-          return snapVec
-        } else {
-          this.snapAnchor = null
-        }
-        if(snapX || snapY) return snapVec
+        return this.snapper.snap(vec, coords)
       },
 
       updateWidgets: function() {
+        // Update Snap Anchor
         if(this.snapAnchor) this.snapAnchor.pos = this.toScreen(this.snapAnchor.vec)
-
+        // Update Handles
         for(let nodeId in this.handles) {
           const node_handles = this.handles[nodeId]
           for(let elemId in node_handles) {
@@ -675,7 +604,7 @@
           }
           this.handles = Object.assign({}, this.handles)
         }
-
+        // Update Paths
         this.paths.forEach((path, i) => {
           path.data = this.buildPath(path.origin, path.target)
           this.$set(this.paths, i, path)
@@ -684,7 +613,7 @@
 
       activateTool: function(toolName) {
         if(this.activeTool) this.activeTool.dispose()
-        this.lastSnaps = []
+        this.snapper.reset()
         const tools = {
           'Set Plane': SetPlaneTool,
           Manipulate: ManipulationTool,

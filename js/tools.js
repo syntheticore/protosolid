@@ -44,7 +44,7 @@ export class ManipulationTool extends HighlightTool {
     this.enableSnapping = true
   }
 
-  click(coords) {
+  click(vec, coords) {
     const curve = this.viewport.objectsAtScreen(coords, this.selectors)[0]
     if(curve) return this.viewport.render()
     if(this.viewport.selectedElement) {

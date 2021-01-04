@@ -171,13 +171,6 @@
   const maxSnapReferences = 5
   const frustumSize = 10
 
-  function getCanvasCoords(mouseCoords, canvas) {
-    return new THREE.Vector2(
-      mouseCoords.x / canvas.offsetWidth * 2 - 1,
-      -mouseCoords.y / canvas.offsetHeight * 2 + 1
-    )
-  }
-
   export default {
     name: 'ViewPort',
 
@@ -530,14 +523,14 @@
 
       click: function(e) {
         this.viewControls.enabled = true
-        const coords = getCanvasCoords(this.getMouseCoords(e), this.$refs.canvas)
+        const [vec, coords] = this.snap(e)
         if(coords.x != this.lastCoords.x || coords.y != this.lastCoords.y) return this.render()
         if(e.altKey) return
-        this.activeTool.click(coords)
+        this.activeTool.click(vec, coords)
       },
 
       doubleClick: function(e) {
-        const coords = getCanvasCoords(this.getMouseCoords(e), this.$refs.canvas)
+        const coords = this.getMouseCoords(e)
         this.viewControlsTarget = this.fromScreen(coords)
         this.animate()
       },
@@ -551,10 +544,10 @@
       mouseDown: function(e) {
         if(e.button != 0) return
         if(e.altKey) return
-        const [vec, coords, canvasCoords] = this.snap(e)
-        if(vec) this.activeTool.mouseDown(vec, canvasCoords)
+        const [vec, coords] = this.snap(e)
+        if(vec) this.activeTool.mouseDown(vec, coords)
         // if(toolName != 'ManipulationTool' && this.activeTool.constructor != ObjectSelectionTool) this.viewControls.enabled = false
-        this.lastCoords = canvasCoords
+        this.lastCoords = coords
       },
 
       handleMouseDown: function(e, handle) {
@@ -569,19 +562,18 @@
         if(e.button != 0) return
         if(this.isOrbiting) return
         if(e.altKey) return
-        const [vec, coords, canvasCoords] = this.snap(e)
-        if(vec) this.activeTool.mouseMove(vec, canvasCoords)
+        const [vec, coords] = this.snap(e)
+        if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
       snap: function(e) {
         const coords = this.getMouseCoords(e)
-        const canvasCoords = getCanvasCoords(coords, this.$refs.canvas)
-        let vec = this.fromScreen(canvasCoords)
+        let vec = this.fromScreen(coords)
         this.guides = []
         this.catchSnapPoints(coords)
         // if(this.activeTool.constructor != ManipulationTool || this.isDragging) vec = this.snapToGuides(vec) || vec
         if(this.activeTool.enableSnapping || this.activeHandle) vec = this.snapToGuides(vec) || vec
-        return [vec, coords, canvasCoords]
+        return [vec, coords]
       },
 
       getSnapPoints: function() {
@@ -753,7 +745,16 @@
         this.render()
       },
 
+      getCanvasCoords: function(mouseCoords) {
+        const canvas = this.$refs.canvas
+        return new THREE.Vector2(
+          mouseCoords.x / canvas.offsetWidth * 2 - 1,
+          -mouseCoords.y / canvas.offsetHeight * 2 + 1,
+        )
+      },
+
       hitTest: function(coords) {
+        coords = this.getCanvasCoords(coords)
         this.raycaster.setFromCamera(coords, this.activeCamera)
         return this.raycaster.intersectObjects(this.scene.children, true)
       },

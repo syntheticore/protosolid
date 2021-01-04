@@ -380,7 +380,7 @@ impl Shell {
           bounds: (0.0, 1.0),
         }.into_enum()
       },
-      _ => { Plane::new().into_enum() }
+      _ => todo!()
     }
   }
 

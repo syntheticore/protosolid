@@ -32,49 +32,16 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
     } else {
       &points[0]
     };
-    region.push(TrimmedCurve::new(make_line(p, *next)));
+    region.push(TrimmedCurve::new(Line::new(p, *next).into_enum()));
   }
-  // let mut solid = Solid::new();
-  // solid.mvfs(points[0], Box::new(Plane::default()));
-  let mut solid = Solid::new_lamina(region, Plane::new().into_enum());
-  let shell = &mut solid.shells[0];
-  shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, dz));
-  solid
+  extrude(region, dz)
 }
 
-pub fn make_cube2(dx: f64, dy: f64, dz: f64) -> Solid {
-  let mut top = Plane::new();
-  let mut bottom = top.clone();
-  bottom.flip();
-  top.origin.z = dz;
-  let points = [
-    Point3::new(0.0, 0.0, 0.0),
-    Point3::new(dx, 0.0, 0.0),
-    Point3::new(dx, dy, 0.0),
-    Point3::new(0.0, dy, 0.0),
+pub fn make_cylinder(radius: f64, height: f64) -> Solid {
+  let region = vec![
+    TrimmedCurve::new(Circle::new(Point3::new(0.0, 0.0, 0.0), radius).into_enum())
   ];
-  // Create solid from bottom face with empty loop
-  let mut solid = Solid::default();
-  solid.mvfs(points[0], bottom.into_enum());
-  let shell = &mut solid.shells[0];
-  let he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
-  // Front edge
-  let (front_edge, _) = shell.lmev(&he, &he, make_line(points[1], points[0]), points[1]);
-  let he = &front_edge.borrow().left_half;
-  // Right edge
-  let (right_edge, _) = shell.lmev(he, he, make_line(points[2], points[1]), points[2]);
-  let he = &right_edge.borrow().left_half;
-  // Back edge
-  let (back_edge, _) = shell.lmev(he, he, make_line(points[3], points[2]), points[3]);
-  // Close left edge to create top face
-  let (_, _top_face) = shell.lmef(&front_edge.borrow().right_half, &back_edge.borrow().left_half, make_line(points[0], points[3]), top.into_enum());
-  //4x shell.mev()
-  //4x shell.mef() side faces
-  solid
-}
-
-fn make_line(p1: Point3, p2: Point3) -> CurveType {
-  Line::new(p1, p2).into_enum()
+  extrude(region, height)
 }
 
 
@@ -93,5 +60,20 @@ mod tests {
     assert_eq!(shell.vertices.len(), 8);
     assert_eq!(shell.edges.len(), 12);
     assert_eq!(shell.faces.len(), 6);
+  }
+
+  #[test]
+  fn cylinder() {
+    let cube = make_cylinder(1.0, 1.0);
+    let shell = &cube.shells[0];
+    println!("\nCylinder finished");
+    shell.print();
+    assert_eq!(shell.vertices.len(), 2);
+    assert_eq!(shell.edges.len(), 3);
+    assert_eq!(shell.faces.len(), 3);
+    assert_eq!(shell.faces[0].borrow().outer_ring.borrow().iter().count(), 1);
+    assert_eq!(shell.faces[1].borrow().outer_ring.borrow().iter().count(), 1);
+    assert_eq!(shell.faces[2].borrow().outer_ring.borrow().iter().count(), 4);
+    panic!("Test trap");
   }
 }

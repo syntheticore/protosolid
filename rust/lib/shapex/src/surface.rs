@@ -59,7 +59,7 @@ impl TrimmedSurface {
 
   pub fn tesselate(&self) -> Mesh {
     let wire = &self.bounds[0];
-    self.base.as_surface().tesselate(10, wire)
+    self.base.as_surface().tesselate(80, wire)
   }
 }
 
@@ -171,6 +171,7 @@ impl Surface for Plane {
     let mut mesh = geom2d::tesselate_polygon(polyline, self.normal());
     mesh.transform(&trans);
     mesh
+    // Mesh::default()
   }
 
   fn flip(&mut self) {
@@ -199,8 +200,8 @@ impl CylindricalSurface {
   pub fn new() -> Self {
     Self {
       origin: Point3::new(0.0, 0.0, 0.0),
-      radius: 1.0,
       direction: Vec3::new(0.0, 0.0, 1.0),
+      radius: 1.0,
       bounds: (0.0, 1.0),
     }
   }
@@ -212,6 +213,7 @@ impl CylindricalSurface {
 
 impl Surface for CylindricalSurface {
   fn sample(&self, u: f64, v: f64) -> Point3 {
+    let u = self.bounds.0 + u * (self.bounds.1 - self.bounds.0);
     let u = u * std::f64::consts::PI * 2.0;
     Point3::new(
       self.origin.x + u.sin() * self.radius,
@@ -225,15 +227,43 @@ impl Surface for CylindricalSurface {
   }
 
   fn tesselate(&self, resolution: i32, _bounds: &Wire) -> Mesh {
-    for u in 0..resolution {
-      let u = u as f64 / resolution as f64;
-      let u = self.bounds.0 + u * (self.bounds.1 - self.bounds.0);
-      for v in 0..resolution {
-        let v = v as f64 / resolution as f64;
-        self.sample(u, v);
+    let mut vertices: Vec<Point3> = vec![];
+    let mut faces: Vec<usize> = vec![];
+    let mut normals: Vec<Vec3> = vec![];
+    let mut iter = (0..=resolution).peekable();
+    while let Some(i) = iter.next() {
+      let u = i as f64 / resolution as f64;
+      let upper_left = self.sample(u, 1.0);
+      let lower_left = self.sample(u, 0.0);
+      vertices.push(lower_left);
+      vertices.push(upper_left);
+      let normal = self.normal_at(u, 0.0);
+      if let Some(&next_i) = iter.peek() {
+        let next_u = next_i as f64 / resolution as f64;
+        let next_normal = self.normal_at(next_u, 0.0);
+        let i = i as usize * 2;
+        // Triangle
+        faces.push(i);
+        faces.push(i + 2);
+        faces.push(i + 1);
+        normals.push(normal);
+        normals.push(next_normal);
+        normals.push(normal);
+        // Triangle
+        faces.push(i + 1);
+        faces.push(i + 2);
+        faces.push(i + 3);
+        normals.push(normal);
+        normals.push(next_normal);
+        normals.push(next_normal);
       }
     }
-    Mesh::default()
+    Mesh {
+      vertices,
+      faces,
+      normals,
+    }
+    // Mesh::default()
   }
 
   fn flip(&mut self) {

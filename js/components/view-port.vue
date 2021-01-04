@@ -257,7 +257,7 @@
       var sun = new THREE.DirectionalLight(0xdfebff, 1)
       sun.position.set(2, 50, 100)
       sun.castShadow = true
-      sun.shadow.bias = - 0.001
+      sun.shadow.bias = - 0.0001
       sun.shadow.mapSize.width = 4096
       sun.shadow.mapSize.height = 4096
       let shadowFrustum = 20 / 2
@@ -949,6 +949,7 @@
         // geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
         // geometry.computeFaceNormals()
         // geometry.computeVertexNormals()
+        // geometry.normalizeNormals()
         return geometry
       },
 

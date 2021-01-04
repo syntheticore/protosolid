@@ -32,6 +32,14 @@ impl Almost for Point3 {
   }
 }
 
+impl Almost for Vec3 {
+  fn almost(&self, other: Self) -> bool {
+    (self.x - other.x).abs() < EPSILON &&
+    (self.y - other.y).abs() < EPSILON &&
+    (self.z - other.z).abs() < EPSILON
+  }
+}
+
 impl Almost for f64 {
   fn almost(&self, other: Self) -> bool {
     (self - other).abs() < EPSILON
@@ -45,14 +53,14 @@ pub fn almost_eq<T: Almost + Debug + Copy>(first: T, second: T) {
 }
 
 
-pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
-  vec![tuple.0, tuple.1]
-}
-
-
 pub type Ref<T> = Rc<RefCell<T>>;
 pub type WeakRef<T> = Weak<RefCell<T>>;
 
 pub fn rc<T>(arg: T) -> Rc<RefCell<T>> {
   Rc::new(RefCell::new(arg))
+}
+
+
+pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
+  vec![tuple.0, tuple.1]
 }

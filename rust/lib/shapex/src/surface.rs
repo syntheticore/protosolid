@@ -197,11 +197,11 @@ pub struct CylindricalSurface {
 }
 
 impl CylindricalSurface {
-  pub fn new() -> Self {
+  pub fn new(radius: f64) -> Self {
     Self {
       origin: Point3::new(0.0, 0.0, 0.0),
       direction: Vec3::new(0.0, 0.0, 1.0),
-      radius: 1.0,
+      radius,
       bounds: (0.0, 1.0),
     }
   }
@@ -244,15 +244,15 @@ impl Surface for CylindricalSurface {
         let i = i as usize * 2;
         // Triangle
         faces.push(i);
-        faces.push(i + 2);
         faces.push(i + 1);
+        faces.push(i + 2);
+        normals.push(normal);
         normals.push(normal);
         normals.push(next_normal);
-        normals.push(normal);
         // Triangle
         faces.push(i + 1);
-        faces.push(i + 2);
         faces.push(i + 3);
+        faces.push(i + 2);
         normals.push(normal);
         normals.push(next_normal);
         normals.push(next_normal);
@@ -287,5 +287,14 @@ mod tests {
   fn plane_normal() {
     let plane = Plane::new();
     assert_eq!(plane.normal(), Vec3::new(0.0, 0.0, 1.0));
+  }
+
+  #[test]
+  fn cylinder_normal() {
+    let cylinder = CylindricalSurface::new(1.0);
+    almost_eq(cylinder.normal_at(0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    almost_eq(cylinder.normal_at(0.5, 0.0), Vec3::new(0.0, -1.0, 0.0));
+    almost_eq(cylinder.normal_at(0.25, 0.0), Vec3::new(1.0, 0.0, 0.0));
+    almost_eq(cylinder.normal_at(0.75, 0.0), Vec3::new(-1.0, 0.0, 0.0));
   }
 }

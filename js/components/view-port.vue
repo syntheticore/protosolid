@@ -267,13 +267,12 @@
       var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
       this.scene.add(atmosphere)
 
-      var pmremGenerator = new THREE.PMREMGenerator(this.renderer)
-      pmremGenerator.compileCubemapShader()
-
       new HDRCubeTextureLoader()
       .setPath('textures/cubemap/')
       .setDataType(THREE.UnsignedByteType)
       .load(['px.hdr', 'nx.hdr', 'py.hdr', 'ny.hdr', 'pz.hdr', 'nz.hdr'], (texture) => {
+        var pmremGenerator = new THREE.PMREMGenerator(this.renderer)
+        pmremGenerator.compileCubemapShader()
         var envMap = pmremGenerator.fromCubemap(texture).texture
         this.scene.environment = envMap
         texture.dispose()
@@ -941,7 +940,6 @@
         const geometry = new THREE.BufferGeometry()
         const vertices = new Float32Array(bufferGeometry.position())
         const normals = new Float32Array(bufferGeometry.normal())
-        console.log(normals)
         // const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
         geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
         geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
@@ -950,6 +948,7 @@
         // geometry.computeFaceNormals()
         // geometry.computeVertexNormals()
         // geometry.normalizeNormals()
+        console.log(normals)
         return geometry
       },
 

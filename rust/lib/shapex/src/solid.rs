@@ -210,6 +210,10 @@ impl Shell {
     }
   }
 
+  pub fn validate(&self) -> bool {
+    todo!()
+  }
+
   pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: CurveType, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
     let vertex = rc(Vertex {
       point: p,

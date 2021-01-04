@@ -26,7 +26,6 @@
       div(
         v-if="snapAnchor"
         :style="{top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px'}"
-        @click="anchorClicked(snapAnchor)"
       )
 
     ul.handles
@@ -171,8 +170,6 @@
   const snapDistance = 10.5 // px
   const maxSnapReferences = 5
   const frustumSize = 10
-
-  let isDragging = false
 
   function getCanvasCoords(mouseCoords, canvas) {
     return new THREE.Vector2(
@@ -549,7 +546,6 @@
         this.activeHandle = null
         this.snapAnchor = null
         this.guides = []
-        this.isDragging = false
       },
 
       mouseDown: function(e) {
@@ -561,15 +557,10 @@
         this.lastCoords = canvasCoords
       },
 
-      anchorClicked: function(anchor) {
-        this.activeTool.mouseDown(anchor.vec, anchor.pos)
-      },
-
       handleMouseDown: function(e, handle) {
         if(this.activeTool.constructor == ManipulationTool) {
           this.lastSnaps = []
           this.activeHandle = handle
-          this.isDragging = true
         }
         this.mouseDown(e)
       },
@@ -588,7 +579,8 @@
         let vec = this.fromScreen(canvasCoords)
         this.guides = []
         this.catchSnapPoints(coords)
-        if(this.activeTool.constructor != ManipulationTool || this.isDragging) vec = this.snapToGuides(vec) || vec
+        // if(this.activeTool.constructor != ManipulationTool || this.isDragging) vec = this.snapToGuides(vec) || vec
+        if(this.activeTool.enableSnapping || this.activeHandle) vec = this.snapToGuides(vec) || vec
         return [vec, coords, canvasCoords]
       },
 
@@ -948,7 +940,6 @@
         // geometry.computeFaceNormals()
         // geometry.computeVertexNormals()
         // geometry.normalizeNormals()
-        console.log(normals)
         return geometry
       },
 

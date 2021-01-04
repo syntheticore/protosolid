@@ -4,6 +4,7 @@ class Tool {
   constructor(component, viewport) {
     this.component = component
     this.viewport = viewport
+    this.enableSnapping = false
   }
 
   click() {}
@@ -40,6 +41,7 @@ class HighlightTool extends Tool {
 export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, ['curve'])
+    this.enableSnapping = true
   }
 
   click(coords) {
@@ -176,6 +178,11 @@ export class FaceSelectionTool extends SelectionTool {
 
 
 export class LineTool extends Tool {
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.enableSnapping = true
+  }
+
   mouseDown(vec) {
     this.mouseMove(vec)
     this.line = this.component.get_sketch().add_line(vec.toArray(), vec.toArray())
@@ -206,6 +213,11 @@ export class LineTool extends Tool {
 
 
 export class SplineTool extends Tool {
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.enableSnapping = true
+  }
+
   mouseDown(vec) {
     if(this.spline) {
       let points = this.spline.get_handles()
@@ -237,6 +249,11 @@ export class SplineTool extends Tool {
 
 
 export class CircleTool extends Tool {
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.enableSnapping = true
+  }
+
   mouseDown(vec) {
     if(this.center) {
       this.center = null
@@ -256,6 +273,11 @@ export class CircleTool extends Tool {
 
 
 export class ArcTool extends Tool {
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.enableSnapping = true
+  }
+
   mouseDown(vec) {
     if(this.start && this.end) {
       this.start = null

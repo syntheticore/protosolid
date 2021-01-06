@@ -284,9 +284,9 @@ impl Transformable for Line {
 pub struct Arc {
   pub id: Uuid,
   pub center: Point3,
+  pub normal: Vec3,
   pub radius: f64,
-  pub start: f64,
-  pub end: f64,
+  pub bounds: (f64, f64),
 }
 
 impl Arc {
@@ -294,9 +294,9 @@ impl Arc {
     Self {
       id: Uuid::new_v4(),
       center,
+      normal: Vec3::unit_z(),
       radius,
-      start,
-      end,
+      bounds: (start, end),
     }
   }
 
@@ -320,8 +320,8 @@ impl Arc {
 
 impl Curve for Arc {
   fn sample(&self, mut t: f64) -> Point3 {
-    let range = self.end - self.start;
-    t = self.start + t * range;
+    let range = self.bounds.1 - self.bounds.0;
+    t = self.bounds.0 + t * range;
     t = t * std::f64::consts::PI * 2.0;
     Point3::new(
       self.center.x + t.sin() * self.radius,
@@ -333,8 +333,8 @@ impl Curve for Arc {
   fn unsample(&self, p: &Point3) -> f64 {
     let circle = Circle::new(self.center, self.radius);
     let param = circle.unsample(p);
-    let range = self.end - self.start;
-    (param - self.start) / range
+    let range = self.bounds.1 - self.bounds.0;
+    (param - self.bounds.0) / range
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -353,6 +353,7 @@ impl Curve for Arc {
 impl Transformable for Arc {
   fn transform(&mut self, transform: &Transform) {
     self.center = transform.apply(self.center);
+    self.normal = transform.apply_vec(self.normal);
   }
 }
 
@@ -361,6 +362,7 @@ impl Transformable for Arc {
 pub struct Circle {
   pub id: Uuid,
   pub center: Point3,
+  pub normal: Vec3,
   pub radius: f64,
 }
 
@@ -369,6 +371,7 @@ impl Circle {
     Self {
       id: Uuid::new_v4(),
       center,
+      normal: Vec3::unit_z(),
       radius,
     }
   }
@@ -469,6 +472,7 @@ impl Curve for Circle {
 impl Transformable for Circle {
   fn transform(&mut self, transform: &Transform) {
     self.center = transform.apply(self.center);
+    self.normal = transform.apply_vec(self.normal);
   }
 }
 

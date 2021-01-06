@@ -358,14 +358,18 @@ impl JsSolid {
     // Vertices
     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
     // Edges
-    let edges = shell.edges.iter().map(|e| {
-      // let left = e.borrow().left_half.borrow().origin.borrow().point;
-      // let right = e.borrow().right_half.borrow().origin.borrow().point;
+    let edges = shell.edges.iter().filter_map(|edge| {
+      // let left = edge.borrow().left_half.borrow().origin.borrow().point;
+      // let right = edge.borrow().right_half.borrow().origin.borrow().point;
       // points_to_js(vec![
       //   left,
       //   right
       // ])
-      points_to_js(e.borrow().curve.as_curve().tesselate())
+      if edge.borrow().is_inner() {
+        None
+      } else {
+        Some(points_to_js(edge.borrow().curve.as_curve().tesselate()))
+      }
     }).collect();
     // Faces
     let faces = shell.faces.iter().map(|f| {

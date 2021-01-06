@@ -157,15 +157,18 @@
 
 <script>
   import * as THREE from 'three'
+
   import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
   import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
   import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
   import { HDRCubeTextureLoader } from 'three/examples/jsm/loaders/HDRCubeTextureLoader.js'
-  import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
   import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
   import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
   import { Snapper } from './../snapping.js'
+  import { SketchPlane } from './../sketchPlane.js'
+  import { ShadowCatcher } from './../shadowCatcher.js'
+  import { Materials } from './../materials.js'
   import {
     ManipulationTool,
     ObjectSelectionTool,
@@ -229,7 +232,6 @@
       this.renderer.physicallyCorrectLights = true
       this.renderer.shadowMap.enabled = true
       this.renderer.shadowMap.autoUpdate = false
-      this.renderer.shadowMap.needsUpdate = true
       // this.renderer.shadowMap.type = THREE.VSMShadowMap
       // this.renderer.toneMapping = THREE.ReinhardToneMapping
       // this.renderer.toneMapping = THREE.LinearToneMapping
@@ -248,18 +250,9 @@
       // Scene
       this.scene = new THREE.Scene()
       this.cameraOrtho.lookAt( this.scene.position )
+
       // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 80)
       // this.scene.add(new THREE.AmbientLight(0x666666))
-      var sun = new THREE.DirectionalLight(0xdfebff, 1)
-      sun.position.set(2, 50, 100)
-      sun.castShadow = true
-      sun.shadow.bias = - 0.0001
-      sun.shadow.mapSize.width = 4096
-      sun.shadow.mapSize.height = 4096
-      let shadowFrustum = 20 / 2
-      sun.shadow.camera = new THREE.OrthographicCamera(-shadowFrustum, shadowFrustum, shadowFrustum, -shadowFrustum, 1, 200)
-      this.scene.add(sun)
-
       var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
       this.scene.add(atmosphere)
 
@@ -276,111 +269,23 @@
         this.render()
       })
 
-      // Fat Line Materials
-      this.lineMaterial = new LineMaterial({
-        color: 'yellow',
-        linewidth: 3,
-        vertexColors: true,
-        dashed: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -4,
-      })
+      // Scene Objects
+      this.world = new THREE.Object3D()
+      this.scene.add(this.world)
 
-      this.selectionLineMaterial = this.lineMaterial.clone()
-      this.selectionLineMaterial.color.set('#0070ff')
-
-      this.highlightLineMaterial = this.lineMaterial.clone()
-      this.highlightLineMaterial.color.set('#2590e1')
-
-      this.wireMaterial = this.lineMaterial.clone()
-      this.wireMaterial.color.set('gray')
-      this.wireMaterial.linewidth = 2
-
-      // Line Materials
-      this.lineBasicMaterial = new THREE.LineBasicMaterial({
-        color: 'gray',
-      })
-
-      // Region materials
-      this.regionMaterial = new THREE.MeshBasicMaterial({
-        side: THREE.DoubleSide,
-        color: new THREE.Color('coral'),
-        depthTest: false,
-        transparent: true,
-        opacity: 0.1,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-      })
-
-      this.highlightRegionMaterial = new THREE.MeshBasicMaterial({
-        side: THREE.DoubleSide,
-        color: new THREE.Color('#0090ff'),
-        transparent: true,
-        opacity: 0.4,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-      })
-
-      // Surface Materials
-      this.surfaceMaterial = new THREE.MeshStandardMaterial({
-        side: THREE.DoubleSide, //XXX remove
-        color: '#53a3e1',
-        roughness: 0.25,
-        metalness: 0.2,
-      })
-
-      this.highlightSurfaceMaterial = new THREE.MeshStandardMaterial({
-        side: THREE.DoubleSide, //XXX remove
-        color: '#0070ff',
-      })
-
-      this.previewAddSurfaceMaterial = new THREE.MeshStandardMaterial({
-        side: THREE.DoubleSide, //XXX remove
-        color: '#0090ff',
-        transparent: true,
-        opacity: 0.4,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-      })
-
-      this.previewSubtractSurfaceMaterial = new THREE.MeshStandardMaterial({
-        side: THREE.DoubleSide, //XXX remove
-        color: 'red',
-        transparent: true,
-        opacity: 0.4,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-      })
-
-      this.shadowCatcherMaterial = new THREE.ShadowMaterial({
-        opacity: 0.2,
-      })
+      // Materials
+      this.materials = new Materials()
 
       // Sketch Plane
-      this.sketchPlane = new THREE.Object3D()
-      var groundGeo = new THREE.PlaneBufferGeometry(100, 100)
-      // groundGeo.rotateX(- Math.PI / 2)
-      var ground = new THREE.Mesh(groundGeo, this.shadowCatcherMaterial)
-      ground.material.depthWrite = false
-      ground.receiveShadow = true
-      ground.alcProjectable = true
-      this.sketchPlane.add(ground)
-
-      // Grid
-      var grid = new THREE.GridHelper(20, 20)
-      grid.rotateX(Math.PI / 2)
-      grid.material.opacity = 0.1
-      grid.material.transparent = true
-      // grid.material.depthWrite = false
-      grid.position.z = 0.0001
-      this.sketchPlane.add(grid)
-
-      // Axis Helper
-      this.sketchPlane.add(new THREE.AxesHelper(0.5));
+      this.sketchPlane = new SketchPlane()
       this.scene.add(this.sketchPlane)
 
+      // Shadow Catcher
+      this.shadowCatcher = new ShadowCatcher(this.renderer, this.world)
+      this.scene.add(this.shadowCatcher)
+
       // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
-      // const mesh = new THREE.Mesh(torusGeometry, this.surfaceMaterial)
+      // const mesh = new THREE.Mesh(torusGeometry, this.materials.surface)
       // mesh.position.z = 1
       // mesh.castShadow = true
       // mesh.receiveShadow = true
@@ -400,7 +305,7 @@
 
       this.transformControl.addEventListener('objectChange', (event) => {
         this.$emit('change-pose')
-        this.renderer.shadowMap.needsUpdate = true
+        this.shadowCatcher.update()
         this.render()
       })
 
@@ -667,10 +572,10 @@
         }
         this.activeCamera.updateProjectionMatrix()
         // Update line materials
-        this.lineMaterial.resolution.set(width, height)
-        this.selectionLineMaterial.resolution.set(width, height)
-        this.highlightLineMaterial.resolution.set(width, height)
-        this.wireMaterial.resolution.set(width, height)
+        this.materials.line.resolution.set(width, height)
+        this.materials.selectionLine.resolution.set(width, height)
+        this.materials.highlightLine.resolution.set(width, height)
+        this.materials.wire.resolution.set(width, height)
         this.render()
       },
 
@@ -689,9 +594,7 @@
       },
 
       fromScreen: function(coords) {
-        this.shadowCatcherMaterial.side = THREE.DoubleSide
         const intersects = this.hitTest(coords).filter(obj => obj.object.alcProjectable)
-        this.shadowCatcherMaterial.side = THREE.FrontSide
         const hit = intersects[0]
         return hit && hit.point
       },
@@ -717,12 +620,12 @@
       loadElement: function(elem, node) {
         this.unloadElement(elem, node, this.document)
         const vertices = elem.tesselate()
-        const line = this.convertLine(vertices, this.lineMaterial)
+        const line = this.convertLine(vertices, this.materials.line)
         line.alcType = 'curve'
         this.document.data[elem.id()] = line
         // line.component = node
         line.alcElement = elem
-        this.scene.add(line)
+        this.world.add(line)
 
         const nodeId = node.id()
         const elemId = elem.id()
@@ -743,7 +646,7 @@
       },
 
       unloadElement: function(elem, node, document) {
-        this.scene.remove(document.data[elem.id()])
+        this.world.remove(document.data[elem.id()])
         const nodeId = node.id()
         if(this.handles[nodeId]) delete this.handles[nodeId][elem.id()]
         this.handles = Object.assign({}, this.handles)
@@ -761,30 +664,29 @@
       loadTree: function(node, recursive) {
         const compData = this.document.data[node.id()]
         this.unloadTree(node, this.document, recursive)
-        this.renderer.shadowMap.needsUpdate = true
-        compData.regions.forEach(mesh => this.scene.remove(mesh))
+        compData.regions.forEach(mesh => this.world.remove(mesh))
         if(compData.hidden) return
         let solids = node.get_solids()
         solids.forEach(solid => {
           const faces = solid.get_faces()
           faces.forEach(face => {
-            const faceMesh = this.convertMesh(face.tesselate(), this.surfaceMaterial)
+            const faceMesh = this.convertMesh(face.tesselate(), this.materials.surface)
             faceMesh.alcType = 'face'
             faceMesh.alcFace = face
             faceMesh.alcComponent = node
             faceMesh.alcProjectable = true
             faceMesh.castShadow = true
             faceMesh.receiveShadow = true
-            this.scene.add(faceMesh)
+            this.world.add(faceMesh)
             compData.faces.push(faceMesh)
-            const line = this.convertLine(face.get_normal(), this.selectionLineMaterial)
-            this.scene.add(line)
+            // const normal = this.convertLine(face.get_normal(), this.materials.selectionLine)
+            // this.world.add(normal)
           })
           const wireframe = solid.get_edges()
           compData.wireframe = wireframe.map(edge => {
             // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
-            const line = this.convertLine(edge, this.wireMaterial)
-            this.scene.add(line)
+            const line = this.convertLine(edge, this.materials.wire)
+            this.world.add(line)
             return line
           })
         })
@@ -798,17 +700,18 @@
       unloadTree: function(node, document, recursive) {
         const nodeData = document.data[node.id()]
         nodeData.curves.forEach(elem => this.unloadElement(elem, node, document))
-        nodeData.wireframe.forEach(edge => this.scene.remove(edge))
-        nodeData.faces.forEach(faceMesh => this.scene.remove(faceMesh))
+        nodeData.wireframe.forEach(edge => this.world.remove(edge))
+        nodeData.faces.forEach(faceMesh => this.world.remove(faceMesh))
         if(recursive) node.get_children().forEach(child =>
           this.unloadTree(child, document, true)
         )
       },
 
       componentChanged: function(comp, recursive) {
-        this.scene.remove(this.previewMesh)
+        this.world.remove(this.previewMesh)
         this.loadTree(comp, recursive)
         this.paths = []
+        this.shadowCatcher.update()
         this.render()
       },
 
@@ -822,22 +725,22 @@
         const compData = this.document.data[comp.id()]
         const regions = comp.get_sketch().get_regions(false)
         console.log('# regions: ', regions.length)
-        compData.regions.forEach(mesh => this.scene.remove(mesh))
+        compData.regions.forEach(mesh => this.world.remove(mesh))
         compData.regions = regions.map(region => {
-          let material = this.regionMaterial.clone()
+          // let material = this.materials.region.clone()
           // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
-          const mesh = this.convertMesh(region.get_mesh(), material)
+          const mesh = this.convertMesh(region.get_mesh(), this.materials.region)
           mesh.alcType = 'region'
           mesh.alcRegion = region
-          this.scene.add(mesh)
+          this.world.add(mesh)
           return mesh
         })
       },
 
       previewFeature: function(comp, bufferGeometry) {
-        this.scene.remove(this.previewMesh)
-        this.previewMesh = this.convertMesh(bufferGeometry, this.previewAddSurfaceMaterial);
-        this.scene.add(this.previewMesh)
+        this.world.remove(this.previewMesh)
+        this.previewMesh = this.convertMesh(bufferGeometry, this.materials.previewAddSurface);
+        this.world.add(this.previewMesh)
         this.render()
       },
 

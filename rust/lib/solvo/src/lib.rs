@@ -266,8 +266,8 @@ impl Controllable for Arc {
     let circle = Circle::from_points(p1, p2, p3).unwrap();
     self.center = circle.center;
     self.radius = circle.radius;
-    self.start = circle.unsample(&p1);
-    self.end = circle.unsample(&p3);
+    self.bounds.0 = circle.unsample(&p1);
+    self.bounds.1 = circle.unsample(&p3);
   }
 
   // Endpoints + center
@@ -276,8 +276,8 @@ impl Controllable for Arc {
     self.center = center;
     self.radius = (start - center).magnitude();
     let circle = Circle::new(self.center, self.radius);
-    self.start = circle.unsample(&start);
-    self.end = circle.unsample(&end);
+    self.bounds.0 = circle.unsample(&start);
+    self.bounds.1 = circle.unsample(&end);
   }
 
   fn get_snap_points(&self) -> Vec<Point3> {

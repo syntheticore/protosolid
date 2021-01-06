@@ -31,9 +31,9 @@ class HighlightTool extends Tool {
     if(!object) return this.viewport.render()
     const oldMaterial = object.material
     object.material = {
-      curve: this.viewport.highlightLineMaterial,
-      region: this.viewport.highlightRegionMaterial,
-      face: this.viewport.highlightSurfaceMaterial,
+      curve: this.viewport.materials.highlightLine,
+      region: this.viewport.materials.highlightRegion,
+      face: this.viewport.materials.highlightSurface,
     }[object.alcType]
     this.viewport.render()
     object.material = oldMaterial
@@ -51,7 +51,7 @@ export class ManipulationTool extends HighlightTool {
     if(curve) return this.viewport.render()
     if(this.viewport.selectedElement) {
       const mesh = this.viewport.document.data[this.viewport.selectedElement.id()]
-      mesh.material = this.viewport.lineMaterial
+      mesh.material = this.viewport.materials.line
     }
     this.viewport.$emit('element-selected', null)
     this.viewport.transformControl.detach()
@@ -67,9 +67,9 @@ export class ManipulationTool extends HighlightTool {
     if(!curve) return
     if(this.viewport.selectedElement) {
       const mesh = this.viewport.document.data[this.viewport.selectedElement.id()]
-      mesh.material = this.viewport.lineMaterial
+      mesh.material = this.viewport.materials.line
     }
-    curve.material = this.viewport.selectionLineMaterial
+    curve.material = this.viewport.materials.selectionLine
     this.viewport.$emit('element-selected', curve.alcElement)
     // this.viewport.transformControl.attach(object)
     this.viewport.render()

@@ -388,6 +388,14 @@ impl Shell {
           bounds: (0.0, 1.0),
         }.into_enum()
       },
+      CurveType::Arc(arc) => {
+        CylindricalSurface {
+          origin: arc.center,
+          radius: arc.radius,
+          direction: vec,
+          bounds: arc.bounds,
+        }.into_enum()
+      },
       _ => todo!()
     }
   }
@@ -459,6 +467,12 @@ impl Edge {
   //   }
   //   curve
   // }
+
+  pub fn is_inner(&self) -> bool {
+    let left_face = self.left_half.borrow().ring.upgrade().unwrap().borrow().face.upgrade().unwrap();
+    let right_face = self.right_half.borrow().ring.upgrade().unwrap().borrow().face.upgrade().unwrap();
+    Rc::ptr_eq(&left_face, &right_face) && false
+  }
 
   pub fn print(&self) {
     println!("\n  Edge {:?}", self.id);

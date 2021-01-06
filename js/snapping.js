@@ -53,7 +53,7 @@ export class Snapper {
     let closestDist = 99999
     let target
     snapPoints.forEach(p => {
-      const dist = this.viewport.toScreen(p).distanceTo(coords)
+      const dist = this.viewport.renderer.toScreen(p).distanceTo(coords)
       if(dist < snapDistance && dist < closestDist) {
         closestDist = dist
         target = p
@@ -83,9 +83,9 @@ export class Snapper {
       }
     })
     const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, snapY ? snapY.y : vec.y, vec.z)
-    const screenSnapVec = this.viewport.toScreen(snapVec)
+    const screenSnapVec = this.viewport.renderer.toScreen(snapVec)
     if(snapX) {
-      const start = this.viewport.toScreen(snapX)
+      const start = this.viewport.renderer.toScreen(snapX)
       this.guides.push({
         id: 'v' + start.x + start.y,
         start,
@@ -93,7 +93,7 @@ export class Snapper {
       })
     }
     if(snapY) {
-      const start = this.viewport.toScreen(snapY)
+      const start = this.viewport.renderer.toScreen(snapY)
       this.guides.push({
         id: 'h' + start.x + start.y,
         start,
@@ -104,7 +104,7 @@ export class Snapper {
       if(this.snapAnchor && this.snapAnchor.vec.equals(snapVec)) return snapVec
       this.snapAnchor = {
         type: 'snap',
-        pos: this.viewport.toScreen(snapVec),
+        pos: this.viewport.renderer.toScreen(snapVec),
         vec: snapVec,
         id: '' + snapVec.x + snapVec.y + snapVec.z,
       }

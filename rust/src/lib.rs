@@ -359,12 +359,6 @@ impl JsSolid {
     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
     // Edges
     let edges = shell.edges.iter().filter_map(|edge| {
-      // let left = edge.borrow().left_half.borrow().origin.borrow().point;
-      // let right = edge.borrow().right_half.borrow().origin.borrow().point;
-      // points_to_js(vec![
-      //   left,
-      //   right
-      // ])
       if edge.borrow().is_inner() {
         None
       } else {
@@ -399,7 +393,6 @@ impl JsSolid {
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct JsComponent {
-  // title: String,
   real: Ref<Component>,
 }
 
@@ -412,7 +405,6 @@ impl JsComponent {
 
   fn from(comp: &Rc<RefCell<Component>>) -> Self {
     JsComponent {
-      // title: String::from(&comp.borrow().title),
       real: comp.clone(),
     }
   }

@@ -26,16 +26,16 @@ class HighlightTool extends Tool {
   }
 
   mouseMove(vec, coords) {
-    if(this.viewport.hoveredHandle) return this.viewport.render()
-    const object = this.viewport.objectsAtScreen(coords, this.selectors)[0]
-    if(!object) return this.viewport.render()
+    if(this.viewport.hoveredHandle) return this.viewport.renderer.render()
+    const object = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
+    if(!object) return this.viewport.renderer.render()
     const oldMaterial = object.material
     object.material = {
-      curve: this.viewport.materials.highlightLine,
-      region: this.viewport.materials.highlightRegion,
-      face: this.viewport.materials.highlightSurface,
+      curve: this.viewport.renderer.materials.highlightLine,
+      region: this.viewport.renderer.materials.highlightRegion,
+      face: this.viewport.renderer.materials.highlightSurface,
     }[object.alcType]
-    this.viewport.render()
+    this.viewport.renderer.render()
     object.material = oldMaterial
   }
 }
@@ -47,15 +47,15 @@ export class ManipulationTool extends HighlightTool {
   }
 
   click(vec, coords) {
-    const curve = this.viewport.objectsAtScreen(coords, this.selectors)[0]
-    if(curve) return this.viewport.render()
+    const curve = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
+    if(curve) return this.viewport.renderer.render()
     if(this.viewport.selectedElement) {
       const mesh = this.viewport.document.data[this.viewport.selectedElement.id()]
-      mesh.material = this.viewport.materials.line
+      mesh.material = this.viewport.renderer.materials.line
     }
     this.viewport.$emit('element-selected', null)
-    this.viewport.transformControl.detach()
-    this.viewport.render()
+    this.viewport.renderer.transformControl.detach()
+    this.viewport.renderer.render()
   }
 
   mouseDown(vec, coords) {
@@ -63,16 +63,16 @@ export class ManipulationTool extends HighlightTool {
       this.enableSnapping = true
       return
     }
-    const curve = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    const curve = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
     if(!curve) return
     if(this.viewport.selectedElement) {
       const mesh = this.viewport.document.data[this.viewport.selectedElement.id()]
-      mesh.material = this.viewport.materials.line
+      mesh.material = this.viewport.renderer.materials.line
     }
-    curve.material = this.viewport.materials.selectionLine
+    curve.material = this.viewport.renderer.materials.selectionLine
     this.viewport.$emit('element-selected', curve.alcElement)
     // this.viewport.transformControl.attach(object)
-    this.viewport.render()
+    this.viewport.renderer.render()
   }
 
   mouseUp(vec, coords) {
@@ -99,42 +99,42 @@ export class SetPlaneTool extends HighlightTool {
   }
 
   click(coords) {
-    const face = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
     if(face) {
       if(face.alcFace.get_surface_type() == 'Plane') {
-        this.viewport.sketchPlane.position.z = face.alcFace.get_origin()[2]
+        this.viewport.renderer.sketchPlane.position.z = face.alcFace.get_origin()[2]
       }
     }
-    this.viewport.render()
+    this.viewport.renderer.render()
   }
 
   mouseDown(vec, coords) {
-    const face = this.viewport.objectsAtScreen(coords, this.selectors)[0]
-    this.viewport.render()
+    const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
+    this.viewport.renderer.render()
   }
 }
 
 
 export class TrimTool extends Tool {
   click(coords) {
-    const curve = this.viewport.objectsAtScreen(coords, 'curve')[0]
-    if(curve) return this.viewport.render()
+    const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
+    if(curve) return this.viewport.renderer.render()
 
-    this.viewport.render()
+    this.viewport.renderer.render()
   }
 
   mouseDown(vec, coords) {
-    const curve = this.viewport.objectsAtScreen(coords, 'curve')[0]
-    if(!curve) return this.viewport.render()
+    const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
+    if(!curve) return this.viewport.renderer.render()
 
-    this.viewport.render()
+    this.viewport.renderer.render()
   }
 
   mouseMove(vec, coords) {
-    const curve = this.viewport.objectsAtScreen(coords, 'curve')[0]
-    if(!curve) return this.viewport.render()
+    const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
+    if(!curve) return this.viewport.renderer.render()
 
-    this.viewport.render()
+    this.viewport.renderer.render()
   }
 }
 
@@ -146,7 +146,7 @@ class SelectionTool extends HighlightTool {
   }
 
   mouseDown(vec, coords) {
-    const mesh = this.viewport.objectsAtScreen(coords, this.selectors)[0]
+    const mesh = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
     if(!mesh) return
     const selection = this.select(mesh)
     this.callback(selection, mesh)
@@ -302,7 +302,11 @@ export class ArcTool extends Tool {
 
   mouseMove(vec) {
     if(!this.start || !this.end) return
-    this.arc = this.arc || this.component.get_sketch().add_arc(this.start.toArray(), vec.toArray(), this.end.toArray())
+    this.arc = this.arc || this.component.get_sketch().add_arc(
+      this.start.toArray(),
+      vec.toArray(),
+      this.end.toArray()
+    )
     this.arc.set_initial_handles([this.start.toArray(), vec.toArray(), this.end.toArray()])
     this.viewport.elementChanged(this.arc, this.component)
   }

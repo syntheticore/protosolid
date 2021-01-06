@@ -287,6 +287,7 @@ export class Renderer {
     const geometry = new THREE.BufferGeometry()
     const vertices = new Float32Array(bufferGeometry.position())
     const normals = new Float32Array(bufferGeometry.normal())
+    bufferGeometry.free()
     // const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
     geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
     geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))

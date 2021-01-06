@@ -217,7 +217,8 @@
           this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')
           mesh.geometry.computeBoundingBox();
-          const center = mesh.geometry.boundingBox.getCenter();
+          const center = new THREE.Vector3()
+          mesh.geometry.boundingBox.getCenter(center);
           this.paths.push({
             target: center,
             origin: pickerCoords,
@@ -458,12 +459,12 @@
             // this.renderer.add(normal)
           })
           const wireframe = solid.get_edges()
-          compData.wireframe = wireframe.map(edge => {
+          compData.wireframe = (compData.wireframe || []).concat(wireframe.map(edge => {
             // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
             const line = this.renderer.convertLine(edge, this.renderer.materials.wire)
             this.renderer.add(line)
             return line
-          })
+          }))
         })
         this.updateRegions(node)
         // Load sketch elements
@@ -500,7 +501,10 @@
         const compData = this.document.data[comp.id()]
         const regions = comp.get_sketch().get_regions(false)
         console.log('# regions: ', regions.length)
-        compData.regions.forEach(mesh => this.renderer.remove(mesh))
+        compData.regions.forEach(mesh => {
+          mesh.alcRegion.free()
+          this.renderer.remove(mesh)
+        })
         compData.regions = regions.map(region => {
           // let material = this.renderer.materials.region.clone()
           // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())

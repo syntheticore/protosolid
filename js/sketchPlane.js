@@ -20,7 +20,7 @@ export class SketchPlane extends THREE.Object3D {
     grid.material.opacity = 0.1
     grid.material.transparent = true
     // grid.material.depthWrite = false
-    grid.position.z = 0.0001
+    // grid.position.z = 0.0001
     this.add(grid)
 
     // Axis Helper

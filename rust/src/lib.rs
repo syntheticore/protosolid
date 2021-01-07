@@ -285,7 +285,6 @@ impl JsRegion {
     let tool = features::extrude(self.region.clone(), distance);
     Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
     web_sys::console::time_end_with_label("BREP extrude");
-
   }
 
   pub fn extrude_preview(&self, distance: f64) -> JsValue {

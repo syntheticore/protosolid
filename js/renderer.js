@@ -117,39 +117,6 @@ export class Renderer {
     this.setActiveCamera(this.camera)
   }
 
-  on(event, callback) {
-    return this.emitter.on(event, callback)
-  }
-
-  add(obj) {
-    this.world.add(obj)
-  }
-
-  remove(obj) {
-    if(!obj) return
-    this.world.remove(obj)
-    this.drop_resources(obj, true)
-  }
-
-  drop_resources(obj, geomOnly) {
-    obj.traverse((child) => {
-      if(child.geometry) child.geometry.dispose()
-      if(child.material && !geomOnly) {
-        var texture = child.material.map
-        if(texture) texture.dispose()
-        child.material.dispose()
-      }
-    })
-  }
-
-  switchCamera() {
-    this.setActiveCamera(this.activeCamera == this.cameraOrtho ? this.camera : this.cameraOrtho)
-  }
-
-  setPivot(coords) {
-    this.viewControlsTarget = this.fromScreen(coords)
-  }
-
   setActiveCamera(camera) {
     if(this.viewControls) this.viewControls.dispose()
     this.viewControls = new OrbitControls(camera, this.renderer.domElement)
@@ -193,6 +160,39 @@ export class Renderer {
     this.activeCamera = camera
 
     this.onWindowResize()
+  }
+
+  switchCamera() {
+    this.setActiveCamera(this.activeCamera == this.cameraOrtho ? this.camera : this.cameraOrtho)
+  }
+
+  on(event, callback) {
+    return this.emitter.on(event, callback)
+  }
+
+  add(obj) {
+    this.world.add(obj)
+  }
+
+  remove(obj) {
+    if(!obj) return
+    this.world.remove(obj)
+    this.dropResources(obj, true)
+  }
+
+  dropResources(obj, geomOnly) {
+    obj.traverse((child) => {
+      if(child.geometry) child.geometry.dispose()
+      if(child.material && !geomOnly) {
+        var texture = child.material.map
+        if(texture) texture.dispose()
+        child.material.dispose()
+      }
+    })
+  }
+
+  setPivot(coords) {
+    this.viewControlsTarget = this.fromScreen(coords)
   }
 
   render() {
@@ -333,6 +333,7 @@ export class Renderer {
     this.scene.environment.dispose()
     this.viewControls.dispose()
     this.transformControl.dispose()
-    this.drop_resources(this.scene)
+    this.dropResources(this.scene)
+    this.renderer.dispose()
   }
 }

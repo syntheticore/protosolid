@@ -168,8 +168,9 @@
     ArcTool,
     SetPlaneTool
   } from './../tools.js'
-  import { Renderer } from './../renderer.js'
   import { Snapper } from './../snapping.js'
+  import { Renderer } from './../renderer.js'
+  import { Transloader } from './../transloader.js'
 
   export default {
     name: 'ViewPort',
@@ -183,8 +184,10 @@
 
     watch: {
       document: function(document, oldDocument) {
-        this.unloadTree(oldDocument.tree, oldDocument, true)
-        this.loadTree(document.tree, document, true)
+        this.transloader.unloadTree(oldDocument.tree, true)
+        this.transloader.dataPool = document.data
+        this.transloader.loadTree(document.tree, true)
+        this.shadowCatcher.update()
         this.renderer.render()
       },
     },
@@ -210,6 +213,24 @@
       this.renderer.on('render', () => this.updateWidgets() )
       this.renderer.on('change-view', () => this.$emit('change-view') )
       this.renderer.on('change-pose', () => this.$emit('change-pose') )
+
+      // Snapping
+      this.snapper = new Snapper(this, (guides, anchor) => {
+        this.guides = guides
+        this.snapAnchor = anchor
+      })
+
+      // Init tree
+      this.transloader = new Transloader(
+        this.renderer,
+        this.document.data,
+        this.onLoadElement.bind(this),
+        this.onUnloadElement.bind(this),
+      )
+      this.transloader.loadTree(this.document.tree, true)
+
+      document._debug = {} || document._debug
+      document._debug.viewport = this
 
       // Events
       const handlePick = (pickerCoords, color, tool) => {
@@ -240,7 +261,7 @@
 
       this.$root.$on('component-changed', this.componentChanged)
 
-      this.$root.$on('preview-feature', this.previewFeature)
+      this.$root.$on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
 
       // Key presses
       this.$refs.canvas.addEventListener('keydown', (e) => {
@@ -258,28 +279,10 @@
         }
       })
 
-      // Snapping
-      this.snapper = new Snapper(this, (guides, anchor) => {
-        this.guides = guides
-        this.snapAnchor = anchor
-      })
-
-      // Init tree
-      this.loadTree(this.document.tree, true)
-
-      document._debug = {} || document._debug
-      document._debug.viewport = this
-
       // Window Resize
       this.onWindowResize()
       setTimeout(() => this.onWindowResize(), 500)
       this.$root.$on('resize', this.onWindowResize)
-
-      setInterval(() => {
-        const info = this.renderer.renderer.info
-        info.memory._programs = info.programs.length
-        console.log(JSON.stringify(info.memory))
-      }, 5 * 1000)
     },
 
     beforeDestroy: function() {
@@ -390,16 +393,28 @@
         this.renderer.render()
       },
 
-      loadElement: function(elem, node) {
-        this.unloadElement(elem, node, this.document)
-        const vertices = elem.tesselate()
-        const line = this.renderer.convertLine(vertices, this.renderer.materials.line)
-        line.alcType = 'curve'
-        this.document.data[elem.id()] = line
-        // line.component = node
-        line.alcElement = elem
-        this.renderer.add(line)
+      deleteElement: function(elem) {
+        this.renderer.transformControl.detach()
+        this.activeComponent.get_sketch().remove_element(elem.id())
+        this.componentChanged(this.activeComponent)
+        this.$emit('element-selected', null)
+      },
 
+      componentChanged: function(comp, recursive) {
+        // this.renderer.remove(this.previewMesh)
+        this.transloader.loadTree(comp, recursive)
+        this.paths = []
+        this.renderer.shadowCatcher.update()
+        this.renderer.render()
+      },
+
+      elementChanged: function(elem, comp) {
+        this.transloader.updateRegions(comp)
+        this.transloader.loadElement(elem, comp)
+        this.renderer.render()
+      },
+
+      onLoadElement: function(elem, node) {
         const nodeId = node.id()
         const elemId = elem.id()
         this.handles[nodeId] = this.handles[nodeId] || {}
@@ -415,118 +430,12 @@
             index: i,
           })
         })
-        this.document.data[nodeId].curves.push(elem)
       },
 
-      unloadElement: function(elem, node, document) {
-        this.renderer.remove(document.data[elem.id()])
+      onUnloadElement: function(elem, node) {
         const nodeId = node.id()
         if(this.handles[nodeId]) delete this.handles[nodeId][elem.id()]
         this.handles = Object.assign({}, this.handles)
-        const curves = document.data[nodeId].curves
-        document.data[nodeId].curves = curves.filter(e => e != elem)
-      },
-
-      deleteElement: function(elem) {
-        this.renderer.transformControl.detach()
-        this.activeComponent.get_sketch().remove_element(elem.id())
-        this.componentChanged(this.activeComponent)
-        this.$emit('element-selected', null)
-      },
-
-      loadTree: function(node, recursive) {
-        const compData = this.document.data[node.id()]
-        this.unloadTree(node, this.document, recursive)
-        compData.regions.forEach(mesh => this.renderer.remove(mesh))
-        if(compData.hidden) return
-        let solids = node.get_solids()
-        solids.forEach(solid => {
-          const faces = solid.get_faces()
-          faces.forEach(face => {
-            const faceMesh = this.renderer.convertMesh(
-              face.tesselate(),
-              this.renderer.materials.surface
-            )
-            faceMesh.alcType = 'face'
-            faceMesh.alcFace = face
-            faceMesh.alcComponent = node
-            faceMesh.alcProjectable = true
-            faceMesh.castShadow = true
-            faceMesh.receiveShadow = true
-            this.renderer.add(faceMesh)
-            compData.faces.push(faceMesh)
-            // const normal = this.convertLine(face.get_normal(), this.renderer.materials.selectionLine)
-            // this.renderer.add(normal)
-          })
-          const wireframe = solid.get_edges()
-          compData.wireframe = (compData.wireframe || []).concat(wireframe.map(edge => {
-            // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
-            const line = this.renderer.convertLine(edge, this.renderer.materials.wire)
-            this.renderer.add(line)
-            return line
-          }))
-        })
-        this.updateRegions(node)
-        // Load sketch elements
-        const elements = node.get_sketch().get_sketch_elements()
-        elements.forEach(element => this.loadElement(element, node))
-        if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
-      },
-
-      unloadTree: function(node, document, recursive) {
-        const nodeData = document.data[node.id()]
-        nodeData.curves.forEach(elem => this.unloadElement(elem, node, document))
-        nodeData.wireframe.forEach(edge => this.renderer.remove(edge))
-        nodeData.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
-        if(recursive) node.get_children().forEach(child =>
-          this.unloadTree(child, document, true)
-        )
-      },
-
-      componentChanged: function(comp, recursive) {
-        this.renderer.remove(this.previewMesh)
-        this.loadTree(comp, recursive)
-        this.paths = []
-        this.renderer.shadowCatcher.update()
-        this.renderer.render()
-      },
-
-      elementChanged: function(elem, comp) {
-        this.updateRegions(comp)
-        this.loadElement(elem, comp)
-        this.renderer.render()
-      },
-
-      updateRegions: function(comp) {
-        const compData = this.document.data[comp.id()]
-        const regions = comp.get_sketch().get_regions(false)
-        console.log('# regions: ', regions.length)
-        compData.regions.forEach(mesh => {
-          mesh.alcRegion.free()
-          this.renderer.remove(mesh)
-        })
-        compData.regions = regions.map(region => {
-          // let material = this.renderer.materials.region.clone()
-          // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
-          const mesh = this.renderer.convertMesh(
-            region.get_mesh(),
-            this.renderer.materials.region
-          )
-          mesh.alcType = 'region'
-          mesh.alcRegion = region
-          this.renderer.add(mesh)
-          return mesh
-        })
-      },
-
-      previewFeature: function(comp, bufferGeometry) {
-        this.renderer.remove(this.previewMesh)
-        this.previewMesh = this.renderer.convertMesh(
-          bufferGeometry,
-          this.renderer.materials.previewAddSurface
-        );
-        this.renderer.add(this.previewMesh)
-        this.renderer.render()
       },
 
       onWindowResize: function() {

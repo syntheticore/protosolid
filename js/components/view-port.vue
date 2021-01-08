@@ -188,9 +188,8 @@
       document: function(document, oldDocument) {
         this.transloader.unloadTree(oldDocument.tree, true)
         this.transloader.dataPool = document.data
-        this.transloader.loadTree(document.tree, true)
-        this.renderer.shadowCatcher.update()
-        this.renderer.render()
+        this.componentChanged(document.tree, true)
+        this.$root.$emit('activate-toolname', 'Manipulate')
       },
 
       activeView: function(view) {
@@ -415,7 +414,6 @@
       },
 
       componentChanged: function(comp, recursive) {
-        // this.renderer.remove(this.previewMesh)
         this.transloader.loadTree(comp, recursive)
         this.paths = []
         this.renderer.shadowCatcher.update()

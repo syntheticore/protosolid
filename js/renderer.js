@@ -213,26 +213,23 @@ export class Renderer {
 
   animate() {
     if(this.isAnimating || this.viewControlsTarget || this.cameraTarget) requestAnimationFrame(this.animate.bind(this))
+    // Update orbit controls dampening
     this.viewControls.update()
     // Transition to target positions
-    if(this.cameraTarget) {
-      this.camera.position.multiplyScalar(0.7).add(
-        this.cameraTarget.clone().multiplyScalar(0.3)
-      )
-      if(this.cameraTarget.clone().sub(this.camera.position).lengthSq() < 0.0001) {
-        this.camera.position.copy(this.cameraTarget)
-        this.cameraTarget = null
-      }
+    this.cameraTarget = this.lerp(this.camera.position, this.cameraTarget)
+    this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
+  }
+
+  lerp(vec, target) {
+    if(!target) return
+    vec.multiplyScalar(0.7).add(
+      target.clone().multiplyScalar(0.3)
+    )
+    if(target.clone().sub(vec).lengthSq() < 0.0001) {
+      vec.copy(target)
+      return null
     }
-    if(this.viewControlsTarget) {
-      this.viewControls.target.multiplyScalar(0.7).add(
-        this.viewControlsTarget.clone().multiplyScalar(0.3)
-      )
-      if(this.viewControlsTarget.clone().sub(this.viewControls.target).lengthSq() < 0.0001) {
-        this.viewControls.target.copy(this.viewControlsTarget)
-        this.viewControlsTarget = null
-      }
-    }
+    return target
   }
 
   getCanvasCoords(mouseCoords) {

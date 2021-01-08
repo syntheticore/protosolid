@@ -11,14 +11,14 @@
         v-for="elem in list"
         :key="elem.id",
         :class="{active: active && active.id == elem.id}"
-        @click="activate(elem)"
+        @click="$emit('activate', elem)"
         @mouseenter="$emit('hover', elem)"
       )
         | {{ elem.title }}
     transition(name="fade" mode="out-in")
       button(
         v-show="allowCreate"
-        @click="createElement"
+        @click="$emit('create')"
         @mouseenter="$emit('unhover')"
       )
         fa-icon(icon="plus")
@@ -104,8 +104,6 @@
 
 
 <script>
-  // import TreeItem from './item.vue'
-
   export default {
     name: 'ListChooser',
     components: {},
@@ -114,17 +112,5 @@
       active: Object,
       allowCreate: Boolean,
     },
-    data() {
-      return {}
-    },
-    methods: {
-      activate: function(elem) {
-        this.$emit('activate', elem)
-      },
-
-      createElement: function() {
-        this.$emit('create')
-      },
-    }
   }
 </script>

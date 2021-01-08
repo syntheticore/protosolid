@@ -2,7 +2,7 @@
   main.document-view
     ViewPort(
       :document="document"
-      :active-component="activeComponent"
+      :active-component="document.activeComponent"
       :active-tool="activeTool"
       :selected-element="selectedElement"
       :active-view="document.activeView"
@@ -14,14 +14,14 @@
     )
     ToolBox(
       :active-tool="activeTool"
-      :active-component="activeComponent"
+      :active-component="document.activeComponent"
       @activate-tool="activateTool"
     )
     .side-bar.left
       TreeView(
         :top="document.tree"
         :data="document.data"
-        :active-component="activeComponent"
+        :active-component="document.activeComponent"
         @create-component="createComponent"
         @activate-component="activateComponent"
       )
@@ -53,7 +53,7 @@
       )
     FooterView(
       :selected-element="selectedElement"
-      :active-component="activeComponent"
+      :active-component="document.activeComponent"
     )
 </template>
 
@@ -139,14 +139,14 @@
 
     watch: {
       document: function() {
-        this.activeComponent = this.document.tree
-        this.integrateComponent(this.activeComponent)
+        this.integrateComponent(this.document.activeComponent)
+        this.previewView(this.document.dirtyView)
       },
     },
 
     data() {
       return {
-        activeComponent: this.document.tree,
+        // activeComponent: this.document.tree,
         activeTool: null,
         // activeFeature: null,
         selectedElement: null,
@@ -166,7 +166,7 @@
             const part6 = this.createComponent(assm3, 'Part 6')
             const part7 = this.createComponent(assm3, 'Part 7')
             const part8 = this.createComponent(assm3, 'Part 8')
-      this.activeComponent = assm2
+      this.document.activeComponent = assm2
     },
 
     mounted() {
@@ -192,9 +192,9 @@
 
     methods: {
       createComponent: function(parent, title) {
-        this.activeComponent = parent.create_component(title || 'New Component')
-        this.integrateComponent(this.activeComponent)
-        return this.activeComponent
+        this.document.activeComponent = parent.create_component(title || 'New Component')
+        this.integrateComponent(this.document.activeComponent)
+        return this.document.activeComponent
       },
 
       integrateComponent: function(comp) {
@@ -212,8 +212,8 @@
         const view = {
           id: lastId++,
           title: title || 'Fresh View',
-          position: this.dirtyView.position.clone(),
-          target: this.dirtyView.target.clone(),
+          position: this.document.dirtyView.position.clone(),
+          target: this.document.dirtyView.target.clone(),
         }
         this.document.views.push(view)
         this.document.isViewDirty = false
@@ -231,7 +231,7 @@
       },
 
       viewChanged: function(position, target) {
-        this.dirtyView = {position: position.clone(), target: target.clone()}
+        this.document.dirtyView = {position: position.clone(), target: target.clone()}
         this.document.isViewDirty = true
         this.document.activeView = null
       },
@@ -241,12 +241,12 @@
       },
 
       unpreviewView: function() {
-        this.document.previewView = this.dirtyView
+        this.document.previewView = this.document.dirtyView
       },
 
       activateView: function(view) {
         this.document.activeView = view
-        this.dirtyView = view
+        this.document.dirtyView = view
       },
 
       activatePose: function(pose) {
@@ -254,7 +254,7 @@
       },
 
       activateComponent: function(comp) {
-        this.activeComponent = comp
+        this.document.activeComponent = comp
       },
 
       activateTool: function(tool) {

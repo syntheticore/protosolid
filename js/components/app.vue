@@ -150,6 +150,7 @@
               { title: 'Extrude 2', id: lastId++ },
             ],
             tree: tree,
+            activeComponent: tree,
             data: {},
             activeView: null,
             previewView: null,

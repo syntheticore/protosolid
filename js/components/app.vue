@@ -46,8 +46,11 @@
 
 
 <script>
+  import * as THREE from 'three'
+
   import TabBar from './tab-bar.vue'
   import DocumentView from './document-view.vue'
+
   const wasmP = import('../../rust/pkg/wasm-index.js')
 
   let lastId = 1;
@@ -112,10 +115,31 @@
             title: 'Untitled Document',
             proxy: proxy,
             views: [
-              { title: 'Top', id: lastId++ },
-              { title: 'Left', id: lastId++ },
-              { title: 'Front', id: lastId++ },
-              { title: 'Perspective', id: lastId++ },
+              {
+                id: lastId++,
+                title: 'Perspective',
+                position: new THREE.Vector3(12.0, 12.0, 12.0),
+                target: new THREE.Vector3(0.0, 0.0, 0.0),
+              },
+              {
+                id: lastId++,
+                title: 'Top',
+                position: new THREE.Vector3(0.0, 0.0, 12.0),
+                target: new THREE.Vector3(0.0, 0.0, 0.0),
+              },
+              {
+                id: lastId++,
+                title: 'Front',
+                position: new THREE.Vector3(0.0, 12.0, 0.0),
+                target: new THREE.Vector3(0.0, 0.0, 0.0),
+              },
+
+              {
+                id: lastId++,
+                title: 'Side',
+                position: new THREE.Vector3(12.0, 0.0, 0.0),
+                target: new THREE.Vector3(0.0, 0.0, 0.0),
+              },
             ],
             poses: [
               { title: 'Base', id: lastId++ },
@@ -128,6 +152,7 @@
             tree: tree,
             data: {},
             activeView: null,
+            previewView: null,
             activePose: null,
             isViewDirty: false,
             isPoseDirty: false,
@@ -138,7 +163,7 @@
 
       changeDocument: function(doc) {
         this.activeDocument = doc
-        this.activeDocument.activeView = this.activeDocument.views[0]
+        // this.activeDocument.activeView = this.activeDocument.views[0]
         this.activeDocument.activePose = this.activeDocument.poses[0]
       }
     },

@@ -1,13 +1,26 @@
 <template lang="pug">
-  .bordered.list-chooser
-    transition-group(name="list" tag="ul" v-if="list.length")
-      li(v-for="elem in list"
-         :key="elem.id",
-         @click="activate(elem)"
-         :class="{active: active == elem}")
+  .bordered.list-chooser(
+    @mouseleave="$emit('unhover')"
+  )
+    transition-group(
+      name="list"
+      tag="ul"
+      v-if="list.length"
+    )
+      li(
+        v-for="elem in list"
+        :key="elem.id",
+        :class="{active: active && active.id == elem.id}"
+        @click="activate(elem)"
+        @mouseenter="$emit('hover', elem)"
+      )
         | {{ elem.title }}
     transition(name="fade" mode="out-in")
-      button(v-show="allowCreate" @click="createElement")
+      button(
+        v-show="allowCreate"
+        @click="createElement"
+        @mouseenter="$emit('unhover')"
+      )
         fa-icon(icon="plus")
 </template>
 

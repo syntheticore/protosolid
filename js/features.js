@@ -43,6 +43,8 @@ export class ExtrudeFeature extends Feature {
         options: ['join', 'cut', 'intersect', 'create'],
       },
     }
+
+    this.defaultSetting = 'profile'
   }
 
   update() {

@@ -29,11 +29,11 @@ module.exports = (env) => {
     plugins: [
       new MiniCssExtractPlugin(),
       new VueLoaderPlugin(),
-      new CopyPlugin(env.wc ? [static] : [
+      env.production ? new CopyPlugin(env.wc ? [static] : [
         './package.json',
         static,
         path.resolve(__dirname, 'electron')
-      ]),
+      ]) : null,
       new WasmPackPlugin({
         crateDirectory: path.resolve(__dirname, 'rust'),
         watchDirectories: [
@@ -42,7 +42,7 @@ module.exports = (env) => {
         ],
         extraArgs: '--out-name wasm-index',
       }),
-    ],
+    ].filter(Boolean),
     module: {
       rules: [
         {

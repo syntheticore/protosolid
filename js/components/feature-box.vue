@@ -162,6 +162,12 @@
       }
     },
 
+    mounted: function() {
+      if(!this.activeFeature.defaultSetting) return
+      const setting = this.activeFeature.settings[this.activeFeature.defaultSetting]
+      this.pick(setting.type, this.activeFeature.defaultSetting, setting.color)
+    },
+
     methods: {
       pick: function(type, name, color) {
         this.$root.$once('picked', (item) => {

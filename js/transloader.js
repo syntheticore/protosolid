@@ -82,7 +82,7 @@ export class Transloader {
     const compData = this.dataPool[comp.id()]
     this.purgeRegions(compData)
     const regions = comp.get_sketch().get_regions(false)
-    console.log('# regions: ', regions.length)
+    // console.log('# regions: ', regions.length)
     compData.regions = regions.map(region => {
       // let material = this.renderer.materials.region.clone()
       // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())

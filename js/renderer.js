@@ -44,7 +44,7 @@ export class Renderer {
     this.raycaster = new THREE.Raycaster()
 
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
-    this.camera.position.set(6, 6, 4)
+    this.camera.position.set(6, 6, 6)
 
     this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
     this.cameraOrtho.position.set(0, 0, 10)
@@ -133,14 +133,15 @@ export class Renderer {
 
     this.viewControls.addEventListener('change', () => {
       this.render()
-      this.emitter.emit('change-view')
+      // this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
     })
 
     let dampingTimeout
 
     this.viewControls.addEventListener('start', () => {
-      this.transformControl.enabled = false
       this.isOrbiting = true
+      this.transformControl.enabled = false
+      this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
       clearTimeout(dampingTimeout)
       if(!this.isAnimating) {
         this.isAnimating = true
@@ -149,8 +150,9 @@ export class Renderer {
     })
 
     this.viewControls.addEventListener('end', () => {
-      this.transformControl.enabled = true
       this.isOrbiting = false
+      this.transformControl.enabled = true
+      this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
       // Make sure we keep animating long enough for view damping to settle
       dampingTimeout = setTimeout(() => {
         this.isAnimating = false
@@ -192,7 +194,16 @@ export class Renderer {
   }
 
   setPivot(coords) {
-    this.viewControlsTarget = this.fromScreen(coords)
+    const vec = this.fromScreen(coords)
+    this.viewControlsTarget = vec
+    this.cameraTarget = vec.clone().sub(this.viewControls.target).add(this.camera.position)
+    this.animate()
+  }
+
+  setView(position, target) {
+    this.cameraTarget = position
+    this.viewControlsTarget = target
+    this.animate()
   }
 
   render() {
@@ -201,17 +212,27 @@ export class Renderer {
   }
 
   animate() {
+    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget) requestAnimationFrame(this.animate.bind(this))
     this.viewControls.update()
-    if(this.isAnimating || this.viewControlsTarget) requestAnimationFrame(this.animate.bind(this))
-    // Transition to manual view target
-    if(!this.viewControlsTarget) return
-    if(this.viewControlsTarget.clone().sub(this.viewControls.target).lengthSq() < 0.001) {
-      this.viewControlsTarget = null
-      return
+    // Transition to target positions
+    if(this.cameraTarget) {
+      this.camera.position.multiplyScalar(0.7).add(
+        this.cameraTarget.clone().multiplyScalar(0.3)
+      )
+      if(this.cameraTarget.clone().sub(this.camera.position).lengthSq() < 0.0001) {
+        this.camera.position.copy(this.cameraTarget)
+        this.cameraTarget = null
+      }
     }
-    this.viewControls.target.multiplyScalar(0.7).add(
-      this.viewControlsTarget.clone().multiplyScalar(0.3)
-    )
+    if(this.viewControlsTarget) {
+      this.viewControls.target.multiplyScalar(0.7).add(
+        this.viewControlsTarget.clone().multiplyScalar(0.3)
+      )
+      if(this.viewControlsTarget.clone().sub(this.viewControls.target).lengthSq() < 0.0001) {
+        this.viewControls.target.copy(this.viewControlsTarget)
+        this.viewControlsTarget = null
+      }
+    }
   }
 
   getCanvasCoords(mouseCoords) {

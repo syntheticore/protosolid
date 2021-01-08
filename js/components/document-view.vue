@@ -5,7 +5,9 @@
       :active-component="activeComponent"
       :active-tool="activeTool"
       :selected-element="selectedElement"
-      @change-view="document.isViewDirty = true"
+      :active-view="document.activeView"
+      :preview-view="document.previewView"
+      @change-view="viewChanged"
       @change-pose="document.isPoseDirty = true"
       @activate-tool="activateTool"
       @element-selected="elementSelected"
@@ -31,6 +33,8 @@
         :allow-create="document.isViewDirty"
         @create="createView"
         @activate="activateView"
+        @hover="previewView"
+        @unhover="unpreviewView"
       )
       h1 Poses
       ListChooser(
@@ -108,6 +112,8 @@
 
 
 <script>
+  import * as THREE from 'three'
+
   import ViewPort from './view-port.vue'
   import TreeView from './tree-view.vue'
   import ToolBox from './tool-box.vue'
@@ -185,21 +191,6 @@
     },
 
     methods: {
-      createView: function() {
-        this.document.views.push({ title: 'Fresh View', id: lastId++ })
-        this.document.isViewDirty = false
-      },
-
-      createPose: function() {
-        this.document.poses.push({ title: 'Untitled Pose', id: lastId++ })
-        this.document.isPoseDirty = false
-      },
-
-      createSet: function() {
-        this.document.sets.push({ title: 'Untitled Set', id: lastId++ })
-        this.document.isSetDirty = false
-      },
-
       createComponent: function(parent, title) {
         this.activeComponent = parent.create_component(title || 'New Component')
         this.integrateComponent(this.activeComponent)
@@ -217,8 +208,45 @@
         })
       },
 
+      createView: function(title) {
+        const view = {
+          id: lastId++,
+          title: title || 'Fresh View',
+          position: this.dirtyView.position.clone(),
+          target: this.dirtyView.target.clone(),
+        }
+        this.document.views.push(view)
+        this.document.isViewDirty = false
+        this.activateView(view)
+      },
+
+      createPose: function() {
+        this.document.poses.push({ title: 'Untitled Pose', id: lastId++ })
+        this.document.isPoseDirty = false
+      },
+
+      createSet: function() {
+        this.document.sets.push({ title: 'Untitled Set', id: lastId++ })
+        this.document.isSetDirty = false
+      },
+
+      viewChanged: function(position, target) {
+        this.dirtyView = {position: position.clone(), target: target.clone()}
+        this.document.isViewDirty = true
+        this.document.activeView = null
+      },
+
+      previewView: function(view) {
+        this.document.previewView = view
+      },
+
+      unpreviewView: function() {
+        this.document.previewView = this.dirtyView
+      },
+
       activateView: function(view) {
         this.document.activeView = view
+        this.dirtyView = view
       },
 
       activatePose: function(pose) {

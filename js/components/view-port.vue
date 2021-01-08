@@ -180,6 +180,8 @@
       activeComponent: Object,
       activeTool: Object,
       selectedElement: Object,
+      activeView: Object,
+      previewView: Object,
     },
 
     watch: {
@@ -187,8 +189,18 @@
         this.transloader.unloadTree(oldDocument.tree, true)
         this.transloader.dataPool = document.data
         this.transloader.loadTree(document.tree, true)
-        this.shadowCatcher.update()
+        this.renderer.shadowCatcher.update()
         this.renderer.render()
+      },
+
+      activeView: function(view) {
+        if(!view) return
+        this.renderer.setView(view.position, view.target)
+      },
+
+      previewView: function(view) {
+        if(!view) return
+        this.renderer.setView(view.position, view.target)
       },
     },
 
@@ -211,7 +223,10 @@
       // Renderer
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
       this.renderer.on('render', () => this.updateWidgets() )
-      this.renderer.on('change-view', () => this.$emit('change-view') )
+      this.renderer.on(
+        'change-view',
+        (position, target) => this.$emit('change-view', position, target)
+      )
       this.renderer.on('change-pose', () => this.$emit('change-pose') )
 
       // Snapping
@@ -312,7 +327,6 @@
 
       doubleClick: function(e) {
         this.renderer.setPivot(this.getMouseCoords(e))
-        this.renderer.animate()
       },
 
       mouseUp: function(e) {

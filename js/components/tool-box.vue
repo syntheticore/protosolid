@@ -13,7 +13,7 @@
         li(v-for="(tool, index) in tabs[activeTab].tools")
 
           button.button(
-            :class="{active: activeFeature && tool.feature}"
+            :class="{active: activeFeature && activeFeature.constructor === tool.feature}"
             @click="activateTool(tool)"
           )
             fa-icon(:icon="tool.icon" fixed-width)
@@ -22,11 +22,10 @@
 
           transition(name="fade")
             FeatureBox(
-              v-if="activeFeature && tool.feature"
+              v-if="activeFeature && activeFeature.constructor === tool.feature"
               :active-tool="activeTool"
               :active-feature="activeFeature"
-              @confirm="closeFeature"
-              @cancel="closeFeature"
+              @close="closeFeature"
             )
 </template>
 
@@ -206,7 +205,11 @@
       });
 
       this.$root.$on('escape', () => {
-        this.$root.$emit('activate-toolname', 'Manipulate')
+        if(this.activeTool.constructor === ManipulationTool) {
+          this.closeFeature()
+        } else {
+          this.$root.$emit('activate-toolname', 'Manipulate')
+        }
       })
     },
 
@@ -217,6 +220,7 @@
       },
 
       activateTool: function(tool) {
+        this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))
         if(tool.feature) {
           this.activeFeature = new tool.feature(this.activeComponent)
         } else {

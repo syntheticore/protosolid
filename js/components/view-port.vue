@@ -248,6 +248,7 @@
 
       // Events
       const handlePick = (pickerCoords, color, tool) => {
+        if(this.activeTool) this.activeTool.dispose()
         this.$emit('activate-tool', new tool(this.activeComponent, this, (item, mesh) => {
           this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')

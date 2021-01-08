@@ -168,6 +168,10 @@
       this.pick(setting.type, this.activeFeature.defaultSetting, setting.color)
     },
 
+    beforeDestroy: function() {
+      this.cancel()
+    },
+
     methods: {
       pick: function(type, name, color) {
         this.$root.$once('picked', (item) => {
@@ -197,13 +201,13 @@
       confirm: function(e) {
         this.activeFeature.confirm()
         this.$root.$emit('component-changed', this.activeFeature.component)
-        this.$emit('confirm')
+        this.$emit('close')
       },
 
       cancel: function(e) {
         this.activeFeature.cancel()
         this.$root.$emit('component-changed', this.activeFeature.component)
-        this.$emit('cancel')
+        this.$emit('close')
       },
     },
   }

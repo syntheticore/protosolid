@@ -13,8 +13,8 @@
         li(v-for="(tool, index) in tabs[activeTab].tools")
 
           button.button(
-            :class="{active: activeFeature && tool.feature && activeFeature.constructor == tool.feature}"
-            @click="tool.feature ? activateFeature(tool.feature) : activateTool(tool.title)"
+            :class="{active: activeFeature && tool.feature}"
+            @click="activateTool(tool)"
           )
             fa-icon(:icon="tool.icon" fixed-width)
             .title(v-html="tool.title")
@@ -22,7 +22,7 @@
 
           transition(name="fade")
             FeatureBox(
-              v-if="activeFeature && tool.feature && activeFeature.constructor == tool.feature"
+              v-if="activeFeature && tool.feature"
               :active-tool="activeTool"
               :active-feature="activeFeature"
               @confirm="closeFeature"
@@ -124,6 +124,17 @@
   import FeatureBox from './feature-box.vue'
   import { ExtrudeFeature } from './../features.js'
 
+  import {
+    ManipulationTool,
+    ObjectSelectionTool,
+    ProfileSelectionTool,
+    LineTool,
+    SplineTool,
+    CircleTool,
+    ArcTool,
+    SetPlaneTool
+  } from './../tools.js'
+
   export default {
     name: 'ToolBox',
 
@@ -144,22 +155,22 @@
           {
             title: 'Sketch',
             tools: [
-              { title: 'Set Plane', icon: 'edit', hotKey: 'S', keyCode: 76 },
+              { title: 'Set Plane', icon: 'edit', hotKey: 'S', keyCode: 83 },
               { title: 'Line', icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
-              { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 76 },
+              { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
               { title: 'Arc', icon: 'bezier-curve' },
-              { title: 'Circle', icon: 'ban', hotKey: 'C', keyCode: 76 },
-              { title: 'Spline', icon: 'route', hotKey: 'B', keyCode: 76 },
+              { title: 'Circle', icon: 'ban', hotKey: 'C', keyCode: 67 },
+              { title: 'Spline', icon: 'route', hotKey: 'B', keyCode: 66 },
             ]
           },
           {
             title: 'Create',
             tools: [
               { title: 'Extrude', icon: 'box', feature: ExtrudeFeature, hotKey: 'E', keyCode: 69 },
-              { title: 'Revolve', icon: 'wave-square', hotKey: 'V', keyCode: 82 },
+              { title: 'Revolve', icon: 'wave-square', hotKey: 'V', keyCode: 86 },
               { title: 'Loft', icon: 'layer-group' },
               { title: 'Sweep', icon: 'route' },
-              { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 76 },
+              { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 77 },
               { title: 'Array', icon: 'th' },
             ],
           },
@@ -168,8 +179,8 @@
             tools: [
               { title: 'Shell', icon: 'magnet' },
               { title: 'Boolean', icon: 'boxes' },
-              { title: 'Fillet', icon: 'clone', hotKey: 'F', keyCode: 76 },
-              { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 76 },
+              { title: 'Fillet', icon: 'clone', hotKey: 'F', keyCode: 70 },
+              { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
               { title: 'Split', icon: 'code-branch' },
             ],
           },
@@ -181,18 +192,36 @@
       }
     },
 
+    mounted: function() {
+      window.addEventListener('keydown', (e) => {
+        console.log(e.keyCode)
+        const tool = this.tabs.flatMap(tab => tab.tools).find(
+          tool => tool.keyCode == e.keyCode
+        )
+        if(tool) {
+          this.activateTool(tool)
+        } else if(e.keyCode === 27) {
+          this.$root.$emit('escape')
+        }
+      });
+
+      this.$root.$on('escape', () => {
+        this.$root.$emit('activate-toolname', 'Manipulate')
+      })
+    },
+
     methods: {
       activateTab: function(index) {
         this.closeFeature()
         this.activeTab = index
       },
 
-      activateTool: function(toolName) {
-        this.$root.$emit('activate-toolname', toolName)
-      },
-
-      activateFeature: function(feature) {
-        this.activeFeature = new feature(this.activeComponent)
+      activateTool: function(tool) {
+        if(tool.feature) {
+          this.activeFeature = new tool.feature(this.activeComponent)
+        } else {
+          this.$root.$emit('activate-toolname', tool.title)
+        }
       },
 
       closeFeature: function() {

@@ -7,16 +7,39 @@
         @click="toggle()"
         fixed-width
       )
-      .box(:class="{hidden: !isVisible, selected: node.id() == activeNode.id()}")
-        fa-icon.eye(icon="eye" fixed-width @click="hidden = !hidden" v-if="!isTop")
+      .box(
+        :class="{hidden: !isVisible, selected: node.id() == activeNode.id()}"
+        @dblclick="activateComponent(node)"
+      )
+        fa-icon.eye(
+          v-if="!isTop"
+          icon="eye" fixed-width
+          @click="hidden = !hidden"
+        )
         fa-icon.assembly(icon="boxes" v-if="isAssembly")
         fa-icon.part(icon="box" v-else)
         span.name {{ node.get_title() }}
         .controls
-          fa-icon.activate(icon="check-circle" fixed-width title="Activate" @click="activateComponent(node)")
-          fa-icon.new-component(icon="plus-circle" fixed-width title="Create Component" @click="createComponent(node)")
-          fa-icon.new-sketch(icon="edit" fixed-width title="Create Sketch" @click="createSketch(node)")
-          fa-icon.new-variable(icon="sliders-h" fixed-width title="Create Variable" @click="createVariable(node)")
+          fa-icon.activate(
+            icon="check-circle" fixed-width
+            title="Activate"
+            @click="activateComponent(node)"
+          )
+          fa-icon.new-component(
+            icon="plus-circle" fixed-width
+            title="Create Component"
+            @click="createComponent(node)"
+          )
+          //- fa-icon.new-sketch(
+          //-   icon="edit" fixed-width
+          //-   title="Create Sketch"
+          //-   @click="createSketch(node)"
+          //- )
+          fa-icon.new-variable(
+            icon="sliders-h" fixed-width
+            title="Create Variable"
+            @click="createVariable(node)"
+          )
     ul.content(v-if="expanded")
       //- li
       //-   fa-icon(icon="atom")
@@ -115,7 +138,7 @@
 
   .controls
     border-left: 0.5px solid $dark1 * 1.3
-    margin-right: -106px
+    margin-right: -80px
     opacity: 0
     transition: all 0.2s
     transition-delay: 0.25s

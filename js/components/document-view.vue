@@ -139,62 +139,44 @@
 
     watch: {
       document: function() {
-        this.integrateComponent(this.document.activeComponent)
         this.previewView(this.document.dirtyView)
       },
     },
 
     data() {
       return {
-        // activeComponent: this.document.tree,
         activeTool: null,
-        // activeFeature: null,
         selectedElement: null,
       }
     },
 
     created() {
       this.integrateComponent(this.document.tree)
-      const part1 = this.createComponent(this.document.tree, 'Part 1')
-        const assm1 = this.createComponent(this.document.tree, 'Sub Assembly 1')
-          const part2 = this.createComponent(assm1, 'Part 2')
-          const part3 = this.createComponent(assm1, 'Part 3')
-          const assm2 = this.createComponent(assm1, 'Sub Assembly 2')
-            const part4 = this.createComponent(assm2, 'Part 4')
-            const part5 = this.createComponent(assm2, 'Part 5')
-          const assm3 = this.createComponent(assm1, 'Sub Assembly 3')
-            const part6 = this.createComponent(assm3, 'Part 6')
-            const part7 = this.createComponent(assm3, 'Part 7')
-            const part8 = this.createComponent(assm3, 'Part 8')
-      this.document.activeComponent = assm2
+      this.activateComponent(this.createComponent(this.document.tree, 'Component 1'))
+      // const part1 = this.createComponent(this.document.tree, 'Part 1')
+      //   const assm1 = this.createComponent(this.document.tree, 'Sub Assembly 1')
+      //     const part2 = this.createComponent(assm1, 'Part 2')
+      //     const part3 = this.createComponent(assm1, 'Part 3')
+      //     const assm2 = this.createComponent(assm1, 'Sub Assembly 2')
+      //       const part4 = this.createComponent(assm2, 'Part 4')
+      //       const part5 = this.createComponent(assm2, 'Part 5')
+      //     const assm3 = this.createComponent(assm1, 'Sub Assembly 3')
+      //       const part6 = this.createComponent(assm3, 'Part 6')
+      //       const part7 = this.createComponent(assm3, 'Part 7')
+      //       const part8 = this.createComponent(assm3, 'Part 8')
+      // this.document.activeComponent = assm2
     },
 
     mounted() {
-      window.addEventListener('keydown', (e) => {
-        console.log(e.keyCode)
-        if(e.keyCode === 27) {
-          this.$root.$emit('escape')
-        } else if(e.keyCode === 76) { // L
-          this.$root.$emit('activate-toolname', 'Line')
-        } else if(e.keyCode === 67) { // C
-          this.$root.$emit('activate-toolname', 'Circle')
-        } else if(e.keyCode === 83) { // S
-          this.$root.$emit('activate-toolname', 'Spline')
-        }
-      });
-
-      this.$root.$on('escape', () => {
-        this.$root.$emit('activate-toolname', 'Manipulate')
-      })
-
       this.$root.$emit('activate-toolname', 'Manipulate')
     },
 
     methods: {
       createComponent: function(parent, title) {
-        this.document.activeComponent = parent.create_component(title || 'New Component')
-        this.integrateComponent(this.document.activeComponent)
-        return this.document.activeComponent
+        const comp = parent.create_component(title || 'New Component')
+        this.integrateComponent(comp)
+        this.activateComponent(comp)
+        return comp
       },
 
       integrateComponent: function(comp) {

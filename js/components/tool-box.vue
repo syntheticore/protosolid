@@ -13,7 +13,7 @@
         li(v-for="(tool, index) in tabs[activeTab].tools")
 
           button.button(
-            :class="{active: activeFeature && activeFeature.constructor === tool.feature}"
+            :class="{active: isActive(tool)}"
             @click="activateTool(tool)"
           )
             fa-icon(:icon="tool.icon" fixed-width)
@@ -22,7 +22,7 @@
 
           transition(name="fade")
             FeatureBox(
-              v-if="activeFeature && activeFeature.constructor === tool.feature"
+              v-if="activeFeature && isActive(tool)"
               :active-tool="activeTool"
               :active-feature="activeFeature"
               @close="closeFeature"
@@ -154,18 +154,18 @@
           {
             title: 'Sketch',
             tools: [
-              { title: 'Set Plane', icon: 'edit', hotKey: 'S', keyCode: 83 },
-              { title: 'Line', icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
+              { title: 'Set Plane', tools: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
+              { title: 'Line', tool: LineTool, icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
               { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
-              { title: 'Arc', icon: 'bezier-curve' },
-              { title: 'Circle', icon: 'ban', hotKey: 'C', keyCode: 67 },
-              { title: 'Spline', icon: 'route', hotKey: 'B', keyCode: 66 },
+              { title: 'Arc', tool: ArcTool, icon: 'bezier-curve' },
+              { title: 'Circle', tool: CircleTool, icon: 'ban', hotKey: 'C', keyCode: 67 },
+              { title: 'Spline', tool: SplineTool, icon: 'route', hotKey: 'B', keyCode: 66 },
             ]
           },
           {
             title: 'Create',
             tools: [
-              { title: 'Extrude', icon: 'box', feature: ExtrudeFeature, hotKey: 'E', keyCode: 69 },
+              { title: 'Extrude', feature: ExtrudeFeature, icon: 'box', hotKey: 'E', keyCode: 69 },
               { title: 'Revolve', icon: 'wave-square', hotKey: 'V', keyCode: 86 },
               { title: 'Loft', icon: 'layer-group' },
               { title: 'Sweep', icon: 'route' },
@@ -226,6 +226,11 @@
         } else {
           this.$root.$emit('activate-toolname', tool.title)
         }
+      },
+
+      isActive: function(tool) {
+        return (this.activeFeature && this.activeFeature.constructor === tool.feature)
+        || (this.activeTool && this.activeTool.constructor === tool.tool)
       },
 
       closeFeature: function() {

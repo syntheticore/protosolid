@@ -146,6 +146,8 @@
 
 
 <script>
+  import { ManipulationTool } from './../tools.js'
+
   export default {
     name: 'FeatureBox',
 
@@ -166,6 +168,14 @@
       if(!this.activeFeature.defaultSetting) return
       const setting = this.activeFeature.settings[this.activeFeature.defaultSetting]
       this.pick(setting.type, this.activeFeature.defaultSetting, setting.color)
+    },
+
+    watch: {
+      activeTool: function(tool) {
+        if(tool.constructor !== ManipulationTool) return
+        this.activePicker = null
+        this.$root.$off('picked')
+      },
     },
 
     beforeDestroy: function() {

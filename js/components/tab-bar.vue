@@ -7,16 +7,17 @@
         h1 Alchemy
         .version Version 0.1
       hr
-      button.button(@click="createDocument") New Document
+      button.button(@click="$emit('create-document')") New Document
       form.preferences
         IconView
 
     ul.tabs
       li(v-for="doc in documents"
-         @click="activate(doc)"
+         @click="$emit('update:activeDocument', doc)"
          :class="{active: doc == activeDocument}")
         span.title {{ doc.title }}
-        fa-icon(icon="times")
+        button(@click.stop="$emit('delete-document', doc)")
+          fa-icon(icon="times")
 
     .grab-handle.dynamic
 
@@ -73,11 +74,7 @@
 <style lang="stylus" scoped>
   .tab-bar
     display: flex
-    // overflow: hidden
-    // background: $dark2
     background: linear-gradient(top, $dark1 * 0.9, $dark2 * 0.95)
-    // background: linear-gradient(top, rgba($dark1, 0.92), rgba($dark2, 0.92))
-    // border-top: 1px solid $dark1 * 1.3
     border-bottom: 1px solid black
     max-width: 100vw
     align-items: center
@@ -126,7 +123,6 @@
     min-height: 200px
 
   .tabs
-    // display: inline-block
     display: flex
     flex: 1 1 auto
     white-space: nowrap
@@ -137,15 +133,10 @@
     &::-webkit-scrollbar
       display: none
     li
-      // display: inline-block
       display: flex
       align-items: center
       border-left: 1px solid $dark1 * 1.2
-      // border-right: 1px solid black //#353535
-      // box-shadow: 0 0 3px black
-      // border-bottom: none
-      padding: 0 12px
-      // height: 36px
+      padding-left: 12px
       height: 100%
       font-size: 12px
       font-weight: bold
@@ -153,9 +144,7 @@
       transition: all 0.2s
       color: $bright2
       text-shadow: 0 -1px 0px black
-      // cursor: pointer
       &:hover
-        // background: $dark1
         background: $dark2 * 1.2
         svg
           opacity: 1
@@ -166,18 +155,18 @@
         // border-left: 1px solid $dark1 * 1.45
       // & + li
       //   border-left: 1px solid $dark1 * 1.2
-      svg
-        margin-left: 12px
-        color: $bright2
-        cursor: pointer
-        transition: all 0.2s
-        // float: right
-        filter: drop-shadow(0 1px 0px rgba(0,0,0, 0.9))
-        opacity: 0
-        // transition-delay: 0.1s
-        &:hover
+      button
+        background: none
+        border: none
+        padding: 6px 11px 6px 10px
+        &:hover svg
           color: $bright1
-          // transition-delay: 0
+        svg
+          color: $bright2
+          // cursor: pointer
+          transition: all 0.2s
+          filter: drop-shadow(0 1px 0px rgba(0,0,0, 0.9))
+          opacity: 0
 
   .grab-handle
     -webkit-app-region: drag
@@ -254,19 +243,7 @@
       isMaximized: Boolean,
     },
 
-    data() {
-      return {}
-    },
-
     methods: {
-      createDocument: function() {
-        this.$emit('create-document')
-      },
-
-      activate: function(doc) {
-        this.$emit('change-document', doc)
-      },
-
       minimize: function() {
         window.ipcRenderer.send('minimize')
       },

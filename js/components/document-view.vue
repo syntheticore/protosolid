@@ -24,12 +24,6 @@
       )
     .side-bar.right
       h1 Views
-      //- RadioBar(
-      //-   :items="displayModes"
-      //-   :chosen.sync="currentDisplayMode"
-      //-   @hover="previewDisplayMode = $event"
-      //-   @unhover="previewDisplayMode = null"
-      //- )
       ListChooser(
         :list="document.views"
         :active.sync="document.activeView"
@@ -37,6 +31,12 @@
         @create="createView"
         @hover="previewView = $event"
         @unhover="previewView = null"
+      )
+      RadioBar(
+        :items="displayModes"
+        :chosen.sync="currentDisplayMode"
+        @hover="previewDisplayMode = $event"
+        @unhover="previewDisplayMode = null"
       )
       h1 Poses
       ListChooser(
@@ -98,7 +98,9 @@
       h1
         flex: 0 0 content
       .list-chooser
+      .radio-bar
         flex: 0 1 auto
+        margin-bottom: 16px
 
   .view-port
     width: 100%
@@ -140,27 +142,37 @@
       document: Object,
     },
 
+    watch: {
+      document: {
+        immediate: true,
+        handler: function(document) {
+          this.integrateComponent(document.tree)
+          this.activateComponent(document.tree)
+        },
+      },
+    },
+
     data() {
       return {
         activeTool: null,
         selectedElement: null,
         displayModes: [
           {
-            title: 'Shaded',
-            icon: 'box',
-          },
-          {
-            title: 'Wireframe',
-            icon: 'edit',
-          },
-          {
             title: 'Shaded + Wire',
             icon: 'magnet',
           },
           {
-            title: 'Hidden Lines',
+            title: 'Wireframe',
             icon: 'clone',
           },
+          {
+            title: 'Shaded',
+            icon: 'box',
+          },
+          // {
+          //   title: 'Hidden Lines',
+          //   icon: 'edit',
+          // },
         ],
         previewView: null,
         currentDisplayMode: null,
@@ -169,7 +181,6 @@
     },
 
     created() {
-      this.integrateComponent(this.document.tree)
       this.activateComponent(this.createComponent(this.document.tree, 'Component 1'))
       // const part1 = this.createComponent(this.document.tree, 'Part 1')
       //   const assm1 = this.createComponent(this.document.tree, 'Sub Assembly 1')
@@ -183,7 +194,7 @@
       //       const part7 = this.createComponent(assm3, 'Part 7')
       //       const part8 = this.createComponent(assm3, 'Part 8')
       // this.document.activeComponent = assm2
-      this.currentDisplayMode = this.displayModes[2]
+      this.currentDisplayMode = this.displayModes[0]
     },
 
     mounted() {

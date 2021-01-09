@@ -27,7 +27,6 @@
 
 <style lang="stylus" scoped>
   .list-chooser
-    margin-bottom: 16px
     pointer-events: all
     overflow: hidden
     display: flex
@@ -60,8 +59,8 @@
     display: block
     width: 100%
     color: $bright1
-    padding: 8px
-    height: 30px
+    padding: 6px
+    height: 28px
     border: none
     margin: 0
     margin-top: 1px
@@ -72,6 +71,7 @@
     transition: all 0.3s
     overflow: hidden
     flex: 0 0 auto
+    font-size: 13px
     &:hover
       background: $dark1
     &:active
@@ -97,9 +97,6 @@
     height: 0
     padding: 0
     margin: 0
-
-  svg
-    font-size: 13px
 </style>
 
 

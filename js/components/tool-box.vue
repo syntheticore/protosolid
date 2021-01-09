@@ -220,6 +220,8 @@
       },
 
       activateTool: function(tool) {
+        // Don't activate features twice
+        if(this.activeFeature && this.activeFeature.constructor === tool.feature) return
         this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))
         if(tool.feature) {
           this.activeFeature = new tool.feature(this.activeComponent)

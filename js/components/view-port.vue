@@ -46,13 +46,10 @@
     position: relative
     overflow: hidden
     // border-top: 1px solid $color * 0.375
-    border-top: 1px solid #2d3840
+    border-top: 1px solid #323840
 
   canvas
     display: block
-    // background: $color * 0.2
-    // background: radial-gradient(50% 150%, farthest-corner, $color * 0.35, $color * 0.2)
-    // background: #1c2127
     background: radial-gradient(50% 150%, farthest-corner, #333333, #1c2127)
 
   .drawpad

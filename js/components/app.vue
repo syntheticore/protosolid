@@ -5,10 +5,10 @@
   )
     TabBar(
       :documents="documents"
-      :active-document="activeDocument"
+      :active-document.sync="activeDocument"
       :is-maximized="isMaximized"
+      @delete-document="deleteDocument"
       @create-document="createDocument"
-      @change-document="changeDocument"
     )
     DocumentView(
       :document="activeDocument"
@@ -73,7 +73,7 @@
     },
 
     created() {
-      this.createDocument().then(() => this.changeDocument(this.documents[0]) )
+      this.createDocument().then(() => this.activeDocument = this.documents[0] )
 
       window.addEventListener('resize', () => {
         this.$root.$emit('resize')
@@ -160,11 +160,16 @@
         })
       },
 
-      changeDocument: function(doc) {
-        this.activeDocument = doc
-        // this.activeDocument.activeView = this.activeDocument.views[0]
-        this.activeDocument.activePose = this.activeDocument.poses[0]
-      }
+      deleteDocument: function(doc) {
+        this.documents = this.documents.filter(d => d !== doc)
+        if(!this.documents.length) this.createDocument()
+        this.activeDocument = this.documents[0]
+        // Free Rust memory when old doc has been removed by viewport
+        setTimeout(() => {
+          doc.tree.free()
+          doc.proxy.free()
+        })
+      },
     },
   }
 </script>

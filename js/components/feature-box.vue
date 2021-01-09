@@ -88,9 +88,9 @@
     padding-left: 11px
     &:hover
       &.ok
-        color: #b9ff64
+        color: $confirm
       &.cancel
-        color: #ff6f6f
+        color: $cancel
     &:active
       color: $dark2 !important
       transition: none
@@ -106,21 +106,21 @@
     font-weight: bold
     & + label
       margin-left: 12px
-    &:nth-of-type(1) .picker // Blue
-      background: #4b8ee3
-      border-color: lighten(#4b8ee3, 75%)
-    &:nth-of-type(2) .picker // Purple
-      background: #a052f7
-      border-color: lighten(#a052f7, 75%)
-    &:nth-of-type(3) .picker // Pink
-      background: #ee3367
-      border-color: lighten(#ee3367, 75%)
-    &:nth-of-type(4) .picker // Orange
-      background: #ea6a43
-      border-color: lighten(#ea6a43, 75%)
-    &:nth-of-type(5) .picker // Green
-      background: #15c115
-      border-color: lighten(#15c115, 75%)
+    &:nth-of-type(1) .picker
+      background: $blue
+      border-color: lighten($blue, 75%)
+    &:nth-of-type(2) .picker
+      background: $purple
+      border-color: lighten($purple, 75%)
+    &:nth-of-type(3) .picker
+      background: $pink
+      border-color: lighten($pink, 75%)
+    &:nth-of-type(4) .picker
+      background: $orange
+      border-color: lighten($orange, 75%)
+    &:nth-of-type(5) .picker
+      background: $green
+      border-color: lighten($green, 75%)
     > *
       margin-top: 6px
     input, select
@@ -134,13 +134,13 @@
     cursor: pointer
     transition: all 0.06s
     &:hover
-      border-width: 2px
+      border-width: 0px
     &.active
       animation: 2s infinite linear rotate
       border-style: dotted
       border-width: 2px !important
     &.filled
-      border-width: 0px
+      border-width: 2px
 
   @keyframes rotate
     50%

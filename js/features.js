@@ -6,6 +6,7 @@ class Feature {
   confirm() {}
   cancel() {}
   update() {}
+  isComplete() {}
 }
 
 export class ExtrudeFeature extends Feature {
@@ -22,12 +23,10 @@ export class ExtrudeFeature extends Feature {
       profile: {
         title: 'Profile',
         type: 'profile',
-        color: 'pink',
       },
       rail: {
         title: 'Rail',
         type: 'curve',
-        color: 'purple',
       },
       distance: {
         title: 'Distance',
@@ -53,5 +52,9 @@ export class ExtrudeFeature extends Feature {
 
   confirm() {
     this.profile.extrude(this.distance * (this.direction ? 1 : -1))
+  }
+
+  isComplete() {
+    return !!this.profile
   }
 }

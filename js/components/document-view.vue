@@ -24,12 +24,12 @@
       )
     .side-bar.right
       h1 Views
-      RadioBar(
-        :items="displayModes"
-        :chosen.sync="currentDisplayMode"
-        @hover="previewDisplayMode = $event"
-        @unhover="previewDisplayMode = null"
-      )
+      //- RadioBar(
+      //-   :items="displayModes"
+      //-   :chosen.sync="currentDisplayMode"
+      //-   @hover="previewDisplayMode = $event"
+      //-   @unhover="previewDisplayMode = null"
+      //- )
       ListChooser(
         :list="document.views"
         :active.sync="document.activeView"
@@ -188,6 +188,7 @@
 
     mounted() {
       this.$root.$emit('activate-toolname', 'Manipulate')
+      this.document.activeView = this.document.views[3]
     },
 
     methods: {

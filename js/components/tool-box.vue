@@ -65,7 +65,6 @@
       display: inline-block
     .button
       text-align: center
-      // background: $dark1
       background: none
       border: none
       box-shadow: none
@@ -78,12 +77,13 @@
       position: relative
       &:hover, &.active
         background: $dark1 * 1.15
-        svg
-          color: $highlight
         .title
           color: $bright1
       &:active
         background: $dark1 * 0.9
+      &.active
+        svg
+          color: $highlight
     svg
       font-size: 21px
       color: $bright1

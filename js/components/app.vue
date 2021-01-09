@@ -117,27 +117,26 @@
             views: [
               {
                 id: lastId++,
-                title: 'Perspective',
-                position: new THREE.Vector3(12.0, 12.0, 12.0),
-                target: new THREE.Vector3(0.0, 0.0, 0.0),
-              },
-              {
-                id: lastId++,
                 title: 'Top',
-                position: new THREE.Vector3(0.0, 0.0, 12.0),
+                position: new THREE.Vector3(0.0, 0.0, 9.0),
                 target: new THREE.Vector3(0.0, 0.0, 0.0),
               },
               {
                 id: lastId++,
                 title: 'Front',
-                position: new THREE.Vector3(0.0, 12.0, 0.0),
+                position: new THREE.Vector3(0.0, 9.0, 0.0),
                 target: new THREE.Vector3(0.0, 0.0, 0.0),
               },
-
               {
                 id: lastId++,
                 title: 'Side',
-                position: new THREE.Vector3(12.0, 0.0, 0.0),
+                position: new THREE.Vector3(9.0, 0.0, 0.0),
+                target: new THREE.Vector3(0.0, 0.0, 0.0),
+              },
+              {
+                id: lastId++,
+                title: 'Perspective',
+                position: new THREE.Vector3(9.0, 9.0, 9.0),
                 target: new THREE.Vector3(0.0, 0.0, 0.0),
               },
             ],

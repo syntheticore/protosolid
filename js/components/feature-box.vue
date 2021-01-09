@@ -12,8 +12,7 @@
           v-if="fields.type == 'profile' || fields.type == 'curve'"
           :ref="key"
           :class="{active: activePicker == key, filled: activeFeature[key]}"
-          :data-color="fields.color"
-          @click="pick(fields.type, key, fields.color)"
+          @click="pick(fields.type, key)"
         )
         input(
           v-if="fields.type == 'length'"
@@ -31,10 +30,14 @@
           option(v-for="option in fields.options") {{ option }}
 
     .confirmation
-      button.ok
-        fa-icon(icon="check-circle" title="Confirm" @click="confirm")
-      button.cancel
-        fa-icon(icon="times-circle" title="Cancel" @click="cancel")
+      button.ok(
+        title="Confirm"
+        :disabled="!activeFeature.isComplete()"
+        @click="confirm"
+      )
+        fa-icon(icon="check-circle")
+      button.cancel(title="Cancel" @click="cancel")
+        fa-icon(icon="times-circle")
 </template>
 
 
@@ -81,7 +84,8 @@
     color: $bright1
     font-size: 16px
     transition: all 0.15s
-    padding-left: 9px
+    padding: 0px 9px
+    padding-left: 11px
     &:hover
       &.ok
         color: #b9ff64
@@ -90,6 +94,8 @@
     &:active
       color: $dark2 !important
       transition: none
+    &:disabled
+      color: $bright1 * 0.5 !important
 
   label
     display: flex
@@ -100,47 +106,47 @@
     font-weight: bold
     & + label
       margin-left: 12px
+    &:nth-of-type(1) .picker // Blue
+      background: #4b8ee3
+      border-color: lighten(#4b8ee3, 75%)
+    &:nth-of-type(2) .picker // Purple
+      background: #a052f7
+      border-color: lighten(#a052f7, 75%)
+    &:nth-of-type(3) .picker // Pink
+      background: #ee3367
+      border-color: lighten(#ee3367, 75%)
+    &:nth-of-type(4) .picker // Orange
+      background: #ea6a43
+      border-color: lighten(#ea6a43, 75%)
+    &:nth-of-type(5) .picker // Green
+      background: #15c115
+      border-color: lighten(#15c115, 75%)
     > *
       margin-top: 6px
     input, select
       max-width: 65px
 
   .picker
-    width: 23px
-    height: 23px
-    border: 6px solid white
+    width: 24px
+    height: 24px
+    border: 7px solid white
     border-radius: 40px
     cursor: pointer
-    transition: all 0.1s
+    transition: all 0.06s
     &:hover
-      border-width: 1px
+      border-width: 2px
     &.active
-      animation: 1s infinite linear rotate
-      border-style: dashed
+      animation: 2s infinite linear rotate
+      border-style: dotted
       border-width: 2px !important
     &.filled
       border-width: 0px
-    &[data-color="pink"]
-      background: #ee3367
-      border-color: lighten(#ee3367, 87%)
-    &[data-color="purple"]
-      background: #dd18dd
-      border-color: lighten(#dd18dd, 87%)
-    &[data-color="orange"]
-      background: #ea6a43
-      border-color: lighten(#ea6a43, 87%)
-    &[data-color="green"]
-      background: #15c115
-      border-color: lighten(#15c115, 87%)
-    &[data-color="blue"]
-      background: #4b8ee3
-      border-color: lighten(#4b8ee3, 87%)
 
   @keyframes rotate
     50%
-      transform: rotate(-180deg)
+      transform: rotate(180deg)
     100%
-      transform: rotate(-360deg)
+      transform: rotate(360deg)
 
 </style>
 
@@ -158,6 +164,14 @@
       activeFeature: Object,
     },
 
+    watch: {
+      activeTool: function(tool) {
+        if(tool.constructor !== ManipulationTool) return
+        this.activePicker = null
+        this.$root.$off('picked')
+      },
+    },
+
     data() {
       return {
         activePicker: null,
@@ -167,15 +181,7 @@
     mounted: function() {
       if(!this.activeFeature.defaultSetting) return
       const setting = this.activeFeature.settings[this.activeFeature.defaultSetting]
-      this.pick(setting.type, this.activeFeature.defaultSetting, setting.color)
-    },
-
-    watch: {
-      activeTool: function(tool) {
-        if(tool.constructor !== ManipulationTool) return
-        this.activePicker = null
-        this.$root.$off('picked')
-      },
+      this.pick(setting.type, this.activeFeature.defaultSetting)
     },
 
     beforeDestroy: function() {
@@ -183,7 +189,7 @@
     },
 
     methods: {
-      pick: function(type, name, color) {
+      pick: function(type, name) {
         this.$root.$once('picked', (item) => {
           this.activeFeature[name] = item
           this.update()
@@ -196,6 +202,8 @@
           x: pickerRect.left + (pickerRect.width / 2),
           y: pickerRect.top + (pickerRect.height / 2) - 38,
         }
+        const style = window.getComputedStyle(picker)
+        const color = style.getPropertyValue('background-color')
         if(type == 'profile') {
           this.$root.$emit('pick-profile', pickerPos, color)
         } else if(type == 'curve') {

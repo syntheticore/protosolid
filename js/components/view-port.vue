@@ -71,6 +71,7 @@
       stroke: white
     path
       stroke-dasharray: 4, 7
+      opacity: 0.7
 
   .handles, .anchors
     position: absolute
@@ -223,8 +224,7 @@
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
       this.renderer.setDisplayMode(this.displayMode.title)
       this.renderer.on('render', () => this.updateWidgets() )
-      this.renderer.on(
-        'change-view',
+      this.renderer.on('change-view',
         (position, target) => this.$emit('change-view', position, target)
       )
       this.renderer.on('change-pose', () => this.$emit('change-pose') )

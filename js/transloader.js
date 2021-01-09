@@ -15,30 +15,35 @@ export class Transloader {
     if(compData.hidden) return
     let solids = node.get_solids()
     solids.forEach(solid => {
-      const faces = solid.get_faces()
-      faces.forEach(face => {
-        const faceMesh = this.renderer.convertMesh(
-          face.tesselate(),
-          this.renderer.materials.surface
-        )
-        faceMesh.alcType = 'face'
-        faceMesh.alcFace = face
-        faceMesh.alcComponent = node
-        faceMesh.alcProjectable = true
-        faceMesh.castShadow = true
-        faceMesh.receiveShadow = true
-        this.renderer.add(faceMesh)
-        compData.faces.push(faceMesh)
-        // const normal = this.convertLine(face.get_normal(), this.renderer.materials.selectionLine)
-        // this.renderer.add(normal)
-      })
-      const wireframe = solid.get_edges()
-      compData.wireframe = (compData.wireframe || []).concat(wireframe.map(edge => {
-        // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
-        const line = this.renderer.convertLine(edge, this.renderer.materials.wire)
-        this.renderer.add(line)
-        return line
-      }))
+      const mode = this.renderer.displayMode
+      if(mode == 'Shaded' || mode == 'Shaded + Wire') {
+        const faces = solid.get_faces()
+        faces.forEach(face => {
+          const faceMesh = this.renderer.convertMesh(
+            face.tesselate(),
+            this.renderer.materials.surface
+          )
+          faceMesh.alcType = 'face'
+          faceMesh.alcFace = face
+          faceMesh.alcComponent = node
+          faceMesh.alcProjectable = true
+          faceMesh.castShadow = true
+          faceMesh.receiveShadow = true
+          this.renderer.add(faceMesh)
+          compData.faces.push(faceMesh)
+          // const normal = this.convertLine(face.get_normal(), this.renderer.materials.selectionLine)
+          // this.renderer.add(normal)
+        })
+      }
+      if(mode == 'Wireframe' || mode == 'Shaded + Wire') {
+        const wireframe = solid.get_edges()
+        compData.wireframe = (compData.wireframe || []).concat(wireframe.map(edge => {
+          // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
+          const line = this.renderer.convertLine(edge, this.renderer.materials.wire)
+          this.renderer.add(line)
+          return line
+        }))
+      }
     })
     this.updateRegions(node)
     // Load sketch elements

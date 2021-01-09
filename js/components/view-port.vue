@@ -181,7 +181,7 @@
       activeTool: Object,
       selectedElement: Object,
       activeView: Object,
-      previewView: Object,
+      displayMode: Object,
     },
 
     watch: {
@@ -197,9 +197,9 @@
         this.renderer.setView(view.position, view.target)
       },
 
-      previewView: function(view) {
-        if(!view) return
-        this.renderer.setView(view.position, view.target)
+      displayMode: function(mode) {
+        this.renderer.setDisplayMode(mode.title)
+        this.componentChanged(this.document.tree, true)
       },
     },
 
@@ -221,6 +221,7 @@
     mounted: function() {
       // Renderer
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
+      this.renderer.setDisplayMode(this.displayMode.title)
       this.renderer.on('render', () => this.updateWidgets() )
       this.renderer.on(
         'change-view',
@@ -249,7 +250,7 @@
       // Events
       const handlePick = (pickerCoords, color, tool) => {
         if(this.activeTool) this.activeTool.dispose()
-        this.$emit('activate-tool', new tool(this.activeComponent, this, (item, mesh) => {
+        this.$emit('update:active-tool', new tool(this.activeComponent, this, (item, mesh) => {
           this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')
           mesh.geometry.computeBoundingBox();
@@ -403,7 +404,7 @@
           Arc: ArcTool,
         }
         const tool = new tools[toolName](this.activeComponent, this)
-        this.$emit('activate-tool', tool)
+        this.$emit('update:active-tool', tool)
         this.renderer.render()
       },
 

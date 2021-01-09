@@ -9,7 +9,7 @@
       )
       .box(
         :class="{hidden: !isVisible, selected: node.id() == activeNode.id()}"
-        @dblclick="activateComponent(node)"
+        @dblclick="$emit('update:activeComponent', node)"
       )
         fa-icon.eye(
           v-if="!isTop"
@@ -23,7 +23,7 @@
           fa-icon.activate(
             icon="check-circle" fixed-width
             title="Activate"
-            @click="activateComponent(node)"
+            @click="$emit('update:activeComponent', node)"
           )
           fa-icon.new-component(
             icon="plus-circle" fixed-width
@@ -201,10 +201,6 @@
     methods: {
       toggle: function() {
         this.expanded = !this.expanded;
-      },
-
-      activateComponent: function(node) {
-        this.$emit('activate-component', node)
       },
 
       createComponent: function(parent) {

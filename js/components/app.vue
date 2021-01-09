@@ -153,7 +153,6 @@
             activeComponent: tree,
             data: {},
             activeView: null,
-            previewView: null,
             activePose: null,
             isViewDirty: false,
             isPoseDirty: false,

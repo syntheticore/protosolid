@@ -8,13 +8,13 @@
       v-if="list.length"
     )
       li(
-        v-for="elem in list"
-        :key="elem.id",
-        :class="{active: active && active.id == elem.id}"
-        @click="$emit('activate', elem)"
-        @mouseenter="$emit('hover', elem)"
+        v-for="item in list"
+        :key="item.id || item.title",
+        :class="{active: isActive(item)}"
+        @click="$emit('update:active', item)"
+        @mouseenter="$emit('hover', item)"
       )
-        | {{ elem.title }}
+        | {{ item.title }}
     transition(name="fade" mode="out-in")
       button(
         v-show="allowCreate"
@@ -111,6 +111,14 @@
       list: Array,
       active: Object,
       allowCreate: Boolean,
+    },
+
+    methods: {
+      isActive: function(item) {
+        if(!this.active) return
+        return (this.active.id && this.active.id == item.id) ||
+        (this.active.title && this.active.title == item.title)
+      },
     },
   }
 </script>

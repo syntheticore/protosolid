@@ -183,7 +183,7 @@ export class Renderer {
   }
 
   dropResources(obj, geomOnly) {
-    obj.traverse((child) => {
+    obj.traverse(child => {
       if(child.geometry) child.geometry.dispose()
       if(child.material && !geomOnly) {
         var texture = child.material.map
@@ -204,6 +204,10 @@ export class Renderer {
     this.cameraTarget = position
     this.viewControlsTarget = target
     this.animate()
+  }
+
+  setDisplayMode(mode) {
+    this.displayMode = mode
   }
 
   render() {
@@ -281,12 +285,12 @@ export class Renderer {
     return line
   }
 
-  convertLineBasic(vertices, material) {
-    var geometry = new THREE.Geometry()
-    geometry.vertices = vertices.map(vertex => new THREE.Vector3().fromArray(vertex))
-    const line = new THREE.Line(geometry, material)
-    return line
-  }
+  // convertLineBasic(vertices, material) {
+  //   var geometry = new THREE.Geometry()
+  //   geometry.vertices = vertices.map(vertex => new THREE.Vector3().fromArray(vertex))
+  //   const line = new THREE.Line(geometry, material)
+  //   return line
+  // }
 
   convertMesh(bufferGeometry, material) {
     const geometry = this.convertBufferGeometry(bufferGeometry)
@@ -294,12 +298,12 @@ export class Renderer {
     return mesh
   }
 
-  convertWireMesh(bufferGeometry, material) {
-    const geometry = this.convertBufferGeometry(bufferGeometry)
-    const wireframe = new THREE.WireframeGeometry(geometry);
-    const line = new THREE.LineSegments(wireframe);
-    return line
-  }
+  // convertWireMesh(bufferGeometry, material) {
+  //   const geometry = this.convertBufferGeometry(bufferGeometry)
+  //   const wireframe = new THREE.WireframeGeometry(geometry);
+  //   const line = new THREE.LineSegments(wireframe);
+  //   return line
+  // }
 
   convertBufferGeometry(bufferGeometry, material) {
     const geometry = new THREE.BufferGeometry()

@@ -3,46 +3,47 @@
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
-      :active-tool="activeTool"
+      :active-tool.sync="activeTool"
       :selected-element="selectedElement"
-      :active-view="document.activeView"
-      :preview-view="document.previewView"
+      :active-view="previewView || document.activeView"
+      :display-mode="previewDisplayMode || currentDisplayMode"
       @change-view="viewChanged"
       @change-pose="document.isPoseDirty = true"
-      @activate-tool="activateTool"
       @element-selected="elementSelected"
     )
     ToolBox(
       :active-tool="activeTool"
       :active-component="document.activeComponent"
-      @activate-tool="activateTool"
     )
     .side-bar.left
       TreeView(
         :top="document.tree"
         :data="document.data"
-        :active-component="document.activeComponent"
+        :active-component.sync="document.activeComponent"
         @create-component="createComponent"
-        @activate-component="activateComponent"
       )
     .side-bar.right
       h1 Views
+      RadioBar(
+        :items="displayModes"
+        :chosen.sync="currentDisplayMode"
+        @hover="previewDisplayMode = $event"
+        @unhover="previewDisplayMode = null"
+      )
       ListChooser(
         :list="document.views"
-        :active="document.activeView"
+        :active.sync="document.activeView"
         :allow-create="document.isViewDirty"
         @create="createView"
-        @activate="activateView"
-        @hover="previewView"
-        @unhover="unpreviewView"
+        @hover="previewView = $event"
+        @unhover="previewView = null"
       )
       h1 Poses
       ListChooser(
         :list="document.poses"
-        :active="document.activePose"
+        :active.sync="document.activePose"
         :allow-create="document.isPoseDirty"
         @create="createPose"
-        @activate="activatePose"
       )
       h1 Sets
       ListChooser(
@@ -119,6 +120,7 @@
   import ToolBox from './tool-box.vue'
   import FooterView from './footer-view.vue'
   import ListChooser from './list-chooser.vue'
+  import RadioBar from './radio-bar.vue'
 
   let lastId = 9999;
 
@@ -131,22 +133,38 @@
       ToolBox,
       FooterView,
       ListChooser,
+      RadioBar,
     },
 
     props: {
       document: Object,
     },
 
-    watch: {
-      document: function() {
-        this.previewView(this.document.dirtyView)
-      },
-    },
-
     data() {
       return {
         activeTool: null,
         selectedElement: null,
+        displayModes: [
+          {
+            title: 'Shaded',
+            icon: 'box',
+          },
+          {
+            title: 'Wireframe',
+            icon: 'edit',
+          },
+          {
+            title: 'Shaded + Wire',
+            icon: 'magnet',
+          },
+          {
+            title: 'Hidden Lines',
+            icon: 'clone',
+          },
+        ],
+        previewView: null,
+        currentDisplayMode: null,
+        previewDisplayMode: null,
       }
     },
 
@@ -165,6 +183,7 @@
       //       const part7 = this.createComponent(assm3, 'Part 7')
       //       const part8 = this.createComponent(assm3, 'Part 8')
       // this.document.activeComponent = assm2
+      this.currentDisplayMode = this.displayModes[2]
     },
 
     mounted() {
@@ -194,12 +213,12 @@
         const view = {
           id: lastId++,
           title: title || 'Fresh View',
-          position: this.document.dirtyView.position.clone(),
-          target: this.document.dirtyView.target.clone(),
+          position: this.document.activeView.position.clone(),
+          target: this.document.activeView.target.clone(),
         }
         this.document.views.push(view)
         this.document.isViewDirty = false
-        this.activateView(view)
+        this.document.activeView = view
       },
 
       createPose: function() {
@@ -213,34 +232,12 @@
       },
 
       viewChanged: function(position, target) {
-        this.document.dirtyView = {position: position.clone(), target: target.clone()}
+        this.document.activeView = {position: position.clone(), target: target.clone()}
         this.document.isViewDirty = true
-        this.document.activeView = null
-      },
-
-      previewView: function(view) {
-        this.document.previewView = view
-      },
-
-      unpreviewView: function() {
-        this.document.previewView = this.document.dirtyView
-      },
-
-      activateView: function(view) {
-        this.document.activeView = view
-        this.document.dirtyView = view
-      },
-
-      activatePose: function(pose) {
-        this.document.activePose = pose
       },
 
       activateComponent: function(comp) {
         this.document.activeComponent = comp
-      },
-
-      activateTool: function(tool) {
-        this.activeTool = tool
       },
 
       elementSelected: function(elem) {

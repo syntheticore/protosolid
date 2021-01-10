@@ -11,13 +11,19 @@ export class Transloader {
     this.document = doc
   }
 
-  loadTree(node, recursive, isParentActive) {
-    const compData = this.document.data[node.id()]
-    const isActive = isParentActive || (node.id() === this.document.activeComponent.id())
-    this.unloadTree(node, false)
-    compData.regions.forEach(mesh => this.renderer.remove(mesh))
+  isActive(comp) {
+    if(!comp) return
+    const compId = comp.id()
+    if(compId === this.document.activeComponent.id()) return true
+    const compData = this.document.data[compId]
+    return this.isActive(compData.parent)
+  }
+
+  loadTree(comp, recursive, isParentActive) {
+    const compData = this.document.data[comp.id()]
     if(compData.hidden) return
-    let solids = node.get_solids()
+    const isActive = this.isActive(comp)
+    let solids = comp.get_solids()
     solids.forEach(solid => {
       const mode = this.renderer.displayMode
       if(mode == 'Shaded' || mode == 'Shaded + Wire') {
@@ -31,7 +37,7 @@ export class Transloader {
           )
           faceMesh.alcType = 'face'
           faceMesh.alcFace = face
-          faceMesh.alcComponent = node
+          faceMesh.alcComponent = comp
           faceMesh.alcProjectable = true
           faceMesh.castShadow = true
           faceMesh.receiveShadow = true
@@ -55,42 +61,42 @@ export class Transloader {
       }
     })
     if(isActive) {
-      this.updateRegions(node)
+      this.updateRegions(comp)
       // Load sketch elements
-      const elements = node.get_sketch().get_sketch_elements()
-      elements.forEach(element => this.loadElement(element, node))
+      const elements = comp.get_sketch().get_sketch_elements()
+      elements.forEach(element => this.loadElement(element, comp))
     }
-    if(recursive) node.get_children().forEach(child => this.loadTree(child, true, isActive))
+    if(recursive) comp.get_children().forEach(child => this.loadTree(child, true, isActive))
   }
 
-  unloadTree(node, recursive) {
-    const nodeData = this.document.data[node.id()]
-    nodeData.curves.forEach(elem => this.unloadElement(elem, node))
-    nodeData.wireframe.forEach(edge => this.renderer.remove(edge))
-    nodeData.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
-    this.purgeRegions(nodeData)
-    if(recursive) node.get_children().forEach(child =>
+  unloadTree(comp, recursive) {
+    const compData = this.document.data[comp.id()]
+    compData.curves.forEach(elem => this.unloadElement(elem, comp))
+    compData.wireframe.forEach(edge => this.renderer.remove(edge))
+    compData.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
+    this.purgeRegions(compData)
+    if(recursive) comp.get_children().forEach(child =>
       this.unloadTree(child, true)
     )
   }
 
-  loadElement(elem, node) {
-    this.unloadElement(elem, node)
+  loadElement(elem, comp) {
+    this.unloadElement(elem, comp)
     const line = this.renderer.convertLine(elem.tesselate(), this.renderer.materials.line)
     line.alcType = 'curve'
     line.alcElement = elem
     this.renderer.add(line)
     this.document.data[elem.id()] = line
-    this.document.data[node.id()].curves.push(elem)
-    this.onLoadElement(elem, node)
+    this.document.data[comp.id()].curves.push(elem)
+    this.onLoadElement(elem, comp)
   }
 
-  unloadElement(elem, node) {
+  unloadElement(elem, comp) {
     this.renderer.remove(this.document.data[elem.id()])
-    const nodeId = node.id()
-    const curves = this.document.data[nodeId].curves
-    this.document.data[nodeId].curves = curves.filter(e => e != elem)
-    this.onUnloadElement(elem, node)
+    const compId = comp.id()
+    const curves = this.document.data[compId].curves
+    this.document.data[compId].curves = curves.filter(e => e != elem)
+    this.onUnloadElement(elem, comp)
   }
 
   updateRegions(comp) {

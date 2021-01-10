@@ -208,15 +208,16 @@
     methods: {
       createComponent: function(parent, title) {
         const comp = parent.create_component(title || 'New Component')
-        this.integrateComponent(comp)
+        this.integrateComponent(comp, parent)
         this.activateComponent(comp)
         return comp
       },
 
-      integrateComponent: function(comp) {
+      integrateComponent: function(comp, parent) {
         const id = comp.id()
         if(!this.document.data[id]) this.$set(this.document.data, id, {
           hidden: false,
+          parent,
           faces: [],
           wireframe: [],
           regions: [],

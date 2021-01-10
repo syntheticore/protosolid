@@ -119,6 +119,7 @@ export class Renderer {
 
   setActiveCamera(camera) {
     if(this.viewControls) this.viewControls.dispose()
+
     this.viewControls = new OrbitControls(camera, this.renderer.domElement)
     this.viewControls.enableDamping = true
     this.viewControls.dampingFactor = 0.4
@@ -127,13 +128,10 @@ export class Renderer {
     this.viewControls.zoomSpeed = 0.6
     this.viewControls.screenSpacePanning = true
     this.viewControls.rotateSpeed = 1.2
-
     this.viewControls.minPolarAngle = - Math.PI
     this.viewControls.maxPolarAngle = Math.PI * 2
 
-    this.viewControls.addEventListener('change', () => {
-      this.render()
-    })
+    this.viewControls.addEventListener('change', () => this.render() )
 
     this.viewControls.addEventListener('start', () => {
       this.isOrbiting = true
@@ -157,8 +155,8 @@ export class Renderer {
     this.setActiveCamera(this.activeCamera == this.cameraOrtho ? this.camera : this.cameraOrtho)
   }
 
-  on(event, callback) {
-    return this.emitter.on(event, callback)
+  on(event, cb) {
+    return this.emitter.on(event, cb)
   }
 
   add(obj) {

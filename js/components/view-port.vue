@@ -421,13 +421,13 @@
       },
 
       componentChanged: function(comp, recursive) {
+        this.transloader.unloadTree(comp, recursive)
         this.transloader.loadTree(comp, recursive)
         this.renderer.shadowCatcher.update()
         this.renderer.render()
       },
 
       elementChanged: function(elem, comp) {
-        console.log(comp.id())
         this.transloader.updateRegions(comp)
         this.transloader.loadElement(elem, comp)
         this.renderer.render()

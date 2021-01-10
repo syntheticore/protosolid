@@ -8,8 +8,10 @@
         fixed-width
       )
       .box(
-        :class="{hidden: !isVisible, selected: node.id() == activeNode.id()}"
-        @dblclick="$emit('update:active-component', node)"
+        :class="{hidden: !isVisible, selected: component.id() == activeComponent.id()}"
+        @dblclick="$emit('update:active-component', component)"
+        @mouseenter="$emit('highlight-component', component)"
+        @mouseleave="$emit('highlight-component', null)"
       )
         fa-icon.eye(
           v-if="!isTop"
@@ -18,41 +20,34 @@
         )
         fa-icon.assembly(icon="boxes" v-if="isAssembly")
         fa-icon.part(icon="box" v-else)
-        span.name {{ node.get_title() }}
+        span.name {{ component.get_title() }}
         .controls
           fa-icon.activate(
             icon="check-circle" fixed-width
             title="Activate"
-            @click="$emit('update:active-component', node)"
+            @click="$emit('update:active-component', component)"
           )
           fa-icon.new-component(
             icon="plus-circle" fixed-width
             title="Create Component"
-            @click="createComponent(node)"
+            @click="createComponent(component)"
           )
-          //- fa-icon.new-sketch(
-          //-   icon="edit" fixed-width
-          //-   title="Create Sketch"
-          //-   @click="createSketch(node)"
-          //- )
           fa-icon.new-variable(
             icon="sliders-h" fixed-width
             title="Create Variable"
-            @click="createVariable(node)"
+            @click="createVariable(component)"
           )
     ul.content(v-if="expanded")
       //- li
       //-   fa-icon(icon="atom")
       //-   span COG
-    //- transition(name="fade" mode="out-in")
-    //- transition-group.children(name="list" tag="ul" v-show="expanded" v-if="isAssembly")
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
       li(
         is="tree-item"
-        v-for="child in node.get_children()"
+        v-for="child in component.get_children()"
         :key="child.id()"
-        :node="child"
-        :active-node="activeNode"
+        :component="child"
+        :active-component="activeComponent"
         :parent-hidden="!isVisible"
         :data="data"
         v-on="$listeners"
@@ -142,8 +137,6 @@
     opacity: 0
     transition: all 0.2s
     transition-delay: 0.25s
-    // svg
-    //   margin-bottom: 1px
 
   .content
     margin-left: 25px
@@ -151,14 +144,6 @@
       display: flex
       font-size: 12px
       align-items: center
-
-  // .fade-enter-active
-  //   transition: all 0.6s
-  // .fade-leave-active
-  //   transition: all 0.2s
-  // .fade-enter
-  // .fade-leave-to
-  //   opacity: 0
 
   .list-enter-active
   .list-leave-active
@@ -178,23 +163,23 @@
 
     props: {
       isTop: Boolean,
-      node: Object,
-      activeNode: Object,
+      component: Object,
+      activeComponent: Object,
       parentHidden: Boolean,
       data: Object,
     },
 
     data() {
       return {
-        hidden: this.data[this.node.id()].hidden,
+        hidden: this.data[this.component.id()].hidden,
         expanded: true,
       };
     },
 
     watch: {
       hidden: function(hidden) {
-        this.$set(this.data[this.node.id()], 'hidden', !this.isVisible)
-        this.$root.$emit('component-changed', this.node, true)
+        this.$set(this.data[this.component.id()], 'hidden', !this.isVisible)
+        this.$root.$emit('component-changed', this.component, true)
       }
     },
 
@@ -210,7 +195,7 @@
 
     computed: {
       isAssembly: function() {
-        return !!this.node.get_children().length;
+        return !!this.component.get_children().length;
       },
 
       isVisible: function() {

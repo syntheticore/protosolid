@@ -2,8 +2,8 @@
   ul.tree-view
     li(
       is="tree-item"
-      :node="top"
-      :active-node="activeComponent"
+      :component="top"
+      :active-component="activeComponent"
       :data="data"
       v-on="$listeners"
       is-top

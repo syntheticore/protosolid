@@ -12,27 +12,43 @@ export class Transloader {
   }
 
   isActive(comp) {
-    if(!comp) return
-    const compId = comp.id()
-    if(compId === this.document.activeComponent.id()) return true
-    const compData = this.document.data[compId]
-    return this.isActive(compData.parent)
+    return this.hasParent(comp, this.document.activeComponent.id())
   }
 
-  loadTree(comp, recursive, isParentActive) {
+  isHighlighted(comp) {
+    if(!this.highlightComponent) return
+    return this.hasParent(comp, this.highlightComponent.id())
+  }
+
+  hasParent(comp, parentId) {
+    if(!comp) return
+    const compId = comp.id()
+    if(compId === parentId) return true
+    const compData = this.document.data[compId]
+    return this.hasParent(compData.parent, parentId)
+  }
+
+  loadTree(comp, recursive) {
     const compData = this.document.data[comp.id()]
     if(compData.hidden) return
     const isActive = this.isActive(comp)
+    const isHighlighted = this.isHighlighted(comp)
+    // Load Bodies
     let solids = comp.get_solids()
     solids.forEach(solid => {
       const mode = this.renderer.displayMode
+      // Load Faces
       if(mode == 'shaded' || mode == 'wireShade') {
         const faces = solid.get_faces()
         faces.forEach(face => {
           const faceMesh = this.renderer.convertMesh(
             face.tesselate(),
             isActive ?
+            isHighlighted ?
+            this.renderer.materials.highlightSurface :
             this.renderer.materials.surface :
+            isHighlighted ?
+            this.renderer.materials.previewAddSurface :
             this.renderer.materials.ghostSurface
           )
           faceMesh.alcType = 'face'
@@ -47,26 +63,31 @@ export class Transloader {
           // this.renderer.add(normal)
         })
       }
-      if(mode == 'wireframe' || mode == 'wireShade') {
+      // Load Edges
+      if(mode == 'wireframe' || (isActive && mode == 'wireShade')) {
         const wireframe = solid.get_edges()
         compData.wireframe = (compData.wireframe || []).concat(wireframe.map(edge => {
           // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
           const line = this.renderer.convertLine(
             edge,
-            isActive ? this.renderer.materials.wire : this.renderer.materials.ghostWire,
+            isHighlighted ?
+            this.renderer.materials.selectionLine :
+            isActive ?
+            this.renderer.materials.wire : this.renderer.materials.ghostWire,
           )
           this.renderer.add(line)
           return line
         }))
       }
     })
-    if(isActive) {
-      this.updateRegions(comp)
-      // Load sketch elements
+    // Load Sketch Elements
+    if(comp.id() == this.document.activeComponent.id()) {
       const elements = comp.get_sketch().get_sketch_elements()
       elements.forEach(element => this.loadElement(element, comp))
+      if(!compData.regions.length) this.updateRegions(comp)
     }
-    if(recursive) comp.get_children().forEach(child => this.loadTree(child, true, isActive))
+    // Recurse
+    if(recursive) comp.get_children().forEach(child => this.loadTree(child, true))
   }
 
   unloadTree(comp, recursive) {

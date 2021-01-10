@@ -3,6 +3,7 @@
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
+      :highlight-component="highlightComponent"
       :active-tool.sync="activeTool"
       :selected-element="selectedElement"
       :active-view="previewView || document.activeView"
@@ -21,6 +22,7 @@
         :data="document.data"
         :active-component="document.activeComponent"
         @update:active-component="activateComponent"
+        @highlight-component="highlightComponent = $event"
         @create-component="createComponent"
       )
     .side-bar.right
@@ -159,6 +161,7 @@
       return {
         activeTool: null,
         selectedElement: null,
+        highlightComponent: null,
         previewView: null,
         dirtyView: null,
         displayModes: {
@@ -186,18 +189,6 @@
 
     created() {
       this.activateComponent(this.createComponent(this.document.tree, 'Component 1'))
-      // const part1 = this.createComponent(this.document.tree, 'Part 1')
-      //   const assm1 = this.createComponent(this.document.tree, 'Sub Assembly 1')
-      //     const part2 = this.createComponent(assm1, 'Part 2')
-      //     const part3 = this.createComponent(assm1, 'Part 3')
-      //     const assm2 = this.createComponent(assm1, 'Sub Assembly 2')
-      //       const part4 = this.createComponent(assm2, 'Part 4')
-      //       const part5 = this.createComponent(assm2, 'Part 5')
-      //     const assm3 = this.createComponent(assm1, 'Sub Assembly 3')
-      //       const part6 = this.createComponent(assm3, 'Part 6')
-      //       const part7 = this.createComponent(assm3, 'Part 7')
-      //       const part8 = this.createComponent(assm3, 'Part 8')
-      // this.document.activeComponent = assm2
       this.currentDisplayMode = 'wireShade'
     },
 
@@ -228,7 +219,7 @@
       createView: function(title) {
         const newView = {
           id: lastId++,
-          title: title || 'Fresh View',
+          title: title || 'Custom View',
           position: this.dirtyView.position.clone(),
           target: this.dirtyView.target.clone(),
         }

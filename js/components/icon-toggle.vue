@@ -1,6 +1,5 @@
 <template lang="pug">
   button.button.icon-toggle(
-    :title="title"
     :class="{active: active}"
     @click.prevent="$emit('update:active', !active)"
   )

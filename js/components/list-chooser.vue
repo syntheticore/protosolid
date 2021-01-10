@@ -112,9 +112,7 @@
 
     methods: {
       isActive: function(item) {
-        if(!this.active) return
-        return (this.active.id && this.active.id == item.id) ||
-        (this.active.title && this.active.title == item.title)
+        return this.active == item
       },
     },
   }

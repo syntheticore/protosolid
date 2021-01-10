@@ -176,6 +176,7 @@
     props: {
       document: Object,
       activeComponent: Object,
+      highlightComponent: Object,
       activeTool: Object,
       selectedElement: Object,
       activeView: Object,
@@ -192,6 +193,16 @@
       activeComponent: function() {
         this.componentChanged(this.document.tree, true)
         this.$root.$emit('activate-toolname', 'Manipulate')
+      },
+
+      highlightComponent: function(comp, oldComp) {
+        this.transloader.highlightComponent = comp
+        if(oldComp) {
+          this.componentChanged(oldComp, true)
+        }
+        if(comp) {
+          this.componentChanged(comp, true)
+        }
       },
 
       activeView: function(view) {
@@ -226,7 +237,7 @@
     mounted: function() {
       // Renderer
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
-      this.renderer.setDisplayMode(this.displayMode.title)
+      this.renderer.setDisplayMode(this.displayMode)
       this.renderer.on('render', () => this.updateWidgets() )
       this.renderer.on('change-view',
         (position, target) => this.$emit('change-view', position, target)

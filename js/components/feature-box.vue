@@ -6,28 +6,32 @@
     //-   .title Extrude
 
     form.options
-      label(v-for="(fields, key) in activeFeature.settings")
-        | {{ fields.title }}
+      label(v-for="(setting, key) in activeFeature.settings")
+        | {{ setting.title }}
         .picker(
-          v-if="fields.type == 'profile' || fields.type == 'curve'"
+          v-if="setting.type == 'profile' || setting.type == 'curve'"
           :ref="key"
           :class="{active: activePicker == key, filled: activeFeature[key]}"
-          @click="pick(fields.type, key)"
+          @click="pick(setting.type, key)"
         )
         input(
-          v-if="fields.type == 'length'"
+          v-if="setting.type == 'length'"
           type="number"
           v-model="activeFeature[key]"
           @change="update"
         )
-        input(
-          v-if="fields.type == 'bool'"
-          type="checkbox"
-          v-model="activeFeature[key]"
-          @change="update"
+        IconToggle(
+          v-if="setting.type == 'bool'"
+          :icons="setting.icons"
+          :active.sync="activeFeature[key]"
+          @update:active="update"
         )
-        select(v-if="fields.type == 'select'")
-          option(v-for="option in fields.options") {{ option }}
+        RadioBar(
+          v-if="setting.type == 'select'"
+          :items="setting.options"
+          :chosen.sync="activeFeature[key]"
+          @update:chosen="update"
+        )
 
     .confirmation
       button.ok(
@@ -69,34 +73,6 @@
   .options
     margin: 10px
     display: flex
-
-  .confirmation
-    display: flex
-    flex-direction: column
-    justify-content: space-around
-    background: $dark1
-    border-radius: 0 4px 4px 0
-
-  button
-    height: 100%
-    background: none
-    border: none
-    color: $bright1
-    font-size: 16px
-    transition: all 0.15s
-    padding: 0px 9px
-    padding-left: 11px
-    transition: all 0.15s
-    &:hover
-      &.ok
-        color: $confirm
-      &.cancel
-        color: $cancel
-    &:active
-      color: $dark2 !important
-      transition: none
-    &:disabled
-      color: $bright1 * 0.5 !important
 
   label
     display: flex
@@ -143,6 +119,34 @@
     &.filled
       border-width: 2px
 
+  .confirmation
+    display: flex
+    flex-direction: column
+    justify-content: space-around
+    background: $dark1
+    border-radius: 0 4px 4px 0
+
+    button
+      height: 100%
+      background: none
+      border: none
+      color: $bright1
+      font-size: 16px
+      transition: all 0.15s
+      padding: 0px 9px
+      padding-left: 11px
+      transition: all 0.15s
+      &:hover
+        &.ok
+          color: $confirm
+        &.cancel
+          color: $cancel
+      &:active
+        color: $dark2 !important
+        transition: none
+      &:disabled
+        color: $bright1 * 0.5 !important
+
   @keyframes rotate
     50%
       transform: rotate(180deg)
@@ -153,12 +157,18 @@
 
 
 <script>
+  import IconToggle from './icon-toggle.vue'
+  import RadioBar from './radio-bar.vue'
+
   import { ManipulationTool } from './../tools.js'
 
   export default {
     name: 'FeatureBox',
 
-    components: {},
+    components: {
+      IconToggle,
+      RadioBar,
+    },
 
     props: {
       activeTool: Object,
@@ -214,7 +224,7 @@
 
       update: function() {
         const mesh = this.activeFeature.update()
-        this.$root.$emit('preview-feature', this.activeFeature.component, mesh)
+        if(mesh) this.$root.$emit('preview-feature', this.activeFeature.component, mesh)
       },
 
       confirm: function(e) {

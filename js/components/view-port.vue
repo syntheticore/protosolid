@@ -179,7 +179,7 @@
       activeTool: Object,
       selectedElement: Object,
       activeView: Object,
-      displayMode: Object,
+      displayMode: String,
     },
 
     watch: {
@@ -200,7 +200,7 @@
       },
 
       displayMode: function(mode) {
-        this.renderer.setDisplayMode(mode.title)
+        this.renderer.setDisplayMode(mode)
         this.componentChanged(this.document.tree, true)
       },
     },

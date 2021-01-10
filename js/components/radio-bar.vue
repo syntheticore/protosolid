@@ -1,11 +1,11 @@
 <template lang="pug">
   .radio-bar(@mouseleave="$emit('unhover', chosen)")
     button.button(
-      v-for="item in items"
+      v-for="(item, key) in items"
       :title="item.title"
-      :class="{pressed: item === chosen}"
-      @click="$emit('update:chosen', item)"
-      @mouseenter="$emit('hover', item)"
+      :class="{pressed: key === chosen}"
+      @click.prevent="$emit('update:chosen', key)"
+      @mouseenter="$emit('hover', key)"
     )
       fa-icon(:icon="item.icon")
 </template>
@@ -43,8 +43,8 @@
   export default {
     name: 'RadioBar',
     props: {
-      items: Array,
-      chosen: Object,
+      items: Object,
+      chosen: String,
     },
   }
 </script>

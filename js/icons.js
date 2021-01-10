@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 
 import {
   faCaretDown,
+  faCaretUp,
   faWindowClose,
   faCaretRight,
   faAngleDown,
@@ -98,6 +99,7 @@ import {
 
 library.add(
   faCaretDown,
+  faCaretUp,
   faWindowClose,
   faCaretRight,
   faAngleDown,

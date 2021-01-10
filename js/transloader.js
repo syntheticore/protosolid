@@ -26,7 +26,7 @@ export class Transloader {
     let solids = comp.get_solids()
     solids.forEach(solid => {
       const mode = this.renderer.displayMode
-      if(mode == 'Shaded' || mode == 'Shaded + Wire') {
+      if(mode == 'shaded' || mode == 'wireShade') {
         const faces = solid.get_faces()
         faces.forEach(face => {
           const faceMesh = this.renderer.convertMesh(
@@ -47,7 +47,7 @@ export class Transloader {
           // this.renderer.add(normal)
         })
       }
-      if(mode == 'Wireframe' || mode == 'Shaded + Wire') {
+      if(mode == 'wireframe' || mode == 'wireShade') {
         const wireframe = solid.get_edges()
         compData.wireframe = (compData.wireframe || []).concat(wireframe.map(edge => {
           // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))

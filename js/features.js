@@ -5,8 +5,12 @@ class Feature {
 
   confirm() {}
   cancel() {}
-  update() {}
   isComplete() {}
+
+  update() {
+    if(!this.isComplete()) return
+    return this.preview()
+  }
 }
 
 export class ExtrudeFeature extends Feature {
@@ -35,26 +39,44 @@ export class ExtrudeFeature extends Feature {
       side: {
         title: 'Side',
         type: 'bool',
+        icons: ['caret-up', 'caret-down']
       },
       operation: {
         title: 'Operation',
         type: 'select',
-        options: ['join', 'cut', 'intersect', 'create'],
+        options: {
+          join: {
+            title: 'Join',
+            icon: 'magnet',
+          },
+          cut: {
+            title: 'Cut',
+            icon: 'clone',
+          },
+          intersect: {
+            title: 'Intersect',
+            icon: 'box',
+          },
+          create: {
+            title: 'Create',
+            icon: 'edit',
+          },
+        },
       },
     }
 
     this.defaultSetting = 'profile'
   }
 
-  update() {
+  isComplete() {
+    return !!this.profile
+  }
+
+  preview() {
     return this.profile.extrude_preview(this.distance * (this.side ? 1 : -1))
   }
 
   confirm() {
     this.profile.extrude(this.distance * (this.side ? 1 : -1))
-  }
-
-  isComplete() {
-    return !!this.profile
   }
 }

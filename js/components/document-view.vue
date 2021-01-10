@@ -159,26 +159,26 @@
       return {
         activeTool: null,
         selectedElement: null,
-        displayModes: [
-          {
+        previewView: null,
+        dirtyView: null,
+        displayModes: {
+          wireShade: {
             title: 'Shaded + Wire',
             icon: 'magnet',
           },
-          {
+          wireframe: {
             title: 'Wireframe',
             icon: 'clone',
           },
-          {
+          shaded: {
             title: 'Shaded',
             icon: 'box',
           },
-          // {
+          // hiddenLines: {
           //   title: 'Hidden Lines',
           //   icon: 'edit',
           // },
-        ],
-        previewView: null,
-        dirtyView: null,
+        },
         currentDisplayMode: null,
         previewDisplayMode: null,
       }
@@ -198,7 +198,7 @@
       //       const part7 = this.createComponent(assm3, 'Part 7')
       //       const part8 = this.createComponent(assm3, 'Part 8')
       // this.document.activeComponent = assm2
-      this.currentDisplayMode = this.displayModes[0]
+      this.currentDisplayMode = 'wireShade'
     },
 
     mounted() {

@@ -28,7 +28,7 @@
       ListChooser(
         :list="document.views"
         :active="document.activeView"
-        :allow-create="document.isViewDirty"
+        :allow-create="!!dirtyView"
         @update:active="activateView"
         @create="createView"
         @hover="previewView = $event"
@@ -147,8 +147,10 @@
     watch: {
       document: {
         immediate: true,
-        handler: function(document) {
+        handler: function(document, oldDocument) {
+          if(oldDocument) oldDocument.activeView = oldDocument.activeView || this.dirtyView
           this.integrateComponent(document.tree)
+          document.activeView = document.activeView || document.views[3]
         },
       },
     },
@@ -223,15 +225,14 @@
       },
 
       createView: function(title) {
-        const view = this.activeView || this.dirtyView
         const newView = {
           id: lastId++,
           title: title || 'Fresh View',
-          position: view.position.clone(),
-          target: view.target.clone(),
+          position: this.dirtyView.position.clone(),
+          target: this.dirtyView.target.clone(),
         }
         this.document.views.push(newView)
-        this.document.isViewDirty = false
+        this.dirtyView = null
         this.activateView(newView)
       },
 
@@ -249,7 +250,6 @@
       viewChanged: function(position, target) {
         this.dirtyView = {position: position.clone(), target: target.clone()}
         this.document.activeView = null
-        this.document.isViewDirty = true
       },
 
       activateView: function(view) {

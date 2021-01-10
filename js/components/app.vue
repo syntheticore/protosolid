@@ -153,7 +153,6 @@
             data: {},
             activeView: null,
             activePose: null,
-            isViewDirty: false,
             isPoseDirty: false,
             isSetDirty: true,
           })

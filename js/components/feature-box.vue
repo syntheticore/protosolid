@@ -14,11 +14,10 @@
           :class="{active: activePicker == key, filled: activeFeature[key]}"
           @click="pick(setting.type, key)"
         )
-        input(
+        NumberInput(
           v-if="setting.type == 'length'"
-          type="number"
-          v-model="activeFeature[key]"
-          @change="update"
+          :value.sync="activeFeature[key]"
+          @update:value="update"
         )
         IconToggle(
           v-if="setting.type == 'bool'"
@@ -102,6 +101,7 @@
       margin-top: 6px
     input, select
       max-width: 65px
+      flex: 1 1 auto
 
   .picker
     width: 24px
@@ -159,6 +159,7 @@
 <script>
   import IconToggle from './icon-toggle.vue'
   import RadioBar from './radio-bar.vue'
+  import NumberInput from './number-input.vue'
 
   import { ManipulationTool } from './../tools.js'
 
@@ -168,6 +169,7 @@
     components: {
       IconToggle,
       RadioBar,
+      NumberInput,
     },
 
     props: {

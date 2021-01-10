@@ -3,9 +3,10 @@ class Feature {
     this.component = component
   }
 
+  isComplete() {}
+  preview() {}
   confirm() {}
   cancel() {}
-  isComplete() {}
 
   update() {
     if(!this.isComplete()) return

@@ -226,7 +226,7 @@
         if(tool.feature) {
           this.activeFeature = new tool.feature(this.activeComponent)
         } else {
-          this.$root.$emit('activate-toolname', tool.title)
+          setTimeout(() => this.$root.$emit('activate-toolname', tool.title) )
         }
       },
 

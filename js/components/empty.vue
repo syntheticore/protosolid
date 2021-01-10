@@ -20,6 +20,7 @@
       return {}
     },
     mounted() {},
+    methods: {},
     beforeDestroy() {},
   }
 </script>

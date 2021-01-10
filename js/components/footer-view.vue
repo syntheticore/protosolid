@@ -39,7 +39,7 @@
           span {{(selectedElement.get_radius() * 2).toFixed(2)}} mm
 
         div(v-if="type == 'Circle'")
-          span Perimeter
+          span Circumfence
           span {{selectedElement.get_length().toFixed(2)}} mm
 
         div(v-if="type == 'Circle'")

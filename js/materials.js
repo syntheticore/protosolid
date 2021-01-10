@@ -23,6 +23,10 @@ export class Materials {
     this.wire.color.set('darkgray')
     this.wire.linewidth = 2
 
+    this.ghostWire = this.wire.clone()
+    this.ghostWire.color.set('rgb(8, 8, 8)')
+    this.ghostWire.linewidth = 1.5
+
     // Line Materials
     this.lineBasic = new THREE.LineBasicMaterial({
       color: 'gray',
@@ -54,6 +58,14 @@ export class Materials {
       color: '#53a3e1',
       roughness: 0.25,
       metalness: 0.2,
+    })
+
+    this.ghostSurface = new THREE.MeshStandardMaterial({
+      side: THREE.DoubleSide, //XXX remove
+      color: 'white',
+      roughness: 1.0,
+      transparent: true,
+      opacity: 0.035,
     })
 
     this.highlightSurface = new THREE.MeshStandardMaterial({

@@ -86,6 +86,7 @@
     transition: all 0.15s
     padding: 0px 9px
     padding-left: 11px
+    transition: all 0.15s
     &:hover
       &.ok
         color: $confirm
@@ -224,7 +225,8 @@
 
       cancel: function(e) {
         this.activeFeature.cancel()
-        this.$root.$emit('component-changed', this.activeFeature.component)
+        this.$root.$emit('unpreview-feature')
+        this.$root.$emit('activate-toolname', 'Manipulate')
         this.$emit('close')
       },
     },

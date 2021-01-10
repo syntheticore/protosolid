@@ -13,7 +13,7 @@
 
     ul.tabs
       li(v-for="doc in documents"
-         @click="$emit('update:activeDocument', doc)"
+         @click="$emit('update:active-document', doc)"
          :class="{active: doc == activeDocument}")
         span.title {{ doc.title }}
         button(@click.stop="$emit('delete-document', doc)")

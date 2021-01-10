@@ -19,18 +19,20 @@
       TreeView(
         :top="document.tree"
         :data="document.data"
-        :active-component.sync="document.activeComponent"
+        :active-component="document.activeComponent"
+        @update:active-component="activateComponent"
         @create-component="createComponent"
       )
     .side-bar.right
       h1 Views
       ListChooser(
         :list="document.views"
-        :active.sync="document.activeView"
+        :active="document.activeView"
         :allow-create="document.isViewDirty"
+        @update:active="activateView"
         @create="createView"
         @hover="previewView = $event"
-        @unhover="previewView = null"
+        @unhover="previewView = dirtyView"
       )
       RadioBar(
         :items="displayModes"
@@ -147,7 +149,6 @@
         immediate: true,
         handler: function(document) {
           this.integrateComponent(document.tree)
-          this.activateComponent(document.tree)
         },
       },
     },
@@ -175,6 +176,7 @@
           // },
         ],
         previewView: null,
+        dirtyView: null,
         currentDisplayMode: null,
         previewDisplayMode: null,
       }
@@ -199,7 +201,6 @@
 
     mounted() {
       this.$root.$emit('activate-toolname', 'Manipulate')
-      this.document.activeView = this.document.views[3]
     },
 
     methods: {
@@ -222,15 +223,16 @@
       },
 
       createView: function(title) {
-        const view = {
+        const view = this.activeView || this.dirtyView
+        const newView = {
           id: lastId++,
           title: title || 'Fresh View',
-          position: this.document.activeView.position.clone(),
-          target: this.document.activeView.target.clone(),
+          position: view.position.clone(),
+          target: view.target.clone(),
         }
-        this.document.views.push(view)
+        this.document.views.push(newView)
         this.document.isViewDirty = false
-        this.document.activeView = view
+        this.activateView(newView)
       },
 
       createPose: function() {
@@ -243,12 +245,21 @@
         this.document.isSetDirty = false
       },
 
+      // User changed camera from viewport
       viewChanged: function(position, target) {
-        this.document.activeView = {position: position.clone(), target: target.clone()}
+        this.dirtyView = {position: position.clone(), target: target.clone()}
+        this.document.activeView = null
         this.document.isViewDirty = true
       },
 
+      activateView: function(view) {
+        this.document.activeView = view
+        this.previewView = null
+        this.dirtyView = null
+      },
+
       activateComponent: function(comp) {
+        this.document.data[comp.id()].hidden = false
         this.document.activeComponent = comp
       },
 

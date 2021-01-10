@@ -185,8 +185,12 @@
     watch: {
       document: function(document, oldDocument) {
         this.transloader.unloadTree(oldDocument.tree, true)
-        this.transloader.dataPool = document.data
+        this.transloader.setDocument(document)
         this.componentChanged(document.tree, true)
+      },
+
+      activeComponent: function() {
+        this.componentChanged(this.document.tree, true)
         this.$root.$emit('activate-toolname', 'Manipulate')
       },
 
@@ -212,7 +216,10 @@
 
     computed: {
       allHandles: function() {
-        return Object.values(this.handles).map(e => Object.values(e)).flat().flat()
+        const handles = Object.values(this.handles).map(e => Object.values(e)).flat().flat()
+        const set = {}
+        handles.forEach(handle => set[JSON.stringify(handle.pos)] = handle)
+        return Object.values(set)
       },
     },
 
@@ -235,10 +242,10 @@
       // Init tree
       this.transloader = new Transloader(
         this.renderer,
-        this.document.data,
         this.onLoadElement.bind(this),
         this.onUnloadElement.bind(this),
       )
+      this.transloader.setDocument(this.document)
       this.transloader.loadTree(this.document.tree, true)
 
       document._debug = {} || document._debug
@@ -275,6 +282,7 @@
       this.$root.$on('component-changed', this.componentChanged)
 
       this.$root.$on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
+      this.$root.$on('unpreview-feature', this.unpreviewFeature)
 
       // Key presses
       this.$refs.canvas.addEventListener('keydown', (e) => {
@@ -293,9 +301,9 @@
       })
 
       // Window Resize
-      this.onWindowResize()
-      setTimeout(() => this.onWindowResize(), 500)
       this.$root.$on('resize', this.onWindowResize)
+      setTimeout(() => this.onWindowResize(), 1000)
+      this.onWindowResize()
     },
 
     beforeDestroy: function() {
@@ -414,15 +422,20 @@
 
       componentChanged: function(comp, recursive) {
         this.transloader.loadTree(comp, recursive)
-        this.paths = []
         this.renderer.shadowCatcher.update()
         this.renderer.render()
       },
 
       elementChanged: function(elem, comp) {
+        console.log(comp.id())
         this.transloader.updateRegions(comp)
         this.transloader.loadElement(elem, comp)
         this.renderer.render()
+      },
+
+      unpreviewFeature: function() {
+        this.paths = []
+        this.transloader.unpreviewFeature()
       },
 
       onLoadElement: function(elem, node) {

@@ -16,7 +16,7 @@ export class ExtrudeFeature extends Feature {
     this.profile = null
     this.rail = null
     this.distance = 2
-    this.direction = true
+    this.side = true
     this.operation = 'join'
 
     this.settings = {
@@ -32,8 +32,8 @@ export class ExtrudeFeature extends Feature {
         title: 'Distance',
         type: 'length',
       },
-      direction: {
-        title: 'Direction',
+      side: {
+        title: 'Side',
         type: 'bool',
       },
       operation: {
@@ -47,11 +47,11 @@ export class ExtrudeFeature extends Feature {
   }
 
   update() {
-    return this.profile.extrude_preview(this.distance * (this.direction ? 1 : -1))
+    return this.profile.extrude_preview(this.distance * (this.side ? 1 : -1))
   }
 
   confirm() {
-    this.profile.extrude(this.distance * (this.direction ? 1 : -1))
+    this.profile.extrude(this.distance * (this.side ? 1 : -1))
   }
 
   isComplete() {

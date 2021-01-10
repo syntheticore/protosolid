@@ -83,7 +83,7 @@
         background: $dark1 * 0.9
       &.active
         svg
-          color: $highlight
+          color: lighten($highlight, 25%)
     svg
       font-size: 21px
       color: $bright1

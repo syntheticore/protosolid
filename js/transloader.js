@@ -1,16 +1,20 @@
 import * as THREE from 'three'
 
 export class Transloader {
-  constructor(renderer, dataPool, onLoadElement, onUnloadElement) {
+  constructor(renderer, onLoadElement, onUnloadElement) {
     this.renderer = renderer
-    this.dataPool = dataPool
     this.onLoadElement = onLoadElement
     this.onUnloadElement = onUnloadElement
   }
 
-  loadTree(node, recursive) {
-    const compData = this.dataPool[node.id()]
-    this.unloadTree(node, recursive)
+  setDocument(doc) {
+    this.document = doc
+  }
+
+  loadTree(node, recursive, isParentActive) {
+    const compData = this.document.data[node.id()]
+    const isActive = isParentActive || (node.id() === this.document.activeComponent.id())
+    this.unloadTree(node, false)
     compData.regions.forEach(mesh => this.renderer.remove(mesh))
     if(compData.hidden) return
     let solids = node.get_solids()
@@ -21,7 +25,9 @@ export class Transloader {
         faces.forEach(face => {
           const faceMesh = this.renderer.convertMesh(
             face.tesselate(),
-            this.renderer.materials.surface
+            isActive ?
+            this.renderer.materials.surface :
+            this.renderer.materials.ghostSurface
           )
           faceMesh.alcType = 'face'
           faceMesh.alcFace = face
@@ -39,26 +45,30 @@ export class Transloader {
         const wireframe = solid.get_edges()
         compData.wireframe = (compData.wireframe || []).concat(wireframe.map(edge => {
           // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
-          const line = this.renderer.convertLine(edge, this.renderer.materials.wire)
+          const line = this.renderer.convertLine(
+            edge,
+            isActive ? this.renderer.materials.wire : this.renderer.materials.ghostWire,
+          )
           this.renderer.add(line)
           return line
         }))
       }
     })
-    this.updateRegions(node)
-    // Load sketch elements
-    const elements = node.get_sketch().get_sketch_elements()
-    elements.forEach(element => this.loadElement(element, node))
-    if(recursive) node.get_children().forEach(child => this.loadTree(child, true))
+    if(isActive) {
+      this.updateRegions(node)
+      // Load sketch elements
+      const elements = node.get_sketch().get_sketch_elements()
+      elements.forEach(element => this.loadElement(element, node))
+    }
+    if(recursive) node.get_children().forEach(child => this.loadTree(child, true, isActive))
   }
 
   unloadTree(node, recursive) {
-    const nodeData = this.dataPool[node.id()]
+    const nodeData = this.document.data[node.id()]
     nodeData.curves.forEach(elem => this.unloadElement(elem, node))
     nodeData.wireframe.forEach(edge => this.renderer.remove(edge))
     nodeData.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
     this.purgeRegions(nodeData)
-    this.renderer.remove(this.previewMesh)
     if(recursive) node.get_children().forEach(child =>
       this.unloadTree(child, true)
     )
@@ -70,21 +80,21 @@ export class Transloader {
     line.alcType = 'curve'
     line.alcElement = elem
     this.renderer.add(line)
-    this.dataPool[elem.id()] = line
-    this.dataPool[node.id()].curves.push(elem)
+    this.document.data[elem.id()] = line
+    this.document.data[node.id()].curves.push(elem)
     this.onLoadElement(elem, node)
   }
 
   unloadElement(elem, node) {
-    this.renderer.remove(this.dataPool[elem.id()])
+    this.renderer.remove(this.document.data[elem.id()])
     const nodeId = node.id()
-    const curves = this.dataPool[nodeId].curves
-    this.dataPool[nodeId].curves = curves.filter(e => e != elem)
+    const curves = this.document.data[nodeId].curves
+    this.document.data[nodeId].curves = curves.filter(e => e != elem)
     this.onUnloadElement(elem, node)
   }
 
   updateRegions(comp) {
-    const compData = this.dataPool[comp.id()]
+    const compData = this.document.data[comp.id()]
     this.purgeRegions(compData)
     const regions = comp.get_sketch().get_regions(false)
     // console.log('# regions: ', regions.length)
@@ -117,6 +127,11 @@ export class Transloader {
       this.renderer.materials.previewAddSurface
     );
     this.renderer.add(this.previewMesh)
+    this.renderer.render()
+  }
+
+  unpreviewFeature() {
+    this.renderer.remove(this.previewMesh)
     this.renderer.render()
   }
 }

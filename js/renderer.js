@@ -133,34 +133,23 @@ export class Renderer {
 
     this.viewControls.addEventListener('change', () => {
       this.render()
-      // this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
     })
-
-    let dampingTimeout
 
     this.viewControls.addEventListener('start', () => {
       this.isOrbiting = true
       this.transformControl.enabled = false
       this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
-      clearTimeout(dampingTimeout)
-      if(!this.isAnimating) {
-        this.isAnimating = true
-        this.animate()
-      }
+      this.startAnimation()
     })
 
     this.viewControls.addEventListener('end', () => {
       this.isOrbiting = false
       this.transformControl.enabled = true
       this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
-      // Make sure we keep animating long enough for view damping to settle
-      dampingTimeout = setTimeout(() => {
-        this.isAnimating = false
-      }, 500)
+      this.endAnimation()
     })
 
     this.activeCamera = camera
-
     this.onWindowResize()
   }
 
@@ -195,15 +184,15 @@ export class Renderer {
 
   setPivot(coords) {
     const vec = this.fromScreen(coords)
-    this.viewControlsTarget = vec
-    this.cameraTarget = vec.clone().sub(this.viewControls.target).add(this.camera.position)
-    this.animate()
+    const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.camera.position)
+    this.setView(cameraTarget, vec)
   }
 
   setView(position, target) {
     this.cameraTarget = position
     this.viewControlsTarget = target
-    this.animate()
+    this.startAnimation()
+    this.endAnimation()
   }
 
   setDisplayMode(mode) {
@@ -213,6 +202,21 @@ export class Renderer {
   render() {
     this.renderer.render(this.scene, this.activeCamera)
     this.emitter.emit('render')
+  }
+
+  startAnimation() {
+    clearTimeout(this.dampingTimeout)
+    if(!this.isAnimating) {
+      this.isAnimating = true
+      this.animate()
+    }
+  }
+
+  endAnimation() {
+    // Make sure we keep animating long enough for view damping to settle
+    this.dampingTimeout = setTimeout(() => {
+      this.isAnimating = false
+    }, 500)
   }
 
   animate() {
@@ -347,15 +351,16 @@ export class Renderer {
     this.materials.selectionLine.resolution.set(width, height)
     this.materials.highlightLine.resolution.set(width, height)
     this.materials.wire.resolution.set(width, height)
+    this.materials.ghostWire.resolution.set(width, height)
     this.render()
   }
 
   dispose() {
-    this.renderer.renderLists.dispose()
-    this.scene.environment.dispose()
     this.viewControls.dispose()
     this.transformControl.dispose()
+    this.scene.environment.dispose()
     this.dropResources(this.scene)
+    this.renderer.renderLists.dispose()
     this.renderer.dispose()
   }
 }

@@ -40,11 +40,12 @@
     // overflow: hidden
 
   .tabs
+    display: flex
     // box-shadow: 0 0 4px rgba(black, 0.6)
     border-bottom: 1px solid $dark1 * 1.15
-    display: flex
     overflow-x: auto
     li
+      flex: 1 1 auto
       padding: 5px 10px
       background: $dark2 * 0.85
       font-size: 12px
@@ -121,7 +122,7 @@
 
 <script>
   import FeatureBox from './feature-box.vue'
-  import { ExtrudeFeature } from './../features.js'
+  import { ExtrudeFeature, RevolveFeature } from './../features.js'
 
   import {
     ManipulationTool,
@@ -131,7 +132,8 @@
     SplineTool,
     CircleTool,
     ArcTool,
-    SetPlaneTool
+    SetPlaneTool,
+    TrimTool,
   } from './../tools.js'
 
   export default {
@@ -154,19 +156,19 @@
           {
             title: 'Sketch',
             tools: [
-              { title: 'Set Plane', tools: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
               { title: 'Line', tool: LineTool, icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
               { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
               { title: 'Arc', tool: ArcTool, icon: 'bezier-curve' },
               { title: 'Circle', tool: CircleTool, icon: 'ban', hotKey: 'C', keyCode: 67 },
-              { title: 'Spline', tool: SplineTool, icon: 'route', hotKey: 'B', keyCode: 66 },
+              { title: 'Spline', tool: SplineTool, icon: 'route'},
+              { title: 'Trim', tool: TrimTool,  icon: 'route',  hotKey: 'T', keyCode: 84},
             ]
           },
           {
             title: 'Create',
             tools: [
               { title: 'Extrude', feature: ExtrudeFeature, icon: 'box', hotKey: 'E', keyCode: 69 },
-              { title: 'Revolve', icon: 'wave-square', hotKey: 'V', keyCode: 86 },
+              { title: 'Revolve', feature: RevolveFeature, icon: 'wave-square', hotKey: 'V', keyCode: 86 },
               { title: 'Loft', icon: 'layer-group' },
               { title: 'Sweep', icon: 'route' },
               { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 77 },
@@ -183,7 +185,12 @@
               { title: 'Split', icon: 'code-branch' },
             ],
           },
-          { title: 'Construct', tools: [] },
+          {
+            title: 'Construct',
+            tools: [
+              { title: 'Set Plane', tools: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
+            ]
+          },
           { title: 'Constrain', tools: [] },
           { title: 'Simulate', tools: [] },
           { title: 'Make', tools: [] },

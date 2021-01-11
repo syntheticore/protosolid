@@ -68,11 +68,11 @@
     overflow: hidden
     display: flex
     justify-content: center
+    min-width: 770px
 
   .tool-box
     position: absolute
     margin-top: 12px
-    max-width: calc(100% - 450px)
     z-index: 2
 
   .side-bar

@@ -11,7 +11,7 @@
     )
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
-      path(v-for="path in paths" :d="path.data" :stroke="path.color")
+      path(v-for="path in allPaths" :d="path.data" :stroke="path.color")
       transition-group(name="hide" tag="g")
         line(
           v-for="guide in guides"
@@ -221,6 +221,7 @@
         snapAnchor: null,
         handles: {},
         paths: [],
+        pickingPath: null,
         guides: [],
       }
     },
@@ -231,6 +232,12 @@
         const set = {}
         handles.forEach(handle => set[JSON.stringify(handle.pos)] = handle)
         return Object.values(set)
+      },
+
+      allPaths: function() {
+        const paths = [...this.paths]
+        if(this.pickingPath && this.pickingPath.target) paths.push(this.pickingPath)
+        return paths
       },
     },
 
@@ -263,9 +270,11 @@
       document._debug.viewport = this
 
       // Events
-      const handlePick = (pickerCoords, color, tool) => {
+      const handlePick = (pickerCoords, color, Tool) => {
         if(this.activeTool) this.activeTool.dispose()
-        this.$emit('update:active-tool', new tool(this.activeComponent, this, (item, mesh) => {
+        const mouseTarget = this.renderer
+        this.pickingPath = { target: null, color, origin: pickerCoords }
+        const tool = new Tool(this.activeComponent, this, (item, mesh) => {
           this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')
           mesh.geometry.computeBoundingBox();
@@ -277,15 +286,16 @@
             data: this.buildPath(pickerCoords, center),
             color,
           })
-        }))
+        })
+        this.$emit('update:active-tool', tool)
       }
 
-      this.$root.$on('pick-profile', (pickerCoords, color) => {
-        handlePick(pickerCoords, color, ProfileSelectionTool)
-      })
-
-      this.$root.$on('pick-curve', (pickerCoords, color) => {
-        handlePick(pickerCoords, color, ObjectSelectionTool)
+      this.$root.$on('pick', (type, pickerCoords, color) => {
+        handlePick(pickerCoords, color, {
+          profile: ProfileSelectionTool,
+          curve: ObjectSelectionTool,
+          axis: ObjectSelectionTool,
+        }[type])
       })
 
       this.$root.$on('activate-toolname', this.activateTool)
@@ -325,7 +335,8 @@
     methods: {
       buildPath: function(origin, vec) {
         const pos = this.renderer.toScreen(vec)
-        return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + 150} ${pos.x} ${pos.y - 150} ${pos.x} ${pos.y}`
+        const dy = Math.abs(origin.y - pos.y) / 2.0
+        return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dy} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
       },
 
       getMouseCoords: function(e) {
@@ -378,6 +389,7 @@
         if(this.renderer.isOrbiting) return
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
+        if(this.pickingPath && vec) this.pickingPath.target = vec
         if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
@@ -406,10 +418,13 @@
           path.data = this.buildPath(path.origin, path.target)
           this.$set(this.paths, i, path)
         })
+        if(!this.pickingPath || !this.pickingPath.target) return
+        this.pickingPath.data = this.buildPath(this.pickingPath.origin, this.pickingPath.target)
       },
 
       activateTool: function(toolName) {
         if(this.activeTool) this.activeTool.dispose()
+        this.pickingPath = null
         this.snapper.reset()
         const tools = {
           'Set Plane': SetPlaneTool,

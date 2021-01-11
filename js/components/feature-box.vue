@@ -9,13 +9,13 @@
       label(v-for="(setting, key) in activeFeature.settings")
         | {{ setting.title }}
         .picker(
-          v-if="setting.type == 'profile' || setting.type == 'curve'"
+          v-if="needsPicker(setting)"
           :ref="key"
           :class="{active: activePicker == key, filled: activeFeature[key]}"
           @click="pick(setting.type, key)"
         )
         NumberInput(
-          v-if="setting.type == 'length'"
+          v-if="setting.type == 'length' || setting.type == 'angle'"
           :value.sync="activeFeature[key]"
           @update:value="update"
         )
@@ -194,9 +194,7 @@
     },
 
     mounted: function() {
-      if(!this.activeFeature.defaultSetting) return
-      const setting = this.activeFeature.settings[this.activeFeature.defaultSetting]
-      this.pick(setting.type, this.activeFeature.defaultSetting)
+      this.pickAll()
     },
 
     beforeDestroy: function() {
@@ -204,26 +202,40 @@
     },
 
     methods: {
-      pick: function(type, name) {
-        this.$root.$off('picked')
-        this.$root.$once('picked', (item) => {
-          this.activeFeature[name] = item
-          this.update()
-          this.activePicker = null
+      pick: function(type, key) {
+        return new Promise((resolve) => {
+          this.$root.$off('picked')
+          this.$root.$once('picked', (item) => {
+            this.activeFeature[key] = item
+            this.update()
+            this.activePicker = null
+            resolve()
+          })
+          this.activePicker = key
+          const picker = this.$refs[key][0]
+          const pickerRect = picker.getBoundingClientRect()
+          const pickerPos = {
+            x: pickerRect.left + (pickerRect.width / 2),
+            y: pickerRect.top + (pickerRect.height / 2) - 38,
+          }
+          const style = window.getComputedStyle(picker)
+          const color = style.getPropertyValue('background-color')
+          this.$root.$emit('pick', type, pickerPos, color)
         })
-        this.activePicker = name
-        const picker = this.$refs[name][0]
-        const pickerRect = picker.getBoundingClientRect()
-        const pickerPos = {
-          x: pickerRect.left + (pickerRect.width / 2),
-          y: pickerRect.top + (pickerRect.height / 2) - 38,
-        }
-        const style = window.getComputedStyle(picker)
-        const color = style.getPropertyValue('background-color')
-        if(type == 'profile') {
-          this.$root.$emit('pick-profile', pickerPos, color)
-        } else if(type == 'curve') {
-          this.$root.$emit('pick-curve', pickerPos, color)
+      },
+
+      needsPicker: function(setting) {
+        return ['profile', 'curve', 'axis'].some(type => type == setting.type )
+      },
+
+      pickAll: function() {
+        const pickerKeys = Object.keys(this.activeFeature.settings).filter(key =>
+          this.needsPicker(this.activeFeature.settings[key])
+        )
+        let chain = Promise.resolve()
+        for(const key of pickerKeys) {
+          const setting = this.activeFeature.settings[key]
+          chain = chain.then(() => this.pick(setting.type, key) )
         }
       },
 

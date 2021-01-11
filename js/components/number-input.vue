@@ -23,10 +23,9 @@
   .number-input
     display: flex
     position: relative
-    max-width: 94px
     input
-      flex: 1 1 auto
       width: 100%
+      min-width: 60px
       border-radius: 0
       text-align: right
       padding: 0

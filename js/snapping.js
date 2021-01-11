@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-const snapDistance = 19.5 // px
+const snapDistance = 14 // px
 const maxSnapReferences = 5
 
 export class Snapper {
@@ -68,16 +68,27 @@ export class Snapper {
 
   snapToGuides(vec) {
     if(!vec) return
+    const screenVec = this.viewport.renderer.toScreen(vec)
     let snapX
     this.lastSnaps.some(snap => {
-      if(Math.abs(vec.x - snap.x) < 0.1) {
+      // Compare world space X axis..
+      const testSnap = snap.clone()
+      testSnap.setY(vec.y)
+      testSnap.setZ(vec.z)
+      const screenSnap = this.viewport.renderer.toScreen(testSnap)
+      // .. in screen space
+      if(screenVec.distanceTo(screenSnap) < snapDistance) {
         snapX = snap
         return true
       }
     })
     let snapY
     this.lastSnaps.some(snap => {
-      if(Math.abs(vec.y - snap.y) < 0.1) {
+      const testSnap = snap.clone()
+      testSnap.setX(vec.x)
+      testSnap.setZ(vec.z)
+      const screenSnap = this.viewport.renderer.toScreen(testSnap)
+      if(screenVec.distanceTo(screenSnap) < snapDistance) {
         snapY = snap
         return true
       }

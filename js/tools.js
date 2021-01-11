@@ -198,7 +198,7 @@ export class LineTool extends Tool {
     this.line = this.component.get_sketch().add_line(vec.toArray(), vec.toArray())
     this.viewport.elementChanged(this.line, this.component)
     // Restart tool when we close a loop
-    if(this.firstPoint && vec.equals(this.firstPoint)) {
+    if(this.firstPoint && vec.distanceTo(this.firstPoint)  < 0.0000001) {
       this.component.get_sketch().remove_element(this.line.id())
       this.line = null
       this.firstPoint = null

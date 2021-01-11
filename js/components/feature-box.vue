@@ -99,16 +99,18 @@
       border-color: lighten($green, 75%)
     > *
       margin-top: 6px
-    input, select
-      max-width: 65px
+    input
+    select
+    .radio-bar
+    .icon-toggle
       flex: 1 1 auto
 
   .picker
     width: 24px
     height: 24px
     border: 7px solid white
-    border-radius: 40px
-    cursor: pointer
+    border-radius: 99px
+    // cursor: pointer
     transition: all 0.06s
     &:hover
       border-width: 0px
@@ -203,6 +205,7 @@
 
     methods: {
       pick: function(type, name) {
+        this.$root.$off('picked')
         this.$root.$once('picked', (item) => {
           this.activeFeature[name] = item
           this.update()

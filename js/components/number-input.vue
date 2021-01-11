@@ -1,5 +1,7 @@
 <template lang="pug">
   .number-input
+    button.button(@click.prevent="pick")
+      fa-icon(icon="eye-dropper")
     input(
       type="text"
       ref="input"
@@ -10,8 +12,10 @@
     .unit
       | mm
     .controls
-      button.button(@click.prevent="increase") +
-      button.button(@click.prevent="decrease") -
+      button.button(@click.prevent="increase")
+        fa-icon(icon="caret-up")
+      button.button(@click.prevent="decrease")
+        fa-icon(icon="caret-down")
 </template>
 
 
@@ -19,20 +23,22 @@
   .number-input
     display: flex
     position: relative
+    max-width: 94px
     input
       flex: 1 1 auto
-      border-top-right-radius: 0
-      border-bottom-right-radius: 0
-      max-width: 60px
+      width: 100%
+      border-radius: 0
       text-align: right
       padding: 0
-      padding-right: 26px
+      padding-right: 23px
       font-size: 12px
       font-weight: 900
       color: $dark2
+      margin: 0
+      z-index: 1
+      font-family: Orbitron
       &:focus
-        border-right: none
-        background: lighten($highlight, 75%)
+        background: lighten($highlight, 80%)
       &::selection
         background: none
 
@@ -43,22 +49,27 @@
     color: rgba(black, 0.65)
     font-size: 10px
     pointer-events: none
+    z-index: 2
+
+  .button
+    margin: 0
+    padding: 0px 5px
+    text-shadow: none
+    font-size: 9px
+    border-radius: 3px
+    border-top-right-radius: 0
+    border-bottom-right-radius: 0
 
   .controls
     display: flex
     flex-direction: column
     flex: 0 0 auto
     .button
-      margin: 0
-      padding: 0px 4px
-      text-shadow: none
-      font-size: 9px
+      padding-bottom: 1px
       border-radius: 0
       &:first-child
-        // margin-top: 3px
         border-top-right-radius: 3px
       &:last-child
-        // margin-top: 3px
         border-bottom-right-radius: 3px
 </style>
 

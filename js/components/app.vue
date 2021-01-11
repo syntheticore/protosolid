@@ -111,7 +111,7 @@
         return wasmP.then((wasm) => {
           const proxy = new wasm.AlchemyProxy()
           const tree = proxy.get_main_assembly()
-          this.documents.push({
+          this.activeDocument = {
             title: 'Untitled Document',
             proxy: proxy,
             views: [
@@ -155,7 +155,8 @@
             activePose: null,
             isPoseDirty: false,
             isSetDirty: true,
-          })
+          }
+          this.documents.push(this.activeDocument)
         })
       },
 

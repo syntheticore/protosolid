@@ -93,6 +93,7 @@ import {
   faBlender,
   faBolt,
   faBookOpen,
+  faEyeDropper,
   faTimesCircle,
   faTimes,
 } from '@fortawesome/free-solid-svg-icons'
@@ -188,6 +189,7 @@ library.add(
   faBlender,
   faBolt,
   faBookOpen,
+  faEyeDropper,
   faTimesCircle,
   faTimes,
 )

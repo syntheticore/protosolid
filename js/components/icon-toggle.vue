@@ -9,7 +9,6 @@
 
 <style lang="stylus" scoped>
   .icon-toggle
-    flex: 1 1 auto
     margin-left: 0
     margin-right: 0
     margin-bottom: 0

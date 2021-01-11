@@ -26,7 +26,7 @@
         @create-component="createComponent"
       )
     .side-bar.right
-      h1 Views
+      h1 View
       ListChooser(
         :list="document.views"
         :active="document.activeView"
@@ -152,7 +152,12 @@
         handler: function(document, oldDocument) {
           if(oldDocument) oldDocument.activeView = oldDocument.activeView || this.dirtyView
           this.integrateComponent(document.tree)
-          document.activeView = document.activeView || document.views[3]
+          if(!document.activeView) {
+            document.activeView = document.views[3]
+            this.createComponent(this.document.tree, 'Component 1')
+          }
+          this.previewView = null
+          this.dirtyView = null
         },
       },
     },
@@ -187,12 +192,8 @@
       }
     },
 
-    created() {
-      this.activateComponent(this.createComponent(this.document.tree, 'Component 1'))
-      this.currentDisplayMode = 'wireShade'
-    },
-
     mounted() {
+      this.currentDisplayMode = 'wireShade'
       this.$root.$emit('activate-toolname', 'Manipulate')
     },
 

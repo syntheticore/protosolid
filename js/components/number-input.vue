@@ -1,11 +1,12 @@
 <template lang="pug">
   .number-input
     button.button(@click.prevent="pick")
-      fa-icon(icon="eye-dropper")
+      fa-icon(icon="tape")
     input(
       type="text"
       ref="input"
       v-model="inner"
+      :style="inputStyle"
       @blur="focusInput"
       @keydown.enter.prevent="focusInput"
     )
@@ -25,7 +26,6 @@
     position: relative
     input
       width: 100%
-      min-width: 60px
       border-radius: 0
       text-align: right
       padding: 0
@@ -54,7 +54,6 @@
     margin: 0
     padding: 0px 5px
     text-shadow: none
-    font-size: 9px
     border-radius: 3px
     border-top-right-radius: 0
     border-bottom-right-radius: 0
@@ -66,6 +65,7 @@
     .button
       padding-bottom: 1px
       border-radius: 0
+      font-size: 9px
       &:first-child
         border-top-right-radius: 3px
       &:last-child
@@ -87,6 +87,15 @@
       },
     },
 
+    computed: {
+      inputStyle: function() {
+        const numChars = String(this.inner).length
+        return {
+          'width': String(36 + Math.max(2, numChars * 10)) + 'px'
+        }
+      },
+    },
+
     data() {
       return {
         inner: String,
@@ -100,13 +109,12 @@
 
     methods: {
       increase: function() {
-        console.log('increase')
-        this.inner = Number(this.inner) + 1
+        this.inner = Number((Number(this.inner) + 1).toFixed(3))
         this.focusInput()
       },
 
       decrease: function() {
-        this.inner = Number(this.inner) - 1
+        this.inner = Number((Number(this.inner) - 1).toFixed(3))
         this.focusInput()
       },
 

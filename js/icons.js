@@ -95,6 +95,8 @@ import {
   faBolt,
   faBookOpen,
   faEyeDropper,
+  faWeight,
+  faThermometer,
   faTimesCircle,
   faTimes,
 } from '@fortawesome/free-solid-svg-icons'
@@ -192,6 +194,8 @@ library.add(
   faBolt,
   faBookOpen,
   faEyeDropper,
+  faWeight,
+  faThermometer,
   faTimesCircle,
   faTimes,
 )

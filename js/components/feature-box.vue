@@ -9,7 +9,7 @@
       label(v-for="(setting, key) in activeFeature.settings")
         | {{ setting.title }}
         .picker(
-          v-if="needsPicker(setting)"
+          v-if="needsPicker(setting, true)"
           :ref="key"
           :class="{active: activePicker == key, filled: activeFeature[key]}"
           @click="pick(setting.type, key)"
@@ -224,8 +224,10 @@
         })
       },
 
-      needsPicker: function(setting) {
-        return ['profile', 'curve', 'axis'].some(type => type == setting.type )
+      needsPicker: function(setting, includeOptionals) {
+        return ['profile', 'curve', 'axis'].some(type =>
+          type == setting.type && (!setting.optional || includeOptionals)
+        )
       },
 
       pickAll: function() {
@@ -251,7 +253,7 @@
       },
 
       cancel: function(e) {
-        this.activeFeature.cancel()
+        this.activeFeature.dispose()
         this.$root.$emit('unpreview-feature')
         this.$root.$emit('activate-toolname', 'Manipulate')
         this.$emit('close')

@@ -335,8 +335,9 @@
     methods: {
       buildPath: function(origin, vec) {
         const pos = this.renderer.toScreen(vec)
+        const dx = Math.min(40 + Math.abs(origin.x - pos.x) / 2.0, 200)
         const dy = Math.abs(origin.y - pos.y) / 2.0
-        return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dy} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
+        return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
       },
 
       getMouseCoords: function(e) {
@@ -362,6 +363,14 @@
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseUp(vec, coords)
         this.snapper.reset()
+        this.updateRegions()
+      },
+
+      updateRegions: function() {
+        if(!this.regionsDirty) return
+        this.transloader.updateRegions(this.activeComponent)
+        this.renderer.render()
+        this.regionsDirty = false
       },
 
       mouseDown: function(e) {
@@ -454,7 +463,7 @@
       },
 
       elementChanged: function(elem, comp) {
-        this.transloader.updateRegions(comp)
+        this.regionsDirty = true
         this.transloader.loadElement(elem, comp)
         this.renderer.render()
       },

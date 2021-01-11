@@ -29,10 +29,10 @@ class Feature {
     }
   }
 
-  isComplete() {}
   preview() {}
   confirm() {}
-  cancel() {}
+  dispose() {}
+  isComplete() {}
 
   update() {
     if(this.isComplete()) return this.preview()
@@ -50,6 +50,7 @@ export class ExtrudeFeature extends Feature {
       rail: {
         title: '(Rail)',
         type: 'curve',
+        optional: true,
       },
       distance: {
         title: 'Distance',
@@ -73,11 +74,16 @@ export class ExtrudeFeature extends Feature {
   }
 
   preview() {
+    this.profile.noFree = true
     return this.profile.extrude_preview(this.distance * (this.side ? 1 : -1))
   }
 
   confirm() {
     this.profile.extrude(this.distance * (this.side ? 1 : -1))
+  }
+
+  dispose() {
+    // if(this.profile) this.profile.free()
   }
 }
 
@@ -115,10 +121,15 @@ export class RevolveFeature extends Feature {
   }
 
   preview() {
-    return this.profile.extrude_preview(profile, this.angle * (this.side ? 1 : -1))
+    this.profile.noFree = true
+    return this.profile.extrude_preview(this.angle * (this.side ? 1 : -1))
   }
 
   confirm() {
     // this.profile.revolve(axis, this.angle * (this.side ? 1 : -1))
+  }
+
+  dispose() {
+    // if(this.profile) this.profile.free()
   }
 }

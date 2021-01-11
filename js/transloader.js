@@ -141,7 +141,7 @@ export class Transloader {
 
   purgeRegions(compData) {
     compData.regions.forEach(mesh => {
-      mesh.alcRegion.free()
+      if(!mesh.alcRegion.noFree) mesh.alcRegion.free()
       this.renderer.remove(mesh)
     })
     compData.regions = []

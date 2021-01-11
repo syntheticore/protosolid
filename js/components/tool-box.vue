@@ -14,6 +14,7 @@
 
           button.button(
             :class="{active: isActive(tool)}"
+            :title="tool.title"
             @click="activateTool(tool)"
           )
             fa-icon(:icon="tool.icon" fixed-width)
@@ -43,7 +44,7 @@
     display: flex
     // box-shadow: 0 0 4px rgba(black, 0.6)
     border-bottom: 1px solid $dark1 * 1.15
-    overflow-x: auto
+    // overflow-x: auto
     li
       flex: 1 1 auto
       padding: 5px 10px
@@ -60,10 +61,10 @@
         background: $dark1 * 1.15
 
   .tools
-    padding-right: 4px
-    padding-bottom: 4px
+    display: flex
     li
-      display: inline-block
+      width: 65px
+      margin: 5px
     .button
       text-align: center
       background: none
@@ -72,14 +73,18 @@
       padding: 5px 6px
       min-width: 55px
       padding-bottom: 4px
-      margin-right: 0
+      // margin-right: 0
+      margin: 0
       margin-bottom: 0
       text-shadow: none
       position: relative
+      width: 100%
       &:hover, &.active
         background: $dark1 * 1.15
         .title
           color: $bright1
+        .hot-key
+          border-color: $dark1 * 1.9
       &:active
         background: $dark1 * 0.9
       &.active
@@ -95,10 +100,13 @@
       font-size: 11px
       margin-top: 6px
       font-weight: bold
+      white-space: nowrap
+      overflow: hidden
+      text-overflow: ellipsis
     .hot-key
       position: absolute
-      top: 1px
-      right: 1px
+      top: 2px
+      right: 2px
       font-size: 9px
       color: $bright2
       background: $dark1
@@ -191,9 +199,34 @@
               { title: 'Set Plane', tools: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
             ]
           },
-          { title: 'Constrain', tools: [] },
-          { title: 'Simulate', tools: [] },
-          { title: 'Make', tools: [] },
+          {
+            title: 'Constrain',
+            tools: [
+              { title: 'Dimension', icon: 'traffic-light' },
+              { title: 'Touch', icon: 'object-group' },
+              { title: 'Parallel', icon: 'code-branch' },
+              { title: 'Perpendicular', icon: 'object-group' },
+              { title: 'Tangent', icon: 'object-group' },
+              { title: 'Hor / Vert', icon: 'object-group' },
+              { title: 'Fix', icon: 'object-group' },
+            ],
+          },
+          {
+            title: 'Analyze',
+            tools: [
+              { title: 'Interference', icon: 'traffic-light' },
+              { title: 'Continuity', icon: 'code-branch' },
+              { title: 'Section', icon: 'object-group' },
+            ],
+          },
+          {
+            title: 'Simulate',
+            tools: [
+              { title: 'Material', icon: 'asterisk' },
+              { title: 'Temperature', icon: 'thermometer' },
+              { title: 'Static Load', icon: 'weight' },
+            ],
+          },
         ]
       }
     },

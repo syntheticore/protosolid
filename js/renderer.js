@@ -136,6 +136,8 @@ export class Renderer {
     this.viewControls.addEventListener('start', () => {
       this.isOrbiting = true
       this.transformControl.enabled = false
+      this.cameraTarget = null
+      this.viewControlsTarget = null
       this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
       this.startAnimation()
     })

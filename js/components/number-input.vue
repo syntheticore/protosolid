@@ -11,7 +11,7 @@
       @keydown.enter.prevent="focusInput"
     )
     .unit
-      | mm
+      | {{ unit }}
     .controls
       button.button(@click.prevent="increase")
         fa-icon(icon="caret-up")
@@ -49,6 +49,7 @@
     font-size: 10px
     pointer-events: none
     z-index: 2
+    width: 18px
 
   .button
     margin: 0
@@ -79,6 +80,10 @@
 
     props: {
       value: Number,
+      unit: {
+        default: 'mm',
+        type: String,
+      },
     },
 
     watch: {

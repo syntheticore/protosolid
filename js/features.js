@@ -31,11 +31,25 @@ class Feature {
 
   preview() {}
   confirm() {}
-  dispose() {}
   isComplete() {}
 
   update() {
     if(this.isComplete()) return this.preview()
+  }
+
+  dispose() {
+    // Free all profile regions
+    for(const key in this.settings) {
+      const setting = this.settings[key]
+      if(setting.type == 'profile') {
+        const profile = this[key]
+        if(profile) {
+          if(profile.unused) profile.free()
+          profile.noFree = false
+          this[key] = null
+        }
+      }
+    }
   }
 }
 
@@ -48,14 +62,21 @@ export class ExtrudeFeature extends Feature {
         type: 'profile',
       },
       rail: {
-        title: '(Rail)',
-        type: 'curve',
+        title: '(Axis)',
+        type: 'axis',
         optional: true,
       },
       distance: {
         title: 'Distance',
         type: 'length',
       },
+      // limit: {
+      //   type: 'OR',
+      //   settings: [
+      //     { title: 'Distance', type: 'length' },
+      //     { title: '(Up to)', type: 'surface|point' },
+      //   ]
+      // },
       side: {
         title: 'Side',
         type: 'bool',
@@ -81,9 +102,42 @@ export class ExtrudeFeature extends Feature {
   confirm() {
     this.profile.extrude(this.distance * (this.side ? 1 : -1))
   }
+}
 
-  dispose() {
-    // if(this.profile) this.profile.free()
+
+export class SweepFeature extends Feature {
+  constructor(component) {
+    super(component, true, {
+      profile: {
+        title: 'Profile',
+        type: 'profile',
+      },
+      rail: {
+        title: 'Rail',
+        type: 'curve',
+      },
+      bounds: {
+        title: 'Bounds',
+        type: 'bounds',
+      },
+    })
+
+    this.profile = null
+    this.rail = null
+    this.bounds = [0.0, 1.0]
+  }
+
+  isComplete() {
+    return this.profile && this.rail
+  }
+
+  preview() {
+    this.profile.noFree = true
+    return this.profile.extrude_preview(1.0)
+  }
+
+  confirm() {
+    this.profile.extrude(1.0)
   }
 }
 
@@ -127,9 +181,5 @@ export class RevolveFeature extends Feature {
 
   confirm() {
     // this.profile.revolve(axis, this.angle * (this.side ? 1 : -1))
-  }
-
-  dispose() {
-    // if(this.profile) this.profile.free()
   }
 }

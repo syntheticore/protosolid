@@ -1,5 +1,6 @@
 <template lang="pug">
   li.tree-item
+
     header
       fa-icon.expander(
         icon="caret-down"
@@ -32,15 +33,27 @@
             title="Create Component"
             @click="createComponent(component)"
           )
-          fa-icon.new-variable(
-            icon="sliders-h" fixed-width
-            title="Create Variable"
-            @click="createVariable(component)"
-          )
-    ul.content(v-if="expanded")
-      //- li
-      //-   fa-icon(icon="atom")
-      //-   span COG
+          //- fa-icon.new-variable(
+          //-   icon="sliders-h" fixed-width
+          //-   title="Create Variable"
+          //-   @click="createVariable(component)"
+          //- )
+
+    ul.content(
+      v-if="expanded"
+      :class="{hidden: !isVisible}"
+    )
+      li
+        fa-icon(icon="atom")
+        span Center of Mass
+      li
+        fa-icon(icon="volleyball-ball")
+        span Polycarbonate
+        fa-icon.expand(icon="angle-right")
+      li
+        fa-icon(icon="object-group")
+        span Section View 1
+
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
       li(
         is="tree-item"
@@ -93,6 +106,7 @@
     &:hover
       background: $dark2 * 1.3
       border-color: $dark1 * 1.85
+      color: white
       .controls
         margin-right: 0
         opacity: 1
@@ -112,9 +126,10 @@
     &.eye, .controls &
       color: $bright1
       // cursor: pointer
-      transition: all 0.15s
+      transition: all 0.1s
       &:hover
-        color: $bright1 * 2
+        // color: $bright1 * 2
+        color: white
         background: $dark1 * 1.85
       &:active
         background: $dark1 * 1.5
@@ -133,17 +148,41 @@
 
   .controls
     border-left: 0.5px solid $dark1 * 1.3
-    margin-right: -80px
+    margin-right: -53px
     opacity: 0
-    transition: all 0.2s
+    transition: all 0.15s
     transition-delay: 0.25s
 
   .content
-    margin-left: 25px
+    // margin-left: 23px
+    margin-left: 43px
+    transition: opacity 0.2s
+    display: flex
+    flex-direction: column
+    align-items: flex-start
+    &.hidden
+      opacity: 0.5
     li
       display: flex
       font-size: 12px
       align-items: center
+      background: $dark2
+      border: 0.5px solid $dark1 * 1.3
+      border-radius: 3px
+      margin: 1px 0
+      padding: 1px 5px 1px 2px
+      &:hover
+        background: $dark2 * 1.3
+        border-color: $dark1 * 1.85
+        svg
+          color: $bright1
+      svg
+        font-size: 19px
+        &.expand
+          padding: 2px
+          margin-left: 4px
+      span
+        margin-left: 1px
 
   .list-enter-active
   .list-leave-active

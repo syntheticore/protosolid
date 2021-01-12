@@ -256,7 +256,7 @@ function showSplash() {
     }
   })
   splash.loadFile('splash.html')
-  setTimeout(createWindow, 500)
+  setTimeout(createWindow, 250)
 }
 
 function setDarkMode() {
@@ -304,7 +304,7 @@ ipcMain.on('vue-ready', function() {
   setTimeout(() => {
     splash.destroy()
     mainWindow.show()
-  }, 1500)
+  }, 1000)
 });
 
 // In this file you can include the rest of your app's specific main process

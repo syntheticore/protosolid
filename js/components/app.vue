@@ -142,7 +142,6 @@
             ],
             poses: [
               { title: 'Base', id: lastId++ },
-              { title: 'Activated', id: lastId++ },
             ],
             sets: [
               { title: 'Filet 14', id: lastId++ },
@@ -161,9 +160,12 @@
       },
 
       deleteDocument: function(doc) {
+        const index = this.documents.indexOf(doc)
         this.documents = this.documents.filter(d => d !== doc)
         if(!this.documents.length) this.createDocument()
-        this.activeDocument = this.documents[0]
+        if(this.activeDocument === doc) {
+          this.activeDocument = this.documents[Math.min(index, this.documents.length - 1)]
+        }
         // Free Rust memory when old doc has been removed by viewport
         setTimeout(() => {
           doc.tree.free()

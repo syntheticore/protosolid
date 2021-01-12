@@ -33,7 +33,7 @@
       //   border-top: none
       //   border-bottom: none
       button
-        padding: 2px 8px
+        padding: 3px 8px
     &.left
       .pop-up
         right: unset
@@ -47,6 +47,8 @@
     color: inherit
     font-size: 16px
     font-weight: normal
+    display: flex
+    align-items: center
     &.pressed
     &:active
       .expander
@@ -79,7 +81,7 @@
 
   .wrapper
     overflow: hidden
-    padding: 14px
+    // padding: 14px
     border-radius: 5px
     right: -12px
 </style>

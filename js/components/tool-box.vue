@@ -15,6 +15,7 @@
           button.button(
             :class="{active: isActive(tool)}"
             :title="tool.title"
+            :disabled="!tool.tool && !tool.feature"
             @click="activateTool(tool)"
           )
             fa-icon(:icon="tool.icon" fixed-width)
@@ -37,7 +38,8 @@
     border-top-right-radius: 3px
     border-bottom-left-radius: 6px
     border-bottom-right-radius: 6px
-    background: rgba($dark2, 0.9)
+    background: rgba($dark2, 0.95)
+    min-width: 565px
     // overflow: hidden
 
   .tabs
@@ -63,8 +65,9 @@
   .tools
     display: flex
     li
-      width: 65px
-      margin: 5px
+      max-width: 86px
+      min-width: 70px
+      margin: 4px
     .button
       text-align: center
       background: none
@@ -83,10 +86,16 @@
         background: $dark1 * 1.15
         .title
           color: $bright1
+          transition: none
         .hot-key
           border-color: $dark1 * 1.9
       &:active
         background: $dark1 * 0.9
+      &:disabled
+        .title
+          color: $bright2 * 0.6
+        svg
+          color: $bright2 * 0.7
       &.active
         svg
           color: lighten($highlight, 25%)
@@ -101,8 +110,10 @@
       margin-top: 6px
       font-weight: bold
       white-space: nowrap
+      // line-height: 1.3
       overflow: hidden
       text-overflow: ellipsis
+      transition: all 0.15s
     .hot-key
       position: absolute
       top: 2px
@@ -130,7 +141,7 @@
 
 <script>
   import FeatureBox from './feature-box.vue'
-  import { ExtrudeFeature, RevolveFeature } from './../features.js'
+  import { ExtrudeFeature, RevolveFeature, SweepFeature } from './../features.js'
 
   import {
     ManipulationTool,
@@ -158,9 +169,17 @@
 
     data() {
       return {
-        activeTab: 1,
+        activeTab: 6,
         activeFeature: null,
         tabs: [
+          {
+            title: 'Construct',
+            tools: [
+              { title: 'Set Plane', tool: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
+              { title: 'Parameter', icon: 'square-root-alt' },
+              { title: 'Center of Mass', icon: 'atom' },
+            ]
+          },
           {
             title: 'Sketch',
             tools: [
@@ -178,7 +197,7 @@
               { title: 'Extrude', feature: ExtrudeFeature, icon: 'box', hotKey: 'E', keyCode: 69 },
               { title: 'Revolve', feature: RevolveFeature, icon: 'wave-square', hotKey: 'V', keyCode: 86 },
               { title: 'Loft', icon: 'layer-group' },
-              { title: 'Sweep', icon: 'route' },
+              { title: 'Sweep', feature: SweepFeature, icon: 'route' },
               { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 77 },
               { title: 'Array', icon: 'th' },
             ],
@@ -192,12 +211,6 @@
               { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
               { title: 'Split', icon: 'code-branch' },
             ],
-          },
-          {
-            title: 'Construct',
-            tools: [
-              { title: 'Set Plane', tools: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
-            ]
           },
           {
             title: 'Constrain',
@@ -214,16 +227,16 @@
           {
             title: 'Analyze',
             tools: [
-              { title: 'Interference', icon: 'traffic-light' },
+              { title: 'Interference Check', icon: 'traffic-light' },
               { title: 'Continuity', icon: 'code-branch' },
-              { title: 'Section', icon: 'object-group' },
+              { title: 'Section View', icon: 'object-group' },
             ],
           },
           {
             title: 'Simulate',
             tools: [
-              { title: 'Material', icon: 'asterisk' },
-              { title: 'Temperature', icon: 'thermometer' },
+              { title: 'Material', icon: 'volleyball-ball' },
+              { title: 'Temperature Distribution', icon: 'thermometer' },
               { title: 'Static Load', icon: 'weight' },
             ],
           },
@@ -263,11 +276,13 @@
         // Don't activate features twice
         if(this.activeFeature && this.activeFeature.constructor === tool.feature) return
         this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))
-        if(tool.feature) {
-          this.activeFeature = new tool.feature(this.activeComponent)
-        } else {
-          setTimeout(() => this.$root.$emit('activate-toolname', tool.title) )
-        }
+        setTimeout(() => {
+          if(tool.feature) {
+            this.activeFeature = new tool.feature(this.activeComponent)
+          } else {
+            this.$root.$emit('activate-toolname', tool.title)
+          }
+        })
       },
 
       isActive: function(tool) {

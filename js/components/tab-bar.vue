@@ -2,14 +2,8 @@
   header.tab-bar
 
     MenuButton.left.app-menu-btn(icon="atom")
-      .about
-        fa-icon(icon="atom")
-        h1 Alchemy
-        .version Version 0.1
-      hr
-      button.button(@click="$emit('create-document')") New Document
-      form.preferences
-        IconView
+      AppMenu(@create-document="$emit('create-document')")
+      IconView
 
     ul.tabs
       li(v-for="doc in documents"
@@ -22,34 +16,35 @@
     .grab-handle.dynamic
 
     nav
-      MenuButton(title="Tool Settings" icon="code-branch")
-        form
-          label
-            | Transform:
-            select
-              option World
-              option Local
-          fieldset
-            legend Selection
-            label
-              input(type="checkbox" checked)
-              | Select invisible Geometry
-          fieldset
-            legend Snapping
-            label
-              input(type="checkbox" checked)
-              | Snap to Grid
-            label.inset
-              | Increment
-              input(type="number" value="10")
-            label
-              input(type="checkbox" checked)
-              | Snap to Angles
-            label.inset
-              | Increment
-              input(type="number" value="45")
-      MenuButton(title="Tool Settings" icon="cloud")
-      //- MenuButton(title="Snapping" icon="ruler")
+      MenuButton(title="Preferences" icon="sliders-h")
+      //- MenuButton(title="Tool Settings" icon="code-branch")
+      //-   form
+      //-     label
+      //-       | Transform:
+      //-       select
+      //-         option World
+      //-         option Local
+      //-     fieldset
+      //-       legend Selection
+      //-       label
+      //-         input(type="checkbox" checked)
+      //-         | Select invisible Geometry
+      //-     fieldset
+      //-       legend Snapping
+      //-       label
+      //-         input(type="checkbox" checked)
+      //-         | Snap to Grid
+      //-       label.inset
+      //-         | Increment
+      //-         input(type="number" value="10")
+      //-       label
+      //-         input(type="checkbox" checked)
+      //-         | Snap to Angles
+      //-       label.inset
+      //-         | Increment
+      //-         input(type="number" value="45")
+      //- MenuButton(title="Tool Settings" icon="cloud")
+      //- //- MenuButton(title="Snapping" icon="ruler")
       MenuButton.account(title="Account" icon="user-circle")
         span.name Björn
 
@@ -97,30 +92,20 @@
     .window-controls button:last-child
       border-radius: 0
 
+  [data-platform="browser"]
+    .icon-view
+      display: block
+
   .app-menu-btn
     color: $highlight * 1.2
-    hr
-      border: 0
-      height: 1px
-      margin: 12px 0
-      background-image: linear-gradient(to right, $dark2, $dark1 * 1.4, $dark2)
+    .wrapper
+      padding: 0 !important
 
-  .about
-    text-align: center
-    svg
-      font-size: 45px
-      color: $bright1
-    h1
-      font-size: 16px
-      font-weight: bold
-      color: $bright1
-      margin-top: 8px
-    .version
-      font-size: 11px
-      margin-top: 4px
+  .app-menu
+    // min-height: 200px
 
-  .preferences
-    min-height: 200px
+  .icon-view
+    display: none
 
   .tabs
     display: flex
@@ -226,6 +211,7 @@
 
 
 <script>
+  import AppMenu from './app-menu.vue'
   import MenuButton from './menu-button.vue'
   import IconView from './icon-view.vue'
 
@@ -233,6 +219,7 @@
     name: 'ToolBar',
 
     components: {
+      AppMenu,
       MenuButton,
       IconView,
     },

@@ -49,13 +49,13 @@
         :allow-create="document.isPoseDirty"
         @create="createPose"
       )
-      h1 Sets
-      ListChooser(
-        v-if="document.sets.length || document.isSetDirty"
-        :list="document.sets"
-        :allow-create="document.isSetDirty"
-        @create="createSet"
-      )
+      //- h1 Sets
+      //- ListChooser(
+      //-   v-if="document.sets.length || document.isSetDirty"
+      //-   :list="document.sets"
+      //-   :allow-create="document.isSetDirty"
+      //-   @create="createSet"
+      //- )
     FooterView(
       :selected-element="selectedElement"
       :active-component="document.activeComponent"

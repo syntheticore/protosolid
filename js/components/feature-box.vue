@@ -17,6 +17,7 @@
         NumberInput(
           v-if="setting.type == 'length' || setting.type == 'angle'"
           :value.sync="activeFeature[key]"
+          :unit="setting.type == 'angle' ? '°' : 'mm'"
           @update:value="update"
         )
         IconToggle(

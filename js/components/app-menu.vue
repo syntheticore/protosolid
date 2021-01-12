@@ -6,45 +6,43 @@
       .version Version 0.11
 
     //- hr
-    //- button.button(@click="$emit('create-document')") New Document
 
     ul.actions
       li
-        button.button(@click="$emit('create-document')")
-          fa-icon(icon="file")
+        button(@click="$emit('create-document')")
+          fa-icon(icon="file" fixed-width)
           span New Document
       li
-        button.button(disabled="disabled")
-          fa-icon(icon="file-import")
-          span Open File..
+        button(disabled="disabled")
+          fa-icon(icon="file-import" fixed-width)
+          span Open...
       li
-        button.button(disabled="disabled")
-          fa-icon(icon="save")
+        button(disabled="disabled")
+          fa-icon(icon="save" fixed-width)
           span Save
       li
-        button.button(disabled="disabled")
-          fa-icon(icon="save")
-          span Save as..
+        button(disabled="disabled")
+          fa-icon(icon="save" fixed-width)
+          span Save as...
       li
-        button.button(disabled="disabled")
-          fa-icon(icon="file-import")
-          span Import..
-      li
-        button.button(disabled="disabled")
-          fa-icon(icon="network-wired")
-          span Open Network Project..
+        button(disabled="disabled")
+          fa-icon(icon="file-import" fixed-width)
+          span Import...
+      //- li
+      //-   button(disabled="disabled")
+      //-     fa-icon(icon="network-wired" fixed-width)
+      //-     span Open Network Project...
 
     ul.recents
 </template>
 
 
 <style lang="stylus" scoped>
-  .app-menu
-    // hr
-    //   border: 0
-    //   height: 1px
-    //   margin: 12px 0
-    //   background-image: linear-gradient(to right, $dark2, $dark1 * 1.4, $dark2)
+  // hr
+  //   border: 0
+  //   height: 1px
+  //   margin: 12px 0
+  //   background-image: linear-gradient(to right, $dark2, $dark1 * 1.4, $dark2)
 
   .about
     padding: 12px
@@ -64,13 +62,36 @@
       margin-top: 4px
 
   .actions
-    padding: 6px 5px
+    button
+      background: none
+      border: none
+      padding: 10px 8px
+      font-size: 14px
+      font-weight: 600
+      color: $bright1
+      width: 100%
+      text-align: left
+      border-bottom: 1px solid $dark1
+      display: flex
+      align-items: center
+      &:hover
+        background: $dark1
+        color: white
+      &:active
+        background: $dark1 * 0.65
+      &:disabled
+        pointer-events: none
+        opacity: 0.5
+      svg
+        color: $bright1 * 0.85
+        font-size: 16px
+      span
+        margin-left: 8px
+        white-space: nowrap
 </style>
 
 
 <script>
-  // import Foo from './foo.vue'
-
   export default {
     name: 'AppMenu',
     components: {},

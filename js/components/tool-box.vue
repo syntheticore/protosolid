@@ -15,7 +15,7 @@
           button.button(
             :class="{active: isActive(tool)}"
             :title="tool.title"
-            :disabled="!tool.tool && !tool.feature"
+            :disabled="!tool.tool && !tool.feature && !tool.action"
             @click="activateTool(tool)"
           )
             fa-icon(:icon="tool.icon" fixed-width)
@@ -66,7 +66,7 @@
     display: flex
     li
       max-width: 86px
-      min-width: 70px
+      min-width: 65px
       margin: 4px
     .button
       text-align: center
@@ -92,10 +92,7 @@
       &:active
         background: $dark1 * 0.9
       &:disabled
-        .title
-          color: $bright2 * 0.6
-        svg
-          color: $bright2 * 0.7
+        filter: brightness(50%)
       &.active
         svg
           color: lighten($highlight, 25%)
@@ -165,19 +162,20 @@
     props: {
       activeTool: Object,
       activeComponent: Object,
+      data: Object,
     },
 
     data() {
       return {
-        activeTab: 6,
+        activeTab: 1,
         activeFeature: null,
         tabs: [
           {
             title: 'Construct',
             tools: [
               { title: 'Set Plane', tool: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
-              { title: 'Parameter', icon: 'square-root-alt' },
-              { title: 'Center of Mass', icon: 'atom' },
+              { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
+              { title: 'Center of Mass', action: this.addCog, icon: 'atom' },
             ]
           },
           {
@@ -235,7 +233,7 @@
           {
             title: 'Simulate',
             tools: [
-              { title: 'Material', icon: 'volleyball-ball' },
+              { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
               { title: 'Temperature Distribution', icon: 'thermometer' },
               { title: 'Static Load', icon: 'weight' },
             ],
@@ -279,6 +277,8 @@
         setTimeout(() => {
           if(tool.feature) {
             this.activeFeature = new tool.feature(this.activeComponent)
+          } else if(tool.action) {
+            tool.action()
           } else {
             this.$root.$emit('activate-toolname', tool.title)
           }
@@ -292,6 +292,24 @@
 
       closeFeature: function() {
         this.activeFeature = null
+      },
+
+      addMaterial: function() {
+        this.data[this.activeComponent.id()].material = {
+          title: 'Polycarbonate',
+        }
+      },
+
+      addCog: function() {
+        this.data[this.activeComponent.id()].cog = true
+      },
+
+      addParameter: function() {
+        this.data[this.activeComponent.id()].parameters.push({
+          title: 'width',
+          unit: 'mm',
+          value: '612',
+        })
       },
     },
   }

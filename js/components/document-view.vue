@@ -15,6 +15,7 @@
     ToolBox(
       :active-tool="activeTool"
       :active-component="document.activeComponent"
+      :data="document.data"
     )
     .side-bar.left
       TreeView(
@@ -128,7 +129,7 @@
   import ListChooser from './list-chooser.vue'
   import RadioBar from './radio-bar.vue'
 
-  let lastId = 9999;
+  let lastId = 9999
 
   export default {
     name: 'DocumentView',
@@ -208,8 +209,12 @@
       integrateComponent: function(comp, parent) {
         const id = comp.id()
         if(!this.document.data[id]) this.$set(this.document.data, id, {
-          hidden: false,
           parent,
+          hidden: false,
+          material: null,
+          cog: false,
+          sectionViews: [],
+          parameters: [],
           faces: [],
           wireframe: [],
           regions: [],

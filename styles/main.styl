@@ -42,18 +42,22 @@ form
     margin-left: 8px
   input[type="checkbox"]
     margin-right: 8px
-  input[type="text"], input[type="number"]
+
+input[type="text"], input[type="number"]
+  background: $bright2
+  border: 2px solid transparent
+  box-shadow: 0 0 0 1px $dark2 * 0.55
+  font-weight: 700
+  border-radius: 4px
+  padding: 3px 0 3px 5px
+  font-size: 11px
+  transition: all 0.2s
+  color: $dark1
+  &:focus
     background: $bright1
-    border: 2px solid transparent
-    box-shadow: 0 0 0 1px $dark2 * 0.55
-    font-weight: 700
-    border-radius: 4px
-    padding: 3px 0 3px 5px
-    font-size: 11px
-    transition: all 0.4s
-    &:focus
-      background: $bright1
-      border: 2px solid $highlight
+    border: 2px solid $highlight
+  &:hover
+    background: $bright1
 
 .button
   color: $bright1

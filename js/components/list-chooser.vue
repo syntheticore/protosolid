@@ -51,6 +51,8 @@
     position: relative
     &:hover
       background: $dark1
+    &:active
+      background: $dark1 * 0.9
     &.active
       background: $highlight
       color: white

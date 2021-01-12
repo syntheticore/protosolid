@@ -33,26 +33,27 @@
             title="Create Component"
             @click="createComponent(component)"
           )
-          //- fa-icon.new-variable(
-          //-   icon="sliders-h" fixed-width
-          //-   title="Create Variable"
-          //-   @click="createVariable(component)"
-          //- )
 
-    ul.content(
+    ul.widgets(
       v-if="expanded"
       :class="{hidden: !isVisible}"
     )
-      li
-        fa-icon(icon="atom")
-        span Center of Mass
-      li
-        fa-icon(icon="volleyball-ball")
-        span Polycarbonate
-        fa-icon.expand(icon="angle-right")
-      li
-        fa-icon(icon="object-group")
-        span Section View 1
+      li(v-if="compData.cog")
+        header
+          fa-icon(icon="atom" fixed-width)
+          span Center of Mass
+
+      li(v-if="compData.material")
+        MaterialTreelet(:material="compData.material")
+
+      li(v-for="param in compData.parameters")
+        ParameterTreelet(:parameter="param")
+
+      li(v-for="material in compData.sectionViews")
+        header
+          fa-icon(icon="object-group" fixed-width)
+          span Section View 1
+          input(type="checkbox")
 
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
       li(
@@ -73,8 +74,6 @@
     margin-left: 23px
 
   header
-    // pointer-events: all
-    // display: inline-block
     display: flex
     align-items: center
 
@@ -82,7 +81,6 @@
     margin-right: 0
     font-size: 16px
     padding: 0
-    // cursor: pointer
     transition: all 0.2s
     &:hover
       color: $bright1
@@ -93,7 +91,6 @@
     background: $dark2
     font-size: 0.75rem
     font-weight: bold
-    // padding: 4px
     margin: 1px 0
     border: 0.5px solid $dark1 * 1.3
     border-radius: 3px
@@ -121,7 +118,6 @@
   svg
     font-size: 21px
     padding: 4px
-    // padding-right: 3px
     color: $bright2
     &.eye, .controls &
       color: $bright1
@@ -153,7 +149,7 @@
     transition: all 0.15s
     transition-delay: 0.25s
 
-  .content
+  .widgets
     // margin-left: 23px
     margin-left: 43px
     transition: opacity 0.2s
@@ -164,25 +160,16 @@
       opacity: 0.5
     li
       display: flex
-      font-size: 12px
       align-items: center
+      margin: 1px 0
+      padding: 1px 5px 1px 0
       background: $dark2
       border: 0.5px solid $dark1 * 1.3
       border-radius: 3px
-      margin: 1px 0
-      padding: 1px 5px 1px 2px
+      font-size: 12px
       &:hover
         background: $dark2 * 1.3
         border-color: $dark1 * 1.85
-        svg
-          color: $bright1
-      svg
-        font-size: 19px
-        &.expand
-          padding: 2px
-          margin-left: 4px
-      span
-        margin-left: 1px
 
   .list-enter-active
   .list-leave-active
@@ -195,10 +182,34 @@
     margin: 0
 </style>
 
+<style lang="stylus">
+  .tree-item .widgets li
+    &:hover
+      svg
+        color: $bright1
+
+    header
+      display: flex
+      align-items: center
+
+      svg
+        padding: 4px
+        color: $bright2
+        font-size: 19px
+</style>
+
 
 <script>
+  import ParameterTreelet from './treelet-parameter.vue'
+  import MaterialTreelet from './treelet-material.vue'
+
   export default {
     name: 'TreeItem',
+
+    components: {
+      ParameterTreelet,
+      MaterialTreelet,
+    },
 
     props: {
       isTop: Boolean,
@@ -222,6 +233,20 @@
       }
     },
 
+    computed: {
+      isAssembly: function() {
+        return !!this.component.get_children().length;
+      },
+
+      isVisible: function() {
+        return !this.hidden && !this.parentHidden;
+      },
+
+      compData: function() {
+        return this.data[this.component.id()]
+      },
+    },
+
     methods: {
       toggle: function() {
         this.expanded = !this.expanded;
@@ -231,15 +256,5 @@
         this.$emit('create-component', parent)
       },
     },
-
-    computed: {
-      isAssembly: function() {
-        return !!this.component.get_children().length;
-      },
-
-      isVisible: function() {
-        return !this.hidden && !this.parentHidden;
-      },
-    }
   }
 </script>

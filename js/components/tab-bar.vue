@@ -44,9 +44,9 @@
       //-         | Increment
       //-         input(type="number" value="45")
       //- MenuButton(title="Tool Settings" icon="cloud")
-      //- //- MenuButton(title="Snapping" icon="ruler")
-      MenuButton.account(title="Account" icon="user-circle")
-        span.name Björn
+      //- MenuButton(title="Snapping" icon="ruler")
+      //- MenuButton.account(title="Account" icon="user-circle")
+      //-   span.name Björn
 
     .grab-handle.fixed
 

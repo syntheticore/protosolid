@@ -43,7 +43,7 @@ export class Transloader {
             isActive ?
             isHighlighted ?
             this.renderer.materials.highlightSurface :
-            this.renderer.materials.surface :
+            comp.material ? comp.material.displayMaterial : this.renderer.materials.surface :
             isHighlighted ?
             this.renderer.materials.previewAddSurface :
             this.renderer.materials.ghostSurface

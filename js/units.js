@@ -25,8 +25,11 @@ export default class Unit {
   }
 
   parse() {
-    const match = /[+-]?(\d+\.?\d*)\s*(\w*)/.exec(this.string)
-    return match && { value: Number(match[1]), unit: match[2] || 'mm' }
+    const match = /([+-]?\d+\.?\d*)\s*(\w*)/.exec(this.string)
+    return match && {
+      value: Number(match[1]),
+      unit: match[2] || 'mm'
+    }
   }
 
   asGiven() {

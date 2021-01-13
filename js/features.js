@@ -183,3 +183,36 @@ export class RevolveFeature extends Feature {
     // this.profile.revolve(axis, this.angle * (this.side ? 1 : -1))
   }
 }
+
+
+export class MaterialFeature extends Feature {
+  constructor(component) {
+    super(component, false, {
+      material: {
+        title: 'Material Presets',
+        type: 'material',
+      },
+    })
+
+    this.material = null
+  }
+
+  isComplete() {
+    return !!this.material
+  }
+
+  preview() {
+    this.oldMaterial = this.oldMaterial || this.component.material
+    this.component.material = this.material
+  }
+
+  confirm() {
+    this.oldMaterial = undefined
+  }
+
+  dispose() {
+    super.dispose()
+    if(this.oldMaterial === undefined) return
+    this.component.material = this.oldMaterial
+  }
+}

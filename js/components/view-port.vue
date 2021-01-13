@@ -302,6 +302,8 @@
 
       this.$root.$on('component-changed', this.componentChanged)
 
+      this.$root.$on('render-needed', () => this.renderer.render())
+
       this.$root.$on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.$root.$on('unpreview-feature', this.unpreviewFeature)
 

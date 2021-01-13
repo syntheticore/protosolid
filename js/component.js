@@ -28,6 +28,12 @@ export default class Component {
   }
 
   getParameters() {
-
+    const params = this.parent ? this.parent.getParameters() : []
+    this.parameters.forEach(own => {
+      const index = params.findIndex(other => other.name == own.name)
+      if(index == -1) return
+      params[index] = own
+    })
+    return params
   }
 }

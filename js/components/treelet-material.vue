@@ -3,40 +3,56 @@
 
     header(@click="expanded = !expanded")
       fa-icon(icon="volleyball-ball" fixed-width)
-      h3 {{ material.title }}
+      h2 {{ material.title }}
       fa-icon.expand(icon="angle-right")
 
     .content(v-if="expanded")
-      fieldset
-        legend Physical Properties
+      fieldset.physical
+        h3 Physical Properties
         label
-          input(type="number" v-model="material.density" min="0.0" max="10.0")
-          | Density
-      fieldset
-        legend Visual Properties
+          input(type="number" v-model="material.density" min="0.0" step="0.01" max="10.0")
+          span Density
+
+      fieldset.visual
+        h3 Visual Properties
         label
           input(type="color" v-model="material.color")
-          | Color
+          span Color
         label
-          input(type="range" v-model="material.roughness" min="0.0" max="1.0")
-          | Roughness
+          input(type="checkbox" v-model="material.metal")
+          span Metal
         label
-          input(type="range" v-model="material.metalness" min="0.0" max="1.0")
-          | Metalness
+          input(type="range" v-model="material.roughness" min="0.0" step="0.001" max="1.0")
+          span Roughness
         label
-          input(type="range" v-model="material.opacity" min="0.0" max="1.0")
-          | Opacity
+          input(type="range" v-model="material.transparency" min="0.0" step="0.001" max="1.0")
+          span Transparency
         label
-          input(type="range" v-model="material.translucency" min="0.0" max="1.0")
-          | Translucency
+          input(type="range" v-model="material.translucency" min="0.0" step="0.001" max="1.0")
+          span Translucency
 </template>
 
 
 <style lang="stylus" scoped>
+  input[type="color"]
+    border-radius: 2px
+    height: 16px
+    border: 2px solid $bright1
+
+  input[type="checkbox"]
+    width: unset
+    margin-left: 60px
+
+  input
+    width: 73px
+    margin: 0
+    margin-right: 8px
+    box-shadow: none !important
+
   header
     display: flex
     align-items: center
-    h3
+    h2
       margin: 0 !important
 
   .expand
@@ -46,16 +62,29 @@
     .expanded &
       transform: rotate(90deg)
 
-  .content
-    padding: 0 12px
+  h3
+    font-size: 12px
+    font-weight: bold
+
+  fieldset
+    margin: 0
+    padding: 12px
+    padding-bottom: 6px
+    & + fieldset
+      border-top: 1px solid $dark1 * 1.3
+
+  label
+    display: flex
+    align-items: center
+    margin: 8px 0
+    span
+      min-width: 80px
 </style>
 
 
 <script>
   export default {
     name: 'MaterialTreelet',
-
-    components: {},
 
     props: {
       material: Object,
@@ -67,7 +96,13 @@
       }
     },
 
-    mounted() {},
-    methods: {},
+    watch: {
+      material: {
+        handler(material) {
+          this.$root.$emit('render-needed')
+        },
+        deep: true
+      },
+    },
   }
 </script>

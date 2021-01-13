@@ -46,7 +46,6 @@
     display: flex
     // box-shadow: 0 0 4px rgba(black, 0.6)
     border-bottom: 1px solid $dark1 * 1.15
-    // overflow-x: auto
     li
       flex: 1 1 auto
       padding: 5px 10px
@@ -139,8 +138,14 @@
 <script>
   import FeatureBox from './feature-box.vue'
 
-  import Material from './../material.js'
-  import { ExtrudeFeature, RevolveFeature, SweepFeature } from './../features.js'
+  import { Aluminum } from './../material.js'
+
+  import {
+    ExtrudeFeature,
+    RevolveFeature,
+    SweepFeature,
+    MaterialFeature,
+  } from './../features.js'
 
   import {
     ManipulationTool,
@@ -234,6 +239,7 @@
           {
             title: 'Simulate',
             tools: [
+              { title: 'Material', feature: MaterialFeature, icon: 'volleyball-ball' },
               { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
               { title: 'Heat Flow', icon: 'thermometer' },
               { title: 'Static Load', icon: 'weight' },
@@ -245,7 +251,6 @@
 
     mounted: function() {
       window.addEventListener('keydown', (e) => {
-        console.log(e.keyCode)
         const tool = this.tabs.flatMap(tab => tab.tools).find(
           tool => tool.keyCode == e.keyCode
         )
@@ -254,6 +259,7 @@
         } else if(e.keyCode === 27) {
           this.$root.$emit('escape')
         }
+        console.log(e.keyCode)
       });
 
       this.$root.$on('escape', () => {
@@ -296,7 +302,7 @@
       },
 
       addMaterial: function() {
-        this.activeComponent.material = new Material('Polycarbonate')
+        this.activeComponent.material = new Aluminum()
       },
 
       addCog: function() {
@@ -305,7 +311,7 @@
 
       addParameter: function() {
         this.activeComponent.parameters.push({
-          title: 'width',
+          name: 'width',
           value: '512mm',
         })
       },

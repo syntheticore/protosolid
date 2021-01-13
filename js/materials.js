@@ -60,17 +60,18 @@ export class Materials {
       metalness: 0.2,
     })
 
+    this.highlightSurface = new THREE.MeshStandardMaterial({
+      side: THREE.DoubleSide, //XXX remove
+      color: '#0070ff',
+      emissive: 'blue',
+    })
+
     this.ghostSurface = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide, //XXX remove
       color: 'white',
       roughness: 1.0,
       transparent: true,
       opacity: 0.035,
-    })
-
-    this.highlightSurface = new THREE.MeshStandardMaterial({
-      side: THREE.DoubleSide, //XXX remove
-      color: '#0070ff',
     })
 
     this.previewAddSurface = new THREE.MeshStandardMaterial({

@@ -2,7 +2,7 @@
   .parameter-treelet
     header
       fa-icon(icon="square-root-alt" fixed-width)
-      input.variable(type="text" v-model="parameter.title")
+      input.variable(type="text" v-model="parameter.name")
       span =
       input.value(type="text" v-model="value")
 </template>
@@ -19,7 +19,6 @@
   input[type="text"]
     max-width: 30px
     padding: 0px 3px
-    border-radius: 2px
     font-weight: 800
     font-size: 9px
     box-shadow: none

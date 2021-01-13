@@ -19,7 +19,6 @@
           :value.sync="activeFeature[key]"
           @update:value="update"
         )
-          //- :unit="setting.type == 'angle' ? '°' : 'mm'"
         IconToggle(
           v-if="setting.type == 'bool'"
           :icons="setting.icons"
@@ -29,6 +28,11 @@
         RadioBar(
           v-if="setting.type == 'select'"
           :items="setting.options"
+          :chosen.sync="activeFeature[key]"
+          @update:chosen="update"
+        )
+        MaterialSelector(
+          v-if="setting.type == 'material'"
           :chosen.sync="activeFeature[key]"
           @update:chosen="update"
         )
@@ -111,7 +115,6 @@
     height: 24px
     border: 7px solid white
     border-radius: 99px
-    // cursor: pointer
     transition: all 0.06s
     &:hover
       border-width: 0px
@@ -163,6 +166,7 @@
   import IconToggle from './icon-toggle.vue'
   import RadioBar from './radio-bar.vue'
   import NumberInput from './number-input.vue'
+  import MaterialSelector from './material-selector.vue'
 
   import { ManipulationTool } from './../tools.js'
 
@@ -173,6 +177,7 @@
       IconToggle,
       RadioBar,
       NumberInput,
+      MaterialSelector,
     },
 
     props: {

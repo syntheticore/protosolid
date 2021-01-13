@@ -41,7 +41,7 @@
       li(v-if="component.cog")
         header
           fa-icon(icon="atom" fixed-width)
-          h3 Center of Mass
+          h2 Center of Mass
 
       li(v-if="component.material")
         MaterialTreelet(:material="component.material")
@@ -52,7 +52,7 @@
       li(v-for="material in component.sectionViews")
         header
           fa-icon(icon="object-group" fixed-width)
-          h3 Section View 1
+          h2 Section View 1
           input(type="checkbox")
 
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
@@ -192,7 +192,7 @@
         color: $bright2
         font-size: 21px
 
-      h3
+      h2
         margin-right: 5px
 
     .content

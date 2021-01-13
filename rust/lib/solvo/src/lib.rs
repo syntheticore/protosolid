@@ -10,8 +10,6 @@ pub use shapex::*;
 #[derive(Debug, Default)]
 pub struct Component {
   pub id: Uuid,
-  pub title: String,
-  // pub visible: bool,
   pub sketch: Sketch,
   pub bodies: Vec<Solid>,
   pub children: Vec<Ref<Self>>,
@@ -25,10 +23,7 @@ impl Component {
   }
 
   pub fn create_component(&mut self) -> Ref<Self> {
-    let mut comp = Self::new();
-    comp.title = "New Component".to_string();
-    // comp.visible = true;
-    let comp = rc(comp);
+    let comp = rc(Self::new());
     self.children.push(comp.clone());
     comp
   }

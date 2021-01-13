@@ -162,7 +162,6 @@
     props: {
       activeTool: Object,
       activeComponent: Object,
-      data: Object,
     },
 
     data() {
@@ -295,17 +294,17 @@
       },
 
       addMaterial: function() {
-        this.data[this.activeComponent.id()].material = {
+        this.activeComponent.material = {
           title: 'Polycarbonate',
         }
       },
 
       addCog: function() {
-        this.data[this.activeComponent.id()].cog = true
+        this.activeComponent.cog = true
       },
 
       addParameter: function() {
-        this.data[this.activeComponent.id()].parameters.push({
+        this.activeComponent.parameters.push({
           title: 'width',
           unit: 'mm',
           value: '612',

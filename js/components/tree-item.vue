@@ -9,7 +9,7 @@
         fixed-width
       )
       .box(
-        :class="{hidden: !isVisible, selected: component.id() == activeComponent.id()}"
+        :class="{hidden: !isVisible, selected: component === activeComponent}"
         @dblclick="$emit('update:active-component', component)"
         @mouseenter="$emit('highlight-component', component)"
         @mouseleave="$emit('highlight-component', null)"
@@ -21,7 +21,7 @@
         )
         fa-icon.assembly(icon="boxes" v-if="isAssembly")
         fa-icon.part(icon="box" v-else)
-        span.name {{ component.get_title() }}
+        span.name {{ component.title }}
         .controls
           fa-icon.activate(
             icon="check-circle" fixed-width
@@ -38,18 +38,18 @@
       v-if="expanded"
       :class="{hidden: !isVisible}"
     )
-      li(v-if="compData.cog")
+      li(v-if="component.cog")
         header
           fa-icon(icon="atom" fixed-width)
           span Center of Mass
 
-      li(v-if="compData.material")
-        MaterialTreelet(:material="compData.material")
+      li(v-if="component.material")
+        MaterialTreelet(:material="component.material")
 
-      li(v-for="param in compData.parameters")
+      li(v-for="param in component.parameters")
         ParameterTreelet(:parameter="param")
 
-      li(v-for="material in compData.sectionViews")
+      li(v-for="material in component.sectionViews")
         header
           fa-icon(icon="object-group" fixed-width)
           span Section View 1
@@ -58,12 +58,11 @@
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
       li(
         is="tree-item"
-        v-for="child in component.get_children()"
-        :key="child.id()"
+        v-for="child in component.children"
+        :key="child.real.id()"
         :component="child"
         :active-component="activeComponent"
         :parent-hidden="!isVisible"
-        :data="data"
         v-on="$listeners"
       )
 </template>
@@ -216,34 +215,29 @@
       component: Object,
       activeComponent: Object,
       parentHidden: Boolean,
-      data: Object,
     },
 
     data() {
       return {
-        hidden: this.data[this.component.id()].hidden,
+        hidden: this.component.hidden,
         expanded: true,
       };
     },
 
     watch: {
       hidden: function(hidden) {
-        this.$set(this.data[this.component.id()], 'hidden', !this.isVisible)
+        this.$set(this.component, 'hidden', !this.isVisible)
         this.$root.$emit('component-changed', this.component, true)
       }
     },
 
     computed: {
       isAssembly: function() {
-        return !!this.component.get_children().length;
+        return !!this.component.children.length;
       },
 
       isVisible: function() {
         return !this.hidden && !this.parentHidden;
-      },
-
-      compData: function() {
-        return this.data[this.component.id()]
       },
     },
 

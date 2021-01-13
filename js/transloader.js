@@ -12,29 +12,26 @@ export class Transloader {
   }
 
   isActive(comp) {
-    return this.hasParent(comp, this.document.activeComponent.id())
+    return this.hasParent(comp, this.document.activeComponent)
   }
 
   isHighlighted(comp) {
     if(!this.highlightComponent) return
-    return this.hasParent(comp, this.highlightComponent.id())
+    return this.hasParent(comp, this.highlightComponent)
   }
 
-  hasParent(comp, parentId) {
+  hasParent(comp, parent) {
     if(!comp) return
-    const compId = comp.id()
-    if(compId === parentId) return true
-    const compData = this.document.data[compId]
-    return this.hasParent(compData.parent, parentId)
+    if(comp === parent) return true
+    return this.hasParent(comp.parent, parent)
   }
 
   loadTree(comp, recursive) {
-    const compData = this.document.data[comp.id()]
-    if(compData.hidden) return
+    if(comp.hidden) return
     const isActive = this.isActive(comp)
     const isHighlighted = this.isHighlighted(comp)
     // Load Bodies
-    let solids = comp.get_solids()
+    let solids = comp.real.get_solids()
     solids.forEach(solid => {
       const mode = this.renderer.displayMode
       // Load Faces
@@ -58,7 +55,7 @@ export class Transloader {
           faceMesh.castShadow = true
           faceMesh.receiveShadow = true
           this.renderer.add(faceMesh)
-          compData.faces.push(faceMesh)
+          comp.cache.faces.push(faceMesh)
           // const normal = this.convertLine(face.get_normal(), this.renderer.materials.selectionLine)
           // this.renderer.add(normal)
         })
@@ -66,7 +63,7 @@ export class Transloader {
       // Load Edges
       if(mode == 'wireframe' || (isActive && mode == 'wireShade')) {
         const wireframe = solid.get_edges()
-        compData.wireframe = (compData.wireframe || []).concat(wireframe.map(edge => {
+        comp.cache.wireframe = (comp.cache.wireframe || []).concat(wireframe.map(edge => {
           // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
           const line = this.renderer.convertLine(
             edge,
@@ -81,22 +78,21 @@ export class Transloader {
       }
     })
     // Load Sketch Elements
-    if(comp.id() == this.document.activeComponent.id()) {
-      const elements = comp.get_sketch().get_sketch_elements()
+    if(comp === this.document.activeComponent) {
+      const elements = comp.real.get_sketch().get_sketch_elements()
       elements.forEach(element => this.loadElement(element, comp))
-      if(!compData.regions.length) this.updateRegions(comp)
+      if(!comp.cache.regions.length) this.updateRegions(comp)
     }
     // Recurse
-    if(recursive) comp.get_children().forEach(child => this.loadTree(child, true))
+    if(recursive) comp.children.forEach(child => this.loadTree(child, true))
   }
 
   unloadTree(comp, recursive) {
-    const compData = this.document.data[comp.id()]
-    compData.curves.forEach(elem => this.unloadElement(elem, comp))
-    compData.wireframe.forEach(edge => this.renderer.remove(edge))
-    compData.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
-    this.purgeRegions(compData)
-    if(recursive) comp.get_children().forEach(child =>
+    comp.cache.curves.forEach(elem => this.unloadElement(elem, comp))
+    comp.cache.wireframe.forEach(edge => this.renderer.remove(edge))
+    comp.cache.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
+    this.purgeRegions(comp)
+    if(recursive) comp.children.forEach(child =>
       this.unloadTree(child, true)
     )
   }
@@ -107,25 +103,22 @@ export class Transloader {
     line.alcType = 'curve'
     line.alcElement = elem
     this.renderer.add(line)
-    this.document.data[elem.id()] = line
-    this.document.data[comp.id()].curves.push(elem)
+    elem.line = line
+    comp.cache.curves.push(elem)
     this.onLoadElement(elem, comp)
   }
 
   unloadElement(elem, comp) {
-    this.renderer.remove(this.document.data[elem.id()])
-    const compId = comp.id()
-    const curves = this.document.data[compId].curves
-    this.document.data[compId].curves = curves.filter(e => e != elem)
+    this.renderer.remove(elem.line)
+    comp.cache.curves = comp.cache.curves.filter(e => e != elem)
     this.onUnloadElement(elem, comp)
   }
 
   updateRegions(comp) {
-    const compData = this.document.data[comp.id()]
-    this.purgeRegions(compData)
-    const regions = comp.get_sketch().get_regions(false)
+    this.purgeRegions(comp)
+    const regions = comp.real.get_sketch().get_regions(false)
     // console.log('# regions: ', regions.length)
-    compData.regions = regions.map(region => {
+    comp.cache.regions = regions.map(region => {
       // let material = this.renderer.materials.region.clone()
       // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
       const mesh = this.renderer.convertMesh(
@@ -139,8 +132,8 @@ export class Transloader {
     })
   }
 
-  purgeRegions(compData) {
-    compData.regions.forEach(mesh => {
+  purgeRegions(comp) {
+    comp.cache.regions.forEach(mesh => {
       if(mesh.alcRegion.noFree) {
         mesh.alcRegion.unused = true
       } else {
@@ -148,7 +141,7 @@ export class Transloader {
       }
       this.renderer.remove(mesh)
     })
-    compData.regions = []
+    comp.cache.regions = []
   }
 
   previewFeature(comp, bufferGeometry) {

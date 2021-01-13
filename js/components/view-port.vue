@@ -412,11 +412,11 @@
         // Update Snap Anchor
         if(this.snapAnchor) this.snapAnchor.pos = this.renderer.toScreen(this.snapAnchor.vec)
         // Update Handles
-        for(let nodeId in this.handles) {
-          const node_handles = this.handles[nodeId]
-          for(let elemId in node_handles) {
-            const elem_handles = node_handles[elemId]
-            elem_handles.forEach(handle => {
+        for(let compId in this.handles) {
+          const compHandles = this.handles[compId]
+          for(let elemId in compHandles) {
+            const elemHandles = compHandles[elemId]
+            elemHandles.forEach(handle => {
               handle.pos = this.renderer.toScreen(handle.vec)
             })
           }
@@ -450,7 +450,7 @@
 
       deleteElement: function(elem) {
         this.renderer.transformControl.detach()
-        this.activeComponent.get_sketch().remove_element(elem.id())
+        this.activeComponent.real.get_sketch().remove_element(elem.id())
         this.componentChanged(this.activeComponent)
         this.$emit('element-selected', null)
       },
@@ -473,14 +473,14 @@
         this.transloader.unpreviewFeature()
       },
 
-      onLoadElement: function(elem, node) {
-        const nodeId = node.id()
+      onLoadElement: function(elem, comp) {
+        const compId = comp.real.id()
         const elemId = elem.id()
-        this.handles[nodeId] = this.handles[nodeId] || {}
-        this.handles[nodeId][elemId] = this.handles[nodeId][elemId] || []
+        this.handles[compId] = this.handles[compId] || {}
+        this.handles[compId][elemId] = this.handles[compId][elemId] || []
         elem.get_handles().forEach((handle, i) => {
           handle = new THREE.Vector3().fromArray(handle)
-          this.handles[nodeId][elemId].push({
+          this.handles[compId][elemId].push({
             type: 'handle',
             pos: this.renderer.toScreen(handle),
             vec: handle,
@@ -491,9 +491,9 @@
         })
       },
 
-      onUnloadElement: function(elem, node) {
-        const nodeId = node.id()
-        if(this.handles[nodeId]) delete this.handles[nodeId][elem.id()]
+      onUnloadElement: function(elem, comp) {
+        const compId = comp.real.id()
+        if(this.handles[compId]) delete this.handles[compId][elem.id()]
         this.handles = Object.assign({}, this.handles)
       },
 

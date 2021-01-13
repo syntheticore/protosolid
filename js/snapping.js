@@ -30,7 +30,7 @@ export class Snapper {
   }
 
   getSnapPoints() {
-    const sketchElements = this.viewport.activeComponent.get_sketch().get_sketch_elements()
+    const sketchElements = this.viewport.activeComponent.real.get_sketch().get_sketch_elements()
     return sketchElements.flatMap(elem => {
       let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
       // Filter out last point of the sketch element actively being drawn

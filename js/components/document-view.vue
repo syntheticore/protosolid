@@ -15,12 +15,10 @@
     ToolBox(
       :active-tool="activeTool"
       :active-component="document.activeComponent"
-      :data="document.data"
     )
     .side-bar.left
       TreeView(
         :top="document.tree"
-        :data="document.data"
         :active-component="document.activeComponent"
         @update:active-component="activateComponent"
         @highlight-component="highlightComponent = $event"
@@ -152,10 +150,9 @@
         immediate: true,
         handler: function(document, oldDocument) {
           if(oldDocument) oldDocument.activeView = oldDocument.activeView || this.dirtyView
-          this.integrateComponent(document.tree)
           if(!document.activeView) {
             document.activeView = document.views[3]
-            this.createComponent(this.document.tree, 'Component 1')
+            this.createComponent(document.tree, 'Component 1')
           }
           this.previewView = null
           this.dirtyView = null
@@ -183,10 +180,6 @@
             title: 'Shaded',
             icon: 'box',
           },
-          // hiddenLines: {
-          //   title: 'Hidden Lines',
-          //   icon: 'edit',
-          // },
         },
         currentDisplayMode: null,
         previewDisplayMode: null,
@@ -200,26 +193,9 @@
 
     methods: {
       createComponent: function(parent, title) {
-        const comp = parent.create_component(title || 'New Component')
-        this.integrateComponent(comp, parent)
+        const comp = parent.createComponent(title)
         this.activateComponent(comp)
         return comp
-      },
-
-      integrateComponent: function(comp, parent) {
-        const id = comp.id()
-        if(!this.document.data[id]) this.$set(this.document.data, id, {
-          parent,
-          hidden: false,
-          material: null,
-          cog: false,
-          sectionViews: [],
-          parameters: [],
-          faces: [],
-          wireframe: [],
-          regions: [],
-          curves: [],
-        })
       },
 
       createView: function(title) {
@@ -257,7 +233,7 @@
       },
 
       activateComponent: function(comp) {
-        this.document.data[comp.id()].hidden = false
+        comp.hidden = false
         this.document.activeComponent = comp
       },
 

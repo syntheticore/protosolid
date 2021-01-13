@@ -399,7 +399,8 @@ pub struct JsComponent {
 impl JsComponent {
   #[wasm_bindgen(constructor)]
   pub fn new() -> Self {
-    Default::default()
+    let tree = Component::new();
+    Self { real: rc(tree) }
   }
 
   fn from(comp: &Rc<RefCell<Component>>) -> Self {
@@ -412,19 +413,15 @@ impl JsComponent {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
   }
 
-  pub fn get_title(&self) -> JsValue {
-    JsValue::from_serde(&self.real.borrow().title).unwrap()
-  }
-
   pub fn get_sketch(&self) -> JsSketch {
     JsSketch::from(&self.real)
   }
 
-  pub fn get_children(&self) -> Array {
-    self.real.borrow().children.iter().map(|child|
-      JsValue::from(JsComponent::from(child))
-    ).collect()
-  }
+  // pub fn get_children(&self) -> Array {
+  //   self.real.borrow().children.iter().map(|child|
+  //     JsValue::from(JsComponent::from(child))
+  //   ).collect()
+  // }
 
   pub fn get_solids(&self) -> Array {
     self.real.borrow().bodies.iter().map(|body|
@@ -432,37 +429,15 @@ impl JsComponent {
     ).collect()
   }
 
-  pub fn export_stl(&self) -> String {
+  pub fn export_stl(&self, title: &str) -> String {
     let comp = self.real.borrow();
     let mesh = comp.bodies[0].tesselate();
     log!("{:?}", mesh);
-    export::stl(&mesh, &comp.title)
+    export::stl(&mesh, title)
   }
 
-  pub fn create_component(&mut self, title: &str) -> JsComponent {
+  pub fn create_component(&mut self) -> JsComponent {
     let comp = self.real.borrow_mut().create_component();
-    comp.borrow_mut().title = title.to_string();
     JsComponent::from(&comp)
-  }
-}
-
-
-#[wasm_bindgen]
-pub struct AlchemyProxy {
-  tree: Ref<Component>,
-}
-
-#[wasm_bindgen]
-impl AlchemyProxy {
-
-  #[wasm_bindgen(constructor)]
-  pub fn new() -> Self {
-    let mut tree = Component::new();
-    tree.title = "Main Assembly".to_string();
-    Self { tree: rc(tree) }
-  }
-
-  pub fn get_main_assembly(&mut self) -> JsComponent {
-    JsComponent::from(&self.tree)
   }
 }

@@ -195,11 +195,12 @@ export class LineTool extends Tool {
 
   mouseDown(vec) {
     this.mouseMove(vec)
-    this.line = this.component.get_sketch().add_line(vec.toArray(), vec.toArray())
+    const sketch = this.component.real.get_sketch()
+    this.line = sketch.add_line(vec.toArray(), vec.toArray())
     this.viewport.elementChanged(this.line, this.component)
     // Restart tool when we close a loop
     if(this.firstPoint && vec.distanceTo(this.firstPoint)  < 0.0000001) {
-      this.component.get_sketch().remove_element(this.line.id())
+      sketch.remove_element(this.line.id())
       this.line = null
       this.firstPoint = null
       return
@@ -216,7 +217,7 @@ export class LineTool extends Tool {
 
   dispose() {
     if(!this.line) return
-    this.component.get_sketch().remove_element(this.line.id())
+    this.component.real.get_sketch().remove_element(this.line.id())
     this.viewport.componentChanged(this.component)
   }
 }
@@ -235,7 +236,7 @@ export class SplineTool extends Tool {
       points.push(vec.toArray())
       this.spline.set_handles(points)
     } else {
-      this.spline = this.component.get_sketch().add_spline([vec.toArray(), vec.toArray()])
+      this.spline = this.component.real.get_sketch().add_spline([vec.toArray(), vec.toArray()])
     }
     this.viewport.elementChanged(this.spline, this.component)
   }
@@ -270,7 +271,7 @@ export class CircleTool extends Tool {
       this.circle = null
     } else {
       this.center = vec
-      this.circle = this.component.get_sketch().add_circle(vec.toArray(), 1)
+      this.circle = this.component.real.get_sketch().add_circle(vec.toArray(), 1)
     }
   }
 
@@ -302,7 +303,7 @@ export class ArcTool extends Tool {
 
   mouseMove(vec) {
     if(!this.start || !this.end) return
-    this.arc = this.arc || this.component.get_sketch().add_arc(
+    this.arc = this.arc || this.component.real.get_sketch().add_arc(
       this.start.toArray(),
       vec.toArray(),
       this.end.toArray()

@@ -46,14 +46,11 @@
 
 
 <script>
-  import * as THREE from 'three'
-
   import TabBar from './tab-bar.vue'
   import DocumentView from './document-view.vue'
 
+  import Document from './../document.js'
   const wasmP = import('../../rust/pkg/wasm-index.js')
-
-  let lastId = 1;
 
   export default {
     name: 'app',
@@ -73,11 +70,11 @@
     },
 
     created() {
-      this.createDocument().then(() => this.activeDocument = this.documents[0] )
-
       window.addEventListener('resize', () => {
         this.$root.$emit('resize')
       }, false)
+
+      this.createDocument()
 
       if(!window.ipcRenderer) return
 
@@ -102,59 +99,12 @@
     mounted() {
       if(!window.ipcRenderer) return
       window.ipcRenderer.send('vue-ready')
-      console.log(window.electronPlatform)
-      console.log(window.electronPlatformVersion)
     },
 
     methods: {
       createDocument: function() {
         return wasmP.then((wasm) => {
-          const proxy = new wasm.AlchemyProxy()
-          const tree = proxy.get_main_assembly()
-          this.activeDocument = {
-            title: 'Untitled Document',
-            proxy: proxy,
-            views: [
-              {
-                id: lastId++,
-                title: 'Top',
-                position: new THREE.Vector3(0.0, 0.0, 9.0),
-                target: new THREE.Vector3(0.0, 0.0, 0.0),
-              },
-              {
-                id: lastId++,
-                title: 'Front',
-                position: new THREE.Vector3(0.0, 9.0, 0.0),
-                target: new THREE.Vector3(0.0, 0.0, 0.0),
-              },
-              {
-                id: lastId++,
-                title: 'Side',
-                position: new THREE.Vector3(9.0, 0.0, 0.0),
-                target: new THREE.Vector3(0.0, 0.0, 0.0),
-              },
-              {
-                id: lastId++,
-                title: 'Perspective',
-                position: new THREE.Vector3(9.0, 9.0, 9.0),
-                target: new THREE.Vector3(0.0, 0.0, 0.0),
-              },
-            ],
-            poses: [
-              { title: 'Base', id: lastId++ },
-            ],
-            sets: [
-              { title: 'Filet 14', id: lastId++ },
-              { title: 'Extrude 2', id: lastId++ },
-            ],
-            tree: tree,
-            activeComponent: tree,
-            data: {},
-            activeView: null,
-            activePose: null,
-            isPoseDirty: false,
-            isSetDirty: true,
-          }
+          this.activeDocument = new Document(wasm)
           this.documents.push(this.activeDocument)
         })
       },
@@ -168,8 +118,7 @@
         }
         // Free Rust memory when old doc has been removed by viewport
         setTimeout(() => {
-          doc.tree.free()
-          doc.proxy.free()
+          if(doc.tree) doc.tree.free()
         })
       },
     },

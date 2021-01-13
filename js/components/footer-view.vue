@@ -138,7 +138,7 @@
       splitAll: function() {
         // const regions = this.activeComponent.get_regions()
         // console.log('Regions', regions)
-        const splits = this.activeComponent.get_sketch().get_all_split()
+        const splits = this.activeComponent.real.get_sketch().get_all_split()
         // const elems = this.activeComponent.get_sketch_elements()
         // // .map(elem => elem.get_handles())
         // elems.forEach(elem => {
@@ -162,8 +162,8 @@
       },
 
       exportStl: function() {
-        const stl = this.activeComponent.export_stl()
-        const title = this.activeComponent.get_title().replace(new RegExp(' ', 'g'), '_')
+        const stl = this.activeComponent.real.export_stl(this.activeComponent.title)
+        const title = this.activeComponent.title.replace(new RegExp(' ', 'g'), '_')
         this.saveFile(stl, title + '.stl', 'STL')
       },
     },

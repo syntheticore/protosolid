@@ -16,22 +16,9 @@
     position: relative
     display: inline-block
     margin: 4px 5px
-    // color: $bright1
     .fullscreen .tab-bar &
     .maximized .tab-bar &
     [data-platform="browser"] .tab-bar &
-      // margin: 0 4px
-      // top: -1px
-      // &:first-child
-      //   margin-left: 0
-      // &:last-child
-      //   margin-right: 0
-      // button
-      //   padding: 3px 12px
-      //   border-radius: 0
-      //   // height: 23px
-      //   border-top: none
-      //   border-bottom: none
       button
         padding: 3px 8px
     &.left
@@ -70,7 +57,7 @@
     pointer-events: all
     top: 27px
     right: -12px
-    min-width: 195px
+    // min-width: 195px
     color: $bright2
     font-size: 12px
     margin: 12px
@@ -81,21 +68,14 @@
 
   .wrapper
     overflow: hidden
-    // padding: 14px
     border-radius: 5px
     right: -12px
 </style>
 
 
 <script>
-  // import TreeItem from './tree-item.vue'
-
   export default {
     name: 'MenuButton',
-
-    components: {
-      // TreeItem,
-    },
 
     props: {
       title: String,
@@ -112,6 +92,10 @@
       toggle: function() {
         this.isOpen = !this.isOpen;
       }
-    }
+    },
+
+    mounted() {
+      this.$root.$on('close-widgets', () => this.isOpen = false )
+    },
   }
 </script>

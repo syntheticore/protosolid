@@ -2,7 +2,7 @@
   header.tab-bar
 
     MenuButton.left.app-menu-btn(icon="atom")
-      AppMenu(@create-document="$emit('create-document')")
+      AppMenu(@create-document="createDocument")
       IconView
 
     ul.tabs
@@ -245,6 +245,11 @@
 
       close: function() {
         window.ipcRenderer.send('close')
+      },
+
+      createDocument: function() {
+        this.$root.$emit('close-widgets')
+        this.$emit('create-document')
       },
     }
   }

@@ -38,6 +38,9 @@
 
 
 <style lang="stylus" scoped>
+  .app-menu
+    min-width: 165px
+
   // hr
   //   border: 0
   //   height: 1px

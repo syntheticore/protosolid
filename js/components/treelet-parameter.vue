@@ -22,8 +22,15 @@
     border-radius: 2px
     font-weight: 800
     font-size: 9px
+    box-shadow: none
+    background: $dark2 * 0.9
+    color: $bright1
     &:last-child
       margin-right: -3px
+    &:hover
+    &:focus
+      background: $bright1
+      color: $dark1
 
   .variable
     max-width: 50px !important

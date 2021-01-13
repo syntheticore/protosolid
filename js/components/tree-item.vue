@@ -41,7 +41,7 @@
       li(v-if="component.cog")
         header
           fa-icon(icon="atom" fixed-width)
-          span Center of Mass
+          h3 Center of Mass
 
       li(v-if="component.material")
         MaterialTreelet(:material="component.material")
@@ -52,7 +52,7 @@
       li(v-for="material in component.sectionViews")
         header
           fa-icon(icon="object-group" fixed-width)
-          span Section View 1
+          h3 Section View 1
           input(type="checkbox")
 
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
@@ -93,14 +93,13 @@
     margin: 1px 0
     border: 0.5px solid $dark1 * 1.3
     border-radius: 3px
-    // display: inline-block
     display: flex
     align-items: center
     transition: opacity 0.2s
     // pointer-events: all
     overflow: hidden
     &:hover
-      background: $dark2 * 1.3
+      background: $dark2 * 1.15
       border-color: $dark1 * 1.85
       color: white
       .controls
@@ -120,10 +119,8 @@
     color: $bright2
     &.eye, .controls &
       color: $bright1
-      // cursor: pointer
       transition: all 0.1s
       &:hover
-        // color: $bright1 * 2
         color: white
         background: $dark1 * 1.85
       &:active
@@ -149,7 +146,6 @@
     transition-delay: 0.25s
 
   .widgets
-    // margin-left: 23px
     margin-left: 43px
     transition: opacity 0.2s
     display: flex
@@ -161,11 +157,11 @@
       display: flex
       align-items: center
       margin: 1px 0
-      padding: 1px 5px 1px 0
-      background: $dark2
+      background: $dark2 * 1.3
       border: 0.5px solid $dark1 * 1.3
       border-radius: 3px
-      font-size: 12px
+      font-size: 11px
+      font-weight: bold
       &:hover
         background: $dark2 * 1.3
         border-color: $dark1 * 1.85
@@ -194,7 +190,13 @@
       svg
         padding: 4px
         color: $bright2
-        font-size: 19px
+        font-size: 21px
+
+      h3
+        margin-right: 5px
+
+    .content
+      border-top: 1px solid $dark1 * 1.3
 </style>
 
 

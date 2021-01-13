@@ -5,8 +5,8 @@
     //-   fa-icon(icon="box" title="Confirm")
     //-   .title Extrude
 
-    form.options
-      label(v-for="(setting, key) in activeFeature.settings")
+    .settings
+      .setting(v-for="(setting, key) in activeFeature.settings")
         | {{ setting.title }}
         .picker(
           v-if="needsPicker(setting, true)"
@@ -17,9 +17,9 @@
         NumberInput(
           v-if="setting.type == 'length' || setting.type == 'angle'"
           :value.sync="activeFeature[key]"
-          :unit="setting.type == 'angle' ? '°' : 'mm'"
           @update:value="update"
         )
+          //- :unit="setting.type == 'angle' ? '°' : 'mm'"
         IconToggle(
           v-if="setting.type == 'bool'"
           :icons="setting.icons"
@@ -70,18 +70,18 @@
   //     margin-top: 6px
   //     font-weight: bold
 
-  .options
+  .settings
     margin: 10px
     display: flex
 
-  label
+  .setting
     display: flex
     flex-direction: column
     align-items: center
     font-size: 12px
     color: $bright1
     font-weight: bold
-    & + label
+    & + .setting
       margin-left: 12px
     &:nth-of-type(1) .picker
       background: $blue

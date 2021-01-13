@@ -1,11 +1,10 @@
 import * as THREE from 'three'
-
 import Component from './component.js'
-
-let lastId = 1
 
 export default class Document {
   constructor(wasm) {
+    this.lastId = 1
+
     const tree = new wasm.JsComponent()
     this.tree = new Component(tree, null, 'Main Assembly')
 
@@ -18,25 +17,25 @@ export default class Document {
 
     this.views = [
       {
-        id: lastId++,
+        id: this.lastId++,
         title: 'Top',
         position: new THREE.Vector3(0.0, 0.0, 9.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
       },
       {
-        id: lastId++,
+        id: this.lastId++,
         title: 'Front',
         position: new THREE.Vector3(0.0, 9.0, 0.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
       },
       {
-        id: lastId++,
+        id: this.lastId++,
         title: 'Side',
         position: new THREE.Vector3(9.0, 0.0, 0.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
       },
       {
-        id: lastId++,
+        id: this.lastId++,
         title: 'Perspective',
         position: new THREE.Vector3(9.0, 9.0, 9.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
@@ -44,12 +43,12 @@ export default class Document {
     ]
 
     this.poses = [
-      { title: 'Base', id: lastId++ },
+      { title: 'Base', id: this.lastId++ },
     ]
 
     this.sets = [
-      { title: 'Filet 14', id: lastId++ },
-      { title: 'Extrude 2', id: lastId++ },
+      { title: 'Filet 14', id: this.lastId++ },
+      { title: 'Extrude 2', id: this.lastId++ },
     ]
   }
 }

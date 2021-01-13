@@ -1,21 +1,21 @@
 <template lang="pug">
   .number-input
-    button.button(@click.prevent="pick")
+    button.button
       fa-icon(icon="tape")
     input(
       type="text"
       ref="input"
-      v-model="inner"
       :style="inputStyle"
+      :value="inner.asGiven()"
       @blur="focusInput"
-      @keydown.enter.prevent="focusInput"
+      @keydown.enter="enter"
     )
     .unit
-      | {{ unit }}
+      | {{ inner.parse().unit }}
     .controls
-      button.button(@click.prevent="increase")
+      button.button(@click="increase")
         fa-icon(icon="caret-up")
-      button.button(@click.prevent="decrease")
+      button.button(@click="decrease")
         fa-icon(icon="caret-down")
 </template>
 
@@ -75,51 +75,53 @@
 
 
 <script>
+  import Unit from './../units.js'
+
   export default {
     name: 'NumberInput',
 
     props: {
       value: Number,
-      unit: {
-        default: 'mm',
-        type: String,
-      },
     },
 
-    watch: {
-      inner: function() {
-        this.$emit('update:value', Number(this.inner))
-      },
+    data() {
+      return {
+        inner: new Unit(this.value),
+      }
     },
 
     computed: {
       inputStyle: function() {
-        const numChars = String(this.inner).length
+        const numChars = String(this.inner.asGiven()).length
         return {
           'width': String(36 + Math.max(2, numChars * 10)) + 'px'
         }
       },
     },
 
-    data() {
-      return {
-        inner: String,
-      }
+    watch: {
+      'inner.value': function() {
+        this.$emit('update:value', this.inner.value)
+      },
     },
 
     mounted() {
-      this.inner = this.value
       this.focusInput()
     },
 
     methods: {
+      enter: function() {
+        this.inner.value = this.$refs.input.value
+        this.focusInput()
+      },
+
       increase: function() {
-        this.inner = Number((Number(this.inner) + 1).toFixed(3))
+        this.inner.value += 1
         this.focusInput()
       },
 
       decrease: function() {
-        this.inner = Number((Number(this.inner) - 1).toFixed(3))
+        this.inner.value -= 1
         this.focusInput()
       },
 

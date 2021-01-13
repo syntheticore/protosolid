@@ -128,6 +128,12 @@ impl Plane {
     self.normal().dot(p - self.origin) <= EPSILON
   }
 
+  // https://github.com/xibyte/jsketcher/blob/master/modules/geom/euclidean.ts
+  // export function perpendicularVector(v) {
+  //   v = vec.normalize(v);
+  //   return IDENTITY_BASIS3.map(axis => vec.cross(axis, v)).sort((a, b) => vec.lengthSq(b) - vec.lengthSq(a))[0];
+  // }
+
   #[allow(dead_code)]
   fn normal_to_uv(normal: Vec3) -> (Vec3, Vec3) {
     let u = normal.cross(Vec3::unit_z()).normalize();

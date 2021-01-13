@@ -138,6 +138,8 @@
 
 <script>
   import FeatureBox from './feature-box.vue'
+
+  import Material from './../material.js'
   import { ExtrudeFeature, RevolveFeature, SweepFeature } from './../features.js'
 
   import {
@@ -233,7 +235,7 @@
             title: 'Simulate',
             tools: [
               { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
-              { title: 'Temperature Distribution', icon: 'thermometer' },
+              { title: 'Heat Flow', icon: 'thermometer' },
               { title: 'Static Load', icon: 'weight' },
             ],
           },
@@ -294,9 +296,7 @@
       },
 
       addMaterial: function() {
-        this.activeComponent.material = {
-          title: 'Polycarbonate',
-        }
+        this.activeComponent.material = new Material('Polycarbonate')
       },
 
       addCog: function() {
@@ -306,8 +306,7 @@
       addParameter: function() {
         this.activeComponent.parameters.push({
           title: 'width',
-          unit: 'mm',
-          value: '612',
+          value: '512mm',
         })
       },
     },

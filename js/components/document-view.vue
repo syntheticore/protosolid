@@ -127,8 +127,6 @@
   import ListChooser from './list-chooser.vue'
   import RadioBar from './radio-bar.vue'
 
-  let lastId = 9999
-
   export default {
     name: 'DocumentView',
 
@@ -200,7 +198,7 @@
 
       createView: function(title) {
         const newView = {
-          id: lastId++,
+          id: this.document.lastId++,
           title: title || 'Custom View',
           position: this.dirtyView.position.clone(),
           target: this.dirtyView.target.clone(),
@@ -211,12 +209,12 @@
       },
 
       createPose: function() {
-        this.document.poses.push({ title: 'Untitled Pose', id: lastId++ })
+        this.document.poses.push({ title: 'Untitled Pose', id: this.document.lastId++ })
         this.document.isPoseDirty = false
       },
 
       createSet: function() {
-        this.document.sets.push({ title: 'Untitled Set', id: lastId++ })
+        this.document.sets.push({ title: 'Untitled Set', id: this.document.lastId++ })
         this.document.isSetDirty = false
       },
 

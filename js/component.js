@@ -26,4 +26,8 @@ export default class Component {
      this.children.push(comp)
      return comp
   }
+
+  getParameters() {
+
+  }
 }

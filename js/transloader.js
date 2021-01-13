@@ -103,13 +103,13 @@ export class Transloader {
     line.alcType = 'curve'
     line.alcElement = elem
     this.renderer.add(line)
-    elem.line = line
+    elem.mesh = line
     comp.cache.curves.push(elem)
     this.onLoadElement(elem, comp)
   }
 
   unloadElement(elem, comp) {
-    this.renderer.remove(elem.line)
+    this.renderer.remove(elem.mesh)
     comp.cache.curves = comp.cache.curves.filter(e => e != elem)
     this.onUnloadElement(elem, comp)
   }

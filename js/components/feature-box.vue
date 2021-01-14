@@ -252,18 +252,23 @@
 
       update: function() {
         const mesh = this.activeFeature.update()
-        if(mesh) this.$root.$emit('preview-feature', this.activeFeature.component, mesh)
+        if(mesh) {
+          this.$root.$emit('preview-feature', this.activeFeature.component, mesh)
+        } else {
+          this.$root.$emit('component-changed', this.activeFeature.component, true)
+        }
       },
 
       confirm: function(e) {
         this.activeFeature.confirm()
-        this.$root.$emit('component-changed', this.activeFeature.component)
+        this.$root.$emit('component-changed', this.activeFeature.component, true)
         this.$emit('close')
       },
 
       cancel: function(e) {
         this.activeFeature.dispose()
         this.$root.$emit('unpreview-feature')
+        this.$root.$emit('component-changed', this.activeFeature.component, true)
         this.$root.$emit('activate-toolname', 'Manipulate')
         this.$emit('close')
       },

@@ -31,6 +31,7 @@ export class Transloader {
     const isActive = this.isActive(comp)
     const isHighlighted = this.isHighlighted(comp)
     // Load Bodies
+    const material = comp.getMaterial()
     let solids = comp.real.get_solids()
     solids.forEach(solid => {
       const mode = this.renderer.displayMode
@@ -43,7 +44,7 @@ export class Transloader {
             isActive ?
             isHighlighted ?
             this.renderer.materials.highlightSurface :
-            comp.material ? comp.material.displayMaterial : this.renderer.materials.surface :
+            material ? material.displayMaterial : this.renderer.materials.surface :
             isHighlighted ?
             this.renderer.materials.previewAddSurface :
             this.renderer.materials.ghostSurface

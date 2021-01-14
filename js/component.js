@@ -27,6 +27,14 @@ export default class Component {
      return comp
   }
 
+  getMaterial() {
+    return this.material || (this.parent && this.parent.getMaterial())
+  }
+
+  // isHidden() {
+  //   return this.hidden || (this.parent && this.parent.isHidden())
+  // }
+
   getParameters() {
     const params = this.parent ? this.parent.getParameters() : []
     this.parameters.forEach(own => {

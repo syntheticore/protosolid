@@ -157,7 +157,8 @@
       display: flex
       align-items: center
       margin: 1px 0
-      background: $dark2 * 1.3
+      background: rgba($dark2 * 1.3, 0.94)
+      backdrop-filter: blur(8px)
       border: 0.5px solid $dark1 * 1.3
       border-radius: 3px
       font-size: 11px
@@ -193,7 +194,7 @@
         font-size: 21px
 
       h2
-        margin-right: 5px
+        margin-right: 8px
 
     .content
       border-top: 1px solid $dark1 * 1.3
@@ -228,7 +229,7 @@
 
     watch: {
       hidden: function(hidden) {
-        this.$set(this.component, 'hidden', !this.isVisible)
+        this.component.hidden = !this.component.hidden
         this.$root.$emit('component-changed', this.component, true)
       }
     },

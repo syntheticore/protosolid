@@ -202,7 +202,7 @@ export class MaterialFeature extends Feature {
   }
 
   preview() {
-    this.oldMaterial = this.oldMaterial || this.component.material
+    if(this.oldMaterial === undefined) this.oldMaterial = this.component.material
     this.component.material = this.material
   }
 

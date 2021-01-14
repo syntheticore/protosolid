@@ -196,13 +196,13 @@
       },
 
       highlightComponent: function(comp, oldComp) {
-        this.transloader.highlightComponent = comp
         if(oldComp) {
-          this.componentChanged(oldComp, true)
+          this.transloader.unhighlightComponent(oldComp)
         }
         if(comp) {
-          this.componentChanged(comp, true)
+          this.transloader.highlightComponent(comp)
         }
+        this.renderer.render()
       },
 
       activeView: function(view) {

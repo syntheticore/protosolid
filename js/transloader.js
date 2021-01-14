@@ -15,11 +15,6 @@ export class Transloader {
     return this.hasParent(comp, this.document.activeComponent)
   }
 
-  isHighlighted(comp) {
-    if(!this.highlightComponent) return
-    return this.hasParent(comp, this.highlightComponent)
-  }
-
   hasParent(comp, parent) {
     if(!comp) return
     if(comp === parent) return true
@@ -28,11 +23,9 @@ export class Transloader {
 
   loadTree(comp, recursive) {
     if(comp.hidden) return
-    const isActive = this.isActive(comp)
-    const isHighlighted = this.isHighlighted(comp)
     // Load Bodies
-    const material = comp.getMaterial()
     let solids = comp.real.get_solids()
+    const surfaceMaterial = this.getSurfaceMaterial(comp)
     solids.forEach(solid => {
       const mode = this.renderer.displayMode
       // Load Faces
@@ -41,13 +34,7 @@ export class Transloader {
         faces.forEach(face => {
           const faceMesh = this.renderer.convertMesh(
             face.tesselate(),
-            isActive ?
-            isHighlighted ?
-            this.renderer.materials.highlightSurface :
-            material ? material.displayMaterial : this.renderer.materials.surface :
-            isHighlighted ?
-            this.renderer.materials.previewAddSurface :
-            this.renderer.materials.ghostSurface
+            surfaceMaterial,
           )
           faceMesh.alcType = 'face'
           faceMesh.alcFace = face
@@ -62,17 +49,12 @@ export class Transloader {
         })
       }
       // Load Edges
-      if(mode == 'wireframe' || (isActive && mode == 'wireShade')) {
+      if(mode == 'wireframe' || (this.isActive(comp) && mode == 'wireShade')) {
         const wireframe = solid.get_edges()
+        const wireMaterial = this.getWireMaterial(comp)
         comp.cache.wireframe = (comp.cache.wireframe || []).concat(wireframe.map(edge => {
           // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
-          const line = this.renderer.convertLine(
-            edge,
-            isHighlighted ?
-            this.renderer.materials.selectionLine :
-            isActive ?
-            this.renderer.materials.wire : this.renderer.materials.ghostWire,
-          )
+          const line = this.renderer.convertLine(edge, wireMaterial)
           this.renderer.add(line)
           return line
         }))
@@ -145,12 +127,46 @@ export class Transloader {
     comp.cache.regions = []
   }
 
+  getSurfaceMaterial(comp, highlight) {
+    const material = comp.getMaterial()
+    const surfaceMaterial = material ?
+      material.displayMaterial :
+      this.renderer.materials.surface
+    return highlight ?
+      this.renderer.materials.highlightSurface :
+      this.isActive(comp) ?
+        surfaceMaterial : this.renderer.materials.ghostSurface
+  }
+
+  getWireMaterial(comp, highlight) {
+    return highlight ?
+      this.renderer.materials.selectionLine :
+      this.isActive(comp) ?
+        this.renderer.materials.wire : this.renderer.materials.ghostWire
+  }
+
+  applyMaterials(comp, highlight) {
+    const surfaceMaterial = this.getSurfaceMaterial(comp, highlight)
+    const wireMaterial = this.getWireMaterial(comp, highlight)
+    comp.cache.faces.forEach(face => face.material = surfaceMaterial )
+    comp.cache.wireframe.forEach(edge => edge.material = wireMaterial )
+    comp.children.forEach(child => this.applyMaterials(child, highlight))
+  }
+
+  highlightComponent(comp) {
+    this.applyMaterials(comp, true)
+  }
+
+  unhighlightComponent(comp) {
+    this.applyMaterials(comp, false)
+  }
+
   previewFeature(comp, bufferGeometry) {
     this.renderer.remove(this.previewMesh)
     this.previewMesh = this.renderer.convertMesh(
       bufferGeometry,
-      this.renderer.materials.previewAddSurface
-    );
+      this.renderer.materials.previewAddSurface,
+    )
     this.renderer.add(this.previewMesh)
     this.renderer.render()
   }

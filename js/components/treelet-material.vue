@@ -58,7 +58,7 @@
   .expand
     padding: 3px !important
     margin: 0 2px
-    transition: all 0.15s
+    transition: transform 0.15s
     .expanded &
       transform: rotate(90deg)
 

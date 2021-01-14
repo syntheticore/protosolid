@@ -157,14 +157,13 @@
       display: flex
       align-items: center
       margin: 1px 0
-      background: rgba($dark2 * 1.3, 0.94)
+      background: rgba($dark2 * 1.3, 0.93)
       backdrop-filter: blur(8px)
       border: 0.5px solid $dark1 * 1.3
       border-radius: 3px
       font-size: 11px
       font-weight: bold
       &:hover
-        background: $dark2 * 1.3
         border-color: $dark1 * 1.85
 
   .list-enter-active

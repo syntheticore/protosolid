@@ -73,7 +73,20 @@ export class Polystyrene extends Material {
 
     this.color = '#ff57a3'
     this.roughness = 0.3
-    this.translucency = 0.15
+    this.translucency = 0.12
+  }
+}
+
+export class DarkViolet extends Material {
+  constructor() {
+    super('Violet Velvet')
+
+    this.density = 2.7
+
+    this.color = '#1a1835'
+    this.roughness = 0.5
+    this.translucency = 0.13
+    this.metal = true
   }
 }
 

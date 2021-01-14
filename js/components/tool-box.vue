@@ -86,10 +86,12 @@
         .title
           color: $bright1
           transition: none
+        svg
+          transition: none
         .hot-key
           border-color: $dark1 * 1.9
       &:active
-        background: $dark1 * 0.9
+        background: $dark1 * 1.075
       &:disabled
         filter: brightness(50%)
       &.active
@@ -98,7 +100,7 @@
     svg
       font-size: 21px
       color: $bright1
-      // transition: all 0.15s
+      transition: all 0.15s
       filter: none
     .title
       color: $bright2
@@ -137,8 +139,6 @@
 
 <script>
   import FeatureBox from './feature-box.vue'
-
-  import { Aluminum } from './../material.js'
 
   import {
     ExtrudeFeature,
@@ -240,7 +240,6 @@
             title: 'Simulate',
             tools: [
               { title: 'Material', feature: MaterialFeature, icon: 'volleyball-ball' },
-              { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
               { title: 'Heat Flow', icon: 'thermometer' },
               { title: 'Static Load', icon: 'weight' },
             ],
@@ -299,10 +298,6 @@
 
       closeFeature: function() {
         this.activeFeature = null
-      },
-
-      addMaterial: function() {
-        this.activeComponent.material = new Aluminum()
       },
 
       addCog: function() {

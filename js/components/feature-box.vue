@@ -148,7 +148,10 @@
         &.cancel
           color: $cancel
       &:active
-        color: $dark2 !important
+        &.ok
+          color: darken($confirm, 40%)
+        &.cancel
+          color: darken($cancel, 15%)
         transition: none
       &:disabled
         color: $bright1 * 0.5 !important

@@ -4,8 +4,9 @@ export class Material {
   constructor(title) {
     this.title = title
     this.density = 1.0 // g/cm^3
-    this.displayMaterial = new THREE.MeshStandardMaterial({
+    this.displayMaterial = new THREE.MeshPhysicalMaterial({
       side: THREE.DoubleSide, //XXX remove
+      clearcoatRoughness: 0.05,
     })
   }
 
@@ -21,8 +22,12 @@ export class Material {
     return this.displayMaterial.metalness > 0.5
   }
 
+  get clearcoat() {
+    return this.displayMaterial.clearcoat > 0.5
+  }
+
   get transparency() {
-    return 1.0 - this.displayMaterial.opacity
+    return this.displayMaterial.transmission
   }
 
   get translucency() {
@@ -42,9 +47,13 @@ export class Material {
     this.displayMaterial.metalness = bool ? 1.0 : 0.0
   }
 
+  set clearcoat(bool) {
+    this.displayMaterial.clearcoat = bool ? 1.0 : 0.0
+  }
+
   set transparency(transparency) {
-    this.displayMaterial.opacity = 1.0 - transparency
-    this.displayMaterial.transparent = (this.displayMaterial.opacity < 0.9999999)
+    this.displayMaterial.transmission = transparency
+    this.displayMaterial.transparent = (this.displayMaterial.transmission > 0.000001)
   }
 
   set translucency(translucency) {
@@ -55,13 +64,26 @@ export class Material {
 
 export class Aluminum extends Material {
   constructor() {
-    super('Aluminum')
+    super('Aluminum Smooth')
 
     this.density = 2.7
 
+    this.metal = true
     this.color = '#abc5d9'
     this.roughness = 0.15
+  }
+}
+
+export class DarkViolet extends Material {
+  constructor() {
+    super('Aluminum Anodized')
+
+    this.density = 2.7
+
     this.metal = true
+    this.color = '#1a1835'
+    this.roughness = 0.5
+    this.translucency = 0.13
   }
 }
 
@@ -77,16 +99,28 @@ export class Polystyrene extends Material {
   }
 }
 
-export class DarkViolet extends Material {
+export class CarPaint extends Material {
   constructor() {
-    super('Violet Velvet')
+    super('Car Paint')
 
     this.density = 2.7
 
-    this.color = '#1a1835'
-    this.roughness = 0.5
-    this.translucency = 0.13
     this.metal = true
+    this.color = 'red'
+    this.roughness = 0.5
+    this.clearcoat = true
+  }
+}
+
+export class Glass extends Material {
+  constructor() {
+    super('Glass')
+
+    this.density = 2.2
+
+    this.color = 'white'
+    this.roughness = 0.0
+    this.transparency = 0.98
   }
 }
 

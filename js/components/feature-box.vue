@@ -16,6 +16,7 @@
         )
         NumberInput(
           v-if="setting.type == 'length' || setting.type == 'angle'"
+          :component="activeFeature.component"
           :value.sync="activeFeature[key]"
           @update:value="update"
         )

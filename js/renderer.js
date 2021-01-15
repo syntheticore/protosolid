@@ -64,8 +64,7 @@ export class Renderer {
     .load(['px.hdr', 'nx.hdr', 'py.hdr', 'ny.hdr', 'pz.hdr', 'nz.hdr'], (texture) => {
       var pmremGenerator = new THREE.PMREMGenerator(this.renderer)
       pmremGenerator.compileCubemapShader()
-      var envMap = pmremGenerator.fromCubemap(texture).texture
-      this.scene.environment = envMap
+      this.scene.environment = pmremGenerator.fromCubemap(texture).texture
       texture.dispose()
       pmremGenerator.dispose()
       this.render()

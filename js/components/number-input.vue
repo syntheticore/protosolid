@@ -6,12 +6,11 @@
       type="text"
       ref="input"
       :style="inputStyle"
-      :value="inner.asGiven()"
+      :value="inner.expression"
       @blur="focusInput"
+      @keydown="keydown"
       @keydown.enter="enter"
     )
-    .unit
-      | {{ inner.parse().unit }}
     .controls
       button.button(@click="increase")
         fa-icon(icon="caret-up")
@@ -27,9 +26,9 @@
     input
       width: 100%
       border-radius: 0
-      text-align: right
+      text-align: center
       padding: 0
-      padding-right: 23px
+      // padding-right: 23px
       font-size: 12px
       font-weight: 900
       color: $dark2
@@ -40,16 +39,6 @@
         background: lighten($highlight, 80%)
       &::selection
         background: none
-
-  .unit
-    position: absolute
-    right: 22px
-    bottom: 6px
-    color: rgba(black, 0.65)
-    font-size: 10px
-    pointer-events: none
-    z-index: 2
-    width: 18px
 
   .button
     margin: 0
@@ -75,26 +64,27 @@
 
 
 <script>
-  import Unit from './../units.js'
+  import Expression from './../expression.js'
 
   export default {
     name: 'NumberInput',
 
     props: {
+      component: Object,
       value: Number,
     },
 
     data() {
       return {
-        inner: new Unit(this.value),
+        inner: new Expression(this.value, this.component.getParameters()),
       }
     },
 
     computed: {
       inputStyle: function() {
-        const numChars = String(this.inner.asGiven()).length
+        const numChars = String(this.inner.expression).length
         return {
-          'width': String(36 + Math.max(2, numChars * 10)) + 'px'
+          'width': String(24 + Math.max(2, numChars * 11)) + 'px'
         }
       },
     },
@@ -113,6 +103,10 @@
       enter: function() {
         this.inner.value = this.$refs.input.value
         this.focusInput()
+      },
+
+      keydown: function(e) {
+        if(e.keyCode != 27) e.stopPropagation() // Don't capture Esc key
       },
 
       increase: function() {

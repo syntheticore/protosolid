@@ -18,12 +18,9 @@
     font-weight: 800
     font-size: 9px
     box-shadow: none
-    background: none
-    color: white
-    &:hover
-    &:focus
-      background: $bright1
-      color: $dark1
+    &:not(:hover):not(:focus)
+      background: none
+      color: white
 
   .variable
     max-width: 38px !important

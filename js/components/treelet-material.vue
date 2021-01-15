@@ -30,6 +30,9 @@
         label
           input(type="range" v-model="material.translucency" min="0.0" step="0.001" max="1.0")
           span Translucency
+        label
+          input(type="checkbox" v-model="material.clearcoat")
+          span Clear Coat
 </template>
 
 

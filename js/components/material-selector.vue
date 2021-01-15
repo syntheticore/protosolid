@@ -5,7 +5,7 @@
       :class="{chosen: material == chosen}"
       @click="$emit('update:chosen', material)"
     )
-      .preview
+      fa-icon.preview(icon="volleyball-ball")
       h1 {{ material.title }}
 </template>
 
@@ -24,14 +24,24 @@
     margin-top: 4px
     transition: all 0.15s
     border: 2px solid transparent
+    width: 80px
     & + li
       margin-left: 12px
     &:nth-child(1) .preview
       background: lighten($blue, 25%)
+      color: lighten($blue, 50%)
     &:nth-child(2) .preview
-      background: $pink
-    &:nth-child(3) .preview
       background: darken($purple, 30%)
+      color: lighten($purple, 20%)
+    &:nth-child(3) .preview
+      background: $pink
+      color: lighten($pink, 50%)
+    &:nth-child(4) .preview
+      background: $red
+      color: lighten($red, 50%)
+    &:nth-child(5) .preview
+      background: white
+      color: $bright1
     &:hover
       background: $dark1
     &.chosen
@@ -43,12 +53,14 @@
     width: width
     height: width
     border-radius: 999px
+    padding: 3px
     border: 4px solid $bright1
 
   h1
     margin-top: 6px
     font-size: 11px
-    white-space: nowrap
+    text-align: center
+    line-height: 1.3
 
 </style>
 
@@ -59,6 +71,8 @@
     Aluminum,
     Polystyrene,
     DarkViolet,
+    CarPaint,
+    Glass,
   } from './../material.js'
 
   export default {
@@ -72,8 +86,10 @@
       return {
         materials: [
           new Aluminum(),
-          new Polystyrene(),
           new DarkViolet(),
+          new Polystyrene(),
+          new CarPaint(),
+          new Glass(),
         ],
       }
     },

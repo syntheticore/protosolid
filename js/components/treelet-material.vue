@@ -47,7 +47,7 @@
     width: 73px
     margin: 0
     margin-right: 8px
-    box-shadow: none !important
+    box-shadow: none
 
   header
     display: flex

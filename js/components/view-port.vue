@@ -41,12 +41,9 @@
 
 
 <style lang="stylus" scoped>
-  // $color = desaturate($highlight, 35%)
   .view-port
     position: relative
     overflow: hidden
-    // border-top: 1px solid $color * 0.375
-    border-top: 1px solid #323840
 
   canvas
     display: block

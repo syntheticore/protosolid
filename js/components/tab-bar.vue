@@ -3,7 +3,6 @@
 
     MenuButton.left.app-menu-btn(icon="atom")
       AppMenu(@create-document="createDocument")
-      IconView
 
     ul.tabs
       li(v-for="doc in documents"
@@ -16,8 +15,9 @@
     .grab-handle.dynamic
 
     nav
-      MenuButton(title="Preferences" icon="sliders-h")
-      //- MenuButton(title="Tool Settings" icon="code-branch")
+      MenuButton(title="Tool Settings" icon="cloud")
+        IconView
+      //- MenuButton(title="History" icon="code-branch")
       //-   form
       //-     label
       //-       | Transform:
@@ -43,9 +43,7 @@
       //-       label.inset
       //-         | Increment
       //-         input(type="number" value="45")
-      //- MenuButton(title="Tool Settings" icon="cloud")
-      //- MenuButton(title="Snapping" icon="ruler")
-      //- MenuButton.account(title="Account" icon="user-circle")
+      //- MenuButton.account(title="Account" icon="user")
       //-   span.name Björn
 
     .grab-handle.fixed
@@ -92,20 +90,9 @@
     .window-controls button:last-child
       border-radius: 0
 
-  [data-platform="browser"]
-    .icon-view
-      display: block
-
   .app-menu-btn
-    color: $highlight * 1.2
-    .wrapper
-      padding: 0 !important
-
-  .app-menu
-    // min-height: 200px
-
-  .icon-view
-    display: none
+    color: #ff9f90
+    // color: $highlight * 1.2
 
   .tabs
     display: flex
@@ -125,7 +112,6 @@
       height: 100%
       font-size: 12px
       font-weight: bold
-      // min-width: 120px
       transition: all 0.2s
       color: $bright2
       text-shadow: 0 -1px 0px black
@@ -136,10 +122,6 @@
       &.active
         color: $bright1
         background: $dark1 * 1.2
-        // border-top: 1px solid $highlight
-        // border-left: 1px solid $dark1 * 1.45
-      // & + li
-      //   border-left: 1px solid $dark1 * 1.2
       button
         background: none
         border: none
@@ -148,7 +130,6 @@
           color: $bright1
         svg
           color: $bright2
-          // cursor: pointer
           transition: all 0.2s
           filter: drop-shadow(0 1px 0px rgba(0,0,0, 0.9))
           opacity: 0

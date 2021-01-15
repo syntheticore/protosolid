@@ -105,7 +105,6 @@
     > *
       margin-top: 6px
     input
-    select
     .radio-bar
     .icon-toggle
       flex: 1 1 auto
@@ -157,8 +156,6 @@
         color: $bright1 * 0.5 !important
 
   @keyframes rotate
-    50%
-      transform: rotate(180deg)
     100%
       transform: rotate(360deg)
 

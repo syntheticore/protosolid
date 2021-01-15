@@ -18,7 +18,6 @@
     margin: 4px 5px
     .fullscreen .tab-bar &
     .maximized .tab-bar &
-    [data-platform="browser"] .tab-bar &
       button
         padding: 3px 8px
     &.left
@@ -29,7 +28,7 @@
           right: unset
           left: 20px
 
-  button
+  .button
     margin: 0
     color: inherit
     font-size: 16px
@@ -55,7 +54,7 @@
     z-index: 2
     transition: all 0.2s
     pointer-events: all
-    top: 27px
+    top: 24px
     right: -12px
     // min-width: 195px
     color: $bright2

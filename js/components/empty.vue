@@ -24,7 +24,5 @@
     mounted() {},
 
     methods: {},
-
-    beforeDestroy() {},
   }
 </script>

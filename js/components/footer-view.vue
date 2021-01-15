@@ -105,6 +105,9 @@
     left: 5px
     bottom: 7px
     pointer-events: all
+    display: none
+    [data-platform="browser"] &
+      display: block
 
   .fade-enter-active, .fade-leave-active
     transition: all 0.4s
@@ -112,6 +115,7 @@
   .fade-enter, .fade-leave-to
     opacity: 0
     transform: translateY(12px)
+
 </style>
 
 

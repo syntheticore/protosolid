@@ -21,13 +21,16 @@ body
     &[data-darwin-old]
       border-top: 1px solid $dark1 * 1.3
 
+h1, h2, h3, h4
+  color: $bright1
+
 fieldset
   // padding-left: 6px
   margin: 12px 0
 
 legend
   color: $bright1 * 0.95
-  font-size: 13px
+  font-size: 12px
   font-weight: bold
   margin: 6px 0
   // margin-left: -6px
@@ -35,12 +38,14 @@ legend
 label
   display: block
   color: $bright2
+  display: flex
+  align-items: center
 .inset
   margin-bottom: 6px
   &:last-child
     margin-bottom: 0
 
-input[type="text"], input[type="number"]
+input, select
   background: $bright1
   border: 2px solid transparent
   box-shadow: 0 0 0 1px $dark2 * 0.55
@@ -51,10 +56,15 @@ input[type="text"], input[type="number"]
   transition: all 0.2s
   color: $dark1
   &:focus
-    background: $bright1
+    background: white
     border: 2px solid $highlight
   &:hover
-    background: $bright1
+    background: white
+
+input[type="range"]
+  padding: unset
+  border: unset
+  box-shadow: unset
 
 input[type="color"]
   border: none

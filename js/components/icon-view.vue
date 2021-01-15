@@ -95,7 +95,8 @@
 <style lang="stylus" scoped>
   .icon-view
     font-size: 16px
-  
+    min-width: 300px
+
   svg
     margin: 6px
 </style>

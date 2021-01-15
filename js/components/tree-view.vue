@@ -17,6 +17,7 @@
     margin-left: -7px
     margin-bottom: 22px
     overflow-y: auto
+    padding-top: 14px
     padding-right: 24px
     box-sizing: content-box
     pointer-events: all

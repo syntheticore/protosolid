@@ -1,5 +1,5 @@
 <template lang="pug">
-  main.document-view
+  main.document-view(@click="click")
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
@@ -68,6 +68,7 @@
     display: flex
     justify-content: center
     min-width: 770px
+    border-top: 1px solid #323840
 
   .tool-box
     position: absolute
@@ -78,7 +79,6 @@
     position: absolute
     top: 0
     bottom: 55px
-    padding-top: 14px
     pointer-events: none
     h1
       text-align: center
@@ -94,6 +94,7 @@
       left: 0
       overflow: hidden
     &.right
+      top: 14px
       right: 14px
       bottom: 35px
       display: flex
@@ -237,6 +238,10 @@
 
       elementSelected: function(elem) {
         this.selectedElement = elem
+      },
+
+      click: function() {
+        this.$root.$emit('close-widgets')
       },
     },
   }

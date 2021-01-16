@@ -49,6 +49,7 @@
   import TabBar from './tab-bar.vue'
   import DocumentView from './document-view.vue'
 
+  import { loadPreferences } from './../preferences.js'
   import Document from './../document.js'
   const wasmP = import('../../rust/pkg/wasm-index.js')
 
@@ -70,6 +71,8 @@
     },
 
     created() {
+      loadPreferences()
+
       window.addEventListener('resize', () => {
         this.$root.$emit('resize')
       }, false)

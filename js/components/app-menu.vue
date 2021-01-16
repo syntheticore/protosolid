@@ -106,6 +106,9 @@
       margin-top: 4px
 
   .actions
+    &:hover
+      button
+        transition: none
     button
       background: none
       border: none
@@ -121,11 +124,10 @@
       &:hover
         background: rgba(white, 0.07)
         color: white
-        transition: none
+        // transition: none
       &:active
         background: $dark1 * 0.65
       &:disabled
-        pointer-events: none
         opacity: 0.5
       svg
         color: $bright1 * 0.85

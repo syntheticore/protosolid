@@ -1,3 +1,5 @@
+import preferences from './preferences.js'
+
 const conversions = {
   mm: 1.0,
   cm: 10.0,
@@ -16,17 +18,17 @@ export default class Expression {
   set(input) {
     if(typeof input == 'number') {
       // Assume preferred unit for raw input
-      this.expression = String(Number(input.toFixed(3))) + this.preferredUnit
+      this.expression = String(Number(input.toFixed(3))) + preferences.preferredUnit
     } else {
       // Allways leave a unit for display purposes
       const number = this.parsePlus(input)
-      if(!number.unit && number.value == input) input += this.preferredUnit
+      if(!number.unit && number.value == input) input += preferences.preferredUnit
       this.expression = input
     }
   }
 
   asPreferredUnit() {
-    return this.as(this.preferredUnit)
+    return this.as(preferences.preferredUnit)
   }
 
   asBaseUnit() {
@@ -45,7 +47,7 @@ export default class Expression {
   parse() {
     const number = this.parsePlus(this.expression)
     // Assume preferred unit if no unit could be determined by now
-    number.unit = number.unit || this.preferredUnit
+    number.unit = number.unit || preferences.preferredUnit
     return number
   }
 
@@ -123,7 +125,7 @@ export default class Expression {
 
   decideUnit(left, right) {
     return left.unit && right.unit ?
-      left.unit == right.unit ? left.unit : this.preferredUnit :
+      left.unit == right.unit ? left.unit : preferences.preferredUnit :
       left.unit || right.unit
   }
 

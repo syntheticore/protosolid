@@ -80,10 +80,7 @@
 
     data() {
       return {
-        inner: new Expression(
-          String(this.value) + 'mm',
-          this.component.getParameters(),
-        ),
+        inner: new Expression(this.value, this.component.getParameters()),
       }
     },
 

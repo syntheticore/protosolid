@@ -9,6 +9,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 
+import { default as preferences, emitter as prefEmitter } from './preferences.js'
 import { Materials } from './materials.js'
 import { SketchPlane } from './sketchPlane.js'
 import { ShadowCatcher } from './shadowCatcher.js'
@@ -23,16 +24,13 @@ export class Renderer {
     // Renderer
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      // antialias: window.devicePixelRatio <= 1.0,
       antialias: true,
       alpha: true,
     })
 
-    this.renderer.setPixelRatio(window.devicePixelRatio)
     this.renderer.outputEncoding = THREE.sRGBEncoding
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.physicallyCorrectLights = true
-    this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.autoUpdate = false
     // this.renderer.shadowMap.type = THREE.VSMShadowMap
     // this.renderer.toneMapping = THREE.ReinhardToneMapping
@@ -114,6 +112,15 @@ export class Renderer {
 
     // Init viewport
     this.setActiveCamera(this.camera)
+
+    const setPixelRatio = () => {
+      this.renderer.setPixelRatio(preferences.highDPI ? window.devicePixelRatio : 0.5)
+      this.renderer.shadowMap.enabled = preferences.shadowMaps
+      this.render()
+    }
+
+    setPixelRatio()
+    prefEmitter.on('updated', setPixelRatio)
   }
 
   setActiveCamera(camera) {

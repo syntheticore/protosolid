@@ -61,6 +61,15 @@ input, select
   &:hover
     background: white
 
+input, select, textarea, label
+  &:disabled
+  &[disabled]
+    pointer-events: none
+    opacity: 0.5
+
+button:disabled
+  pointer-events: none
+
 input[type="range"]
   padding: unset
   border: unset
@@ -98,7 +107,6 @@ input[type="color"]
     border: 1px solid $dark1 * 0.95
     background: linear-gradient(top, $dark1 * 1.1, $dark2 * 1.275)
   &:disabled
-    pointer-events: none
     color: $bright2
   svg
     // filter: drop-shadow(0 -1px 0px rgba(0,0,0, 0.6))

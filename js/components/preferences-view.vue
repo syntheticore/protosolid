@@ -11,22 +11,20 @@
             option System default
           span Theme
         label
-          input(type="checkbox" checked)
+          input(type="checkbox" v-model="preferences.blurredOverlays")
           span Blurred overlays
+        //- label(:disabled="!isHighDPI")
         label
-          input(type="checkbox" checked)
-          span Anti-aliasing
-        label
-          input(type="checkbox" checked)
+          input(type="checkbox" v-model="preferences.highDPI")
           span High DPI rendering
         label
-          input(type="checkbox" checked)
+          input(type="checkbox" v-model="preferences.shadowMaps")
           span Render shadow maps
 
       fieldset
         legend Standard Units
         label
-          select
+          select(v-model="preferences.preferredUnit")
             option mm
             option cm
             option m
@@ -92,21 +90,30 @@
 
 
 <script>
+  import {
+    default as preferences,
+    savePreferences,
+    loadPreferences
+  } from './../preferences.js'
+
   export default {
     name: 'PreferencesView',
-
-    components: {},
-
-    props: {},
 
     data() {
       return {
         open: false,
+        preferences,
+        isHighDPI: window.devicePixelRatio > 1,
       }
     },
 
-    mounted() {},
-
-    methods: {},
+    watch: {
+      preferences: {
+        handler() {
+          savePreferences()
+        },
+        deep: true,
+      },
+    },
   }
 </script>

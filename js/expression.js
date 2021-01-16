@@ -81,16 +81,16 @@ export default class Expression {
   }
 
   parseNumber(expr) {
-    const number = /(\d+\.?\d*)\s*(inch|mm|cm|m)?/.exec(expr)
-    if(!number) {
+    const match = /(\d*\.?\d*)\s*(inch\b|mm\b|cm\b|m\b)?/.exec(expr)
+    if(!match || match[1] === '') {
       // Propably a parameter
       const param = this.parameters.find(param => param.name == expr.trim() )
       if(!param) throw 'Unknown Parameter "' + expr + '"'
       return this.parsePlus(param.value)
     // Actual number literal with or without unit
     } else return {
-      value: Number(number[1]),
-      unit: number[2],
+      value: Number(match[1]),
+      unit: match[2],
     }
   }
 

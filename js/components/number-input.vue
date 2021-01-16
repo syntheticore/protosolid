@@ -115,7 +115,8 @@
       },
 
       decrease: function() {
-        this.inner.value -= 1
+        const value = this.inner.value - 1
+        if(value >= 0) this.inner.value = value
         this.focusInput()
       },
 

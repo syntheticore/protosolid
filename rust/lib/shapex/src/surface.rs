@@ -8,6 +8,7 @@ use crate::mesh::Mesh;
 
 pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
+  // fn unsample(&self, p: Point3) -> (f64, f64);
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
   fn tesselate(&self, resolution: i32, bounds: &Wire) -> Mesh;
   fn flip(&mut self);
@@ -61,6 +62,9 @@ impl TrimmedSurface {
     let wire = &self.bounds[0];
     self.base.as_surface().tesselate(80, wire)
   }
+
+  //XXX pub fn area(&self) -> f64
+  //XXX pub fn on_surface(&self, u: f64, v: f64) -> bool
 }
 
 
@@ -283,6 +287,14 @@ impl Transformable for CylindricalSurface {
     self.direction = transform.apply_vec(self.direction);
   }
 }
+
+
+// EllipticalSurface
+// ConicSurface
+// EllipticalConicSurface
+// SphericalSurface
+// ToricSurface
+// NurbsSurface
 
 
 #[cfg(test)]

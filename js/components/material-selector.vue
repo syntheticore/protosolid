@@ -13,6 +13,13 @@
 <style lang="stylus" scoped>
   .material-selector
     display: flex
+    align-items: start
+    flex-wrap: wrap
+    margin: -10px
+    margin-top: 9px !important
+    overflow-y: auto
+    max-height: 280px
+    border-top: 1px solid $dark1
 
   li
     flex: 1 1 0
@@ -21,12 +28,12 @@
     align-items: center
     padding: 8px
     border-radius: 6px
-    margin-top: 4px
     transition: all 0.15s
     border: 2px solid transparent
-    width: 80px
+    // width: 80px
+    margin: 8px
     & + li
-      margin-left: 12px
+      // margin-left: 12px
     &:nth-child(1) .preview
       background: lighten($blue, 25%)
       color: lighten($blue, 50%)
@@ -85,6 +92,11 @@
     data() {
       return {
         materials: [
+          new Aluminum(),
+          new DarkViolet(),
+          new Polystyrene(),
+          new CarPaint(),
+          new Glass(),
           new Aluminum(),
           new DarkViolet(),
           new Polystyrene(),

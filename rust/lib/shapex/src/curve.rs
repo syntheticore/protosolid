@@ -15,8 +15,9 @@ pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
   fn unsample(&self, p: &Point3) -> f64;
   fn tesselate(&self) -> PolyLine;
-  fn length(&self) -> f64;
   fn endpoints(&self) -> (Point3, Point3);
+  fn length_between(&self, start: f64, end: f64) -> f64;
+  // fn param_at_length(&self, length: f64) -> f64;
 
   fn other_endpoint(&self, point: &Point3) -> Point3 {
     let (start, end) = self.endpoints();
@@ -31,6 +32,10 @@ pub trait Curve: Transformable {
 
   fn tesselate_adaptive(&self, steps_per_mm: f64) -> Vec<Point3> {
     self.tesselate_fixed((steps_per_mm * self.length()).round() as i32)
+  }
+
+  fn length(&self) -> f64 {
+    self.length_between(0.0, 1.0)
   }
 
   // fn closest_point(&self, p: Point3) -> Point3 {
@@ -261,8 +266,8 @@ impl Curve for Line {
     self.tesselate_fixed(1)
   }
 
-  fn length(&self) -> f64 {
-    self.points.0.distance(self.points.1)
+  fn length_between(&self, start: f64, end: f64) -> f64 {
+    self.sample(start).distance(self.sample(end))
   }
 
   fn endpoints(&self) -> (Point3, Point3) {
@@ -341,8 +346,8 @@ impl Curve for Arc {
     self.tesselate_fixed(60)
   }
 
-  fn length(&self) -> f64 {
-    std::f64::consts::PI * 2.0 * self.radius
+  fn length_between(&self, start: f64, end: f64) -> f64 {
+    std::f64::consts::PI * 2.0 * self.radius * (start - end).abs()
   }
 
   fn endpoints(&self) -> (Point3, Point3) {
@@ -459,8 +464,8 @@ impl Curve for Circle {
     self.tesselate_fixed(80)
   }
 
-  fn length(&self) -> f64 {
-    self.circumfence()
+  fn length_between(&self, start: f64, end: f64) -> f64 {
+    self.circumfence() * (start - end).abs()
   }
 
   fn endpoints(&self) -> (Point3, Point3) {
@@ -602,7 +607,7 @@ impl Curve for BezierSpline {
     self.lut.clone()
   }
 
-  fn length(&self) -> f64 {
+  fn length_between(&self, _start: f64, _end: f64) -> f64 {
     1.0
   }
 

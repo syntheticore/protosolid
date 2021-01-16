@@ -50,38 +50,40 @@ export default class Expression {
   }
 
   // * / - +
-  parsePlus(expression) {
-    const numbers = this.split(expression, '+').map(expr => this.parseMinus(expr) )
+  parsePlus(expr) {
+    const numbers = this.split(expr, ['+']).map(chunk =>
+      this.parseMinus(chunk.chunk)
+    )
     return numbers.reduce((acc, number) => this.add(acc, number))
   }
 
   // * / -
-  parseMinus(expression) {
-    const numbers = this.split(expression, '-').map(expr => this.parseDivision(expr) )
+  parseMinus(expr) {
+    const numbers = this.split(expr, ['-']).map(chunk =>
+      this.parseMultiplication(chunk.chunk)
+    )
     return numbers.reduce((acc, number) => this.subtract(acc, number) )
   }
 
   // * /
-  parseDivision(expression) {
-    const numbers = this.split(expression, '/').map(expr => this.parseMultiplication(expr) )
-    return numbers.reduce((acc, number) => this.divide(acc, number) )
+  parseMultiplication(expr) {
+    const chunks = this.split(expr, ['*', '/'])
+    const numbers = chunks.map(chunk => chunk.chunk[0] == '(' ?
+      this.parsePlus(chunk.chunk.substr(1, chunk.chunk.length - 2)) :
+      this.parseNumber(chunk.chunk)
+    )
+    return numbers.reduce((acc, number, i) => chunks[i - 1].op == '*' ?
+      this.multiply(acc, number) :
+      this.divide(acc, number)
+    )
   }
 
-  // *
-  parseMultiplication(expression) {
-    const numbers = this.split(expression, '*').map(expr => {
-      if(expr[0] == '(') return this.parsePlus(expr.substr(1, expr.length - 2))
-      return this.parseNumber(expr)
-    })
-    return numbers.reduce((acc, number) => this.multiply(acc, number) )
-  }
-
-  parseNumber(expression) {
-    const number = /(\d+\.?\d*)\s*(inch|mm|cm|m)?/.exec(expression)
+  parseNumber(expr) {
+    const number = /(\d+\.?\d*)\s*(inch|mm|cm|m)?/.exec(expr)
     if(!number) {
       // Propably a parameter
-      const param = this.parameters.find(param => param.name == expression.trim() )
-      if(!param) throw 'Unknown Parameter "' + expression + '"'
+      const param = this.parameters.find(param => param.name == expr.trim() )
+      if(!param) throw 'Unknown Parameter "' + expr + '"'
       return this.parsePlus(param.value)
     // Actual number literal with or without unit
     } else return {
@@ -114,7 +116,7 @@ export default class Expression {
       value: op(
         left.value * conversions[leftUnit],
         right.value * conversions[rightUnit],
-      ) / conversions[unit || 'mm'],
+      ) / unit ? conversions[unit] : 1.0,
       unit,
     }
   }
@@ -125,7 +127,7 @@ export default class Expression {
       left.unit || right.unit
   }
 
-  split(expression, operator) {
+  split(expression, operators) {
     const result = []
     let braces = 0
     let currentChunk = ''
@@ -136,20 +138,24 @@ export default class Expression {
       } else if (token == ')') {
         braces--
       }
-      if(braces == 0 && operator == token) {
-        result.push(currentChunk.trim())
+      const op = operators.find(op => op == token )
+      if(braces == 0 && op) {
+        result.push({
+          op,
+          chunk: currentChunk.trim(),
+        })
         currentChunk = ''
       } else currentChunk += token
     }
     if(currentChunk != '') {
-      result.push(currentChunk.trim())
+      result.push({
+        chunk: currentChunk.trim(),
+      })
     }
     return result
   }
 }
 
 
-const unit = new Expression('2mm * 2mm / 2inch')
+const unit = new Expression('2mm / 2mm * 2inch')
 console.log('RESULT', unit.asBaseUnit(), unit.parse().value, unit.parse().unit)
-
-b - a / 2 + 5

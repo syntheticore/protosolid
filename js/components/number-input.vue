@@ -66,6 +66,10 @@
 <script>
   import Expression from './../expression.js'
 
+  function truncate(number) {
+    return String(Number(number.toFixed(3)))
+  }
+
   export default {
     name: 'NumberInput',
 
@@ -76,7 +80,10 @@
 
     data() {
       return {
-        inner: new Expression(this.value, this.component.getParameters()),
+        inner: new Expression(
+          String(this.value) + 'mm',
+          this.component.getParameters(),
+        ),
       }
     },
 
@@ -90,8 +97,8 @@
     },
 
     watch: {
-      'inner.value': function() {
-        this.$emit('update:value', this.inner.value)
+      'inner.expression': function() {
+        this.$emit('update:value', this.inner.asBaseUnit())
       },
     },
 
@@ -101,7 +108,7 @@
 
     methods: {
       enter: function() {
-        this.inner.value = this.$refs.input.value
+        this.inner.set(this.$refs.input.value)
         this.focusInput()
       },
 
@@ -110,13 +117,15 @@
       },
 
       increase: function() {
-        this.inner.value += 1
+        const number = this.inner.parse()
+        this.inner.set(truncate(number.value + 1) + number.unit)
         this.focusInput()
       },
 
       decrease: function() {
-        const value = this.inner.value - 1
-        if(value >= 0) this.inner.value = value
+        const number = this.inner.parse()
+        const newValue = number.value - 1
+        if(newValue >= 0) this.inner.set(truncate(newValue) + number.unit)
         this.focusInput()
       },
 

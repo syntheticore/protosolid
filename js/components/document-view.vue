@@ -1,5 +1,5 @@
 <template lang="pug">
-  main.document-view(@click="click")
+  main.document-view(@mousedown="mousedown")
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
@@ -240,7 +240,7 @@
         this.selectedElement = elem
       },
 
-      click: function() {
+      mousedown: function() {
         this.$root.$emit('close-widgets')
       },
     },

@@ -2,9 +2,9 @@
   .parameter-treelet
     header
       fa-icon(icon="square-root-alt" fixed-width)
-      input.variable(type="text" v-model="parameter.name" @keydown.stop="")
+      input.variable(type="text" v-model.trim="parameter.name" @keydown.stop)
       span =
-      input.value(type="text" v-model="value" @keydown.stop="")
+      input.value(type="text" v-model.trim="value" @keydown.stop)
 </template>
 
 

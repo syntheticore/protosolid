@@ -84,9 +84,6 @@
     .tab-bar
       padding-left: 0px
       border-radius: 0 !important
-      // border-top: none
-    .tab-bar
-      border-top: none
     .window-controls button:last-child
       border-radius: 0
 

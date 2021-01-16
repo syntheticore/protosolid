@@ -8,31 +8,34 @@ const conversions = {
 export default class Expression {
   constructor(input, parameters, preferredUnit) {
     this.parameters = parameters || []
-    this.preferredUnit = preferredUnit
-    this.value = input
+    this.preferredUnit = preferredUnit || 'mm'
+    this.set(input)
   }
 
-  // Set in any unit. Defaults to millimeter.
-  set value(input) {
+  // Set in any unit
+  set(input) {
     if(typeof input == 'number') {
-      this.expression = String(Number(input.toFixed(3))) + 'mm'
+      // Assume preferred unit for raw input
+      this.expression = String(Number(input.toFixed(3))) + this.preferredUnit
     } else {
-      // Don't leave the saved expression totally without unit
-      // for display purposes
+      // Allways leave a unit for display purposes
       const number = this.parsePlus(input)
-      if(!number.unit && number.value == input) input += 'mm'
+      if(!number.unit && number.value == input) input += this.preferredUnit
       this.expression = input
     }
   }
 
-  // Return millimeters
-  get value() {
+  asPreferredUnit() {
+    return this.as(this.preferredUnit)
+  }
+
+  asBaseUnit() {
     const number = this.parse()
-    return number.value * conversions[number.unit || 'mm']
+    return number.value * conversions[number.unit]
   }
 
   as(unit) {
-    return this.value / conversions[unit]
+    return this.asBaseUnit() / conversions[unit]
   }
 
   format(unit) {
@@ -40,7 +43,10 @@ export default class Expression {
   }
 
   parse() {
-    return this.parsePlus(this.expression)
+    const number = this.parsePlus(this.expression)
+    // Assume preferred unit if no unit could be determined by now
+    number.unit = number.unit || this.preferredUnit
+    return number
   }
 
   // * / - +
@@ -73,9 +79,11 @@ export default class Expression {
   parseNumber(expression) {
     const number = /(\d+\.?\d*)\s*(inch|mm|cm|m)?/.exec(expression)
     if(!number) {
+      // Propably a parameter
       const param = this.parameters.find(param => param.name == expression.trim() )
       if(!param) throw 'Unknown Parameter "' + expression + '"'
-      return this.parseNumber(param.value)
+      return this.parsePlus(param.value)
+    // Actual number literal with or without unit
     } else return {
       value: Number(number[1]),
       unit: number[2],
@@ -83,25 +91,25 @@ export default class Expression {
   }
 
   add(left, right) {
-    return this.operation(left, right, (l,r) => l + r )
+    return this.operation(left, right, (l,r) => l + r, true)
   }
 
   subtract(left, right) {
-    return this.operation(left, right, (l,r) => l - r )
+    return this.operation(left, right, (l,r) => l - r, true)
   }
 
   divide(left, right) {
-    return this.operation(left, right, (l,r) => l / r, true )
+    return this.operation(left, right, (l,r) => l / r )
   }
 
   multiply(left, right) {
-    return this.operation(left, right, (l,r) => l * r, true )
+    return this.operation(left, right, (l,r) => l * r )
   }
 
-  operation(left, right, op, quadratic) {
+  operation(left, right, op, convertBoth) {
     const unit = this.decideUnit(left, right)
-    const leftUnit = (quadratic ? left.unit : left.unit || right.unit) || 'mm'
-    const rightUnit = (quadratic ? right.unit : right.unit || left.unit) || 'mm'
+    const leftUnit = (convertBoth ? left.unit || right.unit : left.unit) || 'mm'
+    const rightUnit = (convertBoth ? right.unit || left.unit : right.unit) || 'mm'
     return {
       value: op(
         left.value * conversions[leftUnit],
@@ -113,7 +121,7 @@ export default class Expression {
 
   decideUnit(left, right) {
     return left.unit && right.unit ?
-      left.unit == right.unit ? left.unit : 'mm' :
+      left.unit == right.unit ? left.unit : this.preferredUnit :
       left.unit || right.unit
   }
 
@@ -141,5 +149,7 @@ export default class Expression {
 }
 
 
-const unit = new Expression('2 * (1inch + 1mm)')
-console.log('RESULT', unit.value, unit.parse().value, unit.parse().unit)
+const unit = new Expression('2mm * 2mm / 2inch')
+console.log('RESULT', unit.asBaseUnit(), unit.parse().value, unit.parse().unit)
+
+b - a / 2 + 5

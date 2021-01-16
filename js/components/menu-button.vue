@@ -18,8 +18,9 @@
     margin: 4px 5px
     .fullscreen .tab-bar &
     .maximized .tab-bar &
+    [data-platform="browser"] .tab-bar &
       button
-        padding: 3px 8px
+        padding: 4px 8px
     &.left
       .pop-up
         right: unset
@@ -35,6 +36,7 @@
     font-weight: normal
     display: flex
     align-items: center
+    padding: 5px 8px
     &.pressed
     &:active
       .expander

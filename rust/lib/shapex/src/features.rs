@@ -1,16 +1,18 @@
-// use std::rc::{Rc, Weak};
-
 use crate::base::*;
 use crate::curve::*;
 use crate::surface::*;
 use crate::solid::*;
 
 
-pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Solid {
+pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Result<Solid, String> {
   let mut solid = Solid::new_lamina(region, Plane::new().into_enum());
   let shell = &mut solid.shells[0];
   shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
-  solid
+  if distance > 6.0 {
+    Err("Extrusion distance cannot be greater than 6.0".to_string())
+  } else {
+    Ok(solid)
+  }
 }
 
 pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {
@@ -34,14 +36,14 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
     };
     region.push(TrimmedCurve::new(Line::new(p, *next).into_enum()));
   }
-  extrude(region, dz)
+  extrude(region, dz).unwrap()
 }
 
 pub fn make_cylinder(radius: f64, height: f64) -> Solid {
   let region = vec![
     TrimmedCurve::new(Circle::new(Point3::new(0.0, 0.0, 0.0), radius).into_enum())
   ];
-  extrude(region, height)
+  extrude(region, height).unwrap()
 }
 
 

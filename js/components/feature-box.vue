@@ -5,48 +5,52 @@
     //-   fa-icon(icon="box" title="Confirm")
     //-   .title Extrude
 
-    .settings
-      .setting(v-for="(setting, key) in activeFeature.settings")
-        | {{ setting.title }}
-        .picker(
-          v-if="needsPicker(setting, true)"
-          :ref="key"
-          :class="{active: activePicker == key, filled: activeFeature[key]}"
-          @click="pick(setting.type, key)"
-        )
-        NumberInput(
-          v-if="setting.type == 'length' || setting.type == 'angle'"
-          :component="activeFeature.component"
-          :value.sync="activeFeature[key]"
-          @update:value="update"
-        )
-        IconToggle(
-          v-if="setting.type == 'bool'"
-          :icons="setting.icons"
-          :active.sync="activeFeature[key]"
-          @update:active="update"
-        )
-        RadioBar(
-          v-if="setting.type == 'select'"
-          :items="setting.options"
-          :chosen.sync="activeFeature[key]"
-          @update:chosen="update"
-        )
-        MaterialSelector(
-          v-if="setting.type == 'material'"
-          :chosen.sync="activeFeature[key]"
-          @update:chosen="update"
-        )
+    .main
+      .settings
+        .setting(v-for="(setting, key) in activeFeature.settings")
+          | {{ setting.title }}
+          .picker(
+            v-if="needsPicker(setting, true)"
+            :ref="key"
+            :class="{active: activePicker == key, filled: activeFeature[key]}"
+            @click="pick(setting.type, key)"
+          )
+          NumberInput(
+            v-if="setting.type == 'length' || setting.type == 'angle'"
+            :component="activeFeature.component"
+            :value.sync="activeFeature[key]"
+            @update:value="update"
+          )
+          IconToggle(
+            v-if="setting.type == 'bool'"
+            :icons="setting.icons"
+            :active.sync="activeFeature[key]"
+            @update:active="update"
+          )
+          RadioBar(
+            v-if="setting.type == 'select'"
+            :items="setting.options"
+            :chosen.sync="activeFeature[key]"
+            @update:chosen="update"
+          )
+          MaterialSelector(
+            v-if="setting.type == 'material'"
+            :chosen.sync="activeFeature[key]"
+            @update:chosen="update"
+          )
+      transition(name="fade")
+        .error(v-if="error") {{ error }}
 
     .confirmation
       button.ok(
         title="Confirm"
-        :disabled="!activeFeature.isComplete()"
+        :disabled="!activeFeature.isComplete() || error"
         @click="confirm"
       )
         fa-icon(icon="check-circle")
       button.cancel(title="Cancel" @click="cancel")
         fa-icon(icon="times-circle")
+
 </template>
 
 
@@ -124,6 +128,9 @@
       border-width: 2px !important
     &.filled
       border-width: 2px
+    @keyframes rotate
+      100%
+        transform: rotate(360deg)
 
   .confirmation
     display: flex
@@ -156,10 +163,23 @@
       &:disabled
         color: $bright1 * 0.5 !important
 
-  @keyframes rotate
-    100%
-      transform: rotate(360deg)
+  .error
+    background: darken($red, 50%)
+    font-size: 12px
+    font-weight: bold
+    padding: 5px 10px
+    margin-right: 1px
+    transition: all 0.25s
+    color: lighten($red, 65%)
+    text-align: center
+    border-bottom-left-radius: 4px
 
+  .fade-enter
+  .fade-leave-to
+    opacity: 0
+    padding-top: 0
+    padding-bottom: 0
+    margin-bottom: -12px
 </style>
 
 
@@ -196,6 +216,7 @@
 
     data() {
       return {
+        error: null,
         activePicker: null,
       }
     },
@@ -249,9 +270,12 @@
       },
 
       update: function() {
-        const mesh = this.activeFeature.update()
-        if(mesh) {
-          this.$root.$emit('preview-feature', this.activeFeature.component, mesh)
+        const meshOrError = this.activeFeature.update()
+        this.error = null
+        if(typeof meshOrError == 'string') {
+          this.error = meshOrError
+        } else if(meshOrError) {
+          this.$root.$emit('preview-feature', this.activeFeature.component, meshOrError)
         } else {
           this.$root.$emit('component-changed', this.activeFeature.component, true)
         }

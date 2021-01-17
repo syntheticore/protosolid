@@ -44,4 +44,9 @@ export default class Component {
     })
     return params
   }
+
+  free() {
+    this.children.forEach(child => child.free() )
+    this.real.free()
+  }
 }

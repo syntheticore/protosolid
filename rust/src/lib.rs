@@ -1,5 +1,6 @@
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::panic;
 
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
@@ -282,13 +283,17 @@ impl JsRegion {
 
   pub fn extrude(&self, distance: f64) {
     web_sys::console::time_with_label("BREP extrude");
-    let tool = features::extrude(self.region.clone(), distance);
+    let tool = features::extrude(self.region.clone(), distance).unwrap();
     Solid::boolean_all(tool, &mut self.component.borrow_mut().bodies, BooleanType::Add);
     web_sys::console::time_end_with_label("BREP extrude");
   }
 
   pub fn extrude_preview(&self, distance: f64) -> JsValue {
-    JsValue::from(JsBufferGeometry::from_solid(&features::extrude(self.region.clone(), distance)))
+    let extrusion = features::extrude(self.region.clone(), distance);
+    match extrusion {
+      Ok(res) => JsValue::from(JsBufferGeometry::from_solid(&res)),
+      Err(error) => JsValue::from(error),
+    }
   }
 }
 

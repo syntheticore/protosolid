@@ -48,7 +48,6 @@
 
     .debug-panel
       button.button(@click="splitAll") Split all
-      button.button(@click="exportStl") Export STL
 </template>
 
 
@@ -120,8 +119,6 @@
 
 
 <script>
-  // import Foo from './foo.vue'
-
   export default {
     name: 'FooterView',
 
@@ -149,26 +146,6 @@
         //   this.activeComponent.remove_element(elem.id())
         // })
         document._debug.viewport.componentChanged(this.activeComponent)
-      },
-
-      saveFile: function(data, filename, filetype) {
-        var file = new Blob([data], {filetype});
-        const a = document.createElement("a")
-        const url = URL.createObjectURL(file);
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(function() {
-          document.body.removeChild(a);
-          window.URL.revokeObjectURL(url);
-        }, 0);
-      },
-
-      exportStl: function() {
-        const stl = this.activeComponent.real.export_stl(this.activeComponent.title)
-        const title = this.activeComponent.title.replace(new RegExp(' ', 'g'), '_')
-        this.saveFile(stl, title + '.stl', 'STL')
       },
     },
   }

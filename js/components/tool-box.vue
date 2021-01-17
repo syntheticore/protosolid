@@ -53,6 +53,7 @@
       font-size: 12px
       text-align: center
       transition: all 0.2s
+      min-width: 60px
       & + li
         border-left: 1px solid $dark1 * 1.15
       &:hover
@@ -179,9 +180,11 @@
           {
             title: 'Construct',
             tools: [
-              { title: 'Set Plane', tool: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
-              { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
+              { title: 'Plane', tool: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
+              { title: 'Axis', icon: 'edit' },
+              { title: 'Point', icon: 'edit' },
               { title: 'Center of Mass', action: this.addCog, icon: 'atom' },
+              { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
             ]
           },
           {
@@ -192,18 +195,32 @@
               { title: 'Arc', tool: ArcTool, icon: 'bezier-curve' },
               { title: 'Circle', tool: CircleTool, icon: 'ban', hotKey: 'C', keyCode: 67 },
               { title: 'Spline', tool: SplineTool, icon: 'route'},
-              { title: 'Trim', tool: TrimTool,  icon: 'route',  hotKey: 'T', keyCode: 84},
+              { title: 'Polygon', icon: 'layer-group' },
+              { title: 'Text', icon: 'layer-group' },
             ]
           },
           {
-            title: 'Create',
+            title: 'Edit Sketch',
+            tools: [
+              { title: 'Trim', tool: TrimTool,  icon: 'route',  hotKey: 'T', keyCode: 84},
+              { title: 'Break', icon: 'layer-group' },
+              { title: 'Extend', icon: 'layer-group' },
+              { title: 'Offset', icon: 'layer-group' },
+              { title: 'Project', icon: 'layer-group' },
+              { title: 'Intersect', icon: 'layer-group' },
+            ]
+          },
+          {
+            title: 'Solid',
             tools: [
               { title: 'Extrude', feature: ExtrudeFeature, icon: 'box', hotKey: 'E', keyCode: 69 },
               { title: 'Revolve', feature: RevolveFeature, icon: 'wave-square', hotKey: 'V', keyCode: 86 },
               { title: 'Loft', icon: 'layer-group' },
               { title: 'Sweep', feature: SweepFeature, icon: 'route' },
-              { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 77 },
-              { title: 'Array', icon: 'th' },
+              { title: 'Thicken', icon: 'layer-group' },
+              { title: 'Coil', icon: 'layer-group' },
+              { title: 'Web', icon: 'layer-group' },
+              { title: 'Pattern', icon: 'th' },
             ],
           },
           {
@@ -213,7 +230,10 @@
               { title: 'Boolean', icon: 'boxes' },
               { title: 'Fillet', icon: 'clone', hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
-              { title: 'Split', icon: 'code-branch' },
+              { title: 'Draft', icon: 'layer-group' },
+              { title: 'Split', icon: 'layer-group' },
+              { title: 'Align', icon: 'layer-group' }, //XXX also -> Replace Face
+              { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 77 },
             ],
           },
           {
@@ -221,27 +241,38 @@
             tools: [
               { title: 'Dimension', icon: 'traffic-light' },
               { title: 'Touch', icon: 'object-group' },
-              { title: 'Parallel', icon: 'code-branch' },
+              { title: 'Parallel', icon: 'code-branch' }, //XXX Use also for hor/vert
               { title: 'Perpendicular', icon: 'object-group' },
               { title: 'Tangent', icon: 'object-group' },
-              { title: 'Hor / Vert', icon: 'object-group' },
+              { title: 'Equal', icon: 'object-group' },
               { title: 'Fix', icon: 'object-group' },
+            ],
+          },
+          {
+            title: 'Assemble',
+            tools: [
+              { title: 'Joint', icon: 'traffic-light' },
+              { title: 'Group', icon: 'object-group' },
+              { title: 'Motion Link', icon: 'layer-group' },
+              { title: 'Animation', icon: 'layer-group' },
             ],
           },
           {
             title: 'Analyze',
             tools: [
-              { title: 'Interference Check', icon: 'traffic-light' },
-              { title: 'Continuity', icon: 'code-branch' },
+              { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
+              { title: 'Curvature', icon: 'layer-group' },
+              { title: 'Shading', icon: 'layer-group' },
               { title: 'Section View', icon: 'object-group' },
+              { title: 'Canvas', icon: 'object-group' },
             ],
           },
           {
             title: 'Simulate',
             tools: [
               { title: 'Material', feature: MaterialFeature, icon: 'volleyball-ball' },
-              { title: 'Heat Flow', icon: 'thermometer' },
               { title: 'Static Load', icon: 'weight' },
+              { title: 'Heat Flow', icon: 'thermometer' },
             ],
           },
         ]

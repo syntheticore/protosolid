@@ -75,8 +75,7 @@ export default class Expression {
       this.parseNumber(chunk.chunk)
     )
     return numbers.reduce((acc, number, i) => chunks[i - 1].op == '*' ?
-      this.multiply(acc, number) :
-      this.divide(acc, number)
+      this.multiply(acc, number) : this.divide(acc, number)
     )
   }
 

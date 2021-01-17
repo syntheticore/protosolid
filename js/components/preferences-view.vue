@@ -3,25 +3,6 @@
     h2 Preferences
     .panes
       fieldset
-        legend User Interface
-        label
-          select
-            option Bright
-            option Dark
-            option System default
-          span Theme
-        label
-          input(type="checkbox" v-model="preferences.blurredOverlays")
-          span Blurred overlays
-        //- label(:disabled="!isHighDPI")
-        label
-          input(type="checkbox" v-model="preferences.highDPI")
-          span High DPI rendering
-        label
-          input(type="checkbox" v-model="preferences.shadowMaps")
-          span Render shadow maps
-
-      fieldset
         legend Standard Units
         label
           select(v-model="preferences.preferredUnit")
@@ -40,6 +21,21 @@
             option g/cm³
             option kg/m³
           span Density
+
+      fieldset
+        legend User Interface
+        label
+          input(type="checkbox" v-model="preferences.blurredOverlays")
+          span Blurred overlays
+        label(:disabled="!isHighDPI")
+          input(type="checkbox" v-model="preferences.highDPI")
+          span High DPI rendering
+        label
+          select
+            option Bright
+            option Dark
+            option System default
+          span Theme
 
       fieldset
         legend Tolerances
@@ -77,14 +73,6 @@
   label
     margin: 6px 0
     min-height: 18px
-
-  h2
-    font-size: 14px
-    font-weight: 600
-    text-align: center
-    padding: 9px
-    border-bottom: 1px solid $dark1
-    background: linear-gradient(0deg, $dark2 * 0.83, transparent)
 
 </style>
 

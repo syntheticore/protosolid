@@ -2,7 +2,7 @@
   header.tab-bar
 
     MenuButton.left.app-menu-btn(icon="atom")
-      AppMenu(@create-document="createDocument")
+      AppMenu(:document="activeDocument" @create-document="createDocument")
 
     ul.tabs
       li(v-for="doc in documents"

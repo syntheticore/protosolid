@@ -106,8 +106,8 @@ export class CarPaint extends Material {
     this.density = 2.7
 
     this.metal = true
-    this.color = 'red'
-    this.roughness = 0.5
+    this.color = '#740606'
+    this.roughness = 0.386
     this.clearcoat = true
   }
 }
@@ -132,6 +132,7 @@ export class Glass extends Material {
 // 2.2 Glass
 // 2.7 Aluminum
 // 7.2 Cast Iron
+// 7.85 Steel
 // 8.4 Brass
 // 11.3 Lead
 // 19.3 Gold

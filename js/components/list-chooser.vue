@@ -48,7 +48,7 @@
     font-size: 12px
     font-weight: bold
     text-align: center
-    position: relative
+    // position: relative
     &:hover
       background: $dark1
     &:active
@@ -70,7 +70,7 @@
     box-shadow: 0 0 6px rgba(black, 0.4)
     text-shadow: 0 -1px 0px black
     background: $dark2 * 1.1
-    transition: all 0.3s
+    transition: all 0.25s
     overflow: hidden
     flex: 0 0 auto
     font-size: 13px
@@ -92,13 +92,13 @@
 
   .list-enter-active
   .list-leave-active
-    transition: all 0.3s
+    transition: all 0.25s
   .list-enter
   .list-leave-to
     opacity: 0
-    height: 0
     padding: 0
     margin: 0
+    margin-bottom: -12px
 </style>
 
 

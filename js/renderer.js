@@ -32,6 +32,7 @@ export class Renderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.physicallyCorrectLights = true
     this.renderer.shadowMap.autoUpdate = false
+    this.renderer.shadowMap.enabled = true
     // this.renderer.shadowMap.type = THREE.VSMShadowMap
     // this.renderer.toneMapping = THREE.ReinhardToneMapping
     // this.renderer.toneMapping = THREE.LinearToneMapping
@@ -76,7 +77,7 @@ export class Renderer {
     this.materials = new Materials()
 
     // Sketch Plane
-    this.sketchPlane = new SketchPlane()
+    this.sketchPlane = new SketchPlane(this.camera)
     this.scene.add(this.sketchPlane)
 
     // Shadow Catcher
@@ -114,13 +115,16 @@ export class Renderer {
     this.setActiveCamera(this.camera)
 
     const setPixelRatio = () => {
-      this.renderer.setPixelRatio(preferences.highDPI ? window.devicePixelRatio : 0.5)
-      this.renderer.shadowMap.enabled = preferences.shadowMaps
+      this.renderer.setPixelRatio(this.getPixelRatio())
       this.render()
     }
 
     setPixelRatio()
     prefEmitter.on('updated', setPixelRatio)
+  }
+
+  getPixelRatio() {
+    return preferences.highDPI ? window.devicePixelRatio : 1
   }
 
   setActiveCamera(camera) {
@@ -206,6 +210,7 @@ export class Renderer {
   }
 
   render() {
+    this.sketchPlane.update(this.activeCamera)
     this.renderer.render(this.scene, this.activeCamera)
     this.emitter.emit('render')
   }
@@ -268,8 +273,8 @@ export class Renderer {
 
   toScreen(vec) {
     if(!this.activeCamera) return
-    const widthHalf = 0.5 * this.renderer.domElement.width / window.devicePixelRatio
-    const heightHalf = 0.5 * this.renderer.domElement.height / window.devicePixelRatio
+    const widthHalf = 0.5 * this.renderer.domElement.width / this.getPixelRatio()
+    const heightHalf = 0.5 * this.renderer.domElement.height / this.getPixelRatio()
     // this.camera.updateMatrixWorld()
     const vector = vec.clone().project(this.activeCamera)
     return new THREE.Vector2(

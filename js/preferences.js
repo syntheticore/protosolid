@@ -5,7 +5,6 @@ const emitter = createNanoEvents()
 const preferences = {
   preferredUnit: 'mm',
   highDPI: true,
-  shadowMaps: true,
   blurredOverlays: true,
 }
 
@@ -18,7 +17,7 @@ function savePreferences() {
 function loadPreferences() {
   const prefs = JSON.parse(window.localStorage.getItem('preferences'))
   for(const pref in prefs) {
-    preferences[pref] = prefs[pref]
+    if(preferences[pref]) preferences[pref] = prefs[pref]
   }
   console.log(preferences)
 }

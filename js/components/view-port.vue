@@ -11,8 +11,8 @@
     )
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
-      path(v-for="path in allPaths" :d="path.data" stroke="white")
-      path(v-for="path in allPaths" :d="path.data" :stroke="path.color")
+      path.back(v-for="path in allPaths" :d="path.data" stroke="white")
+      path.front(v-for="path in allPaths" :d="path.data" :stroke="path.color")
       transition-group(name="hide" tag="g")
         line(
           v-for="guide in guides"
@@ -65,9 +65,9 @@
       stroke: white
       stroke-dasharray: 3, 7
     path
-      &:first-of-type
+      &.back
         opacity: 0.075
-      &:last-of-type
+      &.front
         opacity: 0.7
         stroke-dasharray: 4, 7
 

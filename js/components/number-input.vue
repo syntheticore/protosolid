@@ -95,11 +95,13 @@
 
     watch: {
       'inner.expression': function() {
-        this.$emit('update:value', this.inner.asBaseUnit())
+        this.update()
       },
     },
 
     mounted() {
+      // Update immediately to make features use preferred unit
+      this.update()
       this.focusInput()
     },
 
@@ -107,6 +109,10 @@
       enter: function() {
         this.inner.set(this.$refs.input.value)
         this.focusInput()
+      },
+
+      update: function() {
+        this.$emit('update:value', this.inner.asBaseUnit())
       },
 
       keydown: function(e) {

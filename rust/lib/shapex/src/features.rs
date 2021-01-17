@@ -8,8 +8,8 @@ pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Result<Solid, String
   let mut solid = Solid::new_lamina(region, Plane::new().into_enum());
   let shell = &mut solid.shells[0];
   shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
-  if distance > 6.0 {
-    Err("Extrusion distance cannot be greater than 6.0".to_string())
+  if distance > 200.0 {
+    Err("Maximum extrusion distance exceeded".to_string())
   } else {
     Ok(solid)
   }

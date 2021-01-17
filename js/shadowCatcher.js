@@ -7,7 +7,7 @@ export class ShadowCatcher extends THREE.Object3D {
     this.world = world
 
     this.sun = new THREE.DirectionalLight(0xdfebff, 1)
-    this.sun.position.set(2, 50, 100)
+    this.sun.position.set(10, 250, 500)
     this.sun.castShadow = true
     this.sun.shadow.bias = - 0.00015
     this.sun.shadow.mapSize.width = 4096
@@ -40,7 +40,7 @@ export class ShadowCatcher extends THREE.Object3D {
       shadowFrustum,
       shadowFrustum,
       -shadowFrustum,
-      1, 200
+      1, 1000
     )
     this.renderer.shadowMap.needsUpdate = true
   }

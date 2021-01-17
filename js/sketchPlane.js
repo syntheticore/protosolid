@@ -8,7 +8,7 @@ export class SketchPlane extends THREE.Object3D {
     this.update(camera)
 
     // Axis Helper
-    this.add(new THREE.AxesHelper(0.5));
+    this.add(new THREE.AxesHelper(10.0));
 
     // Click Catcher
     var groundGeo = new THREE.PlaneBufferGeometry(99999, 99999)
@@ -26,10 +26,10 @@ export class SketchPlane extends THREE.Object3D {
   update(camera) {
     const pos = this.grid && this.grid.position || new THREE.Vector3(0.0, 0.0, 0.0)
     const dist = (pos).distanceTo(camera.position)
-    const size = Math.pow(10, String(Math.round(dist / 4)).length)
+    const size = Math.pow(10, String(Math.round(10 * dist / 4)).length) / 10
     if(size != this.lastSize) {
       this.remove(this.grid)
-      const multiple = 2
+      const multiple = 3
       this.grid = new THREE.GridHelper(size * multiple, 10 * multiple)
       this.grid.rotateX(Math.PI / 2)
       this.grid.material.opacity = 0.1

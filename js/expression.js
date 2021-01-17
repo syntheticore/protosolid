@@ -8,9 +8,8 @@ const conversions = {
 }
 
 export default class Expression {
-  constructor(input, parameters, preferredUnit) {
+  constructor(input, parameters) {
     this.parameters = parameters || []
-    this.preferredUnit = preferredUnit || 'mm'
     this.set(input)
   }
 
@@ -117,7 +116,7 @@ export default class Expression {
       value: op(
         left.value * conversions[leftUnit],
         right.value * conversions[rightUnit],
-      ) / unit ? conversions[unit] : 1.0,
+      ) / (unit ? conversions[unit] : 1.0),
       unit,
     }
   }
@@ -158,5 +157,5 @@ export default class Expression {
 }
 
 
-const unit = new Expression('2mm / 2mm * 2inch')
+const unit = new Expression('2inch + 1mm')
 console.log('RESULT', unit.asBaseUnit(), unit.parse().value, unit.parse().unit)

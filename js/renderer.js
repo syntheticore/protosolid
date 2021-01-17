@@ -42,8 +42,8 @@ export class Renderer {
     // Camera
     this.raycaster = new THREE.Raycaster()
 
-    this.camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10000)
-    this.camera.position.set(9, 9, 9)
+    this.camera = new THREE.PerspectiveCamera(70, 1, 0.5, 10000)
+    this.camera.position.set(90, 90, 90)
 
     this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
     this.cameraOrtho.position.set(0, 0, 10)

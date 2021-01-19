@@ -20,8 +20,8 @@ export default class Expression {
       this.expression = String(Number(input.toFixed(3))) + preferences.preferredUnit
     } else {
       // Allways leave a unit for display purposes
-      input = input.replaceAll(',', '.')
-      const number = this.parsePlus(input.replaceAll(',', '.'))
+      input = input.replace(/,/g, '.')
+      const number = this.parsePlus(input)
       if(!number.unit && number.value == input) input += preferences.preferredUnit
       this.expression = input
     }

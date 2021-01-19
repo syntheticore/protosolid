@@ -39,7 +39,7 @@ export class Transloader {
           )
           faceMesh.alcType = 'face'
           faceMesh.alcFace = face
-          faceMesh.alcComponent = comp
+          // faceMesh.alcComponent = comp
           faceMesh.alcProjectable = isActive
           faceMesh.castShadow = isActive
           faceMesh.receiveShadow = isActive
@@ -51,11 +51,12 @@ export class Transloader {
       }
       // Load Edges
       if(mode == 'wireframe' || (isActive && mode == 'wireShade')) {
-        const wireframe = solid.get_edges()
+        const edges = solid.get_edges()
         const wireMaterial = this.getWireMaterial(comp)
-        comp.cache.wireframe = (comp.cache.wireframe || []).concat(wireframe.map(edge => {
-          // edge = edge.map(vertex => vertex.map(dim => dim + Math.random() / 5))
-          const line = this.renderer.convertLine(edge, wireMaterial)
+        comp.cache.edges = (comp.cache.edges || []).concat(edges.map(edge => {
+          const line = this.renderer.convertLine(edge.tesselate(), wireMaterial)
+          line.alcType = 'edge'
+          line.alcEdge = edge
           this.renderer.add(line)
           return line
         }))
@@ -73,7 +74,7 @@ export class Transloader {
 
   unloadTree(comp, recursive) {
     comp.cache.curves.forEach(elem => this.unloadElement(elem, comp))
-    comp.cache.wireframe.forEach(edge => this.renderer.remove(edge))
+    comp.cache.edges.forEach(edge => this.renderer.remove(edge))
     comp.cache.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
     this.purgeRegions(comp)
     if(recursive) comp.children.forEach(child =>
@@ -146,16 +147,22 @@ export class Transloader {
         this.renderer.materials.wire : this.renderer.materials.ghostWire
   }
 
-  applyMaterials(comp, highlight) {
+  applyMaterials(comp, highlight, solidId) {
     const surfaceMaterial = this.getSurfaceMaterial(comp, highlight)
     const wireMaterial = this.getWireMaterial(comp, highlight)
-    comp.cache.faces.forEach(face => face.material = surfaceMaterial )
-    comp.cache.wireframe.forEach(edge => edge.material = wireMaterial )
+    const faces = solidId ?
+      comp.cache.faces.filter(f => f.alcFace.get_solid_id() == solidId) :
+      comp.cache.faces
+    const edges = solidId ?
+      comp.cache.edges.filter(f => f.alcEdge.get_solid_id() == solidId) :
+      comp.cache.edges
+    faces.forEach(face => face.material = surfaceMaterial )
+    edges.forEach(edge => edge.material = wireMaterial )
     comp.children.forEach(child => this.applyMaterials(child, highlight))
   }
 
-  highlightComponent(comp) {
-    this.applyMaterials(comp, true)
+  highlightComponent(comp, solidId) {
+    this.applyMaterials(comp, true, solidId)
   }
 
   unhighlightComponent(comp) {

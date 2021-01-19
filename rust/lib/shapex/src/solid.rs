@@ -81,11 +81,18 @@ pub struct Vertex {
 
 
 impl Solid {
+  pub fn new() -> Self {
+    Self {
+      id: Uuid::new_v4(),
+      shells: vec![],
+    }
+  }
+
   pub fn new_lamina(region: Region, top_surface: SurfaceType) -> Self {
     println!("Creating Lamina:");
     let mut bottom = top_surface.clone();
     bottom.as_surface_mut().flip();
-    let mut this = Self::default();
+    let mut this = Self::new();
     // Create shell from bottom face with empty ring
     let first_elem = region[0].clone();
     this.mvfs(first_elem.bounds.0, bottom);
@@ -165,7 +172,7 @@ impl Solid {
   }
 
   pub fn boolean(&mut self, _tool: Self, _op: BooleanType) -> Vec<Solid> {
-    vec![Self::default()]
+    vec![Self::new()]
   }
 
   pub fn boolean_all(tool: Self, others: &mut Vec<Solid>, _op: BooleanType) {

@@ -3,7 +3,7 @@
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
-      :highlight-component="highlightComponent"
+      :highlighted-component="highlightedComponent"
       :active-tool.sync="activeTool"
       :selected-element="selectedElement"
       :active-view="previewView || document.activeView"
@@ -21,7 +21,7 @@
         :top="document.tree"
         :active-component="document.activeComponent"
         @update:active-component="activateComponent"
-        @highlight-component="highlightComponent = $event"
+        @highlight-component="highlightComponent"
         @create-component="createComponent"
       )
     .side-bar.right
@@ -163,7 +163,7 @@
       return {
         activeTool: null,
         selectedElement: null,
-        highlightComponent: null,
+        highlightedComponent: null,
         previewView: null,
         dirtyView: null,
         displayModes: {
@@ -234,6 +234,10 @@
       activateComponent: function(comp) {
         comp.hidden = false
         this.document.activeComponent = comp
+      },
+
+      highlightComponent: function(comp, solidId) {
+        this.highlightedComponent = comp ? { comp, solidId } : null
       },
 
       elementSelected: function(elem) {

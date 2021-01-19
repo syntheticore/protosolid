@@ -23,12 +23,12 @@
         fa-icon.part(icon="box" v-else)
         span.name {{ component.title }}
         .controls
-          fa-icon.activate(
+          fa-icon(
             icon="check-circle" fixed-width
             title="Activate"
             @click="$emit('update:active-component', component)"
           )
-          fa-icon.new-component(
+          fa-icon(
             icon="plus-circle" fixed-width
             title="Create Component"
             @click="createComponent(component)"
@@ -55,10 +55,19 @@
           h2 Section View 1
           input(type="checkbox")
 
-      li(v-for="(_, i) in component.solids")
-        header
+      li.solid(v-for="(solid, i) in component.solids")
+        header(
+          @mouseenter="$emit('highlight-component', component, solid.get_id())"
+          @mouseleave="$emit('highlight-component', null)"
+        )
           fa-icon(icon="layer-group" fixed-width)
           h2 Solid {{ i + 1 }}
+          .controls
+            fa-icon.delete(
+              icon="trash-alt" fixed-width
+              title="Delete"
+              @click="removeSolid(solid)"
+            )
 
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
       li(
@@ -102,15 +111,10 @@
     align-items: center
     transition: opacity 0.2s
     // pointer-events: all
-    overflow: hidden
     &:hover
       background: $dark2 * 1.15
       border-color: $dark1 * 1.85
       color: white
-      .controls
-        margin-right: 0
-        opacity: 1
-        transition-delay: 0.05s
     &.selected
       border-color: $highlight * 1.2
       box-shadow: 0 0 0px 1px $highlight * 1.2
@@ -148,7 +152,21 @@
     margin-right: -53px
     opacity: 0
     transition: all 0.15s
-    transition-delay: 0.25s
+    transition-delay: 0.5s
+    .solid &
+      margin-right: -28px
+
+  .box
+  .solid
+    overflow: hidden
+    &:hover
+      .controls
+        margin-right: 0
+        opacity: 1
+        transition-delay: 0.1s
+
+  .delete
+    color: $cancel !important
 
   .widgets
     margin-left: 43px
@@ -184,13 +202,12 @@
 
 <style lang="stylus">
   .tree-item .widgets li
-    &:hover
-      svg
-        color: $bright1
-
     header
       display: flex
       align-items: center
+      &:hover
+        > svg
+          color: $bright1
 
       svg
         padding: 4px
@@ -255,6 +272,11 @@
 
       createComponent: function(parent) {
         this.$emit('create-component', parent)
+      },
+
+      removeSolid: function(solid) {
+        solid.remove()
+        this.$root.$emit('component-changed', this.component)
       },
     },
   }

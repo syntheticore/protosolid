@@ -173,7 +173,7 @@
     props: {
       document: Object,
       activeComponent: Object,
-      highlightComponent: Object,
+      highlightedComponent: Object,
       activeTool: Object,
       selectedElement: Object,
       activeView: Object,
@@ -192,12 +192,12 @@
         this.$root.$emit('activate-toolname', 'Manipulate')
       },
 
-      highlightComponent: function(comp, oldComp) {
+      highlightedComponent: function(comp, oldComp) {
         if(oldComp) {
-          this.transloader.unhighlightComponent(oldComp)
+          this.transloader.unhighlightComponent(oldComp.comp)
         }
         if(comp) {
-          this.transloader.highlightComponent(comp)
+          this.transloader.highlightComponent(comp.comp, comp.solidId)
         }
         this.renderer.render()
       },

@@ -15,7 +15,7 @@ export default class Component {
 
     this.cache = {
       faces: [],
-      wireframe: [],
+      edges: [],
       regions: [],
       curves: [],
     }

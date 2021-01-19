@@ -1,8 +1,9 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use wasm_bindgen::prelude::*;
+use uuid::Uuid;
 use js_sys::Array;
+use wasm_bindgen::prelude::*;
 
 use solvo::*;
 
@@ -300,18 +301,24 @@ impl JsRegion {
 #[wasm_bindgen]
 pub struct JsFace {
   real: Ref<Face>,
+  solid_id: Uuid,
 }
 
 #[wasm_bindgen]
 impl JsFace {
-  fn from(face: &Ref<Face>) -> Self {
+  fn from(face: &Ref<Face>, solid_id: Uuid) -> Self {
     Self {
       real: face.clone(),
+      solid_id,
     }
   }
 
   pub fn get_id(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
+  }
+
+  pub fn get_solid_id(&self) -> JsValue {
+    JsValue::from_serde(&self.solid_id).unwrap()
   }
 
   pub fn get_origin(&self) -> JsValue {
@@ -348,7 +355,38 @@ impl JsFace {
 
 
 #[wasm_bindgen]
+pub struct JsEdge {
+  real: Ref<Edge>,
+  solid_id: Uuid,
+}
+
+#[wasm_bindgen]
+impl JsEdge {
+  fn from(edge: &Ref<Edge>, solid_id: Uuid) -> Self {
+    Self {
+      real: edge.clone(),
+      solid_id,
+    }
+  }
+
+  pub fn get_id(&self) -> JsValue {
+    JsValue::from_serde(&self.real.borrow().id).unwrap()
+  }
+
+  pub fn get_solid_id(&self) -> JsValue {
+    JsValue::from_serde(&self.solid_id).unwrap()
+  }
+
+  pub fn tesselate(&self) -> Array {
+    points_to_js(self.real.borrow().curve.as_curve().tesselate())
+  }
+}
+
+
+#[wasm_bindgen]
 pub struct JsSolid {
+  comp: Ref<Component>,
+  solid_id: Uuid,
   faces: Array,
   edges: Array,
   vertices: Array,
@@ -357,7 +395,7 @@ pub struct JsSolid {
 
 #[wasm_bindgen]
 impl JsSolid {
-  fn from(solid: &Solid) -> Self {
+  fn from(solid: &Solid, comp: Ref<Component>) -> Self {
     let shell = &solid.shells[0];
     // Vertices
     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
@@ -366,21 +404,27 @@ impl JsSolid {
       if edge.borrow().is_inner() {
         None
       } else {
-        Some(points_to_js(edge.borrow().curve.as_curve().tesselate()))
+        Some(JsValue::from(JsEdge::from(edge, solid.id)))
       }
     }).collect();
     // Faces
     let faces = shell.faces.iter().map(|f| {
-      JsValue::from(JsFace::from(f))
+      JsValue::from(JsFace::from(f, solid.id))
     }).collect();
     // Area
     let area = solid.area();
     Self {
+      comp,
+      solid_id: solid.id,
       vertices,
       edges,
       faces,
       area,
     }
+  }
+
+  pub fn get_id(&self) -> JsValue {
+    JsValue::from_serde(&self.solid_id).unwrap()
   }
 
   pub fn get_faces(&self) -> Array {
@@ -393,6 +437,10 @@ impl JsSolid {
 
   pub fn get_vertices(&self) -> Array {
     self.vertices.clone()
+  }
+
+  pub fn remove(&self) {
+    self.comp.borrow_mut().bodies.retain(|body| body.id != self.solid_id )
   }
 }
 
@@ -433,7 +481,7 @@ impl JsComponent {
 
   pub fn get_solids(&self) -> Array {
     self.real.borrow().bodies.iter().map(|body|
-      JsValue::from(JsSolid::from(body))
+      JsValue::from(JsSolid::from(body, self.real.clone()))
     ).collect()
   }
 

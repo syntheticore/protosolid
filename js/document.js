@@ -36,7 +36,7 @@ export default class Document {
       },
       {
         id: this.lastId++,
-        title: 'Perspective',
+        title: 'Home',
         position: new THREE.Vector3(90.0, 90.0, 90.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
       },

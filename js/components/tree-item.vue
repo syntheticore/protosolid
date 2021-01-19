@@ -69,7 +69,8 @@
               @click="removeSolid(solid)"
             )
 
-    transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
+    //- Children
+    transition-group(name="list" tag="ul" v-if="isAssembly && expanded")
       li(
         is="tree-item"
         v-for="child in component.children"
@@ -195,8 +196,6 @@
   .list-enter
   .list-leave-to
     opacity: 0
-    height: 0
-    padding: 0
     margin: 0
 </style>
 

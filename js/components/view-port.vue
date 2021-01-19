@@ -161,7 +161,7 @@
     SplineTool,
     CircleTool,
     ArcTool,
-    SetPlaneTool
+    PlaneTool
   } from './../tools.js'
   import { Snapper } from './../snapping.js'
   import { Renderer } from './../renderer.js'
@@ -435,7 +435,7 @@
         this.pickingPath = null
         this.snapper.reset()
         const tools = {
-          'Set Plane': SetPlaneTool,
+          Plane: PlaneTool,
           Manipulate: ManipulationTool,
           Line: LineTool,
           Spline: SplineTool,

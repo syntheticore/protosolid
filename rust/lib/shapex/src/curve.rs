@@ -607,8 +607,13 @@ impl Curve for BezierSpline {
     self.lut.clone()
   }
 
-  fn length_between(&self, _start: f64, _end: f64) -> f64 {
-    1.0
+  fn length_between(&self, _start: f64, _end: f64) -> f64 { //XXX use bounds
+    let mut last_p = self.lut[0];
+    self.lut.iter().fold(0.0, |acc, p| {
+      let dist = last_p.distance(*p);
+      last_p = *p;
+      acc + dist
+    })
   }
 
   fn endpoints(&self) -> (Point3, Point3) {

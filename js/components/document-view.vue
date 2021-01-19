@@ -78,7 +78,7 @@
   .side-bar
     position: absolute
     top: 0
-    bottom: 55px
+    bottom: 0
     pointer-events: none
     h1
       text-align: center
@@ -112,9 +112,8 @@
 
   .footer-view
     position: absolute
-    left: 0
+    right: 0
     bottom: 0
-    width: 100%
 </style>
 
 

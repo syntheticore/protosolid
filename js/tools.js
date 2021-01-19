@@ -91,7 +91,7 @@ export class ManipulationTool extends HighlightTool {
 }
 
 
-export class SetPlaneTool extends HighlightTool {
+export class PlaneTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, ['face'])
   }

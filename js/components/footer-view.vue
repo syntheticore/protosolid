@@ -101,10 +101,11 @@
 
   .debug-panel
     position: absolute
-    left: 5px
+    right: calc(100vw / 2)
     bottom: 7px
     pointer-events: all
     display: none
+    white-space: nowrap
     [data-platform="browser"] &
       display: block
 

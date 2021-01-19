@@ -12,18 +12,21 @@
 
 <style lang="stylus" scoped>
   .tree-view
-    width: 100%
     max-height: 100%
-    margin-left: -7px
-    margin-bottom: 22px
+    overflow-x: hidden
     overflow-y: auto
-    padding-top: 14px
-    padding-right: 24px
-    box-sizing: content-box
+    padding-top: 10px
     pointer-events: all
+    // width: 100%
+    // padding-right: 24px
+    // box-sizing: content-box
+    padding-right: 1px // Somehow needed for highlighted borders to look right
+    direction: rtl
+    > *
+      direction: ltr
 
   .tree-item
-    margin-left: 0
+    margin-left: -7px
 </style>
 
 

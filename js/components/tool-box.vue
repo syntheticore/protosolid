@@ -156,7 +156,7 @@
     SplineTool,
     CircleTool,
     ArcTool,
-    SetPlaneTool,
+    PlaneTool,
     TrimTool,
   } from './../tools.js'
 
@@ -180,7 +180,7 @@
           {
             title: 'Construct',
             tools: [
-              { title: 'Plane', tool: SetPlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
+              { title: 'Plane', tool: PlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
               { title: 'Axis', icon: 'edit' },
               { title: 'Point', icon: 'edit' },
               { title: 'Center of Mass', action: this.addCog, icon: 'atom' },

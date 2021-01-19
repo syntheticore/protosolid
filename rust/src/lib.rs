@@ -69,32 +69,28 @@ impl JsCurve {
     JsValue::from_serde(&as_controllable(&mut self.real.borrow()).id()).unwrap()
   }
 
-  pub fn typename(&self) -> JsValue {
-    JsValue::from_serde(
+  pub fn typename(&self) -> String {
       match *self.real.borrow() {
         CurveType::Line(_) => "Line",
         CurveType::Arc(_) => "Arc",
         CurveType::Circle(_) => "Circle",
         CurveType::BezierSpline(_) => "BezierSpline",
-      }
-    ).unwrap()
+      }.to_string()
   }
 
-  pub fn get_radius(&self) -> JsValue {
-    JsValue::from_serde(
-      match &*self.real.borrow() {
-        CurveType::Circle(c) => &c.radius,
-        _ => &0.0
-      }
-    ).unwrap()
+  pub fn get_radius(&self) -> f64 {
+    match &*self.real.borrow() {
+      CurveType::Circle(c) => c.radius,
+      _ => 0.0
+    }
   }
 
-  pub fn get_area(&self) -> JsValue {
+  pub fn get_area(&self) -> f64 {
     let area = match &*self.real.borrow() {
       CurveType::Circle(c) => c.area(),
       _ => 0.0
     };
-   JsValue::from_serde(&area).unwrap()
+   area
   }
 
   pub fn get_handles(&self) -> Array {
@@ -124,8 +120,8 @@ impl JsCurve {
     points_to_js(self.real.borrow().as_curve().tesselate())
   }
 
-  pub fn get_length(&self) -> JsValue {
-    JsValue::from_serde(&self.real.borrow().as_curve().length()).unwrap()
+  pub fn get_length(&self) -> f64 {
+    self.real.borrow().as_curve().length()
   }
 }
 
@@ -266,11 +262,11 @@ pub struct JsRegion {
 
 #[wasm_bindgen]
 impl JsRegion {
-  pub fn get_mesh(&mut self) -> JsValue {
+  pub fn get_mesh(&mut self) -> JsBufferGeometry {
     let poly = geom2d::poly_from_wire(&self.region);
-    JsValue::from(JsBufferGeometry::from(
+    JsBufferGeometry::from(
       geom2d::tesselate_polygon(poly, Vec3::unit_z()).to_buffer_geometry()
-    ))
+    )
   }
 
   pub fn get_center(&self) -> JsValue {
@@ -345,11 +341,11 @@ impl JsFace {
     }
   }
 
-  pub fn tesselate(&self) -> JsValue {
+  pub fn tesselate(&self) -> JsBufferGeometry {
     let this = self.real.borrow();
-    JsValue::from(JsBufferGeometry::from(
+    JsBufferGeometry::from(
       this.get_surface().tesselate().to_buffer_geometry()
-    ))
+    )
   }
 }
 
@@ -485,6 +481,15 @@ impl JsComponent {
     ).collect()
   }
 
+  pub fn create_component(&mut self) -> JsComponent {
+    let comp = self.real.borrow_mut().create_component();
+    JsComponent::from(&comp)
+  }
+
+  pub fn delete_component(&self, comp: JsComponent) {
+    self.real.borrow_mut().delete_component(&comp.real)
+  }
+
   pub fn export_stl(&self, title: &str) -> String {
     let comp = self.real.borrow();
     let mesh = comp.bodies[0].tesselate();
@@ -504,10 +509,5 @@ impl JsComponent {
       meshes.append(&mut Self::tesselate_all(&child));
     }
     meshes
-  }
-
-  pub fn create_component(&mut self) -> JsComponent {
-    let comp = self.real.borrow_mut().create_component();
-    JsComponent::from(&comp)
   }
 }

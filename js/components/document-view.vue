@@ -22,6 +22,7 @@
         :active-component="document.activeComponent"
         @update:active-component="activateComponent"
         @highlight-component="highlightComponent"
+        @delete-component="deleteComponent"
         @create-component="createComponent"
       )
     .side-bar.right
@@ -196,6 +197,21 @@
         return comp
       },
 
+      activateComponent: function(comp) {
+        comp.hidden = false
+        this.document.activeComponent = comp
+      },
+
+      deleteComponent: function(comp) {
+        comp.parent.deleteComponent(comp)
+        if(!this.document.activeComponent.hasParent(comp)) return
+        this.document.activeComponent = comp.parent
+      },
+
+      highlightComponent: function(comp, solidId) {
+        this.highlightedComponent = comp ? { comp, solidId } : null
+      },
+
       createView: function(title) {
         const newView = {
           id: this.document.lastId++,
@@ -228,15 +244,6 @@
         this.document.activeView = view
         this.previewView = null
         this.dirtyView = null
-      },
-
-      activateComponent: function(comp) {
-        comp.hidden = false
-        this.document.activeComponent = comp
-      },
-
-      highlightComponent: function(comp, solidId) {
-        this.highlightedComponent = comp ? { comp, solidId } : null
       },
 
       elementSelected: function(elem) {

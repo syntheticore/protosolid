@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::convert::TryInto;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -26,6 +27,10 @@ impl Component {
     let comp = rc(Self::new());
     self.children.push(comp.clone());
     comp
+  }
+
+  pub fn delete_component(&mut self, comp: &Ref<Self>) {
+    self.children.retain(|child| !Rc::ptr_eq(child, comp) )
   }
 }
 

@@ -12,13 +12,7 @@ export class Transloader {
   }
 
   isActive(comp) {
-    return this.hasParent(comp, this.document.activeComponent)
-  }
-
-  hasParent(comp, parent) {
-    if(!comp) return
-    if(comp === parent) return true
-    return this.hasParent(comp.parent, parent)
+    return comp.hasParent(this.document.activeComponent)
   }
 
   loadTree(comp, recursive) {

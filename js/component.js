@@ -28,12 +28,22 @@ export default class Component {
      return comp
   }
 
+  deleteComponent(comp) {
+    this.children = this.children.filter(child => child !== comp )
+    this.real.delete_component(comp.real)
+  }
+
   getMaterial() {
     return this.material || (this.parent && this.parent.getMaterial())
   }
 
   updateSolids() {
     this.solids = this.real.get_solids()
+  }
+
+  hasParent(parent) {
+    if(this === parent) return true
+    return this.parent && this.parent.hasParent(parent)
   }
 
   getParameters() {

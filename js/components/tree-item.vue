@@ -31,7 +31,12 @@
           fa-icon(
             icon="plus-circle" fixed-width
             title="Create Component"
-            @click="createComponent(component)"
+            @click="$emit('create-component', component)"
+          )
+          fa-icon.delete(
+            icon="trash-alt" fixed-width
+            title="Delete Component"
+            @click="$emit('delete-component', component)"
           )
 
     ul.widgets(
@@ -150,7 +155,7 @@
 
   .controls
     border-left: 0.5px solid $dark1 * 1.3
-    margin-right: -53px
+    margin-right: -80px // -53px
     opacity: 0
     transition: all 0.15s
     transition-delay: 0.5s
@@ -267,10 +272,6 @@
     methods: {
       toggle: function() {
         this.expanded = !this.expanded;
-      },
-
-      createComponent: function(parent) {
-        this.$emit('create-component', parent)
       },
 
       removeSolid: function(solid) {

@@ -7,6 +7,6 @@ edition = "2018"
 
 [dependencies]
 rand = "0.7.3"
-uuid = { version = "0.8.1", features = ["v4"] }
 cgmath = "0.17.0"
+uuid = { version = "0.8.1", features = ["v4"] }
 earcutr = { git = "https://github.com/donbright/earcutr" }

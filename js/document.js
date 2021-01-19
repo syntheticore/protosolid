@@ -19,25 +19,25 @@ export default class Document {
       {
         id: this.lastId++,
         title: 'Top',
-        position: new THREE.Vector3(0.0, 0.0, 9.0),
+        position: new THREE.Vector3(0.0, 0.0, 90.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
       },
       {
         id: this.lastId++,
         title: 'Front',
-        position: new THREE.Vector3(0.0, 9.0, 0.0),
+        position: new THREE.Vector3(0.0, 90.0, 0.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
       },
       {
         id: this.lastId++,
         title: 'Side',
-        position: new THREE.Vector3(9.0, 0.0, 0.0),
+        position: new THREE.Vector3(90.0, 0.0, 0.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
       },
       {
         id: this.lastId++,
         title: 'Perspective',
-        position: new THREE.Vector3(9.0, 9.0, 9.0),
+        position: new THREE.Vector3(90.0, 90.0, 90.0),
         target: new THREE.Vector3(0.0, 0.0, 0.0),
       },
     ]

@@ -7,6 +7,7 @@
       ref="input"
       :style="inputStyle"
       :value="inner.expression"
+      spellcheck="false"
       @blur="focusInput"
       @keydown="keydown"
       @keydown.enter="enter"

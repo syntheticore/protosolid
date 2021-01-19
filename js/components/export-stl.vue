@@ -2,6 +2,7 @@
   .export-stl
     h2 Export STL
     button.button(@click="exportStl") Export STL
+    button.button(@click="export3mf") Export 3MF
 </template>
 
 
@@ -13,7 +14,7 @@
 
 
 <script>
-  import { saveFile } from './../utils.js'
+  import { export3mf, exportStl } from './../export.js'
 
   export default {
     name: 'ExportStl',
@@ -28,9 +29,11 @@
 
     methods: {
       exportStl: function() {
-        const stl = this.component.real.export_stl(this.component.title)
-        const title = this.component.title.replace(new RegExp(' ', 'g'), '_')
-        saveFile(stl, title + '.stl', 'STL')
+        exportStl(this.component)
+      },
+
+      export3mf: function() {
+        export3mf(this.component)
       },
     },
   }

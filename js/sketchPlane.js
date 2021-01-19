@@ -5,6 +5,7 @@ export class SketchPlane extends THREE.Object3D {
     super()
 
     // Grid
+    this.cachedVec = new THREE.Vector3(0.0, 0.0, 0.0)
     this.update(camera)
 
     // Axis Helper
@@ -25,7 +26,7 @@ export class SketchPlane extends THREE.Object3D {
 
   update(camera) {
     const pos = this.grid && this.grid.position || new THREE.Vector3(0.0, 0.0, 0.0)
-    const dist = (pos).distanceTo(camera.position)
+    const dist = (pos).distanceTo(camera.position) //XXX should be distance to plane
     const size = Math.pow(10, String(Math.round(10 * dist / 4)).length) / 10
     if(size != this.lastSize) {
       this.remove(this.grid)
@@ -37,6 +38,10 @@ export class SketchPlane extends THREE.Object3D {
       this.add(this.grid)
       this.lastSize = size
     }
-    this.grid.position.z = 0.002 * dist
+    // Move grid towards camera to avoid z-fighting
+    const lookVec = camera.getWorldDirection(this.cachedVec)
+    const facing = this.grid.up.dot(lookVec)
+    this.grid.position.z = -0.005 * dist * facing
+    //XXX transform https://stackoverflow.com/questions/35641875/three-js-how-to-find-world-orientation-vector-of-objects-local-up-vector
   }
 }

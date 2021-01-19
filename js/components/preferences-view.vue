@@ -40,13 +40,13 @@
       fieldset
         legend Tolerances
         label
-          input(type="text" value="0.01mm")
+          input(type="numer" value="0.01mm" step="0.01")
           span Center of Mass Deviation
         label
-          input(type="text" value="0.0001mm")
+          input(type="numer" value="0.0001mm" step="0.0001")
           span Curve/Surface Tesselation
         label
-          input(type="text" value="0.001mm")
+          input(type="numer" value="0.001mm" step="0.001")
           span Curve Fitting Accuracy
 
 </template>

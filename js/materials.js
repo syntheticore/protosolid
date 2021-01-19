@@ -88,8 +88,7 @@ export class Materials {
       color: 'red',
       transparent: true,
       opacity: 0.4,
-      polygonOffset: true,
-      polygonOffsetFactor: -0.5,
+      depthTest: false,
     })
   }
 }

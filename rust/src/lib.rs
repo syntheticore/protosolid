@@ -1,6 +1,5 @@
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::panic;
 
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
@@ -439,6 +438,20 @@ impl JsComponent {
     let mesh = comp.bodies[0].tesselate();
     log!("{:?}", mesh);
     export::stl(&mesh, title)
+  }
+
+  pub fn export_3mf(&self) -> String {
+    let meshes = Self::tesselate_all(&self.real);
+    export::threemf(&meshes, "millimeter")
+  }
+
+  fn tesselate_all(comp: &Ref<Component>) -> Vec<Mesh> {
+    let comp = comp.borrow();
+    let mut meshes: Vec<Mesh> = comp.bodies.iter().map(|body| body.tesselate() ).collect();
+    for child in &comp.children {
+      meshes.append(&mut Self::tesselate_all(&child));
+    }
+    meshes
   }
 
   pub fn create_component(&mut self) -> JsComponent {

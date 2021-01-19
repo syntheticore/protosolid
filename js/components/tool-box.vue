@@ -245,7 +245,7 @@
               { title: 'Perpendicular', icon: 'object-group' },
               { title: 'Tangent', icon: 'object-group' },
               { title: 'Equal', icon: 'object-group' },
-              { title: 'Fix', icon: 'object-group' },
+              { title: 'Fix', icon: 'object-group' }, //XXX also ground for assemblies
             ],
           },
           {
@@ -258,7 +258,7 @@
             ],
           },
           {
-            title: 'Analyze',
+            title: 'Inspect',
             tools: [
               { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
               { title: 'Curvature', icon: 'layer-group' },
@@ -273,6 +273,7 @@
               { title: 'Material', feature: MaterialFeature, icon: 'volleyball-ball' },
               { title: 'Static Load', icon: 'weight' },
               { title: 'Heat Flow', icon: 'thermometer' },
+              { title: 'Modal Frequencies', icon: 'wave-square' },
             ],
           },
         ]

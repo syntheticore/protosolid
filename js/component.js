@@ -11,6 +11,7 @@ export default class Component {
     this.parameters = []
 
     this.children = []
+    this.solids = []
 
     this.cache = {
       faces: [],
@@ -31,9 +32,9 @@ export default class Component {
     return this.material || (this.parent && this.parent.getMaterial())
   }
 
-  // isHidden() {
-  //   return this.hidden || (this.parent && this.parent.isHidden())
-  // }
+  updateSolids() {
+    this.solids = this.real.get_solids()
+  }
 
   getParameters() {
     const params = [...this.parameters]
@@ -44,6 +45,10 @@ export default class Component {
     })
     return params
   }
+
+  // isHidden() {
+  //   return this.hidden || (this.parent && this.parent.isHidden())
+  // }
 
   free() {
     this.children.forEach(child => child.free() )

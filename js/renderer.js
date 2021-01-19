@@ -50,7 +50,7 @@ export class Renderer {
 
     // Scene
     this.scene = new THREE.Scene()
-    this.cameraOrtho.lookAt( this.scene.position )
+    this.cameraOrtho.lookAt(this.scene.position)
 
     // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 80)
     // this.scene.add(new THREE.AmbientLight(0x666666))
@@ -77,7 +77,7 @@ export class Renderer {
     this.materials = new Materials()
 
     // Sketch Plane
-    this.sketchPlane = new SketchPlane(this.camera)
+    this.sketchPlane = new SketchPlane(this.camera, new THREE.Vector3(0.0, 0.0, 1.0))
     this.scene.add(this.sketchPlane)
 
     // Shadow Catcher

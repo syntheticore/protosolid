@@ -55,6 +55,11 @@
           h2 Section View 1
           input(type="checkbox")
 
+      li(v-for="(_, i) in component.solids")
+        header
+          fa-icon(icon="layer-group" fixed-width)
+          h2 Solid {{ i + 1 }}
+
     transition-group.children(name="list" tag="ul" v-if="isAssembly && expanded")
       li(
         is="tree-item"

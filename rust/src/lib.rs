@@ -352,6 +352,7 @@ pub struct JsSolid {
   faces: Array,
   edges: Array,
   vertices: Array,
+  pub area: f64,
 }
 
 #[wasm_bindgen]
@@ -372,10 +373,13 @@ impl JsSolid {
     let faces = shell.faces.iter().map(|f| {
       JsValue::from(JsFace::from(f))
     }).collect();
+    // Area
+    let area = solid.area();
     Self {
       vertices,
       edges,
       faces,
+      area,
     }
   }
 

@@ -63,7 +63,10 @@ impl TrimmedSurface {
     self.base.as_surface().tesselate(80, wire)
   }
 
-  //XXX pub fn area(&self) -> f64
+  pub fn area(&self) -> f64 {
+    0.0 //XXX
+  }
+
   //XXX pub fn on_surface(&self, u: f64, v: f64) -> bool
 }
 

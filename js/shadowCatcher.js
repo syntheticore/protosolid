@@ -9,7 +9,7 @@ export class ShadowCatcher extends THREE.Object3D {
     this.sun = new THREE.DirectionalLight(0xdfebff, 1)
     this.sun.position.set(10, 250, 500)
     this.sun.castShadow = true
-    this.sun.shadow.bias = - 0.00015
+    this.sun.shadow.bias = - 0.0002
     this.sun.shadow.mapSize.width = 4096
     this.sun.shadow.mapSize.height = 4096
     this.add(this.sun)
@@ -30,7 +30,7 @@ export class ShadowCatcher extends THREE.Object3D {
     this.ground.position.set(
       (bbox.min.x + bbox.max.x) / 2.0,
       (bbox.min.y + bbox.max.y) / 2.0,
-      bbox.min.z,
+      bbox.min.z - 0.1,
     )
     bbox.getSize(this.ground.scale)
     this.ground.scale.multiplyScalar(2.5)

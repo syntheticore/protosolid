@@ -24,27 +24,27 @@
 
         div(v-if="type == 'Solid'")
           span Surface Area
-          span 54 cm³
+          span {{ activeComponent.get_area().toFixed(2) }} cm²
 
         div(v-if="type == 'Line' || type == 'BezierSpline'")
           span Length
-          span {{selectedElement.get_length().toFixed(2)}} mm
+          span {{ selectedElement.get_length().toFixed(2) }} mm
 
         div(v-if="type == 'Circle'")
           span Radius
-          span {{selectedElement.get_radius().toFixed(2)}} mm
+          span {{ selectedElement.get_radius().toFixed(2) }} mm
 
         div(v-if="type == 'Circle'")
           span Diameter
-          span {{(selectedElement.get_radius() * 2).toFixed(2)}} mm
+          span {{ (selectedElement.get_radius() * 2).toFixed(2) }} mm
 
         div(v-if="type == 'Circle'")
           span Circumfence
-          span {{selectedElement.get_length().toFixed(2)}} mm
+          span {{ selectedElement.get_length().toFixed(2) }} mm
 
         div(v-if="type == 'Circle'")
           span Area
-          span {{selectedElement.get_area().toFixed(2)}} mm²
+          span {{ selectedElement.get_area().toFixed(2) }} mm²
 
     .debug-panel
       button.button(@click="splitAll") Split all
@@ -108,10 +108,12 @@
     [data-platform="browser"] &
       display: block
 
-  .fade-enter-active, .fade-leave-active
+  .fade-enter-active
+  .fade-leave-active
     transition: all 0.4s
 
-  .fade-enter, .fade-leave-to
+  .fade-enter
+  .fade-leave-to
     opacity: 0
     transform: translateY(12px)
 

@@ -184,6 +184,12 @@ impl Solid {
     }
     mesh
   }
+
+  pub fn area(&self) -> f64 {
+    self.shells.iter()
+    .map(|shell| shell.area() )
+    .fold(0.0, |a, b| a + b )
+  }
 }
 
 
@@ -400,6 +406,12 @@ impl Shell {
     }
   }
 
+  pub fn area(&self) -> f64 {
+    self.faces.iter()
+    .map(|face| face.borrow().get_surface().area() )
+    .fold(0.0, |a, b| a + b )
+  }
+
   pub fn print(&self) {
     println!("\n  Debug Info: Shell");
     println!("  -------------------");
@@ -415,10 +427,6 @@ impl Shell {
 
 
 impl Face {
-  // pub fn tesselate(&self) -> Mesh {
-  //   self.get_surface().tesselate()
-  // }
-
   pub fn get_surface(&self) -> TrimmedSurface {
     let wire = self.outer_ring.borrow().get_wire();
     TrimmedSurface::new(self.surface.clone(), wire)

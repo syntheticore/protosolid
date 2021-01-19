@@ -24,9 +24,10 @@ export class Transloader {
   loadTree(comp, recursive) {
     if(comp.hidden) return
     // Load Bodies
-    let solids = comp.real.get_solids()
+    const isActive = this.isActive(comp)
     const surfaceMaterial = this.getSurfaceMaterial(comp)
-    solids.forEach(solid => {
+    comp.updateSolids()
+    comp.solids.forEach(solid => {
       const mode = this.renderer.displayMode
       // Load Faces
       if(mode == 'shaded' || mode == 'wireShade') {
@@ -39,9 +40,9 @@ export class Transloader {
           faceMesh.alcType = 'face'
           faceMesh.alcFace = face
           faceMesh.alcComponent = comp
-          faceMesh.alcProjectable = true
-          faceMesh.castShadow = true
-          faceMesh.receiveShadow = true
+          faceMesh.alcProjectable = isActive
+          faceMesh.castShadow = isActive
+          faceMesh.receiveShadow = isActive
           this.renderer.add(faceMesh)
           comp.cache.faces.push(faceMesh)
           // const normal = this.convertLine(face.get_normal(), this.renderer.materials.selectionLine)
@@ -49,7 +50,7 @@ export class Transloader {
         })
       }
       // Load Edges
-      if(mode == 'wireframe' || (this.isActive(comp) && mode == 'wireShade')) {
+      if(mode == 'wireframe' || (isActive && mode == 'wireShade')) {
         const wireframe = solid.get_edges()
         const wireMaterial = this.getWireMaterial(comp)
         comp.cache.wireframe = (comp.cache.wireframe || []).concat(wireframe.map(edge => {

@@ -25,6 +25,7 @@
     direction: rtl
     > *
       direction: ltr
+      text-align: left
 
   .tree-item
     margin-left: -7px

@@ -152,7 +152,7 @@ export class Transloader {
       comp.cache.edges
     faces.forEach(face => face.material = surfaceMaterial )
     edges.forEach(edge => edge.material = wireMaterial )
-    comp.children.forEach(child => this.applyMaterials(child, highlight))
+    if(!solidId) comp.children.forEach(child => this.applyMaterials(child, highlight))
   }
 
   highlightComponent(comp, solidId) {

@@ -1,16 +1,18 @@
 <template lang="pug">
-  main.document-view(@mousedown="mousedown")
+  main.document-view(
+    @mousedown="mouseDown"
+    @keydown="keyDown"
+  )
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
       :highlighted-component="highlightedComponent"
       :active-tool.sync="activeTool"
-      :selected-element="selectedElement"
+      :selection.sync="selection"
       :active-view="previewView || document.activeView"
       :display-mode="previewDisplayMode || currentDisplayMode"
       @change-view="viewChanged"
       @change-pose="document.isPoseDirty = true"
-      @element-selected="elementSelected"
     )
     ToolBox(
       :active-tool="activeTool"
@@ -20,10 +22,12 @@
       TreeView(
         :top="document.tree"
         :active-component="document.activeComponent"
+        :selection.sync="selection"
         @update:active-component="activateComponent"
         @highlight-component="highlightComponent"
-        @delete-component="deleteComponent"
         @create-component="createComponent"
+        @delete-component="deleteComponent"
+        @delete-solid="deleteSolid"
       )
     .side-bar.right
       h1 View
@@ -57,7 +61,7 @@
       //-   @create="createSet"
       //- )
     FooterView(
-      :selected-element="selectedElement"
+      :selection="selection"
       :active-component="document.activeComponent"
     )
 </template>
@@ -162,7 +166,7 @@
     data() {
       return {
         activeTool: null,
-        selectedElement: null,
+        selection: null,
         highlightedComponent: null,
         previewView: null,
         dirtyView: null,
@@ -204,8 +208,13 @@
 
       deleteComponent: function(comp) {
         comp.parent.deleteComponent(comp)
-        if(!this.document.activeComponent.hasParent(comp)) return
+        if(!this.document.activeComponent.hasAncestor(comp)) return
         this.document.activeComponent = comp.parent
+      },
+
+      deleteSolid: function(solid) {
+        solid.remove()
+        this.$root.$emit('component-changed', solid.component)
       },
 
       highlightComponent: function(comp, solidId) {
@@ -246,12 +255,23 @@
         this.dirtyView = null
       },
 
-      elementSelected: function(elem) {
-        this.selectedElement = elem
+      mouseDown: function() {
+        this.$root.$emit('close-widgets')
       },
 
-      mousedown: function() {
-        this.$root.$emit('close-widgets')
+      keyDown: function(e) {
+        console.log('DOC DOWN')
+        if(e.keyCode == 46 || e.keyCode == 8) { // Del / Backspace
+          // Delete Selection
+          if(this.selection) {
+            console.log(this.selection)
+            if(this.selection.typename() == 'Component') {
+              this.deleteComponent(this.selection)
+            } else if(this.selection.typename() == 'Solid') {
+              this.deleteSolid(this.selection)
+            }
+          }
+        }
       },
     },
   }

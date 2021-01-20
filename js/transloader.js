@@ -12,7 +12,7 @@ export class Transloader {
   }
 
   isActive(comp) {
-    return comp.hasParent(this.document.activeComponent)
+    return comp.hasAncestor(this.document.activeComponent)
   }
 
   loadTree(comp, recursive) {

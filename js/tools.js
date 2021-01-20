@@ -49,10 +49,12 @@ export class ManipulationTool extends HighlightTool {
   click(vec, coords) {
     const curve = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
     if(curve) return this.viewport.renderer.render()
-    if(this.viewport.selectedElement) {
-      this.viewport.selectedElement.mesh.material = this.viewport.renderer.materials.line
+    const type = this.viewport.selection && this.viewport.selection.typename()
+    if(this.viewport.selection && type !== 'Solid' && type !== 'Component') {
+      console.log(this.viewport.selection)
+      this.viewport.selection.mesh.material = this.viewport.renderer.materials.line
     }
-    this.viewport.$emit('element-selected', null)
+    this.viewport.$emit('update:selection', null)
     this.viewport.renderer.transformControl.detach()
     this.viewport.renderer.render()
   }
@@ -64,11 +66,12 @@ export class ManipulationTool extends HighlightTool {
     }
     const curve = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
     if(!curve) return
-    if(this.viewport.selectedElement) {
-      this.viewport.selectedElement.mesh.material = this.viewport.renderer.materials.line
+    const type = this.viewport.selection && this.viewport.selection.typename()
+    if(this.viewport.selection && type !== 'Solid' && type !== 'Component') {
+      this.viewport.selection.mesh.material = this.viewport.renderer.materials.line
     }
     curve.material = this.viewport.renderer.materials.selectionLine
-    this.viewport.$emit('element-selected', curve.alcElement)
+    this.viewport.$emit('update:selection', curve.alcElement)
     // this.viewport.transformControl.attach(object)
     this.viewport.renderer.render()
   }

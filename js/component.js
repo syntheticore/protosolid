@@ -21,6 +21,10 @@ export default class Component {
     }
   }
 
+  typename() {
+    return 'Component'
+  }
+
   createComponent(title) {
      let comp = this.real.create_component()
      comp = new Component(comp, this, title || 'New Component')
@@ -39,11 +43,12 @@ export default class Component {
 
   updateSolids() {
     this.solids = this.real.get_solids()
+    this.solids.forEach(solid => solid.component = this )
   }
 
-  hasParent(parent) {
+  hasAncestor(parent) {
     if(this === parent) return true
-    return this.parent && this.parent.hasParent(parent)
+    return this.parent && this.parent.hasAncestor(parent)
   }
 
   getParameters() {

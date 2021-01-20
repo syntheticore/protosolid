@@ -13,11 +13,12 @@
         @dblclick="$emit('update:active-component', component)"
         @mouseenter="$emit('highlight-component', component)"
         @mouseleave="$emit('highlight-component', null)"
+        @click="$emit('update:selection', component)"
       )
         fa-icon.eye(
           v-if="!isTop"
           icon="eye" fixed-width
-          @click="hidden = !hidden"
+          @click.stop="hidden = !hidden"
         )
         fa-icon.assembly(icon="boxes" v-if="isAssembly")
         fa-icon.part(icon="box" v-else)
@@ -26,17 +27,17 @@
           fa-icon(
             icon="check-circle" fixed-width
             title="Activate"
-            @click="$emit('update:active-component', component)"
+            @click.stop="$emit('update:active-component', component)"
           )
           fa-icon(
             icon="plus-circle" fixed-width
             title="Create Component"
-            @click="$emit('create-component', component)"
+            @click.stop="$emit('create-component', component)"
           )
           fa-icon.delete(
             icon="trash-alt" fixed-width
             title="Delete Component"
-            @click="$emit('delete-component', component)"
+            @click.stop="$emit('delete-component', component)"
           )
 
     ul.widgets(
@@ -64,6 +65,7 @@
         header(
           @mouseenter="$emit('highlight-component', component, solid.get_id())"
           @mouseleave="$emit('highlight-component', null)"
+          @click="$emit('update:selection', solid)"
         )
           fa-icon(icon="layer-group" fixed-width)
           h2 Solid {{ i + 1 }}
@@ -71,7 +73,7 @@
             fa-icon.delete(
               icon="trash-alt" fixed-width
               title="Delete"
-              @click="removeSolid(solid)"
+              @click.stop="$emit('delete-solid', solid)"
             )
 
     //- Children
@@ -243,6 +245,7 @@
       component: Object,
       activeComponent: Object,
       parentHidden: Boolean,
+      selection: Object,
     },
 
     data() {
@@ -272,11 +275,6 @@
     methods: {
       toggle: function() {
         this.expanded = !this.expanded;
-      },
-
-      removeSolid: function(solid) {
-        solid.remove()
-        this.$root.$emit('component-changed', this.component)
       },
     },
   }

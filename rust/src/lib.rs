@@ -70,12 +70,12 @@ impl JsCurve {
   }
 
   pub fn typename(&self) -> String {
-      match *self.real.borrow() {
-        CurveType::Line(_) => "Line",
-        CurveType::Arc(_) => "Arc",
-        CurveType::Circle(_) => "Circle",
-        CurveType::BezierSpline(_) => "BezierSpline",
-      }.to_string()
+    match *self.real.borrow() {
+      CurveType::Line(_) => "Line",
+      CurveType::Arc(_) => "Arc",
+      CurveType::Circle(_) => "Circle",
+      CurveType::BezierSpline(_) => "BezierSpline",
+    }.to_string()
   }
 
   pub fn get_radius(&self) -> f64 {
@@ -417,6 +417,10 @@ impl JsSolid {
       faces,
       area,
     }
+  }
+
+  pub fn typename(&self) -> String {
+    "Solid".to_string()
   }
 
   pub fn get_id(&self) -> JsValue {

@@ -9,7 +9,7 @@
     //-   | Bring up actions
 
     transition(name="fade")
-      .selection-info.bordered(v-if="selectedElement")
+      .selection-info.bordered(v-if="selection")
         div
           span # Objects
           span 1 {{type}}
@@ -24,27 +24,27 @@
 
         div(v-if="type == 'Solid'")
           span Surface Area
-          span {{ activeComponent.get_area().toFixed(2) }} cm²
+          span {{ selection.area.toFixed(2) }} cm²
 
         div(v-if="type == 'Line' || type == 'BezierSpline'")
           span Length
-          span {{ selectedElement.get_length().toFixed(2) }} mm
+          span {{ selection.get_length().toFixed(2) }} mm
 
         div(v-if="type == 'Circle'")
           span Radius
-          span {{ selectedElement.get_radius().toFixed(2) }} mm
+          span {{ selection.get_radius().toFixed(2) }} mm
 
         div(v-if="type == 'Circle'")
           span Diameter
-          span {{ (selectedElement.get_radius() * 2).toFixed(2) }} mm
+          span {{ (selection.get_radius() * 2).toFixed(2) }} mm
 
         div(v-if="type == 'Circle'")
           span Circumfence
-          span {{ selectedElement.get_length().toFixed(2) }} mm
+          span {{ selection.get_length().toFixed(2) }} mm
 
         div(v-if="type == 'Circle'")
           span Area
-          span {{ selectedElement.get_area().toFixed(2) }} mm²
+          span {{ selection.get_area().toFixed(2) }} mm²
 
     .debug-panel
       button.button(@click="splitAll") Split all
@@ -56,7 +56,6 @@
     font-size: 13px
     padding: 12px
     color: $bright2
-    text-shadow: 0 1px 3px black
     display: flex
     // justify-content: space-between
     justify-content: flex-end
@@ -128,13 +127,13 @@
     components: {},
 
     props: {
-      selectedElement: Object,
+      selection: Object,
       activeComponent: Object,
     },
 
     computed: {
       type: function() {
-        return this.selectedElement.typename()
+        return this.selection.typename()
       },
     },
 

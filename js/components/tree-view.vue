@@ -4,6 +4,7 @@
       is="tree-item"
       :component="top"
       :active-component="activeComponent"
+      :selection="selection"
       v-on="$listeners"
       is-top
     )
@@ -43,10 +44,7 @@
     props: {
       top: Object,
       activeComponent: Object,
+      selection: Object,
     },
-
-    methods: {
-
-    }
   }
 </script>

@@ -8,6 +8,8 @@
       @mouseup="mouseUp"
       @mousedown="mouseDown"
       @mousemove="mouseMove"
+      @keydown="keyDown"
+      @keyup="keyUp"
     )
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
@@ -175,7 +177,7 @@
       activeComponent: Object,
       highlightedComponent: Object,
       activeTool: Object,
-      selectedElement: Object,
+      selection: Object,
       activeView: Object,
       displayMode: String,
     },
@@ -304,22 +306,6 @@
       this.$root.$on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.$root.$on('unpreview-feature', this.unpreviewFeature)
 
-      // Key presses
-      this.$refs.canvas.addEventListener('keydown', (e) => {
-        if(e.keyCode == 46 || e.keyCode == 8) { // Del / Backspace
-          if(this.selectedElement) this.deleteElement(this.selectedElement)
-        } else if(e.keyCode == 18) { // alt
-          // this.guides = []
-        }
-      })
-
-      this.$refs.canvas.addEventListener('keyup', (e) => {
-        if(e.keyCode == 18) { // alt
-        } else if(e.keyCode == 79) { // o
-          this.renderer.switchCamera()
-        }
-      })
-
       // Window Resize
       this.$root.$on('resize', this.onWindowResize)
       setTimeout(() => this.onWindowResize(), 1000)
@@ -401,6 +387,28 @@
         if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
+      keyDown: function(e) {
+        if(e.keyCode == 46 || e.keyCode == 8) { // Del / Backspace
+          // Delete Selection
+          if(this.selection) {
+            console.log(this.selection)
+            const type = this.selection.typename()
+            if(type != 'Solid' && type != 'Component') {
+              this.deleteElement(this.selection)
+            }
+          }
+        } else if(e.keyCode == 18) { // alt
+          // this.guides = []
+        }
+      },
+
+      keyUp: function(e) {
+        if(e.keyCode == 18) { // alt
+        } else if(e.keyCode == 79) { // o
+          this.renderer.switchCamera()
+        }
+      },
+
       snap: function(e) {
         const coords = this.getMouseCoords(e)
         let vec = this.renderer.fromScreen(coords)
@@ -451,7 +459,7 @@
         this.renderer.transformControl.detach()
         this.activeComponent.real.get_sketch().remove_element(elem.id())
         this.componentChanged(this.activeComponent)
-        this.$emit('element-selected', null)
+        this.$emit('update:selection', null)
       },
 
       componentChanged: function(comp, recursive) {

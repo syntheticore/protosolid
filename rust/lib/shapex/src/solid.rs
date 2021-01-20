@@ -193,9 +193,11 @@ impl Solid {
   }
 
   pub fn area(&self) -> f64 {
-    self.shells.iter()
-    .map(|shell| shell.area() )
-    .fold(0.0, |a, b| a + b )
+    self.shells.iter().fold(0.0, |acc, shell| acc + shell.area() )
+  }
+
+  pub fn volume(&self) -> f64 {
+    self.shells[0].volume() - self.shells.iter().skip(1).fold(0.0, |acc, shell| acc + shell.volume() )
   }
 }
 
@@ -415,8 +417,11 @@ impl Shell {
 
   pub fn area(&self) -> f64 {
     self.faces.iter()
-    .map(|face| face.borrow().get_surface().area() )
-    .fold(0.0, |a, b| a + b )
+    .fold(0.0, |acc, face| acc + face.borrow().get_surface().area() )
+  }
+
+  pub fn volume(&self) -> f64 {
+    0.0 //XXX
   }
 
   pub fn print(&self) {

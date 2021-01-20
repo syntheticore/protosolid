@@ -16,11 +16,19 @@
 
         div(v-if="type == 'Solid'")
           span Weight
-          span 12.3 g
+          span(v-if="selection.component.material")
+            | {{ (selection.volume * selection.component.material.density).toFixed(2) }} g
+          span.warn(v-else) No Material
+
+        div(v-if="type == 'Component'")
+          span Weight
+          span(v-if="selection.getWeight() !== undefined")
+            | {{ selection.getWeight().toFixed(2) }} g
+          span.warn(v-else) No Material
 
         div(v-if="type == 'Solid'")
           span Volume
-          span 140 cm³
+          span {{ selection.volume.toFixed(2) }} cm³
 
         div(v-if="type == 'Solid'")
           span Surface Area
@@ -83,7 +91,7 @@
 
     span:first-child
       // text-align: right
-      padding-right: 4px
+      padding-right: 8px
 
     span:last-child
       color: $bright1
@@ -97,6 +105,9 @@
     margin-left: 9px
     margin-right: 3px
     color: $bright1
+
+  .warn
+    color: $warn !important
 
   .debug-panel
     position: absolute

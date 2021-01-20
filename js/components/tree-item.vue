@@ -23,7 +23,7 @@
         fa-icon.assembly(icon="boxes" v-if="isAssembly")
         fa-icon.part(icon="box" v-else)
         span.name {{ component.title }}
-        .controls
+        .controls(:class="{wide: !isTop}")
           fa-icon(
             icon="check-circle" fixed-width
             title="Activate"
@@ -35,6 +35,7 @@
             @click.stop="$emit('create-component', component)"
           )
           fa-icon.delete(
+            v-if="!isTop"
             icon="trash-alt" fixed-width
             title="Delete Component"
             @click.stop="$emit('delete-component', component)"
@@ -156,22 +157,26 @@
     margin-right: 6px
 
   .controls
-    border-left: 0.5px solid $dark1 * 1.3
-    margin-right: -80px // -53px
+    border-left: 0.5px solid $dark1 * 1.85
     opacity: 0
+    width: 0
     transition: all 0.15s
     transition-delay: 0.5s
-    .solid &
-      margin-right: -28px
+    white-space: nowrap
 
   .box
   .solid
     overflow: hidden
     &:hover
       .controls
-        margin-right: 0
         opacity: 1
         transition-delay: 0.1s
+  .box:hover .controls
+    width: 53px
+    &.wide
+      width: 80px
+  .solid:hover .controls
+    width: 28px
 
   .delete
     color: $cancel !important

@@ -41,6 +41,22 @@ export default class Component {
     return this.material || (this.parent && this.parent.getMaterial())
   }
 
+  getWeight() {
+    if(this.solids.length && !this.material) return
+    try {
+      let weight = this.children.reduce((acc, child) => {
+        const childWeight = child.getWeight()
+        if(childWeight === undefined) throw 'no weight'
+        return acc + childWeight
+      }, 0.0)
+      return weight + (this.material ? this.getVolume() * this.material.density : 0.0)
+    } catch(e) {}
+  }
+
+  getVolume() {
+    return this.solids.reduce((acc, solid) => acc + solid.volume, 0.0)
+  }
+
   updateSolids() {
     this.solids = this.real.get_solids()
     this.solids.forEach(solid => solid.component = this )

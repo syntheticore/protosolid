@@ -272,7 +272,10 @@ impl JsRegion {
   pub fn get_center(&self) -> JsValue {
     let center = self.region.iter().fold(
       Point3::new(0.0, 0.0, 0.0),
-      |acc, elem| acc + elem.bounds.0.to_vec() + elem.bounds.1.to_vec()
+      |acc, elem| acc + match &elem.base {
+        CurveType::Circle(circle) => circle.center.to_vec() * 2.0,
+        _ => elem.bounds.0.to_vec() + elem.bounds.1.to_vec(),
+      }
     ) / (self.region.len() as f64 * 2.0);
     point_to_js(center)
   }

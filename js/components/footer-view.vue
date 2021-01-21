@@ -158,7 +158,7 @@
         // elems.forEach(elem => {
         //   this.activeComponent.remove_element(elem.id())
         // })
-        document._debug.viewport.componentChanged(this.activeComponent)
+        this.$root.$emit('component-changed', this.activeComponent)
       },
     },
   }

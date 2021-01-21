@@ -269,32 +269,9 @@
       this.transloader.setDocument(this.document)
       this.transloader.loadTree(this.document.tree, true)
 
-      document._debug = {} || document._debug
-      document._debug.viewport = this
-
       // Events
-      const handlePick = (pickerCoords, color, Tool) => {
-        if(this.activeTool) this.activeTool.dispose()
-        const mouseTarget = this.renderer
-        this.pickingPath = { target: null, color, origin: pickerCoords }
-        const tool = new Tool(this.activeComponent, this, (item, mesh) => {
-          this.$root.$emit('picked', item)
-          this.$root.$emit('activate-toolname', 'Manipulate')
-          mesh.geometry.computeBoundingBox();
-          const center = new THREE.Vector3()
-          mesh.geometry.boundingBox.getCenter(center);
-          this.paths.push({
-            target: center,
-            origin: pickerCoords,
-            data: this.buildPath(pickerCoords, center),
-            color,
-          })
-        })
-        this.$emit('update:active-tool', tool)
-      }
-
       this.$root.$on('pick', (type, pickerCoords, color) => {
-        handlePick(pickerCoords, color, {
+        this.handlePick(pickerCoords, color, {
           profile: ProfileSelectionTool,
           curve: ObjectSelectionTool,
           axis: ObjectSelectionTool,
@@ -302,16 +279,13 @@
       })
 
       this.$root.$on('activate-toolname', this.activateTool)
-
       this.$root.$on('component-changed', this.componentChanged)
-
       this.$root.$on('render-needed', () => this.renderer.render())
-
       this.$root.$on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.$root.$on('unpreview-feature', this.unpreviewFeature)
+      this.$root.$on('resize', this.onWindowResize)
 
       // Window Resize
-      this.$root.$on('resize', this.onWindowResize)
       setTimeout(() => this.onWindowResize(), 1000)
       this.onWindowResize()
     },
@@ -417,6 +391,26 @@
         const coords = this.getMouseCoords(e)
         let vec = this.renderer.fromScreen(coords)
         return this.snapper.snap(vec, coords)
+      },
+
+      handlePick: function(pickerCoords, color, Tool) {
+        if(this.activeTool) this.activeTool.dispose()
+        const mouseTarget = this.renderer
+        this.pickingPath = { target: null, color, origin: pickerCoords }
+        const tool = new Tool(this.activeComponent, this, (item, mesh) => {
+          this.$root.$emit('picked', item)
+          this.$root.$emit('activate-toolname', 'Manipulate')
+          mesh.geometry.computeBoundingBox();
+          const center = new THREE.Vector3()
+          mesh.geometry.boundingBox.getCenter(center);
+          this.paths.push({
+            target: center,
+            origin: pickerCoords,
+            data: this.buildPath(pickerCoords, center),
+            color,
+          })
+        })
+        this.$emit('update:active-tool', tool)
       },
 
       updateWidgets: function() {

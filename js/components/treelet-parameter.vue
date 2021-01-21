@@ -1,5 +1,5 @@
 <template lang="pug">
-  .parameter-treelet
+  .box.parameter-treelet
     header
       fa-icon(icon="square-root-alt" fixed-width)
       input.variable(type="text" v-model.trim="parameter.name" @keydown.stop)

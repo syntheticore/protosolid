@@ -98,6 +98,10 @@
       'inner.expression': function() {
         this.update()
       },
+
+      value: function(value) {
+        this.inner.setBase(value)
+      },
     },
 
     mounted() {
@@ -109,11 +113,11 @@
     methods: {
       enter: function() {
         this.inner.set(this.$refs.input.value)
-        this.focusInput()
       },
 
       update: function() {
-        this.$emit('update:value', this.inner.asBaseUnit())
+        this.$emit('update:value', this.inner.getBase())
+        this.focusInput()
       },
 
       keydown: function(e) {
@@ -123,14 +127,12 @@
       increase: function() {
         const number = this.inner.parse()
         this.inner.set(truncate(number.value + 1) + number.unit)
-        this.focusInput()
       },
 
       decrease: function() {
         const number = this.inner.parse()
         const newValue = number.value - 1
         if(newValue >= 0) this.inner.set(truncate(newValue) + number.unit)
-        this.focusInput()
       },
 
       focusInput: function() {

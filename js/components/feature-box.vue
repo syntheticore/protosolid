@@ -189,7 +189,10 @@
   import NumberInput from './number-input.vue'
   import MaterialSelector from './material-selector.vue'
 
+  import * as THREE from 'three'
+
   import { ManipulationTool } from './../tools.js'
+  import { LengthGizmo } from './../gizmos.js'
 
   export default {
     name: 'FeatureBox',
@@ -226,10 +229,31 @@
     },
 
     beforeDestroy: function() {
-      this.cancel()
+      this.activeFeature.dispose()
+      this.$root.$emit('unpreview-feature')
+      this.$root.$emit('component-changed', this.activeFeature.component, true)
+      this.$root.$emit('activate-toolname', 'Manipulate')
+      window.alcRenderer.removeGizmo()
     },
 
     methods: {
+      pickAll: function() {
+        const pickerKeys = Object.keys(this.activeFeature.settings).filter(key =>
+          this.needsPicker(this.activeFeature.settings[key])
+        )
+        let chain = Promise.resolve()
+        for(const key of pickerKeys) {
+          const setting = this.activeFeature.settings[key]
+          chain = chain.then(() => this.pick(setting.type, key) )
+        }
+      },
+
+      needsPicker: function(setting, includeOptionals) {
+        return ['profile', 'curve', 'axis'].some(type =>
+          type == setting.type && (!setting.optional || includeOptionals)
+        )
+      },
+
       pick: function(type, key) {
         return new Promise((resolve) => {
           this.$root.$off('picked')
@@ -252,24 +276,8 @@
         })
       },
 
-      needsPicker: function(setting, includeOptionals) {
-        return ['profile', 'curve', 'axis'].some(type =>
-          type == setting.type && (!setting.optional || includeOptionals)
-        )
-      },
-
-      pickAll: function() {
-        const pickerKeys = Object.keys(this.activeFeature.settings).filter(key =>
-          this.needsPicker(this.activeFeature.settings[key])
-        )
-        let chain = Promise.resolve()
-        for(const key of pickerKeys) {
-          const setting = this.activeFeature.settings[key]
-          chain = chain.then(() => this.pick(setting.type, key) )
-        }
-      },
-
       update: function() {
+        this.updateGizmos()
         const meshOrError = this.activeFeature.update()
         this.error = null
         if(typeof meshOrError == 'string') {
@@ -279,19 +287,38 @@
         } else {
           this.$root.$emit('component-changed', this.activeFeature.component, true)
         }
+        this.installGizmos()
+      },
+
+      installGizmos: function() {
+        if(!this.activeFeature.isComplete()) return window.alcRenderer.removeGizmo()
+        if(!this.lengthGizmo) this.installLengthGizmo()
+      },
+
+      updateGizmos: function() {
+        if(this.lengthGizmo) this.lengthGizmo.set(this.activeFeature.distance)
+      },
+
+      installLengthGizmo: function() {
+        const settings = Object.values(this.activeFeature.settings)
+        if(!settings.find(setting => setting.type == 'length')) return
+
+        const center = new THREE.Vector3().fromArray(this.activeFeature.profile.get_center())
+        const direction = this.activeFeature.axis || THREE.Object3D.DefaultUp
+        this.lengthGizmo = new LengthGizmo(
+          center, direction,
+          this.activeFeature.distance,
+          (dist) => this.activeFeature.distance = dist,
+        )
+        window.alcRenderer.addGizmo(this.lengthGizmo)
       },
 
       confirm: function(e) {
         this.activeFeature.confirm()
-        this.$root.$emit('component-changed', this.activeFeature.component, true)
         this.$emit('close')
       },
 
       cancel: function(e) {
-        this.activeFeature.dispose()
-        this.$root.$emit('unpreview-feature')
-        this.$root.$emit('component-changed', this.activeFeature.component, true)
-        this.$root.$emit('activate-toolname', 'Manipulate')
         this.$emit('close')
       },
     },

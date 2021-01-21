@@ -1,22 +1,24 @@
 import * as THREE from 'three'
-
 import { createNanoEvents } from 'nanoevents'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
-// import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
+
 import { HDRCubeTextureLoader } from 'three/examples/jsm/loaders/HDRCubeTextureLoader.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+// import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
 
+import Materials from './materials.js'
+import SketchPlane from './sketchPlane.js'
+import ShadowCatcher from './shadowCatcher.js'
+import ArrowControls from './arrowControls.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
-import { Materials } from './materials.js'
-import { SketchPlane } from './sketchPlane.js'
-import { ShadowCatcher } from './shadowCatcher.js'
 
 
 export class Renderer {
   constructor(canvas) {
+    this.canvas = canvas
+
     THREE.Object3D.DefaultUp = new THREE.Vector3(0, 0, 1)
 
     this.emitter = createNanoEvents()
@@ -33,27 +35,16 @@ export class Renderer {
     this.renderer.physicallyCorrectLights = true
     this.renderer.shadowMap.autoUpdate = false
     this.renderer.shadowMap.enabled = true
+
     // this.renderer.shadowMap.type = THREE.VSMShadowMap
     // this.renderer.toneMapping = THREE.ReinhardToneMapping
     // this.renderer.toneMapping = THREE.LinearToneMapping
     // this.renderer.toneMappingExposure = 1.2
     // this.renderer.setClearColor(0x263238)
 
-    // Camera
-    this.raycaster = new THREE.Raycaster()
-
-    this.camera = new THREE.PerspectiveCamera(70, 1, 0.5, 10000)
-    this.camera.position.set(90, 90, 90)
-
-    this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
-    this.cameraOrtho.position.set(0, 0, 10)
-
     // Scene
     this.scene = new THREE.Scene()
-    this.cameraOrtho.lookAt(this.scene.position)
 
-    // this.scene.fog = new THREE.Fog(0xcce0ff, 0.1, 80)
-    // this.scene.add(new THREE.AmbientLight(0x666666))
     var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
     this.scene.add(atmosphere)
 
@@ -68,6 +59,16 @@ export class Renderer {
       pmremGenerator.dispose()
       this.render()
     })
+
+    // Camera
+    this.raycaster = new THREE.Raycaster()
+
+    this.camera = new THREE.PerspectiveCamera(70, 1, 0.5, 10000)
+    this.camera.position.set(90, 90, 90)
+
+    this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
+    this.cameraOrtho.position.set(0, 0, 10)
+    this.cameraOrtho.lookAt(this.scene.position)
 
     // Scene Objects
     this.world = new THREE.Object3D()
@@ -92,25 +93,6 @@ export class Renderer {
     // // mesh.visible = false
     // this.scene.add(mesh)
 
-    // Transform Controls
-    this.transformControl = new TransformControls(this.camera, this.renderer.domElement)
-    this.transformControl.space = 'world'
-    // this.transformControl.translationSnap = 0.5
-    // this.transformControl.rotationSnap = THREE.MathUtils.degToRad(10)
-    // this.transformControl.setMode('rotate')
-    // this.transformControl.addEventListener('change', () => this.render())
-    this.transformControl.addEventListener('dragging-changed', (event) => {
-      this.viewControls.enabled = !event.value
-    })
-
-    this.transformControl.addEventListener('objectChange', (event) => {
-      this.emitter.emit('change-pose')
-      this.shadowCatcher.update()
-      this.render()
-    })
-
-    this.scene.add(this.transformControl)
-
     // Init viewport
     this.setActiveCamera(this.camera)
 
@@ -121,6 +103,9 @@ export class Renderer {
 
     setPixelRatio()
     prefEmitter.on('updated', setPixelRatio)
+
+    // Store as global
+    window.alcRenderer = this
   }
 
   getPixelRatio() {
@@ -130,6 +115,7 @@ export class Renderer {
   setActiveCamera(camera) {
     if(this.viewControls) this.viewControls.dispose()
 
+    const target = this.viewControls && this.viewControls.target
     this.viewControls = new OrbitControls(camera, this.renderer.domElement)
     this.viewControls.enableDamping = true
     this.viewControls.dampingFactor = 0.4
@@ -140,12 +126,14 @@ export class Renderer {
     this.viewControls.rotateSpeed = 1.2
     this.viewControls.minPolarAngle = - Math.PI
     this.viewControls.maxPolarAngle = Math.PI * 2
+    if(target) this.viewControls.target.copy(target)
+    this.viewControls.update()
 
     this.viewControls.addEventListener('change', () => this.render() )
 
     this.viewControls.addEventListener('start', () => {
       this.isOrbiting = true
-      this.transformControl.enabled = false
+      if(this.gizmo) this.gizmo.enabled = false
       this.cameraTarget = null
       this.viewControlsTarget = null
       this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
@@ -154,7 +142,7 @@ export class Renderer {
 
     this.viewControls.addEventListener('end', () => {
       this.isOrbiting = false
-      this.transformControl.enabled = true
+      if(this.gizmo) this.gizmo.enabled = true
       this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
       this.endAnimation()
     })
@@ -249,6 +237,34 @@ export class Renderer {
       return null
     }
     return target
+  }
+
+  addGizmo(gizmo) {
+    this.removeGizmo()
+    this.gizmo = gizmo
+
+
+    this.gizmo.addEventListener('dragging-changed', (event) => {
+      this.viewControls.enabled = !event.value
+    })
+
+    this.gizmo.addEventListener('objectChange', () => {
+      this.emitter.emit('change-pose')
+      this.shadowCatcher.update()
+      this.render()
+    })
+
+    // Recreate View Controls to achieve correct event order
+    this.scene.add(this.gizmo)
+    this.setActiveCamera(this.activeCamera)
+  }
+
+  removeGizmo() {
+    if(!this.gizmo) return
+    this.scene.remove(this.gizmo)
+    this.gizmo.dispose()
+    this.gizmo = null
+    this.render()
   }
 
   getCanvasCoords(mouseCoords) {
@@ -368,7 +384,7 @@ export class Renderer {
 
   dispose() {
     this.viewControls.dispose()
-    this.transformControl.dispose()
+    if(this.gizmo) this.gizmo.dispose()
     this.scene.environment.dispose()
     this.dropResources(this.scene)
     this.renderer.renderLists.dispose()

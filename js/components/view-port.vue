@@ -204,6 +204,10 @@
         this.renderer.render()
       },
 
+      selection: function(selection) {
+        this.renderer.render()
+      },
+
       activeView: function(view) {
         if(!view) return
         this.renderer.setView(view.position, view.target)
@@ -456,7 +460,7 @@
       },
 
       deleteElement: function(elem) {
-        this.renderer.transformControl.detach()
+        this.renderer.removeGizmo()
         this.activeComponent.real.get_sketch().remove_element(elem.id())
         this.componentChanged(this.activeComponent)
         this.$emit('update:selection', null)

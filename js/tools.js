@@ -55,8 +55,7 @@ export class ManipulationTool extends HighlightTool {
       this.viewport.selection.mesh.material = this.viewport.renderer.materials.line
     }
     this.viewport.$emit('update:selection', null)
-    this.viewport.renderer.transformControl.detach()
-    this.viewport.renderer.render()
+    // this.viewport.renderer.removeGizmo()
   }
 
   mouseDown(vec, coords) {
@@ -72,8 +71,7 @@ export class ManipulationTool extends HighlightTool {
     }
     curve.material = this.viewport.renderer.materials.selectionLine
     this.viewport.$emit('update:selection', curve.alcElement)
-    // this.viewport.transformControl.attach(object)
-    this.viewport.renderer.render()
+    // this.viewport.gizmo.attach(object)
   }
 
   mouseUp(vec, coords) {

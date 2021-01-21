@@ -5,6 +5,8 @@ const emitter = createNanoEvents()
 const preferences = {
   preferredUnit: 'mm',
   highDPI: true,
+  antiAlias: true,
+  shadowMaps: true,
   blurredOverlays: true,
 }
 

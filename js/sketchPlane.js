@@ -1,12 +1,14 @@
 import * as THREE from 'three'
 
-export class SketchPlane extends THREE.Object3D {
+import { rotationFromNormal } from './utils.js'
+
+export default class SketchPlane extends THREE.Object3D {
   constructor(camera, normal) {
     super()
     this.normal = normal
 
     // Grid
-    this.cachedVec = new THREE.Vector3(0.0, 0.0, 0.0)
+    this.cachedVec = new THREE.Vector3()
     this.update(camera)
 
     // Axis Helper
@@ -23,11 +25,11 @@ export class SketchPlane extends THREE.Object3D {
     }))
     ground.alcProjectable = true
     this.add(ground)
-    this.applyQuaternion(this.rotationFromNormal(normal))
+    this.applyQuaternion(rotationFromNormal(normal))
   }
 
   update(camera) {
-    const pos = this.grid && this.grid.position || new THREE.Vector3(0.0, 0.0, 0.0)
+    const pos = this.grid && this.grid.position || new THREE.Vector3()
     const dist = (pos).distanceTo(camera.position) //XXX should be distance to plane
     const size = Math.pow(10, String(Math.round(10 * dist / 4)).length) / 10
     if(size != this.lastSize) {
@@ -45,17 +47,5 @@ export class SketchPlane extends THREE.Object3D {
     const facing = this.grid.up.dot(lookVec)
     //XXX transform https://stackoverflow.com/questions/35641875/three-js-how-to-find-world-orientation-vector-of-objects-local-up-vector
     this.grid.position.z = -0.005 * dist * facing
-  }
-
-  rotationFromNormal(normal) {
-    let up = new THREE.Vector3(0, 0, 1)
-    let axis
-    if(normal.z == 1 || normal.z == -1) {
-      axis = new THREE.Vector3(1, 0, 0)
-    } else {
-      axis = new THREE.Vector3().crossVectors(up, normal)
-    }
-    let radians = Math.acos(normal.dot(up))
-    return new THREE.Quaternion().setFromAxisAngle(axis, radians)
   }
 }

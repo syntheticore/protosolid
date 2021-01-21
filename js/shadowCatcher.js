@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-export class ShadowCatcher extends THREE.Object3D {
+export default class ShadowCatcher extends THREE.Object3D {
   constructor(renderer, world) {
     super()
     this.renderer = renderer

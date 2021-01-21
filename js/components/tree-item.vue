@@ -33,6 +33,7 @@
             icon="plus-circle" fixed-width
             title="Create Component"
             @click.stop="$emit('create-component', component)"
+            @dblclick.stop
           )
           fa-icon.delete(
             v-if="!isTop"
@@ -120,6 +121,7 @@
     align-items: center
     transition: opacity 0.2s
     // pointer-events: all
+    box-shadow: 0 1px 3px rgba(black, 0.25)
     &:hover
       background: $dark2 * 1.15
       border-color: $dark1 * 1.85
@@ -159,6 +161,7 @@
   .controls
     border-left: 0.5px solid $dark1 * 1.3
     white-space: nowrap
+    overflow: hidden
     width: 0
     opacity: 0
     transition-property: opacity, width
@@ -167,7 +170,6 @@
 
   .box
   .solid
-    overflow: hidden
     &:hover
       .controls
         opacity: 1
@@ -214,6 +216,7 @@
       border-radius: 3px
       font-size: 11px
       font-weight: bold
+      box-shadow: 0 1px 3px rgba(black, 0.25)
       &:hover
         border-color: $dark1 * 1.85
         > svg

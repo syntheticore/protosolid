@@ -41,6 +41,8 @@ export default class Component {
     return this.material || (this.parent && this.parent.getMaterial())
   }
 
+  // Returns zero for empty components,
+  // but undefined when weight could not be determined
   getWeight() {
     if(this.solids.length && !this.material) return
     try {

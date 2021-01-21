@@ -85,7 +85,7 @@ export class ExtrudeFeature extends Feature {
     })
 
     this.profile = null
-    this.rail = null
+    this.axis = null
     this.distance = 1.0
     this.side = true
   }
@@ -180,7 +180,7 @@ export class RevolveFeature extends Feature {
   }
 
   confirm() {
-    // this.profile.revolve(axis, this.angle * (this.side ? 1 : -1))
+    this.profile.revolve(axis, this.angle * (this.side ? 1 : -1))
   }
 }
 

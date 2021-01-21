@@ -7,6 +7,10 @@ const conversions = {
   inch: 25.4,
 }
 
+function fixDecimals(number) {
+  return String(Number(number.toFixed(3)))
+}
+
 export default class Expression {
   constructor(input, parameters) {
     this.parameters = parameters || []
@@ -17,7 +21,7 @@ export default class Expression {
   set(input) {
     if(typeof input == 'number') {
       // Assume preferred unit for raw input
-      this.expression = String(Number(input.toFixed(3))) + preferences.preferredUnit
+      this.expression = fixDecimals(input) + preferences.preferredUnit
     } else {
       // Allways leave a unit for display purposes
       input = input.replace(/,/g, '.')
@@ -27,21 +31,24 @@ export default class Expression {
     }
   }
 
-  asPreferredUnit() {
-    return this.as(preferences.preferredUnit)
-  }
-
-  asBaseUnit() {
+  getBase() {
     const number = this.parse()
     return number.value * conversions[number.unit]
   }
 
+  setBase(mmValue) {
+    const unit = this.parse().unit
+    // Keep current unit
+    const value = mmValue / conversions[unit]
+    this.set(fixDecimals(value) + unit)
+  }
+
   as(unit) {
-    return this.asBaseUnit() / conversions[unit]
+    return this.getBase() / conversions[unit]
   }
 
   format(unit) {
-    return String(this.as(unit)) + unit
+    return fixDecimals(this.as(unit)) + unit
   }
 
   parse() {
@@ -159,4 +166,4 @@ export default class Expression {
 
 
 const unit = new Expression('2inch + 1mm')
-console.log('RESULT', unit.asBaseUnit(), unit.parse().value, unit.parse().unit)
+console.log('RESULT', unit.getBase(), unit.parse().value, unit.parse().unit)

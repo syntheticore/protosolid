@@ -1,3 +1,5 @@
+import * as THREE from 'three'
+
 export function saveFile(data, filename, filetype) {
   var blob = new Blob([data], {filetype})
   saveBlob(blob, filename, filetype)
@@ -15,4 +17,16 @@ export function saveBlob(blob, filename, filetype) {
     document.body.removeChild(a)
     window.URL.revokeObjectURL(url)
   }, 0)
+}
+
+export function rotationFromNormal(normal) {
+  let up = new THREE.Vector3(0, 0, 1)
+  let axis
+  if(normal.z == 1 || normal.z == -1) {
+    axis = new THREE.Vector3(1, 0, 0)
+  } else {
+    axis = new THREE.Vector3().crossVectors(up, normal)
+  }
+  let radians = Math.acos(normal.dot(up))
+  return new THREE.Quaternion().setFromAxisAngle(axis, radians)
 }

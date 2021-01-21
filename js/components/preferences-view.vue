@@ -25,17 +25,23 @@
       fieldset
         legend User Interface
         label
-          input(type="checkbox" v-model="preferences.blurredOverlays")
-          span Blurred overlays
-        label(:disabled="!isHighDPI")
-          input(type="checkbox" v-model="preferences.highDPI")
-          span High DPI rendering
-        label
           select
             option Bright
             option Dark
             option System default
           span Theme
+        label
+          input(type="checkbox" v-model="preferences.antiAlias" @change="restartRequired = true")
+          span Anti aliasing
+        label(:disabled="!isHighDPI")
+          input(type="checkbox" v-model="preferences.highDPI")
+          span High DPI rendering
+        label
+          input(type="checkbox" v-model="preferences.shadowMaps" @change="restartRequired = true")
+          span Display shadows
+        label
+          input(type="checkbox" v-model="preferences.blurredOverlays")
+          span Blurred overlays
 
       fieldset
         legend Tolerances
@@ -49,10 +55,18 @@
           input(type="numer" value="0.001mm" step="0.001")
           span Curve Fitting Accuracy
 
+    transition(name="fade")
+      .restart(v-if="restartRequired")
+        | A restart is required for some changes to take effect
+        button.button(@click="restart") Restart Alchemy
+
 </template>
 
 
 <style lang="stylus" scoped>
+  .preferences-view
+    position: relative
+
   .panes
     display: flex
 
@@ -72,7 +86,22 @@
 
   label
     margin: 6px 0
-    min-height: 18px
+    min-height: 24px
+
+  .restart
+    position: absolute
+    bottom: 7px
+    right: 7px
+    white-space: nowrap
+    color: $warn
+    transition: all 0.2s
+    .button
+      margin-left: 12px
+
+  .fade-enter
+  .fade-leave-to
+    opacity: 0
+    transform: translateY(10px)
 
 </style>
 
@@ -81,7 +110,6 @@
   import {
     default as preferences,
     savePreferences,
-    loadPreferences
   } from './../preferences.js'
 
   export default {
@@ -89,9 +117,9 @@
 
     data() {
       return {
-        open: false,
         preferences,
         isHighDPI: window.devicePixelRatio > 1,
+        restartRequired: false,
       }
     },
 
@@ -101,6 +129,12 @@
           savePreferences()
         },
         deep: true,
+      },
+    },
+
+    methods: {
+      restart: function() {
+        if(window.ipcRenderer) window.ipcRenderer.send('restart')
       },
     },
   }

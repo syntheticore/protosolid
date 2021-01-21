@@ -299,6 +299,11 @@ ipcMain.on('close', function() {
   mainWindow.close()
 });
 
+ipcMain.on('restart', function() {
+  app.relaunch()
+  app.quit()
+});
+
 ipcMain.on('vue-ready', function() {
   setDarkMode()
   setTimeout(() => {

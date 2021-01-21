@@ -463,7 +463,7 @@
       componentChanged: function(comp, recursive) {
         this.transloader.unloadTree(comp, recursive)
         this.transloader.loadTree(comp, recursive)
-        this.renderer.shadowCatcher.update()
+        this.renderer.updateShadows()
         this.renderer.render()
       },
 

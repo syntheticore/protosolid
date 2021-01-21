@@ -167,8 +167,9 @@ impl Solid {
     (vertex, face, self.shells.last_mut().unwrap())
   }
 
-  pub fn validate(&self) -> bool {
-    self.shells.iter().all(|shell| shell.validate() )
+  pub fn validate(&self) -> Result<(), String> {
+    for shell in &self.shells { shell.validate()? }
+    Ok(())
   }
 
   pub fn boolean(&mut self, _tool: Self, _op: BooleanType) -> Vec<Solid> {
@@ -229,8 +230,8 @@ impl Shell {
     }
   }
 
-  pub fn validate(&self) -> bool {
-    todo!()
+  pub fn validate(&self) -> Result<(), String> {
+    Ok(())
   }
 
   pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: CurveType, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {

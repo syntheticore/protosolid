@@ -463,7 +463,7 @@ impl JsComponent {
   }
 
   fn from(comp: &Rc<RefCell<Component>>) -> Self {
-    JsComponent {
+    Self {
       real: comp.clone(),
     }
   }
@@ -478,7 +478,7 @@ impl JsComponent {
 
   // pub fn get_children(&self) -> Array {
   //   self.real.borrow().children.iter().map(|child|
-  //     JsValue::from(JsComponent::from(child))
+  //     JsValue::from(Self::from(child))
   //   ).collect()
   // }
 
@@ -488,12 +488,12 @@ impl JsComponent {
     ).collect()
   }
 
-  pub fn create_component(&mut self) -> JsComponent {
+  pub fn create_component(&mut self) -> Self {
     let comp = self.real.borrow_mut().create_component();
-    JsComponent::from(&comp)
+    Self::from(&comp)
   }
 
-  pub fn delete_component(&self, comp: JsComponent) {
+  pub fn delete_component(&self, comp: Self) {
     self.real.borrow_mut().delete_component(&comp.real)
   }
 

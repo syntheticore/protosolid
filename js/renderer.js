@@ -26,7 +26,7 @@ export class Renderer {
     // Renderer
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      antialias: preferences.antiAlias,
       alpha: true,
     })
 
@@ -34,7 +34,7 @@ export class Renderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.physicallyCorrectLights = true
     this.renderer.shadowMap.autoUpdate = false
-    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.enabled = preferences.shadowMaps
 
     // this.renderer.shadowMap.type = THREE.VSMShadowMap
     // this.renderer.toneMapping = THREE.ReinhardToneMapping
@@ -82,8 +82,10 @@ export class Renderer {
     this.scene.add(this.sketchPlane)
 
     // Shadow Catcher
-    this.shadowCatcher = new ShadowCatcher(this.renderer, this.world)
-    this.scene.add(this.shadowCatcher)
+    if(preferences.shadowMaps) {
+      this.shadowCatcher = new ShadowCatcher(this.renderer, this.world)
+      this.scene.add(this.shadowCatcher)
+    }
 
     // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
     // const mesh = new THREE.Mesh(torusGeometry, this.materials.surface)
@@ -239,6 +241,10 @@ export class Renderer {
     return target
   }
 
+  updateShadows() {
+    if(this.shadowCatcher) this.shadowCatcher.update()
+  }
+
   addGizmo(gizmo) {
     this.removeGizmo()
     this.gizmo = gizmo
@@ -250,7 +256,7 @@ export class Renderer {
 
     this.gizmo.addEventListener('objectChange', () => {
       this.emitter.emit('change-pose')
-      this.shadowCatcher.update()
+      if(this.shadowCatcher) this.shadowCatcher.update()
       this.render()
     })
 

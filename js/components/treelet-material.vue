@@ -52,11 +52,8 @@
     margin-right: 8px
     box-shadow: none
 
-  header
-    display: flex
-    align-items: center
-    h2
-      margin: 0 !important
+  header h2
+    margin: 0 !important
 
   .expand
     padding: 3px !important
@@ -77,8 +74,6 @@
       border-top: 1px solid $dark1 * 1.3
 
   label
-    display: flex
-    align-items: center
     margin: 8px 0
     span
       min-width: 80px

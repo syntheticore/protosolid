@@ -1,6 +1,6 @@
 <template lang="pug">
   main.document-view(
-    @mousedown="mouseDown"
+    @pointerdown="mouseDown"
     @keydown="keyDown"
   )
     ViewPort(

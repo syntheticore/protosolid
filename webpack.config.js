@@ -29,18 +29,21 @@ module.exports = (env) => {
     plugins: [
       new MiniCssExtractPlugin(),
       new VueLoaderPlugin(),
-      env.production ? new CopyPlugin(env.wc ? [static] : [
-        './package.json',
-        static,
-        path.resolve(__dirname, 'electron')
-      ]) : null,
+      env.production ? new CopyPlugin({
+        patterns: env.wc ? [static] : [
+          './package.json',
+          static,
+          path.resolve(__dirname, 'electron')
+        ],
+      }) : null,
       new WasmPackPlugin({
         crateDirectory: path.resolve(__dirname, 'rust'),
         watchDirectories: [
           path.resolve(__dirname, 'rust/lib/shapex/src/'),
           path.resolve(__dirname, 'rust/lib/solvo/src/'),
         ],
-        extraArgs: '--out-name wasm-index',
+        outDir: path.resolve(__dirname, 'rust/pkg'),
+        outName: 'wasm-index',
       }),
     ].filter(Boolean),
     module: {
@@ -65,8 +68,10 @@ module.exports = (env) => {
             {
               loader: 'stylus-loader',
               options: {
-                use: [require('nib')()],
-                import: ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/reset.styl')]
+                stylusOptions: {
+                  use: ['nib'],
+                  import: ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/reset.styl')],
+                },
               },
             },
           ]
@@ -81,18 +86,20 @@ module.exports = (env) => {
               }
             } : {
               loader: MiniCssExtractPlugin.loader,
-              options: {
-                hmr: !env.production
-              }
+              // options: {
+              //   hmr: !env.production
+              // }
             },
             'css-loader?url=false',
             {
               loader: 'stylus-loader',
               options: {
-                use: [require('nib')()],
-                import: env.wc ?
-                  ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/reset.styl'), path.resolve(__dirname, 'styles/variables.styl')] :
-                  ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/variables.styl')]
+                stylusOptions: {
+                  use: ['nib'],
+                  import: env.wc ?
+                    ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/reset.styl'), path.resolve(__dirname, 'styles/variables.styl')] :
+                    ['~nib/lib/nib/index.styl', path.resolve(__dirname, 'styles/variables.styl')]
+                }
               },
             },
           ]

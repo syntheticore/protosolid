@@ -393,7 +393,5 @@ export class Renderer {
     if(this.gizmo) this.gizmo.dispose()
     this.scene.environment.dispose()
     this.dropResources(this.scene)
-    this.renderer.renderLists.dispose()
-    this.renderer.dispose()
   }
 }

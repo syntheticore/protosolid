@@ -24,16 +24,11 @@ body
 h1, h2, h3, h4
   color: $bright1
 
-fieldset
-  // padding-left: 6px
-  margin: 12px 0
-
 legend
   color: $bright1 * 0.95
   font-size: 12px
   font-weight: bold
   margin: 6px 0
-  // margin-left: -6px
 
 label
   display: flex
@@ -47,7 +42,7 @@ label
 input, select
   background: $bright1
   border: 2px solid transparent
-  box-shadow: 0 0 0 1px $dark2 * 0.55
+  // box-shadow: 0 0 0 1px $dark2 * 0.55
   font-weight: 700
   border-radius: 2px
   padding: 3px 0 3px 5px
@@ -60,7 +55,7 @@ input, select
   &:hover
     background: white
 
-input, select, textarea, label
+input, select, textarea, label, svg
   &:disabled
   &[disabled]
     pointer-events: none
@@ -72,7 +67,7 @@ button:disabled
 input[type="range"]
   padding: unset
   border: unset
-  box-shadow: unset
+  // box-shadow: unset
 
 input[type="color"]
   border: none
@@ -83,6 +78,37 @@ input[type="color"]
   &::-webkit-color-swatch
     border: none
 
+.form
+  input, select, .button
+    width: 73px
+    margin: 0
+    margin-right: 8px
+    // box-shadow: none
+
+  select, input[type="text"], input[type="number"], .button
+    height: 24px
+
+  input[type="color"]
+    height: 16px
+    border-radius: 2px
+    border: 2px solid $bright1
+
+  input[type="checkbox"]
+    width: unset
+
+  h3
+    font-size: 12px
+    font-weight: bold
+    margin: 10px 0
+
+  fieldset
+    margin: 0
+    padding: 0px 12px
+    padding-bottom: 2px
+
+  label
+    margin: 8px 0
+
 .button
   color: $bright1
   box-shadow: 0 0 0 1px $dark2 * 0.55
@@ -92,7 +118,6 @@ input[type="color"]
   background: linear-gradient(top, $dark1 * 1.2, rgba($dark2 * 1.4, 0.0)), $dark2 * 1.4
   border-radius: 2px
   padding: 4px 8px
-  // cursor: pointer
   transition: background 0.15s, border 0.15s
   font-size: 12px
   font-weight: 600
@@ -107,8 +132,8 @@ input[type="color"]
     background: linear-gradient(top, $dark1 * 1.1, $dark2 * 1.275)
   &:disabled
     color: $bright2
-  svg
-    // filter: drop-shadow(0 -1px 0px rgba(0,0,0, 0.6))
+  // svg
+  //   filter: drop-shadow(0 -1px 0px rgba(0,0,0, 0.6))
   span
     margin-left: 7px
 
@@ -136,18 +161,6 @@ input[type="color"]
     border-right: triWidth solid transparent
     border-bottom: triWidth solid $dark2 * 1.1
     filter: drop-shadow(0 -1px 0px $dark1 * 1.7) drop-shadow(0 -1px 0px $dark2 * 0.5)
-
-.header
-  text-align: center
-  font-size: 14px
-  font-weight: bold
-  color: $bright1
-  padding: 7px 14px
-  box-shadow: 0 0 8px rgba(black, 0.6)
-  text-shadow: 0 -1px 0px black
-  background: $dark2 * 1.1
-  margin-bottom: 14px
-  border-bottom: 1px solid $dark1 * 1.2
 
 alchemy-editor
   height: 100%

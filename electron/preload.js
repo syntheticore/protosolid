@@ -1,16 +1,11 @@
 // All of the Node.js APIs are available in the preload process.
 // It has the same sandbox as a Chrome extension.
-window.addEventListener('DOMContentLoaded', () => {
-  const replaceText = (selector, text) => {
-    const element = document.getElementById(selector)
-    if (element) element.innerText = text
-  }
 
-  for (const type of ['chrome', 'node', 'electron']) {
-    replaceText(`${type}-version`, process.versions[type])
-  }
-})
+const electron = require('electron')
 
-window.ipcRenderer = require('electron').ipcRenderer
-window.electronPlatform = require('os').platform()
-window.electronPlatformVersion = require('os').release()
+window.electron = {
+  fs: require('fs'),
+  ipcRenderer: electron.ipcRenderer,
+  platform: require('os').platform(),
+  platformVersion: require('os').release(),
+}

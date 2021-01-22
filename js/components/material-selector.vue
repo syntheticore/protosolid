@@ -20,9 +20,13 @@
     overflow-y: auto
     max-height: 280px
     border-top: 1px solid $dark1
+    width: 480px
 
   li
-    flex: 1 1 0
+    // flex: 1 1 0
+    flex: 0 0 auto
+    width: 80px
+    height: 100px
     display: flex
     flex-direction: column
     align-items: center
@@ -30,7 +34,6 @@
     border-radius: 6px
     transition: all 0.15s
     border: 2px solid transparent
-    // width: 80px
     margin: 8px
     & + li
       // margin-left: 12px
@@ -51,6 +54,8 @@
       color: $bright1
     &:hover
       background: $dark1
+    &:active
+      background: $dark1 * 0.95
     &.chosen
       background: $dark1
       border-color: $highlight

@@ -9,6 +9,7 @@ export default class Component {
     this.cog = false
     this.sectionViews = []
     this.parameters = []
+    this.exportConfigs = []
 
     this.children = []
     this.solids = []
@@ -34,7 +35,9 @@ export default class Component {
 
   deleteComponent(comp) {
     this.children = this.children.filter(child => child !== comp )
-    this.real.delete_component(comp.real)
+    this.real.delete_component(comp.real) // moving comp.real frees it
+    comp.real = null
+    comp.free()
   }
 
   getMaterial() {
@@ -60,6 +63,7 @@ export default class Component {
   }
 
   updateSolids() {
+    this.freeSolids()
     this.solids = this.real.get_solids()
     this.solids.forEach(solid => solid.component = this )
   }
@@ -83,8 +87,15 @@ export default class Component {
   //   return this.hidden || (this.parent && this.parent.isHidden())
   // }
 
+  freeSolids() {
+    this.solids.forEach(solid => solid.free() )
+    this.solids = []
+  }
+
   free() {
     this.children.forEach(child => child.free() )
-    this.real.free()
+    this.freeSolids()
+    if(this.real) this.real.free()
+    this.real = null
   }
 }

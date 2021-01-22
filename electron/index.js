@@ -1,5 +1,14 @@
-const { app, ipcMain, BrowserWindow, Menu, screen, nativeTheme } = require('electron')
+const fs = require('fs').promises
 const path = require('path')
+const {
+  app,
+  ipcMain,
+  BrowserWindow,
+  Menu,
+  screen,
+  nativeTheme,
+  dialog,
+} = require('electron')
 
 const isMac = process.platform === 'darwin'
 
@@ -110,9 +119,9 @@ let mainWindow
 function createWindow() {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 950,
-    height: 650,
-    minWidth: 800,
+    width: 1250,
+    height: 850,
+    minWidth: 1000,
     minHeight: 450,
     titleBarStyle: 'hiddenInset',
     devTools: false,
@@ -120,7 +129,6 @@ function createWindow() {
     backgroundColor: '#000',
     show: false,
     frame: isMac,
-    // vibrancy: 'ultra-dark',
     // vibrancy: isMac ? 'dark' : undefined,
     // transparent: !isMac,
     // opacity: 0.9,
@@ -132,33 +140,12 @@ function createWindow() {
     }
   })
 
-  // mainWindow = new BrowserWindow({
-  //   width: 1950,
-  //   height: 850,
-  //   minWidth: 800,
-  //   minHeight: 450,
-  //   titleBarStyle: 'hiddenInset',
-  //   devTools: true,
-  //   backgroundColor: isMac ? '#000' : false,
-  //   show: true,
-  //   webPreferences: {
-  //     preload: path.join(__dirname, 'preload.js'),
-  //     nodeIntegration: false,
-  //     scrollBounce: true,
-  //   }
-  // })
-
   // and load the index.html of the app.
   mainWindow.loadFile('index.html')
-
-  // Open the DevTools.
   // mainWindow.webContents.openDevTools()
 
-  // Emitted when the window is closed.
   mainWindow.on('closed', function() {
-    // Dereference the window object, usually you would store windows
-    // in an array if your app supports multi windows, this is the time
-    // when you should delete the corresponding element.
+    // Dereference the window object
     mainWindow = null
   })
 
@@ -186,57 +173,57 @@ function createWindow() {
     mainWindow.webContents.send('maximize-changed', false)
   })
 
-  //XXX Fix for missing window events with transparent: true
-  if(mainWindow.webContents.browserWindowOptions.transparent) {
-    // rewrite getNormalBounds, maximize, unmaximize and isMaximized API for the transparent window
-    let resizable = mainWindow.isResizable()
-    let normalBounds = mainWindow.getNormalBounds ? mainWindow.getNormalBounds() : mainWindow.getBounds()
+//   // Fix for missing window events with transparent: true
+//   if(mainWindow.webContents.browserWindowOptions.transparent) {
+//     // rewrite getNormalBounds, maximize, unmaximize and isMaximized API for the transparent window
+//     let resizable = mainWindow.isResizable()
+//     let normalBounds = mainWindow.getNormalBounds ? mainWindow.getNormalBounds() : mainWindow.getBounds()
 
-    mainWindow.getNormalBounds = function() {
-      if (!this.isMaximized()) {
-        if (BrowserWindow.prototype.getNormalBounds) {
-          normalBounds = BrowserWindow.prototype.getNormalBounds.call(this)
-        } else {
-          normalBounds = BrowserWindow.prototype.getBounds.call(this)
-        }
-      }
-      return normalBounds
-    }.bind(mainWindow)
+//     mainWindow.getNormalBounds = function() {
+//       if (!this.isMaximized()) {
+//         if (BrowserWindow.prototype.getNormalBounds) {
+//           normalBounds = BrowserWindow.prototype.getNormalBounds.call(this)
+//         } else {
+//           normalBounds = BrowserWindow.prototype.getBounds.call(this)
+//         }
+//       }
+//       return normalBounds
+//     }.bind(mainWindow)
 
-    mainWindow.maximize = function() {
-      normalBounds = this.getNormalBounds() // store the bounds of normal window
-      resizable = this.isResizable() // store resizable value
-      BrowserWindow.prototype.maximize.call(this)
-      if (!BrowserWindow.prototype.isMaximized.call(this)) {
-        // while isMaximized() was returning false, it will not emit 'maximize' event
-        this.emit('maximize', { sender: this, preventDefault: () => {} })
-      }
-      this.setResizable(false) // disable resize when the window is maximized
-    }.bind(mainWindow)
+//     mainWindow.maximize = function() {
+//       normalBounds = this.getNormalBounds() // store the bounds of normal window
+//       resizable = this.isResizable() // store resizable value
+//       BrowserWindow.prototype.maximize.call(this)
+//       if (!BrowserWindow.prototype.isMaximized.call(this)) {
+//         // while isMaximized() was returning false, it will not emit 'maximize' event
+//         this.emit('maximize', { sender: this, preventDefault: () => {} })
+//       }
+//       this.setResizable(false) // disable resize when the window is maximized
+//     }.bind(mainWindow)
 
-    mainWindow.unmaximize = function() {
-      const fromMaximized = BrowserWindow.prototype.isMaximized.call(this)
-      BrowserWindow.prototype.unmaximize.call(this)
-      if (!fromMaximized) {
-        // isMaximized() returned false before unmaximize was called, it will not emit 'unmaximize' event
-        this.emit('unmaximize', { sender: this, preventDefault: () => {} })
-      }
-      this.setResizable(resizable) // restore resizable
-    }.bind(mainWindow)
+//     mainWindow.unmaximize = function() {
+//       const fromMaximized = BrowserWindow.prototype.isMaximized.call(this)
+//       BrowserWindow.prototype.unmaximize.call(this)
+//       if (!fromMaximized) {
+//         // isMaximized() returned false before unmaximize was called, it will not emit 'unmaximize' event
+//         this.emit('unmaximize', { sender: this, preventDefault: () => {} })
+//       }
+//       this.setResizable(resizable) // restore resizable
+//     }.bind(mainWindow)
 
-    mainWindow.isMaximized = function() {
-      const nativeIsMaximized = BrowserWindow.prototype.isMaximized.call(this)
-      if (!nativeIsMaximized) {
-        // determine whether the window is full of the screen work area
-        const bounds = this.getBounds()
-        const workArea = screen.getDisplayMatching(bounds).workArea
-        if (bounds.x <= workArea.x && bounds.y <= workArea.y && bounds.width >= workArea.width && bounds.height >= workArea.height) {
-          return true
-        }
-      }
-      return nativeIsMaximized
-    }.bind(mainWindow)
-  }
+//     mainWindow.isMaximized = function() {
+//       const nativeIsMaximized = BrowserWindow.prototype.isMaximized.call(this)
+//       if (!nativeIsMaximized) {
+//         // determine whether the window is full of the screen work area
+//         const bounds = this.getBounds()
+//         const workArea = screen.getDisplayMatching(bounds).workArea
+//         if (bounds.x <= workArea.x && bounds.y <= workArea.y && bounds.width >= workArea.width && bounds.height >= workArea.height) {
+//           return true
+//         }
+//       }
+//       return nativeIsMaximized
+//     }.bind(mainWindow)
+//   }
 
   // mainWindow.removeMenu()
 }
@@ -262,26 +249,18 @@ function showSplash() {
 function setDarkMode() {
   mainWindow.webContents.send('dark-mode', nativeTheme.shouldUseDarkColors)
 }
+nativeTheme.on('updated', setDarkMode)
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.on('ready', showSplash)
 
-// Quit when all windows are closed.
 app.on('window-all-closed', function() {
-  // On macOS it is common for applications and their menu bar
-  // to stay active until the user quits explicitly with Cmd + Q
   if(!isMac) app.quit()
 })
 
+// macOS only
 app.on('activate', function() {
-  // On macOS it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
   if (mainWindow === null) createWindow()
 })
-
-nativeTheme.on('updated', setDarkMode)
 
 ipcMain.on('maximize', function() {
   mainWindow.maximize()
@@ -312,6 +291,17 @@ ipcMain.on('vue-ready', function() {
   }, 1000)
 });
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.
+ipcMain.handle('get-save-path', (e, format) => {
+  return dialog.showSaveDialog({
+    properties: ['createDirectory', 'showOverwriteConfirmation'],
+    filters: [
+      { name: format + ' Files', extensions: [format.toLowerCase()] },
+      { name: 'All Files', extensions: ['*'] },
+    ]
+  }).then(e => e.filePath )
+})
+
+ipcMain.handle('save-file', (e, path, data, encoding) => {
+  return fs.writeFile(path, data, encoding || 'utf-8')
+})
 

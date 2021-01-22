@@ -9,10 +9,6 @@
 
 
 <style lang="stylus" scoped>
-  header
-    display: flex
-    align-items: center
-
   input[type="text"]
     padding: 0px 3px
     font-weight: 800

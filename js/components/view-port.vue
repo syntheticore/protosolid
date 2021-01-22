@@ -280,6 +280,7 @@
 
       this.$root.$on('activate-toolname', this.activateTool)
       this.$root.$on('component-changed', this.componentChanged)
+      this.$root.$on('component-deleted', this.componentDeleted)
       this.$root.$on('render-needed', () => this.renderer.render())
       this.$root.$on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.$root.$on('unpreview-feature', this.unpreviewFeature)
@@ -463,6 +464,12 @@
       componentChanged: function(comp, recursive) {
         this.transloader.unloadTree(comp, recursive)
         this.transloader.loadTree(comp, recursive)
+        this.renderer.updateShadows()
+        this.renderer.render()
+      },
+
+      componentDeleted: function(comp) {
+        this.transloader.unloadTree(comp, true)
         this.renderer.updateShadows()
         this.renderer.render()
       },

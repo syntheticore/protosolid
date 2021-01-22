@@ -6,7 +6,7 @@
         h2 {{ material.title }}
         fa-icon.expand(icon="angle-right")
 
-      .content(v-if="expanded")
+      .content.form(v-if="expanded")
         fieldset.physical
           h3 Physical Properties
           label
@@ -37,21 +37,6 @@
 
 
 <style lang="stylus" scoped>
-  input[type="color"]
-    border-radius: 2px
-    height: 16px
-    border: 2px solid $bright1
-
-  input[type="checkbox"]
-    width: unset
-    margin-left: 60px
-
-  input
-    width: 73px
-    margin: 0
-    margin-right: 8px
-    box-shadow: none
-
   header h2
     margin: 0 !important
 
@@ -62,21 +47,6 @@
     .expanded &
       transform: rotate(90deg)
 
-  h3
-    font-size: 12px
-    font-weight: bold
-
-  fieldset
-    margin: 0
-    padding: 12px
-    padding-bottom: 6px
-    & + fieldset
-      border-top: 1px solid $dark1 * 1.3
-
-  label
-    margin: 8px 0
-    span
-      min-width: 80px
 </style>
 
 

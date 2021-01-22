@@ -21,6 +21,8 @@
     [data-platform="browser"] .tab-bar &
       button
         padding: 4px 8px
+      .pop-up
+        top: 24px
     &.left
       .pop-up
         right: unset
@@ -56,7 +58,7 @@
     z-index: 2
     transition: all 0.2s
     pointer-events: all
-    top: 24px
+    top: 26px
     right: -12px
     // min-width: 195px
     color: $bright2
@@ -71,6 +73,18 @@
     overflow: hidden
     border-radius: 5px
     right: -12px
+
+  .header
+    text-align: center
+    font-size: 14px
+    font-weight: bold
+    color: $bright1
+    padding: 7px 14px
+    box-shadow: 0 0 8px rgba(black, 0.6)
+    text-shadow: 0 -1px 0px black
+    background: $dark2 * 1.1
+    margin-bottom: 14px
+    border-bottom: 1px solid $dark1 * 1.2
 </style>
 
 

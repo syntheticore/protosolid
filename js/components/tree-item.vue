@@ -47,6 +47,12 @@
       v-if="expanded"
       :class="{hidden: !isVisible}"
     )
+      //- Material
+      MaterialTreelet(
+        v-if="component.material"
+        :material="component.material"
+      )
+
       //- Center of Mass
       li(v-if="component.cog")
         .box
@@ -54,15 +60,13 @@
             fa-icon(icon="atom" fixed-width)
             h2 Center of Mass
 
-      //- Material
-      MaterialTreelet(
-        v-if="component.material"
-        :material="component.material"
-      )
-
       //- Parameters
       li(v-for="param in component.parameters")
         ParameterTreelet(:parameter="param")
+
+      //- Export Configs
+      li(v-for="config in component.exportConfigs")
+        ExportTreelet(:config="config", :component="component")
 
       //- Section Views
       li(v-for="view in component.sectionViews")
@@ -147,10 +151,12 @@
   .list-leave-to
     opacity: 0
     margin: 0
+
 </style>
 
 <style lang="stylus">
   .tree-item
+
     .delete
       color: $cancel !important
 
@@ -179,6 +185,8 @@
             width: 53px
           &.ultra-wide
             width: 80px
+        .content
+          border-color: $dark1 * 1.85
       &.selected
         border-color: $highlight * 1.2
         box-shadow: 0 0 0px 1px $highlight * 1.2
@@ -220,10 +228,19 @@
         &:hover
           header svg
             color: $bright1
+
       h2
         margin-right: 8px
+
       .content
         border-top: 1px solid $dark1 * 1.3
+
+      .form
+        fieldset + fieldset
+          border-top: 1px solid $dark1 * 1.3
+
+        input[type="checkbox"]
+          margin-left: 60px
 </style>
 
 
@@ -231,6 +248,7 @@
   import ParameterTreelet from './treelet-parameter.vue'
   import MaterialTreelet from './treelet-material.vue'
   import SolidTreelet from './treelet-solid.vue'
+  import ExportTreelet from './treelet-export.vue'
 
   export default {
     name: 'TreeItem',
@@ -239,6 +257,7 @@
       ParameterTreelet,
       MaterialTreelet,
       SolidTreelet,
+      ExportTreelet,
     },
 
     props: {

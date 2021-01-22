@@ -210,19 +210,19 @@
 
     methods: {
       minimize: function() {
-        window.ipcRenderer.send('minimize')
+        window.electron.ipcRenderer.send('minimize')
       },
 
       maximize: function() {
-        window.ipcRenderer.send('maximize')
+        window.electron.ipcRenderer.send('maximize')
       },
 
       unmaximize: function() {
-        window.ipcRenderer.send('unmaximize')
+        window.electron.ipcRenderer.send('unmaximize')
       },
 
       close: function() {
-        window.ipcRenderer.send('close')
+        window.electron.ipcRenderer.send('close')
       },
 
       createDocument: function() {

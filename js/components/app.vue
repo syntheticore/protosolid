@@ -79,17 +79,18 @@
 
       this.createDocument()
 
-      if(!window.ipcRenderer) return
+      if(!window.electron) return
+      const ipcRenderer = window.electron.ipcRenderer
 
-      window.ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
+      ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
         this.isFullscreen = isFullscreen
       })
 
-      window.ipcRenderer.on('maximize-changed', (e, isMaximized) => {
+      ipcRenderer.on('maximize-changed', (e, isMaximized) => {
         this.isMaximized = isMaximized
       })
 
-      window.ipcRenderer.on('dark-mode', (e, darkMode) => {
+      ipcRenderer.on('dark-mode', (e, darkMode) => {
         if(darkMode) {
           document.body.setAttribute('data-dark-mode', true)
         } else {
@@ -100,8 +101,8 @@
     },
 
     mounted() {
-      if(!window.ipcRenderer) return
-      window.ipcRenderer.send('vue-ready')
+      if(!window.electron) return
+      window.electron.ipcRenderer.send('vue-ready')
     },
 
     methods: {

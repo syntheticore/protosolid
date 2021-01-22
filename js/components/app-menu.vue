@@ -31,7 +31,7 @@
             span Import...
         li
           button(@click="exportFile")
-            fa-icon(icon="file-import" fixed-width)
+            fa-icon(icon="file-export" fixed-width)
             span Export
         //- li
         //-   button(disabled="disabled")

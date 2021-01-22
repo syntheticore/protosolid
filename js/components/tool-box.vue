@@ -239,41 +239,43 @@
           {
             title: 'Constrain',
             tools: [
-              { title: 'Dimension', icon: 'traffic-light' },
+              { title: 'Dimension', icon: 'ruler' },
               { title: 'Touch', icon: 'object-group' },
               { title: 'Parallel', icon: 'code-branch' }, //XXX Use also for hor/vert
               { title: 'Perpendicular', icon: 'object-group' },
-              { title: 'Tangent', icon: 'object-group' },
-              { title: 'Equal', icon: 'object-group' },
-              { title: 'Fix', icon: 'object-group' }, //XXX also ground for assemblies
-            ],
-          },
-          {
-            title: 'Assemble',
-            tools: [
-              { title: 'Joint', icon: 'traffic-light' },
-              { title: 'Group', icon: 'object-group' },
-              { title: 'Motion Link', icon: 'layer-group' },
-              { title: 'Animation', icon: 'layer-group' },
-            ],
-          },
-          {
-            title: 'Inspect',
-            tools: [
-              { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
-              { title: 'Curvature', icon: 'layer-group' },
-              { title: 'Shading', icon: 'layer-group' },
-              { title: 'Section View', icon: 'object-group' },
-              { title: 'Canvas', icon: 'object-group' },
+              { title: 'Tangent', icon: 'bezier-curve' },
+              { title: 'Equal', icon: 'exchange-alt' },
+              { title: 'Fix', icon: 'lock' }, //XXX also ground for assemblies
             ],
           },
           {
             title: 'Simulate',
             tools: [
               { title: 'Material', feature: MaterialFeature, icon: 'volleyball-ball' },
+              { title: 'Joint', icon: 'code-branch' },
+              { title: 'Group', icon: 'object-group' },
+              { title: 'Motion Link', icon: 'link' },
+              { title: 'Animation', icon: 'layer-group' },
               { title: 'Static Load', icon: 'weight' },
               { title: 'Heat Flow', icon: 'thermometer' },
-              { title: 'Modal Frequencies', icon: 'wave-square' },
+              // { title: 'Modal Frequencies', icon: 'wave-square' },
+            ],
+          },
+          {
+            title: 'Inspect',
+            tools: [
+              { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
+              { title: 'Curvature', icon: 'route' },
+              { title: 'Shading', icon: 'palette' },
+              { title: 'Section View', icon: 'object-group' },
+            ],
+          },
+          {
+            title: 'Tools',
+            tools: [
+              { title: 'Render', icon: 'lightbulb' },
+              { title: 'Canvas', icon: 'layer-group' },
+              { title: 'Export Configuration', action: this.addExportConfig, icon: 'file-export' },
             ],
           },
         ]
@@ -340,6 +342,16 @@
         this.activeComponent.parameters.push({
           name: 'width',
           value: '512mm',
+        })
+      },
+
+      addExportConfig: function() {
+        this.activeComponent.exportConfigs.push({
+          title: 'High Detail',
+          path: null,
+          format: 'stl',
+          maxDistance: 0.01,
+          maxAngle: 1.0,
         })
       },
     },

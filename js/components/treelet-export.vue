@@ -37,9 +37,9 @@
           span Max Angular Deviation
 
         label
-          button.button(:title="path || 'Choose file location'" @click="pathChanged")
+          button.button(title="Choose file location" @click="pathChanged")
             fa-icon(icon="folder")
-          span {{ path || 'Destination Path'}}
+          span(:title="path") {{ path || 'Destination Path'}}
 </template>
 
 

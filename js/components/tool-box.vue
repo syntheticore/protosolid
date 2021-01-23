@@ -283,16 +283,11 @@
     },
 
     mounted: function() {
-      window.addEventListener('keydown', (e) => {
+      this.$root.$on('keydown', (keyCode) => {
         const tool = this.tabs.flatMap(tab => tab.tools).find(
-          tool => tool.keyCode == e.keyCode
+          tool => tool.keyCode == keyCode
         )
-        if(tool) {
-          this.activateTool(tool)
-        } else if(e.keyCode === 27) {
-          this.$root.$emit('escape')
-        }
-        console.log(e.keyCode)
+        if(tool) this.activateTool(tool)
       });
 
       this.$root.$on('escape', () => {

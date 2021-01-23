@@ -101,6 +101,19 @@
     },
 
     mounted() {
+      window.addEventListener('keydown', (e) => {
+        console.log(e.keyCode)
+        if(e.keyCode === 27) {
+          this.$root.$emit('escape')
+        } else {
+          this.$root.$emit('keydown', e.keyCode)
+        }
+      });
+
+      window.addEventListener('keyup', (e) => {
+        this.$root.$emit('keyup', e.keyCode)
+      });
+
       if(!window.electron) return
       window.electron.ipcRenderer.send('vue-ready')
     },

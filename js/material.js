@@ -60,6 +60,10 @@ export class Material {
     this.glow = translucency
     this.displayMaterial.emissive = this.displayMaterial.color.clone().multiplyScalar(translucency)
   }
+
+  dispose() {
+    this.displayMaterial.dispose()
+  }
 }
 
 export class Aluminum extends Material {

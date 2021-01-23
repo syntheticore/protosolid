@@ -1,8 +1,5 @@
 <template lang="pug">
-  main.document-view(
-    @pointerdown="mouseDown"
-    @keydown="keyDown"
-  )
+  main.document-view(@pointerdown="$root.$emit('close-widgets')")
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
@@ -191,6 +188,7 @@
 
     mounted() {
       this.currentDisplayMode = 'wireShade'
+      this.$root.$on('keydown', this.keyDown)
       this.$root.$emit('activate-toolname', 'Manipulate')
     },
 
@@ -256,21 +254,15 @@
         this.dirtyView = null
       },
 
-      mouseDown: function() {
-        this.$root.$emit('close-widgets')
-      },
-
-      keyDown: function(e) {
-        console.log('DOC DOWN')
-        if(e.keyCode == 46 || e.keyCode == 8) { // Del / Backspace
+      keyDown: function(keyCode) {
+        if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection
-          if(this.selection) {
-            console.log(this.selection)
-            if(this.selection.typename() == 'Component') {
-              this.deleteComponent(this.selection)
-            } else if(this.selection.typename() == 'Solid') {
-              this.deleteSolid(this.selection)
-            }
+          if(this.selection) return
+          const type = this.selection.typename()
+          if(type == 'Component') {
+            this.deleteComponent(this.selection)
+          } else if(type == 'Solid') {
+            this.deleteSolid(this.selection)
           }
         }
       },

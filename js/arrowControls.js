@@ -4,9 +4,10 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 export default class ArrowControls extends TransformControls {
   constructor(startPosition) {
     super(window.alcRenderer.camera, window.alcRenderer.canvas)
-
     this.startPosition = startPosition
-    this.size = 0.5
+
+    const canvas = window.alcRenderer.canvas
+    this.size = 1200 / (canvas.offsetWidth + canvas.offsetHeight)
     this.space = 'world'
     this.translationSnap = 1.0
 

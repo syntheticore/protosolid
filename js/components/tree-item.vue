@@ -51,6 +51,7 @@
       MaterialTreelet(
         v-if="component.material"
         :material="component.material"
+        :component="component"
       )
 
       //- Center of Mass

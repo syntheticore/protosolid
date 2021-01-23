@@ -5,6 +5,12 @@
         fa-icon(icon="volleyball-ball" fixed-width)
         h2 {{ material.title }}
         fa-icon.expand(icon="angle-right")
+        .controls
+          fa-icon.delete(
+            icon="trash-alt" fixed-width
+            title="Delete"
+            @click.stop="remove"
+          )
 
       .content.form(v-if="expanded")
         fieldset.physical
@@ -56,6 +62,7 @@
 
     props: {
       material: Object,
+      component: Object,
     },
 
     data() {
@@ -71,6 +78,15 @@
         },
         deep: true
       },
+    },
+
+    methods: {
+      remove: function() {
+        const mat = this.material
+        this.component.material = null
+        this.$root.$emit('component-changed', this.component, true)
+        mat.dispose()
+      }
     },
   }
 </script>

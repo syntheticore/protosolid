@@ -8,8 +8,6 @@
       @pointerup="mouseUp"
       @pointerdown="mouseDown"
       @mousemove="mouseMove"
-      @keydown="keyDown"
-      @keyup="keyUp"
     )
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
@@ -285,6 +283,8 @@
       this.$root.$on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.$root.$on('unpreview-feature', this.unpreviewFeature)
       this.$root.$on('resize', this.onWindowResize)
+      this.$root.$on('keydown', this.keyDown)
+      this.$root.$on('keyup', this.keyUp)
 
       // Window Resize
       setTimeout(() => this.onWindowResize(), 1000)
@@ -338,6 +338,7 @@
       },
 
       mouseDown: function(e) {
+        document.activeElement.blur() // Necessary since THREE R123
         if(e.button != 0) return
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
@@ -366,8 +367,8 @@
         if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
-      keyDown: function(e) {
-        if(e.keyCode == 46 || e.keyCode == 8) { // Del / Backspace
+      keyDown: function(keyCode) {
+        if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection
           if(this.selection) {
             console.log(this.selection)
@@ -376,14 +377,14 @@
               this.deleteElement(this.selection)
             }
           }
-        } else if(e.keyCode == 18) { // alt
+        } else if(keyCode == 18) { // alt
           // this.guides = []
         }
       },
 
-      keyUp: function(e) {
-        if(e.keyCode == 18) { // alt
-        } else if(e.keyCode == 79) { // o
+      keyUp: function(keyCode) {
+        if(keyCode == 18) { // alt
+        } else if(keyCode == 79) { // o
           this.renderer.switchCamera()
         }
       },

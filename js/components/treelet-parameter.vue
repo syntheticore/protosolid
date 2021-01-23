@@ -5,6 +5,12 @@
       input.variable(type="text" v-model.trim="parameter.name" @keydown.stop)
       span =
       input.value(type="text" v-model.trim="value" @keydown.stop)
+      .controls
+        fa-icon.delete(
+          icon="trash-alt" fixed-width
+          title="Delete"
+          @click.stop="remove"
+        )
 </template>
 
 
@@ -37,6 +43,7 @@
 
     props: {
       parameter: Object,
+      component: Object,
     },
 
     data() {
@@ -48,6 +55,13 @@
     watch: {
       value: function(value) {
         this.parameter.value = value
+      },
+    },
+
+    methods: {
+      remove: function() {
+        this.component.parameters =
+          this.component.parameters.filter(param => param != this.parameter )
       },
     },
   }

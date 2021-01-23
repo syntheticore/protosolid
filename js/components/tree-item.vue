@@ -63,7 +63,10 @@
 
       //- Parameters
       li(v-for="param in component.parameters")
-        ParameterTreelet(:parameter="param")
+        ParameterTreelet(
+          :parameter="param"
+          :component="component"
+        )
 
       //- Export Configs
       li(v-for="config in component.exportConfigs")

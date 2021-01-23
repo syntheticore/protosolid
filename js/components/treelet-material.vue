@@ -86,7 +86,7 @@
         this.component.material = null
         this.$root.$emit('component-changed', this.component, true)
         mat.dispose()
-      }
+      },
     },
   }
 </script>

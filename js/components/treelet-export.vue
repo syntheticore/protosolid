@@ -14,7 +14,7 @@
         fa-icon.delete(
           icon="trash-alt" fixed-width
           title="Delete"
-          @click.stop="$emit('delete')"
+          @click.stop="remove"
         )
 
     .content.form(v-if="expanded")
@@ -103,6 +103,11 @@
         window.electron.ipcRenderer.invoke('save-file', this.path, stl).then(error => {
           alert(error || 'Saved as ' + this.path)
         })
+      },
+
+      remove: function() {
+        this.component.exportConfigs =
+          this.component.exportConfigs.filter(conf => conf !== this.config )
       },
     },
   }

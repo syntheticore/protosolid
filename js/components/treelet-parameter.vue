@@ -61,7 +61,7 @@
     methods: {
       remove: function() {
         this.component.parameters =
-          this.component.parameters.filter(param => param != this.parameter )
+          this.component.parameters.filter(param => param !== this.parameter )
       },
     },
   }

@@ -180,15 +180,6 @@
         background: $dark2 * 1.15
         border-color: $dark1 * 1.85
         color: white
-        .controls
-          opacity: 1
-          border-color: $dark1 * 1.85
-          transition-delay: 0.1s
-          width: 27px
-          &.wide
-            width: 53px
-          &.ultra-wide
-            width: 80px
         .content
           border-color: $dark1 * 1.85
       &.selected
@@ -207,6 +198,17 @@
       transition-property: opacity, width
       transition-duration: 0.15s
       transition-delay: 0.5s
+
+    .box:hover .controls
+    .expanded .controls
+      opacity: 1
+      border-color: $dark1 * 1.85
+      transition-delay: 0.1s
+      width: 27px
+      &.wide
+        width: 53px
+      &.ultra-wide
+        width: 80px
 
     svg
       font-size: 21px

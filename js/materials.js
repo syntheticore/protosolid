@@ -15,6 +15,7 @@ export default class Materials {
 
     this.selectionLine = this.line.clone()
     this.selectionLine.color.set('#0070ff')
+    this.selectionLine.toneMapped = false
 
     this.highlightLine = this.line.clone()
     this.highlightLine.color.set('#2590e1')
@@ -76,7 +77,7 @@ export default class Materials {
 
     this.previewAddSurface = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide, //XXX remove
-      color: '#0090ff',
+      color: '#0070ff',
       transparent: true,
       opacity: 0.4,
       polygonOffset: true,

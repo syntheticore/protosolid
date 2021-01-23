@@ -257,7 +257,7 @@
       keyDown: function(keyCode) {
         if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection
-          if(this.selection) return
+          if(!this.selection) return
           const type = this.selection.typename()
           if(type == 'Component') {
             this.deleteComponent(this.selection)

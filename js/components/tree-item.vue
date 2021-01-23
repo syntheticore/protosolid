@@ -9,7 +9,7 @@
     )
       fa-icon.expander(
         icon="caret-down"
-        :class="{blank: !isAssembly || isTop, closed: !expanded}"
+        :class="{blank: !canExpand || isTop, closed: !expanded}"
         @click.stop="toggle()"
         @dblclick.stop
         fixed-width
@@ -111,6 +111,9 @@
       display: flex
       align-items: center
       padding: 1px 0
+      pointer-events: none
+      > *
+        pointer-events: all
 
   .expander
     margin-right: 0
@@ -171,7 +174,6 @@
       border: 0.5px solid $dark1 * 1.3
       border-radius: 3px
       transition: opacity 0.2s
-      // pointer-events: all
       box-shadow: 0 1px 3px rgba(black, 0.25)
       > header
         display: flex
@@ -180,6 +182,9 @@
         background: $dark2 * 1.15
         border-color: $dark1 * 1.85
         color: white
+        .controls
+          border-color: $dark1 * 1.85
+          transition-delay: 0.1s
         .content
           border-color: $dark1 * 1.85
       &.selected
@@ -202,8 +207,6 @@
     .box:hover .controls
     .expanded .controls
       opacity: 1
-      border-color: $dark1 * 1.85
-      transition-delay: 0.1s
       width: 27px
       &.wide
         width: 53px
@@ -291,6 +294,16 @@
     computed: {
       isAssembly: function() {
         return !!this.component.children.length;
+      },
+
+      canExpand: function() {
+        return this.component.children.length ||
+          this.component.solids.length ||
+          this.component.cog ||
+          this.component.material ||
+          this.component.parameters.length ||
+          this.component.sectionViews.length ||
+          this.component.exportConfigs.length
       },
 
       isVisible: function() {

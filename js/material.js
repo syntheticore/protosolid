@@ -19,7 +19,7 @@ export class Material {
   }
 
   get metal() {
-    return this.displayMaterial.metalness > 0.5
+    return this.isMetal
   }
 
   get clearcoat() {
@@ -44,7 +44,8 @@ export class Material {
   }
 
   set metal(bool) {
-    this.displayMaterial.metalness = bool ? 1.0 : 0.0
+    this.isMetal = bool
+    this.displayMaterial.metalness = bool ? 1.0 - this.displayMaterial.transmission : 0.0
   }
 
   set clearcoat(bool) {
@@ -54,6 +55,7 @@ export class Material {
   set transparency(transparency) {
     this.displayMaterial.transmission = transparency
     this.displayMaterial.transparent = (this.displayMaterial.transmission > 0.000001)
+    this.metal = this.isMetal
   }
 
   set translucency(translucency) {

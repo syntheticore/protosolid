@@ -129,8 +129,9 @@
       deleteDocument: function(doc) {
         const index = this.documents.indexOf(doc)
         this.documents = this.documents.filter(d => d !== doc)
-        if(!this.documents.length) this.createDocument()
-        if(this.activeDocument === doc) {
+        if(!this.documents.length) {
+          this.createDocument()
+        } else if(this.activeDocument === doc) {
           this.activeDocument = this.documents[Math.min(index, this.documents.length - 1)]
         }
         // Free Rust memory when old doc has been removed by viewport

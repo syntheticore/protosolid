@@ -5,7 +5,8 @@ import { rotationFromNormal } from './utils.js'
 export default class SketchPlane extends THREE.Object3D {
   constructor(camera, normal) {
     super()
-    this.normal = normal
+
+    this.setNormal(normal)
 
     // Grid
     this.cachedVec = new THREE.Vector3()
@@ -25,6 +26,11 @@ export default class SketchPlane extends THREE.Object3D {
     }))
     ground.alcProjectable = true
     this.add(ground)
+  }
+
+  setNormal(normal) {
+    this.normal = normal
+    this.rotation.set(0,0,0)
     this.applyQuaternion(rotationFromNormal(normal))
   }
 

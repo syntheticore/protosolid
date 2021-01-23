@@ -85,7 +85,8 @@
     background: linear-gradient(0deg, $dark2 * 0.83, transparent)
     svg
       font-size: 35px
-      color: #ff9f90
+      // color: #ff9f90
+      color: $highlight * 1.2
     h1
       font-size: 16px
       font-weight: bold

@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+import { vec2three } from './utils.js'
+
 class Tool {
   constructor(component, viewport) {
     this.component = component
@@ -97,12 +99,11 @@ export class PlaneTool extends HighlightTool {
     super(component, viewport, ['face'])
   }
 
-  click(coords) {
+  click(vec, coords) {
     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    if(face) {
-      if(face.alcFace.get_surface_type() == 'Plane') {
-        this.viewport.renderer.sketchPlane.position.z = face.alcFace.get_origin()[2]
-      }
+    if(face && face.alcFace.get_surface_type() == 'Planar') {
+      this.viewport.renderer.sketchPlane.position = vec2three(face.alcFace.get_origin())
+      this.viewport.renderer.sketchPlane.setNormal(vec2three(face.alcFace.get_normal()))
     }
     this.viewport.renderer.render()
   }
@@ -115,7 +116,7 @@ export class PlaneTool extends HighlightTool {
 
 
 export class TrimTool extends Tool {
-  click(coords) {
+  click(vec, coords) {
     const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
     if(curve) return this.viewport.renderer.render()
 
@@ -195,16 +196,19 @@ export class LineTool extends Tool {
   mouseDown(vec) {
     this.mouseMove(vec)
     const sketch = this.component.real.get_sketch()
-    this.line = sketch.add_line(vec.toArray(), vec.toArray())
-    this.viewport.elementChanged(this.line, this.component)
-    // Restart tool when we close a loop
-    if(this.firstPoint && vec.distanceTo(this.firstPoint)  < 0.0000001) {
-      sketch.remove_element(this.line.id())
+    const elems = sketch.get_sketch_elements()
+    elems.pop()
+    const touchesExisting = elems
+      .flatMap(elem => elem.get_snap_points() )
+      .map(p => vec2three(p) )
+      .some(p => p.equals(vec) )
+    // Restart tool when we hit an existing point
+    if(touchesExisting && this.line) {
       this.line = null
-      this.firstPoint = null
-      return
+    } else {
+      this.line = sketch.add_line(vec.toArray(), vec.toArray())
+      this.viewport.elementChanged(this.line, this.component)
     }
-    if(!this.firstPoint) this.firstPoint = vec
   }
 
   mouseMove(vec) {

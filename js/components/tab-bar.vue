@@ -88,8 +88,8 @@
       border-radius: 0
 
   .app-menu-btn
-    color: #ff9f90
-    // color: $highlight * 1.2
+    // color: #ff9f90
+    color: $highlight * 1.2
 
   .tabs
     display: flex

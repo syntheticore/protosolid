@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-export class Transloader {
+export default class Transloader {
   constructor(renderer, onLoadElement, onUnloadElement) {
     this.renderer = renderer
     this.onLoadElement = onLoadElement
@@ -39,7 +39,7 @@ export class Transloader {
           faceMesh.receiveShadow = isActive
           this.renderer.add(faceMesh)
           comp.cache.faces.push(faceMesh)
-          // const normal = this.convertLine(face.get_normal(), this.renderer.materials.selectionLine)
+          // const normal = this.convertLine(face.get_display_normal(), this.renderer.materials.selectionLine)
           // this.renderer.add(normal)
         })
       }

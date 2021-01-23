@@ -324,17 +324,21 @@ impl JsFace {
     point_to_js(self.make_origin())
   }
 
+  pub fn get_normal(&self) -> JsValue {
+    point_to_js(Point3::from_vec(self.real.borrow().surface.as_surface().normal_at(0.0, 0.0)))
+  }
+
+  pub fn get_display_normal(&self) -> Array {
+    let normal = self.real.borrow().surface.as_surface().normal_at(0.0, 0.0);
+    let origin = self.make_origin();
+    points_to_js(vec![origin, origin + normal])
+  }
+
   fn make_origin(&self) -> Point3 {
     match &self.real.borrow().surface {
       SurfaceType::Planar(plane) => plane.origin,
       SurfaceType::Cylindrical(cyl) => cyl.origin,
     }
-  }
-
-  pub fn get_normal(&self) -> Array {
-    let normal = self.real.borrow().surface.as_surface().normal_at(0.0, 0.0);
-    let origin = self.make_origin();
-    points_to_js(vec![origin, origin + normal])
   }
 
   pub fn get_surface_type(&self) -> String {

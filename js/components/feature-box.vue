@@ -193,6 +193,7 @@
 
   import { ManipulationTool } from './../tools.js'
   import { LengthGizmo } from './../gizmos.js'
+  import { vec2three } from './../utils.js'
 
   export default {
     name: 'FeatureBox',
@@ -303,7 +304,7 @@
         const settings = Object.values(this.activeFeature.settings)
         if(!settings.find(setting => setting.type == 'length')) return
 
-        const center = new THREE.Vector3().fromArray(this.activeFeature.profile.get_center())
+        const center = vec2three(this.activeFeature.profile.get_center())
         const direction = this.activeFeature.axis || THREE.Object3D.DefaultUp
         this.lengthGizmo = new LengthGizmo(
           center, direction,

@@ -1,9 +1,15 @@
 import * as THREE from 'three'
 
+import {
+  LineTool,
+  SplineTool,
+} from './tools.js'
+import { vec2three } from './utils.js'
+
 const snapDistance = 14 // px
 const maxSnapReferences = 5
 
-export class Snapper {
+export default class Snapper {
   constructor(viewport, updateView) {
     this.viewport = viewport
     this.updateView = updateView
@@ -20,28 +26,23 @@ export class Snapper {
   }
 
   snap(vec, coords) {
-    if(this.viewport.activeTool.enableSnapping) {
-      this.guides = []
-      vec = this.snapToGuides(vec) || vec
-      this.catchSnapPoints(coords)
-      this.updateView(this.guides, this.snapAnchor)
-    }
-    return [vec, coords]
+    this.guides = []
+    this.catchSnapPoints(coords)
+    vec = this.snapToGuides(vec) || vec
+    this.updateView(this.guides, this.snapAnchor)
+    return vec
   }
 
   getSnapPoints() {
     const sketchElements = this.viewport.activeComponent.real.get_sketch().get_sketch_elements()
+    // Filter out sketch element actively being drawn
+    const tool = this.viewport.activeTool
+    if((tool.constructor === LineTool && tool.line) || (tool.constructor === SplineTool && tool.spline)) sketchElements.pop()
     return sketchElements.flatMap(elem => {
-      let points = elem.get_snap_points().map(p => new THREE.Vector3().fromArray(p))
-      // Filter out last point of the sketch element actively being drawn
-      if(elem == sketchElements.slice(-1)[0]) {
-        const handles = elem.get_handles()
-        const lastHandle = new THREE.Vector3().fromArray(handles[handles.length - 1])
-        points = points.filter(p => !p.equals(lastHandle))
-      }
+      let points = elem.get_snap_points().map(p => vec2three(p))
       // Filter out handle actively being dragged
       if(this.viewport.activeHandle && elem.id() == this.viewport.activeHandle.elem.id()) {
-        const handlePoint = new THREE.Vector3().fromArray(this.viewport.activeHandle.elem.get_handles()[this.viewport.activeHandle.index])
+        const handlePoint = vec2three(this.viewport.activeHandle.elem.get_handles()[this.viewport.activeHandle.index])
         points = points.filter(p => !p.equals(handlePoint))
       }
       return points
@@ -69,31 +70,23 @@ export class Snapper {
   snapToGuides(vec) {
     if(!vec) return
     const screenVec = this.viewport.renderer.toScreen(vec)
-    let snapX
-    this.lastSnaps.some(snap => {
+    let snapX = this.lastSnaps.find(snap => {
       // Compare world space X axis..
       const testSnap = snap.clone()
       testSnap.setY(vec.y)
       testSnap.setZ(vec.z)
       const screenSnap = this.viewport.renderer.toScreen(testSnap)
       // .. in screen space
-      if(screenVec.distanceTo(screenSnap) < snapDistance) {
-        snapX = snap
-        return true
-      }
+      return screenVec.distanceTo(screenSnap) < snapDistance
     })
-    let snapY
-    this.lastSnaps.some(snap => {
+    let snapY = this.lastSnaps.find(snap => {
       const testSnap = snap.clone()
       testSnap.setX(vec.x)
       testSnap.setZ(vec.z)
       const screenSnap = this.viewport.renderer.toScreen(testSnap)
-      if(screenVec.distanceTo(screenSnap) < snapDistance) {
-        snapY = snap
-        return true
-      }
+      return screenVec.distanceTo(screenSnap) < snapDistance
     })
-    const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, snapY ? snapY.y : vec.y, vec.z)
+    const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, snapY ? snapY.y : vec.y, vec.z) //XXX z-imprecision
     const screenSnapVec = this.viewport.renderer.toScreen(snapVec)
     if(snapX) {
       const start = this.viewport.renderer.toScreen(snapX)
@@ -112,14 +105,13 @@ export class Snapper {
       })
     }
     if(snapX && snapY) {
-      if(this.snapAnchor && this.snapAnchor.vec.equals(snapVec)) return snapVec
-      this.snapAnchor = {
+      this.snapAnchor = this.snapAnchor || {
         type: 'snap',
         pos: this.viewport.renderer.toScreen(snapVec),
         vec: snapVec,
         id: '' + snapVec.x + snapVec.y + snapVec.z,
       }
-      return snapVec
+      if(snapX === snapY) return snapX
     } else {
       this.snapAnchor = null
     }

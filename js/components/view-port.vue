@@ -153,6 +153,10 @@
 <script>
   import * as THREE from 'three'
 
+  import Snapper from './../snapping.js'
+  import Renderer from './../renderer.js'
+  import Transloader from './../transloader.js'
+  import { vec2three } from './../utils.js'
   import {
     ManipulationTool,
     ObjectSelectionTool,
@@ -163,9 +167,6 @@
     ArcTool,
     PlaneTool
   } from './../tools.js'
-  import { Snapper } from './../snapping.js'
-  import { Renderer } from './../renderer.js'
-  import { Transloader } from './../transloader.js'
 
   export default {
     name: 'ViewPort',
@@ -392,7 +393,8 @@
       snap: function(e) {
         const coords = this.getMouseCoords(e)
         let vec = this.renderer.fromScreen(coords)
-        return this.snapper.snap(vec, coords)
+        return this.activeTool.enableSnapping ?
+          [this.snapper.snap(vec, coords), coords] : [vec, coords]
       },
 
       handlePick: function(pickerCoords, color, Tool) {
@@ -492,7 +494,7 @@
         this.handles[compId] = this.handles[compId] || {}
         this.handles[compId][elemId] = this.handles[compId][elemId] || []
         elem.get_handles().forEach((handle, i) => {
-          handle = new THREE.Vector3().fromArray(handle)
+          handle = vec2three(handle)
           this.handles[compId][elemId].push({
             type: 'handle',
             pos: this.renderer.toScreen(handle),

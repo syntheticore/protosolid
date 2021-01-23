@@ -20,7 +20,7 @@ export function saveBlob(blob, filename, filetype) {
 }
 
 export function rotationFromNormal(normal) {
-  let up = new THREE.Vector3(0, 0, 1)
+  let up = THREE.Object3D.DefaultUp
   let axis
   if(normal.z == 1 || normal.z == -1) {
     axis = new THREE.Vector3(1, 0, 0)
@@ -29,4 +29,8 @@ export function rotationFromNormal(normal) {
   }
   let radians = Math.acos(normal.dot(up))
   return new THREE.Quaternion().setFromAxisAngle(axis, radians)
+}
+
+export function vec2three(vec) {
+  return new THREE.Vector3().fromArray(vec)
 }

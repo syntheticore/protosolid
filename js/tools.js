@@ -30,15 +30,25 @@ class HighlightTool extends Tool {
   mouseMove(vec, coords) {
     if(this.viewport.hoveredHandle) return this.viewport.renderer.render()
     const object = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    if(!object) return this.viewport.renderer.render()
-    const oldMaterial = object.material
-    object.material = {
-      curve: this.viewport.renderer.materials.highlightLine,
-      region: this.viewport.renderer.materials.highlightRegion,
-      face: this.viewport.renderer.materials.highlightSurface,
-    }[object.alcType]
     this.viewport.renderer.render()
-    object.material = oldMaterial
+    this.viewport.$emit('update:highlight', object && object.alcObject)
+  }
+
+  getObject(coords, any) {
+    return new Promise(resolve => {
+      const items = this.viewport.renderer.objectsAtScreen(coords, this.selectors)
+        .map(obj => obj.alcObject)
+      if(items.length > 1 && !any) {
+        // Combat close-widgets event
+        setTimeout(() => this.viewport.widgets.push({
+          items,
+          pos: coords,
+          cb: (choice) => resolve(choice),
+        }))
+      } else {
+        resolve(items[0])
+      }
+    })
   }
 }
 
@@ -49,15 +59,11 @@ export class ManipulationTool extends HighlightTool {
   }
 
   click(vec, coords) {
-    const curve = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    if(curve) return this.viewport.renderer.render()
-    const type = this.viewport.selection && this.viewport.selection.typename()
-    if(this.viewport.selection && type !== 'Solid' && type !== 'Component') {
-      console.log(this.viewport.selection)
-      this.viewport.selection.mesh.material = this.viewport.renderer.materials.line
-    }
-    this.viewport.$emit('update:selection', null)
-    // this.viewport.renderer.removeGizmo()
+    this.getObject(coords, true).then(curve => {
+      if(curve) return this.viewport.renderer.render()
+      this.viewport.$emit('update:selection', null)
+      // this.viewport.renderer.removeGizmo()
+    })
   }
 
   mouseDown(vec, coords) {
@@ -65,15 +71,11 @@ export class ManipulationTool extends HighlightTool {
       this.enableSnapping = true
       return
     }
-    const curve = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    if(!curve) return
-    const type = this.viewport.selection && this.viewport.selection.typename()
-    if(this.viewport.selection && type !== 'Solid' && type !== 'Component') {
-      this.viewport.selection.mesh.material = this.viewport.renderer.materials.line
-    }
-    curve.material = this.viewport.renderer.materials.selectionLine
-    this.viewport.$emit('update:selection', curve.alcElement)
-    // this.viewport.gizmo.attach(object)
+    this.getObject(coords).then(curve => {
+      if(!curve) return
+      this.viewport.$emit('update:selection', curve)
+      // this.viewport.gizmo.attach(object)
+    })
   }
 
   mouseUp(vec, coords) {
@@ -101,9 +103,9 @@ export class PlaneTool extends HighlightTool {
 
   click(vec, coords) {
     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    if(face && face.alcFace.get_surface_type() == 'Planar') {
-      this.viewport.renderer.sketchPlane.position = vec2three(face.alcFace.get_origin())
-      this.viewport.renderer.sketchPlane.setNormal(vec2three(face.alcFace.get_normal()))
+    if(face && face.alcObject.get_surface_type() == 'Planar') {
+      this.viewport.renderer.sketchPlane.position = vec2three(face.alcObject.get_origin())
+      this.viewport.renderer.sketchPlane.setNormal(vec2three(face.alcObject.get_normal()))
     }
     this.viewport.renderer.render()
   }
@@ -139,7 +141,7 @@ export class TrimTool extends Tool {
 }
 
 
-class SelectionTool extends HighlightTool {
+class PickTool extends HighlightTool {
   constructor(component, viewport, selectors, callback) {
     super(component, viewport, selectors)
     this.callback = callback
@@ -154,35 +156,35 @@ class SelectionTool extends HighlightTool {
 }
 
 
-export class ObjectSelectionTool extends SelectionTool {
+export class ObjectPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['curve'], callback)
   }
 
   select(mesh) {
-    return mesh.alcElement
+    return mesh.alcObject
   }
 }
 
 
-export class ProfileSelectionTool extends SelectionTool {
+export class ProfilePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['region'], callback)
   }
 
   select(mesh) {
-    return mesh.alcRegion
+    return mesh.alcObject
   }
 }
 
 
-export class FaceSelectionTool extends SelectionTool {
+export class FacePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['face'], callback)
   }
 
   select(mesh) {
-    return mesh.alcFaceId
+    return mesh.alcObject
   }
 }
 

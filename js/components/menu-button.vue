@@ -57,7 +57,7 @@
     position: absolute
     z-index: 2
     transition: all 0.2s
-    pointer-events: all
+    pointer-events: auto
     top: 26px
     right: -12px
     // min-width: 195px

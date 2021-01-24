@@ -113,7 +113,7 @@
     position: absolute
     right: calc(100vw / 2)
     bottom: 7px
-    pointer-events: all
+    pointer-events: auto
     display: none
     white-space: nowrap
     [data-platform="browser"] &

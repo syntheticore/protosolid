@@ -3,9 +3,9 @@
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
-      :highlighted-component="highlightedComponent"
       :active-tool.sync="activeTool"
       :selection.sync="selection"
+      :highlight.sync="highlight"
       :active-view="previewView || document.activeView"
       :display-mode="previewDisplayMode || currentDisplayMode"
       @change-view="viewChanged"
@@ -20,8 +20,8 @@
         :top="document.tree"
         :active-component="document.activeComponent"
         :selection.sync="selection"
+        :highlight.sync="highlight"
         @update:active-component="activateComponent"
-        @highlight-component="highlightComponent"
         @create-component="createComponent"
         @delete-component="deleteComponent"
         @delete-solid="deleteSolid"
@@ -164,7 +164,7 @@
       return {
         activeTool: null,
         selection: null,
-        highlightedComponent: null,
+        highlight: null,
         previewView: null,
         dirtyView: null,
         displayModes: {
@@ -214,10 +214,6 @@
       deleteSolid: function(solid) {
         solid.remove()
         this.$root.$emit('component-changed', solid.component)
-      },
-
-      highlightComponent: function(comp, solidId) {
-        this.highlightedComponent = comp ? { comp, solidId } : null
       },
 
       createView: function(title) {

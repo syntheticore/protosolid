@@ -121,6 +121,7 @@
     methods: {
       createDocument: function() {
         return wasmP.then((wasm) => {
+          window.alcWasm = wasm
           this.activeDocument = new Document(wasm)
           this.documents.push(this.activeDocument)
         })

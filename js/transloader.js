@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+import Component from './component.js'
+
 export default class Transloader {
   constructor(renderer, onLoadElement, onUnloadElement) {
     this.renderer = renderer
@@ -32,7 +34,8 @@ export default class Transloader {
             surfaceMaterial,
           )
           faceMesh.alcType = 'face'
-          faceMesh.alcFace = face
+          faceMesh.alcObject = face
+          face.mesh = faceMesh
           // faceMesh.alcComponent = comp
           faceMesh.alcProjectable = isActive
           faceMesh.castShadow = isActive
@@ -50,7 +53,8 @@ export default class Transloader {
         comp.cache.edges = (comp.cache.edges || []).concat(edges.map(edge => {
           const line = this.renderer.convertLine(edge.tesselate(), wireMaterial)
           line.alcType = 'edge'
-          line.alcEdge = edge
+          line.alcObject = edge
+          edge.mesh = line
           this.renderer.add(line)
           return line
         }))
@@ -80,9 +84,9 @@ export default class Transloader {
     this.unloadElement(elem, comp)
     const line = this.renderer.convertLine(elem.tesselate(), this.renderer.materials.line)
     line.alcType = 'curve'
-    line.alcElement = elem
-    this.renderer.add(line)
+    line.alcObject = elem
     elem.mesh = line
+    this.renderer.add(line)
     comp.cache.curves.push(elem)
     this.onLoadElement(elem, comp)
   }
@@ -105,7 +109,8 @@ export default class Transloader {
         this.renderer.materials.region
       )
       mesh.alcType = 'region'
-      mesh.alcRegion = region
+      mesh.alcObject = region
+      region.mesh = mesh
       this.renderer.add(mesh)
       return mesh
     })
@@ -113,10 +118,10 @@ export default class Transloader {
 
   purgeRegions(comp) {
     comp.cache.regions.forEach(mesh => {
-      if(mesh.alcRegion.noFree) {
-        mesh.alcRegion.unused = true
+      if(mesh.alcObject.noFree) {
+        mesh.alcObject.unused = true
       } else {
-        mesh.alcRegion.free()
+        mesh.alcObject.free()
       }
       this.renderer.remove(mesh)
     })
@@ -145,10 +150,10 @@ export default class Transloader {
     const surfaceMaterial = this.getSurfaceMaterial(comp, highlight)
     const wireMaterial = this.getWireMaterial(comp, highlight)
     const faces = solidId ?
-      comp.cache.faces.filter(f => f.alcFace.get_solid_id() == solidId) :
+      comp.cache.faces.filter(f => f.alcObject.get_solid_id() == solidId) :
       comp.cache.faces
     const edges = solidId ?
-      comp.cache.edges.filter(f => f.alcEdge.get_solid_id() == solidId) :
+      comp.cache.edges.filter(e => e.alcObject.get_solid_id() == solidId) :
       comp.cache.edges
     faces.forEach(face => face.material = surfaceMaterial )
     edges.forEach(edge => edge.material = wireMaterial )
@@ -161,6 +166,59 @@ export default class Transloader {
 
   unhighlightComponent(comp) {
     this.applyMaterials(comp, false)
+  }
+
+  select(selection) {
+    if(!selection) return
+    if(selection.constructor === Component) {
+      this.highlightComponent(selection)
+    } else if(selection.constructor === window.alcWasm.JsSolid) {
+      this.highlightComponent(selection.component, selection.get_id())
+    } else {
+      selection.mesh.material = this.renderer.materials.selectionLine
+    }
+  }
+
+  unselect(selection) {
+    if(!selection) return
+    if(selection.constructor === Component) {
+      this.unhighlightComponent(selection)
+    } else if(selection.constructor === window.alcWasm.JsSolid) {
+      this.unhighlightComponent(selection.component)
+    } else {
+      selection.mesh.material = this.renderer.materials.line
+    }
+  }
+
+  highlight(obj) {
+    if(!obj) return
+    if(obj.constructor === Component) {
+      this.highlightComponent(obj)
+    } else if(obj.constructor === window.alcWasm.JsSolid) {
+      this.highlightComponent(obj.component, obj.get_id())
+    } else {
+      obj.mesh.material = {
+        curve: this.renderer.materials.highlightLine,
+        region: this.renderer.materials.highlightRegion,
+        face: this.renderer.materials.highlightSurface,
+      }[obj.mesh.alcType]
+    }
+  }
+
+  unhighlight(obj) {
+    if(!obj) return
+    if(obj.constructor === Component) {
+      this.unhighlightComponent(obj)
+    } else if(obj.constructor === window.alcWasm.JsSolid) {
+      this.unhighlightComponent(obj.component)
+    } else {
+      if(!obj.mesh) return
+      obj.mesh.material = {
+        curve: this.renderer.materials.line,
+        region: this.renderer.materials.region,
+        face: this.renderer.materials.surface,
+      }[obj.mesh.alcType]
+    }
   }
 
   previewFeature(comp, bufferGeometry) {

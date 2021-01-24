@@ -42,8 +42,9 @@ class Feature {
     for(const key in this.settings) {
       const setting = this.settings[key]
       if(setting.type == 'profile') {
-        const profile = this[key]
+        let profile = this[key]
         if(profile) {
+          profile = profile()
           if(profile.unused) profile.free()
           profile.noFree = false
           this[key] = null
@@ -95,12 +96,14 @@ export class ExtrudeFeature extends Feature {
   }
 
   preview() {
-    this.profile.noFree = true
-    return this.profile.extrude_preview(this.distance * (this.side ? 1 : -1))
+    const profile = this.profile()
+    // Make sure transloader does not free profile region while in use
+    profile.noFree = true
+    return profile.extrude_preview(this.distance * (this.side ? 1 : -1))
   }
 
   confirm() {
-    this.profile.extrude(this.distance * (this.side ? 1 : -1))
+    this.profile().extrude(this.distance * (this.side ? 1 : -1))
   }
 }
 

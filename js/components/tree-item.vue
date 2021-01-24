@@ -3,8 +3,8 @@
 
     header(
       @dblclick="$emit('update:active-component', component)"
-      @mouseenter="$emit('highlight-component', component)"
-      @mouseleave="$emit('highlight-component', null)"
+      @mouseenter="$emit('update:highlight', component)"
+      @mouseleave="$emit('update:highlight', null)"
       @click="$emit('update:selection', component)"
     )
       fa-icon.expander(
@@ -111,9 +111,6 @@
       display: flex
       align-items: center
       padding: 1px 0
-      pointer-events: none
-      > *
-        pointer-events: all
 
   .expander
     margin-right: 0

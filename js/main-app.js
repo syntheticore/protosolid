@@ -1,9 +1,9 @@
-import Vue from 'vue';
-import './icons.js';
-import App from './components/app.vue';
+import Vue from 'vue'
+import './icons.js'
+import App from './components/app.vue'
 
-Vue.config.productionTip = false;
-Vue.config.devtools = false;
+Vue.config.productionTip = false
+Vue.config.devtools = false
 
 new Vue({
   render: function (h) { return h(App) }

@@ -259,7 +259,8 @@
         return new Promise((resolve) => {
           this.$root.$off('picked')
           this.$root.$once('picked', (item) => {
-            this.activeFeature[key] = item
+            // Hide heavy data from Vue in a closure
+            this.activeFeature[key] = () => item
             this.update()
             this.activePicker = null
             resolve()
@@ -304,7 +305,7 @@
         const settings = Object.values(this.activeFeature.settings)
         if(!settings.find(setting => setting.type == 'length')) return
 
-        const center = vec2three(this.activeFeature.profile.get_center())
+        const center = vec2three(this.activeFeature.profile().get_center())
         const direction = this.activeFeature.axis || THREE.Object3D.DefaultUp
         this.lengthGizmo = new LengthGizmo(
           center, direction,

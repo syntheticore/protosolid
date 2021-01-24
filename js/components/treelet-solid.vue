@@ -1,7 +1,7 @@
 <template lang="pug">
   li.solid-treelet(
-    @mouseenter="$emit('highlight-component', component, solid.get_id())"
-    @mouseleave="$emit('highlight-component', null)"
+    @mouseenter="$emit('update:highlight', solid)"
+    @mouseleave="$emit('update:highlight', null)"
     @click="$emit('update:selection', solid)"
   )
     .box

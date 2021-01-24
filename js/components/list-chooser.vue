@@ -27,7 +27,7 @@
 
 <style lang="stylus" scoped>
   .list-chooser
-    pointer-events: all
+    pointer-events: auto
     overflow: hidden
     display: flex
     flex-direction: column

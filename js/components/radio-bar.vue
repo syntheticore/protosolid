@@ -13,7 +13,7 @@
 
 <style lang="stylus" scoped>
   .radio-bar
-    pointer-events: all
+    pointer-events: auto
     display: flex
 
   .button

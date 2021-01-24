@@ -1,6 +1,7 @@
 <template lang="pug">
   .view-port
 
+    //- GL Viewport
     canvas(
       ref="canvas"
       @click="click"
@@ -10,6 +11,7 @@
       @mousemove="mouseMove"
     )
 
+    //- Snap guides and pick indicators
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
       path(v-for="path in allPaths" :d="path.data" :stroke="path.color")
       transition-group(name="hide" tag="g")
@@ -22,12 +24,14 @@
           :y2="guide.end.y"
         )
 
+    //- Snap anchor highlights active snap point
     .anchors
       div(
         v-if="snapAnchor"
         :style="{top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px'}"
       )
 
+    //- Draggable sketch handles
     ul.handles
       li(
         v-for="handle in allHandles"
@@ -37,6 +41,17 @@
         @mousedown="handleMouseDown($event, handle)"
         @mousemove="handleMouseMove($event, handle)"
       )
+
+    //- Floating UI widgets
+    transition-group.widgets(name="hide2")
+      SelectorWidget(
+        v-for="(widget, i) in widgets"
+        :key="widget.pos.x"
+        :widget="widget"
+        @remove="widgets.splice(i, 1)"
+        @change="$emit('update:highlight', $event)"
+      )
+
 </template>
 
 
@@ -50,12 +65,17 @@
     background: radial-gradient(50% 150%, farthest-corner, #333333, #1c2127)
 
   .drawpad
+  .handles
+  .anchors
+  .widgets
     position: absolute
     left: 0
     top: 0
-    pointer-events: none
     width: 100%
     height: 100%
+    pointer-events: none
+
+  .drawpad
     line, path
       fill-opacity: 0
       stroke-width: 2
@@ -68,12 +88,6 @@
       stroke-dasharray: 4, 7
 
   .handles, .anchors
-    position: absolute
-    left: 0
-    right: 0
-    top: 0
-    bottom: 0
-    pointer-events: none
     > *
       size = 21px
       // padding: 7px
@@ -141,12 +155,25 @@
         width:  5px
         height: 5px
 
+  .widgets
+    .selector-widget
+      pointer-events: auto
+      position: absolute
+
   .hide-enter-active
   .hide-leave-active
     transition: all 0.2s
   .hide-enter
   .hide-leave-to
     opacity: 0
+
+  .hide2-enter-active
+  .hide2-leave-active
+    transition: all 0.15s
+  .hide2-enter
+  .hide2-leave-to
+    opacity: 0
+    transform: translateY(6px)
 </style>
 
 
@@ -159,8 +186,8 @@
   import { vec2three } from './../utils.js'
   import {
     ManipulationTool,
-    ObjectSelectionTool,
-    ProfileSelectionTool,
+    ObjectPickTool,
+    ProfilePickTool,
     LineTool,
     SplineTool,
     CircleTool,
@@ -168,17 +195,34 @@
     PlaneTool
   } from './../tools.js'
 
+  import SelectorWidget from './selector-widget.vue'
+
   export default {
     name: 'ViewPort',
+
+    components: {
+      SelectorWidget,
+    },
 
     props: {
       document: Object,
       activeComponent: Object,
-      highlightedComponent: Object,
       activeTool: Object,
       selection: Object,
+      highlight: Object,
       activeView: Object,
       displayMode: String,
+    },
+
+    data() {
+      return {
+        snapAnchor: null,
+        handles: {},
+        paths: [],
+        pickingPath: null,
+        guides: [],
+        widgets: [],
+      }
     },
 
     watch: {
@@ -193,17 +237,24 @@
         this.$root.$emit('activate-toolname', 'Manipulate')
       },
 
-      highlightedComponent: function(comp, oldComp) {
-        if(oldComp) {
-          this.transloader.unhighlightComponent(oldComp.comp)
-        }
-        if(comp) {
-          this.transloader.highlightComponent(comp.comp, comp.solidId)
-        }
+      selection: function(selection, oldSelection) {
+        this.transloader.unselect(oldSelection)
+        this.transloader.select(selection)
         this.renderer.render()
       },
 
-      selection: function(selection) {
+      highlight: function(highlight, oldHighlight) {
+        if(oldHighlight) {
+          if(oldHighlight === this.selection ||
+              (oldHighlight.component &&
+              oldHighlight.component.hasAncestor(this.selection))
+          ) {
+            this.transloader.select(oldHighlight)
+          } else {
+            this.transloader.unhighlight(oldHighlight)
+          }
+        }
+        this.transloader.highlight(highlight)
         this.renderer.render()
       },
 
@@ -216,16 +267,6 @@
         this.renderer.setDisplayMode(mode)
         this.componentChanged(this.document.tree, true)
       },
-    },
-
-    data() {
-      return {
-        snapAnchor: null,
-        handles: {},
-        paths: [],
-        pickingPath: null,
-        guides: [],
-      }
     },
 
     computed: {
@@ -271,9 +312,9 @@
       // Events
       this.$root.$on('pick', (type, pickerCoords, color) => {
         this.handlePick(pickerCoords, color, {
-          profile: ProfileSelectionTool,
-          curve: ObjectSelectionTool,
-          axis: ObjectSelectionTool,
+          profile: ProfilePickTool,
+          curve: ObjectPickTool,
+          axis: ObjectPickTool,
         }[type])
       })
 

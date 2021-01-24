@@ -155,6 +155,7 @@
   .list-leave-to
     opacity: 0
     margin: 0
+    height: 0
 
 </style>
 
@@ -208,7 +209,7 @@
       &.wide
         width: 53px
       &.ultra-wide
-        width: 80px
+        width: 79px
 
     svg
       font-size: 21px

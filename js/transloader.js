@@ -23,6 +23,7 @@ export default class Transloader {
     const isActive = this.isActive(comp)
     const surfaceMaterial = this.getSurfaceMaterial(comp)
     comp.updateSolids()
+    const cache = comp.cache()
     comp.solids.forEach(solid => {
       const mode = this.renderer.displayMode
       // Load Faces
@@ -41,7 +42,7 @@ export default class Transloader {
           faceMesh.castShadow = isActive
           faceMesh.receiveShadow = isActive
           this.renderer.add(faceMesh)
-          comp.cache.faces.push(faceMesh)
+          cache.faces.push(faceMesh)
           // const normal = this.convertLine(face.get_display_normal(), this.renderer.materials.selectionLine)
           // this.renderer.add(normal)
         })
@@ -50,7 +51,7 @@ export default class Transloader {
       if(mode == 'wireframe' || (isActive && mode == 'wireShade')) {
         const edges = solid.get_edges()
         const wireMaterial = this.getWireMaterial(comp)
-        comp.cache.edges = (comp.cache.edges || []).concat(edges.map(edge => {
+        cache.edges = (cache.edges || []).concat(edges.map(edge => {
           const line = this.renderer.convertLine(edge.tesselate(), wireMaterial)
           line.alcType = 'edge'
           line.alcObject = edge
@@ -64,16 +65,19 @@ export default class Transloader {
     if(comp === this.document.activeComponent) {
       const elements = comp.real.get_sketch().get_sketch_elements()
       elements.forEach(element => this.loadElement(element, comp))
-      if(!comp.cache.regions.length) this.updateRegions(comp)
+      if(!cache.regions.length) this.updateRegions(comp)
     }
     // Recurse
     if(recursive) comp.children.forEach(child => this.loadTree(child, true))
   }
 
   unloadTree(comp, recursive) {
-    comp.cache.curves.forEach(elem => this.unloadElement(elem, comp))
-    comp.cache.edges.forEach(edge => this.renderer.remove(edge))
-    comp.cache.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
+    const cache = comp.cache()
+    cache.curves.forEach(elem => this.unloadElement(elem, comp))
+    cache.edges.forEach(edge => this.renderer.remove(edge))
+    cache.faces.forEach(faceMesh => this.renderer.remove(faceMesh))
+    cache.edges = []
+    cache.faces = []
     this.purgeRegions(comp)
     if(recursive) comp.children.forEach(child =>
       this.unloadTree(child, true)
@@ -87,13 +91,14 @@ export default class Transloader {
     line.alcObject = elem
     elem.mesh = line
     this.renderer.add(line)
-    comp.cache.curves.push(elem)
+    comp.cache().curves.push(elem)
     this.onLoadElement(elem, comp)
   }
 
   unloadElement(elem, comp) {
+    const cache = comp.cache()
     this.renderer.remove(elem.mesh)
-    comp.cache.curves = comp.cache.curves.filter(e => e != elem)
+    cache.curves = cache.curves.filter(e => e != elem)
     this.onUnloadElement(elem, comp)
   }
 
@@ -101,7 +106,7 @@ export default class Transloader {
     this.purgeRegions(comp)
     const regions = comp.real.get_sketch().get_regions(false)
     // console.log('# regions: ', regions.length)
-    comp.cache.regions = regions.map(region => {
+    comp.cache().regions = regions.map(region => {
       // let material = this.renderer.materials.region.clone()
       // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
       const mesh = this.renderer.convertMesh(
@@ -117,7 +122,8 @@ export default class Transloader {
   }
 
   purgeRegions(comp) {
-    comp.cache.regions.forEach(mesh => {
+    const cache = comp.cache()
+    cache.regions.forEach(mesh => {
       if(mesh.alcObject.noFree) {
         mesh.alcObject.unused = true
       } else {
@@ -125,7 +131,7 @@ export default class Transloader {
       }
       this.renderer.remove(mesh)
     })
-    comp.cache.regions = []
+    cache.regions = []
   }
 
   getSurfaceMaterial(comp, highlight) {
@@ -147,14 +153,15 @@ export default class Transloader {
   }
 
   applyMaterials(comp, highlight, solidId) {
+    const cache = comp.cache()
     const surfaceMaterial = this.getSurfaceMaterial(comp, highlight)
     const wireMaterial = this.getWireMaterial(comp, highlight)
     const faces = solidId ?
-      comp.cache.faces.filter(f => f.alcObject.get_solid_id() == solidId) :
-      comp.cache.faces
+      cache.faces.filter(f => f.alcObject.get_solid_id() == solidId) :
+      cache.faces
     const edges = solidId ?
-      comp.cache.edges.filter(e => e.alcObject.get_solid_id() == solidId) :
-      comp.cache.edges
+      cache.edges.filter(e => e.alcObject.get_solid_id() == solidId) :
+      cache.edges
     faces.forEach(face => face.material = surfaceMaterial )
     edges.forEach(edge => edge.material = wireMaterial )
     if(!solidId) comp.children.forEach(child => this.applyMaterials(child, highlight))
@@ -164,12 +171,12 @@ export default class Transloader {
     this.applyMaterials(comp, true, solidId)
   }
 
-  unhighlightComponent(comp) {
-    this.applyMaterials(comp, false)
+  unhighlightComponent(comp, solidId) {
+    this.applyMaterials(comp, false, solidId)
   }
 
   select(selection) {
-    if(!selection) return
+    if(!selection || selection.deallocated) return
     if(selection.constructor === Component) {
       this.highlightComponent(selection)
     } else if(selection.constructor === window.alcWasm.JsSolid) {
@@ -180,18 +187,18 @@ export default class Transloader {
   }
 
   unselect(selection) {
-    if(!selection) return
+    if(!selection || selection.deallocated) return
     if(selection.constructor === Component) {
       this.unhighlightComponent(selection)
     } else if(selection.constructor === window.alcWasm.JsSolid) {
-      this.unhighlightComponent(selection.component)
+      this.unhighlightComponent(selection.component, selection.get_id())
     } else {
       selection.mesh.material = this.renderer.materials.line
     }
   }
 
   highlight(obj) {
-    if(!obj) return
+    if(!obj || obj.deallocated) return
     if(obj.constructor === Component) {
       this.highlightComponent(obj)
     } else if(obj.constructor === window.alcWasm.JsSolid) {
@@ -206,11 +213,11 @@ export default class Transloader {
   }
 
   unhighlight(obj) {
-    if(!obj) return
+    if(!obj || obj.deallocated) return
     if(obj.constructor === Component) {
       this.unhighlightComponent(obj)
     } else if(obj.constructor === window.alcWasm.JsSolid) {
-      this.unhighlightComponent(obj.component)
+      this.unhighlightComponent(obj.component, obj.get_id())
     } else {
       if(!obj.mesh) return
       obj.mesh.material = {

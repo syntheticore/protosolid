@@ -14,12 +14,14 @@ export default class Component {
     this.children = []
     this.solids = []
 
-    this.cache = {
+    const cache = {
       faces: [],
       edges: [],
       regions: [],
       curves: [],
     }
+    // Hide cache from Vue
+    this.cache = () => cache
   }
 
   typename() {
@@ -88,7 +90,10 @@ export default class Component {
   // }
 
   freeSolids() {
-    this.solids.forEach(solid => solid.free() )
+    this.solids.forEach(solid => {
+      solid.free()
+      solid.deallocated = true
+    })
     this.solids = []
   }
 

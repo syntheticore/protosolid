@@ -224,7 +224,7 @@
             ],
           },
           {
-            title: 'Edit',
+            title: 'Edit Solid',
             tools: [
               { title: 'Shell', icon: 'magnet' },
               { title: 'Boolean', icon: 'boxes' },

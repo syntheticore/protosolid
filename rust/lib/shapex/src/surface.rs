@@ -89,7 +89,7 @@ impl Plane {
 
   pub fn from_triangle(p1: Point3, p2: Point3, p3: Point3) -> Self {
     let u = (p2 - p1).normalize();
-    let pre_v = p3 - p1;
+    let pre_v = (p3 - p1).normalize();
     let normal = u.cross(pre_v).normalize();
     Self {
       origin: p1,
@@ -177,14 +177,12 @@ impl Surface for Plane {
     let trans = self.as_transform();
     let lay_flat = trans.invert();
     for curve in &mut bounds {
-      curve.transform(&lay_flat)
+      curve.transform(&trans)
     }
-    let polyline = geom2d::poly_from_wire(&bounds);
-    // let mut mesh = geom2d::tesselate_polygon(polyline, Vec3::new(0.0, 0.0, 1.0).normalize());
+    let polyline = geom2d::tesselate_wire(&bounds);
     let mut mesh = geom2d::tesselate_polygon(polyline, self.normal());
-    mesh.transform(&trans);
+    mesh.transform(&lay_flat);
     mesh
-    // Mesh::default()
   }
 
   fn flip(&mut self) {
@@ -306,8 +304,10 @@ mod tests {
 
   #[test]
   fn plane_normal() {
-    let plane = Plane::new();
+    let mut plane = Plane::new();
     assert_eq!(plane.normal(), Vec3::new(0.0, 0.0, 1.0));
+    plane.flip();
+    assert_eq!(plane.normal(), Vec3::new(0.0, 0.0, -1.0));
   }
 
   #[test]

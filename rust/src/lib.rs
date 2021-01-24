@@ -263,7 +263,7 @@ pub struct JsRegion {
 #[wasm_bindgen]
 impl JsRegion {
   pub fn get_mesh(&mut self) -> JsBufferGeometry {
-    let poly = geom2d::poly_from_wire(&self.region);
+    let poly = geom2d::tesselate_wire(&self.region);
     JsBufferGeometry::from(
       geom2d::tesselate_polygon(poly, Vec3::unit_z()).to_buffer_geometry()
     )

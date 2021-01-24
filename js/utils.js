@@ -22,12 +22,12 @@ export function saveBlob(blob, filename, filetype) {
 export function rotationFromNormal(normal) {
   let up = THREE.Object3D.DefaultUp
   let axis
-  if(normal.z == 1 || normal.z == -1) {
+  if(Math.abs(normal.z - 1) < 0.000000001 || Math.abs(normal.z + 1) < 0.000000001) {
     axis = new THREE.Vector3(1, 0, 0)
   } else {
     axis = new THREE.Vector3().crossVectors(up, normal)
   }
-  let radians = Math.acos(normal.dot(up))
+  let radians = Math.acos(Math.min(1, Math.max(-1, normal.dot(up))))
   return new THREE.Quaternion().setFromAxisAngle(axis, radians)
 }
 

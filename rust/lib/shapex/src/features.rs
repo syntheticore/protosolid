@@ -3,9 +3,15 @@ use crate::curve::*;
 use crate::surface::*;
 use crate::solid::*;
 
+use crate::geom2d;
+use crate::geom3d;
+
 
 pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Result<Solid, String> {
-  let mut solid = Solid::new_lamina(region, Plane::new().into_enum());
+  //XXX use poly_from_wire once circles are handled
+  let mut plane = geom3d::detect_plane(&geom2d::tesselate_wire(&region))?;
+  plane.flip();
+  let mut solid = Solid::new_lamina(region, plane.into_enum());
   let shell = &mut solid.shells[0];
   shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
   if distance > 200.0 {

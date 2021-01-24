@@ -52,7 +52,7 @@ pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   signed_area
 }
 
-// pub fn poly_from_wire(wire: &Wire) -> PolyLine {
+// pub fn tesselate_wire(wire: &Wire) -> PolyLine {
 //   let mut polyline: PolyLine = wire.iter().map(|elem| elem.bounds.0 ).collect();
 //   polyline.push(wire.first().unwrap().bounds.0); //XXX first elem may not start at zero
 //   // let z = rand::random::<f64>() / -6.0;
@@ -62,7 +62,7 @@ pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
 //   polyline
 // }
 
-pub fn poly_from_wire(wire: &Wire) -> PolyLine {
+pub fn tesselate_wire(wire: &Wire) -> PolyLine {
   // let mut wire = wire.clone();
   // straighten_bounds(&mut wire);
   let mut polyline: PolyLine = wire.iter()
@@ -86,6 +86,14 @@ pub fn poly_from_wire(wire: &Wire) -> PolyLine {
   polyline
 }
 
+pub fn poly_from_wire(wire: &Wire) -> PolyLine {
+  let mut polyline: PolyLine = wire.iter()
+  .map(|curve| curve.bounds.0 ).collect();
+  polyline.push(wire[0].bounds.0);
+  polyline
+}
+
+
 pub fn straighten_bounds(wire: &mut Wire) {
   let bounds = wire[0].bounds;
   let next_bounds = wire[1].bounds;
@@ -105,7 +113,7 @@ pub fn straighten_bounds(wire: &mut Wire) {
 }
 
 // // Returned loops are oriented counter-clockwise
-// pub fn poly_from_wire(wire: &Vec<CurveType>) -> PolyLine {
+// pub fn tesselate_wire(wire: &Vec<CurveType>) -> PolyLine {
 //   if wire.len() == 1 {
 //     panic!("PolyLine has length one {:?}", wire);
 //   }
@@ -152,11 +160,11 @@ mod tests {
   fn compare_areas() {
     let rect = test_data::rectangle();
     let rect: Vec<CurveType> = rect.into_iter().map(|l| l.into_enum() ).collect();
-    let rect_poly = poly_from_wire(&make_trimmed(rect));
+    let rect_poly = tesselate_wire(&make_trimmed(rect));
 
     let reverse_rect = test_data::reverse_rectangle();
     let reverse_rect: Vec<CurveType> = reverse_rect.into_iter().map(|l| l.into_enum() ).collect();
-    let reverse_rect_poly = poly_from_wire(&make_trimmed(reverse_rect));
+    let reverse_rect_poly = tesselate_wire(&make_trimmed(reverse_rect));
 
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
   }
@@ -165,7 +173,7 @@ mod tests {
   fn rectangle_clockwise() {
     let rect = test_data::rectangle();
     let rect: Vec<CurveType> = rect.into_iter().map(|l| l.into_enum() ).collect();
-    let rect_poly = poly_from_wire(&make_trimmed(rect));
+    let rect_poly = tesselate_wire(&make_trimmed(rect));
 
     assert!(is_clockwise(&rect_poly));
   }

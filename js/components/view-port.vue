@@ -389,6 +389,7 @@
       },
 
       handleMouseDown: function(e, handle) {
+        if(e.button != 0) return
         this.activeHandle = handle
         this.mouseDown(e)
         this.snapper.reset()

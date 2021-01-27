@@ -43,6 +43,13 @@ pub fn angle_right() -> Vec<Line> {
   ]
 }
 
+pub fn angle_straight() -> Vec<Line> {
+  vec![
+    Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)),
+    Line::new(Point3::new(0.0, 1.0, 0.0), Point3::new(0.0, 2.0, 0.0)),
+  ]
+}
+
 pub fn rectangle() -> Vec<Line> {
   let upper_left = Point3::new(-1.0, 1.0, 0.0);
   let upper_right = Point3::new(1.0, 1.0, 0.0);

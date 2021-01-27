@@ -86,6 +86,8 @@
       border-radius: 0 !important
     .window-controls button:last-child
       border-radius: 0
+    .app-menu-btn
+      margin-left: 4px
 
   .app-menu-btn
     // color: #ff9f90

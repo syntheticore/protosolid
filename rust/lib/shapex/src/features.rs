@@ -71,6 +71,7 @@ mod tests {
   }
 
   #[test]
+  #[ignore]
   fn cylinder() {
     let cube = make_cylinder(1.0, 1.0);
     let shell = &cube.shells[0];

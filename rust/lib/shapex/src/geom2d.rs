@@ -24,11 +24,19 @@ pub fn tesselate_polygon(vertices: PolyLine, normal: Vec3) -> Mesh {
 }
 
 // Check if two line segments turn clockwise
-// Returns values > 0 when clockwise, < 0 when anti-clockwise and 0 when segments are colinear
+// Returns values < 0 when clockwise, > 0 when anti-clockwise and 0 when segments are colinear
 pub fn clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
-  let v1 = p2 - p1;
-  let v2 = p3 - p1;
-  cross_2d(v1, v2)
+  let v1 = (p2 - p1).normalize(); //OPT
+  let v2 = (p3 - p2).normalize();
+  let v3 = (p3 - p1).normalize();
+  // Cross product changes sign with clockwiseness,
+  // but doesn't show if angle is steeper or shallower than 90 degrees
+  // (symmetric between front and back)
+  let cross = cross_2d(v1, v3);
+  // Dot product is "left/right" symmetric,
+  // but negative for steep angles and positive for shallow angles
+  let dot = (v1.dot(v2) - 1.0).abs() / 2.0; // Range shallow to steep => 0 -> 1
+  dot * if cross >= 0.0 { 1.0 } else { -1.0 }
 }
 
 pub fn is_clockwise(closed_loop: &PolyLine) -> bool {
@@ -190,5 +198,12 @@ mod tests {
     let angle = test_data::angle_left();
 
     assert!(clockwise(angle[0].points.0, angle[0].points.1, angle[1].points.1) > 0.0);
+  }
+
+  #[test]
+  fn angle_straight() {
+    let angle = test_data::angle_straight();
+
+    assert_eq!(clockwise(angle[0].points.0, angle[0].points.1, angle[1].points.1), 0.0);
   }
 }

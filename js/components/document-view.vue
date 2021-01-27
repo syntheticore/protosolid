@@ -207,12 +207,14 @@
       deleteComponent: function(comp) {
         this.$root.$emit('component-deleted', comp)
         comp.parent.deleteComponent(comp)
-        if(!this.document.activeComponent.hasAncestor(comp)) return
-        this.document.activeComponent = comp.parent
+        if(this.document.activeComponent.hasAncestor(comp)) {
+          this.document.activeComponent = comp.parent
+        }
       },
 
       deleteSolid: function(solid) {
         solid.remove()
+        if(this.selection === solid) this.selection = null
         this.$root.$emit('component-changed', solid.component)
       },
 

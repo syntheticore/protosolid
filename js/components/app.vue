@@ -7,8 +7,11 @@
       :documents="documents"
       :active-document.sync="activeDocument"
       :is-maximized="isMaximized"
-      @delete-document="deleteDocument"
       @create-document="createDocument"
+      @open-document="loadDocument"
+      @save-document="saveDocument"
+      @save-document-as="saveDocumentAs"
+      @delete-document="deleteDocument"
     )
     DocumentView(
       :document="activeDocument"
@@ -53,6 +56,8 @@
   import Document from './../document.js'
   const wasmP = import('../../rust/pkg/wasm-index.js')
 
+  const ipc = window.electron && window.electron.ipc
+
   export default {
     name: 'app',
 
@@ -80,17 +85,16 @@
       this.createDocument()
 
       if(!window.electron) return
-      const ipcRenderer = window.electron.ipcRenderer
 
-      ipcRenderer.on('fullscreen-changed', (e, isFullscreen) => {
+      ipc.on('fullscreen-changed', (e, isFullscreen) => {
         this.isFullscreen = isFullscreen
       })
 
-      ipcRenderer.on('maximize-changed', (e, isMaximized) => {
+      ipc.on('maximize-changed', (e, isMaximized) => {
         this.isMaximized = isMaximized
       })
 
-      ipcRenderer.on('dark-mode', (e, darkMode) => {
+      ipc.on('dark-mode', (e, darkMode) => {
         if(darkMode) {
           document.body.setAttribute('data-dark-mode', true)
         } else {
@@ -115,7 +119,7 @@
       });
 
       if(!window.electron) return
-      window.electron.ipcRenderer.send('vue-ready')
+      ipc.send('vue-ready')
     },
 
     methods: {
@@ -125,6 +129,21 @@
           this.activeDocument = new Document(wasm)
           this.documents.push(this.activeDocument)
         })
+      },
+
+      loadDocument: async function(path) {
+        const doc = new Document(window.alcWasm)
+        await doc.load(path)
+        this.activeDocument = doc
+        this.documents.push(doc)
+      },
+
+      saveDocument: async function() {
+        this.activeDocument.save()
+      },
+
+      saveDocumentAs: async function() {
+        this.activeDocument.save(true)
       },
 
       deleteDocument: function(doc) {

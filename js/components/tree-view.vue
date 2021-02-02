@@ -17,7 +17,6 @@
     overflow-x: hidden
     overflow-y: auto
     padding-top: 10px
-    pointer-events: auto
     // width: 100%
     // padding-right: 24px
     // box-sizing: content-box

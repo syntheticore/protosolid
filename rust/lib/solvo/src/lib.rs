@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 pub use shapex::*;
 
+pub mod io;
+
 
 #[derive(Debug, Default)]
 pub struct Component {
@@ -40,7 +42,7 @@ pub struct Sketch {
 }
 
 impl Sketch {
-  pub fn get_regions(&self, include_outer: bool) -> Vec<Region> {
+  pub fn get_regions(&self, include_outer: bool) -> Vec<Wire> {
     let cut_elements = Self::all_split(&self.elements);
     let mut circles = vec![];
     let mut others = vec![];
@@ -52,7 +54,7 @@ impl Sketch {
     }
     Self::remove_dangling_segments(&mut others);
     let islands = Self::build_islands(&others);
-    let mut regions: Vec<Region> = islands.iter()
+    let mut regions: Vec<Wire> = islands.iter()
     .flat_map(|island| Self::build_loops_from_island(island, include_outer) ).collect();
     let mut circle_regions = circles
     .into_iter().map(|circle| vec![circle] ).collect();
@@ -60,7 +62,7 @@ impl Sketch {
     regions
   }
 
-  fn build_loops_from_island(island: &Vec<TrimmedCurve>, include_outer: bool) -> Vec<Region> {
+  fn build_loops_from_island(island: &Vec<TrimmedCurve>, include_outer: bool) -> Vec<Wire> {
     let mut regions = vec![];
     let mut used_forward = HashSet::new();
     let mut used_backward = HashSet::new();
@@ -96,7 +98,7 @@ impl Sketch {
         base: (*elem.borrow()).clone(),
         bounds: split.as_curve().endpoints(),
         cache: split,
-      }).collect::<Region>()
+      }).collect::<Vec<TrimmedCurve>>()
     }).collect()
   }
 
@@ -166,7 +168,7 @@ impl Sketch {
     }).collect();
     if connected_elems.len() > 0 {
       // Sort connected segments in clockwise order
-      connected_elems.sort_by(|a, b| {
+      connected_elems.sort_by(|a, b| { //XXX min_by_key
         let final_point_a = a.other_bound(&end_point);
         let final_point_b = b.other_bound(&end_point);
         geom2d::clockwise(*start_point, end_point, final_point_b).partial_cmp(
@@ -194,7 +196,7 @@ impl Sketch {
     regions
   }
 
-  fn remove_outer_loop(loops: &mut Vec<Region>) {
+  fn remove_outer_loop(loops: &mut Vec<Wire>) {
     if loops.len() <= 1 { return }
     loops.retain(|region| {
       !geom2d::is_clockwise(&geom2d::poly_from_wire(region))

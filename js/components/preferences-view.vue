@@ -134,7 +134,7 @@
 
     methods: {
       restart: function() {
-        if(window.electron) window.electron.ipcRenderer.send('restart')
+        if(window.electron) window.electron.ipc.send('restart')
       },
     },
   }

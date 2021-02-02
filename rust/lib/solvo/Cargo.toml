@@ -7,7 +7,10 @@ edition = "2018"
 
 [dependencies]
 rand = "0.7.3"
-uuid = { version = "0.8.1", features = ["v4"] }
-cgmath = "0.17.0"
+ron = "0.6.4"
+serde = { version = "1.0.123", features = ["derive"] }
+cgmath = { version = "0.17.0", features = ["serde"] }
+uuid = { version = "0.8.1", features = ["v4", "serde"] }
 
 shapex = { path = "../shapex" }
+

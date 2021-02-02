@@ -57,7 +57,9 @@ export default class Component {
         return acc + childWeight
       }, 0.0)
       return weight + (this.material ? this.getVolume() * this.material.density : 0.0)
-    } catch(e) {}
+    } catch(e) {
+      if(e !== 'no weight') throw e
+    }
   }
 
   getVolume() {
@@ -88,6 +90,26 @@ export default class Component {
   // isHidden() {
   //   return this.hidden || (this.parent && this.parent.isHidden())
   // }
+
+  serialize() {
+    return {
+      title: this.title,
+      hidden: this.hidden,
+      real: this.real.serialize(),
+      children: this.children.map(child => child.serialize() ),
+    }
+  }
+
+  unserialize(dump) {
+    this.title = dump.title
+    this.hidden = dump.hidden
+    console.log(dump.real)
+    this.real.unserialize(dump.real)
+    dump.children.forEach(childDump => {
+      let child = this.createComponent()
+      child.unserialize(childDump)
+    })
+  }
 
   freeSolids() {
     this.solids.forEach(solid => {

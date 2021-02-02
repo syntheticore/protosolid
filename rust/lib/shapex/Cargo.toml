@@ -6,7 +6,9 @@ authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+serde = { version = "1.0.123", features = ["derive"] }
+ron = "0.6.4"
 rand = "0.7.3"
-cgmath = "0.17.0"
-uuid = { version = "0.8.1", features = ["v4"] }
+cgmath = { version = "0.17.0", features = ["serde"] }
+uuid = { version = "0.8.1", features = ["v4", "serde"] }
 earcutr = { git = "https://github.com/donbright/earcutr" }

@@ -36,6 +36,7 @@ pub fn main() -> Result<(), JsValue> {
 
 fn point_to_js(p: Point3) -> JsValue {
   JsValue::from_serde(&(p.x, p.y, p.z)).unwrap()
+  // JsValue::from_serde(&p).unwrap()
 }
 
 fn points_to_js(points: Vec<Point3>) -> Array {
@@ -449,6 +450,12 @@ impl JsSolid {
   pub fn remove(&self) {
     self.comp.borrow_mut().bodies.retain(|body| body.id != self.solid_id )
   }
+
+  // pub fn serialize(&self) -> String {
+  //   let comp = self.comp.borrow();
+  //   let solid = comp.bodies.iter().find(|body| body.id == self.solid_id ).unwrap();
+  //   export::export_ron(solid)
+  // }
 }
 
 
@@ -505,12 +512,12 @@ impl JsComponent {
     let comp = self.real.borrow();
     let mesh = comp.bodies[0].tesselate();
     log!("{:?}", mesh);
-    export::stl(&mesh, title)
+    export::export_stl(&mesh, title)
   }
 
   pub fn export_3mf(&self) -> String {
     let meshes = Self::tesselate_all(&self.real);
-    export::threemf(&meshes, "millimeter")
+    export::export_threemf(&meshes, "millimeter")
   }
 
   fn tesselate_all(comp: &Ref<Component>) -> Vec<Mesh> {
@@ -520,5 +527,14 @@ impl JsComponent {
       meshes.append(&mut Self::tesselate_all(&child));
     }
     meshes
+  }
+
+  pub fn serialize(&self) -> String {
+    let comp = self.real.borrow();
+    io::export_ron(&comp)
+  }
+
+  pub fn unserialize(&mut self, dump: String) {
+    self.real = rc(io::import_ron(dump));
   }
 }

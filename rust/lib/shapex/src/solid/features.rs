@@ -1,5 +1,4 @@
 use crate::base::*;
-use crate::curve::*;
 use crate::surface::*;
 use crate::solid::*;
 
@@ -9,11 +8,18 @@ use crate::geom3d;
 
 pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Result<Solid, String> {
   //XXX use poly_from_wire once circles are handled
-  let mut plane = geom3d::detect_plane(&geom2d::tesselate_wire(&region))?;
+  let poly = geom2d::tesselate_wire(&region);
+  assert!(!geom2d::is_clockwise(&poly));
+  let mut plane = geom3d::detect_plane(&poly)?;
   plane.flip();
   let mut solid = Solid::new_lamina(region, plane.into_enum());
   let shell = &mut solid.shells[0];
-  shell.sweep(&shell.faces.last().unwrap().clone(), Vec3::new(0.0, 0.0, distance));
+  let face = if distance >= 0.0 {
+    shell.faces.last()
+  } else {
+    shell.faces.first()
+  }.unwrap().clone();
+  shell.sweep(&face, Vec3::new(0.0, 0.0, distance));
   if distance > 200.0 {
     Err("Maximum extrusion distance exceeded".to_string())
   } else {

@@ -152,7 +152,7 @@
           if(oldDocument) oldDocument.activeView = oldDocument.activeView || this.dirtyView
           if(!document.activeView) {
             document.activeView = document.views[3]
-            this.createComponent(document.tree, 'Component 1')
+            // this.createComponent(document.tree, 'Component 1')
           }
           this.previewView = null
           this.dirtyView = null

@@ -8,6 +8,8 @@ use crate::curve::*;
 use crate::surface::*;
 use crate::mesh::*;
 
+pub mod features;
+
 
 #[derive(Debug)]
 pub enum BooleanType {
@@ -41,11 +43,12 @@ pub struct Face {
   pub outer_ring: Ref<Ring>,
   pub rings: Vec<Ref<Ring>>,
   pub surface: SurfaceType,
+  // pub flip_normal: bool, // If cross product of U and V derivatives points into the body
 }
 
 
 #[derive(Debug)]
-pub struct Ring {
+pub struct Ring { //XXX Eliminate
   pub half_edge: Ref<HalfEdge>,
   pub face: WeakRef<Face>,
 }
@@ -402,6 +405,7 @@ impl Shell {
           radius: circle.radius,
           direction: vec,
           bounds: (0.0, 1.0),
+          // flip_normal: false,
         }.into_enum()
       },
       CurveType::Arc(arc) => {
@@ -410,6 +414,7 @@ impl Shell {
           radius: arc.radius,
           direction: vec,
           bounds: arc.bounds,
+          // flip_normal: false,
         }.into_enum()
       },
       _ => todo!()

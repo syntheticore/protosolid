@@ -1,12 +1,16 @@
 import JSZip from 'jszip'
 
-import { saveFile, saveBlob } from './utils.js'
+import { saveFile } from './utils.js'
 
-export function exportStl(component) {
+
+// STL
+export async function exportStl(component, path) {
   const stl = component.real.export_stl(component.title)
-  saveFile(stl, component.title, 'stl')
+  return await saveFile(stl, 'stl', path, component.title)
 }
 
+
+// 3MF
 const header3mf = `
 <?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -23,7 +27,7 @@ const rels3mf = `
 </Relationships>
 `
 
-export function export3mf(component) {
+export function export3mf(component, path) {
   var zip = new JSZip()
   zip.file('[Content_Types].xml', header3mf)
   const Metadata = zip.folder('Metadata')
@@ -32,7 +36,7 @@ export function export3mf(component) {
   threeD.file('3dmodel.model', component.real.export_3mf())
   var _rels = zip.folder('_rels')
   _rels.file('.rels', rels3mf)
-  zip.generateAsync({type:'blob'}).then(function(blob) {
-    saveBlob(blob, component.title, '3mf')
+  zip.generateAsync({type:'uint8array'}).then(function(binarystring) {
+    saveFile(binarystring, '3mf', path, component.title)
   })
 }

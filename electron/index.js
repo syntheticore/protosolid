@@ -301,7 +301,20 @@ ipcMain.handle('get-save-path', (e, format) => {
   }).then(e => e.filePath )
 })
 
+ipcMain.handle('get-load-path', (e, format) => {
+  return dialog.showOpenDialog({
+    properties: [],
+    filters: [
+      { name: format + ' Files', extensions: [format.toLowerCase()] },
+      { name: 'All Files', extensions: ['*'] },
+    ]
+  }).then(e => e.filePaths[0] )
+})
+
 ipcMain.handle('save-file', (e, path, data, encoding) => {
   return fs.writeFile(path, data, encoding || 'utf-8')
 })
 
+ipcMain.handle('load-file', (e, path, encoding) => {
+  return fs.readFile(path, encoding || 'utf-8')
+})

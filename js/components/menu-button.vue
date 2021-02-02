@@ -22,7 +22,7 @@
       button
         padding: 4px 8px
       .pop-up
-        top: 24px
+        top: 22px
     &.left
       .pop-up
         right: unset

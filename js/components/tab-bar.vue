@@ -2,7 +2,10 @@
   header.tab-bar
 
     MenuButton.left.app-menu-btn(icon="atom")
-      AppMenu(:document="activeDocument" @create-document="createDocument")
+      AppMenu(
+        :document="activeDocument"
+        v-on="$listeners"
+      )
 
     ul.tabs
       li(v-for="doc in documents"
@@ -212,24 +215,19 @@
 
     methods: {
       minimize: function() {
-        window.electron.ipcRenderer.send('minimize')
+        window.electron.ipc.send('minimize')
       },
 
       maximize: function() {
-        window.electron.ipcRenderer.send('maximize')
+        window.electron.ipc.send('maximize')
       },
 
       unmaximize: function() {
-        window.electron.ipcRenderer.send('unmaximize')
+        window.electron.ipc.send('unmaximize')
       },
 
       close: function() {
-        window.electron.ipcRenderer.send('close')
-      },
-
-      createDocument: function() {
-        this.$root.$emit('close-widgets')
-        this.$emit('create-document')
+        window.electron.ipc.send('close')
       },
     }
   }

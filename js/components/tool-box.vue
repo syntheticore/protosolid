@@ -347,6 +347,7 @@
           format: 'stl',
           maxDistance: 0.01,
           maxAngle: 1.0,
+          autoSave: false,
         })
       },
     },

@@ -37,9 +37,13 @@
           span Max Angular Deviation
 
         label
-          button.button(title="Choose file location" @click="pathChanged")
+          button.button(title="Choose file location" @click="exportFile")
             fa-icon(icon="folder")
           span(:title="path") {{ path || 'Destination Path'}}
+
+        label(title="Auto-export when saving document")
+          input(type="checkbox" v-model="config.autoSave")
+          span Export on Save
 </template>
 
 
@@ -90,19 +94,12 @@
     },
 
     methods: {
-      pathChanged: function(e) {
-        if(!window.electron) return
-        window.electron.ipcRenderer.invoke('get-save-path', this.format).then(path => {
-          this.path = path || this.path
-        })
-      },
-
-      exportFile: function() {
-        const stl = this.component.real.export_stl(this.component.title)
-        if(!window.electron) return
-        window.electron.ipcRenderer.invoke('save-file', this.path, stl).then(error => {
-          alert(error || 'Saved as ' + this.path)
-        })
+      exportFile: async function() {
+        const exporter = {
+          'STL': exportStl,
+          '3MF': export3mf,
+        }[this.format]
+        this.path = await exporter(this.component, this.path)
       },
 
       remove: function() {

@@ -1,11 +1,59 @@
 import * as THREE from 'three'
 
-export function saveFile(data, filename, filetype) {
-  var blob = new Blob([data], {filetype})
-  saveBlob(blob, filename, filetype)
+const ipc = window.electron && window.electron.ipc
+
+
+export async function loadFile(filetype, path) {
+  if(window.electron) {
+    return loadFileElectron(filetype, path)
+  } else {
+    return loadFileWeb(filetype)
+  }
 }
 
-export function saveBlob(blob, filename, filetype) {
+export async function saveFile(data, filetype, path, title) {
+  if(window.electron) {
+    return saveFileElectron(data, filetype, path)
+  } else {
+    saveFileWeb(data, filetype, path || title)
+  }
+}
+
+// Electron
+async function loadFileElectron(filetype, path) {
+  path = path || await ipc.invoke('get-load-path', filetype)
+  if(!path) throw 'canceled'
+  const data = await ipc.invoke('load-file', path)
+  return {data, path}
+}
+
+async function saveFileElectron(data, filetype, path) {
+  const ipc = window.electron.ipc
+  path = path || await ipc.invoke('get-save-path', filetype)
+  if(!path) throw 'canceled'
+  await ipc.invoke('save-file', path, data)
+  return path
+}
+
+// Web
+function loadFileWeb(filetype) {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.alc'
+    document.body.appendChild(input)
+    input.addEventListener('change', (event) => {
+      document.body.removeChild(input)
+      const reader = new FileReader()
+      reader.onload = (e) => resolve({data: e.target.result})
+      reader.readAsText(event.target.files[0])
+    }, false)
+    input.click()
+  })
+}
+
+function saveFileWeb(data, filetype, filename) {
+  var blob = new Blob([data], {filetype})
   filename = filename.replace(new RegExp(' ', 'g'), '_') + '.' + filetype
   const a = document.createElement("a")
   const url = URL.createObjectURL(blob)
@@ -18,6 +66,7 @@ export function saveBlob(blob, filename, filetype) {
     window.URL.revokeObjectURL(url)
   }, 0)
 }
+
 
 export function rotationFromNormal(normal) {
   let up = THREE.Object3D.DefaultUp

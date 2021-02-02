@@ -2,6 +2,7 @@ use std::ptr;
 use std::convert::TryInto;
 
 use uuid::Uuid;
+use serde::{Serialize, Deserialize};
 
 use crate::base::*;
 use crate::geom3d::*;
@@ -50,7 +51,7 @@ impl std::fmt::Debug for dyn Curve {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CurveType {
   Line(Line),
   Arc(Arc),
@@ -192,7 +193,7 @@ pub type Wire = Vec<TrimmedCurve>;
 /// let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
 /// assert_eq!(line.midpoint(), Point3::new(0.5, 0.0, 0.0))
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Line {
   pub id: Uuid,
   pub points: (Point3, Point3)
@@ -285,7 +286,7 @@ impl Transformable for Line {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Arc {
   pub id: Uuid,
   pub center: Point3,
@@ -363,7 +364,7 @@ impl Transformable for Arc {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Circle {
   pub id: Uuid,
   pub center: Point3,
@@ -484,7 +485,7 @@ impl Transformable for Circle {
 
 const LUT_STEPS: usize = 10;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BezierSpline {
   pub id: Uuid,
   pub vertices: Vec<Point3>,

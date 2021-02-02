@@ -5,7 +5,7 @@ const electron = require('electron')
 
 window.electron = {
   fs: require('fs'),
-  ipcRenderer: electron.ipcRenderer,
+  ipc: electron.ipcRenderer,
   platform: require('os').platform(),
   platformVersion: require('os').release(),
 }

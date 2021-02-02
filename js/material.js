@@ -5,7 +5,6 @@ export class Material {
     this.title = title
     this.density = 1.0 // g/cm^3
     this.displayMaterial = new THREE.MeshPhysicalMaterial({
-      side: THREE.DoubleSide, //XXX remove
       clearcoatRoughness: 0.05,
     })
   }

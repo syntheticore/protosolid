@@ -1,38 +1,35 @@
 <template lang="pug">
   .app-menu(:class="{open: open}")
     .file-menu
-      button.button.settings-btn(@click="openSettings" title="Preferences")
+      button.button.settings-btn(@click="toggleSettings" title="Preferences")
         fa-icon(icon="sliders-h")
       .about
         fa-icon(icon="atom")
         h1 Alchemy
         .version Version 0.11
 
-      ul.actions
+      ul.actions(@click="$root.$emit('close-widgets')")
         li
           button(@click="$emit('create-document')")
             fa-icon(icon="file" fixed-width)
             span New Document
         li
-          button(disabled="disabled")
-            fa-icon(icon="file-import" fixed-width)
+          button(@click="$emit('open-document')")
+            fa-icon(icon="folder-open" fixed-width)
             span Open...
         li
-          button(disabled="disabled")
+          button(@click="$emit('save-document')")
             fa-icon(icon="save" fixed-width)
             span Save
         li
-          button(disabled="disabled")
+          button(@click="$emit('save-document-as')")
             fa-icon(icon="save" fixed-width)
             span Save as...
         li
           button(disabled="disabled")
             fa-icon(icon="file-import" fixed-width)
             span Import...
-        li
-          button(@click="exportFile")
-            fa-icon(icon="file-export" fixed-width)
-            span Export
+
         //- li
         //-   button(disabled="disabled")
         //-     fa-icon(icon="network-wired" fixed-width)
@@ -40,7 +37,7 @@
 
       ul.recents
 
-    component.panel(:is="activePanel", :component="document.activeComponent")
+    PreferencesView.panel
 
 </template>
 
@@ -153,7 +150,6 @@
 
 <script>
   import PreferencesView from './preferences-view.vue'
-  import ExportStl from './export-stl.vue'
 
   export default {
     name: 'AppMenu',
@@ -164,31 +160,19 @@
 
     components: {
       PreferencesView,
-      ExportStl,
     },
 
     data() {
       return {
         open: false,
-        activePanel: null,
       }
     },
 
     mounted() {},
 
     methods: {
-      openSettings: function() {
-        if(this.activePanel != PreferencesView) {
-          this.activePanel = PreferencesView
-          this.open = true
-        } else {
-          this.open = !this.open
-        }
-      },
-
-      exportFile: function() {
-        this.open = true
-        this.activePanel = ExportStl
+      toggleSettings: function() {
+        this.open = !this.open
       },
     },
   }

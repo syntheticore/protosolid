@@ -1,3 +1,5 @@
+use serde::{Serialize, Deserialize};
+
 use crate::base::*;
 use crate::curve::*;
 use crate::curve::intersection::CurveIntersection;
@@ -21,7 +23,7 @@ impl core::fmt::Debug for dyn Surface {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SurfaceType {
   Planar(Plane),
   Cylindrical(CylindricalSurface),
@@ -71,7 +73,7 @@ impl TrimmedSurface {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Plane {
   pub origin: Point3,
   pub u: Vec3,
@@ -175,13 +177,12 @@ impl Surface for Plane {
   fn tesselate(&self, _resolution: i32, bounds: &Wire) -> Mesh {
     let mut bounds = bounds.clone();
     let trans = self.as_transform();
-    let lay_flat = trans.invert();
     for curve in &mut bounds {
       curve.transform(&trans)
     }
     let polyline = geom2d::tesselate_wire(&bounds);
     let mut mesh = geom2d::tesselate_polygon(polyline, self.normal());
-    mesh.transform(&lay_flat);
+    mesh.transform(&trans.invert());
     mesh
   }
 
@@ -199,7 +200,7 @@ impl Transformable for Plane {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CylindricalSurface {
   pub origin: Point3,
   pub radius: f64,

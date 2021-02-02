@@ -290,7 +290,7 @@ impl Controllable for Arc {
 
   fn get_snap_points(&self) -> Vec<Point3> {
     let endpoints = self.endpoints();
-    vec![self.center, endpoints.0, endpoints.1]
+    vec![self.center, endpoints.0, endpoints.1, self.midpoint()]
   }
 }
 

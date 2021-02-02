@@ -81,7 +81,7 @@
     color: $bright1
     padding: 7px 14px
     box-shadow: 0 0 8px rgba(black, 0.6)
-    text-shadow: 0 -1px 0px black
+    // text-shadow: 0 -1px 0px black
     background: $dark2 * 1.1
     margin-bottom: 14px
     border-bottom: 1px solid $dark1 * 1.2

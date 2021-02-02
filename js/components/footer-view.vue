@@ -11,7 +11,7 @@
     transition(name="fade")
       .selection-info.bordered(v-if="selection")
         div
-          span # Objects
+          //- span # Objects
           span 1 {{type}}
 
         div(v-if="type == 'Solid'")

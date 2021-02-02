@@ -68,7 +68,7 @@
     margin-top: 1px
     border-top: 1px solid $dark1 * 1.1
     box-shadow: 0 0 6px rgba(black, 0.4)
-    text-shadow: 0 -1px 0px black
+    // text-shadow: 0 -1px 0px black
     background: $dark2 * 1.1
     transition: all 0.25s
     overflow: hidden

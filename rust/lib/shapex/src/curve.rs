@@ -14,11 +14,13 @@ pub mod intersection;
 
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
-  fn unsample(&self, p: &Point3) -> f64;
-  fn tesselate(&self) -> PolyLine;
-  fn endpoints(&self) -> (Point3, Point3);
+  fn unsample(&self, p: &Point3) -> f64; // p is expected to touch the curve
   fn length_between(&self, start: f64, end: f64) -> f64;
-  // fn param_at_length(&self, length: f64) -> f64;
+  fn tesselate(&self) -> PolyLine;
+
+  fn endpoints(&self) -> (Point3, Point3) {
+    (self.sample(0.0), self.sample(1.0))
+  }
 
   fn other_endpoint(&self, point: &Point3) -> Point3 {
     let (start, end) = self.endpoints();
@@ -37,6 +39,14 @@ pub trait Curve: Transformable {
 
   fn length(&self) -> f64 {
     self.length_between(0.0, 1.0)
+  }
+
+  fn param_at_length(&self, length: f64) -> f64 {
+    length / self.length()
+  }
+
+  fn midpoint(&self) -> Point3 {
+    self.sample(0.5)
   }
 
   // fn closest_point(&self, p: Point3) -> Point3 {
@@ -126,7 +136,7 @@ impl CurveType {
   pub fn split_multi(&self, others: &Vec<Self>) -> Vec<Self> {
     let mut segments = vec![self.clone()];
     for other in others.iter() {
-      if self == other { continue } //OPTIMIZE Compare by ID
+      if self == other { continue } //OPT Compare by ID
       segments = segments.iter().flat_map(|own| {
         own.split(&other)
       }).collect();
@@ -207,10 +217,6 @@ impl Line {
     }
   }
 
-  pub fn midpoint(&self) -> Point3 {
-    (self.points.0 + self.points.1.to_vec()) / 2.0
-  }
-
   pub fn tangent(&self) -> Vec3 {
     (self.points.1 - self.points.0).normalize()
   }
@@ -259,8 +265,8 @@ impl Curve for Line {
     self.points.0 + vec * t
   }
 
-  fn unsample(&self, _p: &Point3) -> f64 {
-    0.0 //XXX
+  fn unsample(&self, p: &Point3) -> f64 {
+    (p - self.points.0).magnitude() / self.length()
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -349,10 +355,6 @@ impl Curve for Arc {
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
     std::f64::consts::PI * 2.0 * self.radius * (start - end).abs()
-  }
-
-  fn endpoints(&self) -> (Point3, Point3) {
-    (self.sample(0.0), self.sample(1.0))
   }
 }
 
@@ -619,6 +621,14 @@ impl Curve for BezierSpline {
 
   fn endpoints(&self) -> (Point3, Point3) {
     (self.vertices[0], *self.vertices.last().unwrap())
+  }
+
+  fn param_at_length(&self, length: f64) -> f64 {
+    length / self.length() //XXX take non uniform chord lengths into account
+  }
+
+  fn midpoint(&self) -> Point3 {
+    self.sample(self.param_at_length(self.length() / 2.0))
   }
 }
 

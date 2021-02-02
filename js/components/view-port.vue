@@ -228,32 +228,21 @@
     watch: {
       document: function(document, oldDocument) {
         this.transloader.unloadTree(oldDocument.tree, true)
-        this.transloader.setDocument(document)
-        this.componentChanged(document.tree, true)
       },
 
       activeComponent: function() {
+        this.transloader.setActiveComponent(this.activeComponent)
         this.componentChanged(this.document.tree, true)
         this.$root.$emit('activate-toolname', 'Manipulate')
       },
 
-      selection: function(selection, oldSelection) {
-        this.transloader.unselect(oldSelection)
-        this.transloader.select(selection)
+      selection: function(selection) {
+        this.transloader.setSelection(selection)
         this.renderer.render()
       },
 
-      highlight: function(highlight, oldHighlight) {
-        if(oldHighlight) {
-          if(oldHighlight === this.selection ||
-            (oldHighlight.component && oldHighlight.component.hasAncestor(this.selection))
-          ) {
-            this.transloader.select(oldHighlight)
-          } else {
-            this.transloader.unhighlight(oldHighlight)
-          }
-        }
-        this.transloader.highlight(highlight)
+      highlight: function(highlight) {
+        this.transloader.setHighlight(highlight)
         this.renderer.render()
       },
 
@@ -305,7 +294,7 @@
         this.onLoadElement.bind(this),
         this.onUnloadElement.bind(this),
       )
-      this.transloader.setDocument(this.document)
+      this.transloader.setActiveComponent(this.activeComponent)
       this.transloader.loadTree(this.document.tree, true)
 
       // Events

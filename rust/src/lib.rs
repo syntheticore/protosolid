@@ -6,6 +6,7 @@ use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
 use solvo::*;
+use shapex::*;
 
 
 #[cfg(feature = "wee_alloc")]
@@ -512,12 +513,12 @@ impl JsComponent {
     let comp = self.real.borrow();
     let mesh = comp.bodies[0].tesselate();
     log!("{:?}", mesh);
-    export::export_stl(&mesh, title)
+    shapex::io::stl::export(&mesh, title)
   }
 
   pub fn export_3mf(&self) -> String {
     let meshes = Self::tesselate_all(&self.real);
-    export::export_threemf(&meshes, "millimeter")
+    shapex::io::threemf::export(&meshes, "millimeter")
   }
 
   fn tesselate_all(comp: &Ref<Component>) -> Vec<Mesh> {
@@ -531,10 +532,10 @@ impl JsComponent {
 
   pub fn serialize(&self) -> String {
     let comp = self.real.borrow();
-    io::export_ron(&comp)
+    solvo::io::export_ron(&comp)
   }
 
   pub fn unserialize(&mut self, dump: String) {
-    self.real = rc(io::import_ron(dump));
+    self.real = rc(solvo::io::import_ron(dump));
   }
 }

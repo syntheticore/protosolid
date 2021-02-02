@@ -6,11 +6,11 @@ use crate::surface;
 use crate::solid;
 
 
-pub fn export_ron(solid: &solid::Solid) -> String {
+pub fn export(solid: &solid::Solid) -> String {
   ron::to_string(&dump_solid(solid)).unwrap()
 }
 
-pub fn import_ron(dump: String) -> solid::Solid {
+pub fn import(dump: String) -> solid::Solid {
   let solid: Solid = ron::from_str(&dump).unwrap();
   undump_solid(&solid)
 }
@@ -97,7 +97,7 @@ mod tests {
   #[test]
   fn stl() {
     let cube = features::make_cube(1.5, 1.5, 1.5);
-    let ron = super::export_ron(&cube);
+    let ron = super::export(&cube);
     println!("{}", ron);
   }
 }

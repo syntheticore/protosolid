@@ -12,7 +12,7 @@ pub use mesh::*;
 
 pub mod geom2d;
 pub mod geom3d;
-pub mod export;
+pub mod io;
 
 // #[cfg(test)]
 pub mod test_data;

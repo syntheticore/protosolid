@@ -246,8 +246,7 @@
       highlight: function(highlight, oldHighlight) {
         if(oldHighlight) {
           if(oldHighlight === this.selection ||
-              (oldHighlight.component &&
-              oldHighlight.component.hasAncestor(this.selection))
+            (oldHighlight.component && oldHighlight.component.hasAncestor(this.selection))
           ) {
             this.transloader.select(oldHighlight)
           } else {

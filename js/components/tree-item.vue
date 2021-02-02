@@ -107,7 +107,6 @@
 <style lang="stylus" scoped>
   .tree-item
     margin-left: 23px
-    pointer-events: auto
     > header
       display: flex
       align-items: center

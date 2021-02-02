@@ -1,7 +1,7 @@
 use crate::mesh::Mesh;
 
 
-pub fn export_threemf(meshes: &Vec<Mesh>, unit: &str) -> String {
+pub fn export(meshes: &Vec<Mesh>, unit: &str) -> String {
   let mut file = format!(r##"<?xml version="1.0" encoding="UTF-8"?>
 <model unit="{}"
   xml:lang="en-US"

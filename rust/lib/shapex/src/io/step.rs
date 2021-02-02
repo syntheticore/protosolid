@@ -1,6 +1,6 @@
 use crate::Solid;
 
-pub fn export_step(
+pub fn export(
   _solid: &Solid,
   name: &str,
   description: &str,

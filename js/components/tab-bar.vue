@@ -11,7 +11,7 @@
       li(v-for="doc in documents"
          @click="$emit('update:active-document', doc)"
          :class="{active: doc == activeDocument}")
-        span.title {{ doc.title }}
+        span.title {{ doc.filePath || 'Untitled Document' }} {{ doc.hasChanges ? '*' : null }}
         button(@click.stop="$emit('delete-document', doc)")
           fa-icon(icon="times")
 
@@ -90,7 +90,8 @@
     .window-controls button:last-child
       border-radius: 0
     .app-menu-btn
-      margin-left: 4px
+      margin-left: 3px
+      margin-right: 4px
 
   .app-menu-btn
     // color: #ff9f90

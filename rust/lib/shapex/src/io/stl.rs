@@ -1,7 +1,7 @@
 use crate::mesh::Mesh;
 
 
-pub fn export_stl(mesh: &Mesh, name: &str) -> String {
+pub fn export(mesh: &Mesh, name: &str) -> String {
   let mut file = format!("solid {}", name);
   for i in (0..mesh.faces.len() - 2).step_by(3) {
     file.push_str(&format!("\nfacet normal {} {} {}", 0.0, 0.0, 0.0));
@@ -26,6 +26,6 @@ use crate::features::make_cube;
   #[test]
   fn stl() {
     let cube = make_cube(1.5, 1.5, 1.5);
-    let _stl = super::export_stl(&cube.tesselate(), "Cube");
+    let _stl = super::export(&cube.tesselate(), "Cube");
   }
 }

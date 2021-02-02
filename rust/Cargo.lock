@@ -8,6 +8,7 @@ dependencies = [
  "js-sys",
  "rand 0.7.3",
  "serde",
+ "shapex",
  "solvo",
  "uuid",
  "wasm-bindgen",

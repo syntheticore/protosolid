@@ -10,13 +10,14 @@ export default class Document {
     const tree = new wasm.JsComponent()
     this.tree = new Component(tree, null, 'Main Assembly')
 
-    this.title = 'Untitled Document'
     this.activeComponent = this.tree
     this.activeView = null
     this.activePose = null
     this.isPoseDirty = false
     this.isSetDirty = true
     this.filePath = null
+    this.hasChanges = false
+    this.isFresh = true
 
     this.views = [
       {
@@ -61,9 +62,11 @@ export default class Document {
     })
     console.log(json)
     try {
-      this.filePath = await saveFile(json, 'alc', as ? null : this.filePath, this.title)
+      this.filePath = await saveFile(json, 'alc', as ? null : this.filePath)
+      this.hasChanges = false
     } catch(error) {
       if(error != 'canceled') alert(error)
+      throw error
     }
   }
 
@@ -73,11 +76,16 @@ export default class Document {
       file = await loadFile('alc', path)
     } catch(error) {
       if(error != 'canceled') alert(error)
-      return
+      throw error
     }
     this.filePath = file.path
+    this.isFresh = false
     const doc = JSON.parse(file.data)
     console.log(doc)
     this.tree.unserialize(doc.tree)
+  }
+
+  dispose() {
+    this.tree.free()
   }
 }

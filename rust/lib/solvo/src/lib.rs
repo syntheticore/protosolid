@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use uuid::Uuid;
 
-pub use shapex::*;
+use shapex::*;
 
 pub mod io;
 

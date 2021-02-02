@@ -11,7 +11,7 @@
       @open-document="loadDocument"
       @save-document="saveDocument"
       @save-document-as="saveDocumentAs"
-      @delete-document="deleteDocument"
+      @delete-document="closeDocument"
     )
     DocumentView(
       :document="activeDocument"
@@ -118,6 +118,11 @@
         this.$root.$emit('keyup', e.keyCode)
       });
 
+      this.$root.$on('component-changed', () => {
+        this.activeDocument.hasChanges = true
+        this.activeDocument.isFresh = false
+      })
+
       if(!window.electron) return
       ipc.send('vue-ready')
     },
@@ -131,11 +136,14 @@
         })
       },
 
-      loadDocument: async function(path) {
+      loadDocument: function(path) {
         const doc = new Document(window.alcWasm)
-        await doc.load(path)
-        this.activeDocument = doc
-        this.documents.push(doc)
+        doc.load(path).then(() => {
+          // Close untouched documents on load
+          if(this.activeDocument.isFresh) this.deleteDocument(this.activeDocument)
+          this.activeDocument = doc
+          this.documents.push(doc)
+        })
       },
 
       saveDocument: async function() {
@@ -146,18 +154,25 @@
         this.activeDocument.save(true)
       },
 
-      deleteDocument: function(doc) {
+      closeDocument: function(doc) {
+        const name = doc.filePath || 'Untitled Document'
+        if(doc.hasChanges &&
+          !window.confirm(name + ' has unsaved changes. Close anyway?')
+        ) return
         const index = this.documents.indexOf(doc)
-        this.documents = this.documents.filter(d => d !== doc)
+        this.deleteDocument(doc)
         if(!this.documents.length) {
           this.createDocument()
         } else if(this.activeDocument === doc) {
           this.activeDocument = this.documents[Math.min(index, this.documents.length - 1)]
         }
+      },
+
+      deleteDocument: function(doc) {
+        const index = this.documents.indexOf(doc)
+        this.documents = this.documents.filter(d => d !== doc)
         // Free Rust memory when old doc has been removed by viewport
-        setTimeout(() => {
-          if(doc.tree) doc.tree.free()
-        })
+        setTimeout(() => doc.dispose() )
       },
     },
   }

@@ -2,7 +2,6 @@ use earcutr;
 
 use crate::base::*;
 use crate::curve::*;
-use crate::geom2d;
 use crate::mesh::Mesh;
 
 
@@ -11,7 +10,8 @@ pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
 }
 
 pub fn tesselate_polygon(vertices: PolyLine, normal: Vec3) -> Mesh {
-  assert!(!geom2d::is_clockwise(&vertices));
+  #[cfg(debug_assertions)]
+  assert!(!is_clockwise(&vertices));
   let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.y] ).collect();
   let faces: Vec<usize> = earcutr::earcut(&flat_vertices, &vec![], 2);
   let mut normals = Vec::with_capacity(vertices.len());

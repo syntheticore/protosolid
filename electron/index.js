@@ -292,20 +292,22 @@ ipcMain.on('vue-ready', function() {
 });
 
 ipcMain.handle('get-save-path', (e, format) => {
+  const name = (format == 'alc' ? 'Alchemy Documents' : format + ' Files')
   return dialog.showSaveDialog({
     properties: ['createDirectory', 'showOverwriteConfirmation'],
     filters: [
-      { name: format + ' Files', extensions: [format.toLowerCase()] },
+      { name, extensions: [format.toLowerCase()] },
       { name: 'All Files', extensions: ['*'] },
     ]
   }).then(e => e.filePath )
 })
 
 ipcMain.handle('get-load-path', (e, format) => {
+  const name = (format == 'alc' ? 'Alchemy Documents' : format + ' Files')
   return dialog.showOpenDialog({
     properties: [],
     filters: [
-      { name: format + ' Files', extensions: [format.toLowerCase()] },
+      { name, extensions: [format.toLowerCase()] },
       { name: 'All Files', extensions: ['*'] },
     ]
   }).then(e => e.filePaths[0] )

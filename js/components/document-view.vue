@@ -156,6 +156,8 @@
           }
           this.previewView = null
           this.dirtyView = null
+          this.selection = null
+          this.highlight = null
         },
       },
     },

@@ -206,8 +206,9 @@ export default class Transloader {
     const selected = this.isSelected(elem)
     const highlighted = this.isHighlighted(elem)
     return {
-      curve: highlighted ? this.renderer.materials.highlightLine :
-        selected ? this.renderer.materials.selectionLine : this.renderer.materials.line,
+      curve: selected ? this.renderer.materials.selectionLine :
+        highlighted ? this.renderer.materials.highlightLine :
+          this.renderer.materials.line,
       region: highlighted ? this.renderer.materials.highlightRegion :
         this.renderer.materials.region,
       face: highlighted ? this.renderer.materials.highlightSurface :

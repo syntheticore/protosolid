@@ -40,6 +40,7 @@
         @mouseup="mouseUp"
         @mousedown="handleMouseDown($event, handle)"
         @mousemove="handleMouseMove($event, handle)"
+        @contextmenu.prevent
       )
 
     //- Floating UI widgets

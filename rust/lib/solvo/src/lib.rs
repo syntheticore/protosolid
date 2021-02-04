@@ -1,5 +1,5 @@
+use std::ptr;
 use std::rc::Rc;
-use std::convert::TryInto;
 use std::collections::HashSet;
 
 use uuid::Uuid;
@@ -13,7 +13,8 @@ pub mod io;
 pub struct Component {
   pub id: Uuid,
   pub sketch: Sketch,
-  pub bodies: Vec<Solid>,
+  // pub bodies: Vec<Solid>,
+  pub compound: Compound,
   pub children: Vec<Ref<Self>>,
 }
 
@@ -36,22 +37,42 @@ impl Component {
 }
 
 
+pub type Profile = Vec<Wire>;
+
+
 #[derive(Debug, Default)]
 pub struct Sketch {
   pub elements: Vec<Ref<CurveType>>,
 }
 
 impl Sketch {
+  pub fn get_profiles(&self, include_outer: bool) -> Vec<Profile> {
+    let regions = self.get_regions(include_outer);
+    regions.iter().map(|wire| {
+      // Find all other wires enclosed by this one
+      let mut cutouts = vec![];
+      for other in &regions {
+        if ptr::eq(&wire, &other) { continue }
+        if geom2d::wire_in_wire(other, wire) {
+          cutouts.push(other.clone());
+        }
+      }
+      let mut profile = vec![wire.clone()];
+      // Only leave the outermost inner wires
+      let others = cutouts.clone();
+      profile.append(&mut cutouts.into_iter().filter(|wire|
+        !others.iter().any(|other| geom2d::wire_in_wire(wire, other))
+      ).collect());
+      profile
+    }).collect()
+  }
+
   pub fn get_regions(&self, include_outer: bool) -> Vec<Wire> {
     let cut_elements = Self::all_split(&self.elements);
-    let mut circles = vec![];
-    let mut others = vec![];
-    for elem in cut_elements {
-      match elem.base {
-        CurveType::Circle(_) => circles.push(elem),
-        _ => others.push(elem),
-      }
-    }
+    let (circles, mut others) = cut_elements.into_iter().partition(|elem| match elem.base {
+      CurveType::Circle(_) => true,
+      _ => false,
+    });
     Self::remove_dangling_segments(&mut others);
     let islands = Self::build_islands(&others);
     let mut regions: Vec<Wire> = islands.iter()
@@ -75,7 +96,7 @@ impl Sketch {
           vec![],
           island,
           &mut used_forward,
-          &mut used_backward
+          &mut used_backward,
         );
         for region in &mut loops { geom2d::straighten_bounds(region) }
         regions.append(&mut loops);
@@ -149,7 +170,7 @@ impl Sketch {
   ) -> Vec<Region> {
     let mut regions = vec![];
     // Traverse edges only once in every direction
-    let start_elem_id = as_controllable(&start_elem.cache).id();
+    let start_elem_id = as_id(&start_elem.cache).id();
     if start_point.almost(start_elem.bounds.0) {
       if used_forward.contains(&start_elem_id) { return regions }
       used_forward.insert(start_elem_id);
@@ -164,7 +185,7 @@ impl Sketch {
     let mut connected_elems: Vec<&TrimmedCurve> = all_elements.iter().filter(|other_elem| {
       let (other_start, other_end) = other_elem.bounds;
       (end_point.almost(other_start) || end_point.almost(other_end)) &&
-        as_controllable(&other_elem.cache).id() != start_elem_id
+        as_id(&other_elem.cache).id() != start_elem_id
     }).collect();
     if connected_elems.len() > 0 {
       // Sort connected segments in clockwise order
@@ -177,7 +198,7 @@ impl Sketch {
       });
       // Follow the leftmost segment to complete loop in anti-clockwise order
       let next_elem = connected_elems[0];
-      if as_controllable(&path[0].cache).id() == as_controllable(&next_elem.cache).id() {
+      if as_id(&path[0].cache).id() == as_id(&next_elem.cache).id() {
         // We are closing a loop
         regions.push(path);
       } else {
@@ -224,130 +245,7 @@ impl Sketch {
 }
 
 
-trait Constraint {}
-
-
-pub trait Controllable {
-  fn id(&self) -> Uuid;
-  fn get_handles(&self) -> Vec<Point3>;
-  fn set_handles(&mut self, handles: Vec<Point3>);
-  fn get_snap_points(&self) -> Vec<Point3>;
-
-  fn set_initial_handles(&mut self, handles: Vec<Point3>) {
-    self.set_handles(handles);
-  }
-}
-
-impl Controllable for Line {
-  fn id(&self) -> Uuid {
-    self.id
-  }
-
-  fn get_handles(&self) -> Vec<Point3> {
-    vec![self.points.0, self.points.1]
-  }
-
-  fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.points = (handles[0], handles[1]);
-  }
-
-  fn get_snap_points(&self) -> Vec<Point3> {
-    let mut points = self.get_handles();
-    points.push(self.midpoint());
-    points
-  }
-}
-
-impl Controllable for Arc {
-  fn id(&self) -> Uuid {
-    self.id
-  }
-
-  fn get_handles(&self) -> Vec<Point3> {
-    let endpoints = self.endpoints();
-    vec![self.center, endpoints.0, endpoints.1]
-  }
-
-  // Three points on arc
-  fn set_initial_handles(&mut self, handles: Vec<Point3>) {
-    let [p1, p2, p3]: [Point3; 3] = handles.try_into().unwrap();
-    let circle = Circle::from_points(p1, p2, p3).unwrap();
-    self.center = circle.center;
-    self.radius = circle.radius;
-    self.bounds.0 = circle.unsample(&p1);
-    self.bounds.1 = circle.unsample(&p3);
-  }
-
-  // Endpoints + center
-  fn set_handles(&mut self, handles: Vec<Point3>) {
-    let [center, start, end]: [Point3; 3] = handles.try_into().unwrap();
-    self.center = center;
-    self.radius = (start - center).magnitude();
-    let circle = Circle::new(self.center, self.radius);
-    self.bounds.0 = circle.unsample(&start);
-    self.bounds.1 = circle.unsample(&end);
-  }
-
-  fn get_snap_points(&self) -> Vec<Point3> {
-    let endpoints = self.endpoints();
-    vec![self.center, endpoints.0, endpoints.1, self.midpoint()]
-  }
-}
-
-
-impl Controllable for Circle {
-  fn id(&self) -> Uuid {
-    self.id
-  }
-
-  fn get_handles(&self) -> Vec<Point3> {
-    vec![self.center]
-  }
-
-  fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.center = handles[0];
-    if handles.len() > 1 {
-      let p = handles[1];
-      self.radius = handles[0].distance(p);
-    }
-  }
-
-  fn get_snap_points(&self) -> Vec<Point3> {
-    vec![self.center]
-  }
-}
-
-
-impl Controllable for BezierSpline {
-  fn id(&self) -> Uuid {
-    self.id
-  }
-
-  fn get_handles(&self) -> Vec<Point3> {
-    self.vertices.clone()
-  }
-
-  fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.vertices = handles;
-    self.update();
-  }
-
-  fn get_snap_points(&self) -> Vec<Point3> {
-    self.get_handles()
-  }
-}
-
-
-pub fn as_controllable(elem: &CurveType) -> &dyn Controllable {
-  match elem {
-    CurveType::Line(line) => line,
-    CurveType::Arc(arc) => arc,
-    CurveType::Circle(circle) => circle,
-    CurveType::BezierSpline(spline) => spline,
-  }
-}
-
-pub fn as_controllable_mut(elem: &mut CurveType) -> &mut dyn Controllable {
+pub fn as_id(elem: &CurveType) -> &dyn Identity {
   match elem {
     CurveType::Line(line) => line,
     CurveType::Arc(arc) => arc,

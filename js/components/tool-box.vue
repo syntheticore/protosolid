@@ -344,7 +344,7 @@
         this.activeComponent.exportConfigs.push({
           title: 'High Detail',
           path: null,
-          format: 'stl',
+          format: 'STL',
           maxDistance: 0.01,
           maxAngle: 1.0,
           autoSave: false,

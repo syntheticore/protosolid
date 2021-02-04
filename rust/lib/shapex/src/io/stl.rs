@@ -1,4 +1,4 @@
-use crate::mesh::Mesh;
+use crate::Mesh;
 
 
 pub fn export(mesh: &Mesh, name: &str) -> String {
@@ -20,7 +20,7 @@ pub fn export(mesh: &Mesh, name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-// use super::*;
+use crate::mesh::Meshable;
 use crate::features::make_cube;
 
   #[test]

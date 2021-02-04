@@ -7,9 +7,7 @@ use serde::{Serialize, Deserialize};
 use crate::base::*;
 use crate::geom3d::*;
 use crate::geom2d;
-use intersection::CurveIntersection;
-
-pub mod intersection;
+use crate::intersection;
 
 
 pub trait Curve: Transformable {
@@ -171,6 +169,10 @@ impl TrimmedCurve {
     let (start, end) = self.bounds;
     if p.almost(start) { end } else { start }
   }
+
+  // pub fn intersect(&self, other: Self) -> IntersectionType {
+    //XXX switch Cross and Touch to Extended
+  // }
 }
 
 impl Transformable for TrimmedCurve {
@@ -227,16 +229,17 @@ impl Line {
 
   pub fn split_with(&self, cutter: &CurveType) -> Vec<Line> {
     match intersection::intersect(&self.clone().into_enum(), cutter) {
-      CurveIntersection::None
-      | CurveIntersection::Contained
-      | CurveIntersection::Touch(_)
-      | CurveIntersection::Extended(_)
+      intersection::CurveIntersectionType::None
+      | intersection::CurveIntersectionType::Contained
+      | intersection::CurveIntersectionType::Touch(_)
+      | intersection::CurveIntersectionType::Extended(_)
       => vec![self.clone()],
 
-      CurveIntersection::Cross(mut points)
-      | CurveIntersection::Pierce(mut points)
+      intersection::CurveIntersectionType::Cross(hits)
+      | intersection::CurveIntersectionType::Pierce(hits)
       => { //XXX points are not sorted along line
-        // Check if intersection goes exactly through endpoint
+        let mut points: Vec<Point3> = hits.iter().map(|hit| hit.point ).collect();
+        // Are we piercing or being pierced?
         if points[0].almost(self.points.0) || points[0].almost(self.points.1) {
           return vec![self.clone()];
         }
@@ -256,6 +259,12 @@ impl Line {
 
   pub fn into_enum(self) -> CurveType {
     CurveType::Line(self)
+  }
+}
+
+impl Identity for Line {
+  fn id(&self) -> Uuid {
+    self.id
   }
 }
 
@@ -327,6 +336,12 @@ impl Arc {
 
   pub fn into_enum(self) -> CurveType {
     CurveType::Arc(self)
+  }
+}
+
+impl Identity for Arc {
+  fn id(&self) -> Uuid {
+    self.id
   }
 }
 
@@ -416,10 +431,10 @@ impl Circle {
   pub fn split_with_line(&self, line: &Line) -> Option<(Arc, Arc)> {
     let intersection = intersection::line_circle(line, self);
     match intersection {
-      CurveIntersection::Cross(points) => {
-        if points.len() == 2 {
-          let t1 = self.unsample(&points[0]);
-          let t2 = self.unsample(&points[1]);
+      intersection::CurveIntersectionType::Cross(hits) => {
+        if hits.len() == 2 {
+          let t1 = self.unsample(&hits[0].point);
+          let t2 = self.unsample(&hits[1].point);
           Some((
             Arc::new(self.center, self.radius, t1, t2),
             Arc::new(self.center, self.radius, t2, t1),
@@ -440,6 +455,12 @@ impl Circle {
 
   pub fn into_enum(self) -> CurveType {
     CurveType::Circle(self)
+  }
+}
+
+impl Identity for Circle {
+  fn id(&self) -> Uuid {
+    self.id
   }
 }
 
@@ -594,6 +615,12 @@ impl BezierSpline {
 
   pub fn into_enum(self) -> CurveType {
     CurveType::BezierSpline(self)
+  }
+}
+
+impl Identity for BezierSpline {
+  fn id(&self) -> Uuid {
+    self.id
   }
 }
 

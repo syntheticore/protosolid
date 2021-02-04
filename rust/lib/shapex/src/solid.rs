@@ -6,17 +6,19 @@ use uuid::Uuid;
 use crate::base::*;
 use crate::curve::*;
 use crate::surface::*;
-use crate::mesh::*;
+
+mod volume;
+mod boolean;
+mod tesselation;
 
 pub mod features;
+pub use boolean::Boolean;
+pub use volume::Volume;
 
 
-#[derive(Debug)]
-pub enum BooleanType {
-  Add,
-  Subtract,
-  Intersection,
-  Difference,
+#[derive(Debug, Default)]
+pub struct Compound {
+  pub solids: Vec<Solid>,
 }
 
 
@@ -175,33 +177,10 @@ impl Solid {
     Ok(())
   }
 
-  pub fn boolean(&mut self, _tool: Self, _op: BooleanType) -> Vec<Solid> {
-    vec![Self::new()]
-  }
-
-  pub fn boolean_all(tool: Self, others: &mut Vec<Solid>, _op: BooleanType) {
-    others.push(tool);
-  }
-
-  pub fn tesselate(&self) -> Mesh {
-    let mut mesh = Mesh::default();
-    for shell in &self.shells {
-      let is_inner = !ptr::eq(shell, &self.shells[0]);
-      for face in &shell.faces {
-        let mut face_mesh = face.borrow().get_surface().tesselate();
-        if is_inner { face_mesh.invert_normals() }
-        mesh.append(face_mesh);
-      }
+  pub fn into_compound(self) -> Compound {
+    Compound {
+      solids: vec![self],
     }
-    mesh
-  }
-
-  pub fn area(&self) -> f64 {
-    self.shells.iter().fold(0.0, |acc, shell| acc + shell.area() )
-  }
-
-  pub fn volume(&self) -> f64 {
-    self.shells[0].volume() - self.shells.iter().skip(1).fold(0.0, |acc, shell| acc + shell.volume() )
   }
 }
 
@@ -419,15 +398,6 @@ impl Shell {
       },
       _ => todo!()
     }
-  }
-
-  pub fn area(&self) -> f64 {
-    self.faces.iter()
-    .fold(0.0, |acc, face| acc + face.borrow().get_surface().area() )
-  }
-
-  pub fn volume(&self) -> f64 {
-    0.0 //XXX
   }
 
   pub fn print(&self) {

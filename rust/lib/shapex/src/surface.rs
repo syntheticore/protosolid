@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::base::*;
 use crate::curve::*;
-use crate::curve::intersection::CurveIntersection;
+
 use crate::geom2d;
 use crate::geom3d::*;
 use crate::mesh::Mesh;
@@ -13,7 +13,7 @@ pub trait Surface: Transformable {
   // fn unsample(&self, p: Point3) -> (f64, f64);
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
   fn tesselate(&self, resolution: i32, bounds: &Wire) -> Mesh;
-  fn flip(&mut self);
+  fn flip(&mut self); //XXX use Face::flip_normal instead
 }
 
 impl core::fmt::Debug for dyn Surface {
@@ -102,35 +102,6 @@ impl Plane {
 
   pub fn normal(&self) -> Vec3 {
     self.u.cross(self.v)
-  }
-
-  pub fn intersect_line(&self, line: (Point3, Point3)) -> CurveIntersection {
-    let n = self.normal();
-    let u = line.1 - line.0;
-    let n_dot_u = n.dot(u);
-    if n_dot_u <= EPSILON {
-      // Line is parallel to this plane
-      if self.contains_point(line.0) {
-        // Line lies completely on this plane
-        CurveIntersection::Contained
-      } else {
-        CurveIntersection::None
-      }
-    } else {
-      let s = n.dot(self.origin - line.0) / n_dot_u;
-      let p = line.0 + u * s;
-      if s >= 0.0 && s <= 1.0 {
-        // Line segment intersects this plane
-        if s == 0.0 || s == 1.0 {
-          CurveIntersection::Pierce(vec![p])
-        } else {
-          CurveIntersection::Cross(vec![p])
-        }
-      } else {
-        // The ray along the given line intersects this plane
-        CurveIntersection::Extended(vec![p])
-      }
-    }
   }
 
   pub fn contains_point(&self, p: Point3) -> bool {

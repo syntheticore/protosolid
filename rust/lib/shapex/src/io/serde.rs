@@ -22,15 +22,22 @@ pub fn import(dump: String) -> solid::Solid {
 fn undump_solid(solid: Solid) -> solid::Solid {
   solid::Solid {
     id: Uuid::new_v4(),
+
+    // Shells
     shells: solid.shells.into_iter().map(|shell| {
+
+      // Vertices
       let vertices: Vec<Ref<solid::Vertex>> = shell.vertices.into_iter().map(|vertex| rc(solid::Vertex {
         half_edge: Weak::new(),
         point: vertex.point,
       })).collect();
+
+      // Faces
       let mut all_half_edges = vec![];
       let faces = shell.faces.iter().map(|face| {
-
+        // Rings
         let rings: Vec<Ref<solid::Ring>> = face.rings.iter().map(|ring| {
+          // Half Edges
           let half_edges: Vec<Ref<solid::HalfEdge>> = ring.iter().map(|he| {
             let vertex = &vertices[he.origin];
             let half_edge = rc(solid::HalfEdge {
@@ -45,6 +52,8 @@ fn undump_solid(solid: Solid) -> solid::Solid {
             all_half_edges.push(half_edge.clone());
             half_edge
           }).collect();
+
+          // Connect Half Edges in a loop
           let len = half_edges.len();
           for i in 0..len {
             let he = &half_edges[i];
@@ -58,6 +67,8 @@ fn undump_solid(solid: Solid) -> solid::Solid {
             half_edge: half_edges[0].clone(),
             face: Weak::new(),
           });
+
+          // Connect Half Edges to Rings
           for he in half_edges {
             he.borrow_mut().ring = Rc::downgrade(&out_ring);
           }
@@ -71,15 +82,21 @@ fn undump_solid(solid: Solid) -> solid::Solid {
           surface: face.surface.clone(),
         });
 
+        // Connect rings to face
         for ring in rings {
           ring.borrow_mut().face = Rc::downgrade(&out_face);
         }
-
         out_face
       }).collect();
 
-      let all_half_edge_dummies: Vec<&HalfEdge> = shell.faces.iter().flat_map(|face| face.rings.iter().flat_map(|ring| ring ).collect::<Vec<&HalfEdge>>() ).collect();
+      // Create flat list of serialized HEs in same order as real ones
+      let all_half_edge_dummies: Vec<&HalfEdge> = shell.faces.iter().flat_map(|face|
+        face.rings.iter().flat_map(|ring| ring ).collect::<Vec<&HalfEdge>>()
+      ).collect();
+
+      // Edges
       let edges = shell.edges.into_iter().enumerate().map(|(i, edge)| {
+        // Find matching serialized HEs and map them to real ones
         let half_edges: Vec<Ref<solid::HalfEdge>> = all_half_edge_dummies.iter().enumerate()
         .filter_map(|(j, he)| if he.edge == i {
           Some(all_half_edges[j].clone())
@@ -92,6 +109,7 @@ fn undump_solid(solid: Solid) -> solid::Solid {
           right_half: half_edges[1].clone(),
           curve: edge.curve,
         });
+        // Connect Half Edges to Edge
         half_edges[0].borrow_mut().edge = Rc::downgrade(&out_edge);
         half_edges[1].borrow_mut().edge = Rc::downgrade(&out_edge);
         out_edge
@@ -109,39 +127,38 @@ fn undump_solid(solid: Solid) -> solid::Solid {
 
 fn dump_solid(solid: &solid::Solid) -> Solid {
   Solid {
+    // Shells
     shells: solid.shells.iter().map(|shell| {
+
+      // Edges
       let edges = shell.edges.iter().map(|edge| Edge {
         curve: edge.borrow().curve.clone(),
       }).collect();
+
+      // Vetices
       let vertices = shell.vertices.iter().map(|vertex| Vertex {
         point: vertex.borrow().point,
       }).collect();
+
       Shell {
         edges,
         vertices,
+        // Faces
         faces: shell.faces.iter().map(|face| Face {
           rings: face.borrow().rings.iter().map(|ring|
-            convert_ring(&ring.borrow(), &shell.edges, &shell.vertices)
+            ring.borrow().iter().map(|he| {
+              let he = he.borrow();
+              HalfEdge {
+                origin: get_vertex_index(&he.origin, &shell.vertices),
+                edge: get_edge_index(&he.edge.upgrade().unwrap(), &shell.edges),
+              }
+            }).collect()
           ).collect(),
           surface: face.borrow().surface.clone(),
         }).collect(),
       }
     }).collect(),
   }
-}
-
-fn convert_ring(
-  ring: &solid::Ring,
-  edges: &Vec<Ref<solid::Edge>>,
-  vertices: &Vec<Ref<solid::Vertex>>,
-) -> Vec<HalfEdge> {
-  ring.iter().map(|he| {
-    let he = he.borrow();
-    HalfEdge {
-      origin: get_vertex_index(&he.origin, vertices),
-      edge: get_edge_index(&he.edge.upgrade().unwrap(), edges),
-    }
-  }).collect()
 }
 
 fn get_edge_index(edge: &Ref<solid::Edge>, edges: &Vec<Ref<solid::Edge>>) -> usize {
@@ -198,9 +215,9 @@ mod tests {
   use crate::solid::features;
 
   #[test]
-  fn stl() {
+  fn serialize() {
     let cube = features::make_cube(1.5, 1.5, 1.5);
     let ron = super::export(&cube);
-    println!("{}", ron);
+    super::import(ron);
   }
 }

@@ -25,9 +25,11 @@ fn undump_component(comp: Component) -> crate::Component {
         rc(elem)
       ).collect(),
     },
-    bodies: comp.bodies.iter().map(|body|
-      shapex::io::serde::import(body.to_string())
-    ).collect(),
+    compound: shapex::Compound {
+      solids: comp.bodies.iter().map(|body|
+        shapex::io::serde::import(body.to_string())
+      ).collect(),
+    },
     children: comp.children.into_iter().map(|child|
       rc(undump_component(child))
     ).collect(),
@@ -39,7 +41,7 @@ fn dump_component(comp: &crate::Component, recursive: bool) -> Component {
     sketch_elements: comp.sketch.elements.iter().map(|elem|
       elem.borrow().clone()
     ).collect(),
-    bodies: comp.bodies.iter().map(|body|
+    bodies: comp.compound.solids.iter().map(|body|
       shapex::io::serde::export(body)
     ).collect(),
     children: if recursive {

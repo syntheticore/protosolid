@@ -82,10 +82,16 @@
     white-space: nowrap
     padding: 0
     align-self: flex-end
+    display: flex
+    align-items: center
 
     div
-      display: inline-block
       padding: 2px 14px
+      &:first-child
+        padding: 1px 14px
+        font-size: 14px
+        span
+          padding-right: 0
       &:not(:last-child)
         border-right: 1px solid $dark1
 

@@ -2,27 +2,12 @@ use earcutr;
 
 use crate::base::*;
 use crate::curve::*;
+use crate::intersection::*;
 use crate::mesh::Mesh;
 
 
 pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
   vec1.x * vec2.y - vec1.y * vec2.x
-}
-
-pub fn tesselate_polygon(vertices: PolyLine, normal: Vec3) -> Mesh {
-  #[cfg(debug_assertions)]
-  // assert!(!is_clockwise(&vertices));
-  let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.y] ).collect();
-  let faces: Vec<usize> = earcutr::earcut(&flat_vertices, &vec![], 2);
-  let mut normals = Vec::with_capacity(vertices.len());
-  for _ in 0..faces.len() {
-    normals.push(normal);
-  }
-  Mesh {
-    vertices,
-    faces,
-    normals,
-  }
 }
 
 // Check if two line segments turn clockwise
@@ -42,7 +27,6 @@ pub fn clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
 }
 
 pub fn is_clockwise(closed_loop: &PolyLine) -> bool {
-  println!("signed_polygon_area {}", signed_polygon_area(&closed_loop) );
   signed_polygon_area(&closed_loop) > 0.0
 }
 
@@ -50,7 +34,7 @@ pub fn polygon_area(closed_loop: &PolyLine) -> f64 {
   signed_polygon_area(&closed_loop).abs() / 2.0
 }
 
-pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
+fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   let mut signed_area = 0.0;
   let len = closed_loop.len();
   for i in 0..len {
@@ -62,15 +46,43 @@ pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   signed_area
 }
 
-// pub fn tesselate_wire(wire: &Wire) -> PolyLine {
-//   let mut polyline: PolyLine = wire.iter().map(|elem| elem.bounds.0 ).collect();
-//   polyline.push(wire.first().unwrap().bounds.0); //XXX first elem may not start at zero
-//   // let z = rand::random::<f64>() / -6.0;
-//   // for p in &mut polyline {
-//   //   p.z = z;
-//   // }
-//   polyline
-// }
+pub fn point_in_wire(p: Point3, wire: &Wire) -> bool {
+  let ray = Line::new(p, p + Vec3::unit_x()).into_enum();
+  let mut hits = 0;
+  for elem in wire {
+    hits += match intersect(&ray, &elem.cache) {
+      CurveIntersectionType::Pierce(hits)
+      | CurveIntersectionType::Cross(hits)
+      => hits.len(),
+
+      CurveIntersectionType::Extended(hits)
+      => hits.iter().filter(|hit| hit.t > 0.0 ).count(),
+
+      _ => 0,
+    }
+  }
+  hits % 2 != 0
+}
+
+pub fn wire_in_wire(_wire: &Wire, _other: &Wire) -> bool {
+  true //XXX
+}
+
+pub fn tesselate_polygon(vertices: PolyLine, normal: Vec3) -> Mesh {
+  // #[cfg(debug_assertions)]
+  // assert!(!is_clockwise(&vertices));
+  let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.y] ).collect();
+  let faces: Vec<usize> = earcutr::earcut(&flat_vertices, &vec![], 2);
+  let mut normals = Vec::with_capacity(vertices.len());
+  for _ in 0..faces.len() {
+    normals.push(normal);
+  }
+  Mesh {
+    vertices,
+    faces,
+    normals,
+  }
+}
 
 pub fn tesselate_wire(wire: &Wire) -> PolyLine {
   // let mut wire = wire.clone();
@@ -122,32 +134,6 @@ pub fn straighten_bounds(wire: &mut Wire) {
   }
 }
 
-// // Returned loops are oriented counter-clockwise
-// pub fn tesselate_wire(wire: &Vec<CurveType>) -> PolyLine {
-//   if wire.len() == 1 {
-//     panic!("PolyLine has length one {:?}", wire);
-//   }
-//   let mut polyline = vec![];
-//   let mut iter = wire.iter().peekable();
-//   while let Some(elem) = iter.next() {
-//     let endpoints = elem.as_curve().endpoints();
-//     if polyline.len() == 0 {
-//       let next_elem = iter.peek().unwrap();
-//       let next_endpoints = next_elem.as_curve().endpoints();
-//       if endpoints.0.almost(next_endpoints.0) || endpoints.0.almost(next_endpoints.1) {
-//         polyline.push(endpoints.1);
-//         polyline.push(endpoints.0);
-//       } else {
-//         polyline.push(endpoints.0);
-//         polyline.push(endpoints.1);
-//       }
-//     } else {
-//       polyline.push(elem.as_curve().other_endpoint(polyline.last().unwrap()));
-//     }
-//   }
-//   polyline
-// }
-
 pub fn trim(_elem: &CurveType, _cutters: &Vec<CurveType>, _p: Point3) {
   // let splits = split_element(elem, cutters);
   // splits.sort_by(|a, b| {
@@ -186,6 +172,16 @@ mod tests {
     let rect_poly = tesselate_wire(&make_trimmed(rect));
 
     assert!(is_clockwise(&rect_poly));
+  }
+
+  #[test]
+  fn point_in_wire() {
+    let rect = test_data::rectangle();
+    let rect: Vec<CurveType> = rect.into_iter().map(|l| l.into_enum() ).collect();
+    let rect = make_trimmed(rect);
+
+    assert!(super::point_in_wire(Point3::new(0.0, 0.0, 0.0), &rect));
+    assert!(!super::point_in_wire(Point3::new(10.0, 0.0, 0.0), &rect));
   }
 
   #[test]

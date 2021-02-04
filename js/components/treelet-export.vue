@@ -22,7 +22,7 @@
         h3 Export Settings
 
         label
-          select(v-model="format")
+          select(v-model="config.format")
             option STL
             option 3MF
             option STEP
@@ -88,7 +88,6 @@
     data() {
       return {
         expanded: false,
-        format: 'STL',
         path: null,
       }
     },
@@ -98,7 +97,7 @@
         const exporter = {
           'STL': exportStl,
           '3MF': export3mf,
-        }[this.format]
+        }[this.config.format]
         this.path = await exporter(this.component, this.path)
       },
 

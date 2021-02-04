@@ -95,15 +95,23 @@ export default class Component {
     return {
       title: this.title,
       hidden: this.hidden,
+      cog: this.cog,
+      sectionViews: this.sectionViews,
+      parameters: this.parameters,
+      exportConfigs: this.exportConfigs,
       real: this.real.serialize(),
       children: this.children.map(child => child.serialize() ),
     }
   }
 
   unserialize(dump) {
+    console.log(dump)
     this.title = dump.title
     this.hidden = dump.hidden
-    console.log(dump.real)
+    this.cog = dump.cog
+    this.sectionViews = dump.sectionViews || []
+    this.parameters = dump.parameters || []
+    this.exportConfigs = dump.exportConfigs || []
     this.real.unserialize(dump.real)
     dump.children.forEach(childDump => {
       let child = this.createComponent()

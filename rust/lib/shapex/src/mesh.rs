@@ -2,6 +2,11 @@ use crate::base::*;
 use crate::geom3d::*;
 
 
+pub trait Meshable {
+  fn tesselate(&self) -> Mesh;
+}
+
+
 #[derive(Debug, Default)]
 pub struct Mesh {
   pub vertices: Vec<Point3>,

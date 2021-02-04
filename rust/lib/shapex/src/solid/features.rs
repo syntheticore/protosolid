@@ -9,7 +9,7 @@ use crate::geom3d;
 pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Result<Solid, String> {
   //XXX use poly_from_wire once circles are handled
   let poly = geom2d::tesselate_wire(&region);
-  #[cfg(debug_assertions)]
+  // #[cfg(debug_assertions)]
   // assert!(!geom2d::is_clockwise(&poly));
   let mut plane = geom3d::detect_plane(&poly)?;
   plane.flip();

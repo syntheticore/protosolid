@@ -6,13 +6,19 @@ impl Meshable for Solid {
   fn tesselate(&self) -> Mesh {
     let mut mesh = Mesh::default();
     for shell in &self.shells {
-      let is_inner = !ptr::eq(shell, &self.shells[0]);
       for face in &shell.faces {
-        let mut face_mesh = face.borrow().get_surface().tesselate();
-        if is_inner { face_mesh.invert_normals() }
+        let face_mesh = face.borrow().tesselate();
         mesh.append(face_mesh);
       }
     }
+    mesh
+  }
+}
+
+impl Meshable for Face {
+  fn tesselate(&self) -> Mesh {
+    let mut mesh = self.get_surface().tesselate();
+    if self.flip_normal { mesh.invert_normals() }
     mesh
   }
 }

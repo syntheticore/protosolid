@@ -6,14 +6,14 @@ use crate::geom2d;
 use crate::geom3d;
 
 
-pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Result<Solid, String> {
+pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
   //XXX use poly_from_wire once circles are handled
-  let poly = geom2d::tesselate_wire(&region);
+  let poly = geom2d::tesselate_wire(&profile[0]);
   // #[cfg(debug_assertions)]
   // assert!(!geom2d::is_clockwise(&poly));
   let mut plane = geom3d::detect_plane(&poly)?;
   plane.flip();
-  let mut solid = Solid::new_lamina(region, plane.into_enum());
+  let mut solid = Solid::new_lamina(profile[0].clone(), plane.into_enum());
   let shell = &mut solid.shells[0];
   let face = if distance >= 0.0 {
     shell.faces.last()
@@ -22,7 +22,7 @@ pub fn extrude(region: Vec<TrimmedCurve>, distance: f64) -> Result<Solid, String
   }.unwrap().clone();
   shell.sweep(&face, Vec3::new(0.0, 0.0, distance));
   if distance > 200.0 {
-    Err("Maximum extrusion distance exceeded".to_string())
+    Err(format!("Maximum extrusion distance exceeded {:?}", profile.len()))
   } else {
     Ok(solid)
   }
@@ -32,14 +32,14 @@ pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {
 
 }
 
-pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
+pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Solid, String> {
   let points = [
     Point3::new(0.0, 0.0, 0.0),
     Point3::new(dx, 0.0, 0.0),
     Point3::new(dx, dy, 0.0),
     Point3::new(0.0, dy, 0.0),
   ];
-  let mut region = vec![];
+  let mut region = vec![vec![]];
   let mut iter = points.iter().peekable();
   while let Some(&p) = iter.next() {
     let next = if let Some(&next) = iter.peek() {
@@ -47,16 +47,16 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Solid {
     } else {
       &points[0]
     };
-    region.push(TrimmedCurve::new(Line::new(p, *next).into_enum()));
+    region[0].push(TrimmedCurve::new(Line::new(p, *next).into_enum()));
   }
-  extrude(region, dz).unwrap()
+  extrude(&region, dz)
 }
 
-pub fn make_cylinder(radius: f64, height: f64) -> Solid {
-  let region = vec![
-    TrimmedCurve::new(Circle::new(Point3::new(0.0, 0.0, 0.0), radius).into_enum())
-  ];
-  extrude(region, height).unwrap()
+pub fn make_cylinder(radius: f64, height: f64) -> Result<Solid, String> {
+  let region = vec![vec![
+    TrimmedCurve::new(Circle::new(Point3::origin(), radius).into_enum())
+  ]];
+  extrude(&region, height)
 }
 
 
@@ -67,7 +67,7 @@ mod tests {
 
   #[test]
   fn cube() {
-    let cube = make_cube(1.5, 1.5, 1.5);
+    let cube = make_cube(1.5, 1.5, 1.5).unwrap();
     let shell = &cube.shells[0];
     println!("\nCube finished");
     shell.print();
@@ -80,7 +80,7 @@ mod tests {
   #[test]
   #[ignore]
   fn cylinder() {
-    let cube = make_cylinder(1.0, 1.0);
+    let cube = make_cylinder(1.0, 1.0).unwrap();
     let shell = &cube.shells[0];
     println!("\nCylinder finished");
     shell.print();

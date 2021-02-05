@@ -4,7 +4,7 @@ use crate::base::*;
 use crate::curve::*;
 
 use crate::geom2d;
-use crate::geom3d::*;
+use crate::transform::*;
 use crate::mesh::Mesh;
 
 
@@ -83,7 +83,7 @@ pub struct Plane {
 impl Plane {
   pub fn new() -> Self {
     Self {
-      origin: Point3::new(0.0, 0.0, 0.0),
+      origin: Point3::origin(),
       u: Vec3::new(1.0, 0.0, 0.0),
       v: Vec3::new(0.0, 1.0, 0.0),
     }
@@ -152,7 +152,7 @@ impl Surface for Plane {
       curve.transform(&trans)
     }
     let polyline = geom2d::tesselate_wire(&bounds);
-    let mut mesh = geom2d::tesselate_polygon(polyline, self.normal());
+    let mut mesh = geom2d::tesselate_polygon(polyline, vec![], self.normal());
     mesh.transform(&trans.invert());
     mesh
   }
@@ -182,7 +182,7 @@ pub struct CylindricalSurface {
 impl CylindricalSurface {
   pub fn new(radius: f64) -> Self {
     Self {
-      origin: Point3::new(0.0, 0.0, 0.0),
+      origin: Point3::origin(),
       direction: Vec3::new(0.0, 0.0, 1.0),
       radius,
       bounds: (0.0, 1.0),

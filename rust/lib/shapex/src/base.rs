@@ -46,17 +46,17 @@ pub trait Almost {
 
 impl Almost for Point3 {
   fn almost(&self, other: Self) -> bool {
-    (self.x - other.x).abs() < EPSILON &&
-    (self.y - other.y).abs() < EPSILON &&
-    (self.z - other.z).abs() < EPSILON
+    (self.x - other.x).abs() <= EPSILON &&
+    (self.y - other.y).abs() <= EPSILON &&
+    (self.z - other.z).abs() <= EPSILON
   }
 }
 
 impl Almost for Vec3 {
   fn almost(&self, other: Self) -> bool {
-    (self.x - other.x).abs() < EPSILON &&
-    (self.y - other.y).abs() < EPSILON &&
-    (self.z - other.z).abs() < EPSILON
+    (self.x - other.x).abs() <= EPSILON &&
+    (self.y - other.y).abs() <= EPSILON &&
+    (self.z - other.z).abs() <= EPSILON
   }
 }
 

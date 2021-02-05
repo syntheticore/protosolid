@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::base::*;
 use crate::curve::*;
 use crate::surface::*;
@@ -174,21 +176,18 @@ pub fn line_circle(line: &Line, circle: &Circle) -> CurveIntersectionType {
     let t1 = (-b - discriminant) / (2.0 * a);
     let t2 = (-b + discriminant) / (2.0 * a);
 
-    let mut intersections = vec![];
-    if t1 >= 0.0 && t1 <= 1.0 {
-      let p = line.sample(t1);
-      intersections.push(CurveIntersection::new(p, t1));
-    }
+    let crossed = (t1 >= 0.0 && t1 <= 1.0, t2 >= 0.0 && t2 <= 1.0);
 
-    if t2 >= 0.0 && t2 <= 1.0 {
-      let p = line.sample(t2);
-      intersections.push(CurveIntersection::new(p, t2));
-    }
+    let mut intersections = VecDeque::from(vec![
+      CurveIntersection::new(line.sample(t1), t1),
+      CurveIntersection::new(line.sample(t2), t2),
+    ]);
 
-    if intersections.len() > 0 {
-      CurveIntersectionType::Cross(intersections)
+    if crossed.0 || crossed.1 {
+      if !crossed.0 { intersections.pop_front(); } else if !crossed.1 { intersections.pop_back(); }
+      CurveIntersectionType::Cross(intersections.into_iter().collect())
     } else {
-      CurveIntersectionType::None
+      CurveIntersectionType::Extended(intersections.into_iter().collect())
     }
   }
 }
@@ -233,7 +232,7 @@ mod tests {
     let lines = test_data::crossing_lines();
     let hit = line_line(&lines[0], &lines[1]);
     assert_eq!(hit, CurveIntersectionType::Cross(vec![
-      CurveIntersection::new(Point3::new(0.0, 0.0, 0.0), 0.5)
+      CurveIntersection::new(Point3::origin(), 0.5)
     ]));
   }
 
@@ -262,7 +261,7 @@ mod tests {
 
   #[test]
   fn circle_cross() {
-    let circle = Circle::new(Point3::new(0.0, 0.0, 0.0), 1.0);
+    let circle = Circle::new(Point3::origin(), 1.0);
     let line = Line::new(Point3::new(-2.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0));
     let hit = line_circle(&line, &circle);
     assert_eq!(hit, CurveIntersectionType::Cross(vec![
@@ -273,7 +272,7 @@ mod tests {
 
   #[test]
   fn circle_pass() {
-    let circle = Circle::new(Point3::new(0.0, 0.0, 0.0), 1.0);
+    let circle = Circle::new(Point3::origin(), 1.0);
     let line = Line::new(Point3::new(-2.0, 2.0, 0.0), Point3::new(2.0, 2.0, 0.0));
     let hit = line_circle(&line, &circle);
     assert_eq!(hit, CurveIntersectionType::None);

@@ -47,7 +47,7 @@ fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
 }
 
 pub fn point_in_wire(p: Point3, wire: &Wire) -> bool {
-  let ray = Line::new(p, p + Vec3::unit_x()).into_enum();
+  let ray = Line::new(p, p + Vec3::unit_x() * 9999.9).into_enum();
   let mut hits = 0;
   for elem in wire {
     hits += match intersect(&ray, &elem.cache) {
@@ -64,24 +64,41 @@ pub fn point_in_wire(p: Point3, wire: &Wire) -> bool {
   hits % 2 != 0
 }
 
-pub fn wire_in_wire(_wire: &Wire, _other: &Wire) -> bool {
-  true //XXX
+pub fn wire_in_wire(wire: &Wire, other: &Wire) -> bool {
+  wire.iter()
+  .flat_map(|elem| tuple2_to_vec(elem.bounds))
+  .all(|bound| point_in_wire(bound, other))
 }
 
-pub fn tesselate_polygon(vertices: PolyLine, normal: Vec3) -> Mesh {
+pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) -> Mesh {
   // #[cfg(debug_assertions)]
   // assert!(!is_clockwise(&vertices));
   let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.y] ).collect();
-  let faces: Vec<usize> = earcutr::earcut(&flat_vertices, &vec![], 2);
+  let faces: Vec<usize> = earcutr::earcut(&flat_vertices, &holes, 2);
   let mut normals = Vec::with_capacity(vertices.len());
   for _ in 0..faces.len() {
-    normals.push(normal);
+    normals.push(normal); //XXX Normals really used?
   }
   Mesh {
     vertices,
     faces,
     normals,
   }
+}
+
+pub fn tesselate_profile(profile: &Profile, normal: Vec3) -> Mesh {
+  let poly_rings: Vec<PolyLine> = profile.iter().map(|wire| {
+    tesselate_wire(wire)
+  }).collect();
+  let mut i = 0;
+  let mut holes = vec![];
+  for ring in &poly_rings {
+    i += ring.len();
+    holes.push(i);
+  }
+  holes.pop();
+  let vertices: Vec<Point3> = poly_rings.into_iter().flatten().collect();
+  tesselate_polygon(vertices, holes, normal)
 }
 
 pub fn tesselate_wire(wire: &Wire) -> PolyLine {
@@ -147,61 +164,82 @@ pub fn trim(_elem: &CurveType, _cutters: &Vec<CurveType>, _p: Point3) {
 mod tests {
   use super::*;
   use crate::test_data;
+  use crate::transform::*;
 
-  fn make_trimmed(elems: Vec<CurveType>) -> Region {
+  fn make_wire(elems: Vec<CurveType>) -> Region {
     elems.into_iter().map(|elem| TrimmedCurve::new(elem)).collect()
+  }
+
+  fn make_generic<T: Curve>(elems: Vec<T>) -> Vec<CurveType> {
+    elems.into_iter().map(|l| l.into_enum()).collect()
+  }
+
+  fn make_rect() -> Wire {
+    let rect = test_data::rectangle();
+    make_wire(make_generic(rect))
   }
 
   #[test]
   fn compare_areas() {
-    let rect = test_data::rectangle();
-    let rect: Vec<CurveType> = rect.into_iter().map(|l| l.into_enum() ).collect();
-    let rect_poly = tesselate_wire(&make_trimmed(rect));
-
-    let reverse_rect = test_data::reverse_rectangle();
-    let reverse_rect: Vec<CurveType> = reverse_rect.into_iter().map(|l| l.into_enum() ).collect();
-    let reverse_rect_poly = tesselate_wire(&make_trimmed(reverse_rect));
-
+    let rect_poly = tesselate_wire(&make_rect());
+    let reverse_rect_poly = rect_poly.iter().rev().cloned().collect();
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
   }
 
   #[test]
   fn rectangle_clockwise() {
-    let rect = test_data::rectangle();
-    let rect: Vec<CurveType> = rect.into_iter().map(|l| l.into_enum() ).collect();
-    let rect_poly = tesselate_wire(&make_trimmed(rect));
-
+    let rect_poly = tesselate_wire(&make_rect());
     assert!(is_clockwise(&rect_poly));
   }
 
   #[test]
   fn point_in_wire() {
-    let rect = test_data::rectangle();
-    let rect: Vec<CurveType> = rect.into_iter().map(|l| l.into_enum() ).collect();
-    let rect = make_trimmed(rect);
-
-    assert!(super::point_in_wire(Point3::new(0.0, 0.0, 0.0), &rect));
+    let rect = make_rect();
+    assert!(super::point_in_wire(Point3::origin(), &rect));
     assert!(!super::point_in_wire(Point3::new(10.0, 0.0, 0.0), &rect));
   }
 
   #[test]
   fn angle_clockwise() {
     let angle = test_data::angle_right();
-
     assert!(clockwise(angle[0].points.0, angle[0].points.1, angle[1].points.1) < 0.0);
   }
 
   #[test]
   fn angle_anti_clockwise() {
     let angle = test_data::angle_left();
-
     assert!(clockwise(angle[0].points.0, angle[0].points.1, angle[1].points.1) > 0.0);
   }
 
   #[test]
   fn angle_straight() {
     let angle = test_data::angle_straight();
-
     assert_eq!(clockwise(angle[0].points.0, angle[0].points.1, angle[1].points.1), 0.0);
+  }
+
+  #[test]
+  fn circle_in_rect() {
+    let circle = make_wire(make_generic(vec![Circle::new(Point3::origin(), 0.5)]));
+    let rect = make_rect();
+    assert!(super::wire_in_wire(&circle, &rect));
+    assert!(!super::wire_in_wire(&rect, &circle));
+  }
+
+  #[test]
+  fn point_in_circle() {
+    let circle = make_wire(make_generic(vec![Circle::new(Point3::origin(), 20.0)]));
+    assert!(super::point_in_wire(Point3::origin(), &circle));
+  }
+
+  #[test]
+  fn rect_in_rect() {
+    let rect = make_rect();
+    let mut inner_rect = test_data::rectangle();
+    for line in &mut inner_rect {
+      line.scale(0.5);
+    }
+    let inner_rect = make_wire(make_generic(inner_rect));
+    assert!(super::wire_in_wire(&inner_rect, &rect));
+    assert!(!super::wire_in_wire(&rect, &inner_rect));
   }
 }

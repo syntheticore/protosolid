@@ -7,51 +7,8 @@ use crate::PolyLine;
 
 #[derive(Debug, Clone)]
 pub struct Axis {
-  origin: Point3,
-  direction: Vec3,
-}
-
-
-#[derive(Debug)]
-pub struct Transform {
-  matrix: Matrix4,
-}
-
-impl Transform {
-  pub fn from_matrix(m: Matrix4) -> Self {
-    Self {
-      matrix: m,
-    }
-  }
-
-  pub fn apply(&self, p: Point3) -> Point3 {
-    self.matrix.transform_point(p)
-  }
-
-  pub fn apply_vec(&self, v: Vec3) -> Vec3 {
-    self.matrix.transform_vector(v)
-  }
-
-  pub fn invert(&self) -> Self {
-    Self::from_matrix(self.matrix.invert().unwrap())
-  }
-}
-
-
-pub trait Transformable {
-  fn transform(&mut self, transform: &Transform);
-
-  fn translate(&mut self, vec: Vec3) {
-    self.transform(&Transform::from_matrix(Matrix4::from_translation(vec)));
-  }
-
-  fn mirror(&mut self, axis: &Axis) {
-    self.transform(&Transform::from_matrix(Matrix4::from_nonuniform_scale(
-      axis.direction.x,
-      axis.direction.y,
-      axis.direction.z,
-    )));
-  }
+  pub origin: Point3,
+  pub direction: Vec3,
 }
 
 

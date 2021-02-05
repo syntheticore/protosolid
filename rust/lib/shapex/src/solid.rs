@@ -45,7 +45,7 @@ pub struct Face {
   pub outer_ring: Ref<Ring>,
   pub rings: Vec<Ref<Ring>>,
   pub surface: SurfaceType,
-  // pub flip_normal: bool, // If cross product of U and V derivatives points into the body
+  pub flip_normal: bool, // If cross product of U and V derivatives points into the body
 }
 
 
@@ -155,6 +155,7 @@ impl Solid {
       outer_ring: ring.clone(),
       rings: vec![ring.clone()],
       surface,
+      flip_normal: false,
     });
     ring.borrow_mut().face = Rc::downgrade(&face);
     {
@@ -304,6 +305,7 @@ impl Shell {
       outer_ring: ring.clone(),
       rings: vec![ring.clone()],
       surface,
+      flip_normal: false,
     });
     println!("  Made face {:?}", face.borrow().id);
     ring.borrow_mut().face = Rc::downgrade(&face);
@@ -384,7 +386,6 @@ impl Shell {
           radius: circle.radius,
           direction: vec,
           bounds: (0.0, 1.0),
-          // flip_normal: false,
         }.into_enum()
       },
       CurveType::Arc(arc) => {
@@ -393,7 +394,6 @@ impl Shell {
           radius: arc.radius,
           direction: vec,
           bounds: arc.bounds,
-          // flip_normal: false,
         }.into_enum()
       },
       _ => todo!()

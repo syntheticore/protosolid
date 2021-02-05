@@ -1,7 +1,7 @@
 [package]
 name = "alchemy"
 version = "0.1.0"
-description = "Direct parametrics for the web"
+description = "Parametric CAD"
 authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
 readme = "README.md"
 edition = "2018"
@@ -60,11 +60,11 @@ console_error_panic_hook = "0.1.6"
 
 [package.metadata.bundle]
 name = "Alchemy"
-identifier = "org.shapex.Alchemy"
+identifier = "org.alchemy.Alchemy"
 icon = ["128x128@2x.png"]
 resources = ["resources"]
 copyright = "Copyright (c) Björn Breitgoff 2018"
 category = "public.app-category.graphics-design"
 long_description = """
-Lorem ipsum dolor sit amet, consectetur adipiscing elit
+Parametric CAD
 """

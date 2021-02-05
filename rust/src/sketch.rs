@@ -79,9 +79,9 @@ impl JsSketch {
   }
 
   pub fn get_regions(&self) -> Array {
-    self.real.borrow().sketch.get_regions(false).into_iter()
-    .map(|region| JsValue::from(JsRegion {
-      region,
+    self.real.borrow().sketch.get_profiles(false).into_iter()
+    .map(|profile| JsValue::from(JsRegion {
+      profile,
       component: self.real.clone(),
     }))
     .collect()
@@ -89,10 +89,20 @@ impl JsSketch {
 
   pub fn get_all_split(&self) {
     let mut real = self.real.borrow_mut();
-    // let splits = real.sketch.split_all();
-    let mut splits = Sketch::all_split(&real.sketch.elements);
-    Sketch::remove_dangling_segments(&mut splits);
-    let islands = Sketch::build_islands(&splits);
+    let splits: Vec<TrimmedCurve> = Sketch::all_split(&real.sketch.elements);
+
+    let (circles, mut others): (Vec<TrimmedCurve>, Vec<TrimmedCurve>) = splits.into_iter().partition(|elem| match elem.base {
+      CurveType::Circle(_) => true,
+      _ => false,
+    });
+    Sketch::remove_dangling_segments(&mut others);
+
+    let mut islands = Sketch::build_islands(&others);
+
+    let mut circle_regions = circles
+    .into_iter().map(|circle| vec![circle] ).collect();
+    islands.append(&mut circle_regions);
+
     let islands: Vec<TrimmedCurve> = islands.into_iter().flatten().collect();
 
     real.sketch.elements.clear();

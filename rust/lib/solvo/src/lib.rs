@@ -13,7 +13,6 @@ pub mod io;
 pub struct Component {
   pub id: Uuid,
   pub sketch: Sketch,
-  // pub bodies: Vec<Solid>,
   pub compound: Compound,
   pub children: Vec<Ref<Self>>,
 }
@@ -37,9 +36,6 @@ impl Component {
 }
 
 
-pub type Profile = Vec<Wire>;
-
-
 #[derive(Debug, Default)]
 pub struct Sketch {
   pub elements: Vec<Ref<CurveType>>,
@@ -61,7 +57,7 @@ impl Sketch {
       // Only leave the outermost inner wires
       let others = cutouts.clone();
       profile.append(&mut cutouts.into_iter().filter(|wire|
-        !others.iter().any(|other| geom2d::wire_in_wire(wire, other))
+        !others.iter().any(|other| !ptr::eq(wire, other) && geom2d::wire_in_wire(wire, other))
       ).collect());
       profile
     }).collect()

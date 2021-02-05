@@ -94,9 +94,22 @@ pub fn arc_rectangle() -> Vec<CurveType> {
   let lower_right = Point3::new(1.0, -1.0, 0.0);
   let lower_left = Point3::new(-1.0, -1.0, 0.0);
   vec![
-    Arc::from_points(upper_left, (upper_left + upper_right.to_vec()) / 2.0 + Vec3::new(0.0, 0.1, 0.0), upper_right).unwrap().into_enum(),
+    Arc::from_points(
+      upper_left,
+      (upper_left + upper_right.to_vec()) / 2.0 + Vec3::new(0.0, 0.1, 0.0),
+      upper_right
+    ).unwrap().into_enum(),
     Line::new(upper_right, lower_right).into_enum(),
     Line::new(lower_right, lower_left).into_enum(),
     Line::new(lower_left, upper_left).into_enum(),
   ]
+}
+
+pub fn s_curve() -> BezierSpline {
+  BezierSpline::new(vec![
+    Point3::new(-1.5, -1.0, 0.0),
+    Point3::new(-0.5, -1.0, 0.0),
+    Point3::new(0.5, 1.0, 0.0),
+    Point3::new(1.5, 1.0, 0.0),
+  ])
 }

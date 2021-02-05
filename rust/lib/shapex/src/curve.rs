@@ -5,7 +5,7 @@ use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
 use crate::base::*;
-use crate::geom3d::*;
+use crate::transform::*;
 use crate::geom2d;
 use crate::intersection;
 
@@ -15,6 +15,7 @@ pub trait Curve: Transformable {
   fn unsample(&self, p: &Point3) -> f64; // p is expected to touch the curve
   fn length_between(&self, start: f64, end: f64) -> f64;
   fn tesselate(&self) -> PolyLine;
+  fn into_enum(self) -> CurveType;
 
   fn endpoints(&self) -> (Point3, Point3) {
     (self.sample(0.0), self.sample(1.0))
@@ -117,8 +118,14 @@ impl CurveType {
           } else { vec![self.clone()] },
 
         Self::BezierSpline(cutter)
-          => circle.split_with_spline(cutter)
-          .iter().map(|seg| seg.clone().into_enum() ).collect(),
+          => {
+            let arcs = circle.split_with_spline(cutter);
+            if arcs.len() > 0 {
+              arcs.iter().map(|seg| seg.clone().into_enum() ).collect()
+            } else {
+              vec![self.clone()]
+            }
+          },
       }
 
       // Bezier Spline
@@ -197,12 +204,16 @@ pub type Region = Vec<TrimmedCurve>;
 pub type Wire = Vec<TrimmedCurve>;
 
 
+/// Profiles contain one or more wires, representing the outer and inner rings
+pub type Profile = Vec<Wire>;
+
+
 /// A finite line segment between two points
 /// # Examples
 ///
 /// ```
 /// use shapex::*;
-/// let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
+/// let line = Line::new(Point3::origin(), Point3::new(1.0, 0.0, 0.0));
 /// assert_eq!(line.midpoint(), Point3::new(0.5, 0.0, 0.0))
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -256,16 +267,10 @@ impl Line {
       },
     }
   }
-
-  pub fn into_enum(self) -> CurveType {
-    CurveType::Line(self)
-  }
 }
 
 impl Identity for Line {
-  fn id(&self) -> Uuid {
-    self.id
-  }
+  fn id(&self) -> Uuid { self.id }
 }
 
 impl Curve for Line {
@@ -288,6 +293,10 @@ impl Curve for Line {
 
   fn endpoints(&self) -> (Point3, Point3) {
     self.points
+  }
+
+  fn into_enum(self) -> CurveType {
+    CurveType::Line(self)
   }
 }
 
@@ -333,16 +342,10 @@ impl Arc {
   pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Arc> { vec![] }
 
   pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
-
-  pub fn into_enum(self) -> CurveType {
-    CurveType::Arc(self)
-  }
 }
 
 impl Identity for Arc {
-  fn id(&self) -> Uuid {
-    self.id
-  }
+  fn id(&self) -> Uuid { self.id }
 }
 
 impl Curve for Arc {
@@ -370,6 +373,10 @@ impl Curve for Arc {
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
     std::f64::consts::PI * 2.0 * self.radius * (start - end).abs()
+  }
+
+  fn into_enum(self) -> CurveType {
+    CurveType::Arc(self)
   }
 }
 
@@ -452,16 +459,10 @@ impl Circle {
   pub fn split_with_circle(&self, _circle: &Circle) -> Option<(Arc, Arc)> { None }
 
   pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
-
-  pub fn into_enum(self) -> CurveType {
-    CurveType::Circle(self)
-  }
 }
 
 impl Identity for Circle {
-  fn id(&self) -> Uuid {
-    self.id
-  }
+  fn id(&self) -> Uuid { self.id }
 }
 
 impl Curve for Circle {
@@ -495,6 +496,10 @@ impl Curve for Circle {
   fn endpoints(&self) -> (Point3, Point3) {
     let zero = self.sample(0.0);
     (zero, zero)
+  }
+
+  fn into_enum(self) -> CurveType {
+    CurveType::Circle(self)
   }
 }
 
@@ -592,45 +597,60 @@ impl BezierSpline {
   }
 
   //XXX Provide exact solution
-  pub fn closest_point(&self, point: Point3) -> Point3 {
-    let mut mdist = 2_i32.pow(63).into();
-    let mut closest = point;
-    for &p in &self.lut {
-      let d = point.distance(p);
-      if point.distance2(p) < mdist {
-        mdist = d;
-        closest = p;
+  pub fn closest_point(&self, point: Point3) -> (f64, Point3) {
+    let mut min_dist = 2_i32.pow(63).into();
+    let mut min_i = 0;
+    for (i, p) in self.lut.iter().enumerate() {
+      let dist = point.distance2(*p);
+      if dist < min_dist {
+        min_dist = dist;
+        min_i = i;
       }
     }
-    closest
+    let t = min_i as f64 / (self.lut.len() as f64 - 1.0);
+    (t, self.lut[min_i])
+  }
+
+  fn unsample_recursive(&self, sample1: (f64, f64), sample2: (f64, f64), target: Point3) -> f64 {
+    if sample1.0.almost(sample2.0) { return sample1.0 }
+    let t_center = (sample1.0 + sample2.0) / 2.0;
+    let p_center = self.sample(t_center);
+    let dist_center = p_center.distance2(target);
+    if p_center.almost(target) { return t_center }
+    let sample_center = (t_center, dist_center);
+    if sample1.1 < sample2.1 {
+      self.unsample_recursive(sample1, sample_center, target)
+    } else {
+      self.unsample_recursive(sample_center, sample2, target)
+    }
   }
 
   pub fn split_with_line(&self, _line: &Line) -> Vec<Self> { vec![self.clone()] }
 
-  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Self> { vec![] }
+  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Self> { vec![self.clone()] }
 
-  pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Self> { vec![] }
+  pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Self> { vec![self.clone()] }
 
-  pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Self> { vec![] }
-
-  pub fn into_enum(self) -> CurveType {
-    CurveType::BezierSpline(self)
-  }
+  pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Self> { vec![self.clone()] }
 }
 
 impl Identity for BezierSpline {
-  fn id(&self) -> Uuid {
-    self.id
-  }
+  fn id(&self) -> Uuid { self.id }
 }
+
 
 impl Curve for BezierSpline {
   fn sample(&self, t: f64) -> Point3 {
     self.real_sample(t, &self.vertices)
   }
 
-  fn unsample(&self, _p: &Point3) -> f64 {
-    0.0 //XXX
+  //XXX Exact solution -> Page 219 https://scholarsarchive.byu.edu/cgi/viewcontent.cgi?article=1000&context=facpub
+  fn unsample(&self, point: &Point3) -> f64 {
+    self.unsample_recursive(
+      (0.0, self.sample(0.0).distance2(*point)),
+      (1.0, self.sample(1.0).distance2(*point)),
+      *point,
+    )
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -656,6 +676,10 @@ impl Curve for BezierSpline {
 
   fn midpoint(&self) -> Point3 {
     self.sample(self.param_at_length(self.length() / 2.0))
+  }
+
+  fn into_enum(self) -> CurveType {
+    CurveType::BezierSpline(self)
   }
 }
 
@@ -850,7 +874,7 @@ mod tests {
 
   #[test]
   fn unsample_circle() {
-    let circle = Circle::new(Point3::new(0.0, 0.0, 0.0), 1.0);
+    let circle = Circle::new(Point3::origin(), 1.0);
 
     almost_eq(circle.sample(0.000), Point3::new(0.0,  1.0, 0.0));
     almost_eq(circle.sample(0.125), Point3::new(0.7071067811865475, 0.7071067811865476, 0.0));
@@ -871,5 +895,13 @@ mod tests {
     almost_eq(circle.unsample(&Point3::new(-1.0, 0.0, 0.0)),                                0.750);
     almost_eq(circle.unsample(&Point3::new(-0.7071067811865477, 0.7071067811865475, 0.0)),  0.875);
     almost_eq(circle.unsample(&Point3::new(0.0, 1.0, 0.0)),                                 0.000);
+  }
+
+  #[test]
+  fn unsample_spline() {
+    let spline = test_data::s_curve();
+    let p = spline.sample(0.5);
+    assert_eq!(p, Point3::origin());
+    assert_eq!(0.5, spline.unsample(&p));
   }
 }

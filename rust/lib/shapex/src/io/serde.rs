@@ -80,6 +80,7 @@ fn undump_solid(solid: Solid) -> solid::Solid {
           outer_ring: rings[0].clone(),
           rings: rings.clone(),
           surface: face.surface.clone(),
+          flip_normal: false,
         });
 
         // Connect rings to face
@@ -144,17 +145,21 @@ fn dump_solid(solid: &solid::Solid) -> Solid {
         edges,
         vertices,
         // Faces
-        faces: shell.faces.iter().map(|face| Face {
-          rings: face.borrow().rings.iter().map(|ring|
-            ring.borrow().iter().map(|he| {
-              let he = he.borrow();
-              HalfEdge {
-                origin: get_vertex_index(&he.origin, &shell.vertices),
-                edge: get_edge_index(&he.edge.upgrade().unwrap(), &shell.edges),
-              }
-            }).collect()
-          ).collect(),
-          surface: face.borrow().surface.clone(),
+        faces: shell.faces.iter().map(|face| {
+          let face = face.borrow();
+          Face {
+            rings: face.rings.iter().map(|ring|
+              ring.borrow().iter().map(|he| {
+                let he = he.borrow();
+                HalfEdge {
+                  origin: get_vertex_index(&he.origin, &shell.vertices),
+                  edge: get_edge_index(&he.edge.upgrade().unwrap(), &shell.edges),
+                }
+              }).collect()
+            ).collect(),
+            surface: face.surface.clone(),
+            flip_normal: face.flip_normal,
+          }
         }).collect(),
       }
     }).collect(),
@@ -188,6 +193,7 @@ struct Shell {
 struct Face {
   pub rings: Vec<Vec<HalfEdge>>,
   pub surface: surface::SurfaceType,
+  pub flip_normal: bool,
 }
 
 
@@ -216,7 +222,7 @@ mod tests {
 
   #[test]
   fn serialize() {
-    let cube = features::make_cube(1.5, 1.5, 1.5);
+    let cube = features::make_cube(1.5, 1.5, 1.5).unwrap();
     let ron = super::export(&cube);
     super::import(ron);
   }

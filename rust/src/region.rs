@@ -13,7 +13,8 @@ use crate::buffer_geometry::JsBufferGeometry;
 #[wasm_bindgen]
 pub struct JsRegion {
   #[wasm_bindgen(skip)]
-  pub region: Vec<TrimmedCurve>,
+  pub profile: Profile,
+
   #[wasm_bindgen(skip)]
   pub component: Rc<RefCell<Component>>,
 }
@@ -21,33 +22,30 @@ pub struct JsRegion {
 #[wasm_bindgen]
 impl JsRegion {
   pub fn get_mesh(&mut self) -> JsBufferGeometry {
-    let poly = geom2d::tesselate_wire(&self.region);
-    JsBufferGeometry::from(
-      geom2d::tesselate_polygon(poly, Vec3::unit_z()).to_buffer_geometry()
-    )
+    let poly = geom2d::tesselate_profile(&self.profile, Vec3::unit_z());
+    JsBufferGeometry::from(poly.to_buffer_geometry())
   }
 
   pub fn get_center(&self) -> JsValue {
-    let center = self.region.iter().fold(
-      Point3::new(0.0, 0.0, 0.0),
+    let center = self.profile[0].iter().fold(
+      Point3::origin(),
       |acc, elem| acc + match &elem.base {
         CurveType::Circle(circle) => circle.center.to_vec() * 2.0,
         _ => elem.bounds.0.to_vec() + elem.bounds.1.to_vec(),
       }
-    ) / (self.region.len() as f64 * 2.0);
+    ) / (self.profile[0].len() as f64 * 2.0);
     point_to_js(center)
   }
 
   pub fn extrude(&self, distance: f64) {
     web_sys::console::time_with_label("BREP extrude");
-    let tool = features::extrude(self.region.clone(), distance).unwrap();
-    // Solid::boolean_all(&mut self.component.borrow_mut().bodies, tool, BooleanType::Add);
+    let tool = features::extrude(&self.profile, distance).unwrap();
     self.component.borrow_mut().compound.add(tool.into_compound());
     web_sys::console::time_end_with_label("BREP extrude");
   }
 
   pub fn extrude_preview(&self, distance: f64) -> JsValue {
-    let extrusion = features::extrude(self.region.clone(), distance);
+    let extrusion = features::extrude(&self.profile, distance);
     match extrusion {
       Ok(res) => JsValue::from(JsBufferGeometry::from_solid(&res)),
       Err(error) => JsValue::from(error),

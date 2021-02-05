@@ -1,10 +1,12 @@
 mod base;
+mod transform;
 mod curve;
 mod surface;
 mod solid;
 mod mesh;
 
 pub use base::*;
+pub use transform::*;
 pub use curve::*;
 pub use surface::*;
 pub use solid::*;

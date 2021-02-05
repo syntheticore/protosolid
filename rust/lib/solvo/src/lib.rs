@@ -48,17 +48,18 @@ impl Sketch {
       // Find all other wires enclosed by this one
       let mut cutouts = vec![];
       for other in &regions {
-        if ptr::eq(&wire, &other) { continue }
+        if ptr::eq(&*wire, &*other) { continue }
         if geom2d::wire_in_wire(other, wire) {
           cutouts.push(other.clone());
         }
       }
       let mut profile = vec![wire.clone()];
       // Only leave the outermost inner wires
-      let others = cutouts.clone();
-      profile.append(&mut cutouts.into_iter().filter(|wire|
-        !others.iter().any(|other| !ptr::eq(wire, other) && geom2d::wire_in_wire(wire, other))
-      ).collect());
+      profile.append(&mut cutouts.iter().filter(|cutout|
+        !cutouts.iter().any(|other|
+          !ptr::eq(&cutout[0], &other[0]) && geom2d::wire_in_wire(cutout, other)
+        )
+      ).cloned().collect());
       profile
     }).collect()
   }
@@ -361,5 +362,18 @@ mod tests {
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0));
     sketch.elements.push(rc(line.into_enum()));
     let _regions = sketch.get_regions(false);
+  }
+
+  #[test]
+  fn circle_in_circle_profile() {
+    let mut sketch = Sketch::default();
+    let circle = Circle::new(Point3::new(-27.0, 3.0, 0.0), 68.97340462273907);
+    let inner_circle = Circle::new(Point3::new(-1.0, 27.654544570311774, 0.0), 15.53598031475424);
+    sketch.elements.push(rc(circle.into_enum()));
+    sketch.elements.push(rc(inner_circle.into_enum()));
+    let regions = sketch.get_profiles(false);
+    assert_eq!(regions.len(), 2);
+    assert_eq!(regions[0].len(), 2);
+    assert_eq!(regions[1].len(), 1);
   }
 }

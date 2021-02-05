@@ -68,7 +68,7 @@ pub struct Edge {
 
 #[derive(Debug, Clone)]
 pub struct HalfEdge {
-  pub id: Uuid,
+  pub id: Uuid, //TEMP
   pub next: WeakRef<Self>,
   pub previous: WeakRef<Self>,
   pub origin: Ref<Vertex>,
@@ -179,9 +179,7 @@ impl Solid {
   }
 
   pub fn into_compound(self) -> Compound {
-    Compound {
-      solids: vec![self],
-    }
+    Compound { solids: vec![self] }
   }
 }
 
@@ -213,9 +211,8 @@ impl Shell {
     }
   }
 
-  pub fn validate(&self) -> Result<(), String> {
-    Ok(())
-  }
+  //XXX
+  pub fn validate(&self) -> Result<(), String> { Ok(()) }
 
   pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: CurveType, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
     let vertex = rc(Vertex {
@@ -498,10 +495,10 @@ impl HalfEdge {
   pub fn remove(&mut self) -> WeakRef<Self> {
     if !self.edge.upgrade().is_some() {
       Weak::new()
-    } else if ptr::eq(self, &*self.next.upgrade().unwrap().borrow()) {
-      let this = Rc::downgrade(&self.mate().borrow().mate());
-      self.edge = Weak::new();
-      this
+    // } else if ptr::eq(self, &*self.next.upgrade().unwrap().borrow()) {
+    //   let this = Rc::downgrade(&self.mate().borrow().mate());
+    //   // self.edge = Weak::new();
+    //   this
     } else {
       self.previous.upgrade().unwrap().borrow_mut().next = self.next.clone();
       self.next.upgrade().unwrap().borrow_mut().previous = self.previous.clone();

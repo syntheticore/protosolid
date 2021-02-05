@@ -8,10 +8,12 @@ pub trait Controllable: Identity {
   fn set_handles(&mut self, handles: Vec<Point3>);
   fn get_snap_points(&self) -> Vec<Point3>;
 
-  fn set_initial_handles(&mut self, handles: Vec<Point3>) {
+  fn set_initial_handles(&mut self, handles: Vec<Point3>) -> Result<(), String> {
     self.set_handles(handles);
+    Ok(())
   }
 }
+
 
 impl Controllable for Line {
   fn get_handles(&self) -> Vec<Point3> {
@@ -29,6 +31,7 @@ impl Controllable for Line {
   }
 }
 
+
 impl Controllable for Arc {
   fn get_handles(&self) -> Vec<Point3> {
     let endpoints = self.endpoints();
@@ -36,13 +39,14 @@ impl Controllable for Arc {
   }
 
   // Three points on arc
-  fn set_initial_handles(&mut self, handles: Vec<Point3>) {
+  fn set_initial_handles(&mut self, handles: Vec<Point3>) -> Result<(), String> {
     let [p1, p2, p3]: [Point3; 3] = handles.try_into().unwrap();
-    let circle = Circle::from_points(p1, p2, p3).unwrap();
+    let circle = Circle::from_points(p1, p2, p3)?;
     self.center = circle.center;
     self.radius = circle.radius;
     self.bounds.0 = circle.unsample(&p1);
     self.bounds.1 = circle.unsample(&p3);
+    Ok(())
   }
 
   // Endpoints + center

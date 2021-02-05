@@ -1,4 +1,3 @@
-use std::ptr;
 use std::convert::TryInto;
 
 use uuid::Uuid;
@@ -48,9 +47,10 @@ pub trait Curve: Transformable {
     self.sample(0.5)
   }
 
-  // fn closest_point(&self, p: Point3) -> Point3 {
-  //   self.sample(self.unsample(p))
-  // }
+  //XXX Potentially not correct for every type
+  fn closest_point(&self, p: &Point3) -> Point3 {
+    self.sample(self.unsample(p))
+  }
 }
 
 impl std::fmt::Debug for dyn Curve {
@@ -596,27 +596,12 @@ impl BezierSpline {
     derivative
   }
 
-  //XXX Provide exact solution
-  pub fn closest_point(&self, point: Point3) -> (f64, Point3) {
-    let mut min_dist = 2_i32.pow(63).into();
-    let mut min_i = 0;
-    for (i, p) in self.lut.iter().enumerate() {
-      let dist = point.distance2(*p);
-      if dist < min_dist {
-        min_dist = dist;
-        min_i = i;
-      }
-    }
-    let t = min_i as f64 / (self.lut.len() as f64 - 1.0);
-    (t, self.lut[min_i])
-  }
-
-  fn unsample_recursive(&self, sample1: (f64, f64), sample2: (f64, f64), target: Point3) -> f64 {
+  fn unsample_recursive(&self, sample1: (f64, f64), sample2: (f64, f64), target: &Point3) -> f64 {
     if sample1.0.almost(sample2.0) { return sample1.0 }
     let t_center = (sample1.0 + sample2.0) / 2.0;
     let p_center = self.sample(t_center);
-    let dist_center = p_center.distance2(target);
-    if p_center.almost(target) { return t_center }
+    let dist_center = p_center.distance2(*target);
+    if p_center.almost(*target) { return t_center }
     let sample_center = (t_center, dist_center);
     if sample1.1 < sample2.1 {
       self.unsample_recursive(sample1, sample_center, target)
@@ -649,7 +634,7 @@ impl Curve for BezierSpline {
     self.unsample_recursive(
       (0.0, self.sample(0.0).distance2(*point)),
       (1.0, self.sample(1.0).distance2(*point)),
-      *point,
+      point,
     )
   }
 
@@ -690,108 +675,6 @@ impl Transformable for BezierSpline {
     }
   }
 }
-
-
-// Iterate through an unordered list of connected sketch elements
-// in an orderly fashion. Returned trim bounds are consistently oriented.
-pub struct RegionIterator<'a> {
-  region: &'a Vec<TrimmedCurve>,
-  elem: Option<&'a TrimmedCurve>,
-  first_elem: &'a TrimmedCurve,
-  point: Point3,
-}
-
-impl<'a> RegionIterator<'a> {
-  pub fn new(region: &'a Vec<TrimmedCurve>) -> Self {
-    Self {
-      region,
-      elem: Some(&region[0]),
-      first_elem: &region[0],
-      point: region[0].bounds.0,
-    }
-  }
-}
-
-impl<'a> Iterator for RegionIterator<'a> {
-  type Item = TrimmedCurve;
-
-  fn next(&mut self) -> Option<Self::Item> {
-    if let Some(elem) = self.elem {
-      let mut output = elem.clone();
-      self.point = if elem.bounds.0.almost(self.point) {
-        elem.bounds.1
-      } else {
-        // Reverse bounds, such that output item bounds are consistently oriented
-        output.bounds = (output.bounds.1, output.bounds.0);
-        elem.bounds.0
-      };
-      self.elem = self.region.iter().find(|other_elem| {
-        (other_elem.bounds.0.almost(self.point) || other_elem.bounds.1.almost(self.point))
-        && !ptr::eq(*other_elem, elem)
-        && !ptr::eq(*other_elem, self.first_elem)
-      });
-      Some(output)
-    } else {
-      None
-    }
-  }
-}
-
-
-// // Iterate through an unordered list of connected sketch elements
-// // in an orderly fashion. Returned trim bounds are consistently oriented.
-// pub struct WireIterator<'a> {
-//   wire: &'a Vec<TrimmedCurve>,
-//   elem: Option<&'a TrimmedCurve>,
-//   first_elem: &'a TrimmedCurve,
-//   point: Point3,
-// }
-
-// impl<'a> WireIterator<'a> {
-//   pub fn new(wire: &'a Vec<TrimmedCurve>) -> Self {
-//     //XXX this assumes elems are already ordered...
-//     let bounds = wire[0].bounds;
-//     let next_bounds = wire[1].bounds;
-//     let first_point = if bounds.0.almost(next_bounds.0) || bounds.0.almost(next_bounds.1) {
-//       bounds.1
-//     } else {
-//       bounds.0
-//     };
-//     Self {
-//       wire,
-//       elem: Some(&wire[0]),
-//       first_elem: &wire[0],
-//       point: first_point,
-//       // point: wire[0].bounds.0,
-//     }
-//   }
-// }
-
-// impl<'a> Iterator for WireIterator<'a> {
-//   type Item = TrimmedCurve;
-
-//   fn next(&mut self) -> Option<Self::Item> {
-//     if let Some(elem) = self.elem {
-//       let mut output = elem.clone();
-//       self.point = if elem.bounds.0.almost(self.point) {
-//         elem.bounds.1
-//       } else {
-//         // Reverse bounds, such that output item bounds are consistently oriented
-//         output.bounds = (output.bounds.1, output.bounds.0);
-//         elem.bounds.0
-//       };
-//       //XXX ... this assumes unordered
-//       self.elem = self.wire.iter().find(|other_elem| {
-//         (other_elem.bounds.0.almost(self.point) || other_elem.bounds.1.almost(self.point))
-//         && !ptr::eq(*other_elem, elem)
-//         && !ptr::eq(*other_elem, self.first_elem)
-//       });
-//       Some(output)
-//     } else {
-//       None
-//     }
-//   }
-// }
 
 
 #[cfg(test)]

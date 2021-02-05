@@ -47,17 +47,13 @@ fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
 }
 
 pub fn point_in_wire(p: Point3, wire: &Wire) -> bool {
-  let ray = Line::new(p, p + Vec3::unit_x() * 9999.9).into_enum();
+  let ray = Line::new(p, p + Vec3::unit_x() * MAX_FLOAT).into_enum();
   let mut hits = 0;
   for elem in wire {
     hits += match intersect(&ray, &elem.cache) {
-      CurveIntersectionType::Pierce(hits)
-      | CurveIntersectionType::Cross(hits)
-      => hits.len(),
-
-      CurveIntersectionType::Extended(hits)
-      => hits.iter().filter(|hit| hit.t > 0.0 ).count(),
-
+      CurveIntersectionType::Pierce(hits) |
+      CurveIntersectionType::Cross(hits)
+        => hits.len(),
       _ => 0,
     }
   }
@@ -223,6 +219,18 @@ mod tests {
     let rect = make_rect();
     assert!(super::wire_in_wire(&circle, &rect));
     assert!(!super::wire_in_wire(&rect, &circle));
+  }
+
+  #[test]
+  fn circle_in_circle() {
+    let circle = make_wire(make_generic(vec![
+      Circle::new(Point3::new(-27.0, 3.0, 0.0), 68.97340462273907)
+    ]));
+    let inner_circle = Circle::new(Point3::new(-1.0, 27.654544570311774, 0.0), 15.53598031475424);
+    let inner_circle = make_wire(make_generic(vec![inner_circle]));
+    println!("{:?}", inner_circle);
+    assert!(super::wire_in_wire(&inner_circle, &circle));
+    assert!(!super::wire_in_wire(&circle, &inner_circle));
   }
 
   #[test]

@@ -10,6 +10,7 @@ use wasm_bindgen::prelude::*;
 use crate::controllable::as_controllable;
 use crate::curve::JsCurve;
 use crate::region::JsRegion;
+use crate::log;
 
 
 #[wasm_bindgen]
@@ -62,14 +63,14 @@ impl JsSketch {
     JsCurve::from(&real.sketch.elements.last().unwrap())
   }
 
-  pub fn add_arc(&mut self, p1: JsValue, p2: JsValue, p3: JsValue) -> JsCurve {
+  pub fn add_arc(&mut self, p1: JsValue, p2: JsValue, p3: JsValue) -> Result<JsCurve, JsValue> {
     let p1: (f64, f64, f64) = p1.into_serde().unwrap();
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
     let p3: (f64, f64, f64) = p3.into_serde().unwrap();
-    let arc = Arc::from_points(Point3::from(p1), Point3::from(p2), Point3::from(p3)).unwrap();
+    let arc = Arc::from_points(Point3::from(p1), Point3::from(p2), Point3::from(p3))?;
     let mut real = self.real.borrow_mut();
     real.sketch.elements.push(rc(arc.into_enum()));
-    JsCurve::from(&real.sketch.elements.last().unwrap())
+    Ok(JsCurve::from(&real.sketch.elements.last().unwrap()))
   }
 
   pub fn remove_element(&mut self, id: JsValue) {
@@ -79,7 +80,10 @@ impl JsSketch {
   }
 
   pub fn get_regions(&self) -> Array {
-    self.real.borrow().sketch.get_profiles(false).into_iter()
+    let profiles = self.real.borrow().sketch.get_profiles(false);
+    log!("get_profiles {:?}", profiles.iter().map(|profile| profile.len()).collect::<Vec<usize>>());
+    // log!("regions {:?}", profiles);
+    profiles.into_iter()
     .map(|profile| JsValue::from(JsRegion {
       profile,
       component: self.real.clone(),

@@ -23,6 +23,9 @@ pub trait Identity {
   fn id(&self) -> Uuid;
 }
 
+// pub const MAX_FLOAT: f64 = 2_i32.pow(63).into();
+pub const MAX_FLOAT: f64 = 9223372036854776000.0;
+
 
 pub type Ref<T> = Rc<RefCell<T>>;
 pub type WeakRef<T> = Weak<RefCell<T>>;

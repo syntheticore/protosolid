@@ -67,10 +67,11 @@ impl JsCurve {
     as_controllable_mut(&mut self.real.borrow_mut()).set_handles(points);
   }
 
-  pub fn set_initial_handles(&self, handles: Array) {
+  pub fn set_initial_handles(&self, handles: Array) -> Result<(), JsValue>{
     let mut real = self.real.borrow_mut();
     let points = vertices_from_js(handles);
-    as_controllable_mut(&mut real).set_initial_handles(points);
+    as_controllable_mut(&mut real).set_initial_handles(points)?;
+    Ok(())
   }
 
   pub fn get_snap_points(&self) -> Array {

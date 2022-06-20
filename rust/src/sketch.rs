@@ -80,8 +80,10 @@ impl JsSketch {
   }
 
   pub fn get_regions(&self) -> Array {
+    web_sys::console::time_with_label("get_profiles");
     let profiles = self.real.borrow().sketch.get_profiles(false);
-    log!("get_profiles {:?}", profiles.iter().map(|profile| profile.len()).collect::<Vec<usize>>());
+    web_sys::console::time_end_with_label("get_profiles");
+    log!("num profiles {:?}", profiles.iter().map(|profile| profile.len()).collect::<Vec<usize>>());
     // log!("regions {:?}", profiles);
     profiles.into_iter()
     .map(|profile| JsValue::from(JsRegion {

@@ -142,6 +142,7 @@ pub fn line_line(own: &Line, other: &Line) -> CurveIntersectionType {
       CurveIntersectionType::Cross(vec![CurveIntersection::new(intersection_point, t)])
     }
   } else {
+    //XXX Should be None for 3d lines
     CurveIntersectionType::Extended(vec![CurveIntersection::new(intersection_point, t)])
   }
 }

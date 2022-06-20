@@ -48,22 +48,20 @@ fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
 
 pub fn point_in_wire(p: Point3, wire: &Wire) -> bool {
   let ray = Line::new(p, p + Vec3::unit_x() * MAX_FLOAT).into_enum();
-  let mut hits = 0;
+  let mut num_hits = 0;
   for elem in wire {
-    hits += match intersect(&ray, &elem.cache) {
+    num_hits += match intersect(&ray, &elem.cache) {
       CurveIntersectionType::Pierce(hits) |
       CurveIntersectionType::Cross(hits)
         => hits.len(),
       _ => 0,
     }
   }
-  hits % 2 != 0
+  num_hits % 2 != 0
 }
 
 pub fn wire_in_wire(wire: &Wire, other: &Wire) -> bool {
-  wire.iter()
-  .flat_map(|elem| tuple2_to_vec(elem.bounds))
-  .all(|bound| point_in_wire(bound, other))
+  wire.iter().all(|elem| point_in_wire(elem.bounds.0, other))
 }
 
 pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) -> Mesh {
@@ -87,7 +85,7 @@ pub fn tesselate_profile(profile: &Profile, normal: Vec3) -> Mesh {
     tesselate_wire(wire)
   }).collect();
   let mut i = 0;
-  let mut holes = vec![];
+  let mut holes = Vec::with_capacity(poly_rings.len());
   for ring in &poly_rings {
     i += ring.len();
     holes.push(i);
@@ -122,8 +120,7 @@ pub fn tesselate_wire(wire: &Wire) -> PolyLine {
 }
 
 pub fn poly_from_wire(wire: &Wire) -> PolyLine {
-  let mut polyline: PolyLine = wire.iter()
-  .map(|curve| curve.bounds.0 ).collect();
+  let mut polyline: PolyLine = wire.iter().map(|curve| curve.bounds.0 ).collect();
   polyline.push(wire[0].bounds.0);
   polyline
 }

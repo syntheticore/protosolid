@@ -22,8 +22,11 @@ pub struct JsRegion {
 #[wasm_bindgen]
 impl JsRegion {
   pub fn get_mesh(&mut self) -> JsBufferGeometry {
-    let poly = geom2d::tesselate_profile(&self.profile, Vec3::unit_z());
-    JsBufferGeometry::from(poly.to_buffer_geometry())
+    web_sys::console::time_with_label("tesselate_profile");
+    let mesh = geom2d::tesselate_profile(&self.profile, Vec3::unit_z());
+    let geom = JsBufferGeometry::from(mesh.to_buffer_geometry());
+    web_sys::console::time_end_with_label("tesselate_profile");
+    geom
   }
 
   pub fn get_center(&self) -> JsValue {

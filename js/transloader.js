@@ -154,7 +154,10 @@ export default class Transloader {
 
   updateRegions(comp) {
     this.purgeRegions(comp)
+    let t = performance.now()
     const regions = comp.real.get_sketch().get_regions(false)
+    console.log('get_regions took ' + (performance.now() - t))
+    t = performance.now()
     comp.cache().regions = regions.map(region => {
       // let material = this.renderer.materials.region.clone()
       // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
@@ -169,6 +172,7 @@ export default class Transloader {
       this.renderer.add(mesh)
       return region
     })
+    console.log('region tesselation took ' + (performance.now() - t))
   }
 
   purgeRegions(comp) {

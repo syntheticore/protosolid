@@ -69,14 +69,17 @@ function saveFileWeb(data, filetype, filename) {
 
 export function rotationFromNormal(normal) {
   let up = THREE.Object3D.DefaultUp
-  let axis
-  if(Math.abs(normal.z - 1) < 0.000000001 || Math.abs(normal.z + 1) < 0.000000001) {
-    axis = new THREE.Vector3(1, 0, 0)
+  let xAxis
+  if(Math.abs(normal.dot(up)) > 0.9999) {
+    xAxis = new THREE.Vector3(1, 0, 0)
   } else {
-    axis = new THREE.Vector3().crossVectors(up, normal)
+    xAxis = new THREE.Vector3().crossVectors(up, normal).normalize()
   }
-  let radians = Math.acos(Math.min(1, Math.max(-1, normal.dot(up))))
-  return new THREE.Quaternion().setFromAxisAngle(axis, radians)
+  const yAxis = new THREE.Vector3().crossVectors(normal, xAxis).normalize()
+  const rot = new THREE.Matrix4().makeBasis(xAxis, yAxis, normal)
+  return new THREE.Quaternion().setFromRotationMatrix(rot)
+  // let radians = Math.acos(normal.dot(up))
+  // return new THREE.Quaternion().setFromAxisAngle(xAxis, radians)
 }
 
 export function vec2three(vec) {

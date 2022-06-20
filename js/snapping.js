@@ -16,6 +16,7 @@ export default class Snapper {
     this.guides = []
     this.lastSnaps = []
     this.snapAnchor = null
+    this.planeTransform = new THREE.Matrix4()
   }
 
   reset() {
@@ -69,24 +70,33 @@ export default class Snapper {
 
   snapToGuides(vec) {
     if(!vec) return
+    const localTransform = this.planeTransform.clone().invert()
+    const localVec = vec.clone().applyMatrix4(localTransform)
     const screenVec = this.viewport.renderer.toScreen(vec)
     let snapX = this.lastSnaps.find(snap => {
-      // Compare world space X axis..
-      const testSnap = snap.clone()
-      testSnap.setY(vec.y)
-      testSnap.setZ(vec.z)
+      // Compare plane space X axis..
+      const testSnap = snap.clone().applyMatrix4(localTransform)
+      testSnap.setY(localVec.y)
+      testSnap.setZ(localVec.z)
+      testSnap.applyMatrix4(this.planeTransform)
       const screenSnap = this.viewport.renderer.toScreen(testSnap)
       // .. in screen space
       return screenVec.distanceTo(screenSnap) < snapDistance
     })
     let snapY = this.lastSnaps.find(snap => {
-      const testSnap = snap.clone()
-      testSnap.setX(vec.x)
-      testSnap.setZ(vec.z)
+      const testSnap = snap.clone().applyMatrix4(localTransform)
+      testSnap.setX(localVec.x)
+      testSnap.setZ(localVec.z)
+      testSnap.applyMatrix4(this.planeTransform)
       const screenSnap = this.viewport.renderer.toScreen(testSnap)
       return screenVec.distanceTo(screenSnap) < snapDistance
     })
-    const snapVec = new THREE.Vector3(snapX ? snapX.x : vec.x, snapY ? snapY.y : vec.y, vec.z) //XXX z-imprecision
+    const snapVec = new THREE.Vector3(
+      snapX ? snapX.clone().applyMatrix4(localTransform).x : localVec.x,
+      snapY ? snapY.clone().applyMatrix4(localTransform).y : localVec.y,
+      localVec.z
+    ) //XXX z-imprecision
+    snapVec.applyMatrix4(this.planeTransform)
     const screenSnapVec = this.viewport.renderer.toScreen(snapVec)
     if(snapX) {
       const start = this.viewport.renderer.toScreen(snapX)

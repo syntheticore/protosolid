@@ -79,7 +79,7 @@ export default class Renderer {
     this.materials = new Materials()
 
     // Sketch Plane
-    this.sketchPlane = new SketchPlane(this.camera, new THREE.Vector3(0.0, 0.0, 1.0))
+    this.sketchPlane = new SketchPlane(this.camera)
     this.scene.add(this.sketchPlane)
 
     // Shadow Catcher

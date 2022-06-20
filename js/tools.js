@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import { vec2three } from './utils.js'
+import { vec2three, rotationFromNormal } from './utils.js'
 
 class Tool {
   constructor(component, viewport) {
@@ -104,8 +104,13 @@ export class PlaneTool extends HighlightTool {
   click(vec, coords) {
     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
     if(face && face.alcObject.get_surface_type() == 'Planar') {
-      this.viewport.renderer.sketchPlane.position = vec2three(face.alcObject.get_origin())
-      this.viewport.renderer.sketchPlane.setNormal(vec2three(face.alcObject.get_normal()))
+      const sketchPlane = this.viewport.renderer.sketchPlane
+      const position = vec2three(face.alcObject.get_origin())
+      const rotation = rotationFromNormal(vec2three(face.alcObject.get_normal()))
+      sketchPlane.position = position
+      sketchPlane.rotation.setFromQuaternion(rotation)
+      // sketchPlane.setNormal(vec2three(face.alcObject.get_normal()))
+      this.viewport.snapper.planeTransform = new THREE.Matrix4().compose(position, rotation, new THREE.Vector3(1,1,1))
     }
     this.viewport.renderer.render()
   }

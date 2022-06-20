@@ -75,7 +75,7 @@ export function rotationFromNormal(normal) {
   } else {
     xAxis = new THREE.Vector3().crossVectors(up, normal).normalize()
   }
-  const yAxis = new THREE.Vector3().crossVectors(normal, xAxis).normalize()
+  const yAxis = new THREE.Vector3().crossVectors(normal, xAxis)
   const rot = new THREE.Matrix4().makeBasis(xAxis, yAxis, normal)
   return new THREE.Quaternion().setFromRotationMatrix(rot)
   // let radians = Math.acos(normal.dot(up))

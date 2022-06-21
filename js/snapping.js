@@ -36,11 +36,15 @@ export default class Snapper {
 
   getSnapPoints() {
     const sketchElements = this.viewport.activeComponent.real.get_sketch().get_sketch_elements()
+    const localTransform = this.planeTransform.clone().invert()
     // Filter out sketch element actively being drawn
     const tool = this.viewport.activeTool
     if((tool.constructor === LineTool && tool.line) || (tool.constructor === SplineTool && tool.spline)) sketchElements.pop()
     return sketchElements.flatMap(elem => {
-      let points = elem.get_snap_points().map(p => vec2three(p))
+      let points = elem.get_snap_points()
+        .map(p => vec2three(p))
+        // Filter points on sketch plane
+        .filter(p => Math.abs(p.clone().applyMatrix4(localTransform).z) < 0.00001 )
       // Filter out handle actively being dragged
       if(this.viewport.activeHandle && elem.id() == this.viewport.activeHandle.elem.id()) {
         const handlePoint = vec2three(this.viewport.activeHandle.elem.get_handles()[this.viewport.activeHandle.index])
@@ -64,7 +68,7 @@ export default class Snapper {
     if(!target) return
     if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(target))) {
       this.lastSnaps.unshift(target)
-      if(this.lastSnaps.length >= maxSnapReferences) this.lastSnaps.pop()
+      if(this.lastSnaps.length > maxSnapReferences) this.lastSnaps.pop()
     }
   }
 

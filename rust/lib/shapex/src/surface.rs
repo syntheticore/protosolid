@@ -10,7 +10,7 @@ use crate::mesh::Mesh;
 
 pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
-  // fn unsample(&self, p: Point3) -> (f64, f64);
+  fn unsample(&self, p: Point3) -> (f64, f64);
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
   fn tesselate(&self, resolution: i32, bounds: &Wire) -> Mesh;
   fn flip(&mut self); //XXX use Face::flip_normal instead
@@ -80,6 +80,12 @@ pub struct Plane {
   pub v: Vec3,
 }
 
+impl Default for Plane {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl Plane {
   pub fn new() -> Self {
     Self {
@@ -122,13 +128,13 @@ impl Plane {
   }
 
   // https://math.stackexchange.com/questions/1956699/getting-a-transformation-matrix-from-a-normal-vector
-  pub fn as_transform(&self) -> Transform {
-    Transform::from_matrix(Matrix4::from_cols(
+  pub fn as_transform(&self) -> Matrix4 {
+    Matrix4::from_cols(
       self.u.extend(self.origin.x),
       self.v.extend(self.origin.y),
       self.normal().extend(self.origin.z),
       Vec4::unit_w()
-    ).transpose())
+    ).transpose()
   }
 
   pub fn into_enum(self) -> SurfaceType {
@@ -139,6 +145,11 @@ impl Plane {
 impl Surface for Plane {
   fn sample(&self, u: f64, v: f64) -> Point3 {
     self.origin + self.u * u + self.v * v
+  }
+
+  fn unsample(&self, p: Point3) -> (f64, f64) {
+    let p_local = self.as_transform().invert().unwrap().transform_point(p);
+    (p_local.x, p_local.y)
   }
 
   fn normal_at(&self, _u: f64, _v: f64) -> Vec3 {
@@ -153,7 +164,7 @@ impl Surface for Plane {
     }
     let polyline = geom2d::tesselate_wire(&bounds);
     let mut mesh = geom2d::tesselate_polygon(polyline, vec![], self.normal());
-    mesh.transform(&trans.invert());
+    mesh.transform(&trans.invert().unwrap());
     mesh
   }
 
@@ -163,10 +174,10 @@ impl Surface for Plane {
 }
 
 impl Transformable for Plane {
-  fn transform(&mut self, transform: &Transform) {
-    self.origin = transform.apply(self.origin);
-    self.u = transform.apply_vec(self.u);
-    self.v = transform.apply_vec(self.v);
+  fn transform(&mut self, transform: &Matrix4) {
+    self.origin = transform.transform_point(self.origin);
+    self.u = transform.transform_vector(self.u);
+    self.v = transform.transform_vector(self.v);
   }
 }
 
@@ -203,6 +214,10 @@ impl Surface for CylindricalSurface {
       self.origin.y + u.cos() * self.radius,
       self.origin.z + self.direction.z * v,
     )
+  }
+
+  fn unsample(&self, _p: Point3) -> (f64, f64) {
+    todo!()
   }
 
   fn normal_at(&self, u: f64, _v: f64) -> Vec3 {
@@ -255,9 +270,9 @@ impl Surface for CylindricalSurface {
 }
 
 impl Transformable for CylindricalSurface {
-  fn transform(&mut self, transform: &Transform) {
-    self.origin = transform.apply(self.origin);
-    self.direction = transform.apply_vec(self.direction);
+  fn transform(&mut self, transform: &Matrix4) {
+    self.origin = transform.transform_point(self.origin);
+    self.direction = transform.transform_vector(self.direction);
   }
 }
 

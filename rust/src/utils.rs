@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::*;
 use shapex::*;
 
 
+
 #[macro_export] macro_rules! log {
   ( $( $t:tt )* ) => {
     web_sys::console::log_1(&format!( $( $t )* ).into());
@@ -31,4 +32,18 @@ pub fn point_from_js(p: JsValue) -> Point3 {
 
 pub fn vertices_from_js(points: Array) -> Vec<Point3> {
   points.iter().map(point_from_js).collect()
+}
+
+pub fn matrix_to_js(m: Matrix4) -> JsValue {
+  // let data = Into::<[[_; 4]; 4]>::into(m);
+  // let data: [[f64; 4]; 4] = m.into();
+  // JsValue::from_serde(&data).unwrap()
+  JsValue::from_serde(&m).unwrap()
+}
+
+pub fn matrix_from_js(m: JsValue) -> Matrix4 {
+  // let data = Into::<[[_; 4]; 4]>::into(m);
+  // let data: [[f64; 4]; 4] = m.into_serde().unwrap();
+  // data.into()
+  m.into_serde().unwrap()
 }

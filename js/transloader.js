@@ -155,7 +155,7 @@ export default class Transloader {
   updateRegions(comp) {
     this.purgeRegions(comp)
     let t = performance.now()
-    const regions = comp.real.get_sketch().get_regions(false)
+    const regions = comp.real.get_sketch().get_regions()
     console.log('get_regions took ' + (performance.now() - t))
     t = performance.now()
     comp.cache().regions = regions.map(region => {

@@ -10,6 +10,8 @@ use wasm_bindgen::prelude::*;
 use crate::controllable::as_controllable;
 use crate::curve::JsCurve;
 use crate::region::JsRegion;
+use crate::utils::matrix_to_js;
+use crate::utils::matrix_from_js;
 use crate::log;
 
 
@@ -79,9 +81,20 @@ impl JsSketch {
     real.sketch.elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id );
   }
 
+  pub fn get_workplane(&self) -> JsValue {
+    let plane = self.real.borrow().sketch.work_plane;
+    matrix_to_js(plane)
+  }
+
+  pub fn set_workplane(&self, plane: JsValue) {
+    let plane = matrix_from_js(plane);
+    self.real.borrow_mut().sketch.work_plane = plane;
+  }
+
   pub fn get_regions(&self) -> Array {
     web_sys::console::time_with_label("get_profiles");
-    let profiles = self.real.borrow().sketch.get_profiles(false);
+    let comp = self.real.borrow();
+    let profiles = comp.sketch.get_profiles(false);
     web_sys::console::time_end_with_label("get_profiles");
     log!("num profiles {:?}", profiles.iter().map(|profile| profile.len()).collect::<Vec<usize>>());
     // log!("regions {:?}", profiles);
@@ -95,24 +108,24 @@ impl JsSketch {
 
   pub fn get_all_split(&self) {
     let mut real = self.real.borrow_mut();
-    let splits: Vec<TrimmedCurve> = Sketch::all_split(&real.sketch.elements);
 
-    let (circles, mut others): (Vec<TrimmedCurve>, Vec<TrimmedCurve>) = splits.into_iter().partition(|elem| match elem.base {
+    let planar_elements = real.sketch.get_planarized_elements();
+    let splits: Vec<TrimmedCurve> = Sketch::all_split(&planar_elements);
+
+    let (mut circles, mut others): (Vec<TrimmedCurve>, Vec<TrimmedCurve>) = splits.into_iter().partition(|elem| match elem.base {
       CurveType::Circle(_) => true,
       _ => false,
     });
+
     Sketch::remove_dangling_segments(&mut others);
+    others.append(&mut circles);
 
-    let mut islands = Sketch::build_islands(&others);
-
-    let mut circle_regions = circles
-    .into_iter().map(|circle| vec![circle] ).collect();
-    islands.append(&mut circle_regions);
-
-    let islands: Vec<TrimmedCurve> = islands.into_iter().flatten().collect();
+    for tcurve in &mut others {
+      tcurve.transform(&real.sketch.work_plane);
+    }
 
     real.sketch.elements.clear();
-    for split in islands.iter() {
+    for split in others.iter() {
       real.sketch.elements.push(Rc::new(RefCell::new(split.cache.clone())));
     }
   }

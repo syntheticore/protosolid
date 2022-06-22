@@ -11,7 +11,7 @@ export class LengthGizmo extends ArrowControls {
     this.showX = false
     this.showY = false
 
-    this.dummy.applyQuaternion(rotationFromNormal(vec))
+    this.dummy.applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(rotationFromNormal(vec)))
     this.set(startValue)
 
     this.addEventListener('value', (e) => cb(Math.abs(e.value.z)) )

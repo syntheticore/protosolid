@@ -77,11 +77,36 @@ export function rotationFromNormal(normal) {
   }
   const yAxis = new THREE.Vector3().crossVectors(normal, xAxis)
   const rot = new THREE.Matrix4().makeBasis(xAxis, yAxis, normal)
-  return new THREE.Quaternion().setFromRotationMatrix(rot)
+  return rot
+  // return new THREE.Quaternion().setFromRotationMatrix(rot)
   // let radians = Math.acos(normal.dot(up))
   // return new THREE.Quaternion().setFromAxisAngle(xAxis, radians)
 }
 
-export function vec2three(vec) {
-  return new THREE.Vector3().fromArray(vec)
+export function vec2three(array) {
+  return new THREE.Vector3().fromArray(array)
+}
+
+export function matrix2three(obj) {
+  const data = Object.values(obj).flatMap(v => Object.values(v))
+  return new THREE.Matrix4().fromArray(data)
+}
+
+export function matrixFromThree(m) {
+  const data = m.toArray()
+  return objectifyVec4([
+    objectifyVec4(data.slice(0, 4)),
+    objectifyVec4(data.slice(4, 8)),
+    objectifyVec4(data.slice(8, 12)),
+    objectifyVec4(data.slice(12, 16)),
+  ])
+}
+
+function objectifyVec4(array) {
+  return {
+    x: array[0],
+    y: array[1],
+    z: array[2],
+    w: array[3],
+  }
 }

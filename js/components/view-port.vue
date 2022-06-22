@@ -424,6 +424,9 @@
       snap: function(e) {
         const coords = this.getMouseCoords(e)
         let vec = this.renderer.fromScreen(coords)
+        // vec.applyMatrix4(this.snapper.planeTransform.clone().invert())
+        // vec.setZ(0)
+        // vec.applyMatrix4(this.snapper.planeTransform)
         return this.activeTool.enableSnapping ?
           [this.snapper.snap(vec, coords), coords] : [vec, coords]
       },

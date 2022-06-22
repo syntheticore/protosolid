@@ -1,8 +1,7 @@
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
-use shapex::rc;
-use shapex::CurveType;
+use shapex::*;
 
 use crate::Sketch;
 
@@ -24,6 +23,7 @@ fn undump_component(comp: Component) -> crate::Component {
       elements: comp.sketch_elements.into_iter().map(|elem|
         rc(elem)
       ).collect(),
+      work_plane: Matrix4::one(),
     },
     compound: shapex::Compound {
       solids: comp.bodies.iter().map(|body|

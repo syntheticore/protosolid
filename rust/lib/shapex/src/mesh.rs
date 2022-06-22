@@ -55,9 +55,9 @@ impl Mesh {
 }
 
 impl Transformable for Mesh {
-  fn transform(&mut self, transform: &Transform) {
+  fn transform(&mut self, transform: &Matrix4) {
     for vertex in &mut self.vertices {
-      *vertex = transform.apply(*vertex);
+      *vertex = transform.transform_point(*vertex);
     }
     // for normal in &mut self.normals {
     //   *normal = transform.apply_vec(*normal);

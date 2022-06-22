@@ -1,5 +1,3 @@
-pub use cgmath::prelude::Transform as OtherTransform;
-
 use crate::base::*;
 use crate::Plane;
 use crate::PolyLine;

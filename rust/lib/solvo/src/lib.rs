@@ -9,6 +9,13 @@ use shapex::*;
 pub mod io;
 
 
+#[macro_export] macro_rules! log {
+  ( $( $t:tt )* ) => {
+    web_sys::console::log_1(&format!( $( $t )* ).into());
+  }
+}
+
+
 #[derive(Debug, Default)]
 pub struct Component {
   pub id: Uuid,
@@ -36,14 +43,55 @@ impl Component {
 }
 
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Sketch {
   pub elements: Vec<Ref<CurveType>>,
+  pub work_plane: Matrix4,
+}
+
+impl Default for Sketch {
+  fn default() -> Self {
+    Self {
+      elements: vec![],
+      work_plane: Matrix4::one(),
+    }
+  }
 }
 
 impl Sketch {
   pub fn get_profiles(&self, include_outer: bool) -> Vec<Profile> {
-    let regions = self.get_regions(include_outer);
+    let planar_elements = self.get_planarized_elements();
+    let cut_elements = Self::all_split(&planar_elements);
+    let regions = Self::get_regions(cut_elements, include_outer);
+    let mut profiles = Self::build_profiles(regions);
+    // Transform generated profiles back to component space
+    for profile in &mut profiles {
+      for wire in profile {
+        for tcurve in wire {
+          tcurve.transform(&self.work_plane);
+        }
+      }
+    }
+    profiles
+  }
+
+  pub fn get_planarized_elements(&self) -> Vec<Ref<CurveType>> {
+    let transform = self.work_plane.invert().unwrap();
+    self.elements.iter()
+    // Tranform elements to work plane
+    .map(|elem| {
+      let mut clone = elem.borrow().clone();
+      clone.as_curve_mut().transform(&transform);
+      rc(clone)
+    })
+    // Filter elements directly on work plane
+    .filter(|elem| {
+      let endpoints = tuple2_to_vec(elem.borrow().as_curve().endpoints());
+      endpoints.iter().all(|p| p.z.almost(0.0) )
+    }).collect()
+  }
+
+  fn build_profiles(regions: Vec<Wire>) -> Vec<Profile> {
     regions.iter().map(|wire| {
       // Find all other wires enclosed by this one
       let mut cutouts = vec![];
@@ -64,8 +112,7 @@ impl Sketch {
     }).collect()
   }
 
-  pub fn get_regions(&self, include_outer: bool) -> Vec<Wire> {
-    let cut_elements = Self::all_split(&self.elements);
+  fn get_regions(cut_elements: Vec<TrimmedCurve>, include_outer: bool) -> Vec<Wire> {
     let (circles, mut others) = cut_elements.into_iter().partition(|elem| match elem.base {
       CurveType::Circle(_) => true,
       _ => false,
@@ -101,12 +148,6 @@ impl Sketch {
     }
     if !include_outer { Self::remove_outer_loop(&mut regions) }
     regions
-  }
-
-  pub fn split_all(&self) -> Vec<CurveType> {
-    Self::all_split(&self.elements).into_iter()
-    .map(|elem| elem.cache )
-    .collect()
   }
 
   pub fn all_split(elements: &Vec<Ref<CurveType>>) -> Vec<TrimmedCurve> {
@@ -157,7 +198,7 @@ impl Sketch {
   }
 
   // https://stackoverflow.com/questions/838076/small-cycle-finding-in-a-planar-graph
-  pub fn build_loop<'a>(
+  fn build_loop<'a>(
     start_point: &Point3,
     start_elem: &'a TrimmedCurve,
     mut path: Region,
@@ -265,10 +306,16 @@ mod tests {
     sketch
   }
 
+  fn split_all(sketch: &Sketch) -> Vec<CurveType> {
+    Sketch::all_split(&sketch.elements).into_iter()
+    .map(|elem| elem.cache )
+    .collect()
+  }
+
   #[test]
   fn split_all_crossing() {
     let sketch = make_sketch(&test_data::crossing_lines());
-    let segments = sketch.split_all();
+    let segments = split_all(&sketch);
     assert_eq!(segments.len(), 4, "{} segments found instead of 4", segments.len());
     assert_eq!(segments[0].as_curve().length(), 0.5, "Segment had wrong length");
     assert_eq!(segments[1].as_curve().length(), 0.5, "Segment had wrong length");
@@ -279,7 +326,7 @@ mod tests {
   #[test]
   fn split_all_parallel() {
     let sketch = make_sketch(&test_data::parallel_lines());
-    let segments = sketch.split_all();
+    let segments = split_all(&sketch);
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
     assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
     assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
@@ -288,7 +335,7 @@ mod tests {
   #[test]
   fn t_split() {
     let sketch = make_sketch(&test_data::t_section());
-    let segments = sketch.split_all();
+    let segments = split_all(&sketch);
     assert_eq!(segments.len(), 3, "{} segments found instead of 3", segments.len());
     assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
     assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
@@ -299,9 +346,9 @@ mod tests {
   fn region_rect() {
     let sketch = make_sketch(&test_data::rectangle());
     let cut_elements = Sketch::all_split(&sketch.elements);
-    let islands = Sketch::build_islands(&cut_elements);
-    let regions = sketch.get_regions(false);
     assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
+    let islands = Sketch::build_islands(&cut_elements);
+    let regions = Sketch::get_regions(cut_elements, false);
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
@@ -310,9 +357,9 @@ mod tests {
   fn region_crossing_rect() {
     let sketch = make_sketch(&test_data::crossing_rectangle());
     let cut_elements = Sketch::all_split(&sketch.elements);
-    let islands = Sketch::build_islands(&cut_elements);
-    let regions = sketch.get_regions(false);
     assert_eq!(cut_elements.len(), 8, "{} cut_elements found instead of 8", cut_elements.len());
+    let islands = Sketch::build_islands(&cut_elements);
+    let regions = Sketch::get_regions(cut_elements, false);
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
@@ -324,9 +371,9 @@ mod tests {
     lines[3].points.0.y = -2.0;
     let sketch = make_sketch(&lines);
     let cut_elements = Sketch::all_split(&sketch.elements);
-    let islands = Sketch::build_islands(&cut_elements);
-    let regions = sketch.get_regions(false);
     assert_eq!(cut_elements.len(), 6, "{} cut_elements found instead of 6", cut_elements.len());
+    let islands = Sketch::build_islands(&cut_elements);
+    let regions = Sketch::get_regions(cut_elements, false);
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
@@ -339,11 +386,11 @@ mod tests {
       sketch.elements.push(rc(curve));
     }
     let cut_elements = Sketch::all_split(&sketch.elements);
-    let islands = Sketch::build_islands(&cut_elements);
-    let regions = sketch.get_regions(false);
-    assert_eq!(sketch.elements.len(), 4, "{} elements found instead of 4", cut_elements.len());
+    assert_eq!(sketch.elements.len(), 4, "{} elements found instead of 4", sketch.elements.len());
     assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
+    let islands = Sketch::build_islands(&cut_elements);
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
+    let regions = Sketch::get_regions(cut_elements, false);
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
 
@@ -352,7 +399,8 @@ mod tests {
     let mut sketch = make_sketch(&test_data::rectangle());
     let line = Line::new(Point3::new(-1.0, 1.0, 0.0), Point3::new(1.0, -1.0, 0.0));
     sketch.elements.push(rc(line.into_enum()));
-    let regions = sketch.get_regions(false);
+    let cut_elements = Sketch::all_split(&sketch.elements);
+    let regions = Sketch::get_regions(cut_elements, false);
     assert_eq!(regions.len(), 2, "{} regions found instead of 2", regions.len());
   }
 
@@ -361,7 +409,8 @@ mod tests {
     let mut sketch = Sketch::default();
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0));
     sketch.elements.push(rc(line.into_enum()));
-    let _regions = sketch.get_regions(false);
+    let cut_elements = Sketch::all_split(&sketch.elements);
+    let _regions = Sketch::get_regions(cut_elements, false);
   }
 
   #[test]

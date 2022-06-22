@@ -8,6 +8,9 @@ pub use cgmath::prelude::SquareMatrix;
 pub use cgmath::prelude::InnerSpace;
 pub use cgmath::prelude::MetricSpace;
 pub use cgmath::prelude::EuclideanSpace;
+// pub use cgmath::prelude::*;
+pub use cgmath::Transform;
+pub use cgmath::Rad;
 
 
 pub type Vec2 = cgmath::Vector2<f64>;
@@ -15,7 +18,7 @@ pub type Vec3 = cgmath::Vector3<f64>;
 pub type Vec4 = cgmath::Vector4<f64>;
 pub type Point2 = cgmath::Point2<f64>;
 pub type Point3 = cgmath::Point3<f64>;
-// pub type Matrix3 = cgmath::Matrix3<f64>;
+pub type Matrix3 = cgmath::Matrix3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
 
 
@@ -40,7 +43,7 @@ pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
 }
 
 
-pub const EPSILON: f64 = core::f64::EPSILON * 10000.0;
+pub const EPSILON: f64 = core::f64::EPSILON * 100000.0;
 
 pub trait Almost {
   // const EPS: f64 = core::f64::EPSILON * 100000.0;

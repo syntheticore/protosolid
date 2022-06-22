@@ -183,10 +183,10 @@ impl TrimmedCurve {
 }
 
 impl Transformable for TrimmedCurve {
-  fn transform(&mut self, transform: &Transform) {
+  fn transform(&mut self, transform: &Matrix4) {
     self.base.as_curve_mut().transform(transform);
     self.cache.as_curve_mut().transform(transform);
-    self.bounds = (transform.apply(self.bounds.0), transform.apply(self.bounds.1));
+    self.bounds = (transform.transform_point(self.bounds.0), transform.transform_point(self.bounds.1));
   }
 }
 
@@ -301,10 +301,10 @@ impl Curve for Line {
 }
 
 impl Transformable for Line {
-  fn transform(&mut self, transform: &Transform) {
+  fn transform(&mut self, transform: &Matrix4) {
     self.points = (
-      transform.apply(self.points.0),
-      transform.apply(self.points.1)
+      transform.transform_point(self.points.0),
+      transform.transform_point(self.points.1)
     );
   }
 }
@@ -381,9 +381,9 @@ impl Curve for Arc {
 }
 
 impl Transformable for Arc {
-  fn transform(&mut self, transform: &Transform) {
-    self.center = transform.apply(self.center);
-    self.normal = transform.apply_vec(self.normal);
+  fn transform(&mut self, transform: &Matrix4) {
+    self.center = transform.transform_point(self.center);
+    self.normal = transform.transform_vector(self.normal);
   }
 }
 
@@ -504,9 +504,9 @@ impl Curve for Circle {
 }
 
 impl Transformable for Circle {
-  fn transform(&mut self, transform: &Transform) {
-    self.center = transform.apply(self.center);
-    self.normal = transform.apply_vec(self.normal);
+  fn transform(&mut self, transform: &Matrix4) {
+    self.center = transform.transform_point(self.center);
+    self.normal = transform.transform_vector(self.normal);
   }
 }
 
@@ -669,9 +669,9 @@ impl Curve for BezierSpline {
 }
 
 impl Transformable for BezierSpline {
-  fn transform(&mut self, transform: &Transform) {
+  fn transform(&mut self, transform: &Matrix4) {
     for v in  &mut self.vertices {
-      *v = transform.apply(*v);
+      *v = transform.transform_point(*v);
     }
   }
 }

@@ -16,6 +16,9 @@ pub struct JsRegion {
   pub profile: Profile,
 
   #[wasm_bindgen(skip)]
+  pub plane: Matrix4,
+
+  #[wasm_bindgen(skip)]
   pub component: Rc<RefCell<Component>>,
 }
 
@@ -23,7 +26,16 @@ pub struct JsRegion {
 impl JsRegion {
   pub fn get_mesh(&mut self) -> JsBufferGeometry {
     web_sys::console::time_with_label("tesselate_profile");
-    let mesh = geom2d::tesselate_profile(&self.profile, Vec3::unit_z());
+    let transform = self.plane.invert().unwrap();
+    let local_profile = self.profile.iter().map(|wire| {
+      wire.iter().map(|tcurve| {
+        let mut c = tcurve.clone();
+        c.transform(&transform);
+        c
+      }).collect()
+    }).collect();
+    let mut mesh = geom2d::tesselate_profile(&local_profile, Vec3::unit_z());
+    mesh.transform(&self.plane);
     let geom = JsBufferGeometry::from(mesh.to_buffer_geometry());
     web_sys::console::time_end_with_label("tesselate_profile");
     geom

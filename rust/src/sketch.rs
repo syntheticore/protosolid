@@ -101,6 +101,7 @@ impl JsSketch {
     profiles.into_iter()
     .map(|profile| JsValue::from(JsRegion {
       profile,
+      plane: comp.sketch.work_plane,
       component: self.real.clone(),
     }))
     .collect()

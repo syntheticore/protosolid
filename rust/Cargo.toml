@@ -52,11 +52,10 @@ features = [
 [target."cfg(debug_assertions)".dependencies]
 console_error_panic_hook = "0.1.6"
 
-# [dev-dependencies]
-# futures = "0.1.27"
-# js-sys = "0.3.46"
-# wasm-bindgen-test = "^0.2.45"
-# wasm-bindgen-futures = "^0.3.22"
+[dev-dependencies]
+futures = "0.1.27"
+wasm-bindgen-test = "^0.2.45"
+wasm-bindgen-futures = "^0.3.22"
 
 [package.metadata.bundle]
 name = "Alchemy"

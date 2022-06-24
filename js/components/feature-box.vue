@@ -45,7 +45,7 @@
     .confirmation
       button.ok(
         title="Confirm"
-        :disabled="!activeFeature.isComplete() || error"
+        :disabled="!canConfirm"
         @click="confirm"
       )
         fa-icon(icon="check-circle")
@@ -226,8 +226,15 @@
       }
     },
 
+    computed: {
+      canConfirm: function() {
+        return this.activeFeature.isComplete() && !this.error
+      },
+    },
+
     mounted: function() {
       this.pickAll()
+      this.$root.$on('enter-pressed', () => this.confirm())
     },
 
     beforeDestroy: function() {
@@ -329,6 +336,7 @@
       },
 
       confirm: function(e) {
+        if(!this.canConfirm) return
         this.activeFeature.confirm()
         this.$emit('close')
       },

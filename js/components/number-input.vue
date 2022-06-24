@@ -117,7 +117,7 @@
           this.inner.set(this.$refs.input.value)
           this.update()
         } catch(e) {
-          this.$emit('error', "Please input a valid expression")
+          this.$emit('error', "Please enter a valid expression")
         }
       },
 
@@ -127,7 +127,11 @@
       },
 
       keydown: function(e) {
-        if(e.keyCode != 27 && !e.altKey) e.stopPropagation() // Don't capture Esc key
+        const allowPropagation =
+          e.keyCode == 27 || // Escape
+          e.altKey ||
+          (e.keyCode == 13 && (this.$refs.input.selectionStart != this.$refs.input.selectionEnd)) // Enter pressed without cursor in input
+        if(!allowPropagation) e.stopPropagation()
       },
 
       increase: function() {

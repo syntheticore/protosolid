@@ -113,3 +113,11 @@ pub fn s_curve() -> BezierSpline {
     Point3::new(1.5, 1.0, 0.0),
   ])
 }
+
+pub fn make_generic<T: Curve>(elems: Vec<T>) -> Vec<CurveType> {
+  elems.into_iter().map(|l| l.into_enum()).collect()
+}
+
+pub fn make_region(elems: Vec<CurveType>) -> Region {
+  elems.into_iter().map(|elem| TrimmedCurve::new(elem)).collect()
+}

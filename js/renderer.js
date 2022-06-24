@@ -250,7 +250,7 @@ export default class Renderer {
     this.removeGizmo()
     this.gizmo = gizmo
 
-
+    // Don't orbit when dragging on gizmo
     this.gizmo.addEventListener('dragging-changed', (event) => {
       this.viewControls.enabled = !event.value
     })

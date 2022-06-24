@@ -23,7 +23,7 @@ fn undump_component(comp: Component) -> crate::Component {
       elements: comp.sketch_elements.into_iter().map(|elem|
         rc(elem)
       ).collect(),
-      work_plane: Matrix4::one(),
+      ..Default::default()
     },
     compound: shapex::Compound {
       solids: comp.bodies.iter().map(|body|

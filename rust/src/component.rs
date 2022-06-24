@@ -90,4 +90,9 @@ impl JsComponent {
   pub fn unserialize(&mut self, dump: String) {
     self.real = rc(solvo::io::import_ron(dump));
   }
+
+  pub fn make_cube(&self) {
+    let cube = features::make_cube(10.0, 10.0, 10.0).unwrap();
+    self.real.borrow_mut().compound.add(cube.into_compound());
+  }
 }

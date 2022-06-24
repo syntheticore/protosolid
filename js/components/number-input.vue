@@ -121,7 +121,7 @@
       },
 
       keydown: function(e) {
-        if(e.keyCode != 27) e.stopPropagation() // Don't capture Esc key
+        if(e.keyCode != 27 && !e.altKey) e.stopPropagation() // Don't capture Esc key
       },
 
       increase: function() {
@@ -141,6 +141,7 @@
         clearTimeout(this.timeout)
         this.timeout = setTimeout(() => {
           input.setSelectionRange(0, input.value.length)
+          console.log(input.selectionStart)
           input.focus()
         })
       },

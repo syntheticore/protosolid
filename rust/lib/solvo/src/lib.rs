@@ -62,8 +62,8 @@ impl Sketch {
   pub fn get_profiles(&self, include_outer: bool) -> Vec<Profile> {
     let planar_elements = self.get_planarized_elements();
     let cut_elements = Self::all_split(&planar_elements);
-    let regions = Self::get_regions(cut_elements, include_outer);
-    let mut profiles = Self::build_profiles(regions);
+    let wires = Self::get_wires(cut_elements, include_outer);
+    let mut profiles = Self::build_profiles(wires);
     // Transform generated profiles back to component space
     for profile in &mut profiles {
       for wire in profile {
@@ -97,7 +97,7 @@ impl Sketch {
       let mut cutouts = vec![];
       for other in &regions {
         if ptr::eq(&*wire, &*other) { continue }
-        if geom2d::wire_in_wire(other, wire) {
+        if geom2d::region_in_region(other, wire) {
           cutouts.push(other.clone());
         }
       }
@@ -105,14 +105,14 @@ impl Sketch {
       // Only leave the outermost inner wires
       profile.append(&mut cutouts.iter().filter(|cutout|
         !cutouts.iter().any(|other|
-          !ptr::eq(&cutout[0], &other[0]) && geom2d::wire_in_wire(cutout, other)
+          !ptr::eq(&cutout[0], &other[0]) && geom2d::region_in_region(cutout, other)
         )
       ).cloned().collect());
       profile
     }).collect()
   }
 
-  fn get_regions(cut_elements: Vec<TrimmedCurve>, include_outer: bool) -> Vec<Wire> {
+  fn get_wires(cut_elements: Vec<TrimmedCurve>, include_outer: bool) -> Vec<Wire> {
     let (circles, mut others) = cut_elements.into_iter().partition(|elem| match elem.base {
       CurveType::Circle(_) => true,
       _ => false,
@@ -120,14 +120,14 @@ impl Sketch {
     Self::remove_dangling_segments(&mut others);
     let islands = Self::build_islands(&others);
     let mut regions: Vec<Wire> = islands.iter()
-    .flat_map(|island| Self::build_loops_from_island(island, include_outer) ).collect();
+    .flat_map(|island| Self::build_wires_from_island(island, include_outer) ).collect();
     let mut circle_regions = circles
     .into_iter().map(|circle| vec![circle] ).collect();
     regions.append(&mut circle_regions);
     regions
   }
 
-  fn build_loops_from_island(island: &Vec<TrimmedCurve>, include_outer: bool) -> Vec<Wire> {
+  fn build_wires_from_island(island: &Vec<TrimmedCurve>, include_outer: bool) -> Vec<Wire> {
     let mut regions = vec![];
     let mut used_forward = HashSet::new();
     let mut used_backward = HashSet::new();
@@ -142,7 +142,7 @@ impl Sketch {
           &mut used_forward,
           &mut used_backward,
         );
-        for region in &mut loops { geom2d::straighten_bounds(region) }
+        for region in &mut loops { geom2d::wire_from_region(region) }
         regions.append(&mut loops);
       }
     }
@@ -258,7 +258,7 @@ impl Sketch {
   fn remove_outer_loop(loops: &mut Vec<Wire>) {
     if loops.len() <= 1 { return }
     loops.retain(|region| {
-      !geom2d::is_clockwise(&geom2d::poly_from_wire(region))
+      !geom2d::is_clockwise(&geom2d::poly_from_wirebounds(region))
     })
   }
 
@@ -348,7 +348,7 @@ mod tests {
     let cut_elements = Sketch::all_split(&sketch.elements);
     assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
     let islands = Sketch::build_islands(&cut_elements);
-    let regions = Sketch::get_regions(cut_elements, false);
+    let regions = Sketch::get_wires(cut_elements, false);
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
@@ -359,7 +359,7 @@ mod tests {
     let cut_elements = Sketch::all_split(&sketch.elements);
     assert_eq!(cut_elements.len(), 8, "{} cut_elements found instead of 8", cut_elements.len());
     let islands = Sketch::build_islands(&cut_elements);
-    let regions = Sketch::get_regions(cut_elements, false);
+    let regions = Sketch::get_wires(cut_elements, false);
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
@@ -373,7 +373,7 @@ mod tests {
     let cut_elements = Sketch::all_split(&sketch.elements);
     assert_eq!(cut_elements.len(), 6, "{} cut_elements found instead of 6", cut_elements.len());
     let islands = Sketch::build_islands(&cut_elements);
-    let regions = Sketch::get_regions(cut_elements, false);
+    let regions = Sketch::get_wires(cut_elements, false);
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
@@ -390,7 +390,7 @@ mod tests {
     assert_eq!(cut_elements.len(), 4, "{} cut_elements found instead of 4", cut_elements.len());
     let islands = Sketch::build_islands(&cut_elements);
     assert_eq!(islands.len(), 1, "{} islands found instead of 1", islands.len());
-    let regions = Sketch::get_regions(cut_elements, false);
+    let regions = Sketch::get_wires(cut_elements, false);
     assert_eq!(regions.len(), 1, "{} regions found instead of 1", regions.len());
   }
 
@@ -400,7 +400,7 @@ mod tests {
     let line = Line::new(Point3::new(-1.0, 1.0, 0.0), Point3::new(1.0, -1.0, 0.0));
     sketch.elements.push(rc(line.into_enum()));
     let cut_elements = Sketch::all_split(&sketch.elements);
-    let regions = Sketch::get_regions(cut_elements, false);
+    let regions = Sketch::get_wires(cut_elements, false);
     assert_eq!(regions.len(), 2, "{} regions found instead of 2", regions.len());
   }
 
@@ -410,7 +410,7 @@ mod tests {
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 1.0));
     sketch.elements.push(rc(line.into_enum()));
     let cut_elements = Sketch::all_split(&sketch.elements);
-    let _regions = Sketch::get_regions(cut_elements, false);
+    let _regions = Sketch::get_wires(cut_elements, false);
   }
 
   #[test]

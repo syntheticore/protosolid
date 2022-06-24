@@ -91,7 +91,7 @@ impl JsSketch {
     self.real.borrow_mut().sketch.work_plane = plane;
   }
 
-  pub fn get_regions(&self) -> Array {
+  pub fn get_profiles(&self) -> Array {
     web_sys::console::time_with_label("get_profiles");
     let comp = self.real.borrow();
     let profiles = comp.sketch.get_profiles(false);

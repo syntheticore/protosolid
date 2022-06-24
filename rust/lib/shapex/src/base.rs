@@ -11,6 +11,7 @@ pub use cgmath::prelude::EuclideanSpace;
 // pub use cgmath::prelude::*;
 pub use cgmath::Transform;
 pub use cgmath::Rad;
+pub use cgmath::Deg;
 
 
 pub type Vec2 = cgmath::Vector2<f64>;
@@ -75,5 +76,11 @@ impl Almost for f64 {
 pub fn almost_eq<T: Almost + Debug + Copy>(first: T, second: T) {
   if !first.almost(second) {
     panic!("\n\n{:?} != {:?}\n\n", first, second);
+  }
+}
+
+#[macro_export] macro_rules! log {
+  ( $( $t:tt )* ) => {
+    web_sys::console::log_1(&format!( $( $t )* ).into());
   }
 }

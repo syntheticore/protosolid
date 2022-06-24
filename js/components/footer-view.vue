@@ -56,6 +56,7 @@
 
     .debug-panel
       button.button(@click="splitAll") Split all
+      button.button(@click="makeCube") Make Cube
 </template>
 
 
@@ -156,14 +157,12 @@
 
     methods: {
       splitAll: function() {
-        // const regions = this.activeComponent.get_regions()
-        // console.log('Regions', regions)
         const splits = this.activeComponent.real.get_sketch().get_all_split()
-        // const elems = this.activeComponent.get_sketch_elements()
-        // // .map(elem => elem.get_handles())
-        // elems.forEach(elem => {
-        //   this.activeComponent.remove_element(elem.id())
-        // })
+        this.$root.$emit('component-changed', this.activeComponent)
+      },
+
+      makeCube: function() {
+        this.activeComponent.real.make_cube()
         this.$root.$emit('component-changed', this.activeComponent)
       },
     },

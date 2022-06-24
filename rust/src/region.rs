@@ -6,6 +6,7 @@ use wasm_bindgen::prelude::*;
 use solvo::*;
 use shapex::*;
 
+use crate::utils::vec_to_js;
 use crate::utils::point_to_js;
 use crate::buffer_geometry::JsBufferGeometry;
 
@@ -24,17 +25,16 @@ pub struct JsRegion {
 
 #[wasm_bindgen]
 impl JsRegion {
-  pub fn get_mesh(&mut self) -> JsBufferGeometry {
+  pub fn get_mesh(&self) -> JsBufferGeometry {
     web_sys::console::time_with_label("tesselate_profile");
     let transform = self.plane.invert().unwrap();
-    let local_profile = self.profile.iter().map(|wire| {
-      wire.iter().map(|tcurve| {
-        let mut c = tcurve.clone();
-        c.transform(&transform);
-        c
-      }).collect()
-    }).collect();
-    let mut mesh = geom2d::tesselate_profile(&local_profile, Vec3::unit_z());
+    let mut profile = self.profile.clone();
+    for wire in &mut profile {
+      for curve in wire {
+        curve.transform(&transform);
+      }
+    }
+    let mut mesh = geom2d::tesselate_profile(&profile, Vec3::unit_z());
     mesh.transform(&self.plane);
     let geom = JsBufferGeometry::from(mesh.to_buffer_geometry());
     web_sys::console::time_end_with_label("tesselate_profile");
@@ -50,6 +50,11 @@ impl JsRegion {
       }
     ) / (self.profile[0].len() as f64 * 2.0);
     point_to_js(center)
+  }
+
+    pub fn get_normal(&self) -> JsValue {
+    let normal = self.plane.transform_vector(Vec3::new(0.0, 0.0, 1.0));
+    vec_to_js(normal)
   }
 
   pub fn extrude(&self, distance: f64) {

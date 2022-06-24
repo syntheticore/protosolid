@@ -12,3 +12,5 @@ rand = "0.7.3"
 cgmath = { version = "0.17.0", features = ["serde"] }
 uuid = { version = "0.8.1", features = ["v4", "serde"] }
 earcutr = { git = "https://github.com/donbright/earcutr" }
+
+web-sys = { version = "0.3.46", features = ["console"]}

@@ -222,6 +222,7 @@
       return {
         error: null,
         activePicker: null,
+        firstUpdate: true,
       }
     },
 
@@ -279,6 +280,13 @@
       },
 
       update: function() {
+        console.log('Update feature')
+        // if(this.firstUpdate) {
+        //   // Skip the first update - initiated by NumberInput - which
+        //   // is only meant to convert the feature's base values to preferred unit
+        //   this.firstUpdate = false
+        //   return
+        // }
         this.updateGizmos()
         const meshOrError = this.activeFeature.update()
         this.error = null
@@ -306,11 +314,16 @@
         if(!settings.find(setting => setting.type == 'length')) return
 
         const center = vec2three(this.activeFeature.profile().get_center())
-        const direction = this.activeFeature.axis || THREE.Object3D.DefaultUp
+        const normal = vec2three(this.activeFeature.profile().get_normal())
+        const direction =
+          (this.activeFeature.axis && this.activeFeature.axis()) ||
+          normal ||
+          THREE.Object3D.DefaultUp
+        console.log(direction)
         this.lengthGizmo = new LengthGizmo(
           center, direction,
           this.activeFeature.distance,
-          (dist) => this.activeFeature.distance = dist,
+          (dist) => this.activeFeature.distance = dist
         )
         window.alcRenderer.addGizmo(this.lengthGizmo)
       },

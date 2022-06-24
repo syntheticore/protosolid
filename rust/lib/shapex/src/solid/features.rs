@@ -1,18 +1,24 @@
 use crate::base::*;
-use crate::surface::*;
+// use crate::surface::*;
 use crate::solid::*;
 
 use crate::geom2d;
 use crate::geom3d;
 
+// use crate::log;
+
 
 pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
-  //XXX use poly_from_wire once circles are handled
+  //XXX use poly_from_wirebounds once circles are handled
   let poly = geom2d::tesselate_wire(&profile[0]);
   // #[cfg(debug_assertions)]
   // assert!(!geom2d::is_clockwise(&poly));
-  let mut plane = geom3d::detect_plane(&poly)?;
-  plane.flip();
+  let plane = geom3d::detect_plane(&poly)?;
+  // plane.flip();
+  let plane_normal = plane.normal() * distance;
+  // let plane_normal = plane.as_transform().transform_vector(Vec3::new(0.0, 0.0, distance));
+  // log!("Generated plane {:?}", plane_normal);
+  // log!("Work plane {:?}", normal);
   let mut solid = Solid::new_lamina(profile[0].clone(), plane.into_enum());
   let shell = &mut solid.shells[0];
   let face = if distance >= 0.0 {
@@ -20,7 +26,7 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
   } else {
     shell.faces.first()
   }.unwrap().clone();
-  shell.sweep(&face, Vec3::new(0.0, 0.0, distance));
+  shell.sweep(&face, plane_normal);
   if distance > 200.0 {
     Err(format!("Maximum extrusion distance exceeded {:?}", profile.len()))
   } else {
@@ -33,12 +39,14 @@ pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {
 }
 
 pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Solid, String> {
-  let points = [
+  let mut points = vec![
     Point3::new(0.0, 0.0, 0.0),
     Point3::new(dx, 0.0, 0.0),
     Point3::new(dx, dy, 0.0),
     Point3::new(0.0, dy, 0.0),
   ];
+  let m = Matrix4::from_angle_z(Deg(45.0));
+  points = points.into_iter().map(|p| m.transform_point(p) ).collect();
   let mut region = vec![vec![]];
   let mut iter = points.iter().peekable();
   while let Some(&p) = iter.next() {
@@ -90,6 +98,6 @@ mod tests {
     assert_eq!(shell.faces[0].borrow().outer_ring.borrow().iter().count(), 1);
     assert_eq!(shell.faces[1].borrow().outer_ring.borrow().iter().count(), 1);
     assert_eq!(shell.faces[2].borrow().outer_ring.borrow().iter().count(), 4);
-    panic!("Test trap");
+    // panic!("Test trap");
   }
 }

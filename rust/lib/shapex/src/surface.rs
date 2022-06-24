@@ -4,15 +4,17 @@ use crate::base::*;
 use crate::curve::*;
 
 use crate::geom2d;
+use crate::geom3d;
 use crate::transform::*;
-use crate::mesh::Mesh;
+use crate::mesh::*;
+use crate::log;
 
 
 pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
   fn unsample(&self, p: Point3) -> (f64, f64);
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
-  fn tesselate(&self, resolution: i32, bounds: &Wire) -> Mesh;
+  fn tesselate(&self, resolution: i32, profile: &Profile) -> Mesh;
   fn flip(&mut self); //XXX use Face::flip_normal instead
 }
 
@@ -49,7 +51,7 @@ impl SurfaceType {
 #[derive(Debug)]
 pub struct TrimmedSurface {
   pub base: SurfaceType,
-  pub bounds: Vec<Wire>,
+  pub bounds: Profile,
 }
 
 impl TrimmedSurface {
@@ -60,16 +62,17 @@ impl TrimmedSurface {
     }
   }
 
-  pub fn tesselate(&self) -> Mesh {
-    let wire = &self.bounds[0];
-    self.base.as_surface().tesselate(80, wire)
-  }
-
   pub fn area(&self) -> f64 {
     0.0 //XXX
   }
 
   //XXX pub fn on_surface(&self, u: f64, v: f64) -> bool
+}
+
+impl Meshable for TrimmedSurface {
+  fn tesselate(&self) -> Mesh {
+    self.base.as_surface().tesselate(80, &self.bounds)
+  }
 }
 
 
@@ -106,12 +109,22 @@ impl Plane {
     }
   }
 
+  pub fn from_normal(origin: Point3, normal: Vec3) -> Self {
+    let m = geom3d::transform_from_location_and_normal(origin, normal);
+    Self {
+      origin,
+      u: m.transform_vector(Vec3::new(1.0, 0.0, 0.0)),
+      v: m.transform_vector(Vec3::new(0.0, 1.0, 0.0)),
+    }
+  }
+
   pub fn normal(&self) -> Vec3 {
     self.u.cross(self.v)
   }
 
   pub fn contains_point(&self, p: Point3) -> bool {
-    self.normal().dot(p - self.origin) <= EPSILON
+    self.origin.almost(p) ||
+    self.normal().dot((p - self.origin).normalize()).abs() <= EPSILON
   }
 
   // https://github.com/xibyte/jsketcher/blob/master/modules/geom/euclidean.ts
@@ -156,14 +169,30 @@ impl Surface for Plane {
     self.normal()
   }
 
-  fn tesselate(&self, _resolution: i32, bounds: &Wire) -> Mesh {
-    let mut bounds = bounds.clone();
+  fn tesselate(&self, _resolution: i32, profile: &Profile) -> Mesh {
+    let mut local_profile = profile.clone();
+    // let mut dummy = self.clone();
+    // dummy.flip();
     let trans = self.as_transform();
-    for curve in &mut bounds {
-      curve.transform(&trans)
+    // let trans = geom3d::transform_from_location_and_normal(self.origin, self.normal()).invert().unwrap();
+    for wire in &mut local_profile {
+      // let poly = geom2d::poly_from_wirebounds(wire);
+      // log!("Start wirebounds {:#?}", poly);
+      // log!("Plane normal {:#?}", self.normal());
+      // log!("Plane {:#?}", self);
+      // for p in &poly {
+        // log!("Point in plane {:#?}", self.contains_point(*p));
+      // }
+      for curve in wire.iter_mut() {
+        curve.transform(&trans);
+      }
+      // log!("Flat wirebounds{:#?}", geom2d::poly_from_wirebounds(wire));
     }
-    let polyline = geom2d::tesselate_wire(&bounds);
-    let mut mesh = geom2d::tesselate_polygon(polyline, vec![], self.normal());
+    let mut mesh = geom2d::tesselate_profile(&local_profile, self.normal());
+    // let polyline = geom2d::tesselate_wire(&local_profile[0]);
+    // log!("{:?}", polyline);
+    // let mut mesh = geom2d::tesselate_polygon(polyline, vec![], self.normal());
+    // log!("{:?}", polyline);
     mesh.transform(&trans.invert().unwrap());
     mesh
   }
@@ -224,7 +253,7 @@ impl Surface for CylindricalSurface {
     (self.sample(u, 0.0) - self.origin).normalize()
   }
 
-  fn tesselate(&self, resolution: i32, _bounds: &Wire) -> Mesh {
+  fn tesselate(&self, resolution: i32, _profile: &Profile) -> Mesh {
     let mut vertices: Vec<Point3> = vec![];
     let mut faces: Vec<usize> = vec![];
     let mut normals: Vec<Vec3> = vec![];
@@ -288,6 +317,9 @@ impl Transformable for CylindricalSurface {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::test_data;
+  // use crate::test_data::make_generic;
+  // use crate::test_data::make_region;
 
   #[test]
   fn plane_normal() {
@@ -304,5 +336,71 @@ mod tests {
     almost_eq(cylinder.normal_at(0.5, 0.0), Vec3::new(0.0, -1.0, 0.0));
     almost_eq(cylinder.normal_at(0.25, 0.0), Vec3::new(1.0, 0.0, 0.0));
     almost_eq(cylinder.normal_at(0.75, 0.0), Vec3::new(-1.0, 0.0, 0.0));
+  }
+
+  #[test]
+  fn plane_transform() {
+    let mut lines = test_data::angle_left();
+    println!("lines {:#?}", lines);
+    // let mut region = make_region(make_generic(lines));
+    let twist = Matrix4::from_angle_x(Deg(90.0));
+    println!("twist {:#?}", twist);
+    let twist_reverse = twist.invert().unwrap();
+    println!("twist inverted {:#?}", twist_reverse);
+    let translate = Matrix4::from_translation(Vec3::new(1.0, 2.0, 3.0));
+    println!("translate {:#?}", translate);
+    println!("translate invert {:#?}", translate.invert().unwrap());
+    for line in &mut lines {
+      line.transform(&twist);
+    }
+    println!("transformed lines {:#?}", lines);
+    let plane = Plane::from_normal(Point3::new(1.0, 0.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
+    println!("plane {:#?}", plane);
+    println!("plane normal {:#?}", plane.normal());
+    let plane_transform = plane.as_transform();
+    println!("plane transform {:#?}", plane_transform);
+    let plane_reverse = plane_transform.invert().unwrap();
+    println!("plane reverse transform {:#?}", plane_reverse);
+
+    println!("backforth zero {:#?}", plane_reverse.transform_point(plane_transform.transform_point(Point3::new(0.0, 0.0, 0.0))));
+    println!("backforth one {:#?}", plane_reverse.transform_point(plane_transform.transform_point(Point3::new(1.0, 1.0, 1.0))));
+    println!("backforth {:#?}", plane_reverse.transform_point(plane_transform.transform_point(Point3::new(6.0, 4.0, 5.0))));
+
+    let rotated_normal = plane.as_transform().transform_vector(Vec3::new(0.0, 0.0, 6.0));
+    println!("rotated_normal {:#?}", rotated_normal);
+
+    for line in &mut lines {
+      line.transform(&plane_reverse);
+    }
+    println!("plane transformed lines {:#?}", lines);
+
+    for line in &lines {
+      almost_eq(line.points.0.z, 0.0);
+      almost_eq(line.points.1.z, 0.0);
+    }
+
+    for line in &mut lines {
+      line.transform(&plane_transform);
+    }
+    println!("back transformed lines {:#?}", lines);
+
+    for line in &mut lines {
+      line.transform(&twist_reverse);
+    }
+    println!("untwisted lines {:#?}", lines);
+  }
+
+  #[test]
+  fn plane_transform2() {
+    let p = Point3::new(0.0, 0.0, 20.0);
+    let plane = Plane {
+      origin: Point3::new(-7.071067811865475, 7.0710678118654755, 0.0),
+      u: Vec3::new(0.0, 0.0, 1.0),
+      v: Vec3::new(-0.7071067811865475, 0.7071067811865476, 0.0),
+    };
+    let trans = plane.as_transform();
+    let p = trans.transform_point(p);
+    println!("transformed point {:#?}", p);
+    panic!("Blub");
   }
 }

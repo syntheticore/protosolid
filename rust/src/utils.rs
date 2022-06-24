@@ -21,16 +21,25 @@ pub fn point_to_js(p: Point3) -> JsValue {
   // JsValue::from_serde(&p).unwrap()
 }
 
-pub fn points_to_js(points: Vec<Point3>) -> Array {
-  points.into_iter().map(point_to_js).collect()
-}
-
 pub fn point_from_js(p: JsValue) -> Point3 {
   let p: (f64, f64, f64) = p.into_serde().unwrap();
   Point3::new(p.0, p.1, p.2)
 }
 
-pub fn vertices_from_js(points: Array) -> Vec<Point3> {
+pub fn vec_to_js(p: Vec3) -> JsValue {
+  JsValue::from_serde(&(p.x, p.y, p.z)).unwrap()
+}
+
+// pub fn vec_from_js(p: JsValue) -> Vec3 {
+//   let p: (f64, f64, f64) = p.into_serde().unwrap();
+//   Vec3::new(p.0, p.1, p.2)
+// }
+
+pub fn points_to_js(points: Vec<Point3>) -> Array {
+  points.into_iter().map(point_to_js).collect()
+}
+
+pub fn points_from_js(points: Array) -> Vec<Point3> {
   points.iter().map(point_from_js).collect()
 }
 

@@ -95,12 +95,13 @@
     },
 
     watch: {
-      'inner.expression': function() {
-        this.update()
-      },
+      // 'inner.expression': function() {
+      //   this.update()
+      // },
 
       value: function(value) {
         this.inner.setBase(value)
+        this.update()
       },
     },
 
@@ -112,7 +113,12 @@
 
     methods: {
       enter: function() {
-        this.inner.set(this.$refs.input.value)
+        try {
+          this.inner.set(this.$refs.input.value)
+          this.update()
+        } catch(e) {
+          this.$emit('error', "Please input a valid expression")
+        }
       },
 
       update: function() {
@@ -127,12 +133,14 @@
       increase: function() {
         const number = this.inner.parse()
         this.inner.set(truncate(number.value + 1) + number.unit)
+        this.update()
       },
 
       decrease: function() {
         const number = this.inner.parse()
         const newValue = number.value - 1
         if(newValue >= 0) this.inner.set(truncate(newValue) + number.unit)
+        this.update()
       },
 
       focusInput: function() {

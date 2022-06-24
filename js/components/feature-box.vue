@@ -20,6 +20,7 @@
             :component="activeFeature.component"
             :value.sync="activeFeature[key]"
             @update:value="update"
+            @error="showError"
           )
           IconToggle(
             v-if="setting.type == 'bool'"
@@ -292,13 +293,17 @@
         this.installGizmos()
       },
 
+      showError: function(error) {
+        this.error = error
+      },
+
       installGizmos: function() {
         if(!this.activeFeature.isComplete()) return window.alcRenderer.removeGizmo()
         if(!this.lengthGizmo) this.installLengthGizmo()
       },
 
       updateGizmos: function() {
-        if(this.lengthGizmo) this.lengthGizmo.set(this.activeFeature.distance)
+        if(this.lengthGizmo) this.lengthGizmo.set(this.activeFeature.distance, this.activeFeature.side)
       },
 
       installLengthGizmo: function() {
@@ -307,15 +312,18 @@
 
         const center = vec2three(this.activeFeature.profile().get_center())
         const normal = vec2three(this.activeFeature.profile().get_normal())
-        const direction =
-          (this.activeFeature.axis && this.activeFeature.axis()) ||
-          normal ||
-          THREE.Object3D.DefaultUp
-        console.log(direction)
+        const axis = this.activeFeature.axis && this.activeFeature.axis()
+        const direction = axis || normal || THREE.Object3D.DefaultUp
+
         this.lengthGizmo = new LengthGizmo(
-          center, direction,
+          center,
+          direction,
+          this.activeFeature.side,
           this.activeFeature.distance,
-          (dist) => this.activeFeature.distance = dist
+          (dist, side) => {
+            this.activeFeature.distance = dist
+            this.activeFeature.side = side
+          },
         )
         window.alcRenderer.addGizmo(this.lengthGizmo)
       },

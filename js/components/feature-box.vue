@@ -222,7 +222,6 @@
       return {
         error: null,
         activePicker: null,
-        firstUpdate: true,
       }
     },
 
@@ -280,13 +279,6 @@
       },
 
       update: function() {
-        console.log('Update feature')
-        // if(this.firstUpdate) {
-        //   // Skip the first update - initiated by NumberInput - which
-        //   // is only meant to convert the feature's base values to preferred unit
-        //   this.firstUpdate = false
-        //   return
-        // }
         this.updateGizmos()
         const meshOrError = this.activeFeature.update()
         this.error = null

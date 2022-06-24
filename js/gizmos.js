@@ -24,5 +24,3 @@ export class LengthGizmo extends ArrowControls {
     this.dummy.position.copy(this.direction).multiplyScalar(value).add(this.startPosition).sub(this.position)
   }
 }
-
-Checken seit wann Halbmonde nicht mehr geBREPt werden

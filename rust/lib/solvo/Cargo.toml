@@ -3,7 +3,7 @@ name = "solvo"
 version = "0.1.0"
 description = "Geometric constraint solver"
 authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 rand = "0.7.3"

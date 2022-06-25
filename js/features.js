@@ -1,3 +1,6 @@
+import { vec2three } from './utils.js'
+import { LengthGizmo } from './gizmos.js'
+
 class Feature {
   constructor(component, booleanOutput, settings) {
     this.component = component
@@ -32,8 +35,10 @@ class Feature {
   preview() {}
   confirm() {}
   isComplete() {}
+  updateGizmos() {}
 
   update() {
+    this.updateGizmos()
     if(this.isComplete()) return this.preview()
   }
 
@@ -104,6 +109,25 @@ export class ExtrudeFeature extends Feature {
 
   confirm() {
     this.profile().extrude(this.distance * (this.side ? 1 : -1))
+  }
+
+  updateGizmos() {
+    if(this.profile) {
+      if(this.lengthGizmo) {
+        this.lengthGizmo.set(this.distance, this.side)
+      } else {
+        const center = vec2three(this.profile().get_center())
+        const axis = this.axis && this.axis()
+        const direction = axis || vec2three(this.profile().get_normal())
+        this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.distance, (dist, side) => {
+          this.distance = dist
+          this.side = side
+        })
+        window.alcRenderer.addGizmo(this.lengthGizmo)
+      }
+    } else {
+      window.alcRenderer.removeGizmo(this.lengthGizmo)
+    }
   }
 }
 

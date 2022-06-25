@@ -193,8 +193,6 @@
   import * as THREE from 'three'
 
   import { ManipulationTool } from './../tools.js'
-  import { LengthGizmo } from './../gizmos.js'
-  import { vec2three } from './../utils.js'
 
   export default {
     name: 'FeatureBox',
@@ -287,7 +285,6 @@
       },
 
       update: function() {
-        this.updateGizmos()
         const meshOrError = this.activeFeature.update()
         this.error = null
         if(typeof meshOrError == 'string') {
@@ -297,42 +294,10 @@
         } else {
           this.$root.$emit('component-changed', this.activeFeature.component, true)
         }
-        this.installGizmos()
       },
 
       showError: function(error) {
         this.error = error
-      },
-
-      installGizmos: function() {
-        if(!this.activeFeature.isComplete()) return window.alcRenderer.removeGizmo()
-        if(!this.lengthGizmo) this.installLengthGizmo()
-      },
-
-      updateGizmos: function() {
-        if(this.lengthGizmo) this.lengthGizmo.set(this.activeFeature.distance, this.activeFeature.side)
-      },
-
-      installLengthGizmo: function() {
-        const settings = Object.values(this.activeFeature.settings)
-        if(!settings.find(setting => setting.type == 'length')) return
-
-        const center = vec2three(this.activeFeature.profile().get_center())
-        const normal = vec2three(this.activeFeature.profile().get_normal())
-        const axis = this.activeFeature.axis && this.activeFeature.axis()
-        const direction = axis || normal || THREE.Object3D.DefaultUp
-
-        this.lengthGizmo = new LengthGizmo(
-          center,
-          direction,
-          this.activeFeature.side,
-          this.activeFeature.distance,
-          (dist, side) => {
-            this.activeFeature.distance = dist
-            this.activeFeature.side = side
-          },
-        )
-        window.alcRenderer.addGizmo(this.lengthGizmo)
       },
 
       confirm: function(e) {

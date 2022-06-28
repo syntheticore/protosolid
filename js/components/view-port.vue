@@ -486,7 +486,9 @@
           Circle: CircleTool,
           Arc: ArcTool,
         }
-        const tool = new tools[toolName](this.activeComponent, this)
+        const Tool = tools[toolName]
+        if(!Tool) return
+        const tool = new Tool(this.activeComponent, this)
         this.$emit('update:active-tool', tool)
         this.renderer.render()
       },

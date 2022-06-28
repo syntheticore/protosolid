@@ -12,7 +12,7 @@ use crate::curve::JsCurve;
 use crate::region::JsRegion;
 use crate::utils::matrix_to_js;
 use crate::utils::matrix_from_js;
-use crate::log;
+// use crate::log;
 
 
 #[wasm_bindgen]
@@ -96,12 +96,11 @@ impl JsSketch {
     let comp = self.real.borrow();
     let profiles = comp.sketch.get_profiles(false);
     web_sys::console::time_end_with_label("get_profiles");
-    log!("num profiles {:?}", profiles.iter().map(|profile| profile.len()).collect::<Vec<usize>>());
-    // log!("regions {:?}", profiles);
     profiles.into_iter()
     .map(|profile| JsValue::from(JsRegion {
-      profile,
-      plane: comp.sketch.work_plane,
+      profile: profile.1,
+      plane: profile.0.as_transform(),
+      // plane: comp.sketch.work_plane,
       component: self.real.clone(),
     }))
     .collect()

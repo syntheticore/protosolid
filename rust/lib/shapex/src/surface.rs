@@ -140,14 +140,13 @@ impl Plane {
     (u, v)
   }
 
-  // https://math.stackexchange.com/questions/1956699/getting-a-transformation-matrix-from-a-normal-vector
   pub fn as_transform(&self) -> Matrix4 {
     Matrix4::from_cols(
-      self.u.extend(self.origin.x),
-      self.v.extend(self.origin.y),
-      self.normal().extend(self.origin.z),
-      Vec4::unit_w()
-    ).transpose()
+      self.u.extend(0.0),
+      self.v.extend(0.0),
+      self.normal().extend(0.0),
+      self.origin.to_vec().extend(1.0)
+    )
   }
 
   pub fn into_enum(self) -> SurfaceType {
@@ -171,29 +170,15 @@ impl Surface for Plane {
 
   fn tesselate(&self, _resolution: i32, profile: &Profile) -> Mesh {
     let mut local_profile = profile.clone();
-    // let mut dummy = self.clone();
-    // dummy.flip();
     let trans = self.as_transform();
-    // let trans = geom3d::transform_from_location_and_normal(self.origin, self.normal()).invert().unwrap();
+    let trans_inv = trans.invert().unwrap();
     for wire in &mut local_profile {
-      // let poly = geom2d::poly_from_wirebounds(wire);
-      // log!("Start wirebounds {:#?}", poly);
-      // log!("Plane normal {:#?}", self.normal());
-      // log!("Plane {:#?}", self);
-      // for p in &poly {
-        // log!("Point in plane {:#?}", self.contains_point(*p));
-      // }
       for curve in wire.iter_mut() {
-        curve.transform(&trans);
+        curve.transform(&trans_inv);
       }
-      // log!("Flat wirebounds{:#?}", geom2d::poly_from_wirebounds(wire));
     }
     let mut mesh = geom2d::tesselate_profile(&local_profile, self.normal());
-    // let polyline = geom2d::tesselate_wire(&local_profile[0]);
-    // log!("{:?}", polyline);
-    // let mut mesh = geom2d::tesselate_polygon(polyline, vec![], self.normal());
-    // log!("{:?}", polyline);
-    mesh.transform(&trans.invert().unwrap());
+    mesh.transform(&trans);
     mesh
   }
 
@@ -339,59 +324,7 @@ mod tests {
   }
 
   #[test]
-  fn plane_transform() {
-    let mut lines = test_data::angle_left();
-    println!("lines {:#?}", lines);
-    // let mut region = make_region(make_generic(lines));
-    let twist = Matrix4::from_angle_x(Deg(90.0));
-    println!("twist {:#?}", twist);
-    let twist_reverse = twist.invert().unwrap();
-    println!("twist inverted {:#?}", twist_reverse);
-    let translate = Matrix4::from_translation(Vec3::new(1.0, 2.0, 3.0));
-    println!("translate {:#?}", translate);
-    println!("translate invert {:#?}", translate.invert().unwrap());
-    for line in &mut lines {
-      line.transform(&twist);
-    }
-    println!("transformed lines {:#?}", lines);
-    let plane = Plane::from_normal(Point3::new(1.0, 0.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
-    println!("plane {:#?}", plane);
-    println!("plane normal {:#?}", plane.normal());
-    let plane_transform = plane.as_transform();
-    println!("plane transform {:#?}", plane_transform);
-    let plane_reverse = plane_transform.invert().unwrap();
-    println!("plane reverse transform {:#?}", plane_reverse);
-
-    println!("backforth zero {:#?}", plane_reverse.transform_point(plane_transform.transform_point(Point3::new(0.0, 0.0, 0.0))));
-    println!("backforth one {:#?}", plane_reverse.transform_point(plane_transform.transform_point(Point3::new(1.0, 1.0, 1.0))));
-    println!("backforth {:#?}", plane_reverse.transform_point(plane_transform.transform_point(Point3::new(6.0, 4.0, 5.0))));
-
-    let rotated_normal = plane.as_transform().transform_vector(Vec3::new(0.0, 0.0, 6.0));
-    println!("rotated_normal {:#?}", rotated_normal);
-
-    for line in &mut lines {
-      line.transform(&plane_reverse);
-    }
-    println!("plane transformed lines {:#?}", lines);
-
-    for line in &lines {
-      almost_eq(line.points.0.z, 0.0);
-      almost_eq(line.points.1.z, 0.0);
-    }
-
-    for line in &mut lines {
-      line.transform(&plane_transform);
-    }
-    println!("back transformed lines {:#?}", lines);
-
-    for line in &mut lines {
-      line.transform(&twist_reverse);
-    }
-    println!("untwisted lines {:#?}", lines);
-  }
-
-  #[test]
-  fn plane_transform2() {
+  fn plane_transform1() {
     let p = Point3::new(0.0, 0.0, 20.0);
     let plane = Plane {
       origin: Point3::new(-7.071067811865475, 7.0710678118654755, 0.0),
@@ -400,7 +333,20 @@ mod tests {
     };
     let trans = plane.as_transform();
     let p = trans.transform_point(p);
-    println!("transformed point {:#?}", p);
-    panic!("Blub");
+    almost_eq(p.z, 0.0);
+  }
+
+  #[test]
+  fn plane_transform2() {
+    let dist = 6.0;
+    let vec = Vec3::new(0.4, 0.5, 1.0).normalize() * dist;
+    println!("input vector {:#?}", vec);
+    let plane = Plane::from_normal(Point3::new(1.0, 2.0, 3.0), vec);
+    let normal = plane.normal() * dist;
+    println!("normal {:#?}", normal);
+    let gen_normal = plane.as_transform().transform_vector(Vec3::new(0.0, 0.0, dist));
+    println!("generated normal {:#?}", gen_normal);
+    almost_eq(vec, normal);
+    almost_eq(normal, gen_normal);
   }
 }

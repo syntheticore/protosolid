@@ -85,16 +85,12 @@ pub fn tesselate_profile(profile: &Profile, normal: Vec3) -> Mesh {
 pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) -> Mesh {
   // #[cfg(debug_assertions)]
   // assert!(!is_clockwise(&vertices));
-  log!("is clockwise {:#?}", is_clockwise(&vertices));
-  // let vertices: PolyLine = vertices.into_iter().rev().collect();
   let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.y] ).collect();
   let faces: Vec<usize> = earcutr::earcut(&flat_vertices, &holes, 2);
   let mut normals = Vec::with_capacity(vertices.len());
   for _ in 0..faces.len() {
-    normals.push(normal); //XXX Normals really used?
+    normals.push(normal);
   }
-  // log!("tesselate_polygon vertices {:#?}", vertices);
-  log!("tesselate_polygon faces {:#?}", faces);
   Mesh {
     vertices,
     faces,
@@ -103,13 +99,10 @@ pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) ->
 }
 
 pub fn tesselate_wire(wire: &Wire) -> PolyLine {
-  // let mut wire = wire.clone();
-  // wire_from_region(&mut wire);
   let polyline: PolyLine = wire.iter()
   .flat_map(|curve| {
     let poly = curve.cache.as_curve().tesselate(); //XXX cache -> base
     // assert!((curve.bounds.0.almost(poly[0]) && curve.bounds.1.almost(poly[1])) ||
-      // (curve.bounds.1.almost(poly[0]) && curve.bounds.0.almost(poly[1])), "{:?} vs {:?}", curve.bounds, poly);
     let poly = if curve.bounds.0.almost(poly[0]) {
       poly
     } else {
@@ -118,11 +111,6 @@ pub fn tesselate_wire(wire: &Wire) -> PolyLine {
     let n = poly.len() - 1;
     poly.into_iter().take(n).collect::<PolyLine>()
   }).collect();
-  // polyline.push(wire.first().unwrap().bounds.0);
-  // let z = rand::random::<f64>() / -6.0;
-  // for p in &mut polyline {
-  //   p.z = z;
-  // }
   polyline
 }
 

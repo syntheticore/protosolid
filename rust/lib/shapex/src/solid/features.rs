@@ -11,14 +11,10 @@ use crate::geom3d;
 pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
   //XXX use poly_from_wirebounds once circles are handled
   let poly = geom2d::tesselate_wire(&profile[0]);
-  // #[cfg(debug_assertions)]
-  // assert!(!geom2d::is_clockwise(&poly));
+  #[cfg(debug_assertions)]
+  assert!(!geom2d::is_clockwise(&poly));
   let plane = geom3d::detect_plane(&poly)?;
-  // plane.flip();
   let plane_normal = plane.normal() * distance;
-  // let plane_normal = plane.as_transform().transform_vector(Vec3::new(0.0, 0.0, distance));
-  // log!("Generated plane {:?}", plane_normal);
-  // log!("Work plane {:?}", normal);
   let mut solid = Solid::new_lamina(profile[0].clone(), plane.into_enum());
   let shell = &mut solid.shells[0];
   let face = if distance >= 0.0 {

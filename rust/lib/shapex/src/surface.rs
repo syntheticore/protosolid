@@ -124,7 +124,7 @@ impl Plane {
 
   pub fn contains_point(&self, p: Point3) -> bool {
     self.origin.almost(p) ||
-    self.normal().dot((p - self.origin).normalize()).abs() <= EPSILON
+    self.normal().dot((p - self.origin).normalize()).abs().almost(0.0)
   }
 
   // https://github.com/xibyte/jsketcher/blob/master/modules/geom/euclidean.ts
@@ -132,13 +132,6 @@ impl Plane {
   //   v = vec.normalize(v);
   //   return IDENTITY_BASIS3.map(axis => vec.cross(axis, v)).sort((a, b) => vec.lengthSq(b) - vec.lengthSq(a))[0];
   // }
-
-  #[allow(dead_code)]
-  fn normal_to_uv(normal: Vec3) -> (Vec3, Vec3) {
-    let u = normal.cross(Vec3::unit_z()).normalize();
-    let v = normal.cross(u);
-    (u, v)
-  }
 
   pub fn as_transform(&self) -> Matrix4 {
     Matrix4::from_cols(
@@ -302,7 +295,6 @@ impl Transformable for CylindricalSurface {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::test_data;
   // use crate::test_data::make_generic;
   // use crate::test_data::make_region;
 

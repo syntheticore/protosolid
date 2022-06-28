@@ -112,26 +112,24 @@ impl Sketch {
       let mut current_plane: Option<Plane> = None;
       let (on_plane, off_plane): (Vec<Ref<CurveType>>, Vec<Ref<CurveType>>) = elems.iter().cloned().partition(|other| {
         if Rc::ptr_eq(elem, other) {
+          if let CurveType::Circle(circle) = &*elem.borrow() {
+            current_plane = Some(Plane::from_normal(circle.center, circle.normal));
+          }
           true
         } else if let Some(plane) = &current_plane {
           let points = tuple2_to_vec(other.borrow().as_curve().endpoints());
           points.iter().all(|p| plane.contains_point(*p) )
         } else {
-          let points = vec![elem, other].iter().map(|curve|
-            tuple2_to_vec(curve.borrow().as_curve().endpoints())
-          ).collect::<Vec<Vec<Point3>>>().concat();
-          if let Ok(mut plane) = geom3d::detect_plane(&points) {
-            plane.flip(); //XXX Probably only neccessary because plane#as_transform is messed up
-            if points.iter().all(|p| plane.contains_point(*p) ) {
+          let test_elems = vec![elem, other].iter().map(|te| te.borrow().clone() ).collect();
+          match geom3d::plane_from_curves(&test_elems) {
+            Ok(plane) => {
               current_plane = Some(plane);
               true
-            } else {
-              // Plane was generated, but not all points actually touch it
-              false
+            },
+            Err(error) => match error {
+              geom3d::PlaneError::Underdefined => true, // Happens only for elems on same line -> same plane
+              geom3d::PlaneError::Inconsistent => false, // Elems don't belong to same plane
             }
-          } else {
-            // Plane detection only fails for elems on same line -> same plane
-            true
           }
         }
       });

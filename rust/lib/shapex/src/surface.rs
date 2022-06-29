@@ -7,7 +7,7 @@ use crate::geom2d;
 use crate::geom3d;
 use crate::transform::*;
 use crate::mesh::*;
-use crate::log;
+// use crate::log;
 
 
 pub trait Surface: Transformable {
@@ -333,7 +333,7 @@ mod tests {
     let dist = 6.0;
     let vec = Vec3::new(0.4, 0.5, 1.0).normalize() * dist;
     println!("input vector {:#?}", vec);
-    let plane = Plane::from_normal(Point3::new(1.0, 2.0, 3.0), vec);
+    let plane = Plane::from_normal(Point3::new(1.0, 2.0, 3.0), vec.normalize());
     let normal = plane.normal() * dist;
     println!("normal {:#?}", normal);
     let gen_normal = plane.as_transform().transform_vector(Vec3::new(0.0, 0.0, dist));

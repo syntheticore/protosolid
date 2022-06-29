@@ -58,9 +58,10 @@ impl JsSketch {
   }
 
   pub fn add_circle(&mut self, center: JsValue, radius: f64) -> JsCurve {
-    let center: (f64, f64, f64) = center.into_serde().unwrap();
-    let circle = Circle::new(Point3::from(center), radius);
     let mut real = self.real.borrow_mut();
+    let center: (f64, f64, f64) = center.into_serde().unwrap();
+    let mut circle = Circle::new(Point3::from(center), radius);
+    circle.normal = real.sketch.work_plane.transform_vector(Vec3::new(0.0, 0.0, 1.0));
     real.sketch.elements.push(rc(CurveType::Circle(circle)));
     JsCurve::from(&real.sketch.elements.last().unwrap())
   }

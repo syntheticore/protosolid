@@ -11,8 +11,6 @@ use crate::geom3d;
 pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
   //XXX use poly_from_wirebounds once circles are handled
   let poly = geom2d::tesselate_wire(&profile[0]);
-  // #[cfg(debug_assertions)]
-  // assert!(!geom2d::is_clockwise(&poly));
   let plane = geom3d::plane_from_points(&poly)?;
   let plane_normal = plane.normal() * distance;
   let mut solid = Solid::new_lamina(profile[0].clone(), plane.into_enum());

@@ -95,4 +95,9 @@ impl JsComponent {
     let cube = features::make_cube(10.0, 10.0, 10.0).unwrap();
     self.real.borrow_mut().compound.add(cube.into_compound());
   }
+
+  pub fn make_cylinder(&self) {
+    let cube = features::make_cylinder(30.0, 50.0).unwrap();
+    self.real.borrow_mut().compound.add(cube.into_compound());
+  }
 }

@@ -1,7 +1,9 @@
 use crate::base::*;
 use crate::Plane;
 use crate::CurveType;
-use crate::surface::Surface;
+use crate::log;
+
+use itertools::Itertools;
 
 
 #[derive(Debug, Clone)]
@@ -36,8 +38,10 @@ impl From<PlaneError> for String {
 
 // Find suitable points in wire to build a matching plane
 pub fn plane_from_points(points: &Vec<Point3>) -> Result<Plane, PlaneError> {
-  let mut points = points.clone();
-  points.dedup(); //XXX remove once circles are handled
+  let points: Vec<Point3> = points.iter().cloned().unique_by(|p|
+    format!("{:?}", p) //XXX Create wrapper for Point3 that implements Ord
+  ).collect();
+  log!("{:#?}", points);
   //XXX use points with greatest distance as start points
   let v1 = (points[1] - points[0]).normalize();
   // if let Some(p3) = points.iter().skip(3).min_by(|p1, p2| {
@@ -67,9 +71,8 @@ pub fn plane_from_curves(elems: &Vec<CurveType>) -> Result<Plane, PlaneError> {
   let points = elems.iter().map(|curve|
     tuple2_to_vec(curve.as_curve().endpoints())
   ).collect::<Vec<Vec<Point3>>>().concat();
-  let mut plane = plane_from_points(&points)?;
+  let plane = plane_from_points(&points)?;
   if points.iter().all(|p| plane.contains_point(*p) ) {
-    plane.flip();
     Ok(plane)
   } else {
     Err(PlaneError::Inconsistent)
@@ -77,7 +80,6 @@ pub fn plane_from_curves(elems: &Vec<CurveType>) -> Result<Plane, PlaneError> {
 }
 
 pub fn transform_from_location_and_normal(origin: Point3, normal: Vec3) -> Matrix4 {
-  let normal = normal.normalize();
   let up = Vec3::new(0.0, 0.0, 1.0);
   let dot = normal.dot(up);
   let x_axis = if dot.abs().almost(1.0) {

@@ -325,7 +325,7 @@ impl Sketch {
     if loops.len() <= 1 { return }
     loops.retain(|region| {
       !geom2d::is_clockwise(&geom2d::poly_from_wirebounds(region))
-    })
+    });
   }
 
   pub fn remove_dangling_segments(island: &mut Vec<TrimmedCurve>) {

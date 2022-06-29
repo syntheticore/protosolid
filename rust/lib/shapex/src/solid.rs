@@ -93,18 +93,18 @@ impl Solid {
     }
   }
 
-  pub fn new_lamina(region: Region, top_surface: SurfaceType) -> Self {
+  pub fn new_lamina(wire: Wire, top_surface: SurfaceType) -> Self {
     println!("Creating Lamina:");
     let mut bottom = top_surface.clone();
     bottom.as_surface_mut().flip();
     let mut this = Self::new();
     // Create shell from bottom face with empty ring
-    let first_elem = region[0].clone();
+    let first_elem = wire[0].clone();
     this.mvfs(first_elem.bounds.0, bottom);
     let shell = &mut this.shells[0];
     // Complete ring of bottom face
     let mut he = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap();
-    for elem in region.iter().take(region.len() - 1) {
+    for elem in wire.iter().take(wire.len() - 1) {
       let points = elem.bounds;
       println!("\n-> lmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
       let (new_edge, _) = shell.lmev(&he, &he, elem.cache.clone(), points.1); //XXX cache -> base
@@ -115,7 +115,7 @@ impl Solid {
     // let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
     let he1 = shell.vertices[0].borrow().half_edge.upgrade().unwrap().clone();
     let he2 = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap().clone();
-    shell.lmef(&he1, &he2, region.last().unwrap().clone().cache, top_surface); //XXX cache -> base
+    shell.lmef(&he1, &he2, wire.last().unwrap().clone().cache, top_surface); //XXX cache -> base
     this
   }
 

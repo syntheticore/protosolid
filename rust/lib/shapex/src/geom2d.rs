@@ -4,7 +4,7 @@ use crate::base::*;
 use crate::curve::*;
 use crate::intersection::*;
 use crate::mesh::Mesh;
-use crate::log;
+// use crate::log;
 
 
 pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
@@ -24,7 +24,7 @@ pub fn clockwise(p1: Point3, p2: Point3, p3: Point3) -> f64 {
   // Dot product is "left/right" symmetric,
   // but negative for steep angles and positive for shallow angles
   let dot = (v1.dot(v2) - 1.0).abs() / 2.0; // Range shallow to steep => 0 -> 1
-  dot * if cross >= 0.0 { 1.0 } else { -1.0 }
+  dot * cross.signum()
 }
 
 pub fn is_clockwise(closed_loop: &PolyLine) -> bool {
@@ -101,13 +101,11 @@ pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) ->
 pub fn tesselate_wire(wire: &Wire) -> PolyLine {
   let polyline: PolyLine = wire.iter()
   .flat_map(|curve| {
-    let poly = curve.cache.as_curve().tesselate(); //XXX cache -> base
+    let mut poly = curve.cache.as_curve().tesselate(); //XXX cache -> base
     // assert!((curve.bounds.0.almost(poly[0]) && curve.bounds.1.almost(poly[1])) ||
-    let poly = if curve.bounds.0.almost(poly[0]) {
-      poly
-    } else {
-      poly.into_iter().rev().collect()
-    };
+    if !curve.bounds.0.almost(poly[0]) {
+      poly = poly.into_iter().rev().collect();
+    }
     let n = poly.len() - 1;
     poly.into_iter().take(n).collect::<PolyLine>()
   }).collect();

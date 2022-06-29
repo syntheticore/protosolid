@@ -57,6 +57,7 @@
     .debug-panel
       button.button(@click="splitAll") Split all
       button.button(@click="makeCube") Make Cube
+      button.button(@click="makeCylinder") Make Cylinder
 </template>
 
 
@@ -163,6 +164,11 @@
 
       makeCube: function() {
         this.activeComponent.real.make_cube()
+        this.$root.$emit('component-changed', this.activeComponent)
+      },
+
+      makeCylinder: function() {
+        this.activeComponent.real.make_cylinder()
         this.$root.$emit('component-changed', this.activeComponent)
       },
     },

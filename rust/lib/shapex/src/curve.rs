@@ -8,6 +8,8 @@ use crate::transform::*;
 use crate::geom2d;
 use crate::intersection;
 
+use cgmath::One;
+use cgmath::Rotation;
 
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
@@ -350,6 +352,7 @@ impl Identity for Arc {
 
 impl Curve for Arc {
   fn sample(&self, mut t: f64) -> Point3 {
+    t = 1.0 - t;
     let range = self.bounds.1 - self.bounds.0;
     t = self.bounds.0 + t * range;
     t = t * std::f64::consts::PI * 2.0;
@@ -364,7 +367,7 @@ impl Curve for Arc {
     let circle = Circle::new(self.center, self.radius);
     let param = circle.unsample(p);
     let range = self.bounds.1 - self.bounds.0;
-    (param - self.bounds.0) / range
+    1.0 - (param - self.bounds.0) / range
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -467,6 +470,7 @@ impl Identity for Circle {
 
 impl Curve for Circle {
   fn sample(&self, t: f64) -> Point3 {
+    let t = 1.0 - t;
     let t = t * std::f64::consts::PI * 2.0;
     Point3::new(
       self.center.x + t.sin() * self.radius,
@@ -478,7 +482,7 @@ impl Curve for Circle {
   fn unsample(&self, p: &Point3) -> f64 {
     let p = p - self.center;
     let atan2 = p.x.atan2(p.y) / std::f64::consts::PI / 2.0;
-    if atan2 < 0.0 {
+    1.0 - if atan2 < 0.0 {
       1.0 + atan2
     } else {
       atan2

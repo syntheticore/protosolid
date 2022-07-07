@@ -101,35 +101,35 @@ export class ManipulationTool extends HighlightTool {
 }
 
 
-export class PlaneTool extends HighlightTool {
-  constructor(component, viewport) {
-    super(component, viewport, ['face'])
-  }
+// export class PlaneTool extends HighlightTool {
+//   constructor(component, viewport) {
+//     super(component, viewport, ['face'])
+//   }
 
-  click(vec, coords) {
-    const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    if(face && face.alcObject.get_surface_type() == 'Planar') {
-      const position = vec2three(face.alcObject.get_origin())
-      let rotation = rotationFromNormal(vec2three(face.alcObject.get_normal()))
+//   click(vec, coords) {
+//     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
+//     if(face && face.alcObject.get_surface_type() == 'Planar') {
+//       const position = vec2three(face.alcObject.get_origin())
+//       let rotation = rotationFromNormal(vec2three(face.alcObject.get_normal()))
 
-      this.viewport.renderer.sketchPlane.position = position
-      this.viewport.renderer.sketchPlane.rotation.setFromRotationMatrix(rotation)
+//       this.viewport.renderer.sketchPlane.position = position
+//       this.viewport.renderer.sketchPlane.rotation.setFromRotationMatrix(rotation)
 
-      rotation.setPosition(position)
-      this.viewport.snapper.planeTransform = rotation
-      this.component.real.get_sketch().set_workplane(matrixFromThree(rotation))
+//       rotation.setPosition(position)
+//       this.viewport.snapper.planeTransform = rotation
+//       this.component.real.get_sketch().set_workplane(matrixFromThree(rotation))
 
-      this.viewport.regionsDirty = true
-      this.viewport.updateRegions()
-    }
-    this.viewport.renderer.render()
-  }
+//       this.viewport.regionsDirty = true
+//       this.viewport.updateRegions()
+//     }
+//     this.viewport.renderer.render()
+//   }
 
-  mouseDown(vec, coords) {
-    const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    this.viewport.renderer.render()
-  }
-}
+//   mouseDown(vec, coords) {
+//     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
+//     this.viewport.renderer.render()
+//   }
+// }
 
 
 export class TrimTool extends Tool {
@@ -168,16 +168,16 @@ class PickTool extends HighlightTool {
     const selection = this.select(mesh)
     this.callback(selection, mesh)
   }
+
+  select(mesh) {
+    return mesh.alcObject
+  }
 }
 
 
 export class ObjectPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['curve'], callback)
-  }
-
-  select(mesh) {
-    return mesh.alcObject
   }
 }
 
@@ -186,10 +186,6 @@ export class ProfilePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['region'], callback)
   }
-
-  select(mesh) {
-    return mesh.alcObject
-  }
 }
 
 
@@ -197,23 +193,32 @@ export class FacePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['face'], callback)
   }
+}
 
-  select(mesh) {
-    return mesh.alcObject
+export class PlanePickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['plane', 'face'], callback)
   }
 }
 
 
-export class LineTool extends Tool {
-  constructor(component, viewport) {
+export class SketchTool extends Tool {
+  constructor(component, viewport, sketch) {
     super(component, viewport)
+    this.sketch = sketch
     this.enableSnapping = true
+  }
+}
+
+
+export class LineTool extends SketchTool {
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
   }
 
   mouseDown(vec) {
     this.mouseMove(vec)
-    const sketch = this.component.real.get_sketch()
-    const elems = sketch.get_sketch_elements()
+    const elems = this.sketch.get_sketch_elements()
     elems.pop()
     const touchesExisting = elems
       .flatMap(elem => elem.get_snap_points() )
@@ -223,7 +228,7 @@ export class LineTool extends Tool {
     if(touchesExisting && this.line) {
       this.line = null
     } else {
-      this.line = sketch.add_line(vec.toArray(), vec.toArray())
+      this.line = this.sketch.add_line(vec.toArray(), vec.toArray())
       this.viewport.elementChanged(this.line, this.component)
     }
   }
@@ -237,16 +242,15 @@ export class LineTool extends Tool {
 
   dispose() {
     if(!this.line) return
-    this.component.real.get_sketch().remove_element(this.line.id())
+    this.sketch.remove_element(this.line.id())
     this.viewport.componentChanged(this.component)
   }
 }
 
 
-export class SplineTool extends Tool {
-  constructor(component, viewport) {
-    super(component, viewport)
-    this.enableSnapping = true
+export class SplineTool extends SketchTool {
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
   }
 
   mouseDown(vec) {
@@ -256,7 +260,7 @@ export class SplineTool extends Tool {
       points.push(vec.toArray())
       this.spline.set_handles(points)
     } else {
-      this.spline = this.component.real.get_sketch().add_spline([vec.toArray(), vec.toArray()])
+      this.spline = this.sketch.add_spline([vec.toArray(), vec.toArray()])
     }
     this.viewport.elementChanged(this.spline, this.component)
   }
@@ -279,10 +283,9 @@ export class SplineTool extends Tool {
 }
 
 
-export class CircleTool extends Tool {
-  constructor(component, viewport) {
-    super(component, viewport)
-    this.enableSnapping = true
+export class CircleTool extends SketchTool {
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
   }
 
   mouseDown(vec) {
@@ -291,7 +294,7 @@ export class CircleTool extends Tool {
       this.circle = null
     } else {
       this.center = vec
-      this.circle = this.component.real.get_sketch().add_circle(vec.toArray(), 1)
+      this.circle = this.sketch.add_circle(vec.toArray(), 1)
     }
   }
 
@@ -303,10 +306,9 @@ export class CircleTool extends Tool {
 }
 
 
-export class ArcTool extends Tool {
-  constructor(component, viewport) {
-    super(component, viewport)
-    this.enableSnapping = true
+export class ArcTool extends SketchTool {
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
   }
 
   mouseDown(vec) {
@@ -323,7 +325,7 @@ export class ArcTool extends Tool {
 
   mouseMove(vec) {
     if(!this.start || !this.end) return
-    this.arc = this.arc || this.component.real.get_sketch().add_arc(
+    this.arc = this.arc || this.sketch.add_arc(
       this.start.toArray(),
       vec.toArray(),
       this.end.toArray()

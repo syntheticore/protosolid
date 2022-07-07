@@ -189,11 +189,12 @@
     ManipulationTool,
     ObjectPickTool,
     ProfilePickTool,
+    FacePickTool,
+    PlanePickTool,
     LineTool,
     SplineTool,
     CircleTool,
     ArcTool,
-    PlaneTool
   } from './../tools.js'
 
   import SelectorWidget from './selector-widget.vue'
@@ -208,6 +209,7 @@
     props: {
       document: Object,
       activeComponent: Object,
+      activeSketch: Object,
       activeTool: Object,
       selection: Object,
       highlight: Object,
@@ -231,10 +233,16 @@
         this.transloader.unloadTree(oldDocument.tree, true)
       },
 
-      activeComponent: function() {
-        this.transloader.setActiveComponent(this.activeComponent)
+      activeComponent: function(comp) {
+        this.transloader.setActiveComponent(comp)
         this.componentChanged(this.document.tree, true)
         this.$root.$emit('activate-toolname', 'Manipulate')
+      },
+
+      activeSketch: function(sketch) {
+        this.transloader.setActiveSketch(sketch)
+        this.renderer.sketchPlane.useSketch(sketch)
+        this.renderer.render()
       },
 
       selection: function(selection) {
@@ -304,6 +312,8 @@
           profile: ProfilePickTool,
           curve: ObjectPickTool,
           axis: ObjectPickTool,
+          face: FacePickTool,
+          plane: PlanePickTool,
         }[type])
       })
 
@@ -479,7 +489,6 @@
         this.pickingPath = null
         this.snapper.reset()
         const tools = {
-          Plane: PlaneTool,
           Manipulate: ManipulationTool,
           Line: LineTool,
           Spline: SplineTool,
@@ -488,14 +497,15 @@
         }
         const Tool = tools[toolName]
         if(!Tool) return
-        const tool = new Tool(this.activeComponent, this)
+        const tool = new Tool(this.activeComponent, this, this.activeSketch)
         this.$emit('update:active-tool', tool)
+        this.$emit('update:highlight', null)
         this.renderer.render()
       },
 
       deleteElement: function(elem) {
         this.renderer.removeGizmo()
-        this.activeComponent.real.get_sketch().remove_element(elem.id())
+        this.activeSketch.remove_element(elem.id())
         this.componentChanged(this.activeComponent)
         this.$emit('update:selection', null)
       },
@@ -525,7 +535,7 @@
       },
 
       onLoadElement: function(elem, comp) {
-        const compId = comp.real.id()
+        const compId = comp.id
         const elemId = elem.id()
         this.handles[compId] = this.handles[compId] || {}
         this.handles[compId][elemId] = this.handles[compId][elemId] || []
@@ -543,7 +553,7 @@
       },
 
       onUnloadElement: function(elem, comp) {
-        const compId = comp.real.id()
+        const compId = comp.id
         if(this.handles[compId]) delete this.handles[compId][elem.id()]
         this.handles = Object.assign({}, this.handles)
       },

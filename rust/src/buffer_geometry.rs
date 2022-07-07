@@ -23,6 +23,14 @@ impl JsBufferGeometry {
     web_sys::console::time_end_with_label("Tesselation");
     Self::from(mesh.to_buffer_geometry())
   }
+
+  pub fn from_compound(compound: &Compound) -> Self {
+    let mut mesh = Mesh::default();
+    for solid in &compound.solids {
+      mesh.append(solid.tesselate());
+    }
+    Self::from(mesh.to_buffer_geometry())
+  }
 }
 
 #[wasm_bindgen]

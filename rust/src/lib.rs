@@ -1,6 +1,8 @@
 use wasm_bindgen::prelude::*;
 
+mod document;
 mod component;
+mod feature;
 mod solid;
 mod sketch;
 mod curve;
@@ -8,6 +10,7 @@ mod region;
 mod utils;
 mod buffer_geometry;
 mod controllable;
+mod construction_helper;
 
 
 #[cfg(feature = "wee_alloc")]

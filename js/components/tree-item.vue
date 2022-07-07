@@ -19,11 +19,11 @@
           fa-icon.eye(
             v-if="!isTop"
             icon="eye" fixed-width
-            @click.stop="hidden = !hidden"
+            @click.stop="component.UIData.hidden = !component.UIData.hidden"
           )
           fa-icon.assembly(icon="boxes" v-if="isAssembly")
           fa-icon.part(icon="box" v-else)
-          span.name {{ component.title }}
+          span.name {{ component.UIData.title }}
           .controls.wide(:class="{'ultra-wide': !isTop}")
             fa-icon(
               icon="check-circle" fixed-width
@@ -49,8 +49,8 @@
     )
       //- Material
       MaterialTreelet(
-        v-if="component.material"
-        :material="component.material"
+        v-if="component.UIData.material"
+        :material="component.UIData.material"
         :component="component"
       )
 
@@ -62,18 +62,18 @@
             h2 Center of Mass
 
       //- Parameters
-      li(v-for="param in component.parameters")
+      li(v-for="param in component.UIData.parameters")
         ParameterTreelet(
           :parameter="param"
           :component="component"
         )
 
       //- Export Configs
-      li(v-for="config in component.exportConfigs")
+      li(v-for="config in component.UIData.exportConfigs")
         ExportTreelet(:config="config", :component="component")
 
       //- Section Views
-      li(v-for="view in component.sectionViews")
+      li(v-for="view in component.UIData.sectionViews")
         .box
           header
             fa-icon(icon="object-group" fixed-width)
@@ -83,9 +83,18 @@
       //- Solids
       SolidTreelet(
         v-for="(solid, i) in component.solids"
-        :key="i"
+        :key="'solid' + i"
         :solid="solid"
         :component="component"
+        :index="i"
+        v-on="$listeners"
+      )
+
+      //- Sketches
+      SketchTreelet(
+        v-for="(sketch, i) in component.sketches"
+        :key="'sketch' + i"
+        :sketch="sketch"
         :index="i"
         v-on="$listeners"
       )
@@ -95,7 +104,7 @@
       li(
         is="tree-item"
         v-for="child in component.children"
-        :key="child.real.id()"
+        :key="child.id"
         :component="child"
         :active-component="activeComponent"
         :parent-hidden="!isVisible"
@@ -116,7 +125,7 @@
     margin-right: 0
     font-size: 16px
     padding: 0
-    transition: all 0.2s
+    transition: color 0.2s, transform 0.2s
     &:hover
       color: $bright1
     &.closed
@@ -255,6 +264,7 @@
   import ParameterTreelet from './treelet-parameter.vue'
   import MaterialTreelet from './treelet-material.vue'
   import SolidTreelet from './treelet-solid.vue'
+  import SketchTreelet from './treelet-sketch.vue'
   import ExportTreelet from './treelet-export.vue'
 
   export default {
@@ -265,6 +275,7 @@
       MaterialTreelet,
       SolidTreelet,
       ExportTreelet,
+      SketchTreelet,
     },
 
     props: {
@@ -277,14 +288,12 @@
 
     data() {
       return {
-        hidden: this.component.hidden,
         expanded: true,
       };
     },
 
     watch: {
-      hidden: function(hidden) {
-        this.component.hidden = !this.component.hidden
+      'component.UIData.hidden': function(hidden) {
         this.$root.$emit('component-changed', this.component, true)
       }
     },
@@ -297,15 +306,16 @@
       canExpand: function() {
         return this.component.children.length ||
           this.component.solids.length ||
-          this.component.cog ||
-          this.component.material ||
-          this.component.parameters.length ||
-          this.component.sectionViews.length ||
-          this.component.exportConfigs.length
+          this.component.sketches.length ||
+          this.component.UIData.cog ||
+          this.component.UIData.material ||
+          this.component.UIData.parameters.length ||
+          this.component.UIData.sectionViews.length ||
+          this.component.UIData.exportConfigs.length
       },
 
       isVisible: function() {
-        return !this.hidden && !this.parentHidden;
+        return !this.component.UIData.hidden && !this.parentHidden;
       },
     },
 

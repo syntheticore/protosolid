@@ -35,7 +35,7 @@ export default class Snapper {
   }
 
   getSnapPoints() {
-    const sketchElements = this.viewport.activeComponent.real.get_sketch().get_sketch_elements()
+    const sketchElements = this.viewport.activeSketch.get_sketch_elements()
     const localTransform = this.planeTransform.clone().invert()
     // Filter out sketch element actively being drawn
     const tool = this.viewport.activeTool

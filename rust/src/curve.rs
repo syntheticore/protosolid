@@ -1,27 +1,22 @@
-use crate::controllable::as_controllable_mut;
-use crate::controllable::as_controllable;
-use std::cell::RefCell;
-use std::rc::Rc;
-
-
-use shapex::*;
-
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
+use shapex::*;
 
 use crate::utils::points_from_js;
 use crate::utils::points_to_js;
+use crate::controllable::as_controllable_mut;
+use crate::controllable::as_controllable;
 
 
 #[wasm_bindgen]
 pub struct JsCurve {
   #[wasm_bindgen(skip)]
-  pub real: Rc<RefCell<CurveType>>,
+  pub real: Ref<CurveType>,
 }
 
 impl JsCurve {
-  pub fn from(elem: &Rc<RefCell<CurveType>>) -> Self {
+  pub fn from(elem: &Ref<CurveType>) -> Self {
     Self {
       real: elem.clone()
     }

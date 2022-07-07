@@ -1,6 +1,3 @@
-use std::rc::Rc;
-use std::cell::RefCell;
-
 use wasm_bindgen::prelude::*;
 
 use solvo::*;
@@ -12,19 +9,31 @@ use crate::buffer_geometry::JsBufferGeometry;
 
 
 #[wasm_bindgen]
+#[derive(Debug, Clone)]
 pub struct JsRegion {
+  plane: Matrix4,
+  sketch: Ref<Sketch>,
+
   #[wasm_bindgen(skip)]
   pub profile: Profile,
+}
 
-  #[wasm_bindgen(skip)]
-  pub plane: Matrix4,
-
-  #[wasm_bindgen(skip)]
-  pub component: Rc<RefCell<Component>>,
+impl JsRegion {
+  pub fn new(profile: Profile, plane: Matrix4, sketch: Ref<Sketch>) -> Self {
+    Self {
+      profile,
+      plane,
+      sketch,
+    }
+  }
 }
 
 #[wasm_bindgen]
 impl JsRegion {
+  pub fn sketch_id(&self) -> JsValue {
+    JsValue::from_serde(&self.sketch.borrow().id).unwrap()
+  }
+
   pub fn get_mesh(&self) -> JsBufferGeometry {
     web_sys::console::time_with_label("tesselate_profile");
     let transform = self.plane.invert().unwrap();
@@ -52,23 +61,12 @@ impl JsRegion {
     point_to_js(center)
   }
 
-    pub fn get_normal(&self) -> JsValue {
+  pub fn get_normal(&self) -> JsValue {
     let normal = self.plane.transform_vector(Vec3::new(0.0, 0.0, 1.0));
     vec_to_js(normal)
   }
 
-  pub fn extrude(&self, distance: f64) {
-    web_sys::console::time_with_label("BREP extrude");
-    let tool = features::extrude(&self.profile, distance).unwrap();
-    self.component.borrow_mut().compound.add(tool.into_compound());
-    web_sys::console::time_end_with_label("BREP extrude");
-  }
-
-  pub fn extrude_preview(&self, distance: f64) -> JsValue {
-    let extrusion = features::extrude(&self.profile, distance);
-    match extrusion {
-      Ok(res) => JsValue::from(JsBufferGeometry::from_solid(&res)),
-      Err(error) => JsValue::from(error),
-    }
+  pub fn duplicate(&self) -> JsRegion {
+    self.clone()
   }
 }

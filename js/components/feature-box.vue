@@ -1,9 +1,9 @@
 <template lang="pug">
-  .bordered.tipped.feature-box
+  .bordered.feature-box
 
-    //- header
-    //-   fa-icon(icon="box" title="Confirm")
-    //-   .title Extrude
+    header(v-if="showHeader")
+      fa-icon(:icon="activeFeature.icon" title="Confirm")
+      .title {{ activeFeature.title }}
 
     .main
       .settings
@@ -17,10 +17,16 @@
           )
           NumberInput(
             v-if="setting.type == 'length' || setting.type == 'angle'"
-            :component="activeFeature.component"
+            :component="document.tree"
             :value.sync="activeFeature[key]"
             @update:value="update"
             @error="showError"
+          )
+          input(
+            type="text"
+            v-if="setting.type == 'text'"
+            :value.sync="activeFeature[key]"
+            spellcheck="false"
           )
           IconToggle(
             v-if="setting.type == 'bool'"
@@ -62,23 +68,23 @@
     &::before
       left: 24px
 
-  // header
-  //   display: flex
-  //   flex-direction: column
-  //   justify-content: center
-  //   align-items: center
-  //   background: $dark1
-  //   padding: 0 10px
-  //   svg
-  //     font-size: 21px
-  //     color: $bright1
-  //     // transition: all 0.15s
-  //     filter: none
-  //   .title
-  //     color: $bright1
-  //     font-size: 11px
-  //     margin-top: 6px
-  //     font-weight: bold
+  header
+    display: flex
+    flex-direction: column
+    justify-content: center
+    align-items: center
+    background: $dark1
+    padding: 0 10px
+    svg
+      font-size: 21px
+      color: $bright1
+      // transition: all 0.15s
+      filter: none
+    .title
+      color: $bright1
+      font-size: 11px
+      margin-top: 6px
+      font-weight: bold
 
   .settings
     margin: 10px
@@ -193,6 +199,7 @@
   import * as THREE from 'three'
 
   import { ManipulationTool } from './../tools.js'
+  import { CreateSketchFeature } from './../features.js'
 
   export default {
     name: 'FeatureBox',
@@ -205,8 +212,10 @@
     },
 
     props: {
+      document: Object,
       activeTool: Object,
       activeFeature: Object,
+      showHeader: Boolean,
     },
 
     watch: {
@@ -221,6 +230,7 @@
       return {
         error: null,
         activePicker: null,
+        status: null,
       }
     },
 
@@ -232,21 +242,32 @@
 
     mounted: function() {
       this.pickAll()
-      this.$root.$on('enter-pressed', () => this.confirm())
+      this.$root.$on('enter-pressed', () => this.confirm() )
+      this.$root.$on('escape', () => {
+        if(this.activeTool.constructor === ManipulationTool) {
+          this.cancel()
+        } else {
+          this.$root.$emit('activate-toolname', 'Manipulate')
+        }
+      })
     },
 
     beforeDestroy: function() {
-      this.activeFeature.dispose()
       this.$root.$emit('unpreview-feature')
-      this.$root.$emit('component-changed', this.activeFeature.component, true)
       this.$root.$emit('activate-toolname', 'Manipulate')
-      window.alcRenderer.removeGizmo()
+      this.activeFeature.dispose()
+      if(this.activeFeature.constructor === CreateSketchFeature) this.activeFeature.real.invalidate()
+      if(this.status == 'confirmed') {
+        this.activeFeature.confirm(this)
+      } else {
+        this.$emit('remove-feature', this.activeFeature)
+      }
     },
 
     methods: {
       pickAll: function() {
         const pickerKeys = Object.keys(this.activeFeature.settings).filter(key =>
-          this.needsPicker(this.activeFeature.settings[key])
+          !this.activeFeature[key] && this.needsPicker(this.activeFeature.settings[key])
         )
         let chain = Promise.resolve()
         for(const key of pickerKeys) {
@@ -256,7 +277,7 @@
       },
 
       needsPicker: function(setting, includeOptionals) {
-        return ['profile', 'curve', 'axis'].some(type =>
+        return ['profile', 'curve', 'axis', 'plane'].some(type =>
           type == setting.type && (!setting.optional || includeOptionals)
         )
       },
@@ -265,11 +286,18 @@
         return new Promise((resolve) => {
           this.$root.$off('picked')
           this.$root.$once('picked', (item) => {
+            // Copy profiles before they get destroyed by transloader
+            if(this.activeFeature.settings[key].type == 'profile') {
+              const oldProfile = this.activeFeature[key]
+              if(oldProfile) oldProfile().free()
+              item = item.duplicate()
+            }
             // Hide heavy data from Vue in a closure
             this.activeFeature[key] = () => item
             this.update()
             this.activePicker = null
             resolve()
+            if(this.activeFeature.settings[key].autoConfirm) this.confirm()
           })
           this.activePicker = key
           const picker = this.$refs[key][0]
@@ -285,15 +313,11 @@
       },
 
       update: function() {
-        const meshOrError = this.activeFeature.update()
-        this.error = null
-        if(typeof meshOrError == 'string') {
-          this.error = meshOrError
-        } else if(meshOrError) {
-          this.$root.$emit('preview-feature', this.activeFeature.component, meshOrError)
-        } else {
-          this.$root.$emit('component-changed', this.activeFeature.component, true)
-        }
+        this.activeFeature.update()
+        this.$root.$emit('regenerate')
+        this.error = this.activeFeature.real.error()
+        const preview = this.activeFeature.real.preview()
+        if(preview) this.$root.$emit('preview-feature', this.activeFeature.component, preview)
       },
 
       showError: function(error) {
@@ -302,11 +326,12 @@
 
       confirm: function(e) {
         if(!this.canConfirm) return
-        this.activeFeature.confirm()
+        this.status = 'confirmed'
         this.$emit('close')
       },
 
       cancel: function(e) {
+        this.status = 'canceled'
         this.$emit('close')
       },
     },

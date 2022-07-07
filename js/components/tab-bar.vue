@@ -18,8 +18,8 @@
     .grab-handle.dynamic
 
     nav
-      MenuButton(title="Tool Settings" icon="cloud")
-        IconView
+      //- MenuButton(title="Tool Settings" icon="cloud")
+      //-   IconView
       //- MenuButton(title="History" icon="code-branch")
       //-   form
       //-     label

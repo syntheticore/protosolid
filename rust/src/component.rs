@@ -1,80 +1,83 @@
-use std::rc::Rc;
-use std::cell::RefCell;
-
+// use std::borrow::Borrow;
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
 use solvo::*;
 use shapex::*;
 
-use crate::sketch::JsSketch;
 use crate::solid::JsSolid;
+use crate::sketch::JsSketch;
+use crate::construction_helper::JsConstructionHelper;
+// use crate::utils::matrix_to_js;
+// use crate::log;
 
-use crate::log;
 
 #[wasm_bindgen]
-#[derive(Default)]
 pub struct JsComponent {
-  real: Ref<Component>,
+  #[wasm_bindgen(skip)]
+  pub component_id: Uuid,
+
+  #[wasm_bindgen(skip)]
+  pub document: Ref<Document>,
 }
 
 #[wasm_bindgen]
 impl JsComponent {
-  #[wasm_bindgen(constructor)]
-  pub fn new() -> Self {
-    let tree = Component::new();
-    Self { real: rc(tree) }
-  }
-
-  fn from(comp: &Rc<RefCell<Component>>) -> Self {
-    Self {
-      real: comp.clone(),
-    }
+  fn get_comp<'a>(&'a self, doc: &'a Document) -> &Component {
+    doc.get_tree().find_child(&self.component_id).unwrap()
   }
 
   pub fn id(&self) -> JsValue {
-    JsValue::from_serde(&self.real.borrow().id).unwrap()
+    let doc = self.document.borrow();
+    JsValue::from_serde(&self.get_comp(&doc).id).unwrap()
   }
 
-  pub fn get_sketch(&self) -> JsSketch {
-    JsSketch::from(&self.real)
-  }
-
-  // pub fn get_children(&self) -> Array {
-  //   self.real.borrow().children.iter().map(|child|
-  //     JsValue::from(Self::from(child))
-  //   ).collect()
-  // }
-
-  pub fn get_solids(&self) -> Array {
-    self.real.borrow().compound.solids.iter().map(|body|
-      JsValue::from(JsSolid::from(body, self.real.clone()))
+  pub fn get_children(&self) -> Array {
+    self.get_comp(&self.document.borrow()).children.iter().map(|child|
+      JsValue::from(Self {
+        component_id: child.id,
+        document: self.document.clone(),
+      })
     ).collect()
   }
 
-  pub fn create_component(&mut self) -> Self {
-    let comp = self.real.borrow_mut().create_component();
-    Self::from(&comp)
+  pub fn get_sketches(&self) -> Array {
+    self.get_comp(&self.document.borrow()).sketches.iter().map(|sketch|
+      JsValue::from(JsSketch::from(&self.document, self.component_id, sketch))
+    ).collect()
   }
 
-  pub fn delete_component(&self, comp: Self) {
-    self.real.borrow_mut().delete_component(&comp.real)
+  pub fn get_solids(&self) -> Array {
+    let doc = self.document.borrow();
+    self.get_comp(&doc).compound.solids.iter().map(|body|
+      JsValue::from(JsSolid::from(body))
+    ).collect()
+  }
+
+  pub fn get_planes(&self) -> Array {
+    self.get_comp(&self.document.borrow()).helpers.iter().filter_map(|helper|
+      if let ConstructionHelperType::Plane(_) = &helper.borrow().helper_type {
+        // Some(matrix_to_js(plane.as_transform()))
+        Some(JsValue::from(JsConstructionHelper::new(self.component_id, helper)))
+      } else {
+        None
+      }
+    ).collect()
   }
 
   pub fn export_stl(&self, title: &str) -> String {
-    let comp = self.real.borrow();
+    let doc = self.document.borrow();
+    let comp = self.get_comp(&doc);
     let mesh = comp.compound.solids[0].tesselate();
-    log!("{:?}", mesh);
     shapex::io::stl::export(&mesh, title)
   }
 
   pub fn export_3mf(&self) -> String {
-    let meshes = Self::tesselate_all(&self.real);
+    let meshes = Self::tesselate_all(&self.get_comp(&self.document.borrow()));
     shapex::io::threemf::export(&meshes, "millimeter")
   }
 
-  fn tesselate_all(comp: &Ref<Component>) -> Vec<Mesh> {
-    let comp = comp.borrow();
+  fn tesselate_all(comp: &Component) -> Vec<Mesh> {
     let mut meshes: Vec<Mesh> = comp.compound.solids.iter().map(|body| body.tesselate() ).collect();
     for child in &comp.children {
       meshes.append(&mut Self::tesselate_all(&child));
@@ -83,21 +86,22 @@ impl JsComponent {
   }
 
   pub fn serialize(&self) -> String {
-    let comp = self.real.borrow();
+    let doc = self.document.borrow();
+    let comp = self.get_comp(&doc);
     solvo::io::export_ron(&comp)
   }
 
-  pub fn unserialize(&mut self, dump: String) {
-    self.real = rc(solvo::io::import_ron(dump));
-  }
+  // pub fn unserialize(&mut self, dump: String) {
+  //   self.real = rc(solvo::io::import_ron(dump));
+  // }
 
-  pub fn make_cube(&self) {
-    let cube = features::make_cube(10.0, 10.0, 10.0).unwrap();
-    self.real.borrow_mut().compound.add(cube.into_compound());
-  }
+  // pub fn make_cube(&self) {
+  //   let cube = features::make_cube(10.0, 10.0, 10.0).unwrap();
+  //   self.get_comp(&self.document.borrow()).compound.create(cube.into_compound());
+  // }
 
-  pub fn make_cylinder(&self) {
-    let cube = features::make_cylinder(30.0, 50.0).unwrap();
-    self.real.borrow_mut().compound.add(cube.into_compound());
-  }
+  // pub fn make_cylinder(&self) {
+  //   let cube = features::make_cylinder(30.0, 50.0).unwrap();
+  //   self.get_comp(&self.document.borrow()).compound.create(cube.into_compound());
+  // }
 }

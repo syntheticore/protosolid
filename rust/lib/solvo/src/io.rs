@@ -19,34 +19,37 @@ pub fn import_ron(dump: String) -> crate::Component {
 fn undump_component(comp: Component) -> crate::Component {
   crate::Component {
     id: Uuid::new_v4(),
-    sketch: Sketch {
-      elements: comp.sketch_elements.into_iter().map(|elem|
-        rc(elem)
-      ).collect(),
-      ..Default::default()
-    },
+    sketches: comp.sketches.into_iter().map(|sketch|
+      rc(Sketch {
+        elements: sketch.into_iter().map(|elem| rc(elem) ).collect(),
+        ..Default::default()
+      })
+    ).collect(),
     compound: shapex::Compound {
       solids: comp.bodies.iter().map(|body|
         shapex::io::serde::import(body.to_string())
       ).collect(),
     },
     children: comp.children.into_iter().map(|child|
-      rc(undump_component(child))
+      undump_component(child)
     ).collect(),
+    ..Default::default()
   }
 }
 
 fn dump_component(comp: &crate::Component, recursive: bool) -> Component {
   Component {
-    sketch_elements: comp.sketch.elements.iter().map(|elem|
-      elem.borrow().clone()
+    sketches: comp.sketches.iter().map(|sketch|
+      sketch.borrow().elements.iter().map(|elem|
+        elem.borrow().clone()
+      ).collect(),
     ).collect(),
     bodies: comp.compound.solids.iter().map(|body|
       shapex::io::serde::export(body)
     ).collect(),
     children: if recursive {
       comp.children.iter().map(|child|
-        dump_component(&child.borrow(), true)
+        dump_component(&child, true)
       ).collect()
     } else {
       vec![]
@@ -57,7 +60,7 @@ fn dump_component(comp: &crate::Component, recursive: bool) -> Component {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Component {
-  pub sketch_elements: Vec<CurveType>,
+  pub sketches: Vec<Vec<CurveType>>,
   pub bodies: Vec<String>,
   pub children: Vec<Self>,
 }

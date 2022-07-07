@@ -101,7 +101,6 @@ impl JsEdge {
 
 #[wasm_bindgen]
 pub struct JsSolid {
-  comp: Ref<Component>,
   solid_id: Uuid,
   faces: Array,
   edges: Array,
@@ -111,7 +110,7 @@ pub struct JsSolid {
 }
 
 impl JsSolid {
-  pub fn from(solid: &Solid, comp: Ref<Component>) -> Self {
+  pub fn from(solid: &Solid) -> Self {
     let shell = &solid.shells[0];
     // Vertices
     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
@@ -128,7 +127,6 @@ impl JsSolid {
       JsValue::from(JsFace::from(f, solid.id))
     }).collect();
     Self {
-      comp,
       solid_id: solid.id,
       vertices,
       edges,
@@ -161,9 +159,9 @@ impl JsSolid {
     self.vertices.clone()
   }
 
-  pub fn remove(&self) {
-    self.comp.borrow_mut().compound.solids.retain(|body| body.id != self.solid_id )
-  }
+  // pub fn remove(&self) {
+  //   self.comp.borrow_mut().compound.solids.retain(|body| body.id != self.solid_id )
+  // }
 
   // pub fn serialize(&self) -> String {
   //   let comp = self.comp.borrow();

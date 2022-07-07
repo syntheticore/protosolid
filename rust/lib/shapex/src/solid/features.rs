@@ -22,14 +22,10 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
   }.unwrap().clone();
   shell.sweep(&face, plane_normal);
   if distance > 200.0 {
-    Err(format!("Maximum extrusion distance exceeded {:?}", profile.len()))
+    Err(format!("Maximum extrusion distance exceeded"))
   } else {
     Ok(solid)
   }
-}
-
-pub fn fillet_edges(_solid: &mut Solid, _edges: Vec<&Edge>) {
-
 }
 
 pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Solid, String> {

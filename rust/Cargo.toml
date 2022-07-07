@@ -25,7 +25,7 @@ default = ["wee_alloc"]
 
 [dependencies]
 rand = "0.7.3"
-serde = { version = "1.0.118", features = ["derive"] }
+serde = { version = "1.0.123", features = ["derive"] }
 wasm-bindgen = { version = "0.2.69", features = ["serde-serialize"] }
 js-sys = "0.3.46"
 uuid = { version = "0.8.1", features = ["serde", "v4", "wasm-bindgen"] }

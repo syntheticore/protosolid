@@ -53,6 +53,21 @@ export default class Materials {
       polygonOffsetFactor: -1,
     })
 
+    this.plane = new THREE.MeshBasicMaterial({
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.1,
+      depthWrite: false,
+    })
+
+    this.highlightPlane = new THREE.MeshBasicMaterial({
+      side: THREE.DoubleSide,
+      color: '#0070ff',
+      transparent: true,
+      opacity: 0.6,
+      depthWrite: false,
+    })
+
     // Surface Materials
     this.surface = new THREE.MeshStandardMaterial({
       color: '#53a3e1',

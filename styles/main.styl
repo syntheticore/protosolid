@@ -159,8 +159,27 @@ input[type="color"]
     left: 16px
     border-left: triWidth solid transparent
     border-right: triWidth solid transparent
-    border-bottom: triWidth solid $dark2 * 1.1
+    border-bottom: triWidth solid $dark2
     filter: drop-shadow(0 -1px 0px $dark1 * 1.7) drop-shadow(0 -1px 0px $dark2 * 0.5)
+
+.tipped-bottom
+  position: relative
+  &::before
+    content: ''
+    display: block
+    position: absolute
+    width: 0
+    height: 0
+    triWidth = 7px
+    bottom: - triWidth
+    left: 16px
+    border-left: triWidth solid transparent
+    border-right: triWidth solid transparent
+    border-top: triWidth solid $dark2
+    filter: drop-shadow(0 1px 0px $dark1 * 1.7) drop-shadow(0 1px 0px $dark2 * 0.5)
+  &.bright::before
+    border-top-color: $dark1
+    filter: drop-shadow(0 1px 0px $dark1) drop-shadow(0 1px 0px $dark2 * 0.5)
 
 alchemy-editor
   height: 100%

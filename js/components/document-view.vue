@@ -3,6 +3,7 @@
     ViewPort(
       :document="document"
       :active-component="document.activeComponent"
+      :active-sketch="document.activeSketch"
       :active-tool.sync="activeTool"
       :selection.sync="selection"
       :highlight.sync="highlight"
@@ -12,8 +13,13 @@
       @change-pose="document.isPoseDirty = true"
     )
     ToolBox(
+      :document="document"
       :active-tool="activeTool"
       :active-component="document.activeComponent"
+      :active-sketch="document.activeSketch"
+      @update:active-sketch="activateSketch"
+      @add-feature="addFeature"
+      @remove-feature="removeFeature"
     )
     .side-bar.left
       TreeView(
@@ -22,6 +28,7 @@
         :selection.sync="selection"
         :highlight.sync="highlight"
         @update:active-component="activateComponent"
+        @update:active-sketch="activateSketch"
         @create-component="createComponent"
         @delete-component="deleteComponent"
         @delete-solid="deleteSolid"
@@ -60,6 +67,13 @@
     FooterView(
       :selection="selection"
       :active-component="document.activeComponent"
+    )
+    FeatureBar(
+      :document="document"
+      :active-tool="activeTool"
+      :active-feature="activeFeature"
+      :selection="selection"
+      @update:active-feature="activateFeature"
     )
 </template>
 
@@ -114,8 +128,13 @@
 
   .footer-view
     position: absolute
-    right: 0
-    bottom: 0
+    // right: 0
+    bottom: 70px
+
+  .feature-bar
+    position: absolute
+    bottom: 12px
+    max-width: 80%
 </style>
 
 
@@ -128,6 +147,12 @@
   import FooterView from './footer-view.vue'
   import ListChooser from './list-chooser.vue'
   import RadioBar from './radio-bar.vue'
+  import FeatureBar from './feature-bar.vue'
+
+  import {
+    CreateComponentFeature,
+    CreateSketchFeature,
+  } from './../features.js'
 
   export default {
     name: 'DocumentView',
@@ -139,6 +164,7 @@
       FooterView,
       ListChooser,
       RadioBar,
+      FeatureBar,
     },
 
     props: {
@@ -152,12 +178,14 @@
           if(oldDocument) oldDocument.activeView = oldDocument.activeView || this.dirtyView
           if(!document.activeView) {
             document.activeView = document.views[3]
-            // this.createComponent(document.tree, 'Component 1')
           }
           this.previewView = null
           this.dirtyView = null
           this.selection = null
           this.highlight = null
+          this.activeFeature = null
+          // // ViewPort/transloader has consumed our faces on unload
+          // this.updateComponent(document.tree)
         },
       },
     },
@@ -165,6 +193,7 @@
     data() {
       return {
         activeTool: null,
+        activeFeature: null,
         selection: null,
         highlight: null,
         previewView: null,
@@ -191,19 +220,104 @@
     mounted() {
       this.currentDisplayMode = 'wireShade'
       this.$root.$on('keydown', this.keyDown)
+      this.$root.$on('regenerate', this.regenerate)
       this.$root.$emit('activate-toolname', 'Manipulate')
     },
 
     methods: {
+      regenerate: function() {
+        const compIds = this.document.real.evaluate()
+        console.log(compIds)
+        compIds.forEach(id => {
+          const comp = this.getComponent(id)
+          this.$root.$emit('component-deleted', comp)
+          this.updateComponent(comp)
+          this.$root.$emit('component-changed', comp, true)
+        })
+        this.document.activeComponent = this.findValidComponent(this.document.activeComponent)
+        this.document.activeSketch = null
+        this.selection = null
+      },
+
+      findValidComponent(comp) {
+        if(comp.real) return comp
+        return this.findValidComponent(comp.parent)
+      },
+
+      getComponent(id) {
+        return this.document.tree.findChild(id)
+      },
+
+      updateComponent(comp) {
+        comp.update(this.document.componentData())
+      },
+
+      addFeature(feature) {
+        this.activeFeature = null
+        this.document.insertFeature(feature, this.document.real.marker)
+        this.$root.$emit('regenerate')
+      },
+
+      removeFeature(feature) {
+        this.document.removeFeature(feature)
+        this.$root.$emit('regenerate')
+      },
+
       createComponent: function(parent, title) {
-        const comp = parent.createComponent(title)
-        this.activateComponent(comp)
-        return comp
+        const feature = new CreateComponentFeature(this.document)
+        feature.parent = () => parent.id
+        feature.execute()
+        this.addFeature(feature)
+        const newComp = parent.children.slice(-1)[0]
+        this.activateComponent(newComp)
       },
 
       activateComponent: function(comp) {
-        comp.hidden = false
+        comp.UIData.hidden = false
         this.document.activeComponent = comp
+      },
+
+      activateFeature: function(feature, doReset) {
+        if(feature) {
+          // Store marker, visibility and active component
+          this.previousMarker = this.document.real.marker
+          this.previousComponent = this.document.activeComponent
+          const compIds = feature.real.modified_components()
+          const comps = compIds.map(id => this.getComponent(id) ).filter(Boolean)
+          this.oldVisibility = {}
+          comps.forEach(comp => this.oldVisibility[comp.id] = comp.UIData.hidden )
+          // Regenerate at marker
+          this.document.real.move_marker_to_feature(feature.real)
+          this.$root.$emit('regenerate')
+          // Moving marker will cause feature bar to deactivate active feature
+          setTimeout(() => this.activeFeature = feature, 0)
+          // Activate sketch for sketch features
+          if(feature.constructor === CreateSketchFeature) {
+            this.document.activeSketch = this.document.tree.findSketchByFeature(feature.id)
+            this.document.activeComponent = this.getComponent(this.document.activeSketch.component_id())
+          } else {
+            this.document.activeSketch = null
+          }
+          // Make affected components visible
+          compIds.forEach(id => this.getComponent(id).UIData.hidden = false )
+        } else {
+          this.activeFeature = null
+          if(doReset && this.previousComponent) {
+            // Restore previous state
+            this.document.activeSketch = null
+            this.document.real.marker = this.previousMarker
+            this.$root.$emit('regenerate')
+            console.log(this.previousComponent.id)
+            this.activateComponent(this.getComponent(this.previousComponent.id))
+            Object.keys(this.oldVisibility).forEach(id => this.getComponent(id).UIData.hidden = this.oldVisibility[id] )
+          }
+        }
+      },
+
+      activateSketch: function(sketch) {
+        const featureId = sketch.get_feature_id()
+        const feature = this.document.features.find(f => f.id == featureId )
+        this.activateFeature(feature)
       },
 
       deleteComponent: function(comp) {

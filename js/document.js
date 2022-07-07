@@ -4,13 +4,16 @@ import { saveFile, loadFile } from './utils.js'
 import Component from './component.js'
 
 export default class Document {
-  constructor(wasm) {
+  constructor() {
     this.lastId = 1
 
-    const tree = new wasm.JsComponent()
-    this.tree = new Component(tree, null, 'Main Assembly')
+    this.componentData = () => { return {} }
+
+    this.real = new window.alcWasm.JsDocument()
+    this.tree = new Component(this.real.get_tree(), null, this.componentData())
 
     this.activeComponent = this.tree
+    this.activeSketch = null
     this.activeView = null
     this.activePose = null
     this.isPoseDirty = false
@@ -18,6 +21,8 @@ export default class Document {
     this.filePath = null
     this.hasChanges = false
     this.isFresh = true
+
+    this.features = this.real.get_features().map(feature => new Feature(this.document, feature) )
 
     this.views = [
       {
@@ -54,6 +59,16 @@ export default class Document {
       { title: 'Filet 14', id: this.lastId++ },
       { title: 'Extrude 2', id: this.lastId++ },
     ]
+  }
+
+  insertFeature(feature, index) {
+    this.features.splice(index, 0, feature);
+  }
+
+  removeFeature(feature) {
+    this.features = this.features.filter(f => f != feature )
+    feature.real.remove()
+    feature.real.free()
   }
 
   async save(as) {

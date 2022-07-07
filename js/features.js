@@ -2,9 +2,13 @@ import { vec2three } from './utils.js'
 import { LengthGizmo } from './gizmos.js'
 
 class Feature {
-  constructor(component, booleanOutput, settings) {
-    this.component = component
+  constructor(document, real, booleanOutput, title, icon, settings) {
+    this.document = document
+    this.real = real || new window.alcWasm.JsFeature(document.real)
+    this.title = title
+    this.icon = icon
     this.settings = settings
+
 
     if(!booleanOutput) return
     this.operation = 'join'
@@ -32,40 +36,82 @@ class Feature {
     }
   }
 
-  preview() {}
+  execute() {
+    this.updateFeature()
+    this.id = this.real.id()
+  }
+
   confirm() {}
   isComplete() {}
   updateGizmos() {}
 
   update() {
     this.updateGizmos()
-    if(this.isComplete()) return this.preview()
+    if(!this.isComplete()) return
+    this.execute()
   }
 
-  dispose() {
-    // Free all profile regions
-    for(const key in this.settings) {
-      const setting = this.settings[key]
-      if(setting.type == 'profile') {
-        let profile = this[key]
-        if(profile) {
-          profile = profile()
-          if(profile.unused) profile.free()
-          profile.noFree = false
-          this[key] = null
-        }
-      }
-    }
+  dispose() {}
+}
+
+
+export class CreateComponentFeature extends Feature {
+  constructor(document, real) {
+    super(document, real, false, 'New Component', 'box', {
+      parent: {
+        title: 'Parent Component',
+        type: 'component',
+      },
+    })
+
+    this.parent = null
+  }
+
+  isComplete() {
+    return !!this.parent
+  }
+
+  updateFeature() {
+    this.real.create_component(this.parent())
+  }
+}
+
+
+export class CreateSketchFeature extends Feature {
+  constructor(document, real) {
+    super(document, real, false, 'Sketch', 'edit', {
+      plane: {
+        title: 'Plane',
+        type: 'plane',
+        autoConfirm: true,
+      },
+    })
+
+    this.plane = null
+  }
+
+  isComplete() {
+    return !!this.plane
+  }
+
+  updateFeature() {
+    const plane = this.plane()
+    this.real.create_sketch(this.document.activeComponent.real.id(), plane.make_reference())
+  }
+
+  confirm(featureBox) {
+    featureBox.$emit('update:active-sketch', this.document.activeComponent.sketches.slice(-1)[0])
   }
 }
 
 
 export class ExtrudeFeature extends Feature {
-  constructor(component) {
-    super(component, true, {
-      profile: {
+  constructor(document, real) {
+    super(document, real, true, 'Extrude', 'layer-group', {
+      profiles: {
         title: 'Profile',
         type: 'profile',
+        multi: true,
       },
       rail: {
         title: '(Axis)',
@@ -90,35 +136,37 @@ export class ExtrudeFeature extends Feature {
       },
     })
 
-    this.profile = null
+    this.profiles = null
     this.axis = null
     this.distance = 1.0
     this.side = true
   }
 
   isComplete() {
-    return !!this.profile
+    return !!this.profiles
   }
 
-  preview() {
-    const profile = this.profile()
-    // Make sure transloader does not free profile region while in use
-    profile.noFree = true
-    return profile.extrude_preview(this.distance * (this.side ? 1 : -1))
-  }
-
-  confirm() {
-    this.profile().extrude(this.distance * (this.side ? 1 : -1))
+  updateFeature() {
+    const profiles = [this.profiles()]
+    const list = new window.alcWasm.JsProfileList()
+    profiles.forEach(profile => {
+      list.push(profile)
+    })
+    const sketch = this.document.tree.findSketch(profiles[0].sketch_id())
+    const comp_ref = sketch.component_id()
+    const distance = this.distance * (this.side ? 1 : -1)
+    this.real.extrusion(comp_ref, sketch, list, distance, this.operation)
   }
 
   updateGizmos() {
-    if(this.profile) {
+    if(this.profiles) {
+      const profiles = [this.profiles()]
       if(this.lengthGizmo) {
         this.lengthGizmo.set(this.distance, this.side)
       } else {
-        const center = vec2three(this.profile().get_center())
+        const center = vec2three(profiles[0].get_center())
         const axis = this.axis && this.axis()
-        const direction = axis || vec2three(this.profile().get_normal())
+        const direction = axis || vec2three(profiles[0].get_normal())
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.distance, (dist, side) => {
           this.distance = dist
           this.side = side
@@ -127,14 +175,21 @@ export class ExtrudeFeature extends Feature {
       }
     } else {
       window.alcRenderer.removeGizmo(this.lengthGizmo)
+      this.lengthGizmo = null
     }
+  }
+
+  dispose() {
+    super.dispose()
+    window.alcRenderer.removeGizmo(this.lengthGizmo)
+    this.lengthGizmo = null
   }
 }
 
 
 export class SweepFeature extends Feature {
-  constructor(component) {
-    super(component, true, {
+  constructor(document, real) {
+    super(document, real, true, 'Sweep', 'edit', {
       profile: {
         title: 'Profile',
         type: 'profile',
@@ -170,8 +225,8 @@ export class SweepFeature extends Feature {
 
 
 export class RevolveFeature extends Feature {
-  constructor(component) {
-    super(component, true, {
+  constructor(document, real) {
+    super(document, real, true, 'Revolve', 'edit', {
       profile: {
         title: 'Profile',
         type: 'profile',
@@ -212,34 +267,34 @@ export class RevolveFeature extends Feature {
 }
 
 
-export class MaterialFeature extends Feature {
-  constructor(component) {
-    super(component, false, {
-      material: {
-        title: 'Material Presets',
-        type: 'material',
-      },
-    })
+// export class MaterialFeature extends Feature {
+//   constructor(component) {
+//     super(component, false, {
+//       material: {
+//         title: 'Material Presets',
+//         type: 'material',
+//       },
+//     })
 
-    this.material = null
-  }
+//     this.material = null
+//   }
 
-  isComplete() {
-    return !!this.material
-  }
+//   isComplete() {
+//     return !!this.material
+//   }
 
-  preview() {
-    if(this.oldMaterial === undefined) this.oldMaterial = this.component.material
-    this.component.material = this.material
-  }
+//   preview() {
+//     if(this.oldMaterial === undefined) this.oldMaterial = this.component.material
+//     this.component.material = this.material
+//   }
 
-  confirm() {
-    this.oldMaterial = undefined
-  }
+//   confirm() {
+//     this.oldMaterial = undefined
+//   }
 
-  dispose() {
-    super.dispose()
-    if(this.oldMaterial === undefined) return
-    this.component.material = this.oldMaterial
-  }
-}
+//   dispose() {
+//     super.dispose()
+//     if(this.oldMaterial === undefined) return
+//     this.component.material = this.oldMaterial
+//   }
+// }

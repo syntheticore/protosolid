@@ -54,10 +54,10 @@
           span Area
           span {{ selection.get_area().toFixed(2) }} mm²
 
-    .debug-panel
-      button.button(@click="splitAll") Split all
-      button.button(@click="makeCube") Make Cube
-      button.button(@click="makeCylinder") Make Cylinder
+    //- .debug-panel
+    //-   button.button(@click="splitAll") Split all
+    //-   button.button(@click="makeCube") Make Cube
+    //-   button.button(@click="makeCylinder") Make Cylinder
 </template>
 
 

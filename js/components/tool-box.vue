@@ -4,6 +4,7 @@
       ul.tabs
         li(
           v-for="(tab, index) in tabs"
+          v-if="!!activeSketch == !!tab.sketchOnly"
           @click="activateTab(index)"
           :class="{active: index == activeTab}"
         )
@@ -23,10 +24,13 @@
             .hot-key(v-if="tool.hotKey") {{ tool.hotKey }}
 
           transition(name="fade")
-            FeatureBox(
+            FeatureBox.tipped(
               v-if="activeFeature && isActive(tool)"
+              :document="document"
               :active-tool="activeTool"
               :active-feature="activeFeature"
+              @update:active-sketch="$emit('update:active-sketch', $event)"
+              @remove-feature="$emit('remove-feature', $event)"
               @close="closeFeature"
             )
 </template>
@@ -53,7 +57,7 @@
       font-size: 12px
       text-align: center
       transition: all 0.2s
-      min-width: 60px
+      min-width: 100px
       & + li
         border-left: 1px solid $dark1 * 1.15
       &:hover
@@ -126,7 +130,7 @@
       border: 0.5px solid $dark1 * 1.4
 
   .feature-box
-    margin-top: 10px
+    margin-top: 9px
     position: absolute
 
   .fade-enter-active, .fade-leave-active
@@ -142,10 +146,11 @@
   import FeatureBox from './feature-box.vue'
 
   import {
+    CreateSketchFeature,
     ExtrudeFeature,
     RevolveFeature,
     SweepFeature,
-    MaterialFeature,
+    // MaterialFeature,
   } from './../features.js'
 
   import {
@@ -168,19 +173,28 @@
     },
 
     props: {
+      document: Object,
       activeTool: Object,
       activeComponent: Object,
+      activeSketch: Object,
+    },
+
+    watch: {
+      activeSketch: function(sketch) {
+        this.activeTab = sketch ? 1 : 4
+      }
     },
 
     data() {
       return {
-        activeTab: 1,
+        activeTab: 0,
         activeFeature: null,
         tabs: [
           {
             title: 'Construct',
             tools: [
-              { title: 'Plane', tool: PlaneTool, icon: 'edit', hotKey: 'S', keyCode: 83 },
+              { title: 'Sketch', feature: CreateSketchFeature, icon: 'edit', hotKey: 'S', keyCode: 83 },
+              { title: 'Plane', tool: PlaneTool, icon: 'edit', hotKey: 'P', keyCode: 80 },
               { title: 'Axis', icon: 'edit' },
               { title: 'Point', icon: 'edit' },
               { title: 'Center of Mass', action: this.addCog, icon: 'atom' },
@@ -189,6 +203,7 @@
           },
           {
             title: 'Sketch',
+            sketchOnly: true,
             tools: [
               { title: 'Line', tool: LineTool, icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
               { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
@@ -201,6 +216,7 @@
           },
           {
             title: 'Edit Sketch',
+            sketchOnly: true,
             tools: [
               { title: 'Trim', tool: TrimTool,  icon: 'route',  hotKey: 'T', keyCode: 84},
               { title: 'Break', icon: 'layer-group' },
@@ -209,6 +225,19 @@
               { title: 'Project', icon: 'layer-group' },
               { title: 'Intersect', icon: 'layer-group' },
             ]
+          },
+          {
+            title: 'Constrain',
+            sketchOnly: true,
+            tools: [
+              { title: 'Dimension', icon: 'ruler' },
+              { title: 'Touch', icon: 'object-group' },
+              { title: 'Parallel', icon: 'code-branch' }, //XXX Use also for hor/vert
+              { title: 'Perpendicular', icon: 'object-group' },
+              { title: 'Tangent', icon: 'bezier-curve' },
+              { title: 'Equal', icon: 'exchange-alt' },
+              { title: 'Fix', icon: 'lock' }, //XXX also ground for assemblies
+            ],
           },
           {
             title: 'Solid',
@@ -237,21 +266,9 @@
             ],
           },
           {
-            title: 'Constrain',
-            tools: [
-              { title: 'Dimension', icon: 'ruler' },
-              { title: 'Touch', icon: 'object-group' },
-              { title: 'Parallel', icon: 'code-branch' }, //XXX Use also for hor/vert
-              { title: 'Perpendicular', icon: 'object-group' },
-              { title: 'Tangent', icon: 'bezier-curve' },
-              { title: 'Equal', icon: 'exchange-alt' },
-              { title: 'Fix', icon: 'lock' }, //XXX also ground for assemblies
-            ],
-          },
-          {
             title: 'Simulate',
             tools: [
-              { title: 'Material', feature: MaterialFeature, icon: 'volleyball-ball' },
+              // { title: 'Material', feature: MaterialFeature, icon: 'volleyball-ball' },
               { title: 'Joint', icon: 'code-branch' },
               { title: 'Group', icon: 'object-group' },
               { title: 'Motion Link', icon: 'link' },
@@ -289,14 +306,6 @@
         )
         if(tool) this.activateTool(tool)
       });
-
-      this.$root.$on('escape', () => {
-        if(this.activeTool.constructor === ManipulationTool) {
-          this.closeFeature()
-        } else {
-          this.$root.$emit('activate-toolname', 'Manipulate')
-        }
-      })
     },
 
     methods: {
@@ -311,7 +320,8 @@
         this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))
         setTimeout(() => {
           if(tool.feature) {
-            this.activeFeature = new tool.feature(this.activeComponent)
+            this.activeFeature = new tool.feature(this.document)
+            this.$emit('add-feature', this.activeFeature)
           } else if(tool.action) {
             tool.action()
           } else {
@@ -330,18 +340,18 @@
       },
 
       addCog: function() {
-        this.activeComponent.cog = true
+        this.activeComponent.UIData.cog = true
       },
 
       addParameter: function() {
-        this.activeComponent.parameters.push({
+        this.activeComponent.UIData.parameters.push({
           name: 'width',
           value: '512mm',
         })
       },
 
       addExportConfig: function() {
-        this.activeComponent.exportConfigs.push({
+        this.activeComponent.UIData.exportConfigs.push({
           title: 'High Detail',
           path: null,
           format: 'STL',

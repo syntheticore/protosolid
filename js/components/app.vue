@@ -133,13 +133,13 @@
       createDocument: function() {
         return wasmP.then((wasm) => {
           window.alcWasm = wasm
-          this.activeDocument = new Document(wasm)
+          this.activeDocument = new Document()
           this.documents.push(this.activeDocument)
         })
       },
 
       loadDocument: function(path) {
-        const doc = new Document(window.alcWasm)
+        const doc = new Document()
         doc.load(path).then(() => {
           // Close untouched documents on load
           if(this.activeDocument.isFresh) this.deleteDocument(this.activeDocument)

@@ -13,23 +13,24 @@ mod tesselation;
 
 pub mod features;
 pub use boolean::Boolean;
+pub use boolean::BooleanType;
 pub use volume::Volume;
 
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Compound {
   pub solids: Vec<Solid>,
 }
 
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Solid {
   pub id: Uuid,
   pub shells: Vec<Shell>, // Shell 0 is outer shell
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Shell {
   // id: Uuid,
   pub closed: bool,
@@ -39,7 +40,7 @@ pub struct Shell {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Face {
   pub id: Uuid,
   pub outer_ring: Ref<Ring>,
@@ -49,14 +50,14 @@ pub struct Face {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Ring { //XXX Eliminate
   pub half_edge: Ref<HalfEdge>,
   pub face: WeakRef<Face>,
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Edge {
   pub id: Uuid,
   pub left_half: Ref<HalfEdge>,
@@ -77,7 +78,7 @@ pub struct HalfEdge {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Vertex {
   // pub id: Uuid,
   pub point: Point3,

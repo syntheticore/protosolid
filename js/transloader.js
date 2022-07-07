@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
 import Component from './component.js'
+import PlaneHelper from './plane-helper.js'
 
 export default class Transloader {
   constructor(renderer, onLoadElement, onUnloadElement) {
@@ -11,6 +12,10 @@ export default class Transloader {
 
   setActiveComponent(comp) {
     this.activeComponent = comp
+  }
+
+  setActiveSketch(sketch) {
+    this.activeSketch = sketch
   }
 
   setSelection(obj) {
@@ -54,6 +59,7 @@ export default class Transloader {
       case alcWasm.JsSolid:
       case alcWasm.JsRegion:
       case alcWasm.JsCurve:
+      case alcWasm.JsConstructionHelper:
         return obj.component
 
       case alcWasm.JsFace:
@@ -62,7 +68,7 @@ export default class Transloader {
   }
 
   loadTree(comp, recursive) {
-    if(comp.hidden) return
+    if(comp.UIData.hidden) return
     // Load Bodies
     const isActive = this.isActive(comp)
     comp.updateSolids()
@@ -106,28 +112,43 @@ export default class Transloader {
     })
     // Load Sketch Elements
     if(comp === this.activeComponent) {
-      const elements = comp.real.get_sketch().get_sketch_elements()
+      const elements = comp.sketches.flatMap(sketch => sketch.get_sketch_elements())
       elements.forEach(element => this.loadElement(element, comp))
       if(!cache.regions.length) this.updateRegions(comp)
     }
+    // Load Construction Helpers
+    comp.helpers.forEach(plane => {
+      const mesh = new PlaneHelper(plane)
+      plane.mesh = mesh
+      this.renderer.add(mesh)
+    })
     // Recurse
     if(recursive) comp.children.forEach(child => this.loadTree(child, true))
   }
 
   unloadTree(comp, recursive) {
     const cache = comp.cache()
+
     cache.curves.forEach(elem => this.unloadElement(elem, comp))
+
     cache.edges.forEach(edge => {
       this.renderer.remove(edge.mesh)
       edge.free()
     })
+    cache.edges = []
+
     cache.faces.forEach(face => {
       this.renderer.remove(face.mesh)
       face.free()
     })
-    cache.edges = []
     cache.faces = []
+
+    comp.helpers.forEach(helper => {
+      this.renderer.remove(helper.mesh)
+    })
+
     this.purgeRegions(comp)
+
     if(recursive) comp.children.forEach(child =>
       this.unloadTree(child, true)
     )
@@ -155,10 +176,11 @@ export default class Transloader {
   updateRegions(comp) {
     this.purgeRegions(comp)
     let t = performance.now()
-    const regions = comp.real.get_sketch().get_profiles()
+    const regions = comp.sketches.flatMap(sketch => sketch.get_profiles())
     console.log('get_profiles took ' + (performance.now() - t))
     t = performance.now()
-    comp.cache().regions = regions.map(region => {
+    comp.cache().regions = regions
+    regions.forEach(region => {
       // let material = this.renderer.materials.region.clone()
       // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
       const mesh = this.renderer.convertMesh(
@@ -170,7 +192,6 @@ export default class Transloader {
       region.mesh = mesh
       region.component = comp
       this.renderer.add(mesh)
-      return region
     })
     console.log('region tesselation took ' + (performance.now() - t))
   }
@@ -215,6 +236,8 @@ export default class Transloader {
           this.renderer.materials.line,
       region: highlighted ? this.renderer.materials.highlightRegion :
         this.renderer.materials.region,
+      plane: highlighted ? this.renderer.materials.highlightPlane :
+        this.renderer.materials.plane,
       face: highlighted ? this.renderer.materials.highlightSurface :
         this.renderer.materials.surface,
     }[elem.mesh.alcType]
@@ -233,6 +256,7 @@ export default class Transloader {
     cache.faces.forEach(face => face.mesh.material = this.getSurfaceMaterial(comp, face) )
     cache.regions.forEach(region => region.mesh.material = this.getElemMaterial(region) )
     cache.curves.forEach(curve => curve.mesh.material = this.getElemMaterial(curve) )
+    comp.helpers.forEach(helper => helper.mesh.material = this.getElemMaterial(helper) )
     comp.children.forEach(child => this.applyMaterials(child) )
   }
 

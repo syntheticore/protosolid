@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+import { matrix2three } from './utils.js'
+
 export default class SketchPlane extends THREE.Object3D {
   constructor(camera) {
     super()
@@ -22,6 +24,16 @@ export default class SketchPlane extends THREE.Object3D {
     }))
     ground.alcProjectable = true
     this.add(ground)
+
+    this.visible = false
+  }
+
+  useSketch(sketch) {
+    this.visible = !!sketch
+    if(!sketch) return
+    const plane = matrix2three(sketch.get_workplane())
+    this.position.setFromMatrixPosition(plane)
+    this.rotation.setFromRotationMatrix(plane)
   }
 
   update(camera) {
@@ -42,6 +54,6 @@ export default class SketchPlane extends THREE.Object3D {
     const lookVec = camera.getWorldDirection(this.cachedVec)
     const facing = this.grid.up.dot(lookVec)
     //XXX transform https://stackoverflow.com/questions/35641875/three-js-how-to-find-world-orientation-vector-of-objects-local-up-vector
-    this.grid.position.z = -0.005 * dist * facing
+    this.grid.position.z = -0.002 * dist * facing
   }
 }

@@ -88,6 +88,9 @@ export default class Renderer {
       this.scene.add(this.shadowCatcher)
     }
 
+    // Gizmos
+    this.gizmos = []
+
     // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
     // const mesh = new THREE.Mesh(torusGeometry, this.materials.surface)
     // mesh.position.z = 1
@@ -136,7 +139,7 @@ export default class Renderer {
 
     this.viewControls.addEventListener('start', () => {
       this.isOrbiting = true
-      if(this.gizmo) this.gizmo.enabled = false
+      this.gizmos.forEach(gizmo => gizmo.enabled = false)
       this.cameraTarget = null
       this.viewControlsTarget = null
       this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
@@ -145,7 +148,7 @@ export default class Renderer {
 
     this.viewControls.addEventListener('end', () => {
       this.isOrbiting = false
-      if(this.gizmo) this.gizmo.enabled = true
+      this.gizmos.forEach(gizmo => gizmo.enabled = true)
       this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
       this.endAnimation()
     })
@@ -247,30 +250,28 @@ export default class Renderer {
   }
 
   addGizmo(gizmo) {
-    this.removeGizmo()
-    this.gizmo = gizmo
+    this.gizmos.push(gizmo)
 
     // Don't orbit when dragging on gizmo
-    this.gizmo.addEventListener('dragging-changed', (event) => {
+    gizmo.addEventListener('dragging-changed', (event) => {
       this.viewControls.enabled = !event.value
     })
 
-    this.gizmo.addEventListener('objectChange', () => {
+    gizmo.addEventListener('objectChange', () => {
       this.emitter.emit('change-pose')
       if(this.shadowCatcher) this.shadowCatcher.update()
       this.render()
     })
 
     // Recreate View Controls to achieve correct event order
-    this.scene.add(this.gizmo)
+    this.scene.add(gizmo)
     this.setActiveCamera(this.activeCamera)
   }
 
-  removeGizmo() {
-    if(!this.gizmo) return
-    this.scene.remove(this.gizmo)
-    this.gizmo.dispose()
-    this.gizmo = null
+  removeGizmo(gizmo) {
+    if(!gizmo) return
+    this.scene.remove(gizmo)
+    gizmo.dispose()
     this.render()
   }
 
@@ -391,7 +392,7 @@ export default class Renderer {
 
   dispose() {
     this.viewControls.dispose()
-    if(this.gizmo) this.gizmo.dispose()
+    this.gizmos.forEach(gizmo => gizmo.dispose() )
     this.scene.environment.dispose()
     this.dropResources(this.scene)
   }

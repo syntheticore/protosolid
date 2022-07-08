@@ -186,11 +186,11 @@ impl Sketch {
   pub fn all_split(elements: &Vec<Ref<CurveType>>) -> Vec<TrimmedCurve> {
     elements.iter().flat_map(|elem| {
       let splits = Self::split_element(&elem.borrow(), &elements);
-      splits.into_iter().map(|split| TrimmedCurve {
-        base: (*elem.borrow()).clone(),
-        bounds: split.as_curve().endpoints(),
-        cache: split,
-      }).collect::<Vec<TrimmedCurve>>()
+      splits.into_iter().map(|split| TrimmedCurve::from_bounds(
+        (*elem.borrow()).clone(),
+        split.as_curve().endpoints(),
+        split,
+      )).collect::<Vec<TrimmedCurve>>()
     }).collect()
   }
 
@@ -241,7 +241,7 @@ impl Sketch {
   ) -> Vec<Region> {
     let mut regions = vec![];
     // Traverse edges only once in every direction
-    let start_elem_id = as_id(&start_elem.cache).id();
+    let start_elem_id = start_elem.id;
     if start_point.almost(start_elem.bounds.0) {
       if used_forward.contains(&start_elem_id) { return regions }
       used_forward.insert(start_elem_id);
@@ -256,7 +256,7 @@ impl Sketch {
     let mut connected_elems: Vec<&TrimmedCurve> = all_elements.iter().filter(|other_elem| {
       let (other_start, other_end) = other_elem.bounds;
       (end_point.almost(other_start) || end_point.almost(other_end)) &&
-        as_id(&other_elem.cache).id() != start_elem_id
+        other_elem.id != start_elem_id
     }).collect();
     if connected_elems.len() > 0 {
       // Sort connected segments in clockwise order
@@ -269,7 +269,7 @@ impl Sketch {
       });
       // Follow the leftmost segment to complete loop in anti-clockwise order
       let next_elem = connected_elems[0];
-      if as_id(&path[0].cache).id() == as_id(&next_elem.cache).id() {
+      if path[0].id == next_elem.id {
         // We are closing a loop
         regions.push(path);
       } else {
@@ -299,7 +299,7 @@ impl Sketch {
     let others = island.clone();
     let start_len = island.len();
     island.retain(|elem| {
-      if elem.cache.as_curve().length().almost(0.0) { return false }
+      if elem.length().almost(0.0) { return false }
       let (start_point, end_point) = elem.bounds;
       // Keep closed circles, arcs and splines
       if start_point == end_point { return true }
@@ -313,15 +313,50 @@ impl Sketch {
     });
     if island.len() < start_len { Self::remove_dangling_segments(island) }
   }
-}
 
+  pub fn find_element(&self, id: Uuid) -> Option<&Ref<CurveType>> {
+    for elem in &self.elements {
+      if elem.borrow().get_id() == id {
+        return Some(&elem)
+      }
+    }
+    None
+  }
 
-pub fn as_id(elem: &CurveType) -> &dyn Identity {
-  match elem {
-    CurveType::Line(line) => line,
-    CurveType::Arc(arc) => arc,
-    CurveType::Circle(circle) => circle,
-    CurveType::BezierSpline(spline) => spline,
+  pub fn update_profile(&self, profile: &mut Profile) {
+    for wire in profile {
+      for tcurve in wire.iter_mut() {
+        let id = tcurve.base.get_id();
+        let new_base = self.find_element(id).unwrap();
+        tcurve.base = new_base.borrow().clone();
+      }
+      let len = wire.len();
+      for i in 0..len {
+        let j = (i + 1) % len;
+        let ipoint = {
+          let tcurve = &wire[i];
+          let next_curve = &wire[j];
+          let isect = tcurve.intersect(&next_curve);
+          match isect {
+            CurveIntersectionType::Touch(isect)
+             => isect.point,
+            CurveIntersectionType::Pierce(isects)
+            | CurveIntersectionType::Cross(isects)
+            | CurveIntersectionType::Extended(isects)
+              => isects[0].point,
+            _ => todo!(),
+          }
+        };
+        {
+          let tcurve = &mut wire[i];
+          tcurve.set_bounds((tcurve.bounds.0, ipoint));
+        }
+        {
+          let next_curve = &mut wire[j];
+          next_curve.set_bounds((ipoint, next_curve.bounds.1));
+        }
+      }
+    }
   }
 }
 

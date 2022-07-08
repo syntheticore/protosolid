@@ -82,6 +82,8 @@ impl Component {
   }
 
   pub fn deep_clone(&self) -> Self {
-    self.clone()
+    let mut clone = self.clone();
+    clone.compound.solids = clone.compound.solids.into_iter().map(|solid| solid.deep_clone() ).collect();
+    clone
   }
 }

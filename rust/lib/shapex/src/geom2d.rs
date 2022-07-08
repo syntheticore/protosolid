@@ -48,10 +48,10 @@ fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
 }
 
 pub fn point_in_region(p: Point3, region: &Region) -> bool {
-  let ray = Line::new(p, p + Vec3::unit_x() * MAX_FLOAT).into_enum();
+  let ray = TrimmedCurve::new(Line::new(p, p + Vec3::unit_x() * MAX_FLOAT).into_enum());
   let mut num_hits = 0;
   for elem in region {
-    num_hits += match intersect(&ray, &elem.cache) {
+    num_hits += match ray.intersect(&elem) {
       CurveIntersectionType::Pierce(hits) |
       CurveIntersectionType::Cross(hits)
         => hits.len(),
@@ -101,11 +101,7 @@ pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) ->
 pub fn tesselate_wire(wire: &Wire) -> PolyLine {
   let polyline: PolyLine = wire.iter()
   .flat_map(|curve| {
-    let mut poly = curve.cache.as_curve().tesselate(); //XXX cache -> base
-    // assert!((curve.bounds.0.almost(poly[0]) && curve.bounds.1.almost(poly[1])) ||
-    if !curve.bounds.0.almost(poly[0]) {
-      poly = poly.into_iter().rev().collect();
-    }
+    let poly = curve.tesselate();
     let n = poly.len() - 1;
     poly.into_iter().take(n).collect::<PolyLine>()
   }).collect();
@@ -129,7 +125,7 @@ pub fn wire_from_region(region: &mut Region) {
   for elem in region {
     if elem.bounds.1.almost(point) {
       point = elem.bounds.0;
-      elem.bounds = (elem.bounds.1, elem.bounds.0);
+      elem.flip();
     } else {
       point = elem.bounds.1;
     }

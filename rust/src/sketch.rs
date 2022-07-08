@@ -97,7 +97,7 @@ impl JsSketch {
   pub fn remove_element(&mut self, id: JsValue) {
     let id: uuid::Uuid = id.into_serde().unwrap();
     let mut sketch = self.real.borrow_mut();
-    sketch.elements.retain(|elem| as_controllable(&mut elem.borrow_mut()).id() != id );
+    sketch.elements.retain(|elem| elem.borrow().get_id() != id );
   }
 
   pub fn get_workplane(&self) -> JsValue {

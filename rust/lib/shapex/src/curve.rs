@@ -7,9 +7,11 @@ use crate::base::*;
 use crate::transform::*;
 use crate::geom2d;
 use crate::intersection;
+use crate::intersection::CurveIntersection;
+use crate::intersection::CurveIntersectionType;
 
-use cgmath::One;
-use cgmath::Rotation;
+// use crate::log;
+
 
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
@@ -53,6 +55,11 @@ pub trait Curve: Transformable {
   fn closest_point(&self, p: &Point3) -> Point3 {
     self.sample(self.unsample(p))
   }
+
+  fn is_point_on_curve(&self, p: Point3) -> bool {
+    let t = self.unsample(&p);
+    t >= 0.0 && t <= 1.0
+  }
 }
 
 impl std::fmt::Debug for dyn Curve {
@@ -86,6 +93,15 @@ impl CurveType {
       Self::Arc(arc) => arc,
       Self::Circle(circle) => circle,
       Self::BezierSpline(spline) => spline,
+    }
+  }
+
+  pub fn get_id(&self) -> Uuid {
+    match self {
+      Self::Line(line) => line.id,
+      Self::Arc(arc) => arc.id,
+      Self::Circle(circle) => circle.id,
+      Self::BezierSpline(spline) => spline.id,
     }
   }
 
@@ -159,19 +175,50 @@ impl CurveType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrimmedCurve {
+  pub id: Uuid,
   pub base: CurveType,
-  // pub bounds: (f64, f64),
+  pub trims: (f64, f64),
   pub bounds: (Point3, Point3),
   pub cache: CurveType,
+  pub is_forward: bool
 }
 
 impl TrimmedCurve {
   pub fn new(elem: CurveType) -> Self {
     Self {
-      bounds: elem.as_curve().endpoints(),
+      id: Uuid::new_v4(),
       base: elem.clone(),
+      trims: (0.0, 1.0),
+      bounds: elem.as_curve().endpoints(),
       cache: elem,
+      is_forward: true,
     }
+  }
+
+  pub fn from_bounds(base: CurveType, bounds: (Point3, Point3), cache: CurveType) -> Self {
+    let mut this = Self {
+      id: Uuid::new_v4(),
+      base,
+      trims: (0.0, 1.0),
+      bounds: (Point3::origin(), Point3::origin()),
+      cache,
+      is_forward: true,
+    };
+    this.set_bounds(bounds);
+    this
+  }
+
+  pub fn set_bounds(&mut self, bounds: (Point3, Point3)) {
+    let curve = self.base.as_curve();
+    let trims = (curve.unsample(&bounds.0), curve.unsample(&bounds.1));
+    self.is_forward = true;
+    self.trims = if trims.0 <= trims.1 {
+      (trims.0, trims.1)
+    } else {
+      self.is_forward = false;
+      (1.0 - trims.0, 1.0 - trims.1)
+    };
+    self.bounds = bounds;
   }
 
   pub fn other_bound(&self, p: &Point3) -> Point3 {
@@ -179,9 +226,70 @@ impl TrimmedCurve {
     if p.almost(start) { end } else { start }
   }
 
-  // pub fn intersect(&self, other: Self) -> IntersectionType {
-    //XXX switch Cross and Touch to Extended
-  // }
+  pub fn flip(&mut self) {
+    self.trims = (1.0 - self.trims.1, 1.0 - self.trims.0);
+    self.bounds = (self.bounds.1, self.bounds.0);
+    self.is_forward = !self.is_forward
+  }
+
+  fn param_to_base(&self, t: f64) -> f64 {
+    let out = self.trims.0 + t * (self.trims.1 - self.trims.0);
+    if self.is_forward { out } else { 1.0 - out }
+  }
+
+  fn param_from_base(&self, t_base: f64) -> f64 {
+    let t_base = if self.is_forward { t_base } else { 1.0 - t_base };
+    (t_base - self.trims.0) / (self.trims.1 - self.trims.0)
+  }
+
+  fn convert_intersection(&self, mut intersection: CurveIntersection) -> (CurveIntersection, bool) {
+    let t = self.param_from_base(intersection.t);
+    intersection.t = t;
+    (intersection, t >= 0.0 && t <= 1.0)
+  }
+
+  pub fn intersect(&self, other: &Self) -> CurveIntersectionType {
+    let mut intersection = intersection::intersect(&self.base, &other.base);
+    match intersection {
+      CurveIntersectionType::None
+      | CurveIntersectionType::Contained //XXX Needs to be checked
+        => intersection,
+      CurveIntersectionType::Extended(ref mut isects)
+        => {
+          *isects = isects.iter()
+          .map(|isect| self.convert_intersection(isect.clone()).0 )
+          .collect();
+          intersection
+        },
+      CurveIntersectionType::Touch(isect)
+        => {
+          let converted = self.convert_intersection(isect);
+          if converted.1 {
+            CurveIntersectionType::Touch(converted.0)
+          } else {
+            CurveIntersectionType::Extended(vec![converted.0])
+          }
+        },
+      CurveIntersectionType::Pierce(ref mut isects)
+      | CurveIntersectionType::Cross(ref mut isects)
+        => {
+          let converted: Vec<(CurveIntersection, bool)> = isects.iter().map(|isect|
+            self.convert_intersection(isect.clone())
+          ).collect();
+          let filtered: Vec<CurveIntersection> = converted.iter().filter_map(|result|
+            if result.1 {
+              Some(result.0.clone())
+            } else { None }
+          ).collect();
+          if filtered.len() > 0 {
+            *isects = filtered;
+            intersection
+          } else {
+            CurveIntersectionType::Extended(converted.into_iter().map(|result| result.0 ).collect())
+          }
+        },
+    }
+  }
 }
 
 impl Transformable for TrimmedCurve {
@@ -192,21 +300,44 @@ impl Transformable for TrimmedCurve {
   }
 }
 
+impl Curve for TrimmedCurve {
+  fn sample(&self, t: f64) -> Point3 {
+    self.base.as_curve().sample(self.param_to_base(t))
+  }
+
+  fn unsample(&self, p: &Point3) -> f64 {
+    self.param_from_base(self.base.as_curve().unsample(p))
+  }
+
+  fn tesselate(&self) -> Vec<Point3> {
+    // self.tesselate_adaptive(20.0)
+    self.tesselate_fixed(1)
+  }
+
+  fn length_between(&self, start: f64, end: f64) -> f64 {
+    self.base.as_curve().length_between(self.param_to_base(start), self.param_to_base(end))
+  }
+
+  fn into_enum(self) -> CurveType {
+    self.base //XXX should actually trim the curve
+  }
+}
+
 
 pub type PolyLine = Vec<Point3>;
 
 
-/// Elements in a region are connected by their endpoints
-/// and already sorted in a closed loop
+/// Elements in a region are sorted in a closed loop and connected by their endpoints
 pub type Region = Vec<TrimmedCurve>;
 
 
-/// Wires fulfill all properties of regions, but their elements
-/// run clockwise and their bounds are ordered in the direction of the loop
+/// Wires fulfill all properties of regions, but their element's
+/// bounds are ordered in the direction of the loop
 pub type Wire = Vec<TrimmedCurve>;
 
 
 /// Profiles contain one or more wires, representing the outer and inner rings
+/// The outer ring runs counter-clockwise and inner rings run clockwise
 pub type Profile = Vec<Wire>;
 
 
@@ -269,10 +400,6 @@ impl Line {
       },
     }
   }
-}
-
-impl Identity for Line {
-  fn id(&self) -> Uuid { self.id }
 }
 
 impl Curve for Line {
@@ -344,10 +471,6 @@ impl Arc {
   pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Arc> { vec![] }
 
   pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
-}
-
-impl Identity for Arc {
-  fn id(&self) -> Uuid { self.id }
 }
 
 impl Curve for Arc {
@@ -462,10 +585,6 @@ impl Circle {
   pub fn split_with_circle(&self, _circle: &Circle) -> Option<(Arc, Arc)> { None }
 
   pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
-}
-
-impl Identity for Circle {
-  fn id(&self) -> Uuid { self.id }
 }
 
 impl Curve for Circle {
@@ -622,11 +741,6 @@ impl BezierSpline {
 
   pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Self> { vec![self.clone()] }
 }
-
-impl Identity for BezierSpline {
-  fn id(&self) -> Uuid { self.id }
-}
-
 
 impl Curve for BezierSpline {
   fn sample(&self, t: f64) -> Point3 {
@@ -790,5 +904,21 @@ mod tests {
     let p = spline.sample(0.5);
     assert_eq!(p, Point3::origin());
     assert_eq!(0.5, spline.unsample(&p));
+  }
+
+  #[test]
+  fn flip_trimmed_curve() {
+    let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)).into_enum();
+    let bounds = (Point3::new(0.0, 0.6, 0.0), Point3::new(0.0, 0.1, 0.0));
+    let mut trimmed = TrimmedCurve::from_bounds(line.clone(), bounds, line.clone());
+    println!("As constructed: {:#?}", trimmed);
+    println!("{:#?}", trimmed.endpoints());
+    almost_eq(trimmed.endpoints().0, bounds.0);
+    almost_eq(trimmed.endpoints().1, bounds.1);
+    trimmed.flip();
+    println!("Flipped: {:#?}", trimmed);
+    println!("{:#?}", trimmed.endpoints());
+    almost_eq(trimmed.endpoints().0, bounds.1);
+    almost_eq(trimmed.endpoints().1, bounds.0);
   }
 }

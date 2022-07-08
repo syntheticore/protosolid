@@ -37,10 +37,11 @@ pub enum CurveSurfaceIntersectionType {
 }
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CurveIntersection {
   pub point: Point3,
   pub t: f64,
+  //pub t2: f64, //XXX Needed to check in which direction a pierce or extension happened
 }
 
 impl CurveIntersection {
@@ -88,7 +89,6 @@ pub fn intersect(own: &CurveType, other: &CurveType) -> CurveIntersectionType {
     },
   }
 }
-
 
 // https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
 pub fn line_line(own: &Line, other: &Line) -> CurveIntersectionType {

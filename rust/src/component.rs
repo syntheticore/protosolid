@@ -50,7 +50,7 @@ impl JsComponent {
   pub fn get_solids(&self) -> Array {
     let doc = self.document.borrow();
     self.get_comp(&doc).compound.solids.iter().map(|body|
-      JsValue::from(JsSolid::from(body))
+      JsValue::from(JsSolid::from(body, self.component_id))
     ).collect()
   }
 
@@ -85,11 +85,11 @@ impl JsComponent {
     meshes
   }
 
-  pub fn serialize(&self) -> String {
-    let doc = self.document.borrow();
-    let comp = self.get_comp(&doc);
-    solvo::io::export_ron(&comp)
-  }
+  // pub fn serialize(&self) -> String {
+  //   let doc = self.document.borrow();
+  //   let comp = self.get_comp(&doc);
+  //   solvo::io::export_ron(&comp)
+  // }
 
   // pub fn unserialize(&mut self, dump: String) {
   //   self.real = rc(solvo::io::import_ron(dump));

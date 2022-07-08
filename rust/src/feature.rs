@@ -129,7 +129,6 @@ impl JsFeature {
         component_id: comp_ref.into_serde().unwrap(),
         plane: plane.0.clone(),
         sketch: rc(Sketch::default()),
-        title: "New Sketch".into(),
       }.into_enum(),
     ));
   }

@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use shapex::*;
 
 
-pub trait Controllable: Identity {
+pub trait Controllable {
   fn get_handles(&self) -> Vec<Point3>;
   fn set_handles(&mut self, handles: Vec<Point3>);
   fn get_snap_points(&self) -> Vec<Point3>;

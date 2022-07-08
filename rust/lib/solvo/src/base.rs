@@ -35,5 +35,6 @@ pub enum PlanarRef {
 #[derive(Debug, Clone)]
 pub enum AxialRef {
   EdgeRef(EdgeRef),
+  FaceRef(FaceRef),
   HelperRef(Ref<ConstructionHelper>),
 }

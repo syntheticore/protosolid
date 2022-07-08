@@ -256,7 +256,6 @@
       this.$root.$emit('unpreview-feature')
       this.$root.$emit('activate-toolname', 'Manipulate')
       this.activeFeature.dispose()
-      if(this.activeFeature.constructor === CreateSketchFeature) this.activeFeature.real.invalidate()
       if(this.status == 'confirmed') {
         this.activeFeature.confirm(this)
       } else {
@@ -324,16 +323,21 @@
         this.error = error
       },
 
-      confirm: function(e) {
+      confirm: function() {
         if(!this.canConfirm) return
         this.status = 'confirmed'
-        this.$emit('close')
+        this.close()
       },
 
-      cancel: function(e) {
+      cancel: function() {
         this.status = 'canceled'
-        this.$emit('close')
+        this.close()
       },
+
+      close: function() {
+        if(this.activeFeature.constructor === CreateSketchFeature) this.activeFeature.real.invalidate()
+        this.$emit('close')
+      }
     },
   }
 </script>

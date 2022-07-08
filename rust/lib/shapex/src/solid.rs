@@ -10,6 +10,7 @@ use crate::surface::*;
 mod volume;
 mod boolean;
 mod tesselation;
+mod serde;
 
 pub mod features;
 pub use boolean::Boolean;
@@ -86,6 +87,17 @@ pub struct Vertex {
 }
 
 
+impl Compound {
+  pub fn get_face(&self, id: Uuid) -> Option<&Ref<Face>> {
+    for solid in &self.solids {
+      let face = solid.get_face(id);
+      if face.is_some() { return face }
+    }
+    None
+  }
+}
+
+
 impl Solid {
   pub fn new() -> Self {
     Self {
@@ -108,7 +120,7 @@ impl Solid {
     for elem in wire.iter().take(wire.len() - 1) {
       let points = elem.bounds;
       println!("\n-> lmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
-      let (new_edge, _) = shell.lmev(&he, &he, elem.cache.clone(), points.1); //XXX cache -> base
+      let (new_edge, _) = shell.lmev(&he, &he, elem.base.clone(), points.1); //XXX cache -> base
       he = new_edge.borrow().left_half.clone();
     }
     // Create top face
@@ -116,7 +128,7 @@ impl Solid {
     // let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
     let he1 = shell.vertices[0].borrow().half_edge.upgrade().unwrap().clone();
     let he2 = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap().clone();
-    shell.lmef(&he1, &he2, wire.last().unwrap().clone().cache, top_surface); //XXX cache -> base
+    shell.lmef(&he1, &he2, wire.last().unwrap().base.clone(), top_surface); //XXX cache -> base
     this
   }
 
@@ -177,6 +189,14 @@ impl Solid {
   pub fn validate(&self) -> Result<(), String> {
     for shell in &self.shells { shell.validate()? }
     Ok(())
+  }
+
+  pub fn get_face(&self, id: Uuid) -> Option<&Ref<Face>> {
+    for shell in &self.shells {
+      let face = shell.get_face(id);
+      if face.is_some() { return face }
+    }
+    None
   }
 
   pub fn into_compound(self) -> Compound {
@@ -398,6 +418,13 @@ impl Shell {
     }
   }
 
+  pub fn get_face(&self, id: Uuid) -> Option<&Ref<Face>> {
+    for face in &self.faces {
+      if face.borrow().id == id { return Some(face) }
+    }
+    None
+  }
+
   pub fn print(&self) {
     println!("\n  Debug Info: Shell");
     println!("  -------------------");
@@ -429,15 +456,6 @@ impl Face {
 
 impl Ring {
   pub fn get_wire(&self) -> Wire {
-    // self.iter().filter_map(|he| {
-    //   let he = he.borrow();
-    //   if let Some(edge) = he.edge.upgrade() {
-    //     // let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
-    //     // curve.bounds = (he.origin.borrow().point, he.mate().borrow().origin.borrow().point);
-    //     let curve = edge.borrow().get_curve();
-    //     Some(curve)
-    //   } else { None }
-    // }).collect()
     self.iter().map(|he|
       he.borrow().get_curve()
     ).collect()
@@ -450,18 +468,6 @@ impl Ring {
 
 
 impl Edge {
-  // pub fn get_curve(&self) -> TrimmedCurve {
-  //   let mut curve = TrimmedCurve::new(self.curve.clone());
-  //   let left_origin = self.left_half.borrow().origin.borrow().point;
-  //   let right_origin = self.right_half.borrow().origin.borrow().point;
-  //   if self.curve_direction {
-  //     curve.bounds = (left_origin, right_origin);
-  //   } else {
-  //     curve.bounds = (right_origin, left_origin);
-  //   }
-  //   curve
-  // }
-
   pub fn is_inner(&self) -> bool {
     let left_face = self.left_half.borrow().ring.upgrade().unwrap().borrow().face.upgrade().unwrap();
     let right_face = self.right_half.borrow().ring.upgrade().unwrap().borrow().face.upgrade().unwrap();
@@ -522,9 +528,9 @@ impl HalfEdge {
 
   pub fn get_curve(&self) -> TrimmedCurve {
     let edge = self.edge.upgrade().unwrap();
-    let mut curve = TrimmedCurve::new(edge.borrow().curve.clone());
-    curve.bounds = (self.origin.borrow().point, self.mate().borrow().origin.borrow().point);
-    curve
+    let curve = &edge.borrow().curve;
+    let bounds = (self.origin.borrow().point, self.mate().borrow().origin.borrow().point);
+    TrimmedCurve::from_bounds(curve.clone(), bounds, curve.clone())
   }
 
   pub fn end_vertex(&self) -> Ref<Vertex> {

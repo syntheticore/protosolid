@@ -26,7 +26,7 @@ impl JsCurve {
 #[wasm_bindgen]
 impl JsCurve {
   pub fn id(&self) -> JsValue {
-    JsValue::from_serde(&as_controllable(&mut self.real.borrow()).id()).unwrap()
+    JsValue::from_serde(&self.real.borrow().get_id()).unwrap()
   }
 
   pub fn typename(&self) -> String {

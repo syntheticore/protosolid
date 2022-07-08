@@ -1,7 +1,7 @@
 use std::rc::{Rc, Weak};
 
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 use crate::base::*;
 use crate::curve;
@@ -9,13 +9,24 @@ use crate::surface;
 use crate::solid;
 
 
-pub fn export(solid: &solid::Solid) -> String {
-  ron::to_string(&dump_solid(solid)).unwrap()
+impl Serialize for solid::Solid {
+  fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    dump_solid(self).serialize(serializer)
+  }
 }
 
-pub fn import(dump: String) -> solid::Solid {
-  let solid: Solid = ron::from_str(&dump).unwrap();
-  undump_solid(solid)
+
+impl<'de> Deserialize<'de> for solid::Solid {
+  fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+    Ok(undump_solid(Solid::deserialize(deserializer)?))
+  }
+}
+
+
+impl solid::Solid {
+  pub fn deep_clone(&self) -> Self {
+    undump_solid(dump_solid(self))
+  }
 }
 
 
@@ -223,7 +234,6 @@ mod tests {
   #[test]
   fn serialize() {
     let cube = features::make_cube(1.5, 1.5, 1.5).unwrap();
-    let ron = super::export(&cube);
-    super::import(ron);
+    ron::to_string(&cube).unwrap();
   }
 }

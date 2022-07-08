@@ -88,7 +88,7 @@ impl Document {
     log!("evaluate {:#?}", self.last_change_index);
     let last_change = self.last_change_index;
     self.regenerate(last_change.min(self.marker), self.marker);
-    let (from, to) = Self::ordered(self.last_eval_index, self.marker);
+    let (from, to) = Self::sort_tuple2(self.last_eval_index, self.marker);
     self.last_eval_index = self.marker;
     self.components_modified(from.min(last_change), to)
   }
@@ -96,10 +96,12 @@ impl Document {
   fn regenerate(&mut self, from: usize, to: usize) {
     self.cache.resize(self.features.len() + 1, Component::default());
     let mut comp = &self.cache[from];
-    for (i, feature) in self.features.iter().enumerate().skip(from).take(to - from) {
+    // for i in from..to {
+    //   let feature = &mut self.features[i];
+    for (i, feature) in self.features.iter_mut().enumerate().skip(from).take(to - from) {
       let mut new_comp = comp.deep_clone();
       let mut feature = feature.borrow_mut();
-      if let Err(error) = feature.feature_type.as_feature().execute(&mut new_comp) {
+      if let Err(error) = feature.feature_type.as_feature_mut().execute(&mut new_comp) {
         feature.error = Some(error);
       }
       let j = i + 1;
@@ -141,7 +143,7 @@ impl Document {
     false
   }
 
-  fn ordered(from: usize, to: usize) -> (usize, usize) {
+  fn sort_tuple2<T: PartialOrd>(from: T, to: T) -> (T, T) {
     if from <= to {
       (from, to)
     } else {
@@ -158,3 +160,5 @@ impl Document {
     })
   }
 }
+
+

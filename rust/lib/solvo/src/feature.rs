@@ -27,7 +27,7 @@ impl Feature {
 
 pub trait FeatureTrait {
   fn preview(&self) -> Option<Compound>;
-  fn execute(&self, top_comp: &mut Component) -> Result<Option<Compound>, FeatureError>;
+  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError>;
   fn modified_components(&self) -> Vec<CompRef>;
 }
 
@@ -41,6 +41,14 @@ pub enum FeatureType {
 
 impl FeatureType {
   pub fn as_feature(&self) -> &dyn FeatureTrait {
+    match self {
+      Self::CreateComponent(f) => f,
+      Self::CreateSketch(f) => f,
+      Self::Extrusion(f) => f,
+    }
+  }
+
+  pub fn as_feature_mut(&mut self) -> &mut dyn FeatureTrait {
     match self {
       Self::CreateComponent(f) => f,
       Self::CreateSketch(f) => f,
@@ -112,11 +120,11 @@ impl CreateComponentFeature {
 impl FeatureTrait for CreateComponentFeature {
   fn preview(&self) -> Option<Compound> { None }
 
-  fn execute(&self, top_comp: &mut Component) -> Result<Option<Compound>, FeatureError> {
+  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
     let comp = top_comp.find_child_mut(&self.component_id).unwrap();
     let new_comp = comp.create_component();
     new_comp.id = self.new_component_id;
-    Ok(None)
+    Ok(())
   }
 
   fn modified_components(&self) -> Vec<CompRef> {
@@ -127,7 +135,6 @@ impl FeatureTrait for CreateComponentFeature {
 
 #[derive(Debug, Clone)]
 pub struct CreateSketchFeature {
-  pub title: String,
   pub component_id: CompRef,
   pub plane: PlanarRef,
   pub sketch: Ref<Sketch>,
@@ -142,11 +149,16 @@ impl CreateSketchFeature {
 impl FeatureTrait for CreateSketchFeature {
   fn preview(&self) -> Option<Compound> { None }
 
-  fn execute(&self, top_comp: &mut Component) -> Result<Option<Compound>, FeatureError> {
-    let comp = top_comp.find_child_mut(&self.component_id).unwrap();
+  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
+    // Refetch sketch plane from face or plane helper
     self.sketch.borrow_mut().work_plane = match &self.plane {
-      PlanarRef::FaceRef(_face_ref) => {
-        Matrix4::one()
+      PlanarRef::FaceRef(face_ref) => {
+        let comp = top_comp.find_child(&face_ref.component_id).unwrap();
+        let face = comp.compound.get_face(face_ref.face_id).unwrap().borrow();
+        match &face.surface {
+          SurfaceType::Planar(plane) => plane.as_transform(),
+          _ => panic!("Expected SurfaceType::Planar in {:?}, but got {:?}", self.plane, face.surface),
+        }
       },
       PlanarRef::HelperRef(helper) => {
         let helper = helper.borrow();
@@ -155,8 +167,10 @@ impl FeatureTrait for CreateSketchFeature {
         } else { Matrix4::one() }
       },
     };
+    // Fetch component and add sketch
+    let comp = top_comp.find_child_mut(&self.component_id).unwrap();
     comp.add_sketch(self.sketch.clone());
-    Ok(None)
+    Ok(())
   }
 
   fn modified_components(&self) -> Vec<CompRef> {
@@ -188,6 +202,13 @@ impl ExtrusionFeature {
     }
     Ok(tool)
   }
+
+  fn update_profiles(&mut self) {
+    for profile_ref in &mut self.profiles {
+      let sketch = profile_ref.sketch.borrow();
+      sketch.update_profile(&mut profile_ref.profile);
+    }
+  }
 }
 
 impl FeatureTrait for ExtrusionFeature {
@@ -195,12 +216,12 @@ impl FeatureTrait for ExtrusionFeature {
     self.make_tool().ok()
   }
 
-  fn execute(&self, top_comp: &mut Component) -> Result<Option<Compound>, FeatureError> {
-    let comp = top_comp.find_child_mut(&self.component_id).unwrap();
+  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
+    self.update_profiles();
     let tool = self.make_tool()?;
+    let comp = top_comp.find_child_mut(&self.component_id).unwrap();
     comp.compound.boolean(tool.clone(), self.op);
-    Ok(Some(tool))
-    // Err(FeatureError::Error("Foo bar".into()))
+    Ok(())
   }
 
   fn modified_components(&self) -> Vec<CompRef> {

@@ -5,23 +5,26 @@ use wasm_bindgen::prelude::*;
 use solvo::*;
 use shapex::*;
 
+use crate::feature::JsPlanarRef;
+use crate::buffer_geometry::JsBufferGeometry;
 use crate::utils::point_to_js;
 use crate::utils::points_to_js;
-use crate::buffer_geometry::JsBufferGeometry;
 
 
 #[wasm_bindgen]
 pub struct JsFace {
-  real: Ref<Face>,
+  component_id: Uuid,
   solid_id: Uuid,
+  real: Ref<Face>,
 }
 
 #[wasm_bindgen]
 impl JsFace {
-  fn from(face: &Ref<Face>, solid_id: Uuid) -> Self {
+  fn from(face: &Ref<Face>, component_id: Uuid, solid_id: Uuid) -> Self {
     Self {
-      real: face.clone(),
+      component_id,
       solid_id,
+      real: face.clone(),
     }
   }
 
@@ -41,11 +44,11 @@ impl JsFace {
     point_to_js(Point3::from_vec(self.real.borrow().surface.as_surface().normal_at(0.0, 0.0)))
   }
 
-  pub fn get_display_normal(&self) -> Array {
-    let normal = self.real.borrow().surface.as_surface().normal_at(0.0, 0.0);
-    let origin = self.make_origin();
-    points_to_js(vec![origin, origin + normal])
-  }
+  // pub fn get_display_normal(&self) -> Array {
+  //   let normal = self.real.borrow().surface.as_surface().normal_at(0.0, 0.0);
+  //   let origin = self.make_origin();
+  //   points_to_js(vec![origin, origin + normal])
+  // }
 
   fn make_origin(&self) -> Point3 {
     match &self.real.borrow().surface {
@@ -54,18 +57,29 @@ impl JsFace {
     }
   }
 
-  pub fn get_surface_type(&self) -> String {
-    match self.real.borrow().surface {
-      SurfaceType::Planar(_) => "Planar".to_string(),
-      SurfaceType::Cylindrical(_) => "Cylindrical".to_string(),
-    }
-  }
+  // pub fn get_surface_type(&self) -> String {
+  //   match self.real.borrow().surface {
+  //     SurfaceType::Planar(_) => "Planar".to_string(),
+  //     SurfaceType::Cylindrical(_) => "Cylindrical".to_string(),
+  //   }
+  // }
 
   pub fn tesselate(&self) -> JsBufferGeometry {
     let this = self.real.borrow();
     JsBufferGeometry::from(
       this.get_surface().tesselate().to_buffer_geometry()
     )
+  }
+
+  pub fn make_reference(&self) -> JsValue {
+    let face = self.real.borrow();
+    match &face.surface {
+      SurfaceType::Planar(_) => JsValue::from(JsPlanarRef::new(PlanarRef::FaceRef(FaceRef {
+        component_id: self.component_id,
+        face_id: face.id,
+      }))),
+      SurfaceType::Cylindrical(_surface) => todo!(),
+    }
   }
 }
 
@@ -94,7 +108,8 @@ impl JsEdge {
   }
 
   pub fn tesselate(&self) -> Array {
-    points_to_js(self.real.borrow().curve.as_curve().tesselate())
+    // points_to_js(self.real.borrow().curve.as_curve().tesselate())
+    points_to_js(self.real.borrow().left_half.borrow().get_curve().tesselate())
   }
 }
 
@@ -110,7 +125,7 @@ pub struct JsSolid {
 }
 
 impl JsSolid {
-  pub fn from(solid: &Solid) -> Self {
+  pub fn from(solid: &Solid, component_id: Uuid) -> Self {
     let shell = &solid.shells[0];
     // Vertices
     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
@@ -124,7 +139,7 @@ impl JsSolid {
     }).collect();
     // Faces
     let faces = shell.faces.iter().map(|f| {
-      JsValue::from(JsFace::from(f, solid.id))
+      JsValue::from(JsFace::from(f, component_id, solid.id))
     }).collect();
     Self {
       solid_id: solid.id,

@@ -255,7 +255,6 @@
       addFeature(feature) {
         this.activeFeature = null
         this.document.insertFeature(feature, this.document.real.marker)
-        this.$root.$emit('regenerate')
       },
 
       removeFeature(feature) {
@@ -266,8 +265,9 @@
       createComponent: function(parent, title) {
         const feature = new CreateComponentFeature(this.document)
         feature.parent = () => parent.id
-        feature.execute()
         this.addFeature(feature)
+        feature.execute()
+        this.$root.$emit('regenerate')
         const newComp = parent.children.slice(-1)[0]
         this.activateComponent(newComp)
       },
@@ -286,10 +286,10 @@
           const comps = compIds.map(id => this.getComponent(id) ).filter(Boolean)
           this.oldVisibility = {}
           comps.forEach(comp => this.oldVisibility[comp.id] = comp.UIData.hidden )
-          // Regenerate at marker
+          // Regenerate at feature position
           this.document.real.move_marker_to_feature(feature.real)
           this.$root.$emit('regenerate')
-          // Moving marker will cause feature bar to deactivate active feature
+          // Moving marker will cause feature bar to deactivate active feature -> Restore
           setTimeout(() => this.activeFeature = feature, 0)
           // Activate sketch for sketch features
           if(feature.constructor === CreateSketchFeature) {
@@ -307,7 +307,6 @@
             this.document.activeSketch = null
             this.document.real.marker = this.previousMarker
             this.$root.$emit('regenerate')
-            console.log(this.previousComponent.id)
             this.activateComponent(this.getComponent(this.previousComponent.id))
             Object.keys(this.oldVisibility).forEach(id => this.getComponent(id).UIData.hidden = this.oldVisibility[id] )
           }

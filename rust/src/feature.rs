@@ -135,7 +135,8 @@ impl JsFeature {
 
   pub fn extrusion(&mut self, comp_ref: JsValue, sketch: &JsSketch, profiles: &JsProfileList, distance: f64, op: &str) {
     let profiles = &profiles.profiles;
-    self.process_feature(Feature::new(
+    let feature_id = self.real.as_ref().map_or(Uuid::new_v4(), |real| real.borrow().id );
+    let mut feature = Feature::new(
       ExtrusionFeature {
         component_id: comp_ref.into_serde().unwrap(),
         profiles: profiles.iter().map(|p| ProfileRef {
@@ -144,8 +145,11 @@ impl JsFeature {
         }).collect(),
         distance,
         op: get_op(op),
+        face_id_seed: feature_id,
       }.into_enum(),
-    ));
+    );
+    feature.id = feature_id;
+    self.process_feature(feature);
   }
 
   fn process_feature(&mut self, feature: Feature) {

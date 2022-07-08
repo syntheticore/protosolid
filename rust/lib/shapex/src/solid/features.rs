@@ -8,7 +8,7 @@ use crate::geom3d;
 // use crate::log;
 
 
-pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
+pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
   //XXX use poly_from_wirebounds once circles are handled
   let poly = geom2d::tesselate_wire(&profile[0]);
   let plane = geom3d::plane_from_points(&poly)?;
@@ -24,11 +24,11 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
   if distance > 200.0 {
     Err(format!("Maximum extrusion distance exceeded"))
   } else {
-    Ok(solid)
+    Ok(solid.into_compound())
   }
 }
 
-pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Solid, String> {
+pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Compound, String> {
   let mut points = vec![
     Point3::new(0.0, 0.0, 0.0),
     Point3::new(dx, 0.0, 0.0),
@@ -50,7 +50,7 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Solid, String> {
   extrude(&region, dz)
 }
 
-pub fn make_cylinder(radius: f64, height: f64) -> Result<Solid, String> {
+pub fn make_cylinder(radius: f64, height: f64) -> Result<Compound, String> {
   let region = vec![vec![
     TrimmedCurve::new(Circle::new(Point3::origin(), radius).into_enum())
   ]];
@@ -65,7 +65,7 @@ mod tests {
 
   #[test]
   fn cube() {
-    let cube = make_cube(1.5, 1.5, 1.5).unwrap();
+    let cube = &make_cube(1.5, 1.5, 1.5).unwrap().solids[0];
     let shell = &cube.shells[0];
     println!("\nCube finished");
     shell.print();
@@ -78,7 +78,7 @@ mod tests {
   #[test]
   #[ignore]
   fn cylinder() {
-    let cube = make_cylinder(1.0, 1.0).unwrap();
+    let cube = &make_cylinder(1.0, 1.0).unwrap().solids[0];
     let shell = &cube.shells[0];
     println!("\nCylinder finished");
     shell.print();

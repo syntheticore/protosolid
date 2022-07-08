@@ -164,7 +164,7 @@ impl FeatureTrait for CreateSketchFeature {
         let helper = helper.borrow();
         if let ConstructionHelperType::Plane(plane) = &helper.helper_type {
           plane.as_transform()
-        } else { Matrix4::one() }
+        } else { panic!("Expected ConstructionHelperType::Plane, but got {:?}", helper.helper_type) }
       },
     };
     // Fetch component and add sketch
@@ -185,6 +185,7 @@ pub struct ExtrusionFeature {
   pub profiles: Vec<ProfileRef>,
   pub distance: f64,
   pub op: BooleanType,
+  pub face_id_seed: Uuid,
 }
 
 impl ExtrusionFeature {
@@ -196,10 +197,11 @@ impl ExtrusionFeature {
     let mut tool = Compound::default();
     for profile_ref in &self.profiles {
       match features::extrude(&profile_ref.profile, self.distance) {
-        Ok(solid) => tool.join(solid.into_compound()),
+        Ok(compound) => tool.join(compound),
         Err(error) => return Err(FeatureError::Error(error)),
       }
     }
+    tool.assign_face_ids(self.face_id_seed);
     Ok(tool)
   }
 

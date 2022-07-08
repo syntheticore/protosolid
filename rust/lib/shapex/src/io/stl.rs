@@ -26,7 +26,7 @@ use crate::features::make_cube;
   #[test]
   #[ignore]
   fn stl() {
-    let cube = make_cube(1.5, 1.5, 1.5).unwrap();
+    let cube = &make_cube(1.5, 1.5, 1.5).unwrap().solids[0];
     let _stl = super::export(&cube.tesselate(), "Cube");
   }
 }

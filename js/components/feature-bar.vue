@@ -157,6 +157,10 @@
     },
 
     watch: {
+      document: function() {
+        this.updateMarker()
+      },
+
       marker: function() {
         this.$emit('update:active-feature', null)
       },

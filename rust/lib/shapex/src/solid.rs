@@ -17,6 +17,8 @@ pub use boolean::Boolean;
 pub use boolean::BooleanType;
 pub use volume::Volume;
 
+// use crate::log;
+
 
 #[derive(Debug, Default, Clone)]
 pub struct Compound {
@@ -94,6 +96,19 @@ impl Compound {
       if face.is_some() { return face }
     }
     None
+  }
+
+  pub fn assign_face_ids(&self, feature_id: Uuid) {
+    let mut i = 0;
+    for solid in &self.solids {
+      for shell in &solid.shells {
+        for face in &shell.faces {
+          let fields = feature_id.as_fields();
+          face.borrow_mut().id = Uuid::from_fields(i, fields.1, fields.2, fields.3).unwrap();
+          i += 1;
+        }
+      }
+    }
   }
 }
 

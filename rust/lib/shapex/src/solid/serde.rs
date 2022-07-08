@@ -87,7 +87,7 @@ fn undump_solid(solid: Solid) -> solid::Solid {
         }).collect();
 
         let out_face = rc(solid::Face {
-          id: Uuid::new_v4(),
+          id: face.id,
           outer_ring: rings[0].clone(),
           rings: rings.clone(),
           surface: face.surface.clone(),
@@ -116,7 +116,7 @@ fn undump_solid(solid: Solid) -> solid::Solid {
           None
         }).collect();
         let out_edge = rc(solid::Edge {
-          id: Uuid::new_v4(),
+          id: edge.id,
           left_half: half_edges[0].clone(),
           right_half: half_edges[1].clone(),
           curve: edge.curve,
@@ -144,6 +144,7 @@ fn dump_solid(solid: &solid::Solid) -> Solid {
 
       // Edges
       let edges = shell.edges.iter().map(|edge| Edge {
+        id: edge.borrow().id,
         curve: edge.borrow().curve.clone(),
       }).collect();
 
@@ -159,6 +160,7 @@ fn dump_solid(solid: &solid::Solid) -> Solid {
         faces: shell.faces.iter().map(|face| {
           let face = face.borrow();
           Face {
+            id: face.id,
             rings: face.rings.iter().map(|ring|
               ring.borrow().iter().map(|he| {
                 let he = he.borrow();
@@ -202,6 +204,7 @@ struct Shell {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Face {
+  pub id: Uuid,
   pub rings: Vec<Vec<HalfEdge>>,
   pub surface: surface::SurfaceType,
   pub flip_normal: bool,
@@ -210,6 +213,7 @@ struct Face {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Edge {
+  pub id: Uuid,
   pub curve: curve::CurveType,
 }
 
@@ -233,7 +237,7 @@ mod tests {
 
   #[test]
   fn serialize() {
-    let cube = features::make_cube(1.5, 1.5, 1.5).unwrap();
-    ron::to_string(&cube).unwrap();
+    let cube = &features::make_cube(1.5, 1.5, 1.5).unwrap().solids[0];
+    ron::to_string(cube).unwrap();
   }
 }

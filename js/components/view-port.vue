@@ -268,6 +268,7 @@
 
     computed: {
       allHandles: function() {
+        if(!this.activeSketch) return {}
         const handles = Object.values(this.handles).map(e => Object.values(e)).flat().flat()
         const set = {}
         handles.forEach(handle => set[JSON.stringify(handle.pos)] = handle)
@@ -465,13 +466,15 @@
         // Update Snap Anchor
         if(this.snapAnchor) this.snapAnchor.pos = this.renderer.toScreen(this.snapAnchor.vec)
         // Update Handles
-        for(let compId in this.handles) {
-          const compHandles = this.handles[compId]
-          for(let elemId in compHandles) {
-            const elemHandles = compHandles[elemId]
-            elemHandles.forEach(handle => {
-              handle.pos = this.renderer.toScreen(handle.vec)
-            })
+        if(this.activeSketch) {
+          for(let compId in this.handles) {
+            const compHandles = this.handles[compId]
+            for(let elemId in compHandles) {
+              const elemHandles = compHandles[elemId]
+              elemHandles.forEach(handle => {
+                handle.pos = this.renderer.toScreen(handle.vec)
+              })
+            }
           }
           this.handles = Object.assign({}, this.handles)
         }

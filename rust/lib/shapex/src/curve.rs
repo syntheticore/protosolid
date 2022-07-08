@@ -310,8 +310,7 @@ impl Curve for TrimmedCurve {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    // self.tesselate_adaptive(20.0)
-    self.tesselate_fixed(1)
+    self.tesselate_fixed(4)
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {

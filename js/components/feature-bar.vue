@@ -76,11 +76,11 @@
       width: 12px
       top: 0
       height: 100%
-      background: linear-gradient(left, $dark2 * 0.83, transparent)
+      background: linear-gradient(left, $dark2 * 0.8, rgba($dark2, 0))
     &::after
       left: unset
       right: 0
-      background: linear-gradient(right, $dark2, transparent)
+      background: linear-gradient(right, $dark2, rgba($dark2, 0))
       border-top-right-radius: 4px
       border-bottom-right-radius: 4px
     li

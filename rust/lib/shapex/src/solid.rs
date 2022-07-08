@@ -104,7 +104,7 @@ impl Compound {
       for shell in &solid.shells {
         for face in &shell.faces {
           let fields = feature_id.as_fields();
-          face.borrow_mut().id = Uuid::from_fields(i, fields.1, fields.2, fields.3).unwrap();
+          face.borrow_mut().id = Uuid::from_fields(fields.0, i, fields.2, fields.3).unwrap();
           i += 1;
         }
       }

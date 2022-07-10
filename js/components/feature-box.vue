@@ -55,7 +55,11 @@
         @click="confirm"
       )
         fa-icon(icon="check-circle")
-      button.cancel(title="Cancel" @click="cancel")
+      button.cancel(
+        title="Cancel"
+        v-if="!isSketchFeature"
+        @click="cancel"
+      )
         fa-icon(icon="times-circle")
 
 </template>
@@ -238,18 +242,16 @@
       canConfirm: function() {
         return this.activeFeature.isComplete() && !this.error
       },
+
+      isSketchFeature: function() {
+        return this.activeFeature && this.activeFeature.constructor === CreateSketchFeature
+      },
     },
 
     mounted: function() {
       this.pickAll()
-      this.$root.$on('enter-pressed', () => this.confirm() )
-      this.$root.$on('escape', () => {
-        if(this.activeTool.constructor === ManipulationTool) {
-          this.cancel()
-        } else {
-          this.$root.$emit('activate-toolname', 'Manipulate')
-        }
-      })
+      this.$root.$on('enter-pressed', this.confirm)
+      this.$root.$on('escape', this.onEscape)
     },
 
     beforeDestroy: function() {
@@ -261,6 +263,8 @@
       } else {
         this.$emit('remove-feature', this.activeFeature)
       }
+      this.$root.$off('enter-pressed', this.confirm)
+      this.$root.$off('escape', this.onEscape)
     },
 
     methods: {
@@ -335,9 +339,17 @@
       },
 
       close: function() {
-        if(this.activeFeature.constructor === CreateSketchFeature) this.activeFeature.real.invalidate()
+        if(this.isSketchFeature) this.activeFeature.real.invalidate()
         this.$emit('close')
-      }
+      },
+
+      onEscape: function() {
+        if(this.activeTool.constructor === ManipulationTool) {
+          this.cancel()
+        } else {
+          this.$root.$emit('activate-toolname', 'Manipulate')
+        }
+      },
     },
   }
 </script>

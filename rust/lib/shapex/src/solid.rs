@@ -36,7 +36,6 @@ pub struct Solid {
 #[derive(Debug, Clone)]
 pub struct Shell {
   // id: Uuid,
-  pub closed: bool,
   pub faces: Vec<Ref<Face>>,
   pub edges: Vec<Ref<Edge>>,
   pub vertices: Vec<Ref<Vertex>>,
@@ -135,7 +134,7 @@ impl Solid {
     for elem in wire.iter().take(wire.len() - 1) {
       let points = elem.bounds;
       println!("\n-> lmev from {:?} to {:?}", points.1, he.borrow().origin.borrow().point);
-      let (new_edge, _) = shell.lmev(&he, &he, elem.base.clone(), points.1); //XXX cache -> base
+      let (new_edge, _) = shell.lmev(&he, &he, elem.base.clone(), points.1);
       he = new_edge.borrow().left_half.clone();
     }
     // Create top face
@@ -143,7 +142,7 @@ impl Solid {
     // let he2 = shell.edges.last().unwrap().borrow().left_half.clone();
     let he1 = shell.vertices[0].borrow().half_edge.upgrade().unwrap().clone();
     let he2 = shell.vertices.last().unwrap().borrow().half_edge.upgrade().unwrap().clone();
-    shell.lmef(&he1, &he2, wire.last().unwrap().base.clone(), top_surface); //XXX cache -> base
+    shell.lmef(&he1, &he2, wire.last().unwrap().base.clone(), top_surface);
     this
   }
 
@@ -155,7 +154,6 @@ impl Solid {
 
   pub fn mvfs(&mut self, p: Point3, surface: SurfaceType) -> (Ref<Vertex>, Ref<Face>, &mut Shell) {
     let mut shell = Shell {
-      closed: true,
       faces: vec![],
       edges: vec![],
       vertices: vec![],
@@ -229,16 +227,11 @@ impl Shell {
 
   pub fn connectivity(&self) -> i32 {
     // Closed shells have odd connectivity
-    if self.closed {
-      3 - self.euler_characteristics()
-    } else {
-      panic!("How to calculate connectivity of open shells?")
-    }
+    3 - self.euler_characteristics()
   }
 
   // Topological type (Number of handles on a sphere)
   pub fn genus(&self) -> i32 {
-    if !self.closed { panic!("Open Shell") } //XXX should return error
     let h = self.connectivity();
     if h >= 3 {
       (h - 1) / 2
@@ -320,6 +313,7 @@ impl Shell {
       // Use empty loop half edge as right half
       he1.clone()
     };
+    let curve_id = curve.get_id();
     let edge = rc(Edge {
       id: Uuid::new_v4(),
       left_half: nhe2.clone(),
@@ -544,7 +538,7 @@ impl HalfEdge {
   pub fn get_curve(&self) -> TrimmedCurve {
     let edge = self.edge.upgrade().unwrap();
     let curve = &edge.borrow().curve;
-    let bounds = (self.origin.borrow().point, self.mate().borrow().origin.borrow().point);
+    let bounds = (self.origin.borrow().point, self.end_vertex().borrow().point);
     TrimmedCurve::from_bounds(curve.clone(), bounds, curve.clone())
   }
 
@@ -553,8 +547,7 @@ impl HalfEdge {
   }
 
   pub fn get_face(&self) -> Ref<Face> {
-    self.ring.upgrade().unwrap().borrow()
-    .face.upgrade().unwrap()
+    self.ring.upgrade().unwrap().borrow().face.upgrade().unwrap()
   }
 
   pub fn ring_iter(&self) -> RingIterator  {
@@ -616,7 +609,7 @@ impl Iterator for RingIterator {
 
 
 pub struct VertexEdgesIterator {
-  start_edge: Ref<HalfEdge>,
+  start_edge: Option<Ref<HalfEdge>>,
   current_edge: Ref<HalfEdge>,
 }
 
@@ -624,7 +617,7 @@ impl VertexEdgesIterator {
   fn new(start_vertex: &Vertex) -> Self {
     let he = &start_vertex.half_edge.upgrade().unwrap();
     Self {
-      start_edge: (*he).clone(),
+      start_edge: Some((*he).clone()),
       current_edge: (*he).clone(),
     }
   }
@@ -633,14 +626,16 @@ impl VertexEdgesIterator {
 impl Iterator for VertexEdgesIterator {
   type Item = Ref<HalfEdge>;
 
-  //XXX last element is never returned
   fn next(&mut self) -> Option<Self::Item> {
-    let current_edge = self.current_edge.clone();
-    self.current_edge = current_edge.borrow().mate().borrow().next.upgrade().unwrap().clone();
-    if Rc::ptr_eq(&self.current_edge, &self.start_edge) {
-      None
-    } else {
+    if let Some(start_edge) = &self.start_edge {
+      let current_edge = self.current_edge.clone();
+      self.current_edge = current_edge.borrow().mate().borrow().next.upgrade().unwrap().clone();
+      if Rc::ptr_eq(&self.current_edge, start_edge) {
+        self.start_edge = None;
+      }
       Some(current_edge)
+    } else {
+      None
     }
   }
 }

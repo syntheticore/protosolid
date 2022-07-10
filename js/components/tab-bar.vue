@@ -70,7 +70,8 @@
 <style lang="stylus" scoped>
   .tab-bar
     display: flex
-    background: linear-gradient(top, $dark1 * 0.9, $dark2 * 0.95)
+    background: $dark2
+    // background: linear-gradient(top, $dark1 * 0.9, $dark2 * 0.95)
     border-bottom: 1px solid black
     max-width: 100vw
     align-items: center

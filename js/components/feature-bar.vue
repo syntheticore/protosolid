@@ -11,11 +11,12 @@
       button(@click="forwardMarker", :disabled="atEnd")
         fa-icon(icon="angle-double-right")
 
-    ul.features
+    ul.features(ref="features", @scroll="scroll")
       li.past(v-for="(feature, i) in past")
         transition(name="fade")
           FeatureBox.tipped-bottom.bright(
             show-header
+            :style="scrollStyle"
             v-if="isActive(feature)"
             :document="document"
             :active-tool="activeTool"
@@ -68,6 +69,17 @@
     padding: 0 6px
     border-radius: 15px
     align-items: center
+    scrollbar-color: $dark1 * 1.15 $dark2
+    scrollbar-width: thin
+    &::-webkit-scrollbar
+      height: 8px
+      background-color: $dark2
+      border-bottom-right-radius: 4px
+    &::-webkit-scrollbar-thumb
+      background: $dark1 * 1.15
+      // border-radius: 4px
+      &:hover
+        background: $dark1 * 1.3
     &::before
     &::after
       position: absolute
@@ -110,6 +122,7 @@
   .feature-box
     bottom: 61px
     margin-left: -12px
+    // left: 0
     position: absolute
 
   .fade-enter-active, .fade-leave-active
@@ -154,6 +167,10 @@
       atEnd: function() {
         return this.marker == this.document.features.length
       },
+
+      scrollStyle: function() {
+        return {'margin-left': String(-this.scrolled - 12) + 'px' }
+      },
     },
 
     watch: {
@@ -169,6 +186,7 @@
     data() {
       return {
         marker: 0,
+        scrolled: 0,
       }
     },
 
@@ -213,6 +231,10 @@
       forwardMarker: function() {
         this.document.real.marker = this.document.features.length
         this.$root.$emit('regenerate')
+      },
+
+      scroll: function() {
+        this.scrolled = this.$refs.features.scrollLeft
       },
     },
   }

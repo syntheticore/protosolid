@@ -27,7 +27,8 @@ impl Default for Sketch {
 impl Sketch {
 
   pub fn get_profiles(&self, include_outer: bool) -> Vec<Profile> {
-    let planar_elements = self.get_planarized_elements();
+    // let planar_elements = self.get_planarized_elements();
+    let planar_elements = &self.elements;
     let cut_elements = Self::all_split(&planar_elements);
     let wires = Self::get_wires(cut_elements, include_outer);
     let mut profiles = Self::build_profiles(wires);
@@ -325,11 +326,14 @@ impl Sketch {
 
   pub fn update_profile(&self, profile: &mut Profile) {
     for wire in profile {
-      for tcurve in wire.iter_mut() {
+      // Refetch base or remove segment when no base could be found
+      *wire = wire.into_iter().filter_map(|tcurve| {
         let id = tcurve.base.get_id();
-        let new_base = self.find_element(id).unwrap();
-        tcurve.base = new_base.borrow().clone();
-      }
+        if let Some(new_base) = self.find_element(id) {
+          tcurve.base = new_base.borrow().clone();
+          Some(tcurve.clone())
+        } else { None }
+      }).collect();
       let len = wire.len();
       for i in 0..len {
         let j = (i + 1) % len;

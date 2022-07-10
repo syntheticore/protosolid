@@ -155,7 +155,7 @@ impl JsSolid {
 #[wasm_bindgen]
 impl JsSolid {
   pub fn typename(&self) -> String {
-    "Solid".to_string()
+    "Solid".into()
   }
 
   pub fn get_id(&self) -> JsValue {

@@ -153,7 +153,7 @@
         clearTimeout(this.timeout)
         this.timeout = setTimeout(() => {
           input.setSelectionRange(0, input.value.length)
-          console.log(input.selectionStart)
+          // console.log(input.selectionStart)
           input.focus()
         })
       },

@@ -154,7 +154,7 @@ impl FeatureTrait for CreateSketchFeature {
     self.sketch.borrow_mut().work_plane = match &self.plane {
       PlanarRef::FaceRef(face_ref) => {
         let comp = top_comp.find_child(&face_ref.component_id).unwrap();
-        let face = comp.compound.get_face(face_ref.face_id).unwrap().borrow();
+        let face = comp.compound.find_face_from_bounds(&face_ref.bounds).unwrap().borrow();
         match &face.surface {
           SurfaceType::Planar(plane) => plane.as_transform(),
           _ => panic!("Expected SurfaceType::Planar in {:?}, but got {:?}", self.plane, face.surface),
@@ -201,7 +201,6 @@ impl ExtrusionFeature {
         Err(error) => return Err(FeatureError::Error(error)),
       }
     }
-    tool.assign_face_ids(self.face_id_seed);
     Ok(tool)
   }
 

@@ -128,7 +128,6 @@ fn undump_solid(solid: Solid) -> solid::Solid {
       }).collect();
 
       solid::Shell {
-        closed: true,
         vertices,
         faces,
         edges,

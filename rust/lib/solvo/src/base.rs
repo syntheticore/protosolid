@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use shapex::Ref;
 use shapex::Profile;
 
@@ -11,7 +13,7 @@ pub type CompRef = Uuid;
 #[derive(Debug, Clone)]
 pub struct FaceRef {
   pub component_id: CompRef,
-  pub face_id: Uuid,
+  pub bounds: HashSet<Uuid>, // Edge/Curve Ids
 }
 
 #[derive(Debug, Clone)]

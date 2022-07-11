@@ -76,7 +76,7 @@ impl JsFace {
     match &face.surface {
       SurfaceType::Planar(_) => JsValue::from(JsPlanarRef::new(PlanarRef::FaceRef(FaceRef {
         component_id: self.component_id,
-        face_id: face.id,
+        bounds: face.get_edge_set(),
       }))),
       SurfaceType::Cylindrical(_surface) => todo!(),
     }

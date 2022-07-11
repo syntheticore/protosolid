@@ -105,6 +105,15 @@ impl CurveType {
     }
   }
 
+  pub fn set_id(&mut self, id: Uuid) {
+    match self {
+      Self::Line(line) => line.id = id,
+      Self::Arc(arc) => arc.id = id,
+      Self::Circle(circle) => circle.id = id,
+      Self::BezierSpline(spline) => spline.id = id,
+    }
+  }
+
   pub fn split(&self, cutter: &Self) -> Vec<Self> {
     match self {
       // Line

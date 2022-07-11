@@ -1,5 +1,7 @@
 use std::ptr;
 use std::rc::{Rc, Weak};
+use std::collections::HashSet;
+use std::iter;
 
 use uuid::Uuid;
 
@@ -97,17 +99,19 @@ impl Compound {
     None
   }
 
-  pub fn assign_face_ids(&self, feature_id: Uuid) {
-    let mut i = 0;
-    for solid in &self.solids {
-      for shell in &solid.shells {
-        for face in &shell.faces {
-          let fields = feature_id.as_fields();
-          face.borrow_mut().id = Uuid::from_fields(fields.0, i, fields.2, fields.3).unwrap();
-          i += 1;
-        }
-      }
-    }
+  pub fn find_face_from_bounds(&self, ids: &HashSet<Uuid>) -> Option<&Ref<Face>> {
+    self.faces_iter().find(|face| {
+      let hashset = face.borrow().get_edge_set();
+      hashset.intersection(&ids).count() > 1
+    })
+  }
+
+  pub fn faces_iter(&self) -> impl Iterator<Item = &Ref<Face>> {
+    self.solids.iter().flat_map(|solid|
+      solid.shells.iter().flat_map(|shell|
+        shell.faces.iter()
+      )
+    )
   }
 }
 
@@ -313,7 +317,6 @@ impl Shell {
       // Use empty loop half edge as right half
       he1.clone()
     };
-    let curve_id = curve.get_id();
     let edge = rc(Edge {
       id: Uuid::new_v4(),
       left_half: nhe2.clone(),
@@ -386,6 +389,11 @@ impl Shell {
     let next_next = next.borrow().next.upgrade().unwrap();
     let mut curve = scan.borrow().edge.upgrade().unwrap().borrow().curve.clone();
     curve.as_curve_mut().translate(vec);
+    // Create new stable id for cloned curve
+    let curve_id = curve.get_id();
+    let fields = curve_id.as_fields();
+    curve.set_id(Uuid::from_fields(fields.0, fields.1 + 1, fields.2, fields.3).unwrap());
+    // Sweep actual surface
     let surface = Self::sweep_surface(&scan.borrow().get_curve(), vec);
     // let p1 = scan_previous.borrow().origin.borrow().point;
     // let p2 = next_next.borrow().origin.borrow().point;
@@ -452,6 +460,12 @@ impl Face {
   pub fn get_surface(&self) -> TrimmedSurface {
     let wire = self.outer_ring.borrow().get_wire();
     TrimmedSurface::new(self.surface.clone(), wire)
+  }
+
+  pub fn get_edge_set(&self) -> HashSet<Uuid> {
+    self.outer_ring.borrow().iter().map(|he|
+      he.borrow().edge.upgrade().unwrap().borrow().curve.get_id()
+    ).collect()
   }
 
   pub fn print(&self) {

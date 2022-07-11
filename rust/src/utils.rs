@@ -23,7 +23,7 @@ pub fn point_to_js(p: Point3) -> JsValue {
 
 pub fn point_from_js(p: JsValue) -> Point3 {
   let p: (f64, f64, f64) = p.into_serde().unwrap();
-  Point3::new(p.0, p.1, p.2)
+  Point3::from(p)
 }
 
 pub fn vec_to_js(p: Vec3) -> JsValue {

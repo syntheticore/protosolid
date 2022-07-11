@@ -98,6 +98,14 @@ impl Plane {
     }
   }
 
+  pub fn from_point(p: Point3) -> Self {
+    Self {
+      origin: p,
+      u: Vec3::new(1.0, 0.0, 0.0),
+      v: Vec3::new(0.0, 1.0, 0.0),
+    }
+  }
+
   pub fn from_triangle(p1: Point3, p2: Point3, p3: Point3) -> Self {
     let u = (p2 - p1).normalize();
     let pre_v = (p3 - p1).normalize();

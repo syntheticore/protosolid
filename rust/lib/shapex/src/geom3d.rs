@@ -64,7 +64,7 @@ pub fn plane_from_points(points: &Vec<Point3>) -> Result<Plane, PlaneError> {
 pub fn plane_from_curves(elems: &Vec<CurveType>) -> Result<Plane, PlaneError> {
   for elem in elems.iter() {
     if let CurveType::Circle(circle) = elem {
-      return Ok(Plane::from_normal(circle.center, circle.normal))
+      return Ok(circle.plane.clone())
     }
   }
   let points = elems.iter().map(|curve|

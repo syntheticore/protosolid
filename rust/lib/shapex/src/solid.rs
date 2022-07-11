@@ -417,7 +417,7 @@ impl Shell {
       },
       CurveType::Circle(circle) => {
         CylindricalSurface {
-          origin: circle.center,
+          origin: circle.plane.origin,
           radius: circle.radius,
           direction: vec,
           bounds: (0.0, 1.0),
@@ -425,7 +425,7 @@ impl Shell {
       },
       CurveType::Arc(arc) => {
         CylindricalSurface {
-          origin: arc.center,
+          origin: arc.plane.origin,
           radius: arc.radius,
           direction: vec,
           bounds: arc.bounds,

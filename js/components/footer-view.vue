@@ -134,7 +134,7 @@
   .fade-enter
   .fade-leave-to
     opacity: 0
-    transform: translateY(12px)
+    transform: translateY(-12px)
 
 </style>
 

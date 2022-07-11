@@ -10,8 +10,9 @@ use wasm_bindgen::prelude::*;
 use crate::curve::JsCurve;
 use crate::region::JsRegion;
 use crate::utils::matrix_to_js;
+use crate::utils::point_from_js;
 
-// use crate::log;
+use crate::log;
 
 
 #[wasm_bindgen]
@@ -79,20 +80,17 @@ impl JsSketch {
   pub fn add_circle(&mut self, center: JsValue, radius: f64) -> JsCurve {
     let mut sketch = self.real.borrow_mut();
     let center: (f64, f64, f64) = center.into_serde().unwrap();
-    let mut circle = Circle::new(Point3::from(center), radius);
-    circle.normal = sketch.work_plane.transform_vector(Vec3::new(0.0, 0.0, 1.0));
-    circle.transform(&sketch.work_plane.invert().unwrap());
+    let circle = Circle::new(sketch.work_plane.transform_point(Point3::from(center)), radius);
     sketch.elements.push(rc(CurveType::Circle(circle)));
     JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
   }
 
   pub fn add_arc(&mut self, p1: JsValue, p2: JsValue, p3: JsValue) -> Result<JsCurve, JsValue> {
-    let p1: (f64, f64, f64) = p1.into_serde().unwrap();
-    let p2: (f64, f64, f64) = p2.into_serde().unwrap();
-    let p3: (f64, f64, f64) = p3.into_serde().unwrap();
-    let mut arc = Arc::from_points(Point3::from(p1), Point3::from(p2), Point3::from(p3))?;
+    let points = vec![point_from_js(p1), point_from_js(p2), point_from_js(p3)];
     let mut sketch = self.real.borrow_mut();
-    arc.transform(&sketch.work_plane.invert().unwrap());
+    let transform = sketch.work_plane.invert().unwrap();
+    let points: Vec<Point3> = points.into_iter().map(|p| transform.transform_point(p) ).collect();
+    let arc = Arc::from_points(points[0], points[1], points[2])?;
     sketch.elements.push(rc(arc.into_enum()));
     Ok(JsCurve::from(&sketch.elements.last().unwrap(), &self.real))
   }

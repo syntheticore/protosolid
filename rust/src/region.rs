@@ -52,7 +52,7 @@ impl JsRegion {
     let center = self.profile[0].iter().fold(
       Point3::origin(),
       |acc, elem| acc + match &elem.base {
-        CurveType::Circle(circle) => circle.center.to_vec() * 2.0,
+        CurveType::Circle(circle) => circle.plane.origin.to_vec() * 2.0,
         _ => elem.bounds.0.to_vec() + elem.bounds.1.to_vec(),
       }
     ) / (self.profile[0].len() as f64 * 2.0);

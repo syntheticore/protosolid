@@ -163,7 +163,7 @@ pub fn line_spline(line: &Line, spline: &BezierSpline) -> CurveIntersectionType 
 
 pub fn line_circle(line: &Line, circle: &Circle) -> CurveIntersectionType {
   let direction = line.points.1 - line.points.0;
-  let f = line.points.0 - circle.center;
+  let f = line.points.0 - circle.plane.origin;
   let a = direction.dot(direction);
   let b = f.dot(direction) * 2.0;
   let c = f.dot(f) - (circle.radius * circle.radius);

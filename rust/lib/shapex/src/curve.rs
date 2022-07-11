@@ -9,6 +9,8 @@ use crate::geom2d;
 use crate::intersection;
 use crate::intersection::CurveIntersection;
 use crate::intersection::CurveIntersectionType;
+use crate::surface::Surface;
+use crate::Plane;
 
 // use crate::log;
 
@@ -450,8 +452,7 @@ impl Transformable for Line {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Arc {
   pub id: Uuid,
-  pub center: Point3,
-  pub normal: Vec3,
+  pub plane: Plane,
   pub radius: f64,
   pub bounds: (f64, f64),
 }
@@ -460,8 +461,7 @@ impl Arc {
   pub fn new(center: Point3, radius: f64, start: f64, end: f64) -> Self {
     Self {
       id: Uuid::new_v4(),
-      center,
-      normal: Vec3::unit_z(),
+      plane: Plane::from_point(center),
       radius,
       bounds: (start, end),
     }
@@ -469,7 +469,7 @@ impl Arc {
 
   pub fn from_points(p1: Point3, p2: Point3, p3: Point3) -> Result<Self, String> {
     let circle = Circle::from_points(p1, p2, p3)?;
-    Ok(Self::new(circle.center, circle.radius, circle.unsample(&p1), circle.unsample(&p3)))
+    Ok(Self::new(circle.plane.origin, circle.radius, circle.unsample(&p1), circle.unsample(&p3)))
   }
 
   pub fn split_with_line(&self, _line: &Line) -> Vec<Arc> { vec![self.clone()] }
@@ -483,22 +483,17 @@ impl Arc {
 
 impl Curve for Arc {
   fn sample(&self, mut t: f64) -> Point3 {
-    t = 1.0 - t;
     let range = self.bounds.1 - self.bounds.0;
     t = self.bounds.0 + t * range;
     t = t * std::f64::consts::PI * 2.0;
-    Point3::new(
-      self.center.x + t.sin() * self.radius,
-      self.center.y + t.cos() * self.radius,
-      self.center.z,
-    )
+    self.plane.sample(t.sin() * self.radius, t.cos() * self.radius)
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
-    let circle = Circle::new(self.center, self.radius);
+    let circle = Circle::new(self.plane.origin, self.radius);
     let param = circle.unsample(p);
     let range = self.bounds.1 - self.bounds.0;
-    1.0 - (param - self.bounds.0) / range
+    (param - self.bounds.0) / range
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -516,8 +511,7 @@ impl Curve for Arc {
 
 impl Transformable for Arc {
   fn transform(&mut self, transform: &Matrix4) {
-    self.center = transform.transform_point(self.center);
-    self.normal = transform.transform_vector(self.normal);
+    self.plane.transform(transform);
   }
 }
 
@@ -525,8 +519,7 @@ impl Transformable for Arc {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Circle {
   pub id: Uuid,
-  pub center: Point3,
-  pub normal: Vec3,
+  pub plane: Plane,
   pub radius: f64,
 }
 
@@ -534,8 +527,7 @@ impl Circle {
   pub fn new(center: Point3, radius: f64) -> Self {
     Self {
       id: Uuid::new_v4(),
-      center,
-      normal: Vec3::unit_z(),
+      plane: Plane::from_point(center),
       radius,
     }
   }
@@ -577,8 +569,8 @@ impl Circle {
           let t1 = self.unsample(&hits[0].point);
           let t2 = self.unsample(&hits[1].point);
           Some((
-            Arc::new(self.center, self.radius, t1, t2),
-            Arc::new(self.center, self.radius, t2, t1),
+            Arc::new(self.plane.origin, self.radius, t1, t2),
+            Arc::new(self.plane.origin, self.radius, t2, t1),
           ))
         } else {
           None
@@ -597,19 +589,14 @@ impl Circle {
 
 impl Curve for Circle {
   fn sample(&self, t: f64) -> Point3 {
-    let t = 1.0 - t;
     let t = t * std::f64::consts::PI * 2.0;
-    Point3::new(
-      self.center.x + t.sin() * self.radius,
-      self.center.y + t.cos() * self.radius,
-      self.center.z,
-    )
+    self.plane.sample(t.sin() * self.radius, t.cos() * self.radius)
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
-    let p = p - self.center;
-    let atan2 = p.x.atan2(p.y) / std::f64::consts::PI / 2.0;
-    1.0 - if atan2 < 0.0 {
+    let (x, y) = self.plane.unsample(*p);
+    let atan2 = x.atan2(y) / std::f64::consts::PI / 2.0;
+    if atan2 < 0.0 {
       1.0 + atan2
     } else {
       atan2
@@ -636,8 +623,7 @@ impl Curve for Circle {
 
 impl Transformable for Circle {
   fn transform(&mut self, transform: &Matrix4) {
-    self.center = transform.transform_point(self.center);
-    self.normal = transform.transform_vector(self.normal);
+    self.plane.transform(transform);
   }
 }
 
@@ -797,6 +783,9 @@ impl Curve for BezierSpline {
 impl Transformable for BezierSpline {
   fn transform(&mut self, transform: &Matrix4) {
     for v in  &mut self.vertices {
+      *v = transform.transform_point(*v);
+    }
+    for v in  &mut self.lut {
       *v = transform.transform_point(*v);
     }
   }

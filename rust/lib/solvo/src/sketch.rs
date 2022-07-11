@@ -81,7 +81,7 @@ impl Sketch {
       let (on_plane, off_plane): (Vec<Ref<CurveType>>, Vec<Ref<CurveType>>) = elems.iter().cloned().partition(|other| {
         if Rc::ptr_eq(elem, other) {
           if let CurveType::Circle(circle) = &*elem.borrow() {
-            current_plane = Some(Plane::from_normal(circle.center, circle.normal));
+            current_plane = Some(circle.plane.clone());
           }
           true
         } else if let Some(plane) = &current_plane {

@@ -362,6 +362,14 @@ impl Sketch {
       }
     }
   }
+
+  pub fn transform_profile(&self, profile: &mut Profile) {
+    for wire in profile {
+      for tcurve in wire {
+        tcurve.transform(&self.work_plane);
+      }
+    }
+  }
 }
 
 

@@ -184,7 +184,7 @@
   import Snapper from './../snapping.js'
   import Renderer from './../renderer.js'
   import Transloader from './../transloader.js'
-  import { vec2three } from './../utils.js'
+  import { vec2three, matrix2three } from './../utils.js'
   import {
     ManipulationTool,
     ObjectPickTool,
@@ -241,7 +241,12 @@
 
       activeSketch: function(sketch) {
         this.transloader.setActiveSketch(sketch)
-        this.renderer.sketchPlane.useSketch(sketch)
+        if(sketch) {
+          let plane = matrix2three(sketch.get_workplane())
+          this.snapper.planeTransform = plane
+          this.renderer.sketchPlane.setPlane(plane)
+        }
+        this.renderer.sketchPlane.visible = !!sketch
         this.renderer.render()
       },
 
@@ -508,7 +513,7 @@
 
       deleteElement: function(elem) {
         this.renderer.removeGizmo()
-        this.activeSketch.remove_element(elem.id())
+        elem.remove()
         this.componentChanged(this.activeComponent)
         this.$emit('update:selection', null)
       },

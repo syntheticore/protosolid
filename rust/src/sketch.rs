@@ -7,11 +7,10 @@ use shapex::*;
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
-use crate::controllable::as_controllable;
 use crate::curve::JsCurve;
 use crate::region::JsRegion;
 use crate::utils::matrix_to_js;
-use crate::utils::matrix_from_js;
+
 // use crate::log;
 
 
@@ -51,17 +50,18 @@ impl JsSketch {
 
   pub fn get_sketch_elements(&self) -> Array {
     self.real.borrow_mut().elements.iter().map(|elem| {
-      JsValue::from(JsCurve::from(elem))
+      JsValue::from(JsCurve::from(elem, &self.real))
     }).collect()
   }
 
   pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsCurve {
     let p1: (f64, f64, f64) = p1.into_serde().unwrap();
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
-    let line = Line::new(Point3::from(p1), Point3::from(p2));
+    let mut line = Line::new(Point3::from(p1), Point3::from(p2));
     let mut sketch = self.real.borrow_mut();
+    line.transform(&sketch.work_plane.invert().unwrap());
     sketch.elements.push(Rc::new(RefCell::new(line.into_enum())));
-    JsCurve::from(&sketch.elements.last().unwrap())
+    JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
   }
 
   pub fn add_spline(&self, vertices: Array) -> JsCurve {
@@ -69,10 +69,11 @@ impl JsSketch {
       let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
       Point3::new(vertex.0, vertex.1, vertex.2)
     }).collect();
-    let spline = BezierSpline::new(points);
+    let mut spline = BezierSpline::new(points);
     let mut sketch = self.real.borrow_mut();
+    spline.transform(&sketch.work_plane.invert().unwrap());
     sketch.elements.push(Rc::new(RefCell::new(CurveType::BezierSpline(spline))));
-    JsCurve::from(&sketch.elements.last().unwrap())
+    JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
   }
 
   pub fn add_circle(&mut self, center: JsValue, radius: f64) -> JsCurve {
@@ -80,34 +81,25 @@ impl JsSketch {
     let center: (f64, f64, f64) = center.into_serde().unwrap();
     let mut circle = Circle::new(Point3::from(center), radius);
     circle.normal = sketch.work_plane.transform_vector(Vec3::new(0.0, 0.0, 1.0));
+    circle.transform(&sketch.work_plane.invert().unwrap());
     sketch.elements.push(rc(CurveType::Circle(circle)));
-    JsCurve::from(&sketch.elements.last().unwrap())
+    JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
   }
 
   pub fn add_arc(&mut self, p1: JsValue, p2: JsValue, p3: JsValue) -> Result<JsCurve, JsValue> {
     let p1: (f64, f64, f64) = p1.into_serde().unwrap();
     let p2: (f64, f64, f64) = p2.into_serde().unwrap();
     let p3: (f64, f64, f64) = p3.into_serde().unwrap();
-    let arc = Arc::from_points(Point3::from(p1), Point3::from(p2), Point3::from(p3))?;
+    let mut arc = Arc::from_points(Point3::from(p1), Point3::from(p2), Point3::from(p3))?;
     let mut sketch = self.real.borrow_mut();
+    arc.transform(&sketch.work_plane.invert().unwrap());
     sketch.elements.push(rc(arc.into_enum()));
-    Ok(JsCurve::from(&sketch.elements.last().unwrap()))
-  }
-
-  pub fn remove_element(&mut self, id: JsValue) {
-    let id: uuid::Uuid = id.into_serde().unwrap();
-    let mut sketch = self.real.borrow_mut();
-    sketch.elements.retain(|elem| elem.borrow().get_id() != id );
+    Ok(JsCurve::from(&sketch.elements.last().unwrap(), &self.real))
   }
 
   pub fn get_workplane(&self) -> JsValue {
     let plane = self.real.borrow_mut().work_plane;
     matrix_to_js(plane)
-  }
-
-  pub fn set_workplane(&self, plane: JsValue) {
-    let plane = matrix_from_js(plane);
-    self.real.borrow_mut().work_plane = plane;
   }
 
   pub fn get_profiles(&self) -> Array {
@@ -116,7 +108,6 @@ impl JsSketch {
     web_sys::console::time_end_with_label("get_profiles");
     profiles.into_iter().map(|profile| JsValue::from(JsRegion::new(
       profile,
-      self.real.borrow().work_plane,
       self.real.clone(),
     ))).collect()
   }

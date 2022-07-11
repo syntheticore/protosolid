@@ -1,7 +1,9 @@
+use std::rc::Rc;
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
 use shapex::*;
+use solvo::Sketch;
 
 use crate::utils::points_from_js;
 use crate::utils::points_to_js;
@@ -13,12 +15,15 @@ use crate::controllable::as_controllable;
 pub struct JsCurve {
   #[wasm_bindgen(skip)]
   pub real: Ref<CurveType>,
+
+  sketch: Ref<Sketch>,
 }
 
 impl JsCurve {
-  pub fn from(elem: &Ref<CurveType>) -> Self {
+  pub fn from(elem: &Ref<CurveType>, sketch: &Ref<Sketch>) -> Self {
     Self {
-      real: elem.clone()
+      real: elem.clone(),
+      sketch: sketch.clone(),
     }
   }
 }
@@ -54,31 +59,42 @@ impl JsCurve {
   }
 
   pub fn get_handles(&self) -> Array {
-    points_to_js(as_controllable(&mut self.real.borrow()).get_handles())
+    points_to_js(as_controllable(&mut self.real.borrow()).get_handles().iter().map(|handle| {
+      self.sketch.borrow().work_plane.transform_point(*handle)
+    }).collect())
   }
 
   pub fn set_handles(&self, handles: Array) {
     let points = points_from_js(handles);
+    let transform = self.sketch.borrow().work_plane.invert().unwrap();
+    let points = points.iter().map(|p| transform.transform_point(*p) ).collect();
     as_controllable_mut(&mut self.real.borrow_mut()).set_handles(points);
   }
 
   pub fn set_initial_handles(&self, handles: Array) -> Result<(), JsValue>{
     let mut real = self.real.borrow_mut();
     let points = points_from_js(handles);
+    let transform = self.sketch.borrow().work_plane.invert().unwrap();
+    let points = points.iter().map(|p| transform.transform_point(*p) ).collect();
     as_controllable_mut(&mut real).set_initial_handles(points)?;
     Ok(())
   }
 
   pub fn get_snap_points(&self) -> Array {
-    points_to_js(as_controllable(&mut self.real.borrow()).get_snap_points())
-  }
-
-  pub fn tesselate_adaptive(&self, steps: i32) -> Array {
-    points_to_js(self.real.borrow().as_curve().tesselate_adaptive(steps.into()))
+    let points = as_controllable(&mut self.real.borrow()).get_snap_points();
+    let plane = self.sketch.borrow().work_plane;
+    let points = points.iter().map(|p| plane.transform_point(*p) ).collect();
+    points_to_js(points)
   }
 
   pub fn tesselate(&self) -> Array {
-    points_to_js(self.real.borrow().as_curve().tesselate())
+    let mut curve = self.real.borrow().clone();
+    curve.as_curve_mut().transform(&self.sketch.borrow().work_plane);
+    points_to_js(curve.as_curve().tesselate())
+  }
+
+  pub fn remove(&self) {
+    self.sketch.borrow_mut().elements.retain(|elem| !Rc::ptr_eq(elem, &self.real) );
   }
 
   pub fn get_length(&self) -> f64 {

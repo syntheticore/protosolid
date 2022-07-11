@@ -51,13 +51,14 @@
     .confirmation
       button.ok(
         title="Confirm"
+        v-if="!isSketchFeature || showHeader"
         :disabled="!canConfirm"
         @click="confirm"
       )
         fa-icon(icon="check-circle")
       button.cancel(
         title="Cancel"
-        v-if="!isSketchFeature"
+        v-if="!isSketchFeature || !showHeader"
         @click="cancel"
       )
         fa-icon(icon="times-circle")

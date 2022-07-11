@@ -196,7 +196,9 @@ impl ExtrusionFeature {
   fn make_tool(&self) -> Result<Compound, FeatureError> {
     let mut tool = Compound::default();
     for profile_ref in &self.profiles {
-      match features::extrude(&profile_ref.profile, self.distance) {
+      let mut profile = profile_ref.profile.clone();
+      profile_ref.sketch.borrow().transform_profile(&mut profile);
+      match features::extrude(&profile, self.distance) {
         Ok(compound) => tool.join(compound),
         Err(error) => return Err(FeatureError::Error(error)),
       }

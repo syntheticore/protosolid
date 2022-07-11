@@ -28,10 +28,7 @@ export default class SketchPlane extends THREE.Object3D {
     this.visible = false
   }
 
-  useSketch(sketch) {
-    this.visible = !!sketch
-    if(!sketch) return
-    const plane = matrix2three(sketch.get_workplane())
+  setPlane(plane) {
     this.position.setFromMatrixPosition(plane)
     this.rotation.setFromRotationMatrix(plane)
   }

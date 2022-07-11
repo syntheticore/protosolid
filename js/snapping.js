@@ -43,8 +43,6 @@ export default class Snapper {
     return sketchElements.flatMap(elem => {
       let points = elem.get_snap_points()
         .map(p => vec2three(p))
-        // Filter points on sketch plane
-        .filter(p => Math.abs(p.clone().applyMatrix4(localTransform).z) < 0.00001 )
       // Filter out handle actively being dragged
       if(this.viewport.activeHandle && elem.id() == this.viewport.activeHandle.elem.id()) {
         const handlePoint = vec2three(this.viewport.activeHandle.elem.get_handles()[this.viewport.activeHandle.index])

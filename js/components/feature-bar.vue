@@ -54,6 +54,9 @@
       color: $bright2
       padding: 20px 15px
       transition: all 0.15s
+      &:first-child
+        border-top-left-radius: 4px
+        border-bottom-left-radius: 4px
       &:hover
         background: $dark1
         transition: none

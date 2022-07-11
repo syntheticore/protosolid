@@ -242,7 +242,7 @@ export class LineTool extends SketchTool {
 
   dispose() {
     if(!this.line) return
-    this.sketch.remove_element(this.line.id())
+    this.line.remove()
     this.viewport.componentChanged(this.component)
   }
 }

@@ -229,6 +229,10 @@ impl TrimmedCurve {
       self.is_forward = false;
       (1.0 - trims.0, 1.0 - trims.1)
     };
+    // Fix circle trims
+    if self.trims.0 == self.trims.1 {
+      self.trims = (0.0, 1.0);
+    }
     self.bounds = bounds;
   }
 

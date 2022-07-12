@@ -154,11 +154,6 @@ export class ExtrudeFeature extends Feature {
     const comp_ref = sketch.component_id()
     const distance = this.distance * (this.side ? 1 : -1)
     this.real.extrusion(comp_ref, sketch, list, distance, this.operation)
-    // Refetch profiles in case they've been repaired
-    setTimeout(() => {
-      this.profiles.forEach(profile => profile.free())
-      this.profiles = this.real.get_profiles()
-    }, 0)
   }
 
   updateGizmos() {
@@ -179,6 +174,12 @@ export class ExtrudeFeature extends Feature {
       window.alcRenderer.removeGizmo(this.lengthGizmo)
       this.lengthGizmo = null
     }
+  }
+
+  confirm() {
+    // Refetch profiles in case they've been repaired
+    this.profiles.forEach(profile => profile.free())
+    this.profiles = this.real.get_profiles()
   }
 
   dispose() {

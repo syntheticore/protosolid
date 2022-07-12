@@ -336,6 +336,7 @@ impl Sketch {
       let replacement_wire = new_wires.iter().filter_map(|new_wire| {
         let new_wire_ids: HashSet<Uuid> = new_wire.iter().map(|tcurve| tcurve.base.get_id() ).collect();
         let count = wire_ids.intersection(&new_wire_ids).count();
+        log!("{:#?} {:#?} {:#?}", wire_ids, new_wire_ids, count);
         if count != wire_ids.len() { was_repair_needed = true }
         if count > 0 {
           Some((count, new_wire))

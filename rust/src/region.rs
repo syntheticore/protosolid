@@ -44,7 +44,7 @@ impl JsRegion {
   }
 
   pub fn get_mesh(&self) -> JsBufferGeometry {
-    web_sys::console::time_with_label("tesselate_profile");
+    // web_sys::console::time_with_label("tesselate_profile");
     let transform = self.sketch.borrow().work_plane.invert().unwrap();
     let mut profile = self.profile.clone();
     for wire in &mut profile {
@@ -55,7 +55,7 @@ impl JsRegion {
     let mut mesh = geom2d::tesselate_profile(&profile, Vec3::unit_z());
     mesh.transform(&self.sketch.borrow().work_plane);
     let geom = JsBufferGeometry::from(mesh.to_buffer_geometry());
-    web_sys::console::time_end_with_label("tesselate_profile");
+    // web_sys::console::time_end_with_label("tesselate_profile");
     geom
   }
 

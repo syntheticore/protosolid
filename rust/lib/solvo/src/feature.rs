@@ -154,10 +154,15 @@ impl FeatureTrait for CreateSketchFeature {
     self.sketch.borrow_mut().work_plane = match &self.plane {
       PlanarRef::FaceRef(face_ref) => {
         let comp = top_comp.find_child(&face_ref.component_id).unwrap();
-        let face = comp.compound.find_face_from_bounds(&face_ref.bounds).unwrap().borrow();
-        match &face.surface {
-          SurfaceType::Planar(plane) => plane.as_transform(),
-          _ => panic!("Expected SurfaceType::Planar in {:?}, but got {:?}", self.plane, face.surface),
+        let face = comp.compound.find_face_from_bounds(&face_ref.bounds);
+        if let Some(face) = face {
+          let face = face.borrow();
+          match &face.surface {
+            SurfaceType::Planar(plane) => plane.as_transform(),
+            _ => panic!("Expected SurfaceType::Planar in {:?}, but got {:?}", self.plane, face.surface),
+          }
+        } else {
+          return Err(FeatureError::Error("Sketch plane was lost".into()));
         }
       },
       PlanarRef::HelperRef(helper) => {
@@ -206,11 +211,18 @@ impl ExtrusionFeature {
     Ok(tool)
   }
 
-  fn update_profiles(&mut self) {
+  fn update_profiles(&mut self) -> Result<(), FeatureError> {
+    let mut res: Result<(), FeatureError> = Ok(());
     for profile_ref in &mut self.profiles {
       let sketch = profile_ref.sketch.borrow();
-      sketch.update_profile(&mut profile_ref.profile);
+      let result = sketch.update_profile(&mut profile_ref.profile);
+      match result {
+        Err(FeatureError::Error(_)) => return result,
+        Err(FeatureError::Warning(_)) => res = result,
+        Ok(_) => {},
+      }
     }
+    res
   }
 }
 
@@ -220,11 +232,14 @@ impl FeatureTrait for ExtrusionFeature {
   }
 
   fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
-    self.update_profiles();
+    let result = self.update_profiles();
+    if let Err(FeatureError::Error(_)) = result {
+      return result;
+    }
     let tool = self.make_tool()?;
     let comp = top_comp.find_child_mut(&self.component_id).unwrap();
     comp.compound.boolean(tool.clone(), self.op);
-    Ok(())
+    result
   }
 
   fn modified_components(&self) -> Vec<CompRef> {

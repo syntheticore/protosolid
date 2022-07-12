@@ -1,10 +1,12 @@
 use std::ptr;
 use std::rc::Rc;
 use std::collections::HashSet;
+use std::cmp::Ordering;
 
 use shapex::*;
 
 use crate::Uuid;
+use crate::FeatureError;
 
 
 #[derive(Debug, Clone)]
@@ -266,7 +268,7 @@ impl Sketch {
         let final_point_b = b.other_bound(&end_point);
         geom2d::clockwise(*start_point, end_point, final_point_b).partial_cmp(
           &geom2d::clockwise(*start_point, end_point, final_point_a)
-        ).unwrap()
+        ).unwrap_or(Ordering::Less)
       });
       // Follow the leftmost segment to complete loop in anti-clockwise order
       let next_elem = connected_elems[0];
@@ -324,43 +326,31 @@ impl Sketch {
     None
   }
 
-  pub fn update_profile(&self, profile: &mut Profile) {
+  pub fn update_profile(&self, profile: &mut Profile) -> Result<(), FeatureError> {
+    let planar_elements = &self.elements;
+    let cut_elements = Self::all_split(&planar_elements);
+    let new_wires = Self::get_wires(cut_elements, false);
+    let mut was_repair_needed = false;
     for wire in profile {
-      // Refetch base or remove segment when no base could be found
-      *wire = wire.into_iter().filter_map(|tcurve| {
-        let id = tcurve.base.get_id();
-        if let Some(new_base) = self.find_element(id) {
-          tcurve.base = new_base.borrow().clone();
-          Some(tcurve.clone())
+      let wire_ids: HashSet<Uuid> = wire.iter().map(|tcurve| tcurve.base.get_id() ).collect();
+      let replacement_wire = new_wires.iter().filter_map(|new_wire| {
+        let new_wire_ids: HashSet<Uuid> = new_wire.iter().map(|tcurve| tcurve.base.get_id() ).collect();
+        let count = wire_ids.intersection(&new_wire_ids).count();
+        log!("{:#?} {:#?} {:#?}", wire_ids, new_wire_ids, count);
+        if count != wire_ids.len() { was_repair_needed = true }
+        if count > 0 {
+          Some((count, new_wire))
         } else { None }
-      }).collect();
-      let len = wire.len();
-      for i in 0..len {
-        let j = (i + 1) % len;
-        let ipoint = {
-          let tcurve = &wire[i];
-          let next_curve = &wire[j];
-          let isect = tcurve.intersect(&next_curve);
-          match isect {
-            CurveIntersectionType::Touch(isect)
-             => isect.point,
-            CurveIntersectionType::Pierce(isects)
-            | CurveIntersectionType::Cross(isects)
-            | CurveIntersectionType::Extended(isects)
-              => isects[0].point,
-            _ => todo!(),
-          }
-        };
-        {
-          let tcurve = &mut wire[i];
-          tcurve.set_bounds((tcurve.bounds.0, ipoint));
-        }
-        {
-          let next_curve = &mut wire[j];
-          next_curve.set_bounds((ipoint, next_curve.bounds.1));
-        }
+      }).max_by_key(|pair| pair.0 );
+      if let Some((_, replacement)) = replacement_wire {
+        *wire = replacement.to_vec();
+      } else {
+        return Err(FeatureError::Error("Profile was lost".into()))
       }
     }
+    if was_repair_needed {
+      Err(FeatureError::Warning("Profile has been repaired".into()))
+    } else { Ok(()) }
   }
 
   pub fn transform_profile(&self, profile: &mut Profile) {

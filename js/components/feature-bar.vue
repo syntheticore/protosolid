@@ -25,7 +25,7 @@
           )
         .feature(
           :title="featureTitle(feature)"
-          :class="{error: feature.real.error(), active: isActive(feature)}"
+          :class="featureStyle(feature)"
           @dblclick="$emit('update:active-feature', feature)"
         )
           fa-icon(:icon="feature.icon" fixed-width)
@@ -111,6 +111,8 @@
       &.active svg
         color: $highlight
       &.error svg
+        color: $red * 1.4 !important
+      &.warning svg
         color: $warn !important
 
     hr
@@ -205,7 +207,7 @@
       featureTitle(feature) {
         let title = feature.title
         const error = feature.real.error()
-        if(error) title += ': ' + error
+        if(error) title += ': ' + error[0]
         return title
       },
 
@@ -238,6 +240,15 @@
 
       scroll: function() {
         this.scrolled = this.$refs.features.scrollLeft
+      },
+
+      featureStyle: function(feature) {
+        const error = feature.real.error()
+        const style = {
+          active: this.isActive(feature),
+        }
+        if(error) style[error[1]] = true
+        return style
       },
     },
   }

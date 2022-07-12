@@ -103,7 +103,10 @@ impl JsFeature {
 
   pub fn error(&self) -> JsValue {
     if let Some(real) = self.real.as_ref() {
-      real.borrow().error.as_ref().map_or(JsValue::undefined(), |e| JsValue::from(e.to_string()) )
+      real.borrow().error.as_ref().map_or(JsValue::undefined(), |e| JsValue::from(vec![e.to_string(), match e {
+        FeatureError::Warning(_) => "warning".into(),
+        FeatureError::Error(_) => "error".into(),
+      }].iter().map(|item| JsValue::from(item) ).collect::<Array>()))
     } else {
       JsValue::undefined()
     }

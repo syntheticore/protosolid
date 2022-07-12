@@ -20,7 +20,7 @@
             :component="document.tree"
             :value.sync="activeFeature[key]"
             @update:value="update"
-            @error="showError"
+            @error="error = $event"
           )
           input(
             type="text"
@@ -46,7 +46,7 @@
             @update:chosen="update"
           )
       transition(name="fade")
-        .error(v-if="error") {{ error }}
+        .error-msg(v-if="error", :class="errorStyle") {{ error[0] }}
 
     .confirmation
       button.ok(
@@ -175,16 +175,21 @@
       &:disabled
         color: $bright1 * 0.5 !important
 
-  .error
-    background: darken($red, 50%)
+  .error-msg
     font-size: 12px
     font-weight: bold
     padding: 5px 10px
     margin-right: 1px
     transition: all 0.25s
-    color: lighten($red, 65%)
     text-align: center
-    border-bottom-left-radius: 4px
+    &:not(.has-header)
+      border-bottom-left-radius: 4px
+    &.error
+      color: lighten($red, 65%)
+      background: darken($red, 50%)
+    &.warning
+      color: lighten($warn, 65%)
+      background: darken($warn, 50%)
 
   .fade-enter
   .fade-leave-to
@@ -241,11 +246,17 @@
 
     computed: {
       canConfirm: function() {
-        return this.activeFeature.isComplete() && !this.error
+        return this.activeFeature.isComplete() && !(this.error && this.error[1] == 'error')
       },
 
       isSketchFeature: function() {
         return this.activeFeature && this.activeFeature.constructor === CreateSketchFeature
+      },
+
+      errorStyle: function() {
+        const style = { 'has-header': this.showHeader }
+        if(this.error) style[this.error[1]] = true
+        return style
       },
     },
 
@@ -320,27 +331,25 @@
         this.activeFeature.update()
         this.$root.$emit('regenerate')
         this.error = this.activeFeature.real.error()
+        console.log(this.error)
         const preview = this.activeFeature.real.preview()
         if(preview) this.$root.$emit('preview-feature', this.activeFeature.component, preview)
-      },
-
-      showError: function(error) {
-        this.error = error
       },
 
       confirm: function() {
         if(!this.canConfirm) return
         this.status = 'confirmed'
+        if(this.isSketchFeature || this.error) this.activeFeature.real.invalidate()
         this.close()
       },
 
       cancel: function() {
         this.status = 'canceled'
+        if(this.isSketchFeature) this.activeFeature.real.invalidate()
         this.close()
       },
 
       close: function() {
-        if(this.isSketchFeature) this.activeFeature.real.invalidate()
         this.$emit('close')
       },
 

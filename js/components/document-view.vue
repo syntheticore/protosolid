@@ -294,7 +294,7 @@
           // Activate sketch for sketch features
           if(feature.constructor === CreateSketchFeature) {
             this.document.activeSketch = this.document.tree.findSketchByFeature(feature.id)
-            this.document.activeComponent = this.getComponent(this.document.activeSketch.component_id())
+            if(this.document.activeSketch) this.document.activeComponent = this.getComponent(this.document.activeSketch.component_id())
           } else {
             this.document.activeSketch = null
           }

@@ -56,9 +56,9 @@ impl JsSketch {
   }
 
   pub fn add_line(&mut self, p1: JsValue, p2: JsValue) -> JsCurve {
-    let p1: (f64, f64, f64) = p1.into_serde().unwrap();
-    let p2: (f64, f64, f64) = p2.into_serde().unwrap();
-    let mut line = Line::new(Point3::from(p1), Point3::from(p2));
+    let p1 = point_from_js(p1);
+    let p2 = point_from_js(p2);
+    let mut line = Line::new(p1, p2);
     let mut sketch = self.real.borrow_mut();
     line.transform(&sketch.work_plane.invert().unwrap());
     sketch.elements.push(Rc::new(RefCell::new(line.into_enum())));
@@ -67,8 +67,7 @@ impl JsSketch {
 
   pub fn add_spline(&self, vertices: Array) -> JsCurve {
     let points = vertices.iter().map(|vertex| {
-      let vertex: (f64, f64, f64) = vertex.into_serde().unwrap();
-      Point3::new(vertex.0, vertex.1, vertex.2)
+      point_from_js(vertex)
     }).collect();
     let mut spline = BezierSpline::new(points);
     let mut sketch = self.real.borrow_mut();
@@ -79,8 +78,8 @@ impl JsSketch {
 
   pub fn add_circle(&mut self, center: JsValue, radius: f64) -> JsCurve {
     let mut sketch = self.real.borrow_mut();
-    let center: (f64, f64, f64) = center.into_serde().unwrap();
-    let circle = Circle::new(sketch.work_plane.transform_point(Point3::from(center)), radius);
+    let center = point_from_js(center);
+    let circle = Circle::new(sketch.work_plane.transform_point(center), radius);
     sketch.elements.push(rc(CurveType::Circle(circle)));
     JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
   }

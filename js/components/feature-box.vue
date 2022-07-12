@@ -1,5 +1,5 @@
 <template lang="pug">
-  .bordered.feature-box
+  .bordered.feature-box(:class="{'has-header': this.showHeader}")
 
     header(v-if="showHeader")
       fa-icon(:icon="activeFeature.icon" title="Confirm")
@@ -8,7 +8,7 @@
     .main
       .settings
         .setting(v-for="(setting, key) in activeFeature.settings")
-          | {{ setting.title }}
+          span {{ setting.title }}
           .picker(
             v-if="needsPicker(setting, true)"
             :ref="key"
@@ -119,8 +119,13 @@
     &:nth-of-type(5) .picker
       background: $green
       border-color: lighten($green, 75%)
-    > *
+    > :not(span)
       margin-top: 6px
+    .has-header &
+      flex-direction: column-reverse
+      > :not(span)
+        margin-top: 0
+        margin-bottom: 8px
     input
     .radio-bar
     .icon-toggle

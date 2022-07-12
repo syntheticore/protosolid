@@ -4,6 +4,7 @@
       :document="document"
       :active-component="document.activeComponent"
       :active-sketch="document.activeSketch"
+      :active-feature="activeFeature"
       :active-tool.sync="activeTool"
       :selection.sync="selection"
       :highlight.sync="highlight"

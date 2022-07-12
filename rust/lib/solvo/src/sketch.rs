@@ -114,7 +114,7 @@ impl Sketch {
   pub fn get_planarized_elements(&self) -> Vec<Ref<CurveType>> {
     let transform = self.work_plane.invert().unwrap();
     self.elements.iter()
-    // Tranform elements to work plane
+    // Transform elements to work plane
     .map(|elem| {
       let mut clone = elem.borrow().clone();
       clone.as_curve_mut().transform(&transform);

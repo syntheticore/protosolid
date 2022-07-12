@@ -13,7 +13,7 @@
 
     //- Snap guides and pick indicators
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
-      path(v-for="path in allPaths" :d="path.data" :stroke="path.color")
+      path(v-for="path in allPaths", :d="path.data", :stroke="path.color")
       transition-group(name="hide" tag="g")
         line(
           v-for="guide in guides"
@@ -210,6 +210,7 @@
       document: Object,
       activeComponent: Object,
       activeSketch: Object,
+      activeFeature: Object,
       activeTool: Object,
       selection: Object,
       highlight: Object,
@@ -346,8 +347,9 @@
     methods: {
       buildPath: function(origin, vec) {
         const pos = this.renderer.toScreen(vec)
-        const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200)
-        const dy = Math.abs(origin.y - pos.y) / 2.0
+        const sign = this.activeFeature ? -1 : 1
+        const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200) * sign
+        const dy = Math.abs(origin.y - pos.y) / 2.0 * sign
         return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
       },
 

@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
@@ -37,8 +35,23 @@ pub trait Curve: Transformable {
     }).collect()
   }
 
-  fn tesselate_adaptive(&self, steps_per_mm: f64) -> Vec<Point3> {
-    self.tesselate_fixed((steps_per_mm * self.length()).round() as i32)
+  fn tesselate_adaptive(&self, max_deviation: f64) -> Vec<Point3> {
+    let mut poly = vec![(0.0, self.sample(0.0)), (1.0, self.sample(1.0))];
+    self.tesselate_adaptive_recurse(&mut poly, 0, max_deviation);
+    poly.iter().map(|pair| pair.1 ).collect()
+  }
+
+  fn tesselate_adaptive_recurse(&self, poly: &mut Vec<(f64, Point3)>, index: usize, max_deviation: f64) {
+    let j = index + 1;
+    let center = (poly[index].1 + poly[j].1.to_vec()) / 2.0;
+    let trims = (poly[index].0, poly[j].0);
+    let t = (trims.0 + trims.1) / 2.0;
+    let sample = self.sample(t);
+    if sample.distance(center) > max_deviation {
+      poly.insert(j, (t, sample));
+      self.tesselate_adaptive_recurse(poly, j, max_deviation);
+      self.tesselate_adaptive_recurse(poly, index, max_deviation);
+    }
   }
 
   fn length(&self) -> f64 {
@@ -60,7 +73,7 @@ pub trait Curve: Transformable {
 
   fn is_point_on_curve(&self, p: Point3) -> bool {
     let t = self.unsample(&p);
-    t >= 0.0 && t <= 1.0
+    t >= 0.0 && t <= 1.0 && self.sample(t).almost(p)
   }
 }
 
@@ -325,7 +338,7 @@ impl Curve for TrimmedCurve {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_fixed(4)
+    self.tesselate_adaptive(0.1)
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
@@ -632,7 +645,7 @@ impl Transformable for Circle {
 }
 
 
-const LUT_STEPS: usize = 10;
+// const LUT_STEPS: usize = 10;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BezierSpline {
@@ -653,7 +666,8 @@ impl BezierSpline {
   }
 
   pub fn update(&mut self) {
-    self.lut = self.tesselate_fixed((self.vertices.len() * LUT_STEPS).try_into().unwrap())
+    // self.lut = self.tesselate_fixed((self.vertices.len() * LUT_STEPS).try_into().unwrap())
+    self.lut = self.tesselate_adaptive(0.1)
   }
 
   // de Casteljau's algorithm

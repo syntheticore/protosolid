@@ -13,7 +13,7 @@ export default class PlaneHelper extends THREE.Mesh {
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.1,
-      depthWrite: false,
+      depthTest: false,
     }))
 
     this.alcType = 'plane'

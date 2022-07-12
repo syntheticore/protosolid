@@ -179,10 +179,11 @@
     font-size: 12px
     font-weight: bold
     padding: 5px 10px
-    margin-right: 1px
+    margin: 0 1px
     transition: all 0.25s
     text-align: center
     &:not(.has-header)
+      margin-left: 0
       border-bottom-left-radius: 4px
     &.error
       color: lighten($red, 65%)

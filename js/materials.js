@@ -37,7 +37,6 @@ export default class Materials {
     this.region = new THREE.MeshBasicMaterial({
       side: THREE.DoubleSide,
       color: new THREE.Color('coral'),
-      // depthTest: false,
       transparent: true,
       opacity: 0.1,
       polygonOffset: true,
@@ -57,7 +56,7 @@ export default class Materials {
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.1,
-      depthWrite: false,
+      depthTest: false,
     })
 
     this.highlightPlane = new THREE.MeshBasicMaterial({
@@ -65,7 +64,7 @@ export default class Materials {
       color: '#0070ff',
       transparent: true,
       opacity: 0.6,
-      depthWrite: false,
+      depthTest: false,
     })
 
     // Surface Materials
@@ -84,6 +83,7 @@ export default class Materials {
       color: 'white',
       roughness: 1.0,
       transparent: true,
+      depthWrite: false,
       opacity: 0.035,
     })
 
@@ -100,6 +100,8 @@ export default class Materials {
       transparent: true,
       opacity: 0.4,
       depthTest: false,
+      polygonOffset: true,
+      polygonOffsetFactor: 0.5,
     })
   }
 }

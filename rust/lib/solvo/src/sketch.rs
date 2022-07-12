@@ -29,20 +29,10 @@ impl Default for Sketch {
 impl Sketch {
 
   pub fn get_profiles(&self, include_outer: bool) -> Vec<Profile> {
-    // let planar_elements = self.get_planarized_elements();
     let planar_elements = &self.elements;
     let cut_elements = Self::all_split(&planar_elements);
     let wires = Self::get_wires(cut_elements, include_outer);
-    let mut profiles = Self::build_profiles(wires);
-    // Transform generated profiles back to component space
-    for profile in &mut profiles {
-      for wire in profile {
-        for tcurve in wire {
-          tcurve.transform(&self.work_plane);
-        }
-      }
-    }
-    profiles
+    Self::build_profiles(wires)
   }
 
   // pub fn get_profiles(&self, include_outer: bool) -> Vec<(Plane, Profile)> {
@@ -52,6 +42,7 @@ impl Sketch {
   //   }).collect::<Vec<Vec<(Plane, Profile)>>>().concat()
   // }
 
+  #[allow(dead_code)]
   fn profiles_from_coplanar_elements(elements: &Vec<Ref<CurveType>>, plane: &Plane, include_outer: bool) -> Vec<Profile> {
     let transform = plane.as_transform();
     let base_transform = transform.invert().unwrap();
@@ -75,6 +66,7 @@ impl Sketch {
     profiles
   }
 
+  #[allow(dead_code)]
   fn group_by_plane(&self) -> Vec<(Plane, Vec<Ref<CurveType>>)> {
     let mut elems: Vec<Ref<CurveType>> = self.elements.iter().cloned().collect();
     let mut groups = vec![];
@@ -111,7 +103,8 @@ impl Sketch {
     groups
   }
 
-  pub fn get_planarized_elements(&self) -> Vec<Ref<CurveType>> {
+  #[allow(dead_code)]
+  fn get_planarized_elements(&self) -> Vec<Ref<CurveType>> {
     let transform = self.work_plane.invert().unwrap();
     self.elements.iter()
     // Transform elements to work plane

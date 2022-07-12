@@ -1,7 +1,6 @@
 use std::ptr;
 use std::rc::{Rc, Weak};
 use std::collections::HashSet;
-use std::iter;
 
 use uuid::Uuid;
 

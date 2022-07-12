@@ -12,7 +12,7 @@ use crate::region::JsRegion;
 use crate::utils::matrix_to_js;
 use crate::utils::point_from_js;
 
-use crate::log;
+// use crate::log;
 
 
 #[wasm_bindgen]
@@ -112,7 +112,7 @@ impl JsSketch {
   pub fn get_all_split(&self) {
     let mut sketch = self.real.borrow_mut();
 
-    let planar_elements = sketch.get_planarized_elements();
+    let planar_elements = &sketch.elements;
     let splits: Vec<TrimmedCurve> = Sketch::all_split(&planar_elements);
 
     let (mut circles, mut others): (Vec<TrimmedCurve>, Vec<TrimmedCurve>) = splits.into_iter().partition(|elem| match elem.base {

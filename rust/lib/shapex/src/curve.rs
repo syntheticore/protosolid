@@ -29,13 +29,13 @@ pub trait Curve: Transformable {
     if point.almost(start) { end } else { start }
   }
 
-  fn tesselate_fixed(&self, steps: i32) -> Vec<Point3> {
+  fn tesselate_fixed(&self, steps: i32) -> PolyLine {
     (0..steps + 1).map(|i| {
       self.sample(i as f64 / steps as f64)
     }).collect()
   }
 
-  fn tesselate_adaptive(&self, max_deviation: f64) -> Vec<Point3> {
+  fn tesselate_adaptive(&self, max_deviation: f64) -> PolyLine {
     let mut poly = vec![(0.0, self.sample(0.0)), (1.0, self.sample(1.0))];
     self.tesselate_adaptive_recurse(&mut poly, 0, max_deviation);
     poly.iter().map(|pair| pair.1 ).collect()

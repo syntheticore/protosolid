@@ -100,6 +100,7 @@
       // },
 
       value: function(value) {
+        if(this.inner.getBase() == value) return
         this.inner.setBase(value)
         this.update()
       },

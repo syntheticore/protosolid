@@ -190,7 +190,6 @@ pub struct ExtrusionFeature {
   pub profiles: Vec<ProfileRef>,
   pub distance: f64,
   pub op: BooleanType,
-  pub face_id_seed: Uuid,
 }
 
 impl ExtrusionFeature {

@@ -110,3 +110,13 @@ function objectifyVec4(array) {
     w: array[3],
   }
 }
+
+export function intersectSets(setA, setB) {
+  const intersection = new Set()
+  for (const elem of setB) {
+    if (setA.has(elem)) {
+      intersection.add(elem)
+    }
+  }
+  return intersection
+}

@@ -9,7 +9,6 @@ class Feature {
     this.icon = icon
     this.settings = settings
 
-
     if(!booleanOutput) return
     this.operation = 'join'
     this.settings.operation = {
@@ -143,30 +142,33 @@ export class ExtrudeFeature extends Feature {
   }
 
   isComplete() {
-    return !!this.profiles
+    return this.profiles && this.profiles.length
   }
 
   updateFeature() {
-    const profiles = [this.profiles()]
     const list = new window.alcWasm.JsProfileList()
-    profiles.forEach(profile => {
+    this.profiles.forEach(profile => {
       list.push(profile)
     })
-    const sketch = this.document.tree.findSketch(profiles[0].sketch_id())
+    const sketch = this.document.tree.findSketch(this.profiles[0].sketch_id())
     const comp_ref = sketch.component_id()
     const distance = this.distance * (this.side ? 1 : -1)
     this.real.extrusion(comp_ref, sketch, list, distance, this.operation)
+    // Refetch profiles in case they've been repaired
+    setTimeout(() => {
+      this.profiles.forEach(profile => profile.free())
+      this.profiles = this.real.get_profiles()
+    }, 0)
   }
 
   updateGizmos() {
-    if(this.profiles) {
-      const profiles = [this.profiles()]
+    if(this.isComplete()) {
       if(this.lengthGizmo) {
         this.lengthGizmo.set(this.distance, this.side)
       } else {
-        const center = vec2three(profiles[0].get_center())
+        const center = vec2three(this.profiles[0].get_center())
         const axis = this.axis && this.axis()
-        const direction = axis || vec2three(profiles[0].get_normal())
+        const direction = axis || vec2three(this.profiles[0].get_normal())
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.distance, (dist, side) => {
           this.distance = dist
           this.side = side

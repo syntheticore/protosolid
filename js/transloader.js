@@ -177,7 +177,7 @@ export default class Transloader {
     this.purgeRegions(comp)
     let t = performance.now()
     const regions = comp.sketches.flatMap(sketch => sketch.get_profiles())
-    console.log('get_profiles took ' + (performance.now() - t))
+    // console.log('get_profiles took ' + (performance.now() - t))
     t = performance.now()
     comp.cache().regions = regions
     regions.forEach(region => {
@@ -193,7 +193,7 @@ export default class Transloader {
       region.component = comp
       this.renderer.add(mesh)
     })
-    console.log('region tesselation took ' + (performance.now() - t))
+    // console.log('region tesselation took ' + (performance.now() - t))
   }
 
   purgeRegions(comp) {

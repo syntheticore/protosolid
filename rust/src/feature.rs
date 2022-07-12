@@ -148,7 +148,6 @@ impl JsFeature {
         }).collect(),
         distance,
         op: get_op(op),
-        face_id_seed: feature_id,
       }.into_enum(),
     );
     feature.id = feature_id;
@@ -178,6 +177,18 @@ impl JsFeature {
     if let Some(this) = &mut self.real {
       self.document.borrow_mut().remove_feature(this);
       self.real = None;
+    }
+  }
+
+  pub fn get_profiles(&self) -> Array {
+    if let Some(real) = &self.real {
+      if let FeatureType::Extrusion(feature) = &real.borrow().feature_type {
+        feature.profiles.iter().map(|profile| JsValue::from(JsRegion::new(profile.profile.clone(), profile.sketch.clone())) ).collect()
+      } else {
+        Array::new()
+      }
+    } else {
+      Array::new()
     }
   }
 }

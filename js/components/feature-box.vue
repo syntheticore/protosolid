@@ -211,6 +211,7 @@
 
   import { ManipulationTool } from './../tools.js'
   import { CreateSketchFeature } from './../features.js'
+  import { intersectSets } from './../utils.js'
 
   export default {
     name: 'FeatureBox',
@@ -302,14 +303,27 @@
         return new Promise((resolve) => {
           this.$root.$off('picked')
           this.$root.$once('picked', (item) => {
-            // Copy profiles before they get destroyed by transloader
             if(this.activeFeature.settings[key].type == 'profile') {
-              const oldProfile = this.activeFeature[key]
-              if(oldProfile) oldProfile().free()
-              item = item.duplicate()
+              const itemIds = new Set(item.get_ids())
+              const currentProfiles = this.activeFeature[key] || []
+              this.activeFeature[key] = currentProfiles
+              const oldProfile = currentProfiles.find(profile => {
+                const set = new Set(profile.get_ids())
+                const intersection = intersectSets(set, itemIds)
+                return intersection.size == itemIds.size
+              })
+              if(oldProfile) {
+                oldProfile.free()
+                currentProfiles.splice(currentProfiles.indexOf(oldProfile), 1)
+              } else {
+                // Copy profiles before they get destroyed by transloader
+                item = item.duplicate()
+                currentProfiles.push(item)
+              }
+            } else {
+              // Hide heavy data from Vue in a closure
+              this.activeFeature[key] = () => item
             }
-            // Hide heavy data from Vue in a closure
-            this.activeFeature[key] = () => item
             this.update()
             this.activePicker = null
             resolve()
@@ -332,7 +346,6 @@
         this.activeFeature.update()
         this.$root.$emit('regenerate')
         this.error = this.activeFeature.real.error()
-        console.log(this.error)
         const preview = this.activeFeature.real.preview()
         if(preview) this.$root.$emit('preview-feature', this.activeFeature.component, preview)
       },

@@ -1,3 +1,4 @@
+use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
 use solvo::*;
@@ -30,6 +31,16 @@ impl JsRegion {
 impl JsRegion {
   pub fn sketch_id(&self) -> JsValue {
     JsValue::from_serde(&self.sketch.borrow().id).unwrap()
+  }
+
+  pub fn get_ids(&self) -> Array {
+    let ids = Array::new();
+    for wire in &self.profile {
+      for tcurve in wire {
+        ids.push(&JsValue::from_serde(&tcurve.base.get_id()).unwrap());
+      }
+    }
+    ids
   }
 
   pub fn get_mesh(&self) -> JsBufferGeometry {

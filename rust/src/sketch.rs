@@ -100,9 +100,9 @@ impl JsSketch {
   }
 
   pub fn get_profiles(&self) -> Array {
-    web_sys::console::time_with_label("get_profiles");
+    // web_sys::console::time_with_label("get_profiles");
     let profiles = self.real.borrow_mut().get_profiles(false);
-    web_sys::console::time_end_with_label("get_profiles");
+    // web_sys::console::time_end_with_label("get_profiles");
     profiles.into_iter().map(|profile| JsValue::from(JsRegion::new(
       profile,
       self.real.clone(),

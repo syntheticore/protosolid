@@ -50,6 +50,16 @@ class Feature {
     this.execute()
   }
 
+  getValues() {
+    const values = {}
+    Object.keys(this.settings).forEach(key => values[key] = this[key] )
+    return values
+  }
+
+  setValues(values) {
+    Object.keys(values).forEach(key => this[key] = values[key] )
+  }
+
   dispose() {}
 }
 
@@ -142,15 +152,15 @@ export class ExtrudeFeature extends Feature {
   }
 
   isComplete() {
-    return this.profiles && this.profiles.length
+    return this.profiles && this.profiles().length
   }
 
   updateFeature() {
     const list = new window.alcWasm.JsProfileList()
-    this.profiles.forEach(profile => {
+    this.profiles().forEach(profile => {
       list.push(profile)
     })
-    const sketch = this.document.tree.findSketch(this.profiles[0].sketch_id())
+    const sketch = this.document.tree.findSketch(this.profiles()[0].sketch_id())
     const comp_ref = sketch.component_id()
     const distance = this.distance * (this.side ? 1 : -1)
     this.real.extrusion(comp_ref, sketch, list, distance, this.operation)
@@ -161,9 +171,9 @@ export class ExtrudeFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo.set(this.distance, this.side)
       } else {
-        const center = vec2three(this.profiles[0].get_center())
+        const center = vec2three(this.profiles()[0].get_center())
         const axis = this.axis && this.axis()
-        const direction = axis || vec2three(this.profiles[0].get_normal())
+        const direction = axis || vec2three(this.profiles()[0].get_normal())
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.distance, (dist, side) => {
           this.distance = dist
           this.side = side
@@ -178,8 +188,9 @@ export class ExtrudeFeature extends Feature {
 
   confirm() {
     // Refetch profiles in case they've been repaired
-    this.profiles.forEach(profile => profile.free())
-    this.profiles = this.real.get_profiles()
+    this.profiles().forEach(profile => profile.free())
+    const profiles = this.real.get_profiles()
+    this.profiles = () => profiles
   }
 
   dispose() {

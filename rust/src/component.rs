@@ -58,7 +58,7 @@ impl JsComponent {
     self.get_comp(&self.document.borrow()).helpers.iter().filter_map(|helper|
       if let ConstructionHelperType::Plane(_) = &helper.borrow().helper_type {
         // Some(matrix_to_js(plane.as_transform()))
-        Some(JsValue::from(JsConstructionHelper::new(self.component_id, helper)))
+        Some(JsValue::from(JsConstructionHelper::new(helper)))
       } else {
         None
       }

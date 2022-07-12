@@ -11,18 +11,16 @@ use crate::feature::JsAxialRef;
 
 
 #[wasm_bindgen]
+#[derive(Debug, Clone)]
 pub struct JsConstructionHelper {
-
-  component_id: Uuid,
 
   #[wasm_bindgen(skip)]
   pub real: Ref<ConstructionHelper>,
 }
 
 impl JsConstructionHelper {
-  pub fn new(component_id: Uuid, helper: &Ref<ConstructionHelper>) -> Self {
+  pub fn new(helper: &Ref<ConstructionHelper>) -> Self {
     JsConstructionHelper {
-      component_id,
       real: helper.clone(),
     }
   }
@@ -44,5 +42,9 @@ impl JsConstructionHelper {
       ConstructionHelperType::Plane(_) => JsValue::from(JsPlanarRef::new(PlanarRef::HelperRef(self.real.clone()))),
       ConstructionHelperType::Axis(_) => JsValue::from(JsAxialRef::new(AxialRef::HelperRef(self.real.clone()))),
     }
+  }
+
+  pub fn duplicate(&self) -> JsConstructionHelper {
+    self.clone()
   }
 }

@@ -266,19 +266,28 @@
       this.pickAll()
       this.$root.$on('enter-pressed', this.confirm)
       this.$root.$on('escape', this.onEscape)
+      this.startValues = this.activeFeature.getValues()
     },
 
     beforeDestroy: function() {
-      this.$root.$emit('unpreview-feature')
-      this.$root.$emit('activate-toolname', 'Manipulate')
-      this.activeFeature.dispose()
       if(this.status == 'confirmed') {
         this.activeFeature.confirm(this)
       } else {
-        this.$emit('remove-feature', this.activeFeature)
+        if(this.showHeader) {
+          // Restore feature state on cancel
+          if(!this.isSketchFeature) {
+            this.activeFeature.setValues(this.startValues)
+            this.update()
+          }
+        } else {
+          this.$emit('remove-feature', this.activeFeature)
+        }
       }
+      this.activeFeature.dispose()
       this.$root.$off('enter-pressed', this.confirm)
       this.$root.$off('escape', this.onEscape)
+      this.$root.$emit('unpreview-feature')
+      this.$root.$emit('activate-toolname', 'Manipulate')
     },
 
     methods: {
@@ -305,8 +314,8 @@
           this.$root.$once('picked', (item) => {
             if(this.activeFeature.settings[key].type == 'profile') {
               const itemIds = new Set(item.get_ids())
-              const currentProfiles = this.activeFeature[key] || []
-              this.activeFeature[key] = currentProfiles
+              const currentProfiles = (this.activeFeature[key] && this.activeFeature[key]()) || []
+              this.activeFeature[key] = () => currentProfiles
               const oldProfile = currentProfiles.find(profile => {
                 const set = new Set(profile.get_ids())
                 const intersection = intersectSets(set, itemIds)
@@ -322,7 +331,8 @@
               }
             } else {
               // Hide heavy data from Vue in a closure
-              this.activeFeature[key] = () => item
+              const itemCopy = (item.duplicate ? item.duplicate() : item)
+              this.activeFeature[key] = () => itemCopy
             }
             this.update()
             this.activePicker = null

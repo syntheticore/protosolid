@@ -11,13 +11,14 @@
       button(@click="forwardMarker", :disabled="atEnd")
         fa-icon(icon="angle-double-right")
 
-    ul.features(ref="features", @scroll="scroll")
-      li.past(v-for="(feature, i) in past")
+    ul.features(ref="features", @scroll="scroll", :style="{'--tip': tip + 'px'}")
+      li.past(v-for="(feature, i) in past", :ref="feature == activeFeature ? 'active' : undefined")
         transition(name="fade")
-          FeatureBox.tipped-bottom.bright(
+          FeatureBox.tipped-bottom(ref="box"
+            v-if="isActive(feature)"
             show-header
             :style="scrollStyle"
-            v-if="isActive(feature)"
+            :class="{bright: tip < 55}"
             :document="document"
             :active-tool="activeTool"
             :active-feature="activeFeature"
@@ -116,7 +117,6 @@
         color: $warn !important
 
     hr
-      // border: 1px solid $bright2
       border: none
       width: 5px
       height: 5px
@@ -125,13 +125,14 @@
       margin: 6px
 
   .feature-box
-    bottom: 61px
-    margin-left: -12px
-    // left: 0
+    bottom: 0
+    margin-bottom: 61px
     position: absolute
+    &::before
+      left: var(--tip)
 
   .fade-enter-active, .fade-leave-active
-    transition: all 0.15s ease-out
+    transition: opacity 0.15s ease-out, transform 0.15s ease-out
 
   .fade-enter, .fade-leave-to
     opacity: 0
@@ -174,17 +175,9 @@
       },
 
       scrollStyle: function() {
-        return {'margin-left': String(-this.scrolled - 12) + 'px' }
-      },
-    },
-
-    watch: {
-      document: function() {
-        this.updateMarker()
-      },
-
-      marker: function() {
-        this.$emit('update:active-feature', null)
+        return {
+          left: String(this.scrolled + 145) + 'px',
+        }
       },
     },
 
@@ -192,11 +185,27 @@
       return {
         marker: 0,
         scrolled: 0,
+        tip: 0,
       }
+    },
+
+    watch: {
+      document: function() {
+        this.updateMarker()
+      },
+
+      activeFeature: function() {
+        setTimeout(() => this.scroll(), 0)
+      },
+
+      marker: function() {
+        this.$emit('update:active-feature', null)
+      },
     },
 
     mounted() {
       this.$root.$on('regenerate', this.updateMarker)
+      this.$root.$on('resize', this.scroll)
     },
 
     methods: {
@@ -239,7 +248,14 @@
       },
 
       scroll: function() {
-        this.scrolled = this.$refs.features.scrollLeft
+        if(!this.$refs.active[0]) return
+        const featuresLeft = this.$refs.features.getBoundingClientRect().left
+        const boxWidth = this.$refs.box[0].$el.getBoundingClientRect().width
+        const iconLeft = this.$refs.active[0].getBoundingClientRect().left
+        const scrolled = iconLeft - featuresLeft
+        const max = document.body.clientWidth - featuresLeft - boxWidth
+        this.scrolled = Math.max(-146, Math.min(scrolled, max))
+        this.tip = Math.max(24, Math.min(scrolled - this.scrolled + 24, boxWidth - 60))
       },
 
       featureStyle: function(feature) {

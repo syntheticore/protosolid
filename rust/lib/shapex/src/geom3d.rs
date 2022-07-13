@@ -78,7 +78,8 @@ pub fn plane_from_curves(elems: &Vec<CurveType>) -> Result<Plane, PlaneError> {
   }
 }
 
-pub fn transform_from_location_and_normal(origin: Point3, normal: Vec3) -> Matrix4 {
+pub fn transform_from_location_and_normal(origin: Point3, mut normal: Vec3) -> Matrix4 {
+  normal = normal.normalize();
   let up = Vec3::new(0.0, 0.0, 1.0);
   let dot = normal.dot(up);
   let x_axis = if dot.abs().almost(1.0) {

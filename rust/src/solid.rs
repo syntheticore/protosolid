@@ -53,7 +53,7 @@ impl JsFace {
   fn make_origin(&self) -> Point3 {
     match &self.real.borrow().surface {
       SurfaceType::Planar(plane) => plane.origin,
-      SurfaceType::Cylindrical(cyl) => cyl.origin,
+      SurfaceType::Cylindrical(cyl) => cyl.plane.origin,
     }
   }
 

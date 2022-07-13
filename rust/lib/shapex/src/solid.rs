@@ -407,29 +407,19 @@ impl Shell {
 
   fn sweep_surface(curve: &TrimmedCurve, vec: Vec3) -> SurfaceType {
     match &curve.base {
-      CurveType::Line(_) => {
+      CurveType::Line(_) =>
         Plane::from_triangle(
           curve.bounds.0,
           curve.bounds.0 + vec,
           curve.bounds.1,
-        ).into_enum()
-      },
-      CurveType::Circle(circle) => {
-        CylindricalSurface {
-          origin: circle.plane.origin,
-          radius: circle.radius,
-          direction: vec,
-          bounds: (0.0, 1.0),
-        }.into_enum()
-      },
-      CurveType::Arc(arc) => {
-        CylindricalSurface {
-          origin: arc.plane.origin,
-          radius: arc.radius,
-          direction: vec,
-          bounds: arc.bounds,
-        }.into_enum()
-      },
+        ).into_enum(),
+
+      CurveType::Circle(circle) =>
+        CylindricalSurface::from_axis(circle.plane.origin, vec, circle.radius).into_enum(),
+
+      CurveType::Arc(arc) =>
+        CylindricalSurface::from_axis(arc.plane.origin, vec, arc.radius).into_enum(),
+
       _ => todo!()
     }
   }

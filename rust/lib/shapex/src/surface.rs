@@ -199,18 +199,27 @@ impl Transformable for Plane {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CylindricalSurface {
-  pub origin: Point3,
+  pub plane: Plane,
   pub radius: f64,
-  pub direction: Vec3,
+  pub height: f64,
   pub bounds: (f64, f64),
 }
 
 impl CylindricalSurface {
-  pub fn new(radius: f64) -> Self {
+  pub fn new(radius: f64, height: f64) -> Self {
     Self {
-      origin: Point3::origin(),
-      direction: Vec3::new(0.0, 0.0, 1.0),
+      plane: Plane::default(),
       radius,
+      height,
+      bounds: (0.0, 1.0),
+    }
+  }
+
+  pub fn from_axis(origin: Point3, axis: Vec3, radius: f64) -> Self {
+    Self {
+      plane: Plane::from_normal(origin, axis),
+      radius,
+      height: axis.magnitude(),
       bounds: (0.0, 1.0),
     }
   }
@@ -224,11 +233,8 @@ impl Surface for CylindricalSurface {
   fn sample(&self, u: f64, v: f64) -> Point3 {
     let u = self.bounds.0 + u * (self.bounds.1 - self.bounds.0);
     let u = u * std::f64::consts::PI * 2.0;
-    Point3::new(
-      self.origin.x + u.sin() * self.radius,
-      self.origin.y + u.cos() * self.radius,
-      self.origin.z + self.direction.z * v,
-    )
+    let p = self.plane.sample(u.sin() * self.radius, u.cos() * self.radius);
+    p + (self.plane.normal() * self.height * v)
   }
 
   fn unsample(&self, _p: Point3) -> (f64, f64) {
@@ -236,7 +242,7 @@ impl Surface for CylindricalSurface {
   }
 
   fn normal_at(&self, u: f64, _v: f64) -> Vec3 {
-    (self.sample(u, 0.0) - self.origin).normalize()
+    (self.sample(u, 0.0) - self.plane.origin).normalize()
   }
 
   fn tesselate(&self, resolution: i32, _profile: &Profile) -> Mesh {
@@ -286,8 +292,7 @@ impl Surface for CylindricalSurface {
 
 impl Transformable for CylindricalSurface {
   fn transform(&mut self, transform: &Matrix4) {
-    self.origin = transform.transform_point(self.origin);
-    self.direction = transform.transform_vector(self.direction);
+    self.plane.transform(transform);
   }
 }
 
@@ -316,7 +321,7 @@ mod tests {
 
   #[test]
   fn cylinder_normal() {
-    let cylinder = CylindricalSurface::new(1.0);
+    let cylinder = CylindricalSurface::new(1.0, 1.0);
     almost_eq(cylinder.normal_at(0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
     almost_eq(cylinder.normal_at(0.5, 0.0), Vec3::new(0.0, -1.0, 0.0));
     almost_eq(cylinder.normal_at(0.25, 0.0), Vec3::new(1.0, 0.0, 0.0));

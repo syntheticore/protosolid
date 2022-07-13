@@ -288,7 +288,7 @@ ipcMain.on('vue-ready', function() {
   setTimeout(() => {
     splash.destroy()
     mainWindow.show()
-  }, 1000)
+  }, 2000)
 });
 
 ipcMain.handle('get-save-path', (e, format) => {

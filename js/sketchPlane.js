@@ -51,6 +51,6 @@ export default class SketchPlane extends THREE.Object3D {
     const lookVec = camera.getWorldDirection(this.cachedVec)
     const facing = this.grid.up.dot(lookVec)
     //XXX transform https://stackoverflow.com/questions/35641875/three-js-how-to-find-world-orientation-vector-of-objects-local-up-vector
-    this.grid.position.z = -0.002 * dist * facing
+    this.grid.position.z = -0.004 * dist * facing
   }
 }

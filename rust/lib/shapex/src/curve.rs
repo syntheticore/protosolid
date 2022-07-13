@@ -35,22 +35,23 @@ pub trait Curve: Transformable {
     }).collect()
   }
 
-  fn tesselate_adaptive(&self, max_deviation: f64) -> PolyLine {
+  fn tesselate_adaptive(&self, max_deviation: f64, max_angle: Deg<f64>) -> PolyLine {
     let mut poly = vec![(0.0, self.sample(0.0)), (1.0, self.sample(1.0))];
-    self.tesselate_adaptive_recurse(&mut poly, 0, max_deviation);
+    self.tesselate_adaptive_recurse(&mut poly, 0, max_deviation, max_angle.into());
     poly.iter().map(|pair| pair.1 ).collect()
   }
 
-  fn tesselate_adaptive_recurse(&self, poly: &mut Vec<(f64, Point3)>, index: usize, max_deviation: f64) {
+  fn tesselate_adaptive_recurse(&self, poly: &mut Vec<(f64, Point3)>, index: usize, max_deviation: f64, max_angle: Rad<f64>) {
     let j = index + 1;
     let center = (poly[index].1 + poly[j].1.to_vec()) / 2.0;
     let trims = (poly[index].0, poly[j].0);
     let t = (trims.0 + trims.1) / 2.0;
     let sample = self.sample(t);
-    if sample.distance(center) > max_deviation {
+    let angle = (sample - poly[index].1).angle(poly[j].1 - sample);
+    if sample.distance(center) > max_deviation || angle > max_angle {
       poly.insert(j, (t, sample));
-      self.tesselate_adaptive_recurse(poly, j, max_deviation);
-      self.tesselate_adaptive_recurse(poly, index, max_deviation);
+      self.tesselate_adaptive_recurse(poly, j, max_deviation, max_angle);
+      self.tesselate_adaptive_recurse(poly, index, max_deviation, max_angle);
     }
   }
 
@@ -338,7 +339,7 @@ impl Curve for TrimmedCurve {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_adaptive(0.1)
+    self.tesselate_adaptive(0.05, Deg(20.0))
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
@@ -667,7 +668,7 @@ impl BezierSpline {
 
   pub fn update(&mut self) {
     // self.lut = self.tesselate_fixed((self.vertices.len() * LUT_STEPS).try_into().unwrap())
-    self.lut = self.tesselate_adaptive(0.1)
+    self.lut = self.tesselate_adaptive(0.05, Deg(20.0))
   }
 
   // de Casteljau's algorithm

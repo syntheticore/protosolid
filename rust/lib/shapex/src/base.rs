@@ -13,6 +13,9 @@ pub use cgmath::Transform;
 pub use cgmath::Rad;
 pub use cgmath::Deg;
 
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
+
 
 pub type Vec2 = cgmath::Vector2<f64>;
 pub type Vec3 = cgmath::Vector3<f64>;
@@ -85,3 +88,15 @@ pub fn almost_eq<T: Almost + Debug + Copy>(first: T, second: T) {
     web_sys::console::log_1(&format!( $( $t )* ).into());
   }
 }
+
+#[cfg(feature = "rayon")]
+macro_rules! parallel {
+  ($a:expr) => { $a.par_iter() }
+}
+
+#[cfg(not(feature = "rayon"))]
+macro_rules! parallel {
+  ($a:expr) => { $a.iter() }
+}
+
+pub(crate) use parallel;

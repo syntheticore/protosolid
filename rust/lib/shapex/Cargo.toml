@@ -14,4 +14,9 @@ uuid = { version = "0.8.1", features = ["v4", "serde"] }
 earcutr = { git = "https://github.com/donbright/earcutr" }
 itertools = "0.10.2"
 
+rayon = { version = "1.5.3", optional = true }
+
 web-sys = { version = "0.3.46", features = ["console"]}
+
+[features]
+  rayon = ["dep:rayon"]

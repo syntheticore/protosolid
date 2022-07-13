@@ -2,8 +2,9 @@ use earcutr;
 
 use crate::base::*;
 use crate::curve::*;
-use crate::intersection::*;
+use crate::intersection::CurveIntersectionType;
 use crate::mesh::Mesh;
+
 // use crate::log;
 
 
@@ -49,25 +50,24 @@ fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
 
 pub fn point_in_region(p: Point3, region: &Region) -> bool {
   let ray = TrimmedCurve::new(Line::new(p, p + Vec3::unit_x() * MAX_FLOAT).into_enum());
-  let mut num_hits = 0;
-  for elem in region {
-    num_hits += match ray.intersect(&elem) {
+  let num_hits: usize = parallel!(region).map(|elem| {
+    match ray.intersect(&elem) {
       CurveIntersectionType::Pierce(hits) |
       CurveIntersectionType::Cross(hits)
         => hits.len(),
       _ => 0,
     }
-  }
+  }).sum();
   num_hits % 2 != 0
 }
 
 pub fn region_in_region(region: &Region, other: &Region) -> bool {
-  region.iter().all(|elem| point_in_region(elem.bounds.0, other))
+  parallel!(region).all(|elem| point_in_region(elem.bounds.0, other))
 }
 
 pub fn tesselate_profile(profile: &Profile, normal: Vec3) -> Mesh {
   // log!("tesselate_profile profile {:#?}", profile);
-  let poly_rings: Vec<PolyLine> = profile.iter().map(|wire| {
+  let poly_rings: Vec<PolyLine> = parallel!(profile).map(|wire| {
     tesselate_wire(wire)
   }).collect();
   let mut i = 0;
@@ -99,7 +99,7 @@ pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) ->
 }
 
 pub fn tesselate_wire(wire: &Wire) -> PolyLine {
-  let polyline: PolyLine = wire.iter()
+  let polyline: PolyLine = parallel!(wire)
   .flat_map(|curve| {
     let poly = curve.tesselate();
     let n = poly.len() - 1;

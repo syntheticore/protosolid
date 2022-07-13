@@ -339,7 +339,7 @@ impl Curve for TrimmedCurve {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_adaptive(0.05, Deg(20.0))
+    self.tesselate_adaptive(0.025, Deg(20.0))
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
@@ -668,7 +668,7 @@ impl BezierSpline {
 
   pub fn update(&mut self) {
     // self.lut = self.tesselate_fixed((self.vertices.len() * LUT_STEPS).try_into().unwrap())
-    self.lut = self.tesselate_adaptive(0.05, Deg(20.0))
+    self.lut = self.tesselate_adaptive(0.025, Deg(20.0))
   }
 
   // de Casteljau's algorithm

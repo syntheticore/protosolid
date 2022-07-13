@@ -27,7 +27,7 @@
         .feature(
           :title="featureTitle(feature)"
           :class="featureStyle(feature)"
-          @dblclick="$emit('update:active-feature', feature)"
+          @dblclick="openFeature(feature)"
         )
           fa-icon(:icon="feature.icon" fixed-width)
       hr
@@ -245,6 +245,11 @@
       forwardMarker: function() {
         this.document.real.marker = this.document.features.length
         this.$root.$emit('regenerate')
+      },
+
+      openFeature: function(feature) {
+        this.$root.$emit('close-feature')
+        setTimeout(() => this.$emit('update:active-feature', feature), 0)
       },
 
       scroll: function() {

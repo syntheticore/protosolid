@@ -25,10 +25,10 @@
 
           transition(name="fade")
             FeatureBox.tipped(
-              v-if="activeFeature && isActive(tool)"
+              v-if="feature && isActive(tool)"
               :document="document"
               :active-tool="activeTool"
-              :active-feature="activeFeature"
+              :active-feature="feature"
               @update:active-sketch="$emit('update:active-sketch', $event)"
               @remove-feature="$emit('remove-feature', $event)"
               @close="closeFeature"
@@ -182,13 +182,13 @@
     watch: {
       activeSketch: function(sketch) {
         this.activeTab = sketch ? 1 : 4
-      }
+      },
     },
 
     data() {
       return {
         activeTab: 0,
-        activeFeature: null,
+        feature: null,
         tabs: [
           {
             title: 'Construct',
@@ -306,6 +306,7 @@
         )
         if(tool) this.activateTool(tool)
       });
+      this.$root.$on('close-feature', this.closeFeature)
     },
 
     methods: {
@@ -316,12 +317,12 @@
 
       activateTool: function(tool) {
         // Don't activate features twice
-        if(this.activeFeature && this.activeFeature.constructor === tool.feature) return
+        if(this.feature && this.feature.constructor === tool.feature) return
         this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))
         setTimeout(() => {
           if(tool.feature) {
-            this.activeFeature = new tool.feature(this.document)
-            this.$emit('add-feature', this.activeFeature)
+            this.feature = new tool.feature(this.document)
+            this.$emit('add-feature', this.feature)
           } else if(tool.action) {
             tool.action()
           } else {
@@ -331,12 +332,12 @@
       },
 
       isActive: function(tool) {
-        return (this.activeFeature && this.activeFeature.constructor === tool.feature)
+        return (this.feature && this.feature.constructor === tool.feature)
         || (this.activeTool && this.activeTool.constructor === tool.tool)
       },
 
       closeFeature: function() {
-        this.activeFeature = null
+        this.feature = null
       },
 
       addCog: function() {

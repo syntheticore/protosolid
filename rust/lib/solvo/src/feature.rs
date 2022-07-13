@@ -237,9 +237,10 @@ impl ExtrusionFeature {
 impl FeatureTrait for ExtrusionFeature {
   fn preview(&self) -> Option<Compound> {
     let mut profiles = self.profiles.clone();
-    if update_profiles(&mut profiles).is_ok() {
-      self.make_tool(&profiles).ok()
-    } else { None }
+    match update_profiles(&mut profiles) {
+      Err(FeatureError::Error(_)) => None,
+      Err(FeatureError::Warning(_)) | Ok(_) => self.make_tool(&profiles).ok(),
+    }
   }
 
   fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {

@@ -368,7 +368,7 @@
       confirm: function() {
         if(!this.canConfirm) return
         this.status = 'confirmed'
-        if(this.isSketchFeature || this.error) this.activeFeature.real.invalidate()
+        if(this.isSketchFeature || this.error) this.activeFeature.real.repair()
         this.close()
       },
 

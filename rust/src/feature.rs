@@ -173,6 +173,13 @@ impl JsFeature {
     }
   }
 
+  pub fn repair(&mut self) {
+    let mut doc = self.document.borrow_mut();
+    if let Some(this) = &mut self.real {
+      doc.repair_feature(this);
+    }
+  }
+
   pub fn remove(&mut self) {
     if let Some(this) = &mut self.real {
       self.document.borrow_mut().remove_feature(this);

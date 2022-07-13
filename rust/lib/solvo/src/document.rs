@@ -71,6 +71,12 @@ impl Document {
     log!("Invalidate {:#?}", self.last_change_index)
   }
 
+  pub fn repair_feature(&mut self, feature: &Ref<Feature>) {
+    let mut f = feature.borrow_mut();
+    f.error = f.feature_type.as_feature_mut().repair().err();
+    self.invalidate_feature(feature);
+  }
+
   pub fn remove_feature(&mut self, feature: &Ref<Feature>) {
     self.removal_modifications.append(
       &mut feature.borrow().feature_type.as_feature().modified_components()

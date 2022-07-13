@@ -6,9 +6,11 @@ use shapex::Profile;
 use crate::Uuid;
 use crate::Sketch;
 use crate::ConstructionHelper;
+use crate::FeatureError;
 
 
 pub type CompRef = Uuid;
+
 
 #[derive(Debug, Clone)]
 pub struct FaceRef {
@@ -16,11 +18,13 @@ pub struct FaceRef {
   pub bounds: HashSet<Uuid>, // Edge/Curve Ids
 }
 
+
 #[derive(Debug, Clone)]
 pub struct EdgeRef {
   pub component_id: CompRef,
   pub edge_id: Uuid,
 }
+
 
 #[derive(Debug, Clone)]
 pub struct ProfileRef {
@@ -28,11 +32,19 @@ pub struct ProfileRef {
   pub profile: Profile,
 }
 
+impl ProfileRef {
+  pub fn update(&mut self) -> Result<(), FeatureError> {
+    self.sketch.borrow().update_profile(&mut self.profile)
+  }
+}
+
+
 #[derive(Debug, Clone)]
 pub enum PlanarRef {
   FaceRef(FaceRef),
   HelperRef(Ref<ConstructionHelper>),
 }
+
 
 #[derive(Debug, Clone)]
 pub enum AxialRef {

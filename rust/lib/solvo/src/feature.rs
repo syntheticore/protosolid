@@ -29,6 +29,7 @@ pub trait FeatureTrait {
   fn preview(&self) -> Option<Compound>;
   fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError>;
   fn modified_components(&self) -> Vec<CompRef>;
+  fn repair(&mut self) -> Result<(), FeatureError>;
 }
 
 
@@ -105,6 +106,20 @@ pub enum ConstructionHelperType {
 }
 
 
+fn update_profiles(profiles: &mut Vec<ProfileRef>) -> Result<(), FeatureError> {
+  let mut res = Ok(());
+  for profile_ref in profiles {
+    let result = profile_ref.update();
+    match result {
+      Err(FeatureError::Error(_)) => return result,
+      Err(FeatureError::Warning(_)) => res = result,
+      Ok(_) => {},
+    }
+  }
+  res
+}
+
+
 #[derive(Debug, Clone)]
 pub struct CreateComponentFeature {
   pub component_id: CompRef,
@@ -129,6 +144,10 @@ impl FeatureTrait for CreateComponentFeature {
 
   fn modified_components(&self) -> Vec<CompRef> {
     vec![self.component_id]
+  }
+
+  fn repair(&mut self) -> Result<(), FeatureError> {
+    Ok(())
   }
 }
 
@@ -181,6 +200,10 @@ impl FeatureTrait for CreateSketchFeature {
   fn modified_components(&self) -> Vec<CompRef> {
     vec![self.component_id]
   }
+
+  fn repair(&mut self) -> Result<(), FeatureError> {
+    Ok(())
+  }
 }
 
 
@@ -197,9 +220,9 @@ impl ExtrusionFeature {
     FeatureType::Extrusion(self)
   }
 
-  fn make_tool(&self) -> Result<Compound, FeatureError> {
+  fn make_tool(&self, profiles: &Vec<ProfileRef>) -> Result<Compound, FeatureError> {
     let mut tool = Compound::default();
-    for profile_ref in &self.profiles {
+    for profile_ref in profiles {
       let mut profile = profile_ref.profile.clone();
       profile_ref.sketch.borrow().transform_profile(&mut profile);
       match features::extrude(&profile, self.distance) {
@@ -209,33 +232,23 @@ impl ExtrusionFeature {
     }
     Ok(tool)
   }
-
-  fn update_profiles(&mut self) -> Result<(), FeatureError> {
-    let mut res: Result<(), FeatureError> = Ok(());
-    for profile_ref in &mut self.profiles {
-      let sketch = profile_ref.sketch.borrow();
-      let result = sketch.update_profile(&mut profile_ref.profile);
-      match result {
-        Err(FeatureError::Error(_)) => return result,
-        Err(FeatureError::Warning(_)) => res = result,
-        Ok(_) => {},
-      }
-    }
-    res
-  }
 }
 
 impl FeatureTrait for ExtrusionFeature {
   fn preview(&self) -> Option<Compound> {
-    self.make_tool().ok()
+    let mut profiles = self.profiles.clone();
+    if update_profiles(&mut profiles).is_ok() {
+      self.make_tool(&profiles).ok()
+    } else { None }
   }
 
   fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
-    let result = self.update_profiles();
+    let mut profiles = self.profiles.clone();
+    let result = update_profiles(&mut profiles);
     if let Err(FeatureError::Error(_)) = result {
       return result;
     }
-    let tool = self.make_tool()?;
+    let tool = self.make_tool(&profiles)?;
     let comp = top_comp.find_child_mut(&self.component_id).unwrap();
     comp.compound.boolean(tool.clone(), self.op);
     result
@@ -243,5 +256,9 @@ impl FeatureTrait for ExtrusionFeature {
 
   fn modified_components(&self) -> Vec<CompRef> {
     vec![self.component_id]
+  }
+
+  fn repair(&mut self) -> Result<(), FeatureError> {
+    update_profiles(&mut self.profiles)
   }
 }

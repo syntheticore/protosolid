@@ -29,6 +29,7 @@ export default class Renderer {
       canvas,
       antialias: preferences.antiAlias,
       alpha: true,
+      // logarithmicDepthBuffer: true,
     })
 
     this.renderer.outputEncoding = THREE.sRGBEncoding
@@ -67,7 +68,7 @@ export default class Renderer {
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.5, 10000)
     this.camera.position.set(90, 90, 90)
 
-    this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 10000)
+    this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -200, 10000)
     this.cameraOrtho.position.set(0, 0, 10)
     this.cameraOrtho.lookAt(this.scene.position)
 
@@ -374,9 +375,9 @@ export default class Renderer {
     if(this.activeCamera == this.camera) {
       this.camera.aspect = aspect
     } else {
-      const frustumSize = 10
-      this.cameraOrtho.left = - 0.5 * frustumSize * aspect / 2
-      this.cameraOrtho.right = 0.5 * frustumSize * aspect / 2
+      const frustumSize = 200
+      this.cameraOrtho.left = - 0.5 * frustumSize * aspect
+      this.cameraOrtho.right = 0.5 * frustumSize * aspect
       this.cameraOrtho.top = frustumSize / 2
       this.cameraOrtho.bottom = - frustumSize / 2
     }

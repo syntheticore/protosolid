@@ -9,8 +9,12 @@ export default class Materials {
       linewidth: 3,
       vertexColors: true,
       dashed: false,
+      // precision: "highp",
       polygonOffset: true,
       polygonOffsetFactor: -2,
+      // polygonOffsetUnits: 1,
+      transparent: true,
+      opacity: 1,
     })
 
     this.selectionLine = this.line.clone()
@@ -72,6 +76,8 @@ export default class Materials {
       color: '#53a3e1',
       roughness: 0.25,
       metalness: 0.2,
+      polygonOffset: true,
+      polygonOffsetFactor: 2,
     })
 
     this.highlightSurface = new THREE.MeshStandardMaterial({

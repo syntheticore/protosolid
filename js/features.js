@@ -1,5 +1,8 @@
+import * as THREE from 'three'
+
 import { vec2three } from './utils.js'
-import { LengthGizmo } from './gizmos.js'
+import { LengthGizmo, AngleGizmo } from './gizmos.js'
+
 
 class Feature {
   constructor(document, real, booleanOutput, title, icon, settings) {
@@ -105,7 +108,7 @@ export class CreateSketchFeature extends Feature {
 
   updateFeature() {
     const plane = this.plane()
-    this.real.create_sketch(this.document.activeComponent.real.id(), plane.make_reference())
+    this.real.create_sketch(this.document.activeComponent.real.id(), plane)
   }
 
   confirm(featureBox) {
@@ -156,14 +159,14 @@ export class ExtrudeFeature extends Feature {
   }
 
   updateFeature() {
-    const list = new window.alcWasm.JsProfileList()
+    const list = new window.alcWasm.JsProfileRefList()
     this.profiles().forEach(profile => {
-      list.push(profile)
+      list.push(profile.make_reference())
     })
     const sketch = this.document.tree.findSketch(this.profiles()[0].sketch_id())
     const comp_ref = sketch.component_id()
     const distance = this.distance * (this.side ? 1 : -1)
-    this.real.extrusion(comp_ref, sketch, list, distance, this.operation)
+    this.real.extrusion(comp_ref, list, distance, this.operation)
   }
 
   updateGizmos() {
@@ -197,6 +200,75 @@ export class ExtrudeFeature extends Feature {
     super.dispose()
     window.alcRenderer.removeGizmo(this.lengthGizmo)
     this.lengthGizmo = null
+  }
+}
+
+
+export class DraftFeature extends Feature {
+  constructor(document, real) {
+    super(document, real, true, 'Draft', 'clone', {
+      ref_plane: {
+        title: 'Reference',
+        type: 'plane',
+      },
+      faces: {
+        title: 'Faces',
+        type: 'face',
+        multi: true,
+        superMulti: true,
+      },
+      angle: {
+        title: 'Angle',
+        type: 'angle',
+      },
+    })
+
+    this.ref_plane = null
+    this.faces = null
+    this.angle = 0.0
+  }
+
+  isComplete() {
+    return this.ref_plane && this.faces && this.faces().length
+  }
+
+  updateFeature() {
+    const list = new window.alcWasm.JsFaceRefList()
+    this.faces().forEach(face => {
+      list.push(face)
+    })
+    this.real.draft(list, this.ref_plane(), this.angle)
+  }
+
+  updateGizmos() {
+    if(this.isComplete()) {
+      if(this.angleGizmo) {
+        this.angleGizmo.set(this.angle)
+      } else {
+        const center = new THREE.Vector3()
+        this.angleGizmo = new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
+          console.log(angle)
+          this.angle = angle
+        })
+        window.alcRenderer.addGizmo(this.angleGizmo)
+      }
+    } else {
+      window.alcRenderer.removeGizmo(this.angleGizmo)
+      this.angleGizmo = null
+    }
+  }
+
+  confirm() {
+    // Refetch faces in case they've been repaired
+    this.faces().forEach(faceRef => faceRef.free())
+    const faces = this.real.get_face_refs()
+    this.faces = () => faces
+  }
+
+  dispose() {
+    super.dispose()
+    window.alcRenderer.removeGizmo(this.angleGizmo)
+    this.angleGizmo = null
   }
 }
 

@@ -148,6 +148,7 @@
   import {
     CreateSketchFeature,
     ExtrudeFeature,
+    DraftFeature,
     RevolveFeature,
     SweepFeature,
     // MaterialFeature,
@@ -259,7 +260,7 @@
               { title: 'Boolean', icon: 'boxes' },
               { title: 'Fillet', icon: 'clone', hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
-              { title: 'Draft', icon: 'layer-group' },
+              { title: 'Draft', feature: DraftFeature, icon: 'clone' },
               { title: 'Split', icon: 'layer-group' },
               { title: 'Align', icon: 'layer-group' }, //XXX also -> Replace Face
               { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 77 },

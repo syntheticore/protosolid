@@ -36,11 +36,19 @@ impl JsConstructionHelper {
     matrix_to_js(m)
   }
 
-  pub fn make_reference(&self) -> JsValue {
+  pub fn make_planar_reference(&self) -> JsValue {
     let helper = self.real.borrow();
     match &helper.helper_type {
       ConstructionHelperType::Plane(_) => JsValue::from(JsPlanarRef::new(PlanarRef::HelperRef(self.real.clone()))),
+      _ => unreachable!(),
+    }
+  }
+
+    pub fn make_axial_reference(&self) -> JsValue {
+    let helper = self.real.borrow();
+    match &helper.helper_type {
       ConstructionHelperType::Axis(_) => JsValue::from(JsAxialRef::new(AxialRef::HelperRef(self.real.clone()))),
+      _ => unreachable!(),
     }
   }
 

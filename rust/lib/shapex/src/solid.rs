@@ -102,7 +102,7 @@ impl Compound {
   pub fn find_face_from_bounds(&self, ids: &HashSet<Uuid>) -> Option<&Ref<Face>> {
     self.faces_iter().find(|face| {
       let hashset = face.borrow().get_edge_ids();
-      hashset.intersection(&ids).count() > 1
+      hashset.intersection(&ids).count() >= 2
     })
   }
 

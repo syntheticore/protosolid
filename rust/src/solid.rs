@@ -6,12 +6,14 @@ use solvo::*;
 use shapex::*;
 
 use crate::feature::JsPlanarRef;
+use crate::feature::JsFaceRef;
 use crate::buffer_geometry::JsBufferGeometry;
 use crate::utils::point_to_js;
 use crate::utils::points_to_js;
 
 
 #[wasm_bindgen]
+#[derive(Debug, Clone)]
 pub struct JsFace {
   component_id: Uuid,
   solid_id: Uuid,
@@ -57,12 +59,12 @@ impl JsFace {
     }
   }
 
-  // pub fn get_surface_type(&self) -> String {
-  //   match self.real.borrow().surface {
-  //     SurfaceType::Planar(_) => "Planar".to_string(),
-  //     SurfaceType::Cylindrical(_) => "Cylindrical".to_string(),
-  //   }
-  // }
+  pub fn get_surface_type(&self) -> String {
+    match self.real.borrow().surface {
+      SurfaceType::Planar(_) => "Planar".to_string(),
+      SurfaceType::Cylindrical(_) => "Cylindrical".to_string(),
+    }
+  }
 
   pub fn tesselate(&self) -> JsBufferGeometry {
     let this = self.real.borrow();
@@ -71,15 +73,27 @@ impl JsFace {
     )
   }
 
-  pub fn make_reference(&self) -> JsValue {
+  pub fn make_face_reference(&self) -> JsValue {
+    let face = self.real.borrow();
+    JsValue::from(JsFaceRef::new(FaceRef {
+      component_id: self.component_id,
+      bounds: face.get_edge_ids(),
+    }))
+  }
+
+  pub fn make_planar_reference(&self) -> JsValue {
     let face = self.real.borrow();
     match &face.surface {
       SurfaceType::Planar(_) => JsValue::from(JsPlanarRef::new(PlanarRef::FaceRef(FaceRef {
         component_id: self.component_id,
         bounds: face.get_edge_ids(),
       }))),
-      SurfaceType::Cylindrical(_surface) => todo!(),
+      _ => unreachable!(),
     }
+  }
+
+  pub fn duplicate(&self) -> Self {
+    self.clone()
   }
 }
 

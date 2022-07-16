@@ -7,6 +7,7 @@ use shapex::*;
 use crate::utils::vec_to_js;
 use crate::utils::point_to_js;
 use crate::buffer_geometry::JsBufferGeometry;
+use crate::feature::JsProfileRef;
 
 
 #[wasm_bindgen]
@@ -68,7 +69,15 @@ impl JsRegion {
     vec_to_js(normal)
   }
 
-  pub fn duplicate(&self) -> JsRegion {
+  pub fn duplicate(&self) -> Self {
     self.clone()
   }
+
+  pub fn make_reference(&self) -> JsValue {
+    JsValue::from(JsProfileRef::new(ProfileRef {
+      sketch: self.sketch.clone(),
+      profile: self.profile.clone(),
+    }))
+  }
 }
+

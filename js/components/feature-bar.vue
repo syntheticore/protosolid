@@ -32,7 +32,10 @@
           fa-icon(:icon="feature.icon" fixed-width)
       hr
       li.future(v-for="(feature, i) in future")
-        .feature(:title="feature.title" @dblclick="$emit('update:active-feature', feature)")
+        .feature(
+          :title="feature.title"
+          @dblclick="$emit('update:active-feature', feature)"
+        )
           fa-icon(:icon="feature.icon" fixed-width)
 
 </template>

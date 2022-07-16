@@ -308,7 +308,7 @@
       },
 
       needsPicker: function(setting, includeOptionals) {
-        return ['profile', 'curve', 'axis', 'plane'].some(type =>
+        return ['profile', 'curve', 'axis', 'plane', 'face', 'edge'].some(type =>
           type == setting.type && (!setting.optional || includeOptionals)
         )
       },
@@ -334,6 +334,25 @@
                 item = item.duplicate()
                 currentProfiles.push(item)
               }
+            } else if(this.activeFeature.settings[key].type == 'face') {
+              const itemRef = item.make_face_reference();
+              const bounds = new Set(itemRef.get_ids())
+              const currentFaces = (this.activeFeature[key] && this.activeFeature[key]()) || []
+              this.activeFeature[key] = () => currentFaces
+              const oldFace = currentFaces.find(faceRef => {
+                const set = new Set(faceRef.get_ids())
+                const intersection = intersectSets(set, bounds)
+                return intersection.size == bounds.size
+              })
+              if(oldFace) {
+                oldFace.free()
+                currentFaces.splice(currentFaces.indexOf(oldFace), 1)
+              } else {
+                currentFaces.push(itemRef)
+              }
+            } else if(this.activeFeature.settings[key].type == 'plane') {
+              const ref = item.make_planar_reference()
+              this.activeFeature[key] = () => ref
             } else {
               // Hide heavy data from Vue in a closure
               const itemCopy = (item.duplicate ? item.duplicate() : item)
@@ -343,6 +362,7 @@
             this.activePicker = null
             resolve()
             if(this.activeFeature.settings[key].autoConfirm) this.confirm()
+            if(this.activeFeature.settings[key].superMulti) setTimeout(() => this.pick(type, key), 0)
           })
           this.activePicker = key
           const picker = this.$refs[key][0]

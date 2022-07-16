@@ -3,12 +3,12 @@ use std::cell::RefCell;
 use std::fmt::Debug;
 
 use uuid::Uuid;
+// pub use cgmath::prelude::*;
 pub use cgmath::prelude::Matrix;
 pub use cgmath::prelude::SquareMatrix;
 pub use cgmath::prelude::InnerSpace;
 pub use cgmath::prelude::MetricSpace;
 pub use cgmath::prelude::EuclideanSpace;
-// pub use cgmath::prelude::*;
 pub use cgmath::Transform;
 pub use cgmath::Rad;
 pub use cgmath::Deg;
@@ -73,7 +73,7 @@ impl Almost for Vec3 {
 
 impl Almost for f64 {
   fn almost(&self, other: Self) -> bool {
-    (self - other).abs() < EPSILON
+    (self - other).abs() <= EPSILON
   }
 }
 

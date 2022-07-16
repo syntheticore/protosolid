@@ -50,6 +50,7 @@ pub fn matrix_to_js(m: Matrix4) -> JsValue {
   JsValue::from_serde(&m).unwrap()
 }
 
+#[allow(dead_code)]
 pub fn matrix_from_js(m: JsValue) -> Matrix4 {
   // let data = Into::<[[_; 4]; 4]>::into(m);
   // let data: [[f64; 4]; 4] = m.into_serde().unwrap();

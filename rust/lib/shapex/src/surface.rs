@@ -1,12 +1,16 @@
 use serde::{Serialize, Deserialize};
 
 use crate::base::*;
+use crate::transform::*;
 use crate::curve::*;
-
+use crate::mesh::*;
 use crate::geom2d;
 use crate::geom3d;
-use crate::transform::*;
-use crate::mesh::*;
+
+pub mod intersection;
+pub use intersection::SurfaceIntersection;
+pub use intersection::CurveSurfaceIntersection;
+
 // use crate::log;
 
 
@@ -43,6 +47,53 @@ impl SurfaceType {
     match self {
       Self::Planar(plane) => plane,
       Self::Cylindrical(surf) => surf,
+    }
+  }
+
+  pub fn intersect(&self, other: &Self) -> SurfaceIntersection {
+    match self {
+      // Plane
+      SurfaceType::Planar(plane) => match other {
+        SurfaceType::Planar(surface) => intersection::plane_plane(plane, surface),
+        SurfaceType::Cylindrical(_surface) => SurfaceIntersection::None,
+      },
+
+      // CylindricalSurface
+      SurfaceType::Cylindrical(_surface) => match other {
+        SurfaceType::Planar(_surface) => SurfaceIntersection::None,
+        SurfaceType::Cylindrical(_surface) => SurfaceIntersection::None,
+      },
+    }
+  }
+}
+
+
+impl CurveType {
+  pub fn intersect_surface(&self, other: &SurfaceType) -> CurveSurfaceIntersection {
+    match self {
+      // Line
+      CurveType::Line(line) => match other {
+        SurfaceType::Planar(surface) => intersection::line_plane(line, surface),
+        SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+      },
+
+      // Arc
+      CurveType::Arc(_arc) => match other {
+        SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+      },
+
+      // Circle
+      CurveType::Circle(_circle) => match other {
+        SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+      },
+
+      // Bezier Spline
+      CurveType::BezierSpline(_spline) => match other {
+        SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+      },
     }
   }
 }
@@ -124,6 +175,10 @@ impl Plane {
       u: m.transform_vector(Vec3::new(1.0, 0.0, 0.0)),
       v: m.transform_vector(Vec3::new(0.0, 1.0, 0.0)),
     }
+  }
+
+  pub fn d(&self) -> f64 {
+    self.normal().dot(self.origin.to_vec())
   }
 
   pub fn normal(&self) -> Vec3 {

@@ -27,7 +27,6 @@ impl Default for Sketch {
 }
 
 impl Sketch {
-
   pub fn get_profiles(&self, include_outer: bool) -> Vec<Profile> {
     let planar_elements = &self.elements;
     let cut_elements = Self::all_split(&planar_elements);

@@ -1,6 +1,6 @@
 use shapex::*;
 
-use crate::base::*;
+use crate::references::*;
 use crate::Uuid;
 use crate::Component;
 use crate::Sketch;
@@ -26,10 +26,10 @@ impl Feature {
 
 
 pub trait FeatureTrait {
-  fn preview(&self) -> Option<Compound>;
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError>;
+  fn execute(&self, top_comp: &mut Component) -> Result<(), FeatureError>;
   fn modified_components(&self) -> Vec<CompRef>;
-  fn repair(&mut self) -> Result<(), FeatureError>;
+  fn repair(&mut self, _top_comp: &Component) {}
+  fn preview(&self) -> Option<Compound> { None }
 }
 
 
@@ -38,6 +38,7 @@ pub enum FeatureType {
   CreateComponent(CreateComponentFeature),
   CreateSketch(CreateSketchFeature),
   Extrusion(ExtrusionFeature),
+  Draft(DraftFeature),
 }
 
 impl FeatureType {
@@ -46,6 +47,7 @@ impl FeatureType {
       Self::CreateComponent(f) => f,
       Self::CreateSketch(f) => f,
       Self::Extrusion(f) => f,
+      Self::Draft(f) => f,
     }
   }
 
@@ -54,6 +56,7 @@ impl FeatureType {
       Self::CreateComponent(f) => f,
       Self::CreateSketch(f) => f,
       Self::Extrusion(f) => f,
+      Self::Draft(f) => f,
     }
   }
 }
@@ -133,9 +136,7 @@ impl CreateComponentFeature {
 }
 
 impl FeatureTrait for CreateComponentFeature {
-  fn preview(&self) -> Option<Compound> { None }
-
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
+  fn execute(&self, top_comp: &mut Component) -> Result<(), FeatureError> {
     let comp = top_comp.find_child_mut(&self.component_id).unwrap();
     let new_comp = comp.create_component();
     new_comp.id = self.new_component_id;
@@ -144,10 +145,6 @@ impl FeatureTrait for CreateComponentFeature {
 
   fn modified_components(&self) -> Vec<CompRef> {
     vec![self.component_id]
-  }
-
-  fn repair(&mut self) -> Result<(), FeatureError> {
-    Ok(())
   }
 }
 
@@ -166,43 +163,22 @@ impl CreateSketchFeature {
 }
 
 impl FeatureTrait for CreateSketchFeature {
-  fn preview(&self) -> Option<Compound> { None }
-
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
+  fn execute(&self, top_comp: &mut Component) -> Result<(), FeatureError> {
     // Refetch sketch plane from face or plane helper
-    self.sketch.borrow_mut().work_plane = match &self.plane {
-      PlanarRef::FaceRef(face_ref) => {
-        let comp = top_comp.find_child(&face_ref.component_id).unwrap();
-        let face = comp.compound.find_face_from_bounds(&face_ref.bounds);
-        if let Some(face) = face {
-          let face = face.borrow();
-          match &face.surface {
-            SurfaceType::Planar(plane) => plane.as_transform(),
-            _ => panic!("Expected SurfaceType::Planar in {:?}, but got {:?}", self.plane, face.surface),
-          }
-        } else {
-          return Err(FeatureError::Error("Sketch plane was lost".into()));
-        }
-      },
-      PlanarRef::HelperRef(helper) => {
-        let helper = helper.borrow();
-        if let ConstructionHelperType::Plane(plane) = &helper.helper_type {
-          plane.as_transform()
-        } else { panic!("Expected ConstructionHelperType::Plane, but got {:?}", helper.helper_type) }
-      },
+    let result = if let Some(plane) = self.plane.get_plane(top_comp) {
+      self.sketch.borrow_mut().work_plane = plane.as_transform();
+      Ok(())
+    } else {
+      Err(FeatureError::Warning("Sketch plane was lost".into()))
     };
     // Fetch component and add sketch
     let comp = top_comp.find_child_mut(&self.component_id).unwrap();
     comp.add_sketch(self.sketch.clone());
-    Ok(())
+    result
   }
 
   fn modified_components(&self) -> Vec<CompRef> {
     vec![self.component_id]
-  }
-
-  fn repair(&mut self) -> Result<(), FeatureError> {
-    Ok(())
   }
 }
 
@@ -243,7 +219,7 @@ impl FeatureTrait for ExtrusionFeature {
     }
   }
 
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
+  fn execute(&self, top_comp: &mut Component) -> Result<(), FeatureError> {
     let mut profiles = self.profiles.clone();
     let result = update_profiles(&mut profiles);
     if let Err(FeatureError::Error(_)) = result {
@@ -259,7 +235,50 @@ impl FeatureTrait for ExtrusionFeature {
     vec![self.component_id]
   }
 
-  fn repair(&mut self) -> Result<(), FeatureError> {
-    update_profiles(&mut self.profiles)
+  fn repair(&mut self, _top_comp: &Component) {
+    update_profiles(&mut self.profiles).ok();
+  }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct DraftFeature {
+  pub fixed_plane: PlanarRef,
+  pub faces: Vec<FaceRef>,
+  pub angle: Deg<f64>,
+}
+
+impl DraftFeature {
+  pub fn into_enum(self) -> FeatureType {
+    FeatureType::Draft(self)
+  }
+}
+
+impl FeatureTrait for DraftFeature {
+  fn execute(&self, top_comp: &mut Component) -> Result<(), FeatureError> {
+    if let Some(plane) = self.fixed_plane.get_plane(top_comp) {
+      let found_faces = self.faces.iter().filter_map(|face| face.get_face(top_comp) ).cloned().collect();
+      //XXX should group faces by component and apply draft to all affected compounds
+      let result = features::draft(&found_faces, &plane, self.angle)
+      .map_err(|error| FeatureError::Error(error) );
+      if found_faces.len() == self.faces.len() {
+        result
+      } else {
+        Err(result.err().unwrap_or(FeatureError::Warning("Some faces could not be found".into())))
+      }
+    } else {
+      Err(FeatureError::Error("Reference plane was lost".into()))
+    }
+  }
+
+  fn modified_components(&self) -> Vec<CompRef> {
+    let mut ids: Vec<Uuid> = self.faces.iter().map(|face| face.component_id ).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+  }
+
+  fn repair(&mut self, top_comp: &Component) {
+    self.faces.retain(|face| face.get_face(top_comp).is_some() );
   }
 }

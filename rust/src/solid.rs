@@ -67,7 +67,7 @@ impl JsFace {
   pub fn tesselate(&self) -> JsBufferGeometry {
     let this = self.real.borrow();
     JsBufferGeometry::from(
-      this.get_surface().tesselate().to_buffer_geometry()
+      this.make_surface().tesselate().to_buffer_geometry()
     )
   }
 
@@ -76,7 +76,7 @@ impl JsFace {
     match &face.surface {
       SurfaceType::Planar(_) => JsValue::from(JsPlanarRef::new(PlanarRef::FaceRef(FaceRef {
         component_id: self.component_id,
-        bounds: face.get_edge_set(),
+        bounds: face.get_edge_ids(),
       }))),
       SurfaceType::Cylindrical(_surface) => todo!(),
     }
@@ -109,7 +109,7 @@ impl JsEdge {
 
   pub fn tesselate(&self) -> Array {
     // points_to_js(self.real.borrow().curve.as_curve().tesselate())
-    points_to_js(self.real.borrow().left_half.borrow().get_curve().tesselate())
+    points_to_js(self.real.borrow().left_half.borrow().make_curve().tesselate())
   }
 }
 

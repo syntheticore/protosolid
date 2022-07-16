@@ -92,7 +92,6 @@ impl Controllable for BezierSpline {
 
   fn set_handles(&mut self, handles: Vec<Point3>) {
     self.vertices = handles;
-    self.update();
   }
 
   fn get_snap_points(&self) -> Vec<Point3> {

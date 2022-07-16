@@ -17,7 +17,7 @@ impl Meshable for Solid {
 
 impl Meshable for Face {
   fn tesselate(&self) -> Mesh {
-    let mut mesh = self.get_surface().tesselate();
+    let mut mesh = self.make_surface().tesselate();
     if self.flip_normal { mesh.invert_normals() }
     mesh
   }

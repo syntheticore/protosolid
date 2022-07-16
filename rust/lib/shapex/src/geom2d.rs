@@ -2,7 +2,6 @@ use earcutr;
 
 use crate::base::*;
 use crate::curve::*;
-use crate::intersection::CurveIntersectionType;
 use crate::mesh::Mesh;
 
 // use crate::log;

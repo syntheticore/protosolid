@@ -12,6 +12,16 @@ pub struct Axis {
   pub direction: Vec3,
 }
 
+impl Axis {
+  pub fn from_points(points: (Point3, Point3)) -> Self {
+    Self {
+      origin: points.0,
+      direction: (points.1 - points.0).normalize(),
+    }
+  }
+}
+
+
 #[derive(Debug)]
 pub enum PlaneError {
   Underdefined,
@@ -94,6 +104,12 @@ pub fn transform_from_location_and_normal(origin: Point3, mut normal: Vec3) -> M
     normal.extend(0.0),
     origin.to_vec().extend(1.0)
   )
+}
+
+pub fn rotation_about_axis(axis: Axis, angle: Deg<f64>) -> Matrix4 {
+  let translation = Matrix4::from_translation(axis.origin.to_vec());
+  let rotation = Matrix4::from_axis_angle(axis.direction, angle);
+  translation * rotation * translation.invert().unwrap()
 }
 
 

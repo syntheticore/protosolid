@@ -4,11 +4,12 @@ use serde::{Serialize, Deserialize};
 use crate::base::*;
 use crate::transform::*;
 use crate::geom2d;
-use crate::intersection;
-use crate::intersection::CurveIntersection;
-use crate::intersection::CurveIntersectionType;
-use crate::surface::Surface;
+use crate::Surface;
 use crate::Plane;
+
+pub mod intersection;
+pub use intersection::CurveIntersection;
+pub use intersection::CurveIntersectionType;
 
 // use crate::log;
 
@@ -35,8 +36,8 @@ pub trait Curve: Transformable {
     }).collect()
   }
 
-  fn tesselate_adaptive(&self, max_deviation: f64, max_angle: Deg<f64>) -> PolyLine {
-    let mut poly = vec![(0.0, self.sample(0.0)), (1.0, self.sample(1.0))];
+  fn tesselate_adaptive(&self, max_deviation: f64, max_angle: Deg<f64>, trims: (f64, f64)) -> PolyLine {
+    let mut poly = vec![(trims.0, self.sample(trims.0)), (trims.1, self.sample(trims.1))];
     self.tesselate_adaptive_recurse(&mut poly, 0, max_deviation, max_angle.into());
     poly.iter().map(|pair| pair.1 ).collect()
   }
@@ -64,7 +65,7 @@ pub trait Curve: Transformable {
   }
 
   fn midpoint(&self) -> Point3 {
-    self.sample(0.5)
+    self.sample(self.param_at_length(self.length() / 2.0))
   }
 
   //XXX Potentially not correct for every type
@@ -129,6 +130,43 @@ impl CurveType {
       Self::BezierSpline(spline) => spline.id = id,
     }
   }
+
+  pub fn intersect(&self, other: &Self) -> CurveIntersectionType {
+    match self {
+      // Line
+      CurveType::Line(line) => match other {
+        CurveType::Line(other) => intersection::line_line(line, other),
+        CurveType::Circle(other) => intersection::line_circle(line, other),
+        CurveType::Arc(_other) => CurveIntersectionType::None,
+        CurveType::BezierSpline(other) => intersection::line_spline(line, other),
+      },
+
+      // Arc
+      CurveType::Arc(_arc) => match other {
+        CurveType::Line(_other) => CurveIntersectionType::None,
+        CurveType::Circle(_other) => CurveIntersectionType::None,
+        CurveType::Arc(_other) => CurveIntersectionType::None,
+        CurveType::BezierSpline(_other) => CurveIntersectionType::None,
+      },
+
+      // Circle
+      CurveType::Circle(circle) => match other {
+        CurveType::Line(other) => intersection::line_circle(other, circle),
+        CurveType::Circle(_other) => CurveIntersectionType::None,
+        CurveType::Arc(_other) => CurveIntersectionType::None,
+        CurveType::BezierSpline(_other) => CurveIntersectionType::None,
+      },
+
+      // Bezier Spline
+      CurveType::BezierSpline(spline) => match other {
+        CurveType::Line(other) => intersection::line_spline(other, spline), //XXX need to switch return values
+        CurveType::Circle(_other) => CurveIntersectionType::None,
+        CurveType::Arc(_other) => CurveIntersectionType::None,
+        CurveType::BezierSpline(_other) => CurveIntersectionType::None,
+      },
+    }
+  }
+
 
   pub fn split(&self, cutter: &Self) -> Vec<Self> {
     match self {
@@ -278,7 +316,7 @@ impl TrimmedCurve {
   }
 
   pub fn intersect(&self, other: &Self) -> CurveIntersectionType {
-    let mut intersection = intersection::intersect(&self.base, &other.base);
+    let mut intersection = self.base.intersect(&other.base);
     match intersection {
       CurveIntersectionType::None
       | CurveIntersectionType::Contained //XXX Needs to be checked
@@ -339,7 +377,7 @@ impl Curve for TrimmedCurve {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_adaptive(0.025, Deg(20.0))
+    self.tesselate_adaptive(0.025, Deg(20.0), (0.0, 1.0))
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
@@ -400,7 +438,7 @@ impl Line {
   }
 
   pub fn split_with(&self, cutter: &CurveType) -> Vec<Line> {
-    match intersection::intersect(&self.clone().into_enum(), cutter) {
+    match self.clone().into_enum().intersect(cutter) {
       intersection::CurveIntersectionType::None
       | intersection::CurveIntersectionType::Contained
       | intersection::CurveIntersectionType::Touch(_)
@@ -437,7 +475,10 @@ impl Curve for Line {
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
-    (p - self.points.0).magnitude() / self.length()
+    if p.almost(self.points.0) { return 0.0 }
+    let vec = p - self.points.0;
+    let direction = (self.points.1 - self.points.0).normalize();
+    (vec).dot(direction) / self.length()
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -646,29 +687,19 @@ impl Transformable for Circle {
 }
 
 
-// const LUT_STEPS: usize = 10;
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BezierSpline {
   pub id: Uuid,
   pub vertices: Vec<Point3>,
-  pub lut: Vec<Point3>,
 }
 
 impl BezierSpline {
   pub fn new(vertices: Vec<Point3>) -> Self {
-    let mut this = Self {
+    let this = Self {
       id: Uuid::new_v4(),
       vertices: vertices,
-      lut: vec![],
     };
-    this.update();
     this
-  }
-
-  pub fn update(&mut self) {
-    // self.lut = self.tesselate_fixed((self.vertices.len() * LUT_STEPS).try_into().unwrap())
-    self.lut = self.tesselate_adaptive(0.025, Deg(20.0))
   }
 
   // de Casteljau's algorithm
@@ -770,12 +801,12 @@ impl Curve for BezierSpline {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.lut.clone()
+    self.tesselate_adaptive(0.025, Deg(20.0), (0.0, 1.0))
   }
 
-  fn length_between(&self, _start: f64, _end: f64) -> f64 { //XXX use bounds
-    let mut last_p = self.lut[0];
-    self.lut.iter().fold(0.0, |acc, p| {
+  fn length_between(&self, start: f64, end: f64) -> f64 { //XXX Replace with proper solution
+    let mut last_p = self.sample(start);
+    self.tesselate_adaptive(0.025, Deg(20.0), (start, end)).iter().fold(0.0, |acc, p| {
       let dist = last_p.distance(*p);
       last_p = *p;
       acc + dist
@@ -790,10 +821,6 @@ impl Curve for BezierSpline {
     length / self.length() //XXX take non uniform chord lengths into account
   }
 
-  fn midpoint(&self) -> Point3 {
-    self.sample(self.param_at_length(self.length() / 2.0))
-  }
-
   fn into_enum(self) -> CurveType {
     CurveType::BezierSpline(self)
   }
@@ -802,9 +829,6 @@ impl Curve for BezierSpline {
 impl Transformable for BezierSpline {
   fn transform(&mut self, transform: &Matrix4) {
     for v in  &mut self.vertices {
-      *v = transform.transform_point(*v);
-    }
-    for v in  &mut self.lut {
       *v = transform.transform_point(*v);
     }
   }
@@ -936,5 +960,15 @@ mod tests {
     println!("{:#?}", trimmed.endpoints());
     almost_eq(trimmed.endpoints().0, bounds.1);
     almost_eq(trimmed.endpoints().1, bounds.0);
+  }
+
+  #[test]
+  fn negative_trims() {
+    let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)).into_enum();
+    let bounds = (Point3::new(0.0, -1.0, 0.0), Point3::new(0.0, 0.5, 0.0));
+    let trimmed = TrimmedCurve::from_bounds(line.clone(), bounds, line.clone());
+    println!("{:#?}", trimmed);
+    almost_eq(trimmed.trims.0, -1.0);
+    almost_eq(trimmed.trims.1, 0.5);
   }
 }

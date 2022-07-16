@@ -112,7 +112,7 @@
       &.active svg
         color: $highlight
       &.error svg
-        color: $red * 1.4 !important
+        color: darken($red, 30%) !important
       &.warning svg
         color: $warn !important
 

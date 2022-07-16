@@ -21,7 +21,7 @@ impl Volume for Solid {
 impl Volume for Shell {
   fn surface_area(&self) -> f64 {
     self.faces.iter()
-    .fold(0.0, |acc, face| acc + face.borrow().get_surface().area() )
+    .fold(0.0, |acc, face| acc + face.borrow().make_surface().area() )
   }
 
   fn volume(&self) -> f64 {

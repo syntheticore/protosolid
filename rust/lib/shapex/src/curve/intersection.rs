@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 
 use crate::base::*;
 use crate::curve::*;
-use crate::surface::*;
 use crate::geom2d::cross_2d;
 
 
@@ -13,26 +12,6 @@ pub enum CurveIntersectionType {
   Pierce(Vec<CurveIntersection>), // Endpoint touching curve/surface
   Cross(Vec<CurveIntersection>), // Actual intersections
   Extended(Vec<CurveIntersection>), // Intersections outside geometric bounds
-  Contained, // Overlap, Infinite intersections
-}
-
-
-#[derive(Debug, PartialEq)]
-pub enum SurfaceIntersectionType {
-  None,
-  Touch(TrimmedCurve),
-  Cross(TrimmedCurve),
-  Extended(TrimmedCurve),
-  Contained, // Overlap, Infinite intersections
-}
-
-
-#[derive(Debug, PartialEq)]
-pub enum CurveSurfaceIntersectionType {
-  None,
-  Pierce(Vec<CurveIntersection>),
-  Cross(Vec<CurveIntersection>),
-  Extended(Vec<CurveIntersection>),
   Contained, // Overlap, Infinite intersections
 }
 
@@ -53,42 +32,6 @@ impl CurveIntersection {
   }
 }
 
-
-pub fn intersect(own: &CurveType, other: &CurveType) -> CurveIntersectionType {
-  match own {
-    // Line
-    CurveType::Line(line) => match other {
-      CurveType::Line(other) => line_line(line, other),
-      CurveType::Circle(other) => line_circle(line, other),
-      CurveType::Arc(_other) => CurveIntersectionType::None,
-      CurveType::BezierSpline(other) => line_spline(line, other),
-    },
-
-    // Arc
-    CurveType::Arc(_arc) => match other {
-      CurveType::Line(_other) => CurveIntersectionType::None,
-      CurveType::Circle(_other) => CurveIntersectionType::None,
-      CurveType::Arc(_other) => CurveIntersectionType::None,
-      CurveType::BezierSpline(_other) => CurveIntersectionType::None,
-    },
-
-    // Circle
-    CurveType::Circle(circle) => match other {
-      CurveType::Line(other) => line_circle(other, circle),
-      CurveType::Circle(_other) => CurveIntersectionType::None,
-      CurveType::Arc(_other) => CurveIntersectionType::None,
-      CurveType::BezierSpline(_other) => CurveIntersectionType::None,
-    },
-
-    // Bezier Spline
-    CurveType::BezierSpline(spline) => match other {
-      CurveType::Line(other) => line_spline(other, spline), //XXX need to switch return values
-      CurveType::Circle(_other) => CurveIntersectionType::None,
-      CurveType::Arc(_other) => CurveIntersectionType::None,
-      CurveType::BezierSpline(_other) => CurveIntersectionType::None,
-    },
-  }
-}
 
 // https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
 pub fn line_line(own: &Line, other: &Line) -> CurveIntersectionType {
@@ -147,6 +90,7 @@ pub fn line_line(own: &Line, other: &Line) -> CurveIntersectionType {
   }
 }
 
+
 pub fn line_spline(line: &Line, spline: &BezierSpline) -> CurveIntersectionType {
   let spline_end_points = spline.endpoints();
   // Curves touch at endpoints
@@ -160,6 +104,7 @@ pub fn line_spline(line: &Line, spline: &BezierSpline) -> CurveIntersectionType 
     CurveIntersectionType::None
   }
 }
+
 
 pub fn line_circle(line: &Line, circle: &Circle) -> CurveIntersectionType {
   let direction = line.points.1 - line.points.0;
@@ -189,35 +134,6 @@ pub fn line_circle(line: &Line, circle: &Circle) -> CurveIntersectionType {
       CurveIntersectionType::Cross(intersections.into_iter().collect())
     } else {
       CurveIntersectionType::Extended(intersections.into_iter().collect())
-    }
-  }
-}
-
-pub fn line_plane(line: &Line, plane: &Plane) -> CurveSurfaceIntersectionType {
-  let n = plane.normal();
-  let u = line.points.1 - line.points.0;
-  let n_dot_u = n.dot(u);
-  if n_dot_u <= EPSILON {
-    // Line is parallel to plane
-    if plane.contains_point(line.points.0) {
-      // Line lies completely on plane
-      CurveSurfaceIntersectionType::Contained
-    } else {
-      CurveSurfaceIntersectionType::None
-    }
-  } else {
-    let s = n.dot(plane.origin - line.points.0) / n_dot_u;
-    let p = line.points.0 + u * s;
-    if s >= 0.0 && s <= 1.0 {
-      // Line segment intersects plane
-      if s == 0.0 || s == 1.0 {
-        CurveSurfaceIntersectionType::Pierce(vec![CurveIntersection::new(p, s)])
-      } else {
-        CurveSurfaceIntersectionType::Cross(vec![CurveIntersection::new(p, s)])
-      }
-    } else {
-      // The ray along the given line intersects plane
-      CurveSurfaceIntersectionType::Extended(vec![CurveIntersection::new(p, s)])
     }
   }
 }

@@ -1,5 +1,5 @@
 use crate::base::*;
-use crate::geom3d::Axis;
+use crate::geom3d;
 
 
 pub trait Transformable {
@@ -13,12 +13,8 @@ pub trait Transformable {
     self.transform(&Matrix4::from_scale(scalar));
   }
 
-  fn mirror(&mut self, axis: &Axis) {
-    self.transform(&Matrix4::from_nonuniform_scale(
-      axis.direction.x,
-      axis.direction.y,
-      axis.direction.z,
-    ));
+  fn rotate_about_axis(&mut self, axis: geom3d::Axis, angle: Deg<f64>) {
+    self.transform(&geom3d::rotation_about_axis(axis, angle));
   }
 }
 

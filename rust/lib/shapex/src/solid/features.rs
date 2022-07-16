@@ -1,9 +1,10 @@
 use crate::base::*;
-// use crate::surface::*;
 use crate::solid::*;
-
 use crate::geom2d;
 use crate::geom3d;
+use crate::geom3d::Axis;
+use crate::surface::intersection;
+use crate::surface::SurfaceType;
 
 // use crate::log;
 
@@ -55,6 +56,23 @@ pub fn make_cylinder(radius: f64, height: f64) -> Result<Compound, String> {
     TrimmedCurve::new(Circle::new(Point3::origin(), radius).into_enum())
   ]];
   extrude(&region, height)
+}
+
+pub fn draft(faces: &Vec<Ref<Face>>, fixed_plane: &Plane, angle: Deg<f64>) -> Result<(), String> {
+  for face in faces {
+    let mut face = face.borrow_mut();
+    match &face.surface {
+      SurfaceType::Planar(plane) => {
+        let isect = intersection::plane_plane(plane, fixed_plane);
+        if let Some(line) = isect.get_line() {
+          let axis = Axis::from_points(line.endpoints());
+          face.surface.as_surface_mut().rotate_about_axis(axis, angle);
+        }
+      },
+      SurfaceType::Cylindrical(_) => todo!(),
+    }
+  }
+  Ok(())
 }
 
 

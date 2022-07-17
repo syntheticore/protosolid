@@ -38,6 +38,10 @@ class Feature {
     }
   }
 
+  typename() {
+    return this.title
+  }
+
   execute() {
     this.updateFeature()
     this.id = this.real.id()
@@ -119,7 +123,7 @@ export class CreateSketchFeature extends Feature {
 
 export class ExtrudeFeature extends Feature {
   constructor(document, real) {
-    super(document, real, true, 'Extrude', 'layer-group', {
+    super(document, real, true, 'Extrusion', 'layer-group', {
       profiles: {
         title: 'Profile',
         type: 'profile',

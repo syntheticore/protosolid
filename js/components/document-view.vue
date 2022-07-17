@@ -73,7 +73,7 @@
       :document="document"
       :active-tool="activeTool"
       :active-feature="activeFeature"
-      :selection="selection"
+      :selection.sync="selection"
       @update:active-feature="activateFeature"
     )
 </template>
@@ -150,6 +150,7 @@
   import RadioBar from './radio-bar.vue'
   import FeatureBar from './feature-bar.vue'
 
+  import { Selection } from './../selection.js'
   import {
     CreateComponentFeature,
     CreateSketchFeature,
@@ -182,7 +183,7 @@
           }
           this.previewView = null
           this.dirtyView = null
-          this.selection = null
+          this.selection = new Selection()
           this.highlight = null
           this.activeFeature = null
           // // ViewPort/transloader has consumed our faces on unload
@@ -195,7 +196,7 @@
       return {
         activeTool: null,
         activeFeature: null,
-        selection: null,
+        selection: new Selection(),
         highlight: null,
         previewView: null,
         dirtyView: null,
@@ -237,7 +238,7 @@
         })
         this.document.activeComponent = this.findValidComponent(this.document.activeComponent)
         this.document.activeSketch = null
-        this.selection = null
+        this.selection = new Selection()
       },
 
       findValidComponent(comp) {
@@ -330,7 +331,7 @@
 
       deleteSolid: function(solid) {
         solid.remove()
-        if(this.selection === solid) this.selection = null
+        this.selection = this.selection.delete(solid)
         this.$root.$emit('component-changed', solid.component)
       },
 
@@ -371,13 +372,15 @@
       keyDown: function(keyCode) {
         if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection
-          if(!this.selection) return
-          const type = this.selection.typename()
-          if(type == 'Component') {
-            this.deleteComponent(this.selection)
-          } else if(type == 'Solid') {
-            this.deleteSolid(this.selection)
-          }
+          if(!this.selection.set.size) return
+          this.selection.set.forEach(item => {
+            const type = item.typename()
+            if(type == 'Component') {
+              this.deleteComponent(item)
+            } else if(type == 'Solid') {
+              this.deleteSolid(item)
+            }
+          })
         }
       },
     },

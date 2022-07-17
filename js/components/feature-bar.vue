@@ -27,6 +27,7 @@
         .feature(
           :title="featureTitle(feature)"
           :class="featureStyle(feature)"
+          @click="$emit('update:selection', selection.handle(feature, $root.isCtrlPressed))"
           @dblclick="openFeature(feature)"
         )
           fa-icon(:icon="feature.icon" fixed-width)
@@ -145,6 +146,7 @@
 
 <script>
   import FeatureBox from './feature-box.vue'
+  import { Selection } from './../selection.js'
 
   export default {
     name: 'FeatureBar',
@@ -269,7 +271,7 @@
       featureStyle: function(feature) {
         const error = feature.real.error()
         const style = {
-          active: this.isActive(feature),
+          active: this.isActive(feature) || this.selection.has(feature),
         }
         if(error) style[error[1]] = true
         return style

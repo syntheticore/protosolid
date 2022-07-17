@@ -695,11 +695,10 @@ pub struct BezierSpline {
 
 impl BezierSpline {
   pub fn new(vertices: Vec<Point3>) -> Self {
-    let this = Self {
+    Self {
       id: Uuid::new_v4(),
-      vertices: vertices,
-    };
-    this
+      vertices,
+    }
   }
 
   // de Casteljau's algorithm

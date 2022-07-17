@@ -2,7 +2,7 @@
   li.sketch-treelet(
     @dblclick="$emit('update:active-sketch', sketch)"
   )
-    //- @click="$emit('update:selection', sketch)"
+    //- @click="$emit('update:selection', selection.handle(sketch, $root.isCtrlPressed))"
     //- @mouseenter="$emit('update:highlight', sketch)"
     //- @mouseleave="$emit('update:highlight', null)"
     .box

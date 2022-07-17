@@ -80,6 +80,7 @@
     align-items: center
     background: $dark1
     padding: 0 10px
+    min-width: 60px
     svg
       font-size: 21px
       color: $bright1

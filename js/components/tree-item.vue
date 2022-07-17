@@ -5,7 +5,7 @@
       @dblclick="$emit('update:active-component', component)"
       @mouseenter="$emit('update:highlight', component)"
       @mouseleave="$emit('update:highlight', null)"
-      @click="$emit('update:selection', component)"
+      @click="$emit('update:selection', selection.handle(component, $root.isCtrlPressed))"
     )
       fa-icon.expander(
         icon="caret-down"
@@ -86,6 +86,7 @@
         :key="'solid' + i"
         :solid="solid"
         :component="component"
+        :selection="selection"
         :index="i"
         v-on="$listeners"
       )

@@ -420,12 +420,13 @@
       keyDown: function(keyCode) {
         if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection
-          if(this.selection) {
-            console.log(this.selection)
-            const type = this.selection.typename()
-            if(type != 'Solid' && type != 'Component') {
-              this.deleteElement(this.selection)
-            }
+          if(this.selection.set.size) {
+            this.selection.set.forEach(item => {
+              const type = item.typename()
+              if(type != 'Solid' && type != 'Component') {
+                this.deleteElement(item)
+              }
+            })
           }
         } else if(keyCode == 18) { // alt
           // this.guides = []
@@ -516,8 +517,8 @@
       deleteElement: function(elem) {
         this.renderer.removeGizmo()
         elem.remove()
+        this.$emit('update:selection', this.selection.delete(elem))
         this.componentChanged(this.activeComponent)
-        this.$emit('update:selection', null)
       },
 
       componentChanged: function(comp, recursive) {

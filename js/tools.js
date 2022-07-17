@@ -65,8 +65,8 @@ export class ManipulationTool extends HighlightTool {
 
   click(vec, coords) {
     this.getObject(coords, true).then(curve => {
-      if(curve) return this.viewport.renderer.render()
-      this.viewport.$emit('update:selection', null)
+      if(curve || this.viewport.$root.isCtrlPressed) return this.viewport.renderer.render()
+      this.viewport.$emit('update:selection', this.viewport.selection.clear())
       // this.viewport.renderer.removeGizmo()
     })
   }
@@ -78,7 +78,7 @@ export class ManipulationTool extends HighlightTool {
     }
     this.getObject(coords).then(curve => {
       if(!curve) return
-      this.viewport.$emit('update:selection', curve)
+      this.viewport.$emit('update:selection', this.viewport.selection.handle(curve, this.viewport.$root.isCtrlPressed))
       // this.viewport.gizmo.attach(object)
     })
   }

@@ -2,7 +2,7 @@
   li.solid-treelet(
     @mouseenter="$emit('update:highlight', solid)"
     @mouseleave="$emit('update:highlight', null)"
-    @click="$emit('update:selection', solid)"
+    @click="$emit('update:selection', selection.handle(solid, $root.isCtrlPressed))"
   )
     .box
       header
@@ -30,6 +30,7 @@
       solid: Object,
       index: Number,
       component: Object,
+      selection: Object,
     },
 
     data() {

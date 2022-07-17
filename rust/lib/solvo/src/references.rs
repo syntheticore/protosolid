@@ -20,10 +20,17 @@ pub type CompRef = Uuid;
 #[derive(Debug, Clone)]
 pub struct FaceRef {
   pub component_id: CompRef,
-  pub bounds: HashSet<Uuid>, // Edge/Curve Ids
+  pub bounds: HashSet<Uuid>,
 }
 
 impl FaceRef {
+  // pub fn new(face: &Face, component_id: Uuid) -> Self {
+  //   Self {
+  //     component_id,
+  //     bounds: face.get_edge_ids(),
+  //   }
+  // }
+
   pub fn get_face<'a>(&self, top_comp: &'a Component) -> Option<&'a Ref<Face>> {
     let comp = top_comp.find_child(&self.component_id).unwrap();
     comp.compound.find_face_from_bounds(&self.bounds)

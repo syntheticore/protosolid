@@ -9,50 +9,20 @@
     //-   | Bring up actions
 
     transition(name="fade")
-      .selection-info.bordered(v-if="selection")
+      .selection-info.bordered(v-if="selection.set.size")
         div
-          //- span # Objects
-          span 1 {{type}}
+          span {{ description.title }}
 
-        div(v-if="type == 'Solid'")
-          span Weight
-          span(v-if="selection.component.material")
-            | {{ (selection.volume * selection.component.material.density).toFixed(2) }} g
-          span.warn(v-else) No Material
+        div(v-if="description.isMixed")
+          span # Total
+          span
+            | {{ selection.set.size }}
 
-        div(v-if="type == 'Component'")
-          span Weight
-          span(v-if="selection.getWeight() !== undefined")
-            | {{ selection.getWeight().toFixed(2) }} g
-          span.warn(v-else) No Material
-
-        div(v-if="type == 'Solid'")
-          span Volume
-          span {{ selection.volume.toFixed(2) }} cm³
-
-        div(v-if="type == 'Solid'")
-          span Surface Area
-          span {{ selection.area.toFixed(2) }} cm²
-
-        div(v-if="type == 'Line' || type == 'BezierSpline'")
-          span Length
-          span {{ selection.get_length().toFixed(2) }} mm
-
-        div(v-if="type == 'Circle'")
-          span Radius
-          span {{ selection.get_radius().toFixed(2) }} mm
-
-        div(v-if="type == 'Circle'")
-          span Diameter
-          span {{ (selection.get_radius() * 2).toFixed(2) }} mm
-
-        div(v-if="type == 'Circle'")
-          span Circumfence
-          span {{ selection.get_length().toFixed(2) }} mm
-
-        div(v-if="type == 'Circle'")
-          span Area
-          span {{ selection.get_area().toFixed(2) }} mm²
+        div(v-for="prop in description.properties")
+          span {{ prop.title }}
+          span(v-if="!prop.warn")
+            | {{ prop.value.toFixed(2) }} {{ prop.unit }}
+          span.warn(v-else) {{ prop.value }}
 
     //- .debug-panel
     //-   button.button(@click="splitAll") Split all
@@ -140,6 +110,15 @@
 
 
 <script>
+  import pluralize from 'pluralize'
+
+  function groupBy(xs, key) {
+    return xs.reduce(function(rv, x) {
+      (rv[x[key]()] = rv[x[key]()] || []).push(x)
+      return rv
+    }, {})
+  }
+
   export default {
     name: 'FooterView',
 
@@ -151,12 +130,105 @@
     },
 
     computed: {
-      type: function() {
-        return this.selection.typename()
+      description: function() {
+        const selection = [...this.selection.set]
+        const uniqueNames = selection.map(item => item.typename() ).filter((value, index, self) => self.indexOf(value) === index )
+        const groups = groupBy(selection, 'typename')
+        const propsPerItem = selection.map(item => this.produceProperties(item) ).filter(Boolean)
+        return {
+          title: Object.keys(groups).map(typename => {
+            const group = groups[typename]
+            return `${group.length} ${pluralize(typename, group.length)}`
+          }).join(' + '),
+
+          properties: propsPerItem.reduce((acc, propSet) => {
+            Object.keys(acc).forEach(key => {
+              const prop = acc[key]
+              const otherProp = propSet[key]
+              if(!otherProp) {
+                delete acc[key]
+              } else if(typeof prop.value == 'number' && typeof otherProp.value == 'number') {
+                prop.value += otherProp.value
+              }
+              prop.title = key
+            })
+            return acc
+          }),
+
+          isMixed: Object.keys(groups).length > 1,
+        }
       },
     },
 
     methods: {
+      produceProperties: function(item) {
+        const type = item.typename()
+        if(type == 'Solid') {
+          const weight = item.component.material ? item.volume * item.component.material.density : 'No Material'
+          return {
+            Weight: {
+              title: 'Weight',
+              unit: 'g',
+              value: weight,
+              warn: !item.component.material,
+            },
+            Volume: {
+              title: 'Volume',
+              unit: 'cm³',
+              value: item.volume,
+            },
+            Area: {
+              title: 'Surface Area',
+              unit: 'cm²',
+              value: item.area,
+            },
+          }
+        } else if(type == 'Component') {
+          const weight = item.getWeight()
+          return {
+            Weight: {
+              title: 'Weight',
+              unit: 'g',
+              value: weight ? weight : 'No Material',
+              warn: !weight,
+            },
+          }
+        } else if(type == 'Line' || type == 'BezierSpline') {
+          return {
+            Length: {
+              title: 'Length',
+              unit: 'mm',
+              value: item.get_length(),
+            },
+          }
+        } else if(type == 'Circle') {
+          return {
+            Radius: {
+              title: 'Radius',
+              unit: 'mm',
+              value: item.get_radius()
+            },
+            Diameter: {
+              title: 'Diameter',
+              unit: 'mm',
+              value: item.get_radius() * 2
+            },
+            Length: {
+              title: 'Circumfence',
+              unit: 'mm',
+              value: item.get_length()
+            },
+            Area: {
+              title: 'Area',
+              unit: 'cm²',
+              value: item.get_area()
+            },
+          }
+        } else {
+          return {}
+        }
+      },
+
       splitAll: function() {
         const splits = this.activeComponent.real.get_sketch().get_all_split()
         this.$root.$emit('component-changed', this.activeComponent)

@@ -111,6 +111,12 @@
           this.$root.$emit('escape')
         } else if(e.keyCode === 13) {
           this.$root.$emit('enter-pressed')
+        } else if(e.keyCode === 16) {
+          this.$root.$emit('shift-pressed')
+          this.$root.isShiftPressed = true
+        } else if(e.keyCode === 17) {
+          this.$root.$emit('ctrl-pressed')
+          this.$root.isCtrlPressed = true
         } else {
           this.$root.$emit('keydown', e.keyCode)
         }
@@ -118,6 +124,11 @@
 
       window.addEventListener('keyup', (e) => {
         this.$root.$emit('keyup', e.keyCode)
+        if(e.keyCode === 16) {
+          this.$root.isShiftPressed = false
+        } else if(e.keyCode === 17) {
+          this.$root.isCtrlPressed = false
+        }
       });
 
       this.$root.$on('component-changed', () => {

@@ -8,6 +8,7 @@ export default class Transloader {
     this.renderer = renderer
     this.onLoadElement = onLoadElement
     this.onUnloadElement = onUnloadElement
+    this.selection = []
   }
 
   setActiveComponent(comp) {
@@ -18,11 +19,13 @@ export default class Transloader {
     this.activeSketch = sketch
   }
 
-  setSelection(obj) {
+  setSelection(selection) {
     const old = this.selection
-    this.selection = obj
-    this.applyMaterials(old)
-    this.applyMaterials(obj)
+    this.selection = [...selection.set]
+    const uniqueComps = this.selection.map(obj => this.getComponent(obj) )
+      .filter((value, index, self) => self.indexOf(value) === index )
+    this.getComponents(old).forEach(comp => this.applyMaterials(comp) )
+    this.getComponents(this.selection).forEach(comp => this.applyMaterials(comp) )
   }
 
   setHighlight(obj) {
@@ -37,7 +40,7 @@ export default class Transloader {
   }
 
   isSelected(obj) {
-    return this.hasAncestor(obj, this.selection)
+    return this.selection.some(item => this.hasAncestor(obj, item) )
   }
 
   isHighlighted(obj) {
@@ -47,8 +50,7 @@ export default class Transloader {
   hasAncestor(obj, ancestor) {
     if(obj === ancestor) return true
     if(obj.constructor === alcWasm.JsFace) return this.hasAncestor(obj.solid, ancestor)
-    const comp = this.getComponent(obj)
-    return comp.hasAncestor(ancestor)
+    return this.getComponent(obj).hasAncestor(ancestor)
   }
 
   getComponent(obj) {
@@ -65,6 +67,11 @@ export default class Transloader {
       case alcWasm.JsFace:
         return obj.solid.component
     }
+  }
+
+  getComponents(objs) {
+    return objs.map(obj => this.getComponent(obj) )
+    .filter((value, index, self) => value && self.indexOf(value) === index )
   }
 
   loadTree(comp, recursive) {
@@ -246,6 +253,7 @@ export default class Transloader {
   applyMaterials(obj) {
     if(!obj || obj.deallocated) return
     const comp = this.getComponent(obj)
+    if(!comp) return
     const cache = comp.cache()
     for(const solid of comp.solids) {
       const wireMaterial = this.getWireMaterial(comp, solid)

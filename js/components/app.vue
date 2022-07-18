@@ -137,7 +137,7 @@
       })
 
       if(!window.electron) return
-      ipc.send('vue-ready')
+      setTimeout(() => ipc.send('vue-ready'), 0)
     },
 
     methods: {

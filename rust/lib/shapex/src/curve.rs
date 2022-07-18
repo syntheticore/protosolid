@@ -17,6 +17,7 @@ pub use intersection::CurveIntersectionType;
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
   fn unsample(&self, p: &Point3) -> f64; // p is expected to touch the curve
+  // fn tangent(&self, t: f64, order: i32) -> Vec3;
   fn length_between(&self, start: f64, end: f64) -> f64;
   fn tesselate(&self) -> PolyLine;
   fn into_enum(self) -> CurveType;
@@ -56,6 +57,11 @@ pub trait Curve: Transformable {
     }
   }
 
+  fn is_closed(&self) -> bool {
+    let (start, end) = self.endpoints();
+    start == end
+  }
+
   fn length(&self) -> f64 {
     self.length_between(0.0, 1.0)
   }
@@ -91,7 +97,7 @@ pub enum CurveType {
   Line(Line),
   Arc(Arc),
   Circle(Circle),
-  BezierSpline(BezierSpline),
+  Spline(Spline),
 }
 
 impl CurveType {
@@ -100,7 +106,7 @@ impl CurveType {
       Self::Line(line) => line,
       Self::Arc(arc) => arc,
       Self::Circle(circle) => circle,
-      Self::BezierSpline(spline) => spline,
+      Self::Spline(spline) => spline,
     }
   }
 
@@ -109,7 +115,7 @@ impl CurveType {
       Self::Line(line) => line,
       Self::Arc(arc) => arc,
       Self::Circle(circle) => circle,
-      Self::BezierSpline(spline) => spline,
+      Self::Spline(spline) => spline,
     }
   }
 
@@ -118,7 +124,7 @@ impl CurveType {
       Self::Line(line) => line.id,
       Self::Arc(arc) => arc.id,
       Self::Circle(circle) => circle.id,
-      Self::BezierSpline(spline) => spline.id,
+      Self::Spline(spline) => spline.id,
     }
   }
 
@@ -127,7 +133,7 @@ impl CurveType {
       Self::Line(line) => line.id = id,
       Self::Arc(arc) => arc.id = id,
       Self::Circle(circle) => circle.id = id,
-      Self::BezierSpline(spline) => spline.id = id,
+      Self::Spline(spline) => spline.id = id,
     }
   }
 
@@ -138,7 +144,7 @@ impl CurveType {
         CurveType::Line(other) => intersection::line_line(line, other),
         CurveType::Circle(other) => intersection::line_circle(line, other),
         CurveType::Arc(_other) => CurveIntersectionType::None,
-        CurveType::BezierSpline(other) => intersection::line_spline(line, other),
+        CurveType::Spline(other) => intersection::line_spline(line, other),
       },
 
       // Arc
@@ -146,7 +152,7 @@ impl CurveType {
         CurveType::Line(_other) => CurveIntersectionType::None,
         CurveType::Circle(_other) => CurveIntersectionType::None,
         CurveType::Arc(_other) => CurveIntersectionType::None,
-        CurveType::BezierSpline(_other) => CurveIntersectionType::None,
+        CurveType::Spline(_other) => CurveIntersectionType::None,
       },
 
       // Circle
@@ -154,15 +160,15 @@ impl CurveType {
         CurveType::Line(other) => intersection::line_circle(other, circle),
         CurveType::Circle(_other) => CurveIntersectionType::None,
         CurveType::Arc(_other) => CurveIntersectionType::None,
-        CurveType::BezierSpline(_other) => CurveIntersectionType::None,
+        CurveType::Spline(_other) => CurveIntersectionType::None,
       },
 
       // Bezier Spline
-      CurveType::BezierSpline(spline) => match other {
+      CurveType::Spline(spline) => match other {
         CurveType::Line(other) => intersection::line_spline(other, spline), //XXX need to switch return values
         CurveType::Circle(_other) => CurveIntersectionType::None,
         CurveType::Arc(_other) => CurveIntersectionType::None,
-        CurveType::BezierSpline(_other) => CurveIntersectionType::None,
+        CurveType::Spline(_other) => CurveIntersectionType::None,
       },
     }
   }
@@ -178,7 +184,7 @@ impl CurveType {
         Self::Line(cutter) => arc.split_with_line(cutter),
         Self::Arc(cutter) => arc.split_with_arc(cutter),
         Self::Circle(cutter) => arc.split_with_circle(cutter),
-        Self::BezierSpline(cutter) => arc.split_with_spline(cutter),
+        Self::Spline(cutter) => arc.split_with_spline(cutter),
       }.iter().map(|seg| seg.clone().into_enum() ).collect(),
 
       // Circle
@@ -198,7 +204,7 @@ impl CurveType {
             vec![arc_l.into_enum(), arc_r.into_enum()]
           } else { vec![self.clone()] },
 
-        Self::BezierSpline(cutter)
+        Self::Spline(cutter)
           => {
             let arcs = circle.split_with_spline(cutter);
             if arcs.len() > 0 {
@@ -210,12 +216,12 @@ impl CurveType {
       }
 
       // Bezier Spline
-      Self::BezierSpline(spline) => match cutter {
+      Self::Spline(spline) => match cutter {
         Self::Line(cutter) => spline.split_with_line(cutter),
         Self::Arc(cutter) => spline.split_with_arc(cutter),
         Self::Circle(cutter) => spline.split_with_circle(cutter),
-        Self::BezierSpline(cutter) => spline.split_with_spline(cutter),
-      }.iter().map(|seg| Self::BezierSpline(seg.clone())).collect(),
+        Self::Spline(cutter) => spline.split_with_spline(cutter),
+      }.iter().map(|seg| Self::Spline(seg.clone())).collect(),
     }
   }
 
@@ -485,6 +491,8 @@ impl Curve for Line {
     self.tesselate_fixed(1)
   }
 
+  fn is_closed(&self) -> bool { false }
+
   fn length_between(&self, start: f64, end: f64) -> f64 {
     self.sample(start).distance(self.sample(end))
   }
@@ -537,7 +545,7 @@ impl Arc {
 
   pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Arc> { vec![] }
 
-  pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
+  pub fn split_with_spline(&self, _spline: &Spline) -> Vec<Arc> { vec![] }
 }
 
 impl Curve for Arc {
@@ -643,7 +651,7 @@ impl Circle {
 
   pub fn split_with_circle(&self, _circle: &Circle) -> Option<(Arc, Arc)> { None }
 
-  pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Arc> { vec![] }
+  pub fn split_with_spline(&self, _spline: &Spline) -> Vec<Arc> { vec![] }
 }
 
 impl Curve for Circle {
@@ -666,6 +674,8 @@ impl Curve for Circle {
     self.tesselate_fixed(80)
   }
 
+  fn is_closed(&self) -> bool { true }
+
   fn length_between(&self, start: f64, end: f64) -> f64 {
     self.circumfence() * (start - end).abs()
   }
@@ -687,56 +697,71 @@ impl Transformable for Circle {
 }
 
 
+pub type Spline = BasisSpline;
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct BezierSpline {
+pub struct BasisSpline {
   pub id: Uuid,
-  pub vertices: Vec<Point3>,
+  pub degree: usize,
+  pub controls: Vec<Point3>,
+  pub knots: Vec<f64>,
+  pub weights: Vec<f64>,
 }
 
-impl BezierSpline {
-  pub fn new(vertices: Vec<Point3>) -> Self {
+impl BasisSpline {
+  pub fn new(controls: Vec<Point3>) -> Self {
+    let n = controls.len();
+    if n < 2 { panic!() }
+    let degree = (n - 1).min(5);
     Self {
       id: Uuid::new_v4(),
-      vertices,
+      degree,
+      controls,
+      knots: Self::clamped_knots(n, degree),
+      weights: vec![1.0; n],
     }
   }
 
-  // de Casteljau's algorithm
-  fn real_sample(&self, t: f64, vertices: &[Point3]) -> Point3 {
-    if vertices.len() == 1 {
-      vertices[0]
-    } else {
-      let len = vertices.len() - 1;
-      let mut new_vertices: Vec<Point3> = vec![];
-      for i in 0..len {
-        new_vertices.push(vertices[i] * (1.0 - t) + (vertices[i + 1] * t).to_vec());
-      }
-      self.real_sample(t, &new_vertices)
-    }
+  #[allow(dead_code)]
+  fn uniform_knots(n: usize, degree: usize) -> Vec<f64> {
+    if degree >= n {return vec![]}
+    let num_knots = n + degree + 1;
+    (0..num_knots).map(|i| i as f64 ).collect()
+  }
+
+  #[allow(dead_code)]
+  fn clamped_knots(n: usize, degree: usize) -> Vec<f64> {
+    if degree >= n {return vec![]}
+    let d = degree + 1;
+    [
+      vec![0.0; d],
+      (1..=n - d).map(|i| i as f64 ).collect(),
+      vec![(n - d + 1) as f64; d]
+    ].concat()
   }
 
   pub fn split_at(&self, t: f64) -> (Self, Self) {
     let mut left = vec![];
     let mut right = vec![];
-    self.real_split(t, &self.vertices, &mut left, &mut right);
+    self.real_split(t, &self.controls, &mut left, &mut right);
     (Self::new(left), Self::new(right))
   }
 
-  fn real_split(&self, t: f64, vertices: &[Point3], left: &mut Vec<Point3>, right: &mut Vec<Point3>) -> Point3 {
-    if vertices.len() == 1 {
-      let p = vertices[0];
+  fn real_split(&self, t: f64, controls: &[Point3], left: &mut Vec<Point3>, right: &mut Vec<Point3>) -> Point3 {
+    if controls.len() == 1 {
+      let p = controls[0];
       left.push(p);
       right.push(p);
       p
     } else {
-      let len = vertices.len() - 1;
-      let mut new_vertices: Vec<Point3> = vec![];
+      let len = controls.len() - 1;
+      let mut new_controls: Vec<Point3> = vec![];
       for i in 0..len {
-        if i == 0 { left.push(vertices[i]) }
-        if i == len - 1 { right.push(vertices[i + 1]) }
-        new_vertices.push(vertices[i] * (1.0 - t) + (vertices[i + 1] * t).to_vec());
+        if i == 0 { left.push(controls[i]) }
+        if i == len - 1 { right.push(controls[i + 1]) }
+        new_controls.push(controls[i] * (1.0 - t) + (controls[i + 1] * t).to_vec());
       }
-      self.real_split(t, &new_vertices, left, right)
+      self.real_split(t, &new_controls, left, right)
     }
   }
 
@@ -754,12 +779,9 @@ impl BezierSpline {
   }
 
   pub fn derive(&self) -> Self {
-    let mut derivative: Self = Default::default();
-    let len = self.vertices.len() - 1;
-    for i in 0..len {
-      derivative.vertices[i] = (self.vertices[i + 1] - self.vertices[i].to_vec()) * len as f64;
-    }
-    derivative
+    let len = self.controls.len() - 1;
+    let controls = (0..len).map(|i| (self.controls[i + 1] - self.controls[i].to_vec()) * len as f64 ).collect();
+    Self::new(controls)
   }
 
   fn unsample_recursive(&self, sample1: (f64, f64), sample2: (f64, f64), target: &Point3) -> f64 {
@@ -782,12 +804,28 @@ impl BezierSpline {
 
   pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Self> { vec![self.clone()] }
 
-  pub fn split_with_spline(&self, _spline: &BezierSpline) -> Vec<Self> { vec![self.clone()] }
+  pub fn split_with_spline(&self, _spline: &BasisSpline) -> Vec<Self> { vec![self.clone()] }
 }
 
-impl Curve for BezierSpline {
+impl Curve for BasisSpline {
   fn sample(&self, t: f64) -> Point3 {
-    self.real_sample(t, &self.vertices)
+    let n = self.controls.len();
+    // Remap t to actual curve range
+    let low = self.knots[self.degree];
+    let high = self.knots[n];
+    let t = low + t * (high - low);
+    // Find knot interval that contains t
+    let span = (self.degree..n).find(|&i| t <= self.knots[i + 1] ).unwrap();
+    // Premultiply weights
+    let mut homogeneous: Vec<Vec4> = (0..n).map(|i| (self.controls[i].to_vec() * self.weights[i]).extend(self.weights[i]) ).collect();
+    // de Boor's algorithm
+    for l in 1..=self.degree + 1 {
+      for i in (span - self.degree + l..=span).rev() {
+        let alpha = (t - self.knots[i]) / (self.knots[i + self.degree + 1 - l] - self.knots[i]);
+        homogeneous[i] = (homogeneous[i] * alpha) + (homogeneous[i - 1] * (1.0 - alpha));
+      }
+    }
+    Point3::from_vec(homogeneous[span].truncate() / homogeneous[span].w)
   }
 
   //XXX Exact solution -> Page 219 https://scholarsarchive.byu.edu/cgi/viewcontent.cgi?article=1000&context=facpub
@@ -813,22 +851,18 @@ impl Curve for BezierSpline {
   }
 
   fn endpoints(&self) -> (Point3, Point3) {
-    (self.vertices[0], *self.vertices.last().unwrap())
-  }
-
-  fn param_at_length(&self, length: f64) -> f64 {
-    length / self.length() //XXX take non uniform chord lengths into account
+    (self.controls[0], *self.controls.last().unwrap())
   }
 
   fn into_enum(self) -> CurveType {
-    CurveType::BezierSpline(self)
+    CurveType::Spline(self)
   }
 }
 
-impl Transformable for BezierSpline {
+impl Transformable for BasisSpline {
   fn transform(&mut self, transform: &Matrix4) {
-    for v in  &mut self.vertices {
-      *v = transform.transform_point(*v);
+    for p in  &mut self.controls {
+      *p = transform.transform_point(*p);
     }
   }
 }

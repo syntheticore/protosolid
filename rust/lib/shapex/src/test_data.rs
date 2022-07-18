@@ -105,8 +105,8 @@ pub fn arc_rectangle() -> Vec<CurveType> {
   ]
 }
 
-pub fn s_curve() -> BezierSpline {
-  BezierSpline::new(vec![
+pub fn s_curve() -> Spline {
+  Spline::new(vec![
     Point3::new(-1.5, -1.0, 0.0),
     Point3::new(-0.5, -1.0, 0.0),
     Point3::new(0.5, 1.0, 0.0),

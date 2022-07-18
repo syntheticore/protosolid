@@ -146,7 +146,6 @@
 
 <script>
   import FeatureBox from './feature-box.vue'
-  import { Selection } from './../selection.js'
 
   export default {
     name: 'FeatureBar',

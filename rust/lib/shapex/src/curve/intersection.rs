@@ -91,7 +91,7 @@ pub fn line_line(own: &Line, other: &Line) -> CurveIntersectionType {
 }
 
 
-pub fn line_spline(line: &Line, spline: &BezierSpline) -> CurveIntersectionType {
+pub fn line_spline(line: &Line, spline: &Spline) -> CurveIntersectionType {
   let spline_end_points = spline.endpoints();
   // Curves touch at endpoints
   return if line.points.0.almost(spline_end_points.0) || line.points.0.almost(spline_end_points.1) {

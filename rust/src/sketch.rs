@@ -69,10 +69,10 @@ impl JsSketch {
     let points = vertices.iter().map(|vertex| {
       point_from_js(vertex)
     }).collect();
-    let mut spline = BezierSpline::new(points);
+    let mut spline = Spline::new(points);
     let mut sketch = self.real.borrow_mut();
     spline.transform(&sketch.work_plane.invert().unwrap());
-    sketch.elements.push(Rc::new(RefCell::new(CurveType::BezierSpline(spline))));
+    sketch.elements.push(Rc::new(RefCell::new(CurveType::Spline(spline))));
     JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
   }
 

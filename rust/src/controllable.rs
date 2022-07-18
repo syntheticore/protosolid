@@ -85,13 +85,15 @@ impl Controllable for Circle {
 }
 
 
-impl Controllable for BezierSpline {
+impl Controllable for Spline {
   fn get_handles(&self) -> Vec<Point3> {
-    self.vertices.clone()
+    self.controls.clone()
   }
 
   fn set_handles(&mut self, handles: Vec<Point3>) {
-    self.vertices = handles;
+    let mut copy = Self::new(handles);
+    copy.id = self.id;
+    *self = copy;
   }
 
   fn get_snap_points(&self) -> Vec<Point3> {
@@ -105,7 +107,7 @@ pub fn as_controllable(elem: &CurveType) -> &dyn Controllable {
     CurveType::Line(line) => line,
     CurveType::Arc(arc) => arc,
     CurveType::Circle(circle) => circle,
-    CurveType::BezierSpline(spline) => spline,
+    CurveType::Spline(spline) => spline,
   }
 }
 
@@ -114,6 +116,6 @@ pub fn as_controllable_mut(elem: &mut CurveType) -> &mut dyn Controllable {
     CurveType::Line(line) => line,
     CurveType::Arc(arc) => arc,
     CurveType::Circle(circle) => circle,
-    CurveType::BezierSpline(spline) => spline,
+    CurveType::Spline(spline) => spline,
   }
 }

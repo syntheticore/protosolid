@@ -134,11 +134,13 @@
         const selection = [...this.selection.set]
         const uniqueNames = selection.map(item => item.typename() ).filter((value, index, self) => self.indexOf(value) === index )
         const groups = groupBy(selection, 'typename')
+        const numGroups = Object.keys(groups).length
         const propsPerItem = selection.map(item => this.produceProperties(item) ).filter(Boolean)
         return {
           title: Object.keys(groups).map(typename => {
             const group = groups[typename]
-            return `${group.length} ${pluralize(typename, group.length)}`
+            console.log(groups.length, group.length)
+            return `${group.length == 1 && numGroups == 1 ? '' : group.length} ${pluralize(typename, group.length)}`
           }).join(' + '),
 
           properties: propsPerItem.reduce((acc, propSet) => {
@@ -155,7 +157,7 @@
             return acc
           }),
 
-          isMixed: Object.keys(groups).length > 1,
+          isMixed: numGroups > 1,
         }
       },
     },
@@ -193,7 +195,7 @@
               warn: !weight,
             },
           }
-        } else if(type == 'Line' || type == 'BezierSpline') {
+        } else if(type == 'Line' || type == 'Spline') {
           return {
             Length: {
               title: 'Length',

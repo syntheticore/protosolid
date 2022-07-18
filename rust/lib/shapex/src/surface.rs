@@ -90,7 +90,7 @@ impl CurveType {
       },
 
       // Bezier Spline
-      CurveType::BezierSpline(_spline) => match other {
+      CurveType::Spline(_spline) => match other {
         SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
         SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
       },

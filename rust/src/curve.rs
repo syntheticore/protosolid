@@ -39,7 +39,7 @@ impl JsCurve {
       CurveType::Line(_) => "Line",
       CurveType::Arc(_) => "Arc",
       CurveType::Circle(_) => "Circle",
-      CurveType::BezierSpline(_) => "BezierSpline",
+      CurveType::Spline(_) => "Spline",
     }.to_string()
   }
 

@@ -18,8 +18,40 @@ pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
   fn unsample(&self, p: Point3) -> (f64, f64);
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
-  fn tesselate(&self, resolution: i32, profile: &Profile) -> Mesh;
+  fn tesselate(&self, profile: &Profile) -> Mesh;
   fn flip(&mut self); //XXX use Face::flip_normal instead
+
+  fn tesselate_fixed(&self, u_res: usize, v_res: usize, _profile: &Profile) -> Mesh {
+    let mut vertices: Vec<Point3> = vec![];
+    let mut vertex_normals: Vec<Vec3> = vec![];
+    let mut faces: Vec<usize> = vec![];
+    let u_steps = u_res + 1;
+    for j in 0..=v_res {
+      let v = j as f64 / v_res as f64;
+      for i in 0..=u_res {
+        let u = i as f64 / u_res as f64;
+        let vertex = self.sample(u, v);
+        let normal = self.normal_at(u, v);
+        vertices.push(vertex);
+        vertex_normals.push(normal);
+        if j == 0 || i == 0 { continue }
+        // Triangle
+        faces.push(j * u_steps + (i - 1) );
+        faces.push((j - 1) * u_steps + i);
+        faces.push(j * u_steps + i);
+        // Triangle
+        faces.push(j * u_steps + (i - 1) );
+        faces.push((j - 1) * u_steps + (i - 1) );
+        faces.push((j - 1) * u_steps + i);
+      }
+    }
+    let normals = faces.iter().map(|index| vertex_normals[*index] ).collect();
+    Mesh {
+      vertices,
+      faces,
+      normals,
+    }
+  }
 }
 
 impl core::fmt::Debug for dyn Surface {
@@ -33,6 +65,7 @@ impl core::fmt::Debug for dyn Surface {
 pub enum SurfaceType {
   Planar(Plane),
   Cylindrical(CylindricalSurface),
+  Spline(SplineSurface),
 }
 
 impl SurfaceType {
@@ -40,6 +73,7 @@ impl SurfaceType {
     match self {
       Self::Planar(plane) => plane,
       Self::Cylindrical(surf) => surf,
+      Self::Spline(surf) => surf,
     }
   }
 
@@ -47,6 +81,7 @@ impl SurfaceType {
     match self {
       Self::Planar(plane) => plane,
       Self::Cylindrical(surf) => surf,
+      Self::Spline(surf) => surf,
     }
   }
 
@@ -56,12 +91,21 @@ impl SurfaceType {
       SurfaceType::Planar(plane) => match other {
         SurfaceType::Planar(surface) => intersection::plane_plane(plane, surface),
         SurfaceType::Cylindrical(_surface) => SurfaceIntersection::None,
+        SurfaceType::Spline(_surface) => SurfaceIntersection::None,
       },
 
       // CylindricalSurface
       SurfaceType::Cylindrical(_surface) => match other {
         SurfaceType::Planar(_surface) => SurfaceIntersection::None,
         SurfaceType::Cylindrical(_surface) => SurfaceIntersection::None,
+        SurfaceType::Spline(_surface) => SurfaceIntersection::None,
+      },
+
+      // SplineSurface
+      SurfaceType::Spline(_surface) => match other {
+        SurfaceType::Planar(_surface) => SurfaceIntersection::None,
+        SurfaceType::Cylindrical(_surface) => SurfaceIntersection::None,
+        SurfaceType::Spline(_surface) => SurfaceIntersection::None,
       },
     }
   }
@@ -75,24 +119,28 @@ impl CurveType {
       CurveType::Line(line) => match other {
         SurfaceType::Planar(surface) => intersection::line_plane(line, surface),
         SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
       },
 
       // Arc
       CurveType::Arc(_arc) => match other {
         SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
         SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
       },
 
       // Circle
       CurveType::Circle(_circle) => match other {
         SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
         SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
       },
 
       // Bezier Spline
       CurveType::Spline(_spline) => match other {
         SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
         SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
       },
     }
   }
@@ -122,7 +170,7 @@ impl TrimmedSurface {
 
 impl Meshable for TrimmedSurface {
   fn tesselate(&self) -> Mesh {
-    self.base.as_surface().tesselate(80, &self.bounds)
+    self.base.as_surface().tesselate(&self.bounds)
   }
 }
 
@@ -224,7 +272,7 @@ impl Surface for Plane {
     self.normal()
   }
 
-  fn tesselate(&self, _resolution: i32, profile: &Profile) -> Mesh {
+  fn tesselate(&self, profile: &Profile) -> Mesh {
     let mut local_profile = profile.clone();
     let trans = self.as_transform();
     let trans_inv = trans.invert().unwrap();
@@ -300,44 +348,8 @@ impl Surface for CylindricalSurface {
     (self.sample(u, 0.0) - self.plane.origin).normalize()
   }
 
-  fn tesselate(&self, resolution: i32, _profile: &Profile) -> Mesh {
-    let mut vertices: Vec<Point3> = vec![];
-    let mut faces: Vec<usize> = vec![];
-    let mut normals: Vec<Vec3> = vec![];
-    let mut iter = (0..=resolution).peekable();
-    while let Some(i) = iter.next() {
-      let u = i as f64 / resolution as f64;
-      let upper_left = self.sample(u, 1.0);
-      let lower_left = self.sample(u, 0.0);
-      vertices.push(lower_left);
-      vertices.push(upper_left);
-      let normal = self.normal_at(u, 0.0);
-      if let Some(&next_i) = iter.peek() {
-        let next_u = next_i as f64 / resolution as f64;
-        let next_normal = self.normal_at(next_u, 0.0);
-        let i = i as usize * 2;
-        // Triangle
-        faces.push(i);
-        faces.push(i + 1);
-        faces.push(i + 2);
-        normals.push(normal);
-        normals.push(normal);
-        normals.push(next_normal);
-        // Triangle
-        faces.push(i + 1);
-        faces.push(i + 3);
-        faces.push(i + 2);
-        normals.push(normal);
-        normals.push(next_normal);
-        normals.push(next_normal);
-      }
-    }
-    Mesh {
-      vertices,
-      faces,
-      normals,
-    }
-    // Mesh::default()
+  fn tesselate(&self, profile: &Profile) -> Mesh {
+    self.tesselate_fixed(80, 1, profile)
   }
 
   fn flip(&mut self) {
@@ -348,6 +360,115 @@ impl Surface for CylindricalSurface {
 impl Transformable for CylindricalSurface {
   fn transform(&mut self, transform: &Matrix4) {
     self.plane.transform(transform);
+  }
+}
+
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SplineSurface {
+  pub degree: (usize, usize),
+  pub controls: Vec<Vec<Point3>>,
+  pub knots: (Vec<f64>, Vec<f64>),
+}
+
+impl SplineSurface {
+  pub fn tabulated(spline: &Spline, vec: Vec3) -> Self {
+    let mut other_spline = spline.clone();
+    other_spline.translate(vec);
+    Self {
+      degree: (spline.degree, 1),
+      controls: vec![
+        other_spline.controls,
+        spline.controls.clone(),
+      ],
+      knots: (other_spline.knots, vec![0.0, 0.0, 1.0, 1.0]),
+    }
+  }
+
+  fn get_basis_function(degree: usize, t: f64, knots: &Vec<f64>) -> Vec<f64> {
+    // Remap t to actual curve range
+    let low = knots[degree];
+    let high = knots[knots.len() - degree - 1];
+    let t = low + t * (high - low);
+    // Find knot interval that contains t
+    let span = (degree..knots.len() - 1).find(|&i| t <= knots[i + 1] ).unwrap();
+    let n = knots.len() - 1;
+    let mut basis = vec![0.0; n];
+    basis[span] = 1.0;
+    for k in 1..=degree {
+      let base = (span - k).max(0);
+      let delta = knots[base + k] - knots[base];
+      let max = if span + k < n { span } else { n - k - 1 };
+      let mut a = Self::inv_or_zero(delta) * (t - knots[base]);
+      for i in base..=max {
+        let delta = knots[i + k + 1] - knots[i + 1];
+        let b = Self::inv_or_zero(delta) * (knots[i + k + 1] - t);
+        basis[i] = a * basis[i] + b * basis[i + 1];
+        a = 1.0 - b;
+      }
+    }
+    basis.truncate(n - degree);
+    basis
+  }
+
+  fn inv_or_zero(delta: f64) -> f64 {
+    if delta.almost(0.0) {
+      0.0
+    } else {
+      1.0 / delta
+    }
+  }
+
+  fn tesselation_steps(&self, degree: usize, num_cvs: usize) -> usize {
+    if degree == 1 {
+      1
+    } else {
+      (num_cvs - 1) * 20
+    }
+  }
+
+  pub fn into_enum(self) -> SurfaceType {
+    SurfaceType::Spline(self)
+  }
+}
+
+impl Surface for SplineSurface {
+  fn sample(&self, u: f64, v: f64) -> Point3 {
+    let basis_u = Self::get_basis_function(self.degree.0, u, &self.knots.0);
+    let basis_v = Self::get_basis_function(self.degree.1, v, &self.knots.1);
+    self.controls.iter().zip(&basis_v).fold(Point3::origin(), |acc, (row, bu)| {
+      row.iter().zip(&basis_u).fold(acc, |acc, (cv, bv)| {
+        acc + cv.to_vec() * (bu * bv)
+      })
+    })
+  }
+
+  fn unsample(&self, _p: Point3) -> (f64, f64) {
+    todo!()
+  }
+
+  fn normal_at(&self, _u: f64, _v: f64) -> Vec3 {
+    Vec3::unit_x()
+  }
+
+  fn tesselate(&self, profile: &Profile) -> Mesh {
+    self.tesselate_fixed(
+      self.tesselation_steps(self.degree.0, self.controls[0].len()),
+      self.tesselation_steps(self.degree.1, self.controls.len()),
+      profile
+    )
+  }
+
+  fn flip(&mut self) {}
+}
+
+impl Transformable for SplineSurface {
+  fn transform(&mut self, transform: &Matrix4) {
+    for row in  &mut self.controls {
+      for p in row {
+        *p = transform.transform_point(*p);
+      }
+    }
   }
 }
 

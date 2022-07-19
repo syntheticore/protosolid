@@ -56,13 +56,15 @@ impl JsFace {
     match &self.real.borrow().surface {
       SurfaceType::Planar(plane) => plane.origin,
       SurfaceType::Cylindrical(cyl) => cyl.plane.origin,
+      SurfaceType::Spline(_) => todo!(),
     }
   }
 
   pub fn get_surface_type(&self) -> String {
     match self.real.borrow().surface {
-      SurfaceType::Planar(_) => "Planar".to_string(),
-      SurfaceType::Cylindrical(_) => "Cylindrical".to_string(),
+      SurfaceType::Planar(_) => "Planar".into(),
+      SurfaceType::Cylindrical(_) => "Cylindrical".into(),
+      SurfaceType::Spline(_) => "Spline".into(),
     }
   }
 

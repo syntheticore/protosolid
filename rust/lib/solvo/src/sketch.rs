@@ -337,7 +337,7 @@ impl Sketch {
         if count != wire_ids.len() {
           was_repair_needed = true;
         }
-        *wire = replacement.to_vec();
+        *wire = replacement.clone();
       } else {
         return Err(FeatureError::Error("Profile was lost".into()))
       }

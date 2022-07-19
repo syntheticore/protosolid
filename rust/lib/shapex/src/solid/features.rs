@@ -70,6 +70,7 @@ pub fn draft(faces: &Vec<Ref<Face>>, fixed_plane: &Plane, angle: Deg<f64>) -> Re
         }
       },
       SurfaceType::Cylindrical(_) => todo!(),
+      SurfaceType::Spline(_) => todo!(),
     }
   }
   Ok(())

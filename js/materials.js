@@ -78,6 +78,7 @@ export default class Materials {
       metalness: 0.2,
       polygonOffset: true,
       polygonOffsetFactor: 2,
+      // wireframe: true,
     })
 
     this.highlightSurface = new THREE.MeshStandardMaterial({

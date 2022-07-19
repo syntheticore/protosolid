@@ -223,13 +223,12 @@ impl Solid {
 
 impl Shell {
   pub fn euler_characteristics(&self) -> i32 {
-    let num_faces = self.faces.len();
-    let num_loops = self.faces.iter().fold(0, |acc, face| acc + face.borrow().rings.len());
-    (num_faces - self.edges.len() + self.vertices.len() + (num_faces - num_loops)) as i32
+    let num_faces = self.faces.len() as i32;
+    let num_loops = self.faces.iter().fold(0, |acc, face| acc + face.borrow().rings.len()) as i32;
+    num_faces - self.edges.len() as i32 + self.vertices.len() as i32 + (num_faces - num_loops)
   }
 
   pub fn connectivity(&self) -> i32 {
-    // Closed shells have odd connectivity
     3 - self.euler_characteristics()
   }
 
@@ -250,8 +249,13 @@ impl Shell {
     None
   }
 
-  //XXX
-  pub fn validate(&self) -> Result<(), String> { Ok(()) }
+  pub fn validate(&self) -> Result<(), String> {
+    // Closed shells have odd connectivity
+    if self.connectivity() % 2 == 0 {
+      return Err("Open shell".into())
+    }
+    Ok(())
+  }
 
   pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: CurveType, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {
     let vertex = rc(Vertex {
@@ -427,7 +431,8 @@ impl Shell {
       CurveType::Arc(arc) =>
         CylindricalSurface::from_axis(arc.plane.origin, vec, arc.radius).into_enum(),
 
-      _ => todo!()
+      CurveType::Spline(spline) =>
+        SplineSurface::tabulated(spline, vec).into_enum(),
     }
   }
 

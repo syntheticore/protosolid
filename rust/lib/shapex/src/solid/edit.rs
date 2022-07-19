@@ -6,7 +6,8 @@ use crate::solid::*;
 impl Compound {
   pub fn repair(&mut self) -> Result<(), String> {
     for solid in &mut self.solids {
-      solid.repair()?;
+      solid.validate()?;
+      // solid.repair()?;
     }
     self.join_solids();
     Ok(())
@@ -36,11 +37,22 @@ impl Shell {
 }
 
 
+impl Face {
+  pub fn repair_edges(&self) -> Result<(), String> {
+    for he in self.outer_ring.borrow().iter() {
+      let edge = he.borrow().get_edge();
+      edge.borrow_mut().repair()?;
+    }
+    Ok(())
+  }
+}
+
+
 impl Edge {
   pub fn repair(&mut self) -> Result<(), String> {
     match self.get_left_face().borrow().surface.intersect(&self.get_right_face().borrow().surface) {
       SurfaceIntersection::None
-      => return Err("Adjacent faces don't intersect".into()),
+      => Err("Adjacent faces don't intersect".into()),
 
       SurfaceIntersection::Contained
       => todo!(), //XXX Faces should be joined into one
@@ -57,21 +69,12 @@ impl Edge {
           let id = self.curve.get_id();
           self.curve = curve;
           self.curve.set_id(id);
+          Ok(())
+        } else {
+          Err("Edge could not be trimmed by surrounding faces".into())
         }
-        Ok(())
       },
     }
-  }
-}
-
-
-impl Face {
-  pub fn repair_edges(&self) -> Result<(), String> {
-    for he in self.outer_ring.borrow().iter() {
-      let edge = he.borrow().get_edge();
-      edge.borrow_mut().repair()?;
-    }
-    Ok(())
   }
 }
 

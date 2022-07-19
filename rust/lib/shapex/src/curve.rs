@@ -807,6 +807,7 @@ impl BasisSpline {
   pub fn split_with_spline(&self, _spline: &BasisSpline) -> Vec<Self> { vec![self.clone()] }
 }
 
+
 impl Curve for BasisSpline {
   fn sample(&self, t: f64) -> Point3 {
     let n = self.controls.len();

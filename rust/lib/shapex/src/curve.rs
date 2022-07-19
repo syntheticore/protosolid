@@ -785,7 +785,7 @@ impl BasisSpline {
     let derivative = self.derive();
     let tan = derivative.sample(t).to_vec().normalize();
     let tan2 = (tan + derivative.derive().sample(t).to_vec()).normalize();
-    let c = tan2.cross(tan).normalize();
+    let c = tan2.cross(tan);
     c.cross(tan).normalize()
   }
 

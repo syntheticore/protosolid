@@ -74,12 +74,12 @@ impl Plane {
 
   pub fn from_triangle(p1: Point3, p2: Point3, p3: Point3) -> Self {
     let u = (p2 - p1).normalize();
-    let pre_v = (p3 - p1).normalize();
-    let normal = u.cross(pre_v).normalize();
+    let pre_v = p3 - p1;
+    let normal = u.cross(pre_v);
     Self {
       origin: p1,
       u,
-      v: u.cross(normal),
+      v: u.cross(normal).normalize(),
     }
   }
 

@@ -275,10 +275,9 @@ impl Surface for RevolutionSurface {
     let sample = self.sample_local(u, v);
     let mut axis_normal = sample.to_vec();
     axis_normal.z = 0.0;
-    axis_normal = axis_normal.normalize();
     let v_tangent = self.curve.as_curve().tangent(v, 1);
     let u_tangent = v_tangent.cross(axis_normal);
-    let normal = v_tangent.cross(u_tangent);
+    let normal = v_tangent.cross(u_tangent).normalize();
     self.axis.as_transform().transform_vector(normal)
   }
 

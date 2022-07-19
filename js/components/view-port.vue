@@ -11,9 +11,11 @@
       @mousemove="mouseMove"
     )
 
-    //- Snap guides and pick indicators
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
+      //- Pick indicators
       path(v-for="path in allPaths", :d="path.data", :stroke="path.color")
+      circle(v-for="path in allPaths", :cx="path.targetPos.x", :cy="path.targetPos.y", r="5", :fill="path.color")
+      //- Snap guides
       transition-group(name="hide" tag="g")
         line(
           v-for="guide in guides"
@@ -345,14 +347,6 @@
     },
 
     methods: {
-      buildPath: function(origin, vec) {
-        const pos = this.renderer.toScreen(vec)
-        const sign = this.activeFeature ? -1 : 1
-        const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200) * sign
-        const dy = Math.abs(origin.y - pos.y) / 2.0 * sign
-        return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
-      },
-
       getMouseCoords: function(e) {
         var rect = this.$refs.canvas.getBoundingClientRect()
         return new THREE.Vector2(e.clientX, e.clientY - rect.top)
@@ -460,12 +454,13 @@
           mesh.geometry.computeBoundingBox();
           const center = new THREE.Vector3()
           mesh.geometry.boundingBox.getCenter(center);
-          this.paths.push({
+          const path = {
             target: center,
             origin: pickerCoords,
-            data: this.buildPath(pickerCoords, center),
             color,
-          })
+          }
+          this.updatePath(path)
+          this.paths.push(path)
         })
         this.$emit('update:active-tool', tool)
       },
@@ -488,11 +483,23 @@
         }
         // Update Paths
         this.paths.forEach((path, i) => {
-          path.data = this.buildPath(path.origin, path.target)
+          this.updatePath(path)
           this.$set(this.paths, i, path)
         })
         if(!this.pickingPath || !this.pickingPath.target) return
-        this.pickingPath.data = this.buildPath(this.pickingPath.origin, this.pickingPath.target)
+        this.updatePath(this.pickingPath)
+      },
+
+      updatePath: function(path) {
+        path.targetPos = this.renderer.toScreen(path.target)
+        path.data = this.buildPath(path.origin, path.targetPos)
+      },
+
+      buildPath: function(origin, pos) {
+        const sign = this.activeFeature ? -1 : 1
+        const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200) * sign
+        const dy = Math.abs(origin.y - pos.y) / 2.0 * sign
+        return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
       },
 
       activateTool: function(toolName) {

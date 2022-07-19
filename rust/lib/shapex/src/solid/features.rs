@@ -1,8 +1,7 @@
-use crate::base::*;
+use crate::internal::*;
 use crate::solid::*;
 use crate::geom2d;
 use crate::geom3d;
-use crate::geom3d::Axis;
 use crate::surface::intersection;
 use crate::surface::SurfaceType;
 
@@ -14,7 +13,7 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
   let poly = geom2d::tesselate_wire(&profile[0]);
   let plane = geom3d::plane_from_points(&poly)?;
   let plane_normal = plane.normal() * distance;
-  let mut solid = Solid::new_lamina(profile[0].clone(), plane.into_enum());
+  let mut solid = Solid::new_lamina(profile[0].clone(), PlanarSurface::new(plane).into_enum());
   let shell = &mut solid.shells[0];
   let face = if distance >= 0.0 {
     shell.faces.last()
@@ -63,13 +62,13 @@ pub fn draft(faces: &Vec<Ref<Face>>, fixed_plane: &Plane, angle: Deg<f64>) -> Re
     let mut face = face.borrow_mut();
     match &face.surface {
       SurfaceType::Planar(plane) => {
-        let isect = intersection::plane_plane(plane, fixed_plane);
+        let isect = intersection::plane_plane(&plane.plane, fixed_plane);
         if let Some(line) = isect.get_line() {
           let axis = Axis::from_points(line.endpoints());
           face.surface.as_surface_mut().rotate_about_axis(axis, angle);
         }
       },
-      SurfaceType::Cylindrical(_) => todo!(),
+      SurfaceType::Revolution(_) => todo!(),
       SurfaceType::Spline(_) => todo!(),
     }
   }

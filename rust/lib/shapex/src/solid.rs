@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use uuid::Uuid;
 
-use crate::base::*;
+use crate::internal::*;
 use crate::curve::*;
 use crate::surface::*;
 
@@ -12,7 +12,7 @@ mod volume;
 mod boolean;
 mod tesselation;
 mod serde;
-mod edit;
+mod repair;
 
 pub mod features;
 
@@ -419,17 +419,20 @@ impl Shell {
   fn sweep_surface(curve: &TrimmedCurve, vec: Vec3) -> SurfaceType {
     match &curve.base {
       CurveType::Line(_) =>
-        Plane::from_triangle(
+        PlanarSurface::new(Plane::from_triangle(
           curve.bounds.0,
           curve.bounds.0 + vec,
           curve.bounds.1,
-        ).into_enum(),
+        )).into_enum(),
 
       CurveType::Circle(circle) =>
-        CylindricalSurface::from_axis(circle.plane.origin, vec, circle.radius).into_enum(),
+        RevolutionSurface::cylinder(Axis::new(circle.plane.origin, vec), circle.radius, vec.magnitude()).into_enum(),
 
-      CurveType::Arc(arc) =>
-        CylindricalSurface::from_axis(arc.plane.origin, vec, arc.radius).into_enum(),
+      CurveType::Arc(arc) => {
+        let mut surface = RevolutionSurface::cylinder(Axis::new(arc.plane.origin, vec), arc.radius, vec.magnitude());
+        surface.u_bounds = arc.bounds;
+        surface.into_enum()
+      },
 
       CurveType::Spline(spline) =>
         SplineSurface::tabulated(spline, vec).into_enum(),

@@ -3,7 +3,7 @@ use std::rc::{Rc, Weak};
 use uuid::Uuid;
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
-use crate::base::*;
+use crate::internal::*;
 use crate::curve;
 use crate::surface;
 use crate::solid;

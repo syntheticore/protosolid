@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 
 use solvo::*;
 use shapex::*;
+use shapex::internal::Ref;
 
 use crate::utils::matrix_to_js;
 use crate::feature::JsPlanarRef;

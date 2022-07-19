@@ -3,6 +3,8 @@ use std::rc::Rc;
 
 use solvo::*;
 use shapex::*;
+use shapex::internal::rc;
+use shapex::internal::Ref;
 
 use js_sys::Array;
 use wasm_bindgen::prelude::*;

@@ -1,8 +1,5 @@
-use std::rc::{Rc, Weak};
-use std::cell::RefCell;
-use std::fmt::Debug;
-
 use uuid::Uuid;
+
 // pub use cgmath::prelude::*;
 pub use cgmath::prelude::Matrix;
 pub use cgmath::prelude::SquareMatrix;
@@ -16,6 +13,12 @@ pub use cgmath::Deg;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
+pub use crate::geom3d::Axis;
+pub use crate::geom3d::Plane;
+
+// pub const MAX_FLOAT: f64 = 2_i32.pow(63).into();
+pub const MAX_FLOAT: f64 = 9223372036854776000.0;
+pub const EPSILON: f64 = core::f64::EPSILON * 100000.0;
 
 pub type Vec2 = cgmath::Vector2<f64>;
 pub type Vec3 = cgmath::Vector3<f64>;
@@ -26,29 +29,9 @@ pub type Matrix3 = cgmath::Matrix3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
 pub type Quaternion = cgmath::Quaternion<f64>;
 
-
 pub trait Identity {
   fn id(&self) -> Uuid;
 }
-
-// pub const MAX_FLOAT: f64 = 2_i32.pow(63).into();
-pub const MAX_FLOAT: f64 = 9223372036854776000.0;
-
-
-pub type Ref<T> = Rc<RefCell<T>>;
-pub type WeakRef<T> = Weak<RefCell<T>>;
-
-pub fn rc<T>(arg: T) -> Rc<RefCell<T>> {
-  Rc::new(RefCell::new(arg))
-}
-
-
-pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
-  vec![tuple.0, tuple.1]
-}
-
-
-pub const EPSILON: f64 = core::f64::EPSILON * 100000.0;
 
 pub trait Almost {
   // const EPS: f64 = core::f64::EPSILON * 100000.0;
@@ -76,27 +59,3 @@ impl Almost for f64 {
     (self - other).abs() <= EPSILON
   }
 }
-
-pub fn almost_eq<T: Almost + Debug + Copy>(first: T, second: T) {
-  if !first.almost(second) {
-    panic!("\n\n{:?} != {:?}\n\n", first, second);
-  }
-}
-
-#[macro_export] macro_rules! log {
-  ( $( $t:tt )* ) => {
-    web_sys::console::log_1(&format!( $( $t )* ).into());
-  }
-}
-
-#[cfg(feature = "rayon")]
-macro_rules! parallel {
-  ($a:expr) => { $a.par_iter() }
-}
-
-#[cfg(not(feature = "rayon"))]
-macro_rules! parallel {
-  ($a:expr) => { $a.iter() }
-}
-
-pub(crate) use parallel;

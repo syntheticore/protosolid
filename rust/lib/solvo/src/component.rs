@@ -1,6 +1,8 @@
 use std::ptr;
 
 use shapex::*;
+use shapex::internal::Ref;
+use shapex::internal::rc;
 
 use crate::Uuid;
 use crate::Sketch;

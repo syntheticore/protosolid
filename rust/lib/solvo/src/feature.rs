@@ -1,4 +1,5 @@
 use shapex::*;
+use shapex::internal::Ref;
 
 use crate::references::*;
 use crate::Uuid;

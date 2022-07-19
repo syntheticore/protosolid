@@ -2,6 +2,8 @@ use wasm_bindgen::prelude::*;
 use js_sys::Array;
 
 use shapex::*;
+use shapex::internal::rc;
+use shapex::internal::Ref;
 use solvo::*;
 
 use crate::document::JsDocument;

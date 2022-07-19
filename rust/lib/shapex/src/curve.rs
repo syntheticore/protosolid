@@ -1,11 +1,10 @@
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
-use crate::base::*;
+use crate::internal::*;
 use crate::transform::*;
 use crate::geom2d;
-use crate::Surface;
-use crate::Plane;
+use crate::geom3d::Plane;
 
 pub mod intersection;
 pub use intersection::CurveIntersection;
@@ -17,7 +16,7 @@ pub use intersection::CurveIntersectionType;
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
   fn unsample(&self, p: &Point3) -> f64; // p is expected to touch the curve
-  // fn tangent(&self, t: f64, order: i32) -> Vec3;
+  fn tangent(&self, t: f64, order: u32) -> Vec3;
   fn length_between(&self, start: f64, end: f64) -> f64;
   fn tesselate(&self) -> PolyLine;
   fn into_enum(self) -> CurveType;
@@ -382,12 +381,16 @@ impl Curve for TrimmedCurve {
     self.param_from_base(self.base.as_curve().unsample(p))
   }
 
-  fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_adaptive(0.025, Deg(20.0), (0.0, 1.0))
+  fn tangent(&self, t: f64, order: u32) -> Vec3 {
+    self.base.as_curve().tangent(self.param_to_base(t), order)
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
     self.base.as_curve().length_between(self.param_to_base(start), self.param_to_base(end))
+  }
+
+  fn tesselate(&self) -> Vec<Point3> {
+    self.tesselate_adaptive(0.025, Deg(20.0), (0.0, 1.0))
   }
 
   fn into_enum(self) -> CurveType {
@@ -487,6 +490,10 @@ impl Curve for Line {
     (vec).dot(direction) / self.length()
   }
 
+  fn tangent(&self, _t: f64, _order: u32) -> Vec3 {
+    (self.points.1 - self.points.0).normalize()
+  }
+
   fn tesselate(&self) -> Vec<Point3> {
     self.tesselate_fixed(1)
   }
@@ -561,6 +568,10 @@ impl Curve for Arc {
     let param = circle.unsample(p);
     let range = self.bounds.1 - self.bounds.0;
     (param - self.bounds.0) / range
+  }
+
+  fn tangent(&self, _t: f64, _order: u32) -> Vec3 {
+    todo!()
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -670,6 +681,10 @@ impl Curve for Circle {
     }
   }
 
+  fn tangent(&self, _t: f64, _order: u32) -> Vec3 {
+    todo!()
+  }
+
   fn tesselate(&self) -> Vec<Point3> {
     self.tesselate_fixed(80)
   }
@@ -765,10 +780,6 @@ impl BasisSpline {
     }
   }
 
-  pub fn tangent(&self, t: f64) -> Vec3 {
-    self.derive().sample(t).to_vec().normalize()
-  }
-
   // https://stackoverflow.com/questions/25453159/getting-consistent-normals-from-a-3d-cubic-bezier-path
   pub fn normal(&self, t: f64) -> Vec3 {
     let derivative = self.derive();
@@ -836,6 +847,10 @@ impl Curve for BasisSpline {
       (1.0, self.sample(1.0).distance2(*point)),
       point,
     )
+  }
+
+  fn tangent(&self, t: f64, _order: u32) -> Vec3 {
+    self.derive().sample(t).to_vec().normalize()
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -1004,5 +1019,12 @@ mod tests {
     println!("{:#?}", trimmed);
     almost_eq(trimmed.trims.0, -1.0);
     almost_eq(trimmed.trims.1, 0.5);
+  }
+
+  #[test]
+  fn closest_point() {
+    let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0));
+    let p = Point3::new(1.0, 2.0, 1.0);
+    almost_eq(line.closest_point(&p), Point3::new(0.0, 2.0, 0.0));
   }
 }

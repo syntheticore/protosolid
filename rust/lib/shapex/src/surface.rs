@@ -1,11 +1,11 @@
+use std::mem;
 use serde::{Serialize, Deserialize};
 
-use crate::base::*;
+use crate::internal::*;
 use crate::transform::*;
 use crate::curve::*;
 use crate::mesh::*;
 use crate::geom2d;
-use crate::geom3d;
 
 pub mod intersection;
 pub use intersection::SurfaceIntersection;
@@ -20,6 +20,7 @@ pub trait Surface: Transformable {
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
   fn tesselate(&self, profile: &Profile) -> Mesh;
   fn flip(&mut self); //XXX use Face::flip_normal instead
+  fn into_enum(self) -> SurfaceType;
 
   fn tesselate_fixed(&self, u_res: usize, v_res: usize, _profile: &Profile) -> Mesh {
     let mut vertices: Vec<Point3> = vec![];
@@ -54,17 +55,11 @@ pub trait Surface: Transformable {
   }
 }
 
-impl core::fmt::Debug for dyn Surface {
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "Foo")
-  }
-}
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SurfaceType {
-  Planar(Plane),
-  Cylindrical(CylindricalSurface),
+  Planar(PlanarSurface),
+  Revolution(RevolutionSurface),
   Spline(SplineSurface),
 }
 
@@ -72,7 +67,7 @@ impl SurfaceType {
   pub fn as_surface(&self) -> &dyn Surface {
     match self {
       Self::Planar(plane) => plane,
-      Self::Cylindrical(surf) => surf,
+      Self::Revolution(surf) => surf,
       Self::Spline(surf) => surf,
     }
   }
@@ -80,31 +75,31 @@ impl SurfaceType {
   pub fn as_surface_mut(&mut self) -> &mut dyn Surface {
     match self {
       Self::Planar(plane) => plane,
-      Self::Cylindrical(surf) => surf,
+      Self::Revolution(surf) => surf,
       Self::Spline(surf) => surf,
     }
   }
 
   pub fn intersect(&self, other: &Self) -> SurfaceIntersection {
     match self {
-      // Plane
+      // PlanarSurface
       SurfaceType::Planar(plane) => match other {
-        SurfaceType::Planar(surface) => intersection::plane_plane(plane, surface),
-        SurfaceType::Cylindrical(_surface) => SurfaceIntersection::None,
+        SurfaceType::Planar(surface) => intersection::plane_plane(&plane.plane, &surface.plane),
+        SurfaceType::Revolution(_surface) => SurfaceIntersection::None,
         SurfaceType::Spline(_surface) => SurfaceIntersection::None,
       },
 
-      // CylindricalSurface
-      SurfaceType::Cylindrical(_surface) => match other {
+      // RevolutionSurface
+      SurfaceType::Revolution(_surface) => match other {
         SurfaceType::Planar(_surface) => SurfaceIntersection::None,
-        SurfaceType::Cylindrical(_surface) => SurfaceIntersection::None,
+        SurfaceType::Revolution(_surface) => SurfaceIntersection::None,
         SurfaceType::Spline(_surface) => SurfaceIntersection::None,
       },
 
       // SplineSurface
       SurfaceType::Spline(_surface) => match other {
         SurfaceType::Planar(_surface) => SurfaceIntersection::None,
-        SurfaceType::Cylindrical(_surface) => SurfaceIntersection::None,
+        SurfaceType::Revolution(_surface) => SurfaceIntersection::None,
         SurfaceType::Spline(_surface) => SurfaceIntersection::None,
       },
     }
@@ -117,29 +112,29 @@ impl CurveType {
     match self {
       // Line
       CurveType::Line(line) => match other {
-        SurfaceType::Planar(surface) => intersection::line_plane(line, surface),
-        SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Planar(surface) => intersection::line_plane(line, &surface.plane),
+        SurfaceType::Revolution(_surface) => CurveSurfaceIntersection::None,
         SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
       },
 
       // Arc
       CurveType::Arc(_arc) => match other {
         SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Revolution(_surface) => CurveSurfaceIntersection::None,
         SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
       },
 
       // Circle
       CurveType::Circle(_circle) => match other {
         SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Revolution(_surface) => CurveSurfaceIntersection::None,
         SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
       },
 
       // Bezier Spline
       CurveType::Spline(_spline) => match other {
         SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Cylindrical(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Revolution(_surface) => CurveSurfaceIntersection::None,
         SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
       },
     }
@@ -176,176 +171,115 @@ impl Meshable for TrimmedSurface {
 
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Plane {
-  pub origin: Point3,
-  pub u: Vec3,
-  pub v: Vec3,
+pub struct PlanarSurface {
+  pub plane: Plane,
 }
 
-impl Default for Plane {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
-impl Plane {
-  pub fn new() -> Self {
-    Self {
-      origin: Point3::origin(),
-      u: Vec3::new(1.0, 0.0, 0.0),
-      v: Vec3::new(0.0, 1.0, 0.0),
-    }
-  }
-
-  pub fn from_point(p: Point3) -> Self {
-    Self {
-      origin: p,
-      u: Vec3::new(1.0, 0.0, 0.0),
-      v: Vec3::new(0.0, 1.0, 0.0),
-    }
-  }
-
-  pub fn from_triangle(p1: Point3, p2: Point3, p3: Point3) -> Self {
-    let u = (p2 - p1).normalize();
-    let pre_v = (p3 - p1).normalize();
-    let normal = u.cross(pre_v).normalize();
-    Self {
-      origin: p1,
-      u,
-      v: u.cross(normal),
-    }
-  }
-
-  pub fn from_normal(origin: Point3, normal: Vec3) -> Self {
-    let m = geom3d::transform_from_location_and_normal(origin, normal);
-    Self {
-      origin,
-      u: m.transform_vector(Vec3::new(1.0, 0.0, 0.0)),
-      v: m.transform_vector(Vec3::new(0.0, 1.0, 0.0)),
-    }
-  }
-
-  pub fn d(&self) -> f64 {
-    self.normal().dot(self.origin.to_vec())
-  }
-
-  pub fn normal(&self) -> Vec3 {
-    self.u.cross(self.v)
-  }
-
-  pub fn contains_point(&self, p: Point3) -> bool {
-    self.origin.almost(p) ||
-    self.normal().dot((p - self.origin).normalize()).abs().almost(0.0)
-  }
-
-  // https://github.com/xibyte/jsketcher/blob/master/modules/geom/euclidean.ts
-  // export function perpendicularVector(v) {
-  //   v = vec.normalize(v);
-  //   return IDENTITY_BASIS3.map(axis => vec.cross(axis, v)).sort((a, b) => vec.lengthSq(b) - vec.lengthSq(a))[0];
-  // }
-
-  pub fn as_transform(&self) -> Matrix4 {
-    Matrix4::from_cols(
-      self.u.extend(0.0),
-      self.v.extend(0.0),
-      self.normal().extend(0.0),
-      self.origin.to_vec().extend(1.0)
-    )
-  }
-
-  pub fn into_enum(self) -> SurfaceType {
-    SurfaceType::Planar(self)
+impl PlanarSurface {
+  pub fn new(plane: Plane) -> Self {
+    Self { plane }
   }
 }
 
-impl Surface for Plane {
+impl Surface for PlanarSurface {
   fn sample(&self, u: f64, v: f64) -> Point3 {
-    self.origin + self.u * u + self.v * v
+    self.plane.sample(u, v)
   }
 
   fn unsample(&self, p: Point3) -> (f64, f64) {
-    let p_local = self.as_transform().invert().unwrap().transform_point(p);
-    (p_local.x, p_local.y)
+    self.plane.unsample(p)
   }
 
   fn normal_at(&self, _u: f64, _v: f64) -> Vec3 {
-    self.normal()
+    self.plane.normal()
   }
 
   fn tesselate(&self, profile: &Profile) -> Mesh {
     let mut local_profile = profile.clone();
-    let trans = self.as_transform();
+    let trans = self.plane.as_transform();
     let trans_inv = trans.invert().unwrap();
     for wire in &mut local_profile {
       for curve in wire.iter_mut() {
         curve.transform(&trans_inv);
       }
     }
-    let mut mesh = geom2d::tesselate_profile(&local_profile, self.normal());
+    let mut mesh = geom2d::tesselate_profile(&local_profile, self.plane.normal());
     mesh.transform(&trans);
     mesh
   }
 
   fn flip(&mut self) {
-    self.v = -self.v;
+    self.plane.flip();
+  }
+
+  fn into_enum(self) -> SurfaceType {
+    SurfaceType::Planar(self)
   }
 }
 
-impl Transformable for Plane {
+impl Transformable for PlanarSurface {
   fn transform(&mut self, transform: &Matrix4) {
-    self.origin = transform.transform_point(self.origin);
-    self.u = transform.transform_vector(self.u);
-    self.v = transform.transform_vector(self.v);
+    self.plane.transform(transform);
   }
 }
 
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CylindricalSurface {
-  pub plane: Plane,
-  pub radius: f64,
-  pub height: f64,
-  pub bounds: (f64, f64),
+pub struct RevolutionSurface {
+  pub axis: Axis,
+  pub curve: CurveType, // Curve is stored in coordinate space of axis
+  pub u_bounds: (f64, f64), // v direction is bounded by curve
 }
 
-impl CylindricalSurface {
-  pub fn new(radius: f64, height: f64) -> Self {
+impl RevolutionSurface {
+  pub fn new(axis: Axis, mut curve: CurveType) -> Self {
+    let base_transform = axis.as_transform().invert().unwrap();
+    curve.as_curve_mut().transform(&base_transform);
     Self {
-      plane: Plane::default(),
-      radius,
-      height,
-      bounds: (0.0, 1.0),
+      axis,
+      curve,
+      u_bounds: (0.0, 1.0),
     }
   }
 
-  pub fn from_axis(origin: Point3, axis: Vec3, radius: f64) -> Self {
+  pub fn cylinder(axis: Axis, radius: f64, height: f64) -> Self {
     Self {
-      plane: Plane::from_normal(origin, axis),
-      radius,
-      height: axis.magnitude(),
-      bounds: (0.0, 1.0),
+      axis,
+      curve: Line::new(Point3::new(radius, 0.0, 0.0), Point3::new(radius, 0.0, height)).into_enum(),
+      u_bounds: (0.0, 1.0),
     }
   }
 
-  pub fn into_enum(self) -> SurfaceType {
-    SurfaceType::Cylindrical(self)
-  }
-}
-
-impl Surface for CylindricalSurface {
-  fn sample(&self, u: f64, v: f64) -> Point3 {
-    let u = self.bounds.0 + u * (self.bounds.1 - self.bounds.0);
+  fn sample_local(&self, u: f64, v: f64) -> Point3 {
+    let u = self.u_bounds.0 + u * (self.u_bounds.1 - self.u_bounds.0);
     let u = u * std::f64::consts::PI * 2.0;
-    let p = self.plane.sample(u.sin() * self.radius, u.cos() * self.radius);
-    p + (self.plane.normal() * self.height * v)
+    let mut sample = self.curve.as_curve().sample(v);
+    let height = sample.z;
+    sample.z = 0.0;
+    let radius = sample.to_vec().magnitude();
+    Point3::new(u.cos() * radius, u.sin() * radius, height)
+  }
+}
+
+impl Surface for RevolutionSurface {
+  fn sample(&self, u: f64, v: f64) -> Point3 {
+    let p = self.sample_local(u, v);
+    self.axis.as_transform().transform_point(p)
   }
 
   fn unsample(&self, _p: Point3) -> (f64, f64) {
     todo!()
   }
 
-  fn normal_at(&self, u: f64, _v: f64) -> Vec3 {
-    (self.sample(u, 0.0) - self.plane.origin).normalize()
+  fn normal_at(&self, u: f64, v: f64) -> Vec3 {
+    let sample = self.sample_local(u, v);
+    let mut axis_normal = sample.to_vec();
+    axis_normal.z = 0.0;
+    axis_normal = axis_normal.normalize();
+    let v_tangent = self.curve.as_curve().tangent(v, 1);
+    let u_tangent = v_tangent.cross(axis_normal);
+    let normal = v_tangent.cross(u_tangent);
+    self.axis.as_transform().transform_vector(normal)
   }
 
   fn tesselate(&self, profile: &Profile) -> Mesh {
@@ -353,13 +287,17 @@ impl Surface for CylindricalSurface {
   }
 
   fn flip(&mut self) {
-    self.bounds = (self.bounds.1, self.bounds.0);
+    self.u_bounds = (self.u_bounds.1, self.u_bounds.0);
+  }
+
+  fn into_enum(self) -> SurfaceType {
+    SurfaceType::Revolution(self)
   }
 }
 
-impl Transformable for CylindricalSurface {
+impl Transformable for RevolutionSurface {
   fn transform(&mut self, transform: &Matrix4) {
-    self.plane.transform(transform);
+    self.axis.transform(transform);
   }
 }
 
@@ -426,10 +364,6 @@ impl SplineSurface {
       (num_cvs - 1) * 20
     }
   }
-
-  pub fn into_enum(self) -> SurfaceType {
-    SurfaceType::Spline(self)
-  }
 }
 
 impl Surface for SplineSurface {
@@ -459,7 +393,14 @@ impl Surface for SplineSurface {
     )
   }
 
-  fn flip(&mut self) {}
+  fn flip(&mut self) {
+    self.controls = self.controls.iter().rev().cloned().collect();
+    mem::swap(&mut self.knots.1, &mut self.knots.0);
+  }
+
+  fn into_enum(self) -> SurfaceType {
+    SurfaceType::Spline(self)
+  }
 }
 
 impl Transformable for SplineSurface {
@@ -473,19 +414,9 @@ impl Transformable for SplineSurface {
 }
 
 
-// EllipticalSurface
-// ConicSurface
-// EllipticalConicSurface
-// SphericalSurface
-// ToricSurface
-// NurbsSurface
-
-
 #[cfg(test)]
 mod tests {
   use super::*;
-  // use crate::test_data::make_generic;
-  // use crate::test_data::make_region;
 
   #[test]
   fn plane_normal() {
@@ -497,11 +428,11 @@ mod tests {
 
   #[test]
   fn cylinder_normal() {
-    let cylinder = CylindricalSurface::new(1.0, 1.0);
-    almost_eq(cylinder.normal_at(0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
-    almost_eq(cylinder.normal_at(0.5, 0.0), Vec3::new(0.0, -1.0, 0.0));
-    almost_eq(cylinder.normal_at(0.25, 0.0), Vec3::new(1.0, 0.0, 0.0));
-    almost_eq(cylinder.normal_at(0.75, 0.0), Vec3::new(-1.0, 0.0, 0.0));
+    let cylinder = RevolutionSurface::cylinder(Axis::new(Point3::origin(), Vec3::unit_z()), 1.0, 1.0);
+    almost_eq(cylinder.normal_at(0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0));
+    almost_eq(cylinder.normal_at(0.25, 0.0), Vec3::new(0.0, -1.0, 0.0));
+    almost_eq(cylinder.normal_at(0.5, 0.0), Vec3::new(1.0, 0.0, 0.0));
+    almost_eq(cylinder.normal_at(0.75, 0.0), Vec3::new(0.0, 1.0, 0.0));
   }
 
   #[test]

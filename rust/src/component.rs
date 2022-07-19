@@ -1,14 +1,14 @@
-// use std::borrow::Borrow;
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
 use solvo::*;
 use shapex::*;
+use shapex::internal::Ref;
 
 use crate::solid::JsSolid;
 use crate::sketch::JsSketch;
 use crate::construction_helper::JsConstructionHelper;
-// use crate::utils::matrix_to_js;
+
 // use crate::log;
 
 

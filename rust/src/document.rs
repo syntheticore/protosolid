@@ -2,7 +2,8 @@ use wasm_bindgen::prelude::*;
 use js_sys::Array;
 
 use solvo::*;
-use shapex::*;
+use shapex::internal::rc;
+use shapex::internal::Ref;
 
 use crate::component::JsComponent;
 use crate::feature::JsFeature;

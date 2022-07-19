@@ -3,6 +3,7 @@ use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
 use shapex::*;
+use shapex::internal::Ref;
 use solvo::Sketch;
 
 use crate::utils::points_from_js;

@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use shapex::*;
+use shapex::internal::Ref;
 
 use crate::Component;
 use crate::Feature;

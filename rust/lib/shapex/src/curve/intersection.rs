@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use crate::base::*;
 use crate::curve::*;
 use crate::geom2d::cross_2d;
 

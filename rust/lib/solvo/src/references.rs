@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
-use shapex::Ref;
 use shapex::Profile;
 use shapex::Face;
 use shapex::Plane;
 use shapex::SurfaceType;
+use shapex::internal::Ref;
 
 use crate::Uuid;
 use crate::Sketch;
@@ -72,7 +72,7 @@ impl PlanarRef {
         if let Some(face) = face {
           let face = face.borrow();
           match &face.surface {
-            SurfaceType::Planar(plane) => Some(plane.clone()),
+            SurfaceType::Planar(plane) => Some(plane.plane.clone()),
             _ => unreachable!("Expected SurfaceType::Planar in {:?}, but got {:?}", self, face.surface),
           }
         } else {

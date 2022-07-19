@@ -1,4 +1,4 @@
-use crate::base::*;
+use crate::internal::*;
 use crate::curve::*;
 
 pub fn crossing_lines() -> Vec<Line> {

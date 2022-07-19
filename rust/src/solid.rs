@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::*;
 
 use solvo::*;
 use shapex::*;
+use shapex::internal::Ref;
 
 use crate::feature::JsPlanarRef;
 use crate::feature::JsFaceRef;
@@ -54,16 +55,16 @@ impl JsFace {
 
   fn make_origin(&self) -> Point3 {
     match &self.real.borrow().surface {
-      SurfaceType::Planar(plane) => plane.origin,
-      SurfaceType::Cylindrical(cyl) => cyl.plane.origin,
-      SurfaceType::Spline(_) => todo!(),
+      SurfaceType::Planar(plane) => plane.plane.origin,
+      SurfaceType::Revolution(cyl) => cyl.axis.origin,
+      SurfaceType::Spline(spline) => spline.controls[0][0],
     }
   }
 
   pub fn get_surface_type(&self) -> String {
     match self.real.borrow().surface {
       SurfaceType::Planar(_) => "Planar".into(),
-      SurfaceType::Cylindrical(_) => "Cylindrical".into(),
+      SurfaceType::Revolution(_) => "Revolution".into(),
       SurfaceType::Spline(_) => "Spline".into(),
     }
   }

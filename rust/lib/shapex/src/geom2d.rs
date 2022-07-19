@@ -1,6 +1,6 @@
 use earcutr;
 
-use crate::base::*;
+use crate::internal::*;
 use crate::curve::*;
 use crate::mesh::Mesh;
 

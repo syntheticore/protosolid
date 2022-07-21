@@ -48,14 +48,15 @@ fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
 }
 
 pub fn point_in_region(p: Point3, region: &Region) -> bool {
-  let ray = TrimmedCurve::new(Line::new(p, p + Vec3::unit_x() * MAX_FLOAT).into_enum());
-  let num_hits: usize = parallel!(region).map(|elem| {
-    match ray.intersect(&elem) {
-      CurveIntersectionType::Pierce(hits) |
-      CurveIntersectionType::Cross(hits)
-        => hits.len(),
+  let ray = TrimmedCurve::new(Line::new(p, p + Vec3::unit_x() * 9999999.0).into_enum());
+  let num_hits: usize = parallel!(region).flat_map(|elem| {
+    let intersections = ray.intersect(&elem);
+    intersections.iter().map(|isect| match isect {
+      CurveIntersectionType::Pierce(_)
+      | CurveIntersectionType::Cross(_)
+        => 1,
       _ => 0,
-    }
+    }).collect::<Vec<usize>>()
   }).sum();
   num_hits % 2 != 0
 }
@@ -78,7 +79,6 @@ pub fn tesselate_profile(profile: &Profile, normal: Vec3) -> Mesh {
   holes.pop();
   let vertices: Vec<Point3> = poly_rings.into_iter().flatten().collect();
   tesselate_polygon(vertices, holes, normal)
-  // tesselate_polygon(vertices, vec![], normal)
 }
 
 pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) -> Mesh {
@@ -142,7 +142,7 @@ pub fn trim(_elem: &CurveType, _cutters: &Vec<CurveType>, _p: Point3) {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+  use super::*;
   use crate::transform::*;
   use crate::test_data;
   use crate::test_data::make_generic;
@@ -206,7 +206,6 @@ use super::*;
     ]));
     let inner_circle = Circle::new(Point3::new(-1.0, 27.654544570311774, 0.0), 15.53598031475424);
     let inner_circle = make_region(make_generic(vec![inner_circle]));
-    println!("{:?}", inner_circle);
     assert!(super::region_in_region(&inner_circle, &circle));
     assert!(!super::region_in_region(&circle, &inner_circle));
   }
@@ -228,4 +227,11 @@ use super::*;
     assert!(super::region_in_region(&inner_rect, &rect));
     assert!(!super::region_in_region(&rect, &inner_rect));
   }
+
+  #[test]
+  fn point_in_triangle() {
+    let tri = make_region(make_generic(test_data::triangle()));
+    assert!(super::point_in_region(Point3::new(-7.0, 60.0, 0.0), &tri));
+  }
 }
+

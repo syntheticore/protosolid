@@ -481,7 +481,6 @@ mod tests {
   }
 
   #[test]
-  #[ignore]
   fn circle_in_circle_profile() {
     let mut sketch = Sketch::default();
     let circle = Circle::new(Point3::new(-27.0, 3.0, 0.0), 68.97340462273907);

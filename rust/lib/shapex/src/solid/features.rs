@@ -62,10 +62,11 @@ pub fn draft(faces: &Vec<Ref<Face>>, fixed_plane: &Plane, angle: Deg<f64>) -> Re
     let mut face = face.borrow_mut();
     match &face.surface {
       SurfaceType::Planar(plane) => {
-        let isect = intersection::plane_plane(&plane.plane, fixed_plane);
-        if let Some(line) = isect.get_line() {
-          let axis = Axis::from_points(line.endpoints());
-          face.surface.as_surface_mut().rotate_about_axis(axis, angle);
+        if let Some(intersection) = intersection::plane_plane(&plane.plane, fixed_plane) {
+          if let Some(line) = intersection.get_line() {
+            let axis = Axis::from_points(line.endpoints());
+            face.surface.as_surface_mut().rotate_about_axis(axis, angle);
+          }
         }
       },
       SurfaceType::Revolution(_) => todo!(),

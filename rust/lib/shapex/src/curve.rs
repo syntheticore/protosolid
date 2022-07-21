@@ -16,10 +16,11 @@ pub use intersection::CurveIntersectionType;
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
   fn unsample(&self, p: &Point3) -> f64; // p is expected to touch the curve
-  fn tangent(&self, t: f64, order: u32) -> Vec3;
+  fn tangent_at(&self, t: f64) -> Vec3;
+  fn curvature_at(&self, t: f64) -> f64;
   fn length_between(&self, start: f64, end: f64) -> f64;
+  // fn intersect(&self, other: &CurveType) -> Vec<CurveIntersectionType>;
   fn tesselate(&self) -> PolyLine;
-  fn into_enum(self) -> CurveType;
 
   fn endpoints(&self) -> (Point3, Point3) {
     (self.sample(0.0), self.sample(1.0))
@@ -30,7 +31,7 @@ pub trait Curve: Transformable {
     if point.almost(start) { end } else { start }
   }
 
-  fn tesselate_fixed(&self, steps: i32) -> PolyLine {
+  fn tesselate_fixed(&self, steps: u32) -> PolyLine {
     (0..steps + 1).map(|i| {
       self.sample(i as f64 / steps as f64)
     }).collect()
@@ -78,7 +79,7 @@ pub trait Curve: Transformable {
     self.sample(self.unsample(p))
   }
 
-  fn is_point_on_curve(&self, p: Point3) -> bool {
+  fn contains_point(&self, p: Point3) -> bool {
     let t = self.unsample(&p);
     t >= 0.0 && t <= 1.0 && self.sample(t).almost(p)
   }
@@ -88,6 +89,65 @@ impl std::fmt::Debug for dyn Curve {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "Foo")
   }
+}
+
+
+pub trait Splittable: Curve + Clone {
+  fn split_at(&self, t: f64) -> Option<(Self, Self)> where Self: Sized;
+  fn into_enum(self) -> CurveType;
+
+  fn split_with(&self, cutter: &CurveType) -> Option<Vec<CurveType>> {
+    let intersections = filter_splitting(self.clone().into_enum().intersect(cutter));
+    if intersections.len() == 0 { return None }
+    let points = intersections.iter().map(|hit| hit.point ).collect();
+    self.split_at_points(&points) //XXX use params instead
+  }
+
+  fn split_at_points(&self, points: &Vec<Point3>) -> Option<Vec<CurveType>> {
+    let params = points.iter().map(|p| self.unsample(p) ).collect();
+    self.split_at_params(params)
+  }
+
+  fn split_at_params(&self, mut params: Vec<f64>) -> Option<Vec<CurveType>> {
+    if params.len() == 0 { return None }
+    params.sort_by(|a, b| a.partial_cmp(b).unwrap() );
+    let mut segments = vec![];
+    let mut curve = self.clone();
+    let mut t_last = 0.0;
+    for (i, t) in params.iter().enumerate() {
+      let t_new = (t - t_last) / (1.0 - t_last);
+      let (first, second) = curve.split_at(t_new).unwrap();
+      segments.push(first.into_enum());
+      if i == params.len() - 1 {
+        segments.push(second.into_enum());
+      } else {
+        curve = second;
+      }
+      t_last = *t;
+    }
+    Some(segments)
+  }
+}
+
+fn filter_splitting(intersections: Vec<CurveIntersectionType>) -> Vec<CurveIntersection> {
+  intersections.into_iter().filter_map(|intersection| {
+    match intersection {
+      intersection::CurveIntersectionType::Contained
+      | intersection::CurveIntersectionType::Touch(_)
+      | intersection::CurveIntersectionType::Extended(_)
+      => None,
+
+      intersection::CurveIntersectionType::Cross(hit)
+      => Some(hit),
+
+      | intersection::CurveIntersectionType::Pierce(hit)
+      => if hit.direction { // Are we piercing or being pierced?
+        None
+      } else {
+        Some(hit)
+      },
+    }
+  }).collect()
 }
 
 
@@ -136,91 +196,55 @@ impl CurveType {
     }
   }
 
-  pub fn intersect(&self, other: &Self) -> CurveIntersectionType {
+  fn invert_intersections(mut intersections: Vec<CurveIntersectionType>) -> Vec<CurveIntersectionType>{
+    for isect in &mut intersections {
+      isect.invert();
+    }
+    intersections
+  }
+
+  pub fn intersect(&self, other: &Self) -> Vec<CurveIntersectionType> {
     match self {
       // Line
       CurveType::Line(line) => match other {
-        CurveType::Line(other) => intersection::line_line(line, other),
+        CurveType::Line(other) => intersection::line_line(line, other).map_or(vec![], |isect| vec![isect] ),
         CurveType::Circle(other) => intersection::line_circle(line, other),
-        CurveType::Arc(_other) => CurveIntersectionType::None,
+        CurveType::Arc(_other) => vec![],
         CurveType::Spline(other) => intersection::line_spline(line, other),
       },
 
       // Arc
       CurveType::Arc(_arc) => match other {
-        CurveType::Line(_other) => CurveIntersectionType::None,
-        CurveType::Circle(_other) => CurveIntersectionType::None,
-        CurveType::Arc(_other) => CurveIntersectionType::None,
-        CurveType::Spline(_other) => CurveIntersectionType::None,
+        CurveType::Line(_other) => vec![],
+        CurveType::Circle(_other) => vec![],
+        CurveType::Arc(_other) => vec![],
+        CurveType::Spline(_other) => vec![],
       },
 
       // Circle
       CurveType::Circle(circle) => match other {
-        CurveType::Line(other) => intersection::line_circle(other, circle),
-        CurveType::Circle(_other) => CurveIntersectionType::None,
-        CurveType::Arc(_other) => CurveIntersectionType::None,
-        CurveType::Spline(_other) => CurveIntersectionType::None,
+        CurveType::Line(other) => Self::invert_intersections(intersection::line_circle(other, circle)),
+        CurveType::Circle(_other) => vec![],
+        CurveType::Arc(_other) => vec![],
+        CurveType::Spline(_other) => vec![],
       },
 
       // Bezier Spline
       CurveType::Spline(spline) => match other {
-        CurveType::Line(other) => intersection::line_spline(other, spline), //XXX need to switch return values
-        CurveType::Circle(_other) => CurveIntersectionType::None,
-        CurveType::Arc(_other) => CurveIntersectionType::None,
-        CurveType::Spline(_other) => CurveIntersectionType::None,
+        CurveType::Line(other) => Self::invert_intersections(intersection::line_spline(other, spline)),
+        CurveType::Circle(_other) => vec![],
+        CurveType::Arc(_other) => vec![],
+        CurveType::Spline(_other) => vec![],
       },
     }
   }
 
-
-  pub fn split(&self, cutter: &Self) -> Vec<Self> {
+  pub fn split(&self, cutter: &Self) -> Option<Vec<Self>> {
     match self {
-      // Line
-      Self::Line(line) => line.split_with(cutter).iter().map(|seg| Self::Line(seg.clone())).collect(),
-
-      // Arc
-      Self::Arc(arc) => match cutter {
-        Self::Line(cutter) => arc.split_with_line(cutter),
-        Self::Arc(cutter) => arc.split_with_arc(cutter),
-        Self::Circle(cutter) => arc.split_with_circle(cutter),
-        Self::Spline(cutter) => arc.split_with_spline(cutter),
-      }.iter().map(|seg| seg.clone().into_enum() ).collect(),
-
-      // Circle
-      Self::Circle(circle) => match cutter {
-        Self::Line(cutter)
-          => if let Some((arc_l, arc_r)) = circle.split_with_line(cutter) {
-            vec![arc_l.into_enum(), arc_r.into_enum()]
-          } else { vec![self.clone()] },
-
-        Self::Arc(cutter)
-          => if let Some((arc_l, arc_r)) = circle.split_with_arc(cutter) {
-            vec![arc_l.into_enum(), arc_r.into_enum()]
-          } else { vec![self.clone()] },
-
-        Self::Circle(cutter)
-          => if let Some((arc_l, arc_r)) = circle.split_with_circle(cutter) {
-            vec![arc_l.into_enum(), arc_r.into_enum()]
-          } else { vec![self.clone()] },
-
-        Self::Spline(cutter)
-          => {
-            let arcs = circle.split_with_spline(cutter);
-            if arcs.len() > 0 {
-              arcs.iter().map(|seg| seg.clone().into_enum() ).collect()
-            } else {
-              vec![self.clone()]
-            }
-          },
-      }
-
-      // Bezier Spline
-      Self::Spline(spline) => match cutter {
-        Self::Line(cutter) => spline.split_with_line(cutter),
-        Self::Arc(cutter) => spline.split_with_arc(cutter),
-        Self::Circle(cutter) => spline.split_with_circle(cutter),
-        Self::Spline(cutter) => spline.split_with_spline(cutter),
-      }.iter().map(|seg| Self::Spline(seg.clone())).collect(),
+      Self::Line(line) => line.split_with(cutter),
+      Self::Arc(arc) => arc.split_with(cutter),
+      Self::Circle(circle) => circle.split_with(cutter),
+      Self::Spline(spline) => spline.split_with(cutter),
     }
   }
 
@@ -229,15 +253,11 @@ impl CurveType {
     for other in others.iter() {
       if self == other { continue } //OPT Compare by ID
       segments = segments.iter().flat_map(|own| {
-        own.split(&other)
+        own.split(&other).unwrap_or(vec![own.clone()])
       }).collect();
     }
     segments
   }
-
-  // pub fn trim(&self, at: f64, side: bool) {
-
-  // }
 }
 
 
@@ -304,63 +324,50 @@ impl TrimmedCurve {
     self.is_forward = !self.is_forward
   }
 
-  fn param_to_base(&self, t: f64) -> f64 {
+  pub fn param_to_base(&self, t: f64) -> f64 {
     let out = self.trims.0 + t * (self.trims.1 - self.trims.0);
     if self.is_forward { out } else { 1.0 - out }
   }
 
-  fn param_from_base(&self, t_base: f64) -> f64 {
+  pub fn param_from_base(&self, t_base: f64) -> f64 {
     let t_base = if self.is_forward { t_base } else { 1.0 - t_base };
     (t_base - self.trims.0) / (self.trims.1 - self.trims.0)
   }
 
-  fn convert_intersection(&self, mut intersection: CurveIntersection) -> (CurveIntersection, bool) {
-    let t = self.param_from_base(intersection.t);
-    intersection.t = t;
-    (intersection, t >= 0.0 && t <= 1.0)
+  fn convert_intersection(&self, intersection: &mut CurveIntersection, other: &Self) {
+    intersection.t1 = self.param_from_base(intersection.t1);
+    intersection.t2 = other.param_from_base(intersection.t2);
   }
 
-  pub fn intersect(&self, other: &Self) -> CurveIntersectionType {
-    let mut intersection = self.base.intersect(&other.base);
-    match intersection {
-      CurveIntersectionType::None
-      | CurveIntersectionType::Contained //XXX Needs to be checked
+  pub fn intersect(&self, other: &Self) -> Vec<CurveIntersectionType> {
+    let intersections = self.base.intersect(&other.base);
+    intersections.into_iter().map(move |intersection| {
+      match intersection {
+        CurveIntersectionType::Contained //XXX Could now be Touch. Contained needs to store its range
         => intersection,
-      CurveIntersectionType::Extended(ref mut isects)
+
+        CurveIntersectionType::Touch(mut isect)
+        | CurveIntersectionType::Pierce(mut isect)
+        | CurveIntersectionType::Cross(mut isect)
+        | CurveIntersectionType::Extended(mut isect)
         => {
-          *isects = isects.iter()
-          .map(|isect| self.convert_intersection(isect.clone()).0 )
-          .collect();
-          intersection
-        },
-      CurveIntersectionType::Touch(isect)
-        => {
-          let converted = self.convert_intersection(isect);
-          if converted.1 {
-            CurveIntersectionType::Touch(converted.0)
+          self.convert_intersection(&mut isect, other);
+          let first_at_end = isect.t1.almost(0.0) || isect.t1.almost(1.0);
+          let second_at_end = isect.t2.almost(0.0) || isect.t2.almost(1.0);
+          if first_at_end && second_at_end {
+            CurveIntersectionType::Touch(isect)
+          } else if first_at_end || second_at_end {
+            isect.direction = first_at_end;
+            CurveIntersectionType::Pierce(isect)
+          } else if 0.0 <= isect.t1 && isect.t1 <= 1.0 && 0.0 <= isect.t2 && isect.t2 <= 1.0 {
+            CurveIntersectionType::Cross(isect)
           } else {
-            CurveIntersectionType::Extended(vec![converted.0])
+            isect.direction = 0.0 <= isect.t2 && isect.t2 <= 1.0;
+            CurveIntersectionType::Extended(isect)
           }
         },
-      CurveIntersectionType::Pierce(ref mut isects)
-      | CurveIntersectionType::Cross(ref mut isects)
-        => {
-          let converted: Vec<(CurveIntersection, bool)> = isects.iter().map(|isect|
-            self.convert_intersection(isect.clone())
-          ).collect();
-          let filtered: Vec<CurveIntersection> = converted.iter().filter_map(|result|
-            if result.1 {
-              Some(result.0.clone())
-            } else { None }
-          ).collect();
-          if filtered.len() > 0 {
-            *isects = filtered;
-            intersection
-          } else {
-            CurveIntersectionType::Extended(converted.into_iter().map(|result| result.0 ).collect())
-          }
-        },
-    }
+      }
+    }).collect()
   }
 }
 
@@ -381,8 +388,12 @@ impl Curve for TrimmedCurve {
     self.param_from_base(self.base.as_curve().unsample(p))
   }
 
-  fn tangent(&self, t: f64, order: u32) -> Vec3 {
-    self.base.as_curve().tangent(self.param_to_base(t), order)
+  fn tangent_at(&self, t: f64) -> Vec3 {
+    self.base.as_curve().tangent_at(self.param_to_base(t))
+  }
+
+  fn curvature_at(&self, _t: f64) -> f64 {
+    todo!()
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
@@ -391,10 +402,6 @@ impl Curve for TrimmedCurve {
 
   fn tesselate(&self) -> Vec<Point3> {
     self.tesselate_adaptive(0.025, Deg(20.0), (0.0, 1.0))
-  }
-
-  fn into_enum(self) -> CurveType {
-    self.base //XXX should actually trim the curve
   }
 }
 
@@ -424,6 +431,7 @@ pub type Profile = Vec<Wire>;
 /// let line = Line::new(Point3::origin(), Point3::new(1.0, 0.0, 0.0));
 /// assert_eq!(line.midpoint(), Point3::new(0.5, 0.0, 0.0))
 /// ```
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Line {
   pub id: Uuid,
@@ -445,36 +453,6 @@ impl Line {
   pub fn angle_to(&self, other: &Self) -> f64 {
     self.tangent().dot(other.tangent()).acos()
   }
-
-  pub fn split_with(&self, cutter: &CurveType) -> Vec<Line> {
-    match self.clone().into_enum().intersect(cutter) {
-      intersection::CurveIntersectionType::None
-      | intersection::CurveIntersectionType::Contained
-      | intersection::CurveIntersectionType::Touch(_)
-      | intersection::CurveIntersectionType::Extended(_)
-      => vec![self.clone()],
-
-      intersection::CurveIntersectionType::Cross(hits)
-      | intersection::CurveIntersectionType::Pierce(hits)
-      => { //XXX points are not sorted along line
-        let mut points: Vec<Point3> = hits.iter().map(|hit| hit.point ).collect();
-        // Are we piercing or being pierced?
-        if points[0].almost(self.points.0) || points[0].almost(self.points.1) {
-          return vec![self.clone()];
-        }
-        points.push(self.points.1);
-        let mut segments = vec![Self::new(self.points.0, points[0])];
-        let mut iter = points.iter().peekable();
-        loop {
-          match (iter.next(), iter.peek()) {
-            (Some(p), Some(&next_p)) => segments.push(Self::new(*p, *next_p)),
-            _ => break,
-          }
-        }
-        segments
-      },
-    }
-  }
 }
 
 impl Curve for Line {
@@ -490,8 +468,12 @@ impl Curve for Line {
     (vec).dot(direction) / self.length()
   }
 
-  fn tangent(&self, _t: f64, _order: u32) -> Vec3 {
-    (self.points.1 - self.points.0).normalize()
+  fn tangent_at(&self, _t: f64) -> Vec3 {
+    self.tangent()
+  }
+
+  fn curvature_at(&self, _t: f64) -> f64 {
+    0.0
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -506,6 +488,13 @@ impl Curve for Line {
 
   fn endpoints(&self) -> (Point3, Point3) {
     self.points
+  }
+}
+
+impl Splittable for Line {
+  fn split_at(&self, t: f64) -> Option<(Self, Self)> {
+    let p = self.sample(t);
+    Some((Line::new(self.points.0, p), Line::new(p, self.points.1)))
   }
 
   fn into_enum(self) -> CurveType {
@@ -541,18 +530,14 @@ impl Arc {
     }
   }
 
+  pub fn circle(center: Point3, radius: f64) -> Self {
+    Self::new(center, radius, 0.0, 1.0)
+  }
+
   pub fn from_points(p1: Point3, p2: Point3, p3: Point3) -> Result<Self, String> {
     let circle = Circle::from_points(p1, p2, p3)?;
     Ok(Self::new(circle.plane.origin, circle.radius, circle.unsample(&p1), circle.unsample(&p3)))
   }
-
-  pub fn split_with_line(&self, _line: &Line) -> Vec<Arc> { vec![self.clone()] }
-
-  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Arc> { vec![self.clone()] }
-
-  pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Arc> { vec![] }
-
-  pub fn split_with_spline(&self, _spline: &Spline) -> Vec<Arc> { vec![] }
 }
 
 impl Curve for Arc {
@@ -570,8 +555,12 @@ impl Curve for Arc {
     (param - self.bounds.0) / range
   }
 
-  fn tangent(&self, _t: f64, _order: u32) -> Vec3 {
+  fn tangent_at(&self, _t: f64) -> Vec3 {
     todo!()
+  }
+
+  fn curvature_at(&self, _t: f64) -> f64 {
+    1.0 / self.radius
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -580,6 +569,12 @@ impl Curve for Arc {
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
     std::f64::consts::PI * 2.0 * self.radius * (start - end).abs()
+  }
+}
+
+impl Splittable for Arc {
+  fn split_at(&self, _t: f64) -> Option<(Self, Self)> {
+    todo!()
   }
 
   fn into_enum(self) -> CurveType {
@@ -638,31 +633,6 @@ impl Circle {
   pub fn area(&self) -> f64 {
     std::f64::consts::PI * self.radius.powf(2.0)
   }
-
-  pub fn split_with_line(&self, line: &Line) -> Option<(Arc, Arc)> {
-    let intersection = intersection::line_circle(line, self);
-    match intersection {
-      intersection::CurveIntersectionType::Cross(hits) => {
-        if hits.len() == 2 {
-          let t1 = self.unsample(&hits[0].point);
-          let t2 = self.unsample(&hits[1].point);
-          Some((
-            Arc::new(self.plane.origin, self.radius, t1, t2),
-            Arc::new(self.plane.origin, self.radius, t2, t1),
-          ))
-        } else {
-          None
-        }
-      },
-      _ => None,
-    }
-  }
-
-  pub fn split_with_arc(&self, _arc: &Arc) -> Option<(Arc, Arc)> { None }
-
-  pub fn split_with_circle(&self, _circle: &Circle) -> Option<(Arc, Arc)> { None }
-
-  pub fn split_with_spline(&self, _spline: &Spline) -> Vec<Arc> { vec![] }
 }
 
 impl Curve for Circle {
@@ -681,8 +651,12 @@ impl Curve for Circle {
     }
   }
 
-  fn tangent(&self, _t: f64, _order: u32) -> Vec3 {
+  fn tangent_at(&self, _t: f64) -> Vec3 {
     todo!()
+  }
+
+  fn curvature_at(&self, _t: f64) -> f64 {
+    1.0 / self.radius
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -698,6 +672,31 @@ impl Curve for Circle {
   fn endpoints(&self) -> (Point3, Point3) {
     let zero = self.sample(0.0);
     (zero, zero)
+  }
+}
+
+impl Splittable for Circle {
+  fn split_at(&self, _t: f64) -> Option<(Self, Self)> {
+    None
+  }
+
+  fn split_at_points(&self, points: &Vec<Point3>) -> Option<Vec<CurveType>> {
+    if points.len() >= 2 {
+      let mut params: Vec<f64> = points.iter().map(|p| self.unsample(p) ).collect();
+      params.sort_by(|a, b| a.partial_cmp(b).unwrap() );
+      let first_arc = Arc::new(self.plane.origin, self.radius, params[0], params[1]);
+      let second_arc = Arc::new(self.plane.origin, self.radius, params[1], params[0]);
+      if points.len() > 2 {
+        let remaining_points = points.iter().skip(2).cloned().collect();
+        let mut arcs = vec![first_arc.into_enum()];
+        arcs.append(&mut second_arc.split_at_points(&remaining_points).unwrap());
+        Some(arcs)
+      } else {
+        Some(vec![first_arc.into_enum(), second_arc.into_enum()])
+      }
+    } else {
+      None
+    }
   }
 
   fn into_enum(self) -> CurveType {
@@ -755,13 +754,6 @@ impl BasisSpline {
     ].concat()
   }
 
-  pub fn split_at(&self, t: f64) -> (Self, Self) {
-    let mut left = vec![];
-    let mut right = vec![];
-    self.real_split(t, &self.controls, &mut left, &mut right);
-    (Self::new(left), Self::new(right))
-  }
-
   fn real_split(&self, t: f64, controls: &[Point3], left: &mut Vec<Point3>, right: &mut Vec<Point3>) -> Point3 {
     if controls.len() == 1 {
       let p = controls[0];
@@ -808,14 +800,6 @@ impl BasisSpline {
       self.unsample_recursive(sample_center, sample2, target)
     }
   }
-
-  pub fn split_with_line(&self, _line: &Line) -> Vec<Self> { vec![self.clone()] }
-
-  pub fn split_with_arc(&self, _arc: &Arc) -> Vec<Self> { vec![self.clone()] }
-
-  pub fn split_with_circle(&self, _circle: &Circle) -> Vec<Self> { vec![self.clone()] }
-
-  pub fn split_with_spline(&self, _spline: &BasisSpline) -> Vec<Self> { vec![self.clone()] }
 }
 
 
@@ -849,8 +833,12 @@ impl Curve for BasisSpline {
     )
   }
 
-  fn tangent(&self, t: f64, _order: u32) -> Vec3 {
+  fn tangent_at(&self, t: f64) -> Vec3 {
     self.derive().sample(t).to_vec().normalize()
+  }
+
+  fn curvature_at(&self, _t: f64) -> f64 {
+    todo!()
   }
 
   fn tesselate(&self) -> Vec<Point3> {
@@ -868,6 +856,16 @@ impl Curve for BasisSpline {
 
   fn endpoints(&self) -> (Point3, Point3) {
     (self.controls[0], *self.controls.last().unwrap())
+  }
+}
+
+impl Splittable for BasisSpline {
+  fn split_at(&self, t: f64) -> Option<(Self, Self)> {
+    if t.almost(0.0) || t.almost(1.0) { return None }
+    let mut left = vec![];
+    let mut right = vec![];
+    self.real_split(t, &self.controls, &mut left, &mut right);
+    Some((Self::new(left), Self::new(right)))
   }
 
   fn into_enum(self) -> CurveType {
@@ -898,34 +896,43 @@ mod tests {
   #[test]
   fn split_crossing_lines() {
     let lines = test_data::crossing_lines();
-    let segments = lines[0].split_with(&lines[1].clone().into_enum());
+    let segments = lines[0].split_with(&lines[1].clone().into_enum()).unwrap();
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
-    assert_eq!(segments[0].length(), 0.5, "Segment had wrong length");
+    assert_eq!(segments[0].as_curve().length(), 0.5, "Segment had wrong length");
   }
 
   #[test]
   fn split_touching_lines() {
     let lines = test_data::rectangle();
     let segments = lines[0].split_with(&lines[1].clone().into_enum());
-    assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
-    assert_eq!(segments[0].length(), 2.0, "Segment had wrong length");
+    assert_eq!(segments, None, "Line should not have been split");
   }
 
   #[test]
   fn split_t_section1() {
     let lines = test_data::t_section();
-    let segments = lines[0].split_with(&lines[1].clone().into_enum());
+    let segments = lines[0].split_with(&lines[1].clone().into_enum()).unwrap();
     assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
-    assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
-    assert_eq!(segments[1].length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
   }
 
   #[test]
   fn split_t_section2() {
     let lines = test_data::t_section();
     let segments = lines[1].split_with(&lines[0].clone().into_enum());
-    assert_eq!(segments.len(), 1, "{} segments found instead of 1", segments.len());
-    assert_eq!(segments[0].length(), 1.0, "Segment had wrong length");
+    assert_eq!(segments, None, "Line should not have been split");
+  }
+
+  #[test]
+  fn pierce_direction() {
+    let lines = test_data::t_section();
+    let intersections = lines[0].clone().into_enum().intersect(&lines[1].clone().into_enum());
+    assert_eq!(intersections.len(), 1, "{} intersections instead of 1", intersections.len());
+    match &intersections[0] {
+      CurveIntersectionType::Pierce(hit) => assert_eq!(hit.direction, false, "Pierce orientation was wrong"),
+      _ => panic!("Intersection type should be Pierce instead of {:#?}", intersections[0]),
+    };
   }
 
   #[test]

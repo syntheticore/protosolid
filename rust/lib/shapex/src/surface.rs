@@ -8,7 +8,8 @@ use crate::mesh::*;
 use crate::geom2d;
 
 pub mod intersection;
-pub use intersection::SurfaceIntersection;
+pub use intersection::SurfaceIntersectionType;
+pub use intersection::CurveSurfaceIntersectionType;
 pub use intersection::CurveSurfaceIntersection;
 
 // use crate::log;
@@ -20,7 +21,6 @@ pub trait Surface: Transformable {
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
   fn tesselate(&self, profile: &Profile) -> Mesh;
   fn flip(&mut self); //XXX use Face::flip_normal instead
-  fn into_enum(self) -> SurfaceType;
 
   fn tesselate_fixed(&self, u_res: usize, v_res: usize, _profile: &Profile) -> Mesh {
     let mut vertices: Vec<Point3> = vec![];
@@ -53,6 +53,16 @@ pub trait Surface: Transformable {
       normals,
     }
   }
+
+  fn closest_point(&self, p: Point3) -> Point3 {
+    let (u, v) = self.unsample(p);
+    self.sample(u, v)
+  }
+
+  fn contains_point(&self, p: Point3, ) -> bool {
+    let (u, v) = self.unsample(p);
+    u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0 && self.sample(u, v).almost(p)
+  }
 }
 
 
@@ -80,27 +90,27 @@ impl SurfaceType {
     }
   }
 
-  pub fn intersect(&self, other: &Self) -> SurfaceIntersection {
+  pub fn intersect(&self, other: &Self) -> Vec<SurfaceIntersectionType> {
     match self {
       // PlanarSurface
       SurfaceType::Planar(plane) => match other {
-        SurfaceType::Planar(surface) => intersection::plane_plane(&plane.plane, &surface.plane),
-        SurfaceType::Revolution(_surface) => SurfaceIntersection::None,
-        SurfaceType::Spline(_surface) => SurfaceIntersection::None,
+        SurfaceType::Planar(surface) => intersection::plane_plane(&plane.plane, &surface.plane).map_or(vec![], |isect| vec![isect] ),
+        SurfaceType::Revolution(_surface) => vec![],
+        SurfaceType::Spline(_surface) => vec![],
       },
 
       // RevolutionSurface
       SurfaceType::Revolution(_surface) => match other {
-        SurfaceType::Planar(_surface) => SurfaceIntersection::None,
-        SurfaceType::Revolution(_surface) => SurfaceIntersection::None,
-        SurfaceType::Spline(_surface) => SurfaceIntersection::None,
+        SurfaceType::Planar(_surface) => vec![],
+        SurfaceType::Revolution(_surface) => vec![],
+        SurfaceType::Spline(_surface) => vec![],
       },
 
       // SplineSurface
       SurfaceType::Spline(_surface) => match other {
-        SurfaceType::Planar(_surface) => SurfaceIntersection::None,
-        SurfaceType::Revolution(_surface) => SurfaceIntersection::None,
-        SurfaceType::Spline(_surface) => SurfaceIntersection::None,
+        SurfaceType::Planar(_surface) => vec![],
+        SurfaceType::Revolution(_surface) => vec![],
+        SurfaceType::Spline(_surface) => vec![],
       },
     }
   }
@@ -108,36 +118,68 @@ impl SurfaceType {
 
 
 impl CurveType {
-  pub fn intersect_surface(&self, other: &SurfaceType) -> CurveSurfaceIntersection {
+  pub fn intersect_surface(&self, other: &SurfaceType) -> Vec<CurveSurfaceIntersectionType> {
     match self {
       // Line
       CurveType::Line(line) => match other {
-        SurfaceType::Planar(surface) => intersection::line_plane(line, &surface.plane),
-        SurfaceType::Revolution(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Planar(surface) => intersection::line_plane(line, &surface.plane).map_or(vec![], |isect| vec![isect] ),
+        SurfaceType::Revolution(_surface) => vec![],
+        SurfaceType::Spline(_surface) => vec![],
       },
 
       // Arc
       CurveType::Arc(_arc) => match other {
-        SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Revolution(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Planar(_surface) => vec![],
+        SurfaceType::Revolution(_surface) => vec![],
+        SurfaceType::Spline(_surface) => vec![],
       },
 
       // Circle
       CurveType::Circle(_circle) => match other {
-        SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Revolution(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Planar(_surface) => vec![],
+        SurfaceType::Revolution(_surface) => vec![],
+        SurfaceType::Spline(_surface) => vec![],
       },
 
-      // Bezier Spline
+      // Spline
       CurveType::Spline(_spline) => match other {
-        SurfaceType::Planar(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Revolution(_surface) => CurveSurfaceIntersection::None,
-        SurfaceType::Spline(_surface) => CurveSurfaceIntersection::None,
+        SurfaceType::Planar(_surface) => vec![],
+        SurfaceType::Revolution(_surface) => vec![],
+        SurfaceType::Spline(_surface) => vec![],
       },
     }
+  }
+}
+
+
+impl TrimmedCurve {
+  pub fn intersect_surface(&self, other: &TrimmedSurface) -> Vec<CurveSurfaceIntersectionType> {
+    let intersections = self.base.intersect_surface(&other.base);
+    intersections.into_iter().map(move |intersection| {
+      match intersection {
+        CurveSurfaceIntersectionType::Contained
+        => intersection,
+
+        CurveSurfaceIntersectionType::Pierce(mut isect)
+        | CurveSurfaceIntersectionType::Cross(mut isect)
+        | CurveSurfaceIntersectionType::Extended(mut isect)
+        => {
+          isect.t = self.param_from_base(isect.t);
+          let first_at_end = isect.t.almost(0.0) || isect.t.almost(1.0);
+          if other.contains_point(isect.point) {
+            if first_at_end {
+              CurveSurfaceIntersectionType::Pierce(isect)
+            } else if 0.0 <= isect.t && isect.t <= 1.0 {
+              CurveSurfaceIntersectionType::Cross(isect)
+            } else {
+              CurveSurfaceIntersectionType::Extended(isect)
+            }
+          } else {
+            CurveSurfaceIntersectionType::Extended(isect)
+          }
+        },
+      }
+    }).collect()
   }
 }
 
@@ -145,27 +187,45 @@ impl CurveType {
 #[derive(Debug)]
 pub struct TrimmedSurface {
   pub base: SurfaceType,
-  pub bounds: Profile,
+  pub profile: Profile,
 }
 
 impl TrimmedSurface {
   pub fn new(surf: SurfaceType, outer_bounds: Wire) -> Self {
     Self {
       base: surf,
-      bounds: vec![outer_bounds],
+      profile: vec![outer_bounds],
     }
   }
 
   pub fn area(&self) -> f64 {
-    0.0 //XXX
+    0.0
   }
 
-  //XXX pub fn on_surface(&self, u: f64, v: f64) -> bool
+  pub fn on_surface(&self, u: f64, v: f64) -> bool {
+    let p = Point3::new(u, v, 0.0);
+    geom2d::point_in_region(p, &self.profile[0]) && !self.profile.iter().skip(1).any(|wire| geom2d::point_in_region(p, wire) )
+  }
+
+  pub fn contains_point(&self, p: Point3) -> bool {
+    let (u, v) = self.base.as_surface().unsample(p);
+    self.base.as_surface().sample(u, v).almost(p) && self.on_surface(u, v)
+  }
+
+  pub fn intersect(&self, _other: Self) -> SurfaceIntersectionType {
+    todo!()
+  }
+}
+
+impl Transformable for TrimmedSurface {
+  fn transform(&mut self, transform: &Matrix4) {
+    self.base.as_surface_mut().transform(transform);
+  }
 }
 
 impl Meshable for TrimmedSurface {
   fn tesselate(&self) -> Mesh {
-    self.base.as_surface().tesselate(&self.bounds)
+    self.base.as_surface().tesselate(&self.profile)
   }
 }
 
@@ -178,6 +238,10 @@ pub struct PlanarSurface {
 impl PlanarSurface {
   pub fn new(plane: Plane) -> Self {
     Self { plane }
+  }
+
+  pub fn into_enum(self) -> SurfaceType {
+    SurfaceType::Planar(self)
   }
 }
 
@@ -197,7 +261,7 @@ impl Surface for PlanarSurface {
   fn tesselate(&self, profile: &Profile) -> Mesh {
     let mut local_profile = profile.clone();
     let trans = self.plane.as_transform();
-    let trans_inv = trans.invert().unwrap();
+    let trans_inv = trans.invert().unwrap(); //XXX Profile should be in plane space
     for wire in &mut local_profile {
       for curve in wire.iter_mut() {
         curve.transform(&trans_inv);
@@ -210,10 +274,6 @@ impl Surface for PlanarSurface {
 
   fn flip(&mut self) {
     self.plane.flip();
-  }
-
-  fn into_enum(self) -> SurfaceType {
-    SurfaceType::Planar(self)
   }
 }
 
@@ -259,6 +319,10 @@ impl RevolutionSurface {
     let radius = sample.to_vec().magnitude();
     Point3::new(u.cos() * radius, u.sin() * radius, height)
   }
+
+  pub fn into_enum(self) -> SurfaceType {
+    SurfaceType::Revolution(self)
+  }
 }
 
 impl Surface for RevolutionSurface {
@@ -275,7 +339,7 @@ impl Surface for RevolutionSurface {
     let sample = self.sample_local(u, v);
     let mut axis_normal = sample.to_vec();
     axis_normal.z = 0.0;
-    let v_tangent = self.curve.as_curve().tangent(v, 1);
+    let v_tangent = self.curve.as_curve().tangent_at(v);
     let u_tangent = v_tangent.cross(axis_normal);
     let normal = v_tangent.cross(u_tangent).normalize();
     self.axis.as_transform().transform_vector(normal)
@@ -287,10 +351,6 @@ impl Surface for RevolutionSurface {
 
   fn flip(&mut self) {
     self.u_bounds = (self.u_bounds.1, self.u_bounds.0);
-  }
-
-  fn into_enum(self) -> SurfaceType {
-    SurfaceType::Revolution(self)
   }
 }
 
@@ -363,6 +423,10 @@ impl SplineSurface {
       (num_cvs - 1) * 20
     }
   }
+
+  pub fn into_enum(self) -> SurfaceType {
+    SurfaceType::Spline(self)
+  }
 }
 
 impl Surface for SplineSurface {
@@ -395,10 +459,6 @@ impl Surface for SplineSurface {
   fn flip(&mut self) {
     self.controls = self.controls.iter().rev().cloned().collect();
     mem::swap(&mut self.knots.1, &mut self.knots.0);
-  }
-
-  fn into_enum(self) -> SurfaceType {
-    SurfaceType::Spline(self)
   }
 }
 

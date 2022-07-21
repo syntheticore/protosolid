@@ -1,39 +1,87 @@
-use std::collections::VecDeque;
-
 use crate::curve::*;
 use crate::geom2d::cross_2d;
 
 
 #[derive(Debug, PartialEq)]
 pub enum CurveIntersectionType {
-  None,
   Touch(CurveIntersection), // Touching endpoints
-  Pierce(Vec<CurveIntersection>), // Endpoint touching curve/surface
-  Cross(Vec<CurveIntersection>), // Actual intersections
-  Extended(Vec<CurveIntersection>), // Intersections outside geometric bounds
+  Pierce(CurveIntersection), // Endpoint touching curve/surface
+  Cross(CurveIntersection), // Actual intersections
+  Extended(CurveIntersection), // Intersections outside geometric bounds
   Contained, // Overlap, Infinite intersections
 }
 
+impl CurveIntersectionType {
+  pub fn get_intersection(&self, include_extended: bool) -> Option<&CurveIntersection> {
+    match self {
+      Self::Contained
+      => None,
+
+      Self::Touch(isect)
+      |Self::Pierce(isect)
+      | Self::Cross(isect)
+      => Some(isect),
+
+      Self::Extended(isect)
+      => if include_extended {
+        Some(isect)
+      } else {
+        None
+      }
+    }
+  }
+
+  pub fn get_point(&self, include_extended: bool) -> Option<Point3> {
+    self.get_intersection(include_extended).map(|isect| isect.point )
+  }
+
+  pub fn invert(&mut self) -> &Self {
+    match self {
+      Self::Touch(isect)
+      |Self::Pierce(isect)
+      | Self::Cross(isect)
+      | Self::Extended(isect)
+      => isect.invert(),
+      _ => {}
+    };
+    self
+  }
+}
+
+
+/// Geometric intersection between two curves
+/// * `point` - Point of intersection
+/// * `t1` - Parameter on first curve
+/// * `t2` - Parameter on second curve
+/// * `direction` - Determines which way the Pierce and Extended variants are to be interpreted
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CurveIntersection {
   pub point: Point3,
-  pub t: f64,
-  //pub t2: f64, //XXX Needed to check in which direction a pierce or extension happened
+  pub t1: f64,
+  pub t2: f64,
+  pub direction: bool
 }
 
 impl CurveIntersection {
-  pub fn new(point: Point3, t: f64) -> Self {
+  pub fn new(point: Point3, t1: f64, t2: f64) -> Self {
     Self {
       point,
-      t,
+      t1,
+      t2,
+      direction: true,
     }
+  }
+
+  pub fn invert(&mut self) {
+    (self.t1, self.t2) = (self.t2, self.t1);
+    self.direction = !self.direction
   }
 }
 
 
 // https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
-pub fn line_line(own: &Line, other: &Line) -> CurveIntersectionType {
+pub fn line_line(own: &Line, other: &Line) -> Option<CurveIntersectionType> {
   let r = own.points.1 - own.points.0;
   let s = other.points.1 - other.points.0;
   let u_numerator = cross_2d(other.points.0 - own.points.0, r);
@@ -54,22 +102,29 @@ pub fn line_line(own: &Line, other: &Line) -> CurveIntersectionType {
       (other.points.1.y - own.points.1.y < 0.0),
     ].windows(2).all(|w| w[0] == w[1]);
     return if overlap {
-      CurveIntersectionType::Contained
+      Some(CurveIntersectionType::Contained)
     } else {
-      CurveIntersectionType::None
+      None
     }
   }
 
   // Lines touch at endpoints
-  if own.points.0.almost(other.points.0) || own.points.0.almost(other.points.1){
-    return CurveIntersectionType::Touch(CurveIntersection::new(own.points.0, 0.0))
-  } else if own.points.1.almost(other.points.0) || own.points.1.almost(other.points.1) {
-    return CurveIntersectionType::Touch(CurveIntersection::new(own.points.1, 1.0))
+  if own.points.0.almost(other.points.0) {
+    return Some(CurveIntersectionType::Touch(CurveIntersection::new(own.points.0, 0.0, 0.0)))
+
+  } else if own.points.0.almost(other.points.1) {
+    return Some(CurveIntersectionType::Touch(CurveIntersection::new(own.points.0, 0.0, 1.0)))
+
+  } else if own.points.1.almost(other.points.0) {
+    return Some(CurveIntersectionType::Touch(CurveIntersection::new(own.points.1, 1.0, 0.0)))
+
+  } else if own.points.1.almost(other.points.1) {
+    return Some(CurveIntersectionType::Touch(CurveIntersection::new(own.points.1, 1.0, 1.0)))
   }
 
   // Lines are parallel
   if denominator.almost(0.0) {
-    return CurveIntersectionType::None;
+    return None;
   }
 
   // Lines cross
@@ -78,44 +133,50 @@ pub fn line_line(own: &Line, other: &Line) -> CurveIntersectionType {
   let do_cross = (t >= 0.0) && (t <= 1.0) && (u >= 0.0) && (u <= 1.0);
   let intersection_point = own.points.0 + r * t;
   if do_cross {
-    if t.almost(0.0) || t.almost(1.0) || u.almost(0.0) || u.almost(1.0) {
-      CurveIntersectionType::Pierce(vec![CurveIntersection::new(intersection_point, t)])
+    let first_at_end = t.almost(0.0) || t.almost(1.0);
+    let second_at_end = u.almost(0.0) || u.almost(1.0);
+    if first_at_end || second_at_end {
+      let mut isect = CurveIntersection::new(intersection_point, t, u);
+      isect.direction = first_at_end;
+      Some(CurveIntersectionType::Pierce(isect))
     } else {
-      CurveIntersectionType::Cross(vec![CurveIntersection::new(intersection_point, t)])
+      Some(CurveIntersectionType::Cross(CurveIntersection::new(intersection_point, t, u)))
     }
   } else {
-    //XXX Should be None for 3d lines
-    CurveIntersectionType::Extended(vec![CurveIntersection::new(intersection_point, t)])
+    Some(CurveIntersectionType::Extended(CurveIntersection::new(intersection_point, t, u)))
   }
 }
 
 
-pub fn line_spline(line: &Line, spline: &Spline) -> CurveIntersectionType {
+pub fn line_spline(line: &Line, spline: &Spline) -> Vec<CurveIntersectionType> {
   let spline_end_points = spline.endpoints();
+  let mut intersections = vec![];
   // Curves touch at endpoints
-  return if line.points.0.almost(spline_end_points.0) || line.points.0.almost(spline_end_points.1) {
-    CurveIntersectionType::Touch(CurveIntersection::new(line.points.0, 0.0))
+  if line.points.0.almost(spline_end_points.0) {
+    intersections.push(CurveIntersectionType::Touch(CurveIntersection::new(line.points.0, 0.0, 0.0)))
 
-  } else if line.points.1.almost(spline_end_points.0) || line.points.1.almost(spline_end_points.1) {
-    CurveIntersectionType::Touch(CurveIntersection::new(line.points.1, 1.0))
+  } else if line.points.0.almost(spline_end_points.1) {
+    intersections.push(CurveIntersectionType::Touch(CurveIntersection::new(line.points.0, 0.0, 1.0)))
 
-  } else {
-    CurveIntersectionType::None
+  } else if line.points.1.almost(spline_end_points.0) {
+    intersections.push(CurveIntersectionType::Touch(CurveIntersection::new(line.points.1, 1.0, 0.0)))
+
+  } else if line.points.1.almost(spline_end_points.1) {
+    intersections.push(CurveIntersectionType::Touch(CurveIntersection::new(line.points.1, 1.0, 1.0)))
   }
+  intersections
 }
 
 
-pub fn line_circle(line: &Line, circle: &Circle) -> CurveIntersectionType {
+pub fn line_circle(line: &Line, circle: &Circle) -> Vec<CurveIntersectionType> {
   let direction = line.points.1 - line.points.0;
   let f = line.points.0 - circle.plane.origin;
   let a = direction.dot(direction);
   let b = f.dot(direction) * 2.0;
-  let c = f.dot(f) - (circle.radius * circle.radius);
-
+  let c = f.dot(f) - (circle.radius.powf(2.0));
+  let mut intersections = vec![];
   let discriminant = b * b - 4.0 * a * c;
-  if discriminant < 0.0 {
-    CurveIntersectionType::None
-  } else {
+  if discriminant >= 0.0 { // No intersection for negative discriminant
     let discriminant = discriminant.sqrt();
 
     let t1 = (-b - discriminant) / (2.0 * a);
@@ -123,18 +184,23 @@ pub fn line_circle(line: &Line, circle: &Circle) -> CurveIntersectionType {
 
     let crossed = (t1 >= 0.0 && t1 <= 1.0, t2 >= 0.0 && t2 <= 1.0);
 
-    let mut intersections = VecDeque::from(vec![
-      CurveIntersection::new(line.sample(t1), t1),
-      CurveIntersection::new(line.sample(t2), t2),
-    ]);
+    let p1 = line.sample(t1);
+    let p2 = line.sample(t2);
+    let isect1 = CurveIntersection::new(p1, t1, circle.unsample(&p1));
+    let isect2 = CurveIntersection::new(p2, t2, circle.unsample(&p2));
 
-    if crossed.0 || crossed.1 {
-      if !crossed.0 { intersections.pop_front(); } else if !crossed.1 { intersections.pop_back(); }
-      CurveIntersectionType::Cross(intersections.into_iter().collect())
+    intersections.push(if crossed.0 {
+      CurveIntersectionType::Cross(isect1)
     } else {
-      CurveIntersectionType::Extended(intersections.into_iter().collect())
-    }
+      CurveIntersectionType::Extended(isect1)
+    });
+    intersections.push(if crossed.1 {
+      CurveIntersectionType::Cross(isect2)
+    } else {
+      CurveIntersectionType::Extended(isect2)
+    });
   }
+  intersections
 }
 
 
@@ -147,32 +213,32 @@ mod tests {
   fn crossing_lines() {
     let lines = test_data::crossing_lines();
     let hit = line_line(&lines[0], &lines[1]);
-    assert_eq!(hit, CurveIntersectionType::Cross(vec![
-      CurveIntersection::new(Point3::origin(), 0.5)
-    ]));
+    assert_eq!(hit, Some(CurveIntersectionType::Cross(
+      CurveIntersection::new(Point3::origin(), 0.5, 0.5)
+    )));
   }
 
   #[test]
   fn parallel_lines() {
     let lines = test_data::parallel_lines();
     let hit = line_line(&lines[0], &lines[1]);
-    assert_eq!(hit, CurveIntersectionType::None);
+    assert_eq!(hit, None);
   }
 
   #[test]
   fn overlapping_lines() {
     let lines = test_data::overlapping_lines();
     let hit = line_line(&lines[0], &lines[1]);
-    assert_eq!(hit, CurveIntersectionType::Contained);
+    assert_eq!(hit, Some(CurveIntersectionType::Contained));
   }
 
   #[test]
   fn touching_lines() {
     let lines = test_data::rectangle();
     let hit = line_line(&lines[0], &lines[1]);
-    assert_eq!(hit, CurveIntersectionType::Touch(
-      CurveIntersection::new(Point3::new(1.0, 1.0, 0.0), 1.0)
-    ));
+    assert_eq!(hit, Some(CurveIntersectionType::Touch(
+      CurveIntersection::new(Point3::new(1.0, 1.0, 0.0), 1.0, 0.0)
+    )));
   }
 
   #[test]
@@ -180,10 +246,10 @@ mod tests {
     let circle = Circle::new(Point3::origin(), 1.0);
     let line = Line::new(Point3::new(-2.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0));
     let hit = line_circle(&line, &circle);
-    assert_eq!(hit, CurveIntersectionType::Cross(vec![
-      CurveIntersection::new(Point3::new(-1.0, 0.0, 0.0), 0.25),
-      CurveIntersection::new(Point3::new(1.0, 0.0, 0.0), 0.75),
-    ]));
+    assert_eq!(hit, vec![
+      CurveIntersectionType::Cross(CurveIntersection::new(Point3::new(-1.0, 0.0, 0.0), 0.25, 0.75)),
+      CurveIntersectionType::Cross(CurveIntersection::new(Point3::new(1.0, 0.0, 0.0), 0.75, 0.25)),
+    ]);
   }
 
   #[test]
@@ -191,6 +257,6 @@ mod tests {
     let circle = Circle::new(Point3::origin(), 1.0);
     let line = Line::new(Point3::new(-2.0, 2.0, 0.0), Point3::new(2.0, 2.0, 0.0));
     let hit = line_circle(&line, &circle);
-    assert_eq!(hit, CurveIntersectionType::None);
+    assert_eq!(hit, vec![]);
   }
 }

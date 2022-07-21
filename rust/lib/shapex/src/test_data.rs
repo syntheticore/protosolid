@@ -105,6 +105,17 @@ pub fn arc_rectangle() -> Vec<CurveType> {
   ]
 }
 
+pub fn triangle() -> Vec<Line> {
+  let p1 = Point3::new(46.0, 48.0, 0.0);
+  let p2 = Point3::new(-41.0, 3.0, 0.0);
+  let p3 = Point3::new(-46.0, 84.0, 0.0);
+  vec![
+    Line::new(p1, p2),
+    Line::new(p3, p1),
+    Line::new(p2, p3),
+  ]
+}
+
 pub fn s_curve() -> Spline {
   Spline::new(vec![
     Point3::new(-1.5, -1.0, 0.0),
@@ -114,7 +125,7 @@ pub fn s_curve() -> Spline {
   ])
 }
 
-pub fn make_generic<T: Curve>(elems: Vec<T>) -> Vec<CurveType> {
+pub fn make_generic<T: Curve + Splittable>(elems: Vec<T>) -> Vec<CurveType> {
   elems.into_iter().map(|l| l.into_enum()).collect()
 }
 

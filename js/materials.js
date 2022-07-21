@@ -77,7 +77,7 @@ export default class Materials {
       roughness: 0.25,
       metalness: 0.2,
       polygonOffset: true,
-      polygonOffsetFactor: 2,
+      polygonOffsetFactor: 1,
       // wireframe: true,
     })
 

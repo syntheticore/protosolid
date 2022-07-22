@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import ArrowControls from './arrowControls.js'
+import ArrowControls from './arrow-controls.js'
 import { rotationFromNormal } from './utils.js'
 
 export class LengthGizmo extends ArrowControls {

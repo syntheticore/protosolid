@@ -9,9 +9,9 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
 
 import Materials from './materials.js'
-import SketchPlane from './sketchPlane.js'
-import ShadowCatcher from './shadowCatcher.js'
-import ArrowControls from './arrowControls.js'
+import SketchPlane from './sketch-plane.js'
+import ShadowCatcher from './shadow-catcher.js'
+import ArrowControls from './arrow-controls.js'
 import { vec2three } from './utils.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
 

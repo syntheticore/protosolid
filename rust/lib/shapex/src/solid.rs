@@ -367,44 +367,46 @@ impl Shell {
     (edge, face)
   }
 
-  pub fn sweep(&mut self, face: &Ref<Face>, vec: Vec3) {
+  pub fn sweep<C,S>(&mut self, face: &Ref<Face>, transform: &Matrix4, make_curve: C, make_surface: S)
+  where
+    C: Fn(Point3) -> (CurveType, Point3),
+    S: Fn(&TrimmedCurve) -> SurfaceType,
+  {
     for ring in &face.borrow().rings {
       let first = ring.borrow().half_edge.clone();
       let mut scan = first.borrow().get_next();
-      self.sweep_mev(&scan, vec);
+      self.sweep_mev(&scan, &make_curve);
       while !Rc::ptr_eq(&scan, &first) {
         scan = {
           let scan_next = scan.borrow().get_next();
-          self.sweep_mev(&scan_next, vec);
-          self.sweep_mef(&scan, vec);
+          self.sweep_mev(&scan_next, &make_curve);
+          self.sweep_mef(&scan, transform, &make_surface);
           let scanb = scan.borrow();
           scanb.get_next().borrow().mate().borrow().get_next()
         }
       }
-      self.sweep_mef(&scan, vec);
+      self.sweep_mef(&scan, transform, &make_surface);
     }
-    face.borrow_mut().surface.as_surface_mut().translate(vec);
+    face.borrow_mut().surface.as_surface_mut().transform(transform);
   }
 
-  fn sweep_mev(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
+  fn sweep_mev<C: Fn(Point3) -> (CurveType, Point3)>(&mut self, scan: &Ref<HalfEdge>, make_curve: C) {
     let point = scan.borrow().origin.borrow().point;
-    let new_point = point + vec;
-    let line = Line::new(new_point, point).into_enum();
-    self.lmev(scan, scan, line, new_point);
+    let (curve, new_point) = make_curve(point);
+    self.lmev(scan, scan, curve, new_point);
   }
 
-  fn sweep_mef(&mut self, scan: &Ref<HalfEdge>, vec: Vec3) {
+  fn sweep_mef<S: Fn(&TrimmedCurve) -> SurfaceType>(&mut self, scan: &Ref<HalfEdge>, transform: &Matrix4, make_surface: S) {
     let scan_previous = scan.borrow().get_previous();
     let next = scan.borrow().get_next();
     let next_next = next.borrow().get_next();
     let mut curve = scan.borrow().get_edge().borrow().curve.clone();
-    curve.as_curve_mut().translate(vec);
+    curve.as_curve_mut().transform(transform);
     // Create new stable id for cloned curve
     let curve_id = curve.get_id();
     let fields = curve_id.as_fields();
     curve.set_id(Uuid::from_fields(fields.0, fields.1 + 1, fields.2, fields.3).unwrap());
     // Sweep actual surface
-    let surface = Self::sweep_surface(&scan.borrow().make_curve(), vec);
     // let p1 = scan_previous.borrow().origin.borrow().point;
     // let p2 = next_next.borrow().origin.borrow().point;
     self.lmef(
@@ -412,31 +414,8 @@ impl Shell {
       &scan_previous, // ..this half edge's vertex..
       &next_next, // ..to this half edge's vertex
       curve,
-      surface,
+      make_surface(&scan.borrow().make_curve()),
     );
-  }
-
-  fn sweep_surface(curve: &TrimmedCurve, vec: Vec3) -> SurfaceType {
-    match &curve.base {
-      CurveType::Line(_) =>
-        PlanarSurface::new(Plane::from_triangle(
-          curve.bounds.0,
-          curve.bounds.0 + vec,
-          curve.bounds.1,
-        )).into_enum(),
-
-      CurveType::Circle(circle) =>
-        RevolutionSurface::cylinder(Axis::new(circle.plane.origin, vec), circle.radius, vec.magnitude()).into_enum(),
-
-      CurveType::Arc(arc) => {
-        let mut surface = RevolutionSurface::cylinder(Axis::new(arc.plane.origin, vec), arc.radius, vec.magnitude());
-        surface.u_bounds = arc.bounds;
-        surface.into_enum()
-      },
-
-      CurveType::Spline(spline) =>
-        SplineSurface::tabulated(spline, vec).into_enum(),
-    }
   }
 
   pub fn print(&self) {

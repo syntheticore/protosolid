@@ -129,7 +129,7 @@ export class ExtrudeFeature extends Feature {
         type: 'profile',
         multi: true,
       },
-      rail: {
+      axis: {
         title: '(Axis)',
         type: 'axis',
         optional: true,
@@ -208,6 +208,90 @@ export class ExtrudeFeature extends Feature {
 }
 
 
+export class RevolveFeature extends Feature {
+  constructor(document, real) {
+    super(document, real, true, 'Revolution', 'wave-square', {
+      profiles: {
+        title: 'Profile',
+        type: 'profile',
+        multi: true,
+      },
+      axis: {
+        title: 'Axis',
+        type: 'axis',
+      },
+      angle: {
+        title: 'Angle',
+        type: 'length',
+      },
+      side: {
+        title: 'Side',
+        type: 'bool',
+        icons: ['caret-right', 'caret-left']
+      },
+    })
+
+    this.profiles = null
+    this.axis = null
+    this.angle = 1.0
+    this.side = true
+  }
+
+  isComplete() {
+    return this.axis && this.profiles && this.profiles().length
+  }
+
+  updateFeature() {
+    const list = new window.alcWasm.JsProfileRefList()
+    this.profiles().forEach(profile => {
+      list.push(profile.make_reference())
+    })
+    const sketch = this.document.tree.findSketch(this.profiles()[0].sketch_id())
+    const comp_ref = sketch.component_id()
+    const angle = this.angle * (this.side ? 1 : -1)
+    console.log(this.axis())
+    this.real.revolution(comp_ref, list, this.axis(), angle, this.operation)
+  }
+
+  updateGizmos() {
+    if(this.isComplete()) {
+      if(this.lengthGizmo) {
+        this.lengthGizmo.set(this.angle, this.side)
+      } else {
+        const center = vec2three(this.profiles()[0].get_center())
+        const axis = this.axis && this.axis()
+        const direction = vec2three(this.profiles()[0].get_normal())
+        this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.angle, (dist, side) => {
+          this.angle = dist
+          this.side = side
+        })
+        // this.angleGizmo = new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
+        //   console.log(angle)
+        //   this.angle = angle
+        // })
+        window.alcRenderer.addGizmo(this.lengthGizmo)
+      }
+    } else {
+      window.alcRenderer.removeGizmo(this.lengthGizmo)
+      this.lengthGizmo = null
+    }
+  }
+
+  confirm() {
+    // Refetch profiles in case they've been repaired
+    this.profiles().forEach(profile => profile.free())
+    const profiles = this.real.get_profiles()
+    this.profiles = () => profiles
+  }
+
+  dispose() {
+    super.dispose()
+    window.alcRenderer.removeGizmo(this.lengthGizmo)
+    this.lengthGizmo = null
+  }
+}
+
+
 export class DraftFeature extends Feature {
   constructor(document, real) {
     super(document, real, true, 'Draft', 'clone', {
@@ -219,7 +303,7 @@ export class DraftFeature extends Feature {
         title: 'Faces',
         type: 'face',
         multi: true,
-        superMulti: true,
+        autoMulti: true,
       },
       angle: {
         title: 'Angle',
@@ -310,49 +394,6 @@ export class SweepFeature extends Feature {
 
   confirm() {
     this.profile.extrude(1.0)
-  }
-}
-
-
-export class RevolveFeature extends Feature {
-  constructor(document, real) {
-    super(document, real, true, 'Revolve', 'edit', {
-      profile: {
-        title: 'Profile',
-        type: 'profile',
-      },
-      axis: {
-        title: 'Axis',
-        type: 'axis',
-      },
-      angle: {
-        title: 'Angle',
-        type: 'angle',
-      },
-      side: {
-        title: 'Side',
-        type: 'bool',
-        icons: ['caret-right', 'caret-left']
-      },
-    })
-
-    this.profile = null
-    this.axis = null
-    this.angle = 360.0
-    this.side = true
-  }
-
-  isComplete() {
-    return this.profile && this.axis
-  }
-
-  preview() {
-    this.profile.noFree = true
-    return this.profile.extrude_preview(this.angle * (this.side ? 1 : -1))
-  }
-
-  confirm() {
-    this.profile.revolve(axis, this.angle * (this.side ? 1 : -1))
   }
 }
 

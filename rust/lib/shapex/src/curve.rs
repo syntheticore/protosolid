@@ -85,12 +85,6 @@ pub trait Curve: Transformable {
   }
 }
 
-impl std::fmt::Debug for dyn Curve {
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "Foo")
-  }
-}
-
 
 pub trait Splittable: Curve + Clone {
   fn split_at(&self, t: f64) -> Option<(Self, Self)> where Self: Sized;
@@ -128,6 +122,7 @@ pub trait Splittable: Curve + Clone {
     Some(segments)
   }
 }
+
 
 fn filter_splitting(intersections: Vec<CurveIntersectionType>) -> Vec<CurveIntersection> {
   intersections.into_iter().filter_map(|intersection| {
@@ -392,8 +387,8 @@ impl Curve for TrimmedCurve {
     self.base.as_curve().tangent_at(self.param_to_base(t))
   }
 
-  fn curvature_at(&self, _t: f64) -> f64 {
-    todo!()
+  fn curvature_at(&self, t: f64) -> f64 {
+    self.base.as_curve().curvature_at(self.param_to_base(t))
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
@@ -462,10 +457,9 @@ impl Curve for Line {
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
-    if p.almost(self.points.0) { return 0.0 }
+    // if p.almost(self.points.0) { return 0.0 }
     let vec = p - self.points.0;
-    let direction = (self.points.1 - self.points.0).normalize();
-    (vec).dot(direction) / self.length()
+    (vec).dot(self.tangent()) / self.length()
   }
 
   fn tangent_at(&self, _t: f64) -> Vec3 {
@@ -522,9 +516,20 @@ pub struct Arc {
 
 impl Arc {
   pub fn new(center: Point3, radius: f64, start: f64, end: f64) -> Self {
+    let mut plane = Plane::from_point(center);
+    plane.flip();
     Self {
       id: Uuid::new_v4(),
-      plane: Plane::from_point(center),
+      plane,
+      radius,
+      bounds: (start, end),
+    }
+  }
+
+  pub fn from_plane(plane: Plane, radius: f64, start: f64, end: f64) -> Self {
+    Self {
+      id: Uuid::new_v4(),
+      plane,
       radius,
       bounds: (start, end),
     }
@@ -598,9 +603,11 @@ pub struct Circle {
 
 impl Circle {
   pub fn new(center: Point3, radius: f64) -> Self {
+    let mut plane = Plane::from_point(center);
+    plane.flip();
     Self {
       id: Uuid::new_v4(),
-      plane: Plane::from_point(center),
+      plane,
       radius,
     }
   }

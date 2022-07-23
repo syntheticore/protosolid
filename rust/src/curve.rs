@@ -5,11 +5,14 @@ use wasm_bindgen::prelude::*;
 use shapex::*;
 use shapex::internal::Ref;
 use solvo::Sketch;
+use solvo::AxialRef;
+use solvo::CurveRef;
 
 use crate::utils::points_from_js;
 use crate::utils::points_to_js;
 use crate::controllable::as_controllable_mut;
 use crate::controllable::as_controllable;
+use crate::feature::JsAxialRef;
 
 
 #[wasm_bindgen]
@@ -100,5 +103,15 @@ impl JsCurve {
 
   pub fn get_length(&self) -> f64 {
     self.real.borrow().as_curve().length()
+  }
+
+  pub fn make_axial_reference(&self) -> JsValue {
+    let curve = self.real.borrow();
+    match *curve {
+      CurveType::Line(_) => JsValue::from(JsAxialRef::new(AxialRef::CurveRef(CurveRef {
+        curve: self.real.clone(),
+      }))),
+      _ => unreachable!(),
+    }
   }
 }

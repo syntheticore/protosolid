@@ -292,13 +292,17 @@ pub struct RevolutionSurface {
 }
 
 impl RevolutionSurface {
-  pub fn new(axis: Axis, mut curve: CurveType) -> Self {
+  pub fn new(axis: Axis, curve: CurveType) -> Self {
+    Self::with_bounds(axis, curve, (0.0, 1.0))
+  }
+
+  pub fn with_bounds(axis: Axis, mut curve: CurveType, u_bounds: (f64, f64)) -> Self {
     let base_transform = axis.as_transform().invert().unwrap();
     curve.as_curve_mut().transform(&base_transform);
     Self {
       axis,
       curve,
-      u_bounds: (0.0, 1.0),
+      u_bounds,
     }
   }
 
@@ -346,7 +350,7 @@ impl Surface for RevolutionSurface {
   }
 
   fn tesselate(&self, profile: &Profile) -> Mesh {
-    self.tesselate_fixed(80, 1, profile)
+    self.tesselate_fixed(80, 10, profile)
   }
 
   fn flip(&mut self) {

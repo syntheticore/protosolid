@@ -1,3 +1,5 @@
+use std::convert::From;
+
 use serde::{Serialize, Deserialize};
 use itertools::Itertools;
 
@@ -32,12 +34,26 @@ impl Axis {
   pub fn as_transform(&self) -> Matrix4 {
     transform_from_location_and_normal(self.origin, self.direction)
   }
+
+  pub fn closest_point(&self, p: Point3) -> Point3 {
+    let t = (p - self.origin).dot(self.direction);
+    self.origin + self.direction * t
+  }
 }
 
 impl Transformable for Axis {
   fn transform(&mut self, transform: &Matrix4) {
     self.origin = transform.transform_point(self.origin);
     self.direction = transform.transform_vector(self.direction);
+  }
+}
+
+impl From<&Plane> for Axis {
+  fn from(plane: &Plane) -> Self {
+    Self {
+      origin: plane.origin,
+      direction: plane.normal(),
+    }
   }
 }
 
@@ -142,6 +158,12 @@ impl Transformable for Plane {
   }
 }
 
+impl From<&Axis> for Plane {
+  fn from(axis: &Axis) -> Self {
+    Self::from_normal(axis.origin, axis.direction)
+  }
+}
+
 
 #[derive(Debug)]
 pub enum PlaneError {
@@ -227,7 +249,7 @@ pub fn transform_from_location_and_normal(origin: Point3, mut normal: Vec3) -> M
   )
 }
 
-pub fn rotation_about_axis(axis: Axis, angle: Deg<f64>) -> Matrix4 {
+pub fn rotation_about_axis(axis: &Axis, angle: Deg<f64>) -> Matrix4 {
   let translation = Matrix4::from_translation(axis.origin.to_vec());
   let rotation = Matrix4::from_axis_angle(axis.direction, angle);
   translation * rotation * translation.invert().unwrap()

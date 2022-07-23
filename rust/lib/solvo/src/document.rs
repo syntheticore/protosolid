@@ -109,7 +109,7 @@ impl Document {
     for (i, feature) in self.features.iter_mut().enumerate().skip(from).take(to - from) {
       let mut new_comp = comp.deep_clone();
       let mut feature = feature.borrow_mut();
-      feature.error = feature.feature_type.as_feature().execute(&mut new_comp).err();
+      feature.error = feature.feature_type.as_feature_mut().execute(&mut new_comp).err();
       let j = i + 1;
       self.cache[j] = if let Some(FeatureError::Error(_)) = feature.error {
         comp.deep_clone()

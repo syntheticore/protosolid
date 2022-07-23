@@ -191,8 +191,7 @@ impl JsFeature {
 
   pub fn extrusion(&mut self, comp_ref: JsValue, profiles: JsProfileRefList, distance: f64, op: &str) {
     let profiles = &profiles.profiles;
-    let feature_id = self.real.as_ref().map_or(Uuid::new_v4(), |real| real.borrow().id );
-    let mut feature = Feature::new(
+    let feature = Feature::new(
       ExtrusionFeature {
         component_id: comp_ref.into_serde().unwrap(),
         profiles: profiles.iter().map(|profile| profile.0.clone() ).collect(),
@@ -200,7 +199,21 @@ impl JsFeature {
         op: get_op(op),
       }.into_enum(),
     );
-    feature.id = feature_id;
+    self.process_feature(feature);
+  }
+
+  pub fn revolution(&mut self, comp_ref: JsValue, profiles: JsProfileRefList, axis: &JsAxialRef, angle: f64, op: &str) {
+    let profiles = &profiles.profiles;
+    let feature = Feature::new(
+      RevolutionFeature {
+        component_id: comp_ref.into_serde().unwrap(),
+        profiles: profiles.iter().map(|profile| profile.0.clone() ).collect(),
+        axis: axis.0.clone(),
+        angle: Deg(angle),
+        op: get_op(op),
+        preview_compound: None,
+      }.into_enum(),
+    );
     self.process_feature(feature);
   }
 
@@ -216,9 +229,10 @@ impl JsFeature {
     self.process_feature(feature);
   }
 
-  fn process_feature(&mut self, feature: Feature) {
+  fn process_feature(&mut self, mut feature: Feature) {
     let mut doc = self.document.borrow_mut();
     if let Some(this) = &mut self.real {
+      feature.id = this.borrow().id;
       *this.borrow_mut() = feature;
       doc.invalidate_feature(this);
     } else {
@@ -236,8 +250,8 @@ impl JsFeature {
   }
 
   pub fn repair(&mut self) {
-    let mut doc = self.document.borrow_mut();
     if let Some(this) = &mut self.real {
+      let mut doc = self.document.borrow_mut();
       doc.repair_feature(this);
     }
   }

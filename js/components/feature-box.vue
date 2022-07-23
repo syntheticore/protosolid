@@ -354,6 +354,9 @@
             } else if(this.activeFeature.settings[key].type == 'plane') {
               const ref = item.make_planar_reference()
               this.activeFeature[key] = () => ref
+            } else if(this.activeFeature.settings[key].type == 'axis') {
+              const ref = item.make_axial_reference()
+              this.activeFeature[key] = () => ref
             } else {
               // Hide heavy data from Vue in a closure
               const itemCopy = (item.duplicate ? item.duplicate() : item)
@@ -363,7 +366,7 @@
             this.activePicker = null
             resolve()
             if(this.activeFeature.settings[key].autoConfirm) this.confirm()
-            if(this.activeFeature.settings[key].superMulti) setTimeout(() => this.pick(type, key), 0)
+            if(this.activeFeature.settings[key].autoMulti) setTimeout(() => this.pick(type, key), 0)
           })
           this.activePicker = key
           const picker = this.$refs[key][0]

@@ -8,7 +8,7 @@ pub enum SurfaceIntersectionType {
   Touch(CurveType),
   Cross(CurveType),
   Extended(CurveType),
-  Contained, // Overlap, Infinite intersections
+  Contained,
 }
 
 impl SurfaceIntersectionType {
@@ -35,7 +35,7 @@ pub enum CurveSurfaceIntersectionType {
   Pierce(CurveSurfaceIntersection),
   Cross(CurveSurfaceIntersection),
   Extended(CurveSurfaceIntersection),
-  Contained, // Overlap, Infinite intersections
+  Contained,
 }
 
 impl CurveSurfaceIntersectionType {

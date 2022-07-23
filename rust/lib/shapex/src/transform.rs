@@ -1,5 +1,6 @@
 use crate::internal::*;
 use crate::geom3d;
+use crate::geom3d::Axis;
 
 
 pub trait Transformable {
@@ -13,7 +14,7 @@ pub trait Transformable {
     self.transform(&Matrix4::from_scale(scalar));
   }
 
-  fn rotate_about_axis(&mut self, axis: geom3d::Axis, angle: Deg<f64>) {
+  fn rotate_about_axis(&mut self, axis: &Axis, angle: Deg<f64>) {
     self.transform(&geom3d::rotation_about_axis(axis, angle));
   }
 }

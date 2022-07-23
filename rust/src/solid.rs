@@ -17,26 +17,26 @@ use crate::utils::points_to_js;
 #[derive(Debug, Clone)]
 pub struct JsFace {
   component_id: Uuid,
-  solid_id: Uuid,
   real: Ref<Face>,
+
+  #[wasm_bindgen(skip)]
+  pub document: Ref<Document>,
+}
+
+impl JsFace {
+  pub fn from(face: &Ref<Face>, component_id: Uuid, document: Ref<Document>) -> Self {
+    Self {
+      component_id,
+      real: face.clone(),
+      document,
+    }
+  }
 }
 
 #[wasm_bindgen]
 impl JsFace {
-  fn from(face: &Ref<Face>, component_id: Uuid, solid_id: Uuid) -> Self {
-    Self {
-      component_id,
-      solid_id,
-      real: face.clone(),
-    }
-  }
-
   pub fn get_id(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
-  }
-
-  pub fn get_solid_id(&self) -> JsValue {
-    JsValue::from_serde(&self.solid_id).unwrap()
   }
 
   pub fn get_origin(&self) -> JsValue {
@@ -81,7 +81,7 @@ impl JsFace {
     JsValue::from(JsFaceRef::new(FaceRef {
       component_id: self.component_id,
       bounds: face.get_edge_ids(),
-    }))
+    }, self.document.clone()))
   }
 
   pub fn make_planar_reference(&self) -> JsValue {
@@ -90,7 +90,7 @@ impl JsFace {
       SurfaceType::Planar(_) => JsValue::from(JsPlanarRef::new(PlanarRef::FaceRef(FaceRef {
         component_id: self.component_id,
         bounds: face.get_edge_ids(),
-      }))),
+      }), self.document.clone())),
       _ => unreachable!(),
     }
   }
@@ -104,15 +104,13 @@ impl JsFace {
 #[wasm_bindgen]
 pub struct JsEdge {
   real: Ref<Edge>,
-  solid_id: Uuid,
 }
 
 #[wasm_bindgen]
 impl JsEdge {
-  fn from(edge: &Ref<Edge>, solid_id: Uuid) -> Self {
+  fn from(edge: &Ref<Edge>) -> Self {
     Self {
       real: edge.clone(),
-      solid_id,
     }
   }
 
@@ -120,12 +118,7 @@ impl JsEdge {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
   }
 
-  pub fn get_solid_id(&self) -> JsValue {
-    JsValue::from_serde(&self.solid_id).unwrap()
-  }
-
   pub fn tesselate(&self) -> Array {
-    // points_to_js(self.real.borrow().curve.as_curve().tesselate())
     points_to_js(self.real.borrow().left_half.borrow().make_curve().tesselate())
   }
 }
@@ -142,7 +135,7 @@ pub struct JsSolid {
 }
 
 impl JsSolid {
-  pub fn from(solid: &Solid, component_id: Uuid) -> Self {
+  pub fn from(solid: &Solid, component_id: Uuid, document: Ref<Document>) -> Self {
     let shell = &solid.shells[0];
     // Vertices
     let vertices = points_to_js(shell.vertices.iter().map(|v| v.borrow().point ).collect());
@@ -151,12 +144,12 @@ impl JsSolid {
       if edge.borrow().is_inner() {
         None
       } else {
-        Some(JsValue::from(JsEdge::from(edge, solid.id)))
+        Some(JsValue::from(JsEdge::from(edge)))
       }
     }).collect();
     // Faces
     let faces = shell.faces.iter().map(|f| {
-      JsValue::from(JsFace::from(f, component_id, solid.id))
+      JsValue::from(JsFace::from(f, component_id, document.clone()))
     }).collect();
     Self {
       solid_id: solid.id,

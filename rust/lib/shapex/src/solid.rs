@@ -369,17 +369,17 @@ impl Shell {
 
   pub fn sweep<C,S>(&mut self, face: &Ref<Face>, transform: &Matrix4, make_curve: C, make_surface: S)
   where
-    C: Fn(Point3) -> (CurveType, Point3),
+    C: Fn(Point3) -> CurveType,
     S: Fn(&TrimmedCurve) -> SurfaceType,
   {
     for ring in &face.borrow().rings {
       let first = ring.borrow().half_edge.clone();
       let mut scan = first.borrow().get_next();
-      self.sweep_mev(&scan, &make_curve);
+      self.sweep_mev(&scan, transform, &make_curve);
       while !Rc::ptr_eq(&scan, &first) {
         scan = {
           let scan_next = scan.borrow().get_next();
-          self.sweep_mev(&scan_next, &make_curve);
+          self.sweep_mev(&scan_next, transform, &make_curve);
           self.sweep_mef(&scan, transform, &make_surface);
           let scanb = scan.borrow();
           scanb.get_next().borrow().mate().borrow().get_next()
@@ -390,10 +390,10 @@ impl Shell {
     face.borrow_mut().surface.as_surface_mut().transform(transform);
   }
 
-  fn sweep_mev<C: Fn(Point3) -> (CurveType, Point3)>(&mut self, scan: &Ref<HalfEdge>, make_curve: C) {
+  fn sweep_mev<C: Fn(Point3) -> CurveType>(&mut self, scan: &Ref<HalfEdge>, transform: &Matrix4, make_curve: C) {
     let point = scan.borrow().origin.borrow().point;
-    let (curve, new_point) = make_curve(point);
-    self.lmev(scan, scan, curve, new_point);
+    let curve = make_curve(point);
+    self.lmev(scan, scan, curve, transform.transform_point(point));
   }
 
   fn sweep_mef<S: Fn(&TrimmedCurve) -> SurfaceType>(&mut self, scan: &Ref<HalfEdge>, transform: &Matrix4, make_surface: S) {
@@ -407,6 +407,7 @@ impl Shell {
     let fields = curve_id.as_fields();
     curve.set_id(Uuid::from_fields(fields.0, fields.1 + 1, fields.2, fields.3).unwrap());
     // Sweep actual surface
+    let surface = make_surface(&scan.borrow().make_curve());
     // let p1 = scan_previous.borrow().origin.borrow().point;
     // let p2 = next_next.borrow().origin.borrow().point;
     self.lmef(
@@ -414,7 +415,7 @@ impl Shell {
       &scan_previous, // ..this half edge's vertex..
       &next_next, // ..to this half edge's vertex
       curve,
-      make_surface(&scan.borrow().make_curve()),
+      surface,
     );
   }
 

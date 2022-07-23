@@ -21,34 +21,36 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
     shell.faces.first()
   }.unwrap().clone();
   let transform = Matrix4::from_translation(vec);
-  shell.sweep(&face, &transform,
-  |point| {
-    let new_point = point + vec;
-    (Line::new(new_point, point).into_enum(), new_point)
-  },
-  |tcurve| {
-    match &tcurve.base {
-      CurveType::Line(_)
-      => PlanarSurface::new(Plane::from_triangle(
-        tcurve.bounds.0,
-        tcurve.bounds.0 + vec,
-        tcurve.bounds.1,
-      )).into_enum(),
+  shell.sweep(
+    &face,
+    &transform,
+    |point| {
+      Line::new(point + vec, point).into_enum()
+    },
+    |tcurve| {
+      match &tcurve.base {
+        CurveType::Line(_)
+        => PlanarSurface::new(Plane::from_triangle(
+          tcurve.bounds.0,
+          tcurve.bounds.0 + vec,
+          tcurve.bounds.1,
+        )).into_enum(),
 
-      CurveType::Circle(circle)
-      => RevolutionSurface::cylinder(Axis::new(circle.plane.origin, vec), circle.radius, vec.magnitude()).into_enum(),
+        CurveType::Circle(circle)
+        => RevolutionSurface::cylinder(Axis::new(circle.plane.origin, vec), circle.radius, vec.magnitude()).into_enum(),
 
-      CurveType::Arc(arc)
-      => {
-        let mut surface = RevolutionSurface::cylinder(Axis::new(arc.plane.origin, vec), arc.radius, vec.magnitude());
-        surface.u_bounds = arc.bounds;
-        surface.into_enum()
-      },
+        CurveType::Arc(arc)
+        => {
+          let mut surface = RevolutionSurface::cylinder(Axis::new(arc.plane.origin, vec), arc.radius, vec.magnitude());
+          surface.u_bounds = arc.bounds;
+          surface.into_enum()
+        },
 
-      CurveType::Spline(spline)
-      => SplineSurface::tabulated(spline, vec).into_enum(),
+        CurveType::Spline(spline)
+        => SplineSurface::tabulated(spline, vec).into_enum(),
+      }
     }
-  });
+  );
   if distance > 200.0 {
     Err(format!("Maximum extrusion distance exceeded"))
   } else {
@@ -68,19 +70,21 @@ pub fn revolve(profile: &Profile, axis: &Axis, angle: Deg<f64>) -> Result<Compou
     shell.faces.first()
   }.unwrap().clone();
   let transform = geom3d::rotation_about_axis(axis, angle);
-  shell.sweep(&face, &transform,
-  |point| {
-    let p_axis = axis.closest_point(point);
-    let radius = p_axis.distance(point);
-    let mut plane: Plane = axis.into();
-    plane.origin = p_axis;
-    let arc = Arc::from_plane(plane, radius, 0.0, angle / Deg(360.0));
-    let new_point = arc.sample(1.0);
-    (arc.into_enum(), new_point)
-  },
-  |tcurve| {
-    RevolutionSurface::with_bounds(axis.clone(), tcurve.base.clone(), (0.0, angle / Deg(360.0))).into_enum()
-  });
+  shell.sweep(
+    &face,
+    &transform,
+    |point| {
+      let p_axis = axis.closest_point(point);
+      let radius = p_axis.distance(point);
+      let mut plane: Plane = axis.into();
+      plane.origin = p_axis;
+      let arc = Arc::from_plane(plane, radius, 0.0, angle / Deg(360.0));
+      arc.into_enum()
+    },
+    |tcurve| {
+      RevolutionSurface::with_bounds(axis.clone(), tcurve.base.clone(), (0.0, angle / Deg(360.0))).into_enum()
+    }
+  );
   Ok(solid.into_compound())
 }
 

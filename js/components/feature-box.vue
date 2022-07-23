@@ -217,7 +217,6 @@
 
   import { ManipulationTool } from './../tools.js'
   import { CreateSketchFeature } from './../features.js'
-  import { intersectSets } from './../utils.js'
 
   export default {
     name: 'FeatureBox',
@@ -318,49 +317,33 @@
         return new Promise((resolve) => {
           this.$root.$off('picked')
           this.$root.$once('picked', (item) => {
+            let itemRef;
             if(this.activeFeature.settings[key].type == 'profile') {
-              const itemIds = new Set(item.get_ids())
-              const currentProfiles = (this.activeFeature[key] && this.activeFeature[key]()) || []
-              this.activeFeature[key] = () => currentProfiles
-              const oldProfile = currentProfiles.find(profile => {
-                const set = new Set(profile.get_ids())
-                const intersection = intersectSets(set, itemIds)
-                return intersection.size == itemIds.size
-              })
-              if(oldProfile) {
-                oldProfile.free()
-                currentProfiles.splice(currentProfiles.indexOf(oldProfile), 1)
-              } else {
-                // Copy profiles before they get destroyed by transloader
-                item = item.duplicate()
-                currentProfiles.push(item)
-              }
+              itemRef = item.make_reference()
             } else if(this.activeFeature.settings[key].type == 'face') {
-              const itemRef = item.make_face_reference();
-              const bounds = new Set(itemRef.get_ids())
-              const currentFaces = (this.activeFeature[key] && this.activeFeature[key]()) || []
-              this.activeFeature[key] = () => currentFaces
-              const oldFace = currentFaces.find(faceRef => {
-                const set = new Set(faceRef.get_ids())
-                const intersection = intersectSets(set, bounds)
-                return intersection.size == bounds.size
-              })
-              if(oldFace) {
-                oldFace.free()
-                currentFaces.splice(currentFaces.indexOf(oldFace), 1)
-              } else {
-                currentFaces.push(itemRef)
-              }
+              itemRef = item.make_face_reference()
             } else if(this.activeFeature.settings[key].type == 'plane') {
-              const ref = item.make_planar_reference()
-              this.activeFeature[key] = () => ref
+              itemRef = item.make_planar_reference()
             } else if(this.activeFeature.settings[key].type == 'axis') {
-              const ref = item.make_axial_reference()
-              this.activeFeature[key] = () => ref
+              itemRef = item.make_axial_reference()
+            }
+            if(this.activeFeature.settings[key].multi) {
+              const currentItems = (this.activeFeature[key] && this.activeFeature[key]()) || []
+              this.activeFeature[key] = () => currentItems
+              const oldItem = currentItems.find(otherRef => {
+                return otherRef.get_item_id() == item.get_id()
+              })
+              if(oldItem) {
+                oldItem.free()
+                currentItems.splice(currentItems.indexOf(oldItem), 1)
+              } else {
+                currentItems.push(itemRef)
+              }
             } else {
+              const oldRef = this.activeFeature[key]
+              if(oldRef) oldRef().free()
               // Hide heavy data from Vue in a closure
-              const itemCopy = (item.duplicate ? item.duplicate() : item)
-              this.activeFeature[key] = () => itemCopy
+              this.activeFeature[key] = () => itemRef
             }
             this.update()
             this.activePicker = null

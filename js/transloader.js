@@ -112,6 +112,7 @@ export default class Transloader {
           line.alcType = 'edge'
           line.alcObject = edge
           edge.mesh = line
+          edge.solid = solid
           this.renderer.add(line)
           return edge
         }))
@@ -257,8 +258,7 @@ export default class Transloader {
     const cache = comp.cache()
     for(const solid of comp.solids) {
       const wireMaterial = this.getWireMaterial(comp, solid)
-      const solidId = solid.get_id()
-      const edges = cache.edges.filter(e => e.get_solid_id() == solidId )
+      const edges = cache.edges.filter(e => e.solid === solid )
       edges.forEach(edge => edge.mesh.material = wireMaterial )
     }
     cache.faces.forEach(face => face.mesh.material = this.getSurfaceMaterial(comp, face) )

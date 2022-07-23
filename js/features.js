@@ -165,9 +165,9 @@ export class ExtrudeFeature extends Feature {
   updateFeature() {
     const list = new window.alcWasm.JsProfileRefList()
     this.profiles().forEach(profile => {
-      list.push(profile.make_reference())
+      list.push(profile)
     })
-    const sketch = this.document.tree.findSketch(this.profiles()[0].sketch_id())
+    const sketch = this.document.tree.findSketch(this.profiles()[0].get_sketch_id())
     const comp_ref = sketch.component_id()
     const distance = this.distance * (this.side ? 1 : -1)
     this.real.extrusion(comp_ref, list, distance, this.operation)
@@ -178,9 +178,11 @@ export class ExtrudeFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo.set(this.distance, this.side)
       } else {
-        const center = vec2three(this.profiles()[0].get_center())
+        const item = this.profiles()[0].get_item()
+        const center = vec2three(item.get_center())
         const axis = this.axis && this.axis()
-        const direction = axis || vec2three(this.profiles()[0].get_normal())
+        const direction = axis || vec2three(item.get_normal())
+        item.free()
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.distance, (dist, side) => {
           this.distance = dist
           this.side = side
@@ -195,9 +197,7 @@ export class ExtrudeFeature extends Feature {
 
   confirm() {
     // Refetch profiles in case they've been repaired
-    this.profiles().forEach(profile => profile.free())
-    const profiles = this.real.get_profiles()
-    this.profiles = () => profiles
+    this.profiles().forEach(profile => profile.update())
   }
 
   dispose() {
@@ -244,12 +244,11 @@ export class RevolveFeature extends Feature {
   updateFeature() {
     const list = new window.alcWasm.JsProfileRefList()
     this.profiles().forEach(profile => {
-      list.push(profile.make_reference())
+      list.push(profile)
     })
-    const sketch = this.document.tree.findSketch(this.profiles()[0].sketch_id())
+    const sketch = this.document.tree.findSketch(this.profiles()[0].get_sketch_id())
     const comp_ref = sketch.component_id()
     const angle = this.angle * (this.side ? 1 : -1)
-    console.log(this.axis())
     this.real.revolution(comp_ref, list, this.axis(), angle, this.operation)
   }
 
@@ -258,9 +257,11 @@ export class RevolveFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo.set(this.angle, this.side)
       } else {
-        const center = vec2three(this.profiles()[0].get_center())
+        const item = this.profiles()[0].get_item()
+        const center = vec2three(item.get_center())
         const axis = this.axis && this.axis()
-        const direction = vec2three(this.profiles()[0].get_normal())
+        const direction = vec2three(item.get_normal())
+        item.free()
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.angle, (dist, side) => {
           this.angle = dist
           this.side = side
@@ -279,9 +280,7 @@ export class RevolveFeature extends Feature {
 
   confirm() {
     // Refetch profiles in case they've been repaired
-    this.profiles().forEach(profile => profile.free())
-    const profiles = this.real.get_profiles()
-    this.profiles = () => profiles
+    this.profiles().forEach(profile => profile.update())
   }
 
   dispose() {

@@ -8,17 +8,54 @@ use solvo::*;
 
 use crate::document::JsDocument;
 use crate::region::JsRegion;
+use crate::solid::JsFace;
+use crate::curve::JsCurve;
 use crate::buffer_geometry::JsBufferGeometry;
+use crate::construction_helper::JsConstructionHelper;
+
 // use crate::log;
 
 
 #[wasm_bindgen]
 #[derive(Debug, Clone)]
-pub struct JsPlanarRef(PlanarRef);
+pub struct JsPlanarRef {
+  real: PlanarRef,
+  document: Ref<Document>,
+}
 
 impl JsPlanarRef {
-  pub fn new(real: PlanarRef) -> Self {
-    Self(real)
+  pub fn new(real: PlanarRef, document: Ref<Document>) -> Self {
+    Self {
+      real,
+      document,
+    }
+  }
+}
+
+#[wasm_bindgen]
+impl JsPlanarRef {
+  pub fn get_item(&self) -> JsValue {
+    match &self.real {
+      PlanarRef::FaceRef(face_ref)
+      => if let Some(face) = face_ref.get_face(self.document.borrow().get_tree()) {
+        JsValue::from(JsFace::from(face, face_ref.component_id, self.document.clone()))
+      } else {
+        JsValue::undefined()
+      },
+      PlanarRef::HelperRef(helper) => JsValue::from(JsConstructionHelper::new(&helper, self.document.clone())),
+    }
+  }
+
+  pub fn get_item_id(&self) -> JsValue {
+    match &self.real {
+      PlanarRef::FaceRef(face_ref)
+      => if let Some(face) = face_ref.get_face(self.document.borrow().get_tree()) {
+        JsValue::from_serde(&face.borrow().id).unwrap()
+      } else {
+        JsValue::undefined()
+      },
+      PlanarRef::HelperRef(helper) => JsValue::from_serde(&helper.borrow().id).unwrap(),
+    }
   }
 }
 
@@ -33,25 +70,58 @@ impl JsAxialRef {
   }
 }
 
+#[wasm_bindgen]
+impl JsAxialRef {
+  pub fn get_item(&self) -> JsValue {
+    match &self.0 {
+      AxialRef::CurveRef(curve_ref)
+      => JsValue::from(JsCurve::from(curve_ref.curve.clone(), curve_ref.sketch.clone())),
+      _ => todo!(),
+    }
+  }
+
+  pub fn get_item_id(&self) -> JsValue {
+    match &self.0 {
+      AxialRef::CurveRef(curve_ref)
+      => JsValue::from_serde(&curve_ref.curve.borrow().get_id()).unwrap(),
+      _ => todo!(),
+    }
+  }
+}
+
 
 #[wasm_bindgen]
 #[derive(Debug, Clone)]
-pub struct JsFaceRef(FaceRef);
+pub struct JsFaceRef {
+  real: FaceRef,
+  document: Ref<Document>,
+}
 
 impl JsFaceRef {
-  pub fn new(real: FaceRef) -> Self {
-    Self(real)
+  pub fn new(real: FaceRef, document: Ref<Document>) -> Self {
+    Self {
+      real,
+      document,
+    }
   }
 }
 
 #[wasm_bindgen]
 impl JsFaceRef {
-  pub fn get_ids(&self) -> Array {
-    let ids = Array::new();
-    for bound in &self.0.bounds {
-      ids.push(&JsValue::from_serde(bound).unwrap());
+  pub fn get_item(&self) -> JsValue {
+    if let Some(face) = self.real.get_face(self.document.borrow().get_tree()) {
+      JsValue::from(JsFace::from(face, self.real.component_id, self.document.clone()))
+    } else {
+      JsValue::undefined()
     }
-    ids
+  }
+
+  pub fn get_item_id(&self) -> JsValue {
+    if let Some(face) = self.real.get_face(self.document.borrow().get_tree()) {
+      JsValue::from_serde(&face.borrow().id).unwrap()
+    } else {
+      JsValue::undefined()
+    }
   }
 }
 
@@ -63,6 +133,31 @@ pub struct JsProfileRef(ProfileRef);
 impl JsProfileRef {
   pub fn new(real: ProfileRef) -> Self {
     Self(real)
+  }
+}
+
+#[wasm_bindgen]
+impl JsProfileRef {
+  pub fn get_item(&self) -> JsValue {
+    JsValue::from(JsRegion::new(self.0.profile.clone(), self.0.sketch.clone()))
+  }
+
+  pub fn get_item_id(&self) -> String {
+    let mut s = String::new();
+    for wire in &self.0.profile {
+      for tcurve in wire {
+        s.push_str(&tcurve.base.get_id().to_string());
+      }
+    }
+    s
+  }
+
+  pub fn get_sketch_id(&self) -> JsValue {
+    JsValue::from_serde(&self.0.sketch.borrow().id).unwrap()
+  }
+
+  pub fn update(&mut self) {
+    self.0.update().ok();
   }
 }
 
@@ -183,7 +278,7 @@ impl JsFeature {
     self.process_feature(Feature::new(
       CreateSketchFeature {
         component_id: comp_ref.into_serde().unwrap(),
-        plane: plane.0.clone(),
+        plane: plane.real.clone(),
         sketch: rc(Sketch::default()),
       }.into_enum(),
     ));
@@ -221,8 +316,8 @@ impl JsFeature {
     let faces = &faces.faces;
     let feature = Feature::new(
       DraftFeature {
-        fixed_plane: ref_plane.0.clone(),
-        faces: faces.iter().map(|face| face.0.clone() ).collect(),
+        fixed_plane: ref_plane.real.clone(),
+        faces: faces.iter().map(|face| face.real.clone() ).collect(),
         angle: Deg(angle),
       }.into_enum(),
     );
@@ -278,7 +373,7 @@ impl JsFeature {
   pub fn get_face_refs(&self) -> Array {
     if let Some(real) = &self.real {
       if let FeatureType::Draft(feature) = &real.borrow().feature_type {
-        feature.faces.iter().map(|face_ref| JsValue::from(JsFaceRef::new(face_ref.clone())) ).collect()
+        feature.faces.iter().map(|face_ref| JsValue::from(JsFaceRef::new(face_ref.clone(), self.document.clone())) ).collect()
       } else {
         Array::new()
       }

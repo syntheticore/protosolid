@@ -63,6 +63,7 @@ pub struct EdgeRef {
 
 #[derive(Debug, Clone)]
 pub struct CurveRef {
+  pub sketch: Ref<Sketch>,
   pub curve: Ref<CurveType>,
 }
 

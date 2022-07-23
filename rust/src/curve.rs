@@ -19,15 +19,14 @@ use crate::feature::JsAxialRef;
 pub struct JsCurve {
   #[wasm_bindgen(skip)]
   pub real: Ref<CurveType>,
-
   sketch: Ref<Sketch>,
 }
 
 impl JsCurve {
-  pub fn from(elem: &Ref<CurveType>, sketch: &Ref<Sketch>) -> Self {
+  pub fn from(elem: Ref<CurveType>, sketch: Ref<Sketch>) -> Self {
     Self {
-      real: elem.clone(),
-      sketch: sketch.clone(),
+      real: elem,
+      sketch: sketch,
     }
   }
 }
@@ -110,6 +109,7 @@ impl JsCurve {
     match *curve {
       CurveType::Line(_) => JsValue::from(JsAxialRef::new(AxialRef::CurveRef(CurveRef {
         curve: self.real.clone(),
+        sketch: self.sketch.clone(),
       }))),
       _ => unreachable!(),
     }

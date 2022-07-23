@@ -1,5 +1,5 @@
-use js_sys::Array;
 use wasm_bindgen::prelude::*;
+use js_sys::Array;
 
 use solvo::*;
 use shapex::*;
@@ -31,18 +31,14 @@ impl JsRegion {
 
 #[wasm_bindgen]
 impl JsRegion {
-  pub fn sketch_id(&self) -> JsValue {
-    JsValue::from_serde(&self.sketch.borrow().id).unwrap()
-  }
-
-  pub fn get_ids(&self) -> Array {
-    let ids = Array::new();
+  pub fn get_id(&self) -> String {
+    let mut s = String::new();
     for wire in &self.profile {
       for tcurve in wire {
-        ids.push(&JsValue::from_serde(&tcurve.base.get_id()).unwrap());
+        s.push_str(&tcurve.base.get_id().to_string());
       }
     }
-    ids
+    s
   }
 
   pub fn get_mesh(&self) -> JsBufferGeometry {

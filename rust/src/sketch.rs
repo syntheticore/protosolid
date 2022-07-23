@@ -53,7 +53,7 @@ impl JsSketch {
 
   pub fn get_sketch_elements(&self) -> Array {
     self.real.borrow_mut().elements.iter().map(|elem| {
-      JsValue::from(JsCurve::from(elem, &self.real))
+      JsValue::from(JsCurve::from(elem.clone(), self.real.clone()))
     }).collect()
   }
 
@@ -64,7 +64,7 @@ impl JsSketch {
     let mut sketch = self.real.borrow_mut();
     line.transform(&sketch.work_plane.invert().unwrap());
     sketch.elements.push(Rc::new(RefCell::new(line.into_enum())));
-    JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
+    JsCurve::from(sketch.elements.last().unwrap().clone(), self.real.clone())
   }
 
   pub fn add_spline(&self, vertices: Array) -> JsCurve {
@@ -75,7 +75,7 @@ impl JsSketch {
     let mut sketch = self.real.borrow_mut();
     spline.transform(&sketch.work_plane.invert().unwrap());
     sketch.elements.push(Rc::new(RefCell::new(CurveType::Spline(spline))));
-    JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
+    JsCurve::from(sketch.elements.last().unwrap().clone(), self.real.clone())
   }
 
   pub fn add_circle(&mut self, center: JsValue, radius: f64) -> JsCurve {
@@ -83,7 +83,7 @@ impl JsSketch {
     let center = point_from_js(center);
     let circle = Circle::new(sketch.work_plane.transform_point(center), radius);
     sketch.elements.push(rc(CurveType::Circle(circle)));
-    JsCurve::from(&sketch.elements.last().unwrap(), &self.real)
+    JsCurve::from(sketch.elements.last().unwrap().clone(), self.real.clone())
   }
 
   pub fn add_arc(&mut self, p1: JsValue, p2: JsValue, p3: JsValue) -> Result<JsCurve, JsValue> {
@@ -93,7 +93,7 @@ impl JsSketch {
     let points: Vec<Point3> = points.into_iter().map(|p| transform.transform_point(p) ).collect();
     let arc = Arc::from_points(points[0], points[1], points[2])?;
     sketch.elements.push(rc(arc.into_enum()));
-    Ok(JsCurve::from(&sketch.elements.last().unwrap(), &self.real))
+    Ok(JsCurve::from(sketch.elements.last().unwrap().clone(), self.real.clone()))
   }
 
   pub fn get_workplane(&self) -> JsValue {

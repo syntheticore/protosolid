@@ -43,6 +43,10 @@ impl JsFace {
     point_to_js(self.make_origin())
   }
 
+  pub fn get_center(&self) -> JsValue {
+    self.get_origin()
+  }
+
   pub fn get_normal(&self) -> JsValue {
     point_to_js(Point3::from_vec(self.real.borrow().surface.as_surface().normal_at(0.0, 0.0)))
   }

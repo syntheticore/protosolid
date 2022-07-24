@@ -10,6 +10,7 @@ use solvo::CurveRef;
 
 use crate::utils::points_from_js;
 use crate::utils::points_to_js;
+use crate::utils::point_to_js;
 use crate::controllable::as_controllable_mut;
 use crate::controllable::as_controllable;
 use crate::feature::JsAxialRef;
@@ -44,6 +45,10 @@ impl JsCurve {
       CurveType::Circle(_) => "Circle",
       CurveType::Spline(_) => "Spline",
     }.to_string()
+  }
+
+  pub fn get_center(&self) -> JsValue {
+    point_to_js(self.real.borrow().as_curve().midpoint())
   }
 
   pub fn get_radius(&self) -> f64 {

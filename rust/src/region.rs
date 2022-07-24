@@ -1,5 +1,4 @@
 use wasm_bindgen::prelude::*;
-use js_sys::Array;
 
 use solvo::*;
 use shapex::*;

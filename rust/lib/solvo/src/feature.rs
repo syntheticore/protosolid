@@ -108,7 +108,7 @@ impl ConstructionHelper {
 
 #[derive(Debug, Clone)]
 pub enum ConstructionHelperType {
-  Axis(geom3d::Axis),
+  Axis(Axis),
   Plane(Plane),
 }
 

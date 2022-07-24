@@ -326,6 +326,8 @@
         }[type])
       })
 
+      this.$root.$on('show-picker', this.addPath)
+      this.$root.$on('clear-pickers', this.clearPaths)
       this.$root.$on('activate-toolname', this.activateTool)
       this.$root.$on('component-changed', this.componentChanged)
       this.$root.$on('component-deleted', this.componentDeleted)
@@ -451,18 +453,23 @@
         const tool = new Tool(this.activeComponent, this, (item, mesh) => {
           this.$root.$emit('picked', item)
           this.$root.$emit('activate-toolname', 'Manipulate')
-          mesh.geometry.computeBoundingBox();
-          const center = new THREE.Vector3()
-          mesh.geometry.boundingBox.getCenter(center);
-          const path = {
-            target: center,
-            origin: pickerCoords,
-            color,
-          }
-          this.updatePath(path)
-          this.paths.push(path)
+          this.pickingPath = null
         })
         this.$emit('update:active-tool', tool)
+      },
+
+      addPath: function(pickerCoords, center, color) {
+        const path = {
+          target: center,
+          origin: pickerCoords,
+          color,
+        }
+        this.updatePath(path)
+        this.paths.push(path)
+      },
+
+      clearPaths: function() {
+        this.paths = []
       },
 
       updateWidgets: function() {
@@ -548,7 +555,7 @@
       },
 
       unpreviewFeature: function() {
-        this.paths = []
+        this.clearPaths()
         this.transloader.unpreviewFeature()
       },
 

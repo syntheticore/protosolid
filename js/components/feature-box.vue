@@ -217,6 +217,7 @@
 
   import { ManipulationTool } from './../tools.js'
   import { CreateSketchFeature } from './../features.js'
+  import { vec2three } from './../utils.js'
 
   export default {
     name: 'FeatureBox',
@@ -268,10 +269,13 @@
     },
 
     mounted: function() {
-      this.pickAll()
       this.$root.$on('enter-pressed', this.confirm)
       this.$root.$on('escape', this.onEscape)
       this.startValues = this.activeFeature.getValues()
+      setTimeout(() => {
+        this.updatePaths()
+        this.pickAll()
+      }, 0)
     },
 
     beforeDestroy: function() {
@@ -346,22 +350,44 @@
               this.activeFeature[key] = () => itemRef
             }
             this.update()
+            this.updatePaths()
             this.activePicker = null
             resolve()
             if(this.activeFeature.settings[key].autoConfirm) this.confirm()
             if(this.activeFeature.settings[key].autoMulti) setTimeout(() => this.pick(type, key), 0)
           })
           this.activePicker = key
-          const picker = this.$refs[key][0]
-          const pickerRect = picker.getBoundingClientRect()
-          const pickerPos = {
-            x: pickerRect.left + (pickerRect.width / 2),
-            y: pickerRect.top + (pickerRect.height / 2) - 38,
-          }
-          const style = window.getComputedStyle(picker)
-          const color = style.getPropertyValue('background-color')
+          const { pickerPos, color } = this.getPickerInfo(key)
           this.$root.$emit('pick', type, pickerPos, color)
         })
+      },
+
+      updatePaths: function() {
+        this.$root.$emit('clear-pickers')
+        for(const key in this.activeFeature.settings) {
+          const data = this.activeFeature[key]
+          if(data && this.needsPicker(this.activeFeature.settings[key], true) && data()) {
+            const { pickerPos, color } = this.getPickerInfo(key)
+            const refs = Array.isArray(data()) ? data() : [data()]
+            refs.forEach(ref => {
+              const item = ref.get_item()
+              this.$root.$emit('show-picker', pickerPos, vec2three(item.get_center()), color)
+              item.free()
+            })
+          }
+        }
+      },
+
+      getPickerInfo: function(key) {
+        const picker = this.$refs[key][0]
+        const pickerRect = picker.getBoundingClientRect()
+        const pickerPos = {
+          x: pickerRect.left + (pickerRect.width / 2),
+          y: pickerRect.top + (pickerRect.height / 2) - 38,
+        }
+        const style = window.getComputedStyle(picker)
+        const color = style.getPropertyValue('background-color')
+        return { pickerPos, color }
       },
 
       update: function() {

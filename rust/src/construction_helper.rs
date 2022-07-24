@@ -5,6 +5,7 @@ use shapex::*;
 use shapex::internal::Ref;
 
 use crate::utils::matrix_to_js;
+use crate::utils::point_to_js;
 use crate::feature::JsPlanarRef;
 use crate::feature::JsAxialRef;
 
@@ -34,6 +35,13 @@ impl JsConstructionHelper {
 impl JsConstructionHelper {
   pub fn get_id(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
+  }
+
+  pub fn get_center(&self) -> JsValue {
+    point_to_js( match &self.real.borrow().helper_type {
+      ConstructionHelperType::Axis(axis) => axis.origin,
+      ConstructionHelperType::Plane(plane) => plane.origin,
+    })
   }
 
   pub fn get_transform(&self) -> JsValue {

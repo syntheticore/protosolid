@@ -334,7 +334,6 @@ export class DraftFeature extends Feature {
       } else {
         const center = new THREE.Vector3()
         this.angleGizmo = new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
-          console.log(angle)
           this.angle = angle
         })
         window.alcRenderer.addGizmo(this.angleGizmo)

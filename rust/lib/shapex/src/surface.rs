@@ -350,7 +350,7 @@ impl Surface for RevolutionSurface {
   }
 
   fn tesselate(&self, profile: &Profile) -> Mesh {
-    self.tesselate_fixed(80, 10, profile)
+    self.tesselate_fixed(40, 20, profile)
   }
 
   fn flip(&mut self) {

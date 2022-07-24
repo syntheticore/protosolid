@@ -539,8 +539,12 @@ impl Arc {
     Ok(Self::new(circle.plane.origin, circle.radius, circle.unsample(&p1), circle.unsample(&p3)))
   }
 
+  pub fn range(&self) -> f64 {
+    self.bounds.1 - self.bounds.0
+  }
+
   fn convert_param(&self, u: f64) -> f64 {
-    let u = self.bounds.0 + u * (self.bounds.1 - self.bounds.0);
+    let u = self.bounds.0 + u * self.range();
     if u > 1.0 {
       u % 1.0
     } else if u < 0.0 {
@@ -561,8 +565,7 @@ impl Curve for Arc {
   fn unsample(&self, p: &Point3) -> f64 {
     let circle = Circle::from_plane(self.plane.clone(), self.radius);
     let param = circle.unsample(p);
-    let range = self.bounds.1 - self.bounds.0;
-    (param - self.bounds.0) / range
+    (param - self.bounds.0) / self.range()
   }
 
   fn tangent_at(&self, _t: f64) -> Vec3 {
@@ -574,7 +577,7 @@ impl Curve for Arc {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_fixed(60)
+    self.tesselate_fixed((80.0 * self.range()) as u32)
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {

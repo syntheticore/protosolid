@@ -371,9 +371,9 @@ impl Surface for RevolutionSurface {
     axis_normal.z = 0.0;
     axis_normal = self.axis.as_transform().transform_vector(axis_normal);
     let v_tangent = self.v_tangent_at(u, v);
-    let dot = v_tangent.dot(axis_normal);
+    let dot = v_tangent.dot(axis_normal.normalize());
     if dot.abs().almost(1.0) {
-      self.axis.direction * dot.signum()
+      self.axis.direction * dot.signum() //XXX Remove once planar faces are handled in features::revolve()
     } else {
       let u_tangent = v_tangent.cross(axis_normal);
       -v_tangent.cross(u_tangent).normalize() * v_tangent.dot(self.axis.direction).signum()

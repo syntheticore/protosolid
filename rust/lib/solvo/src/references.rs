@@ -7,6 +7,7 @@ use shapex::Curve;
 use shapex::Plane;
 use shapex::CurveType;
 use shapex::SurfaceType;
+use shapex::Transformable;
 use shapex::internal::Ref;
 
 use crate::Uuid;
@@ -116,7 +117,9 @@ impl AxialRef {
       Self::CurveRef(curve_ref) => {
         let curve = curve_ref.curve.borrow();
         if let CurveType::Line(line) = &*curve {
-          Some(Axis::from_points(line.endpoints()))
+          let mut axis = Axis::from_points(line.endpoints());
+          axis.transform(&curve_ref.sketch.borrow().work_plane);
+          Some(axis)
         } else {
           unreachable!("Expected CurveType::Line, but got {:?}", curve)
         }

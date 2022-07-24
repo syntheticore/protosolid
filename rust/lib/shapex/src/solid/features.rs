@@ -5,7 +5,8 @@ use crate::geom3d;
 use crate::surface::intersection;
 use crate::surface::SurfaceType;
 
-// use crate::log;
+#[allow(unused_imports)]
+use crate::log;
 
 
 pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
@@ -59,26 +60,33 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
 }
 
 
-pub fn revolve(profile: &Profile, axis: &Axis, angle: Deg<f64>) -> Result<Compound, String> {
+pub fn revolve(profile: &Profile, mut axis: geom3d::Axis, angle: Deg<f64>) -> Result<Compound, String> {
   let poly = geom2d::tesselate_wire(&profile[0]);
   let plane = geom3d::plane_from_points(&poly)?;
-  let mut solid = Solid::new_lamina(profile[0].clone(), PlanarSurface::new(plane).into_enum());
+  let mut solid = Solid::new_lamina(profile[0].clone(), PlanarSurface::new(plane.clone()).into_enum());
   let shell = &mut solid.shells[0];
+  if axis.direction.dot(plane.u).signum() < 0.0 {
+    axis.flip();
+  }
   let face = if angle >= Deg(0.0) {
     shell.faces.last()
   } else {
     shell.faces.first()
   }.unwrap().clone();
-  let transform = geom3d::rotation_about_axis(axis, angle);
+  let transform = geom3d::rotation_about_axis(&axis, angle);
   shell.sweep(
     &face,
     &transform,
     |point| {
       let p_axis = axis.closest_point(point);
       let radius = p_axis.distance(point);
-      let mut plane: Plane = axis.into();
+      let mut plane: Plane = (&axis).into();
       plane.origin = p_axis;
-      let arc = Arc::from_plane(plane, radius, 0.0, angle / Deg(360.0));
+      plane.flip();
+      let mut arc = Arc::from_plane(plane, radius, 0.0, 1.0);
+      let t = arc.unsample(&point);
+      arc.bounds.0 = t;
+      arc.bounds.1 = t + (angle / Deg(360.0));
       arc.into_enum()
     },
     |tcurve| {

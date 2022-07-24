@@ -12,7 +12,8 @@ pub use intersection::SurfaceIntersectionType;
 pub use intersection::CurveSurfaceIntersectionType;
 pub use intersection::CurveSurfaceIntersection;
 
-// use crate::log;
+#[allow(unused_imports)]
+use crate::log;
 
 
 pub trait Surface: Transformable {
@@ -299,10 +300,17 @@ impl RevolutionSurface {
   pub fn with_bounds(axis: Axis, mut curve: CurveType, u_bounds: (f64, f64)) -> Self {
     let base_transform = axis.as_transform().invert().unwrap();
     curve.as_curve_mut().transform(&base_transform);
+    let mut p = curve.as_curve().endpoints().0;
+    p.z = 0.0;
+    // Move curve onto local XZ plane
+    let angle = p.to_vec().angle(Vec3::unit_x());
+    curve.as_curve_mut().transform(&Matrix4::from_angle_z(-angle));
+    // Offset bounds to account for difference between curve plane and natural start of circle
+    let degrees: Deg<f64> = angle.into();
     Self {
       axis,
       curve,
-      u_bounds,
+      u_bounds: (u_bounds.0 + (degrees / Deg(360.0)), u_bounds.1 + (degrees / Deg(360.0))),
     }
   }
 
@@ -314,14 +322,32 @@ impl RevolutionSurface {
     }
   }
 
-  fn sample_local(&self, u: f64, v: f64) -> Point3 {
+  fn convert_param(&self, u: f64) -> f64 {
     let u = self.u_bounds.0 + u * (self.u_bounds.1 - self.u_bounds.0);
-    let u = u * std::f64::consts::PI * 2.0;
+    if u > 1.0 {
+      u % 1.0
+    } else if u < 0.0 {
+      1.0 + u % 1.0
+    } else {
+      u
+    }
+  }
+
+  fn sample_local(&self, u: f64, v: f64) -> Point3 {
     let mut sample = self.curve.as_curve().sample(v);
     let height = sample.z;
     sample.z = 0.0;
     let radius = sample.to_vec().magnitude();
+    let u = self.convert_param(u);
+    let u = u * std::f64::consts::PI * 2.0;
     Point3::new(u.cos() * radius, u.sin() * radius, height)
+  }
+
+  pub fn v_tangent_at(&self, u: f64, v: f64) -> Vec3 {
+    let u = self.convert_param(u);
+    let v_tangent = self.curve.as_curve().tangent_at(v);
+    let rotation = Matrix4::from_angle_z(Deg(u * 360.0 ));
+    self.axis.as_transform().transform_vector(rotation.transform_vector(v_tangent))
   }
 
   pub fn into_enum(self) -> SurfaceType {
@@ -343,14 +369,19 @@ impl Surface for RevolutionSurface {
     let sample = self.sample_local(u, v);
     let mut axis_normal = sample.to_vec();
     axis_normal.z = 0.0;
-    let v_tangent = self.curve.as_curve().tangent_at(v);
-    let u_tangent = v_tangent.cross(axis_normal);
-    let normal = v_tangent.cross(u_tangent).normalize();
-    self.axis.as_transform().transform_vector(normal)
+    axis_normal = self.axis.as_transform().transform_vector(axis_normal);
+    let v_tangent = self.v_tangent_at(u, v);
+    let dot = v_tangent.dot(axis_normal);
+    if dot.abs().almost(1.0) {
+      self.axis.direction * dot.signum()
+    } else {
+      let u_tangent = v_tangent.cross(axis_normal);
+      -v_tangent.cross(u_tangent).normalize() * v_tangent.dot(self.axis.direction).signum()
+    }
   }
 
   fn tesselate(&self, profile: &Profile) -> Mesh {
-    self.tesselate_fixed(40, 20, profile)
+    self.tesselate_fixed(40, 5, profile)
   }
 
   fn flip(&mut self) {

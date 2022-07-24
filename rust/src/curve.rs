@@ -48,7 +48,9 @@ impl JsCurve {
   }
 
   pub fn get_center(&self) -> JsValue {
-    point_to_js(self.real.borrow().as_curve().midpoint())
+    let mut midpoint = self.real.borrow().as_curve().midpoint();
+    midpoint = self.sketch.borrow().work_plane.transform_point(midpoint);
+    point_to_js(midpoint)
   }
 
   pub fn get_radius(&self) -> f64 {

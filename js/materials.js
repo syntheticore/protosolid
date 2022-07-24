@@ -73,12 +73,10 @@ export default class Materials {
 
     // Surface Materials
     this.surface = new THREE.MeshStandardMaterial({
-      side: THREE.DoubleSide,
+      // side: THREE.DoubleSide,
       color: '#53a3e1',
       roughness: 0.25,
       metalness: 0.2,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
       // wireframe: true,
     })
 

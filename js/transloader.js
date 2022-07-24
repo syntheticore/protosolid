@@ -1,7 +1,10 @@
 import * as THREE from 'three'
+import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js'
 
 import Component from './component.js'
 import PlaneHelper from './plane-helper.js'
+
+let vnhs = [];
 
 export default class Transloader {
   constructor(renderer, onLoadElement, onUnloadElement) {
@@ -76,6 +79,7 @@ export default class Transloader {
 
   loadTree(comp, recursive) {
     if(comp.UIData.hidden) return
+    vnhs.forEach(vnh => this.renderer.remove(vnh) )
     // Load Bodies
     const isActive = this.isActive(comp)
     comp.updateSolids()
@@ -99,6 +103,9 @@ export default class Transloader {
           faceMesh.receiveShadow = isActive
           this.renderer.add(faceMesh)
           cache.faces.push(face)
+          const vnh = new VertexNormalsHelper( faceMesh, 5, 0xff0000 )
+          // this.renderer.add( vnh )
+          // vnhs.push(vnh)
           // const normal = this.convertLine(face.get_display_normal(), this.renderer.materials.selectionLine)
           // this.renderer.add(normal)
         })

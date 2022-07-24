@@ -139,7 +139,6 @@
         return {
           title: Object.keys(groups).map(typename => {
             const group = groups[typename]
-            console.log(groups.length, group.length)
             return `${group.length == 1 && numGroups == 1 ? '' : group.length} ${pluralize(typename, group.length)}`
           }).join(' + '),
 

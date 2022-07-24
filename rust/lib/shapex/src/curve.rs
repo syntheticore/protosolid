@@ -518,12 +518,7 @@ impl Arc {
   pub fn new(center: Point3, radius: f64, start: f64, end: f64) -> Self {
     let mut plane = Plane::from_point(center);
     plane.flip();
-    Self {
-      id: Uuid::new_v4(),
-      plane,
-      radius,
-      bounds: (start, end),
-    }
+    Self::from_plane(plane, radius, start, end)
   }
 
   pub fn from_plane(plane: Plane, radius: f64, start: f64, end: f64) -> Self {
@@ -543,18 +538,28 @@ impl Arc {
     let circle = Circle::from_points(p1, p2, p3)?;
     Ok(Self::new(circle.plane.origin, circle.radius, circle.unsample(&p1), circle.unsample(&p3)))
   }
+
+  fn convert_param(&self, u: f64) -> f64 {
+    let u = self.bounds.0 + u * (self.bounds.1 - self.bounds.0);
+    if u > 1.0 {
+      u % 1.0
+    } else if u < 0.0 {
+      1.0 + u % 1.0
+    } else {
+      u
+    }
+  }
 }
 
 impl Curve for Arc {
-  fn sample(&self, mut t: f64) -> Point3 {
-    let range = self.bounds.1 - self.bounds.0;
-    t = self.bounds.0 + t * range;
-    t = t * std::f64::consts::PI * 2.0;
+  fn sample(&self, t: f64) -> Point3 {
+    let mut t = self.convert_param(t);
+    t *= std::f64::consts::PI * 2.0;
     self.plane.sample(t.sin() * self.radius, t.cos() * self.radius)
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
-    let circle = Circle::new(self.plane.origin, self.radius);
+    let circle = Circle::from_plane(self.plane.clone(), self.radius);
     let param = circle.unsample(p);
     let range = self.bounds.1 - self.bounds.0;
     (param - self.bounds.0) / range
@@ -605,6 +610,10 @@ impl Circle {
   pub fn new(center: Point3, radius: f64) -> Self {
     let mut plane = Plane::from_point(center);
     plane.flip();
+    Self::from_plane(plane, radius)
+  }
+
+  pub fn from_plane(plane: Plane, radius: f64) -> Self {
     Self {
       id: Uuid::new_v4(),
       plane,

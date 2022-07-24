@@ -266,7 +266,7 @@ impl RevolutionFeature {
       for profile_ref in profiles {
         let mut profile = profile_ref.profile.clone();
         profile_ref.sketch.borrow().transform_profile(&mut profile);
-        match features::revolve(&profile, &axis, self.angle) {
+        match features::revolve(&profile, axis.clone(), self.angle) {
           Ok(compound) => tool.join(compound),
           Err(error) => return Err(FeatureError::Error(error)),
         }

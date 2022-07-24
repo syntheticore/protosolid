@@ -39,6 +39,10 @@ impl Axis {
     let t = (p - self.origin).dot(self.direction);
     self.origin + self.direction * t
   }
+
+  pub fn flip(&mut self) {
+    self.direction = -self.direction;
+  }
 }
 
 impl Transformable for Axis {

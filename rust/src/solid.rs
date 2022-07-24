@@ -44,7 +44,12 @@ impl JsFace {
   }
 
   pub fn get_center(&self) -> JsValue {
-    self.get_origin()
+    let mut count = 0;
+    let center = self.real.borrow().outer_ring.borrow().vertex_iter().fold(Point3::origin(), |acc, vertex| {
+      count += 1;
+      acc + vertex.borrow().point.to_vec()
+    }) / (count as f64);
+    point_to_js(center)
   }
 
   pub fn get_normal(&self) -> JsValue {

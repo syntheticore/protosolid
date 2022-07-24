@@ -381,7 +381,19 @@ impl Surface for RevolutionSurface {
   }
 
   fn tesselate(&self, profile: &Profile) -> Mesh {
-    self.tesselate_fixed(40, 5, profile)
+    let circle_steps = 80;
+    let u_steps = (circle_steps as f64 * (self.u_bounds.1 - self.u_bounds.0)) as usize;
+    let v_steps = match &self.curve {
+      CurveType::Line(_) => 1,
+      CurveType::Arc(arc) => (circle_steps as f64 * (arc.bounds.1 - arc.bounds.0)) as usize,
+      CurveType::Circle(_) => circle_steps,
+      CurveType:: Spline(spline) => if spline.degree == 1 {
+        1
+      } else {
+        (spline.controls.len() - 1) * 10
+      },
+    };
+    self.tesselate_fixed(u_steps, v_steps, profile)
   }
 
   fn flip(&mut self) {

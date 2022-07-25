@@ -126,7 +126,7 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Compound, String> {
   ];
   let m = Matrix4::from_angle_z(Deg(45.0));
   points = points.into_iter().map(|p| m.transform_point(p) ).collect();
-  let mut profile = vec![vec![]];
+  let mut wire = vec![];
   let mut iter = points.iter().peekable();
   while let Some(&p) = iter.next() {
     let next = if let Some(&next) = iter.peek() {
@@ -134,9 +134,9 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Compound, String> {
     } else {
       &points[0]
     };
-    profile[0].push(TrimmedCurve::new(Line::new(p, *next).into_enum()));
+    wire.push(TrimmedCurve::new(Line::new(p, *next).into_enum()));
   }
-  extrude(&profile, dz)
+  extrude(&vec![wire], dz)
 }
 
 

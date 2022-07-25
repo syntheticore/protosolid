@@ -14,7 +14,7 @@
         @dblclick.stop
         fixed-width
       )
-      .box(:class="{hidden: !isVisible, selected: component === activeComponent}")
+      .box(:class="{hidden: !isVisible, active: component === activeComponent, selected: selection.has(component)}")
         header
           fa-icon.eye(
             v-if="!isTop"
@@ -109,6 +109,7 @@
         :component="child"
         :active-component="activeComponent"
         :parent-hidden="!isVisible"
+        :selection="selection"
         v-on="$listeners"
       )
 </template>
@@ -195,10 +196,13 @@
           transition-delay: 0.1s
         .content
           border-color: $dark1 * 1.85
-      &.selected
+      &.active
         border-color: $highlight * 1.2
         box-shadow: 0 0 0px 1px $highlight * 1.2
         color: white
+      &.selected
+        background: $highlight * 0.5 !important
+        border-color: $highlight * 1.2
       &.hidden
         opacity: 0.5
 

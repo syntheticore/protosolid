@@ -35,7 +35,7 @@
       li.future(v-for="(feature, i) in future")
         .feature(
           :title="feature.title"
-          @dblclick="$emit('update:active-feature', feature)"
+          @dblclick="openFeature(feature)"
         )
           fa-icon(:icon="feature.icon" fixed-width)
 

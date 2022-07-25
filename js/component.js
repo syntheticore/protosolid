@@ -13,6 +13,7 @@ export default class Component {
       sectionViews: [],
       parameters: [],
       exportConfigs: [],
+      itemsHidden: {},
     }
     componentData[this.id] = this.UIData
 
@@ -57,6 +58,7 @@ export default class Component {
   updateSketches() {
     this.freeSketches()
     this.sketches = this.real.get_sketches()
+    this.sketches.forEach(sketch => sketch.component = this )
   }
 
   updateHelpers() {

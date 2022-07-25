@@ -60,8 +60,8 @@
 
     methods: {
       remove: function() {
-        this.component.parameters =
-          this.component.parameters.filter(param => param !== this.parameter )
+        this.component.UIData.parameters =
+          this.component.UIData.parameters.filter(param => param !== this.parameter )
       },
     },
   }

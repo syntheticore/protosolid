@@ -4,6 +4,14 @@ export class Selection {
     this.set = new Set(items)
   }
 
+  handle(item, ctrlPressed) {
+    if(ctrlPressed) {
+      return this.toggle(item)
+    } else {
+      return this.only(item)
+    }
+  }
+
   toggle(item) {
     if(this.has(item)) {
       return this.delete(item)
@@ -34,13 +42,5 @@ export class Selection {
 
   clear() {
     return new Selection()
-  }
-
-  handle(item, ctrlPressed) {
-    if(ctrlPressed) {
-      return this.toggle(item)
-    } else {
-      return this.only(item)
-    }
   }
 }

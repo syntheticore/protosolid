@@ -7,7 +7,8 @@ export default class Document {
   constructor() {
     this.lastId = 1
 
-    this.componentData = () => { return {} }
+    const componentData = {}
+    this.componentData = () => { return componentData }
 
     this.real = new window.alcWasm.JsDocument()
     this.tree = new Component(this.real.get_tree(), null, this.componentData())

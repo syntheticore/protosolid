@@ -237,7 +237,6 @@
           this.$root.$emit('component-changed', comp, true)
         })
         this.document.activeComponent = this.findValidComponent(this.document.activeComponent)
-        this.document.activeSketch = null
         this.selection = new Selection()
       },
 
@@ -257,6 +256,7 @@
       addFeature(feature) {
         this.activeFeature = null
         this.document.insertFeature(feature, this.document.real.marker)
+        this.document.activeSketch = null
       },
 
       removeFeature(feature) {
@@ -277,10 +277,12 @@
       activateComponent: function(comp) {
         comp.UIData.hidden = false
         this.document.activeComponent = comp
+        this.selection = this.selection.clear()
       },
 
       activateFeature: function(feature, doReset) {
         if(feature) {
+          if(this.activeFeature) this.activateFeature(null, true)
           // Store marker, visibility and active component
           this.previousMarker = this.document.real.marker
           this.previousComponent = this.document.activeComponent
@@ -296,7 +298,13 @@
           // Activate sketch for sketch features
           if(feature.constructor === CreateSketchFeature) {
             this.document.activeSketch = this.document.tree.findSketchByFeature(feature.id)
-            if(this.document.activeSketch) this.document.activeComponent = this.getComponent(this.document.activeSketch.component_id())
+            if(this.document.activeSketch) {
+              // Activate matching component
+              this.document.activeComponent = this.getComponent(this.document.activeSketch.component_id())
+              // Make sketch visible & store previous visibility
+              this.previousSketchVisibility = this.document.activeComponent.UIData.itemsHidden[this.document.activeSketch.id()]
+              this.$set(this.document.activeComponent.UIData.itemsHidden, this.document.activeSketch.id(), false)
+            }
           } else {
             this.document.activeSketch = null
           }
@@ -306,11 +314,15 @@
           this.activeFeature = null
           if(doReset && this.previousComponent) {
             // Restore previous state
+            if(this.previousSketchVisibility !== null && this.document.activeSketch) {
+              this.$set(this.document.activeComponent.UIData.itemsHidden, this.document.activeSketch.id(), this.previousSketchVisibility)
+            }
+            this.previousSketchVisibility = null
             this.document.activeSketch = null
+            Object.keys(this.oldVisibility).forEach(id => this.getComponent(id).UIData.hidden = this.oldVisibility[id] )
             this.document.real.marker = this.previousMarker
             this.$root.$emit('regenerate')
             this.activateComponent(this.getComponent(this.previousComponent.id))
-            Object.keys(this.oldVisibility).forEach(id => this.getComponent(id).UIData.hidden = this.oldVisibility[id] )
           }
         }
       },

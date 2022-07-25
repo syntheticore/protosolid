@@ -127,7 +127,7 @@ export default class Transloader {
     })
     // Load Sketch Elements
     if(comp === this.activeComponent) {
-      const elements = comp.sketches.flatMap(sketch => sketch.get_sketch_elements())
+      const elements = comp.sketches.filter(sketch => !comp.UIData.itemsHidden[sketch.id()] ).flatMap(sketch => sketch.get_sketch_elements() )
       elements.forEach(element => this.loadElement(element, comp))
       if(!cache.regions.length) this.updateRegions(comp)
     }
@@ -191,7 +191,7 @@ export default class Transloader {
   updateRegions(comp) {
     this.purgeRegions(comp)
     let t = performance.now()
-    const regions = comp.sketches.flatMap(sketch => sketch.get_profiles())
+    const regions = comp.sketches.filter(sketch => !comp.UIData.itemsHidden[sketch.id()] ).flatMap(sketch => sketch.get_profiles())
     // console.log('get_profiles took ' + (performance.now() - t))
     t = performance.now()
     comp.cache().regions = regions

@@ -4,7 +4,7 @@
     @mouseleave="$emit('update:highlight', null)"
     @click="$emit('update:selection', selection.handle(solid, $root.isCtrlPressed))"
   )
-    .box
+    .box(:class="{selected: selection.has(solid)}")
       header
         fa-icon(icon="layer-group" fixed-width)
         h2 Solid {{ index + 1 }}

@@ -5,9 +5,6 @@ use crate::geom3d;
 use crate::surface::intersection;
 use crate::surface::SurfaceType;
 
-#[allow(unused_imports)]
-use crate::log;
-
 
 pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
   //XXX use poly_from_wirebounds once circles are handled
@@ -82,7 +79,6 @@ pub fn revolve(profile: &Profile, mut axis: geom3d::Axis, angle: Deg<f64>) -> Re
       let radius = p_axis.distance(point);
       let mut plane: Plane = (&axis).into();
       plane.origin = p_axis;
-      plane.flip();
       let mut arc = Arc::from_plane(plane, radius, 0.0, 1.0);
       let t = arc.unsample(&point);
       arc.bounds.0 = t;

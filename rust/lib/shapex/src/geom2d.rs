@@ -4,8 +4,6 @@ use crate::internal::*;
 use crate::curve::*;
 use crate::mesh::Mesh;
 
-// use crate::log;
-
 
 pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
   vec1.x * vec2.y - vec1.y * vec2.x

@@ -1,6 +1,5 @@
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
-use std::fmt::Debug;
 
 pub use crate::base::*;
 
@@ -12,21 +11,35 @@ pub fn rc<T>(arg: T) -> Rc<RefCell<T>> {
   Rc::new(RefCell::new(arg))
 }
 
+
 pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
   vec![tuple.0, tuple.1]
 }
 
-pub fn almost_eq<T: Almost + Debug + Copy>(first: T, second: T) {
-  if !first.almost(second) {
-    panic!("\n\n{:?} != {:?}\n\n", first, second);
+
+#[allow(unused_macros)]
+macro_rules! almost_eq {
+  ($a:expr, $b:expr) => {
+    if !$a.almost($b) {
+      panic!("\n\n{:?} != {:?}\n\n", $a, $b);
+    }
   }
 }
 
-#[macro_export] macro_rules! log {
+#[allow(unused_imports)]
+pub(crate) use almost_eq;
+
+
+#[allow(unused_macros)]
+macro_rules! log {
   ( $( $t:tt )* ) => {
     web_sys::console::log_1(&format!( $( $t )* ).into());
   }
 }
+
+#[allow(unused_imports)]
+pub(crate) use log;
+
 
 #[cfg(feature = "rayon")]
 macro_rules! parallel {

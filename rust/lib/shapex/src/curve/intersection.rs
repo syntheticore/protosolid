@@ -247,8 +247,8 @@ mod tests {
     let line = Line::new(Point3::new(-2.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0));
     let hit = line_circle(&line, &circle);
     assert_eq!(hit, vec![
-      CurveIntersectionType::Cross(CurveIntersection::new(Point3::new(-1.0, 0.0, 0.0), 0.25, 0.75)),
-      CurveIntersectionType::Cross(CurveIntersection::new(Point3::new(1.0, 0.0, 0.0), 0.75, 0.25)),
+      CurveIntersectionType::Cross(CurveIntersection::new(Point3::new(-1.0, 0.0, 0.0), 0.25, 0.5)),
+      CurveIntersectionType::Cross(CurveIntersection::new(Point3::new(1.0, 0.0, 0.0), 0.75, 0.0)),
     ]);
   }
 

@@ -20,8 +20,6 @@ pub use boolean::Boolean;
 pub use boolean::BooleanType;
 pub use volume::Volume;
 
-// use crate::log;
-
 
 #[derive(Debug, Default, Clone)]
 pub struct Compound {

@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use shapex::*;
 use shapex::internal::Ref;
 
 use crate::Component;
@@ -10,7 +9,7 @@ use crate::Sketch;
 use crate::CompRef;
 use crate::FeatureError;
 
-// use crate::log;
+use crate::log;
 
 
 #[derive(Debug)]
@@ -70,7 +69,7 @@ impl Document {
 
   pub fn invalidate_feature(&mut self, feature: &Ref<Feature>) {
     self.last_change_index = self.find_feature_index(feature);
-    log!("Invalidate {:#?}", self.last_change_index)
+    log!("Invalidate {:#?}", self.last_change_index);
   }
 
   pub fn repair_feature(&mut self, feature: &Ref<Feature>) {

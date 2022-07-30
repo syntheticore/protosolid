@@ -1,7 +1,5 @@
 use crate::solid::*;
 
-// use crate::log;
-
 
 impl Compound {
   pub fn repair(&mut self) -> Result<(), String> {

@@ -10,8 +10,6 @@ pub mod intersection;
 pub use intersection::CurveIntersection;
 pub use intersection::CurveIntersectionType;
 
-// use crate::log;
-
 
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
@@ -263,7 +261,6 @@ pub struct TrimmedCurve {
   pub trims: (f64, f64),
   pub bounds: (Point3, Point3),
   pub cache: CurveType,
-  pub is_forward: bool
 }
 
 impl TrimmedCurve {
@@ -274,7 +271,6 @@ impl TrimmedCurve {
       trims: (0.0, 1.0),
       bounds: elem.as_curve().endpoints(),
       cache: elem,
-      is_forward: true,
     }
   }
 
@@ -285,7 +281,6 @@ impl TrimmedCurve {
       trims: (0.0, 1.0),
       bounds: (Point3::origin(), Point3::origin()),
       cache,
-      is_forward: true,
     };
     this.set_bounds(bounds);
     this
@@ -293,14 +288,7 @@ impl TrimmedCurve {
 
   pub fn set_bounds(&mut self, bounds: (Point3, Point3)) {
     let curve = self.base.as_curve();
-    let trims = (curve.unsample(&bounds.0), curve.unsample(&bounds.1));
-    self.is_forward = true;
-    self.trims = if trims.0 <= trims.1 {
-      (trims.0, trims.1)
-    } else {
-      self.is_forward = false;
-      (1.0 - trims.0, 1.0 - trims.1)
-    };
+    self.trims = (curve.unsample(&bounds.0), curve.unsample(&bounds.1));
     // Fix circle trims
     if self.trims.0 == self.trims.1 {
       self.trims = (0.0, 1.0);
@@ -313,19 +301,20 @@ impl TrimmedCurve {
     if p.almost(start) { end } else { start }
   }
 
+  pub fn is_forward(&self) -> bool {
+    self.trims.0 < self.trims.1
+  }
+
   pub fn flip(&mut self) {
-    self.trims = (1.0 - self.trims.1, 1.0 - self.trims.0);
+    self.trims = (self.trims.1, self.trims.0);
     self.bounds = (self.bounds.1, self.bounds.0);
-    self.is_forward = !self.is_forward
   }
 
   pub fn param_to_base(&self, t: f64) -> f64 {
-    let out = self.trims.0 + t * (self.trims.1 - self.trims.0);
-    if self.is_forward { out } else { 1.0 - out }
+    self.trims.0 + t * (self.trims.1 - self.trims.0)
   }
 
   pub fn param_from_base(&self, t_base: f64) -> f64 {
-    let t_base = if self.is_forward { t_base } else { 1.0 - t_base };
     (t_base - self.trims.0) / (self.trims.1 - self.trims.0)
   }
 
@@ -516,8 +505,7 @@ pub struct Arc {
 
 impl Arc {
   pub fn new(center: Point3, radius: f64, start: f64, end: f64) -> Self {
-    let mut plane = Plane::from_point(center);
-    plane.flip();
+    let plane = Plane::from_point(center);
     Self::from_plane(plane, radius, start, end)
   }
 
@@ -545,6 +533,10 @@ impl Arc {
 
   fn convert_param(&self, u: f64) -> f64 {
     let u = self.bounds.0 + u * self.range();
+    Self::overflow(u)
+  }
+
+  fn overflow(u: f64) -> f64 {
     if u > 1.0 {
       u % 1.0
     } else if u < 0.0 {
@@ -559,13 +551,13 @@ impl Curve for Arc {
   fn sample(&self, t: f64) -> Point3 {
     let mut t = self.convert_param(t);
     t *= std::f64::consts::PI * 2.0;
-    self.plane.sample(t.sin() * self.radius, t.cos() * self.radius)
+    self.plane.sample(t.cos() * self.radius, t.sin() * self.radius)
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
     let circle = Circle::from_plane(self.plane.clone(), self.radius);
     let param = circle.unsample(p);
-    (param - self.bounds.0) / self.range()
+    (param - Self::overflow(self.bounds.0)) / (Self::overflow(self.bounds.1) - Self::overflow(self.bounds.0))
   }
 
   fn tangent_at(&self, _t: f64) -> Vec3 {
@@ -577,7 +569,7 @@ impl Curve for Arc {
   }
 
   fn tesselate(&self) -> Vec<Point3> {
-    self.tesselate_fixed((80.0 * self.range()) as u32)
+    self.tesselate_fixed((80.0 * self.range().abs()) as u32)
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
@@ -611,8 +603,7 @@ pub struct Circle {
 
 impl Circle {
   pub fn new(center: Point3, radius: f64) -> Self {
-    let mut plane = Plane::from_point(center);
-    plane.flip();
+    let plane = Plane::from_point(center);
     Self::from_plane(plane, radius)
   }
 
@@ -657,12 +648,12 @@ impl Circle {
 impl Curve for Circle {
   fn sample(&self, t: f64) -> Point3 {
     let t = t * std::f64::consts::PI * 2.0;
-    self.plane.sample(t.sin() * self.radius, t.cos() * self.radius)
+    self.plane.sample(t.cos() * self.radius, t.sin() * self.radius)
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
     let (x, y) = self.plane.unsample(*p);
-    let atan2 = x.atan2(y) / std::f64::consts::PI / 2.0;
+    let atan2 = y.atan2(x) / std::f64::consts::PI / 2.0;
     if atan2 < 0.0 {
       1.0 + atan2
     } else {
@@ -982,35 +973,49 @@ mod tests {
       Point3::new(1.5, 0.1, 0.0),
       Point3::new(2.0, 0.0, 0.0),
     ).unwrap();
-    almost_eq(arc.sample(0.0), Point3::new(1.0, 0.0, 0.0));
-    almost_eq(arc.sample(1.0), Point3::new(2.0, 0.0, 0.0));
-    almost_eq(arc.unsample(&Point3::new(1.0, 0.0, 0.0)), 0.0);
-    almost_eq(arc.unsample(&Point3::new(2.0, 0.0, 0.0)), 1.0);
+    almost_eq!(arc.sample(0.0), Point3::new(1.0, 0.0, 0.0));
+    almost_eq!(arc.sample(1.0), Point3::new(2.0, 0.0, 0.0));
+    almost_eq!(arc.unsample(&Point3::new(1.0, 0.0, 0.0)), 0.0);
+    almost_eq!(arc.unsample(&Point3::new(2.0, 0.0, 0.0)), 1.0);
+  }
+
+  #[test]
+  fn unsample_arc_trimmed() {
+    let plane = Plane {
+      origin: Point3::new(-32.0, -2.0, 0.0),
+      u: Vec3::new(0.0, -1.0, 0.0),
+      v: Vec3::new(0.0, 0.0, -1.0),
+    };
+    let arc = Arc::from_plane(plane, 19.0, 0.5, 1.2);
+    almost_eq!(arc.unsample(&arc.sample(1.0)), 1.0);
+    let mut tcurve = TrimmedCurve::new(arc.into_enum());
+    tcurve.set_bounds(tcurve.bounds);
+    almost_eq!(tcurve.trims, (0.0, 1.0));
   }
 
   #[test]
   fn unsample_circle() {
     let circle = Circle::new(Point3::origin(), 1.0);
 
-    almost_eq(circle.sample(0.000), Point3::new(0.0,  1.0, 0.0));
-    almost_eq(circle.sample(0.125), Point3::new(0.7071067811865475, 0.7071067811865476, 0.0));
-    almost_eq(circle.sample(0.250), Point3::new(1.0,  0.0, 0.0));
-    almost_eq(circle.sample(0.375), Point3::new(0.7071067811865476, -0.7071067811865475, 0.0));
-    almost_eq(circle.sample(0.500), Point3::new(0.0, -1.0, 0.0));
-    almost_eq(circle.sample(0.625), Point3::new(-0.7071067811865475, -0.7071067811865477, 0.0));
-    almost_eq(circle.sample(0.750), Point3::new(-1.0, 0.0, 0.0));
-    almost_eq(circle.sample(0.875), Point3::new(-0.7071067811865477, 0.7071067811865475, 0.0));
-    almost_eq(circle.sample(1.000), Point3::new(0.0,  1.0, 0.0));
+    almost_eq!(circle.sample(0.000), Point3::new(1.0,  0.0, 0.0));
+    almost_eq!(circle.sample(0.125), Point3::new(0.7071067811865475, 0.7071067811865476, 0.0));
+    almost_eq!(circle.sample(0.250), Point3::new(0.0,  1.0, 0.0));
+    almost_eq!(circle.sample(0.375), Point3::new(-0.7071067811865476, 0.7071067811865475, 0.0));
+    almost_eq!(circle.sample(0.500), Point3::new(-1.0, 0.0, 0.0));
+    almost_eq!(circle.sample(0.625), Point3::new(-0.7071067811865475, -0.7071067811865477, 0.0));
+    almost_eq!(circle.sample(0.750), Point3::new(0.0, -1.0, 0.0));
+    almost_eq!(circle.sample(0.875), Point3::new(0.7071067811865477, -0.7071067811865475, 0.0));
+    almost_eq!(circle.sample(1.000), Point3::new(1.0,  0.0, 0.0));
 
-    almost_eq(circle.unsample(&Point3::new(0.0, 1.0, 0.0)),                                 0.000);
-    almost_eq(circle.unsample(&Point3::new(0.7071067811865475, 0.7071067811865476, 0.0)),   0.125);
-    almost_eq(circle.unsample(&Point3::new(1.0, 0.0, 0.0)),                                 0.250);
-    almost_eq(circle.unsample(&Point3::new(0.7071067811865476, -0.7071067811865475, 0.0)),  0.375);
-    almost_eq(circle.unsample(&Point3::new(0.0, -1.0, 0.0)),                                0.500);
-    almost_eq(circle.unsample(&Point3::new(-0.7071067811865475, -0.7071067811865477, 0.0)), 0.625);
-    almost_eq(circle.unsample(&Point3::new(-1.0, 0.0, 0.0)),                                0.750);
-    almost_eq(circle.unsample(&Point3::new(-0.7071067811865477, 0.7071067811865475, 0.0)),  0.875);
-    almost_eq(circle.unsample(&Point3::new(0.0, 1.0, 0.0)),                                 0.000);
+    almost_eq!(circle.unsample(&Point3::new(1.0, 0.0, 0.0)),                                 0.000);
+    almost_eq!(circle.unsample(&Point3::new(0.7071067811865475, 0.7071067811865476, 0.0)),   0.125);
+    almost_eq!(circle.unsample(&Point3::new(0.0, 1.0, 0.0)),                                 0.250);
+    almost_eq!(circle.unsample(&Point3::new(-0.7071067811865476, 0.7071067811865475, 0.0)),  0.375);
+    almost_eq!(circle.unsample(&Point3::new(-1.0, 0.0, 0.0)),                                0.500);
+    almost_eq!(circle.unsample(&Point3::new(-0.7071067811865475, -0.7071067811865477, 0.0)), 0.625);
+    almost_eq!(circle.unsample(&Point3::new(0.0, -1.0, 0.0)),                                0.750);
+    almost_eq!(circle.unsample(&Point3::new(0.7071067811865477, -0.7071067811865475, 0.0)),  0.875);
+    almost_eq!(circle.unsample(&Point3::new(1.0, 0.0, 0.0)),                                 0.000);
   }
 
   #[test]
@@ -1028,13 +1033,13 @@ mod tests {
     let mut trimmed = TrimmedCurve::from_bounds(line.clone(), bounds, line.clone());
     println!("As constructed: {:#?}", trimmed);
     println!("{:#?}", trimmed.endpoints());
-    almost_eq(trimmed.endpoints().0, bounds.0);
-    almost_eq(trimmed.endpoints().1, bounds.1);
+    almost_eq!(trimmed.endpoints().0, bounds.0);
+    almost_eq!(trimmed.endpoints().1, bounds.1);
     trimmed.flip();
     println!("Flipped: {:#?}", trimmed);
     println!("{:#?}", trimmed.endpoints());
-    almost_eq(trimmed.endpoints().0, bounds.1);
-    almost_eq(trimmed.endpoints().1, bounds.0);
+    almost_eq!(trimmed.endpoints().0, bounds.1);
+    almost_eq!(trimmed.endpoints().1, bounds.0);
   }
 
   #[test]
@@ -1043,14 +1048,14 @@ mod tests {
     let bounds = (Point3::new(0.0, -1.0, 0.0), Point3::new(0.0, 0.5, 0.0));
     let trimmed = TrimmedCurve::from_bounds(line.clone(), bounds, line.clone());
     println!("{:#?}", trimmed);
-    almost_eq(trimmed.trims.0, -1.0);
-    almost_eq(trimmed.trims.1, 0.5);
+    almost_eq!(trimmed.trims.0, -1.0);
+    almost_eq!(trimmed.trims.1, 0.5);
   }
 
   #[test]
   fn closest_point() {
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0));
     let p = Point3::new(1.0, 2.0, 1.0);
-    almost_eq(line.closest_point(&p), Point3::new(0.0, 2.0, 0.0));
+    almost_eq!(line.closest_point(&p), Point3::new(0.0, 2.0, 0.0));
   }
 }

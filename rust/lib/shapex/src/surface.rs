@@ -12,9 +12,6 @@ pub use intersection::SurfaceIntersectionType;
 pub use intersection::CurveSurfaceIntersectionType;
 pub use intersection::CurveSurfaceIntersection;
 
-#[allow(unused_imports)]
-use crate::log;
-
 
 pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
@@ -382,15 +379,15 @@ impl Surface for RevolutionSurface {
 
   fn tesselate(&self, profile: &Profile) -> Mesh {
     let circle_steps = 80;
-    let u_steps = (circle_steps as f64 * (self.u_bounds.1 - self.u_bounds.0)) as usize;
+    let u_steps = (circle_steps as f64 * (self.u_bounds.1 - self.u_bounds.0).abs()).max(1.0) as usize;
     let v_steps = match &self.curve {
       CurveType::Line(_) => 1,
-      CurveType::Arc(arc) => (circle_steps as f64 * (arc.bounds.1 - arc.bounds.0)) as usize,
+      CurveType::Arc(arc) => (circle_steps as f64 * (arc.bounds.1 - arc.bounds.0).abs()).max(1.0) as usize,
       CurveType::Circle(_) => circle_steps,
       CurveType:: Spline(spline) => if spline.degree == 1 {
         1
       } else {
-        (spline.controls.len() - 1) * 10
+        (spline.controls.len() - 1) * 7
       },
     };
     self.tesselate_fixed(u_steps, v_steps, profile)
@@ -535,10 +532,10 @@ mod tests {
   #[test]
   fn cylinder_normal() {
     let cylinder = RevolutionSurface::cylinder(Axis::new(Point3::origin(), Vec3::unit_z()), 1.0, 1.0);
-    almost_eq(cylinder.normal_at(0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0));
-    almost_eq(cylinder.normal_at(0.25, 0.0), Vec3::new(0.0, -1.0, 0.0));
-    almost_eq(cylinder.normal_at(0.5, 0.0), Vec3::new(1.0, 0.0, 0.0));
-    almost_eq(cylinder.normal_at(0.75, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    almost_eq!(cylinder.normal_at(0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
+    almost_eq!(cylinder.normal_at(0.25, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    almost_eq!(cylinder.normal_at(0.5, 0.0), Vec3::new(-1.0, 0.0, 0.0));
+    almost_eq!(cylinder.normal_at(0.75, 0.0), Vec3::new(0.0, -1.0, 0.0));
   }
 
   #[test]
@@ -551,7 +548,7 @@ mod tests {
     };
     let trans = plane.as_transform();
     let p = trans.transform_point(p);
-    almost_eq(p.z, 0.0);
+    almost_eq!(p.z, 0.0);
   }
 
   #[test]
@@ -564,7 +561,7 @@ mod tests {
     println!("normal {:#?}", normal);
     let gen_normal = plane.as_transform().transform_vector(Vec3::new(0.0, 0.0, dist));
     println!("generated normal {:#?}", gen_normal);
-    almost_eq(vec, normal);
-    almost_eq(normal, gen_normal);
+    almost_eq!(vec, normal);
+    almost_eq!(normal, gen_normal);
   }
 }

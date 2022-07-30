@@ -1,7 +1,5 @@
 use crate::surface::*;
 
-// use crate::log;
-
 
 #[derive(Debug, PartialEq)]
 pub enum SurfaceIntersectionType {
@@ -145,7 +143,7 @@ mod tests {
     if let Some(SurfaceIntersectionType::Cross(curve)) = isect {
       if let CurveType::Line(line) = curve {
         let points = line.endpoints();
-        almost_eq(points.1 - points.0, Vec3::new(-1.0, 0.0, 0.0));
+        almost_eq!(points.1 - points.0, Vec3::new(-1.0, 0.0, 0.0));
         assert!(tuple2_to_vec(points).iter().all(|p| plane.contains_point(*p) && other.contains_point(*p) ));
       } else { panic!("Intersection was no line") }
     } else { panic!("No intersection detected") }

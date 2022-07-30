@@ -7,8 +7,6 @@ use crate::internal::*;
 use crate::CurveType;
 use crate::Transformable;
 
-// use crate::log;
-
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Axis {

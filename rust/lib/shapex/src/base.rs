@@ -59,3 +59,10 @@ impl Almost for f64 {
     (self - other).abs() <= EPSILON
   }
 }
+
+impl Almost for (f64, f64) {
+  fn almost(&self, other: Self) -> bool {
+    (self.0 - other.0).abs() <= EPSILON &&
+    (self.1 - other.1).abs() <= EPSILON
+  }
+}

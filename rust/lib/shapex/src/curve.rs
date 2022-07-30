@@ -557,7 +557,11 @@ impl Curve for Arc {
   fn unsample(&self, p: &Point3) -> f64 {
     let circle = Circle::from_plane(self.plane.clone(), self.radius);
     let param = circle.unsample(p);
-    (param - Self::overflow(self.bounds.0)) / (Self::overflow(self.bounds.1) - Self::overflow(self.bounds.0))
+    let mut range = Self::overflow(self.bounds.1) - Self::overflow(self.bounds.0);
+    if range.almost(0.0) {
+      range = 1.0;
+    }
+    (param - Self::overflow(self.bounds.0)) / range
   }
 
   fn tangent_at(&self, _t: f64) -> Vec3 {

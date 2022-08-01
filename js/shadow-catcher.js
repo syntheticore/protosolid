@@ -33,14 +33,14 @@ export default class ShadowCatcher extends THREE.Object3D {
       bbox.min.z - 0.1,
     )
     bbox.getSize(this.ground.scale)
-    this.ground.scale.multiplyScalar(2.5)
+    this.ground.scale.multiplyScalar(5)
     let shadowFrustum = Math.max(this.ground.scale.x, this.ground.scale.y) / 2
     this.sun.shadow.camera = new THREE.OrthographicCamera(
       -shadowFrustum,
       shadowFrustum,
       shadowFrustum,
       -shadowFrustum,
-      1, 1000
+      1, 2000
     )
     this.renderer.shadowMap.needsUpdate = true
   }

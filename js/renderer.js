@@ -73,15 +73,17 @@ export default class Renderer {
     this.cameraOrtho.lookAt(this.scene.position)
 
     // Scene Objects
+    this.traceables = new THREE.Object3D()
     this.world = new THREE.Object3D()
-    this.scene.add(this.world)
+    this.traceables.add(this.world)
+    this.scene.add(this.traceables)
 
     // Materials
     this.materials = new Materials()
 
     // Sketch Plane
     this.sketchPlane = new SketchPlane(this.camera)
-    this.world.add(this.sketchPlane)
+    this.traceables.add(this.sketchPlane)
 
     // Shadow Catcher
     if(preferences.shadowMaps) {
@@ -265,7 +267,7 @@ export default class Renderer {
 
     gizmo.addEventListener('objectChange', () => {
       this.emitter.emit('change-pose')
-      if(this.shadowCatcher) this.shadowCatcher.update()
+      this.updateShadows()
       this.render()
     })
 
@@ -292,7 +294,7 @@ export default class Renderer {
   hitTest(coords) {
     coords = this.getCanvasCoords(coords)
     this.raycaster.setFromCamera(coords, this.activeCamera)
-    return this.raycaster.intersectObjects(this.world.children, true)
+    return this.raycaster.intersectObjects(this.traceables.children, true)
   }
 
   fromScreen(coords) {

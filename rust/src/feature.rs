@@ -144,7 +144,7 @@ impl JsProfileRef {
 
   pub fn get_item_id(&self) -> String {
     let mut s = String::new();
-    for wire in &self.0.profile {
+    for wire in &self.0.profile.rings {
       for tcurve in wire {
         s.push_str(&tcurve.base.get_id().to_string());
       }

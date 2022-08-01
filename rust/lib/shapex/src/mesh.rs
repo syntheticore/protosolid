@@ -59,8 +59,8 @@ impl Transformable for Mesh {
     for vertex in &mut self.vertices {
       *vertex = transform.transform_point(*vertex);
     }
-    // for normal in &mut self.normals {
-    //   *normal = transform.apply_vec(*normal);
-    // }
+    for normal in &mut self.normals {
+      *normal = transform.transform_vector(*normal);
+    }
   }
 }

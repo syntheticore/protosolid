@@ -2,7 +2,8 @@ use earcutr;
 
 use crate::internal::*;
 use crate::curve::*;
-use crate::mesh::Mesh;
+use crate::wire::*;
+use crate::mesh::*;
 
 
 pub fn cross_2d(vec1: Vec3, vec2: Vec3) -> f64 {
@@ -63,7 +64,7 @@ pub fn region_in_region(region: &Region, other: &Region) -> bool {
   parallel!(region).all(|elem| point_in_region(elem.bounds.0, other))
 }
 
-pub fn tesselate_profile(profile: &Profile, normal: Vec3) -> Mesh {
+pub fn tesselate_profile(profile: &Vec<Wire>) -> Mesh {
   // log!("tesselate_profile profile {:#?}", profile);
   let poly_rings: Vec<PolyLine> = parallel!(profile).map(|wire| {
     tesselate_wire(wire)
@@ -76,17 +77,17 @@ pub fn tesselate_profile(profile: &Profile, normal: Vec3) -> Mesh {
   }
   holes.pop();
   let vertices: Vec<Point3> = poly_rings.into_iter().flatten().collect();
-  tesselate_polygon(vertices, holes, normal)
+  tesselate_polygon(vertices, holes)
 }
 
-pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>, normal: Vec3) -> Mesh {
+pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>) -> Mesh {
   // #[cfg(debug_assertions)]
   // assert!(!is_clockwise(&vertices));
   let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| vec![v.x, v.y] ).collect();
   let faces: Vec<usize> = earcutr::earcut(&flat_vertices, &holes, 2);
   let mut normals = Vec::with_capacity(vertices.len());
   for _ in 0..faces.len() {
-    normals.push(normal);
+    normals.push(Vec3::unit_z());
   }
   Mesh {
     vertices,
@@ -111,24 +112,6 @@ pub fn poly_from_wirebounds(wire: &Wire) -> PolyLine {
   polyline
 }
 
-pub fn wire_from_region(region: &mut Region) {
-  let bounds = region[0].bounds;
-  let next_bounds = region[1].bounds;
-  let mut point = if bounds.0.almost(next_bounds.0) || bounds.0.almost(next_bounds.1) {
-    bounds.1
-  } else {
-    bounds.0
-  };
-  for elem in region {
-    if elem.bounds.1.almost(point) {
-      point = elem.bounds.0;
-      elem.flip();
-    } else {
-      point = elem.bounds.1;
-    }
-  }
-}
-
 pub fn trim(_elem: &CurveType, _cutters: &Vec<CurveType>, _p: Point3) {
   // let splits = split_element(elem, cutters);
   // splits.sort_by(|a, b| {
@@ -141,6 +124,7 @@ pub fn trim(_elem: &CurveType, _cutters: &Vec<CurveType>, _p: Point3) {
 #[cfg(test)]
 mod tests {
   use super::*;
+
   use crate::transform::*;
   use crate::test_data;
   use crate::test_data::make_generic;
@@ -148,7 +132,7 @@ mod tests {
 
   fn make_rect() -> Wire {
     let rect = test_data::rectangle();
-    make_region(make_generic(rect))
+    Wire::new(make_region(make_generic(rect)))
   }
 
   #[test]

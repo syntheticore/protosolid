@@ -101,7 +101,7 @@ export default class Transloader {
           faceMesh.alcProjectable = isActive
           faceMesh.castShadow = isActive
           faceMesh.receiveShadow = isActive
-          this.renderer.add(faceMesh)
+          this.renderer.add(faceMesh, true)
           cache.faces.push(face)
           const vnh = new VertexNormalsHelper( faceMesh, 5, 0xff0000 )
           // this.renderer.add( vnh )
@@ -120,7 +120,7 @@ export default class Transloader {
           line.alcObject = edge
           edge.mesh = line
           edge.solid = solid
-          this.renderer.add(line)
+          this.renderer.add(line, true)
           return edge
         }))
       }
@@ -135,7 +135,7 @@ export default class Transloader {
     comp.helpers.forEach(plane => {
       const mesh = new PlaneHelper(plane)
       plane.mesh = mesh
-      this.renderer.add(mesh)
+      this.renderer.add(mesh, true)
     })
     // Recurse
     if(recursive) comp.children.forEach(child => this.loadTree(child, true))
@@ -176,7 +176,7 @@ export default class Transloader {
     line.alcObject = elem
     elem.mesh = line
     elem.component = comp
-    this.renderer.add(line)
+    this.renderer.add(line, true)
     comp.cache().curves.push(elem)
     this.onLoadElement(elem, comp)
   }
@@ -206,7 +206,7 @@ export default class Transloader {
       mesh.alcObject = region
       region.mesh = mesh
       region.component = comp
-      this.renderer.add(mesh)
+      this.renderer.add(mesh, true)
     })
     // console.log('region tesselation took ' + (performance.now() - t))
   }

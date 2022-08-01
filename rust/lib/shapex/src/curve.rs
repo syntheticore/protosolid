@@ -1,9 +1,10 @@
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
+use serde::{ Serialize, Deserialize };
 
 use crate::internal::*;
 use crate::transform::*;
 use crate::geom2d;
+use crate::wire::PolyLine;
 use crate::geom3d::Plane;
 
 pub mod intersection;
@@ -254,7 +255,7 @@ impl CurveType {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrimmedCurve {
   pub id: Uuid,
   pub base: CurveType,
@@ -373,7 +374,12 @@ impl Curve for TrimmedCurve {
   }
 
   fn tangent_at(&self, t: f64) -> Vec3 {
-    self.base.as_curve().tangent_at(self.param_to_base(t))
+    let tangent = self.base.as_curve().tangent_at(self.param_to_base(t));
+    if self.is_forward() {
+      tangent
+    } else {
+      -tangent
+    }
   }
 
   fn curvature_at(&self, t: f64) -> f64 {
@@ -388,23 +394,6 @@ impl Curve for TrimmedCurve {
     self.tesselate_adaptive(0.025, Deg(20.0), (0.0, 1.0))
   }
 }
-
-
-pub type PolyLine = Vec<Point3>;
-
-
-/// Elements in a region are sorted in a closed loop and connected by their endpoints
-pub type Region = Vec<TrimmedCurve>;
-
-
-/// Wires fulfill all properties of regions, but their element's
-/// bounds are ordered in the direction of the loop
-pub type Wire = Vec<TrimmedCurve>;
-
-
-/// Profiles contain one or more wires, representing the outer and inner rings
-/// The outer ring runs counter-clockwise and inner rings run clockwise
-pub type Profile = Vec<Wire>;
 
 
 /// A finite line segment between two points
@@ -564,8 +553,11 @@ impl Curve for Arc {
     (param - Self::overflow(self.bounds.0)) / range
   }
 
-  fn tangent_at(&self, _t: f64) -> Vec3 {
-    todo!()
+  fn tangent_at(&self, t: f64) -> Vec3 {
+    let mut t = self.convert_param(t);
+    t *= std::f64::consts::PI * 2.0;
+    let v = Vec3::new(t.sin(), -t.cos(), 0.0);
+    self.plane.as_transform().transform_vector(v)
   }
 
   fn curvature_at(&self, _t: f64) -> f64 {
@@ -665,8 +657,10 @@ impl Curve for Circle {
     }
   }
 
-  fn tangent_at(&self, _t: f64) -> Vec3 {
-    todo!()
+  fn tangent_at(&self, t: f64) -> Vec3 {
+    let t = t * std::f64::consts::PI * 2.0;
+    let v = Vec3::new(t.sin(), -t.cos(), 0.0);
+    self.plane.as_transform().transform_vector(v)
   }
 
   fn curvature_at(&self, _t: f64) -> f64 {
@@ -752,14 +746,14 @@ impl BasisSpline {
 
   #[allow(dead_code)]
   fn uniform_knots(n: usize, degree: usize) -> Vec<f64> {
-    if degree >= n {return vec![]}
+    if degree >= n { return vec![] }
     let num_knots = n + degree + 1;
     (0..num_knots).map(|i| i as f64 ).collect()
   }
 
   #[allow(dead_code)]
   fn clamped_knots(n: usize, degree: usize) -> Vec<f64> {
-    if degree >= n {return vec![]}
+    if degree >= n { return vec![] }
     let d = degree + 1;
     [
       vec![0.0; d],

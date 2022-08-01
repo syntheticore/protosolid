@@ -29,7 +29,9 @@ pub struct ProfileRef {
 
 impl ProfileRef {
   pub fn update(&mut self) -> Result<(), FeatureError> {
-    self.sketch.borrow().update_profile(&mut self.profile)
+    let sketch = self.sketch.borrow();
+    self.profile.plane = (&sketch.work_plane).into();
+    sketch.update_profile(&mut self.profile)
   }
 }
 

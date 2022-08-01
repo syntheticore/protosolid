@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::internal::*;
 use crate::curve::*;
 use crate::surface::*;
+use crate::wire::*;
 
 mod volume;
 mod boolean;
@@ -122,7 +123,7 @@ impl Solid {
     }
   }
 
-  pub fn new_lamina(wire: Wire, top_surface: SurfaceType) -> Self {
+  pub fn lamina(wire: Wire, top_surface: SurfaceType) -> Self {
     println!("Creating Lamina:");
     let mut bottom = top_surface.clone();
     bottom.as_surface_mut().flip();
@@ -454,9 +455,9 @@ impl Face {
 
 impl Ring {
   pub fn make_wire(&self) -> Wire {
-    self.iter().map(|he|
+    Wire::new(self.iter().map(|he|
       he.borrow().make_curve()
-    ).collect()
+    ).collect())
   }
 
   pub fn iter(&self) -> RingIterator  {

@@ -81,7 +81,7 @@ export default class Renderer {
 
     // Sketch Plane
     this.sketchPlane = new SketchPlane(this.camera)
-    this.scene.add(this.sketchPlane)
+    this.world.add(this.sketchPlane)
 
     // Shadow Catcher
     if(preferences.shadowMaps) {
@@ -166,13 +166,18 @@ export default class Renderer {
     return this.emitter.on(event, cb)
   }
 
-  add(obj) {
-    this.world.add(obj)
+  add(obj, selectable) {
+    if(selectable) {
+      this.world.add(obj)
+    } else {
+      this.scene.add(obj)
+    }
   }
 
   remove(obj) {
     if(!obj) return
     this.world.remove(obj)
+    this.scene.remove(obj)
     this.dropResources(obj, true)
   }
 
@@ -287,7 +292,7 @@ export default class Renderer {
   hitTest(coords) {
     coords = this.getCanvasCoords(coords)
     this.raycaster.setFromCamera(coords, this.activeCamera)
-    return this.raycaster.intersectObjects(this.scene.children, true)
+    return this.raycaster.intersectObjects(this.world.children, true)
   }
 
   fromScreen(coords) {

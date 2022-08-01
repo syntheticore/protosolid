@@ -1,10 +1,10 @@
-use std::mem;
 use serde::{Serialize, Deserialize};
 
 use crate::internal::*;
 use crate::transform::*;
 use crate::curve::*;
 use crate::mesh::*;
+use crate::wire::*;
 use crate::geom2d;
 
 pub mod intersection;
@@ -17,10 +17,10 @@ pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
   fn unsample(&self, p: Point3) -> (f64, f64);
   fn normal_at(&self, u: f64, v: f64) -> Vec3;
-  fn tesselate(&self, profile: &Profile) -> Mesh;
+  fn tesselate(&self, profile: &Vec<Wire>) -> Mesh;
   fn flip(&mut self); //XXX use Face::flip_normal instead
 
-  fn tesselate_fixed(&self, u_res: usize, v_res: usize, _profile: &Profile) -> Mesh {
+  fn tesselate_fixed(&self, u_res: usize, v_res: usize, _profile: &Vec<Wire>) -> Mesh {
     let mut vertices: Vec<Point3> = vec![];
     let mut vertex_normals: Vec<Vec3> = vec![];
     let mut faces: Vec<usize> = vec![];
@@ -185,7 +185,7 @@ impl TrimmedCurve {
 #[derive(Debug)]
 pub struct TrimmedSurface {
   pub base: SurfaceType,
-  pub profile: Profile,
+  pub profile: Vec<Wire>,
 }
 
 impl TrimmedSurface {
@@ -256,7 +256,7 @@ impl Surface for PlanarSurface {
     self.plane.normal()
   }
 
-  fn tesselate(&self, profile: &Profile) -> Mesh {
+  fn tesselate(&self, profile: &Vec<Wire>) -> Mesh {
     let mut local_profile = profile.clone();
     let trans = self.plane.as_transform();
     let trans_inv = trans.invert().unwrap(); //XXX Profile should be in plane space
@@ -265,9 +265,11 @@ impl Surface for PlanarSurface {
         curve.transform(&trans_inv);
       }
     }
-    let mut mesh = geom2d::tesselate_profile(&local_profile, self.plane.normal());
-    mesh.transform(&trans);
-    mesh
+    let profile = Profile::new(self.plane.clone(), local_profile);
+    profile.tesselate()
+    // let mut mesh = geom2d::tesselate_profile(&local_profile, self.plane.normal());
+    // mesh.transform(&trans);
+    // mesh
   }
 
   fn flip(&mut self) {
@@ -285,23 +287,23 @@ impl Transformable for PlanarSurface {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RevolutionSurface {
   pub axis: Axis,
-  pub curve: CurveType, // Curve is stored in coordinate space of axis
+  pub curve: TrimmedCurve, // Curve is stored in coordinate space of axis
   pub u_bounds: (f64, f64), // v direction is bounded by curve
 }
 
 impl RevolutionSurface {
-  pub fn new(axis: Axis, curve: CurveType) -> Self {
+  pub fn new(axis: Axis, curve: TrimmedCurve) -> Self {
     Self::with_bounds(axis, curve, (0.0, 1.0))
   }
 
-  pub fn with_bounds(axis: Axis, mut curve: CurveType, u_bounds: (f64, f64)) -> Self {
+  pub fn with_bounds(axis: Axis, mut curve: TrimmedCurve, u_bounds: (f64, f64)) -> Self {
     let base_transform = axis.as_transform().invert().unwrap();
-    curve.as_curve_mut().transform(&base_transform);
-    let mut p = curve.as_curve().endpoints().0;
+    curve.transform(&base_transform);
+    let mut p = curve.endpoints().0;
     p.z = 0.0;
     // Move curve onto local XZ plane
     let angle = p.to_vec().angle(Vec3::unit_x());
-    curve.as_curve_mut().transform(&Matrix4::from_angle_z(-angle));
+    curve.transform(&Matrix4::from_angle_z(-angle));
     // Offset bounds to account for difference between curve plane and natural start of circle
     let degrees: Deg<f64> = angle.into();
     Self {
@@ -314,7 +316,7 @@ impl RevolutionSurface {
   pub fn cylinder(axis: Axis, radius: f64, height: f64) -> Self {
     Self {
       axis,
-      curve: Line::new(Point3::new(radius, 0.0, 0.0), Point3::new(radius, 0.0, height)).into_enum(),
+      curve: TrimmedCurve::new(Line::new(Point3::new(radius, 0.0, 0.0), Point3::new(radius, 0.0, height)).into_enum()),
       u_bounds: (0.0, 1.0),
     }
   }
@@ -331,7 +333,7 @@ impl RevolutionSurface {
   }
 
   fn sample_local(&self, u: f64, v: f64) -> Point3 {
-    let mut sample = self.curve.as_curve().sample(v);
+    let mut sample = self.curve.sample(v);
     let height = sample.z;
     sample.z = 0.0;
     let radius = sample.to_vec().magnitude();
@@ -342,8 +344,8 @@ impl RevolutionSurface {
 
   pub fn v_tangent_at(&self, u: f64, v: f64) -> Vec3 {
     let u = self.convert_param(u);
-    let v_tangent = self.curve.as_curve().tangent_at(v);
-    let rotation = Matrix4::from_angle_z(Deg(u * 360.0 ));
+    let v_tangent = self.curve.tangent_at(v);
+    let rotation = Matrix4::from_angle_z(Deg(u * 360.0));
     self.axis.as_transform().transform_vector(rotation.transform_vector(v_tangent))
   }
 
@@ -377,14 +379,14 @@ impl Surface for RevolutionSurface {
     }
   }
 
-  fn tesselate(&self, profile: &Profile) -> Mesh {
+  fn tesselate(&self, profile: &Vec<Wire>) -> Mesh {
     let circle_steps = 80;
     let u_steps = (circle_steps as f64 * (self.u_bounds.1 - self.u_bounds.0).abs()).max(1.0) as usize;
-    let v_steps = match &self.curve {
+    let v_steps = match &self.curve.base {
       CurveType::Line(_) => 1,
       CurveType::Arc(arc) => (circle_steps as f64 * (arc.bounds.1 - arc.bounds.0).abs()).max(1.0) as usize,
       CurveType::Circle(_) => circle_steps,
-      CurveType:: Spline(spline) => if spline.degree == 1 {
+      CurveType::Spline(spline) => if spline.degree == 1 {
         1
       } else {
         (spline.controls.len() - 1) * 7
@@ -492,7 +494,7 @@ impl Surface for SplineSurface {
     Vec3::unit_x()
   }
 
-  fn tesselate(&self, profile: &Profile) -> Mesh {
+  fn tesselate(&self, profile: &Vec<Wire>) -> Mesh {
     self.tesselate_fixed(
       self.tesselation_steps(self.degree.0, self.controls[0].len()),
       self.tesselation_steps(self.degree.1, self.controls.len()),
@@ -502,7 +504,8 @@ impl Surface for SplineSurface {
 
   fn flip(&mut self) {
     self.controls = self.controls.iter().rev().cloned().collect();
-    mem::swap(&mut self.knots.1, &mut self.knots.0);
+    // mem::swap(&mut self.knots.1, &mut self.knots.0);
+    // self.knots.0 = self.knots.0.iter().rev().cloned().collect();
   }
 }
 

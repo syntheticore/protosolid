@@ -1,19 +1,17 @@
 use crate::internal::*;
 use crate::solid::*;
-use crate::geom2d;
 use crate::geom3d;
 use crate::surface::intersection;
 use crate::surface::SurfaceType;
 
 
 pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
-  //XXX use poly_from_wirebounds once circles are handled
-  let poly = geom2d::tesselate_wire(&profile[0]);
-  let plane = geom3d::plane_from_points(&poly)?;
-  let vec = plane.normal() * distance;
-  let mut solid = Solid::new_lamina(profile[0].clone(), PlanarSurface::new(plane).into_enum());
+  let wire = profile.rings[0].clone();
+  let vec = profile.plane.normal() * distance;
+  let mut solid = Solid::lamina(wire, PlanarSurface::new(profile.plane.clone()).into_enum());
   let shell = &mut solid.shells[0];
-  let face = if distance >= 0.0 {
+  let is_forward = distance >= 0.0;
+  let face = if is_forward {
     shell.faces.last()
   } else {
     shell.faces.first()
@@ -39,13 +37,27 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
 
         CurveType::Arc(arc)
         => {
-          let mut surface = RevolutionSurface::cylinder(Axis::new(arc.plane.origin, vec), arc.radius, vec.magnitude());
+          let axis = if is_forward {
+            Axis::new(arc.plane.origin, vec)
+          } else {
+            Axis::new(arc.plane.origin + vec, -vec)
+          };
+          let mut surface = RevolutionSurface::cylinder(axis, arc.radius, vec.magnitude());
           surface.u_bounds = arc.bounds;
+          if tcurve.is_forward() != is_forward {
+            surface.flip();
+          }
           surface.into_enum()
         },
 
         CurveType::Spline(spline)
-        => SplineSurface::tabulated(spline, vec).into_enum(),
+        => {
+          let mut surface = SplineSurface::tabulated(spline, vec);
+          if tcurve.is_forward() {
+            surface.flip();
+          }
+          surface.into_enum()
+        },
       }
     }
   );
@@ -58,14 +70,14 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
 
 
 pub fn revolve(profile: &Profile, mut axis: geom3d::Axis, angle: Deg<f64>) -> Result<Compound, String> {
-  let poly = geom2d::tesselate_wire(&profile[0]);
-  let plane = geom3d::plane_from_points(&poly)?;
-  let mut solid = Solid::new_lamina(profile[0].clone(), PlanarSurface::new(plane.clone()).into_enum());
+  let wire = profile.rings[0].clone();
+  let mut solid = Solid::lamina(wire, PlanarSurface::new(profile.plane.clone()).into_enum());
   let shell = &mut solid.shells[0];
-  if axis.direction.dot(plane.u).signum() < 0.0 {
+  if axis.direction.dot(profile.plane.u).signum() < 0.0 {
     axis.flip();
   }
-  let face = if angle >= Deg(0.0) {
+  let is_forward = angle >= Deg(0.0);
+  let face = if is_forward {
     shell.faces.last()
   } else {
     shell.faces.first()
@@ -86,7 +98,15 @@ pub fn revolve(profile: &Profile, mut axis: geom3d::Axis, angle: Deg<f64>) -> Re
       arc.into_enum()
     },
     |tcurve| {
-      RevolutionSurface::with_bounds(axis.clone(), tcurve.base.clone(), (0.0, angle / Deg(360.0))).into_enum()
+      let mut tcurve = tcurve.clone();
+      if is_forward {
+        tcurve.flip();
+      }
+      let mut surface = RevolutionSurface::with_bounds(axis.clone(), tcurve.clone(), (0.0, angle / Deg(360.0)));
+      if !is_forward {
+        surface.flip();
+      }
+      surface.into_enum()
     }
   );
   Ok(solid.into_compound())
@@ -122,7 +142,7 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Compound, String> {
   ];
   let m = Matrix4::from_angle_z(Deg(45.0));
   points = points.into_iter().map(|p| m.transform_point(p) ).collect();
-  let mut wire = vec![];
+  let mut wire = Wire::new(vec![]);
   let mut iter = points.iter().peekable();
   while let Some(&p) = iter.next() {
     let next = if let Some(&next) = iter.peek() {
@@ -132,15 +152,15 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Compound, String> {
     };
     wire.push(TrimmedCurve::new(Line::new(p, *next).into_enum()));
   }
-  extrude(&vec![wire], dz)
+  extrude(&Profile::new(Plane::new(), vec![wire]), dz)
 }
 
 
 pub fn make_cylinder(radius: f64, height: f64) -> Result<Compound, String> {
-  let profile = vec![vec![
+  let wire = Wire::new(vec![
     TrimmedCurve::new(Circle::new(Point3::origin(), radius).into_enum())
-  ]];
-  extrude(&profile, height)
+  ]);
+  extrude(&Profile::new(Plane::new(), vec![wire]), height)
 }
 
 

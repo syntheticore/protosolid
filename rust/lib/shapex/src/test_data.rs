@@ -1,5 +1,6 @@
 use crate::internal::*;
 use crate::curve::*;
+use crate::wire::*;
 
 pub fn crossing_lines() -> Vec<Line> {
   vec![

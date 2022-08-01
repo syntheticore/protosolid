@@ -1,5 +1,3 @@
-use uuid::Uuid;
-
 // pub use cgmath::prelude::*;
 pub use cgmath::prelude::Matrix;
 pub use cgmath::prelude::SquareMatrix;
@@ -13,7 +11,10 @@ pub use cgmath::Deg;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
+#[doc(inline)]
 pub use crate::geom3d::Axis;
+
+#[doc(inline)]
 pub use crate::geom3d::Plane;
 
 // pub const MAX_FLOAT: f64 = 2_i32.pow(63).into();
@@ -28,10 +29,6 @@ pub type Point3 = cgmath::Point3<f64>;
 pub type Matrix3 = cgmath::Matrix3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
 pub type Quaternion = cgmath::Quaternion<f64>;
-
-pub trait Identity {
-  fn id(&self) -> Uuid;
-}
 
 pub trait Almost {
   // const EPS: f64 = core::f64::EPSILON * 100000.0;

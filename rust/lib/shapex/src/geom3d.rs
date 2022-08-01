@@ -166,6 +166,16 @@ impl From<&Axis> for Plane {
   }
 }
 
+impl From<&Matrix4> for Plane {
+  fn from(m: &Matrix4) -> Self {
+    Self {
+      origin: m.transform_point(Point3::origin()),
+      u: m.transform_vector(Vec3::new(1.0, 0.0, 0.0)),
+      v: m.transform_vector(Vec3::new(0.0, 1.0, 0.0)),
+    }
+  }
+}
+
 
 #[derive(Debug)]
 pub enum PlaneError {

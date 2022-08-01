@@ -34,7 +34,7 @@ impl Sketch {
     let planar_elements = &self.elements;
     let cut_elements = Self::all_split(&planar_elements);
     let wires = Self::get_wires(cut_elements, include_outer);
-    Self::build_profiles(wires)
+    Self::build_profiles(wires, &(&self.work_plane).into())
   }
 
   // pub fn get_profiles(&self, include_outer: bool) -> Vec<(Plane, Profile)> {
@@ -56,11 +56,11 @@ impl Sketch {
     }).collect();
     let cut_elements = Self::all_split(&elements);
     let wires = Self::get_wires(cut_elements, include_outer);
-    let mut profiles = Self::build_profiles(wires);
+    let mut profiles = Self::build_profiles(wires, plane);
     // Transform generated profiles back to component space
     for profile in &mut profiles {
-      for wire in profile {
-        for tcurve in wire {
+      for wire in &mut profile.rings {
+        for tcurve in wire.iter_mut() {
           tcurve.transform(&transform);
         }
       }
@@ -122,7 +122,7 @@ impl Sketch {
     }).collect()
   }
 
-  fn build_profiles(regions: Vec<Wire>) -> Vec<Profile> {
+  fn build_profiles(regions: Vec<Wire>, plane: &Plane) -> Vec<Profile> {
     regions.iter().map(|wire| {
       // Find all other wires enclosed by this one
       let mut cutouts = vec![];
@@ -139,7 +139,7 @@ impl Sketch {
           !ptr::eq(&cutout[0], &other[0]) && geom2d::region_in_region(cutout, other)
         )
       ).cloned().collect());
-      profile
+      Profile::new(plane.clone(), profile)
     }).collect()
   }
 
@@ -150,22 +150,22 @@ impl Sketch {
     });
     Self::remove_dangling_segments(&mut others);
     let islands = Self::build_islands(&others);
-    let mut regions: Vec<Wire> = islands.iter()
+    let mut wires: Vec<Wire> = islands.iter()
       .flat_map(|island| Self::build_wires_from_island(island, include_outer) ).collect();
-    let mut circle_regions = circles
-      .into_iter().map(|circle| vec![circle] ).collect();
-    regions.append(&mut circle_regions);
-    regions
+    let mut circle_wires = circles
+      .into_iter().map(|circle| Wire::new(vec![circle]) ).collect();
+    wires.append(&mut circle_wires);
+    wires
   }
 
   fn build_wires_from_island(island: &Vec<TrimmedCurve>, include_outer: bool) -> Vec<Wire> {
-    let mut regions = vec![];
+    let mut wires = vec![];
     let mut used_forward = HashSet::new();
     let mut used_backward = HashSet::new();
     for start_elem in island.iter() {
       let points = tuple2_to_vec(start_elem.bounds);
       for i in 0..2 {
-        let mut loops = Self::build_loop(
+        let loops = Self::build_loop(
           &points[i],
           &start_elem,
           vec![],
@@ -173,12 +173,12 @@ impl Sketch {
           &mut used_forward,
           &mut used_backward,
         );
-        for region in &mut loops { geom2d::wire_from_region(region) }
-        regions.append(&mut loops);
+        let mut new_wires = loops.into_iter().map(move |region| Wire::new(region) ).collect();
+        wires.append(&mut new_wires);
       }
     }
-    if !include_outer { Self::remove_outer_loop(&mut regions) }
-    regions
+    if !include_outer { Self::remove_outer_loop(&mut wires) }
+    wires
   }
 
   pub fn all_split(elements: &Vec<Ref<CurveType>>) -> Vec<TrimmedCurve> {
@@ -326,7 +326,7 @@ impl Sketch {
     let cut_elements = Self::all_split(&planar_elements);
     let new_wires = Self::get_wires(cut_elements, false);
     let mut was_repair_needed = false;
-    for wire in profile {
+    for wire in &mut profile.rings {
       let wire_ids: HashSet<Uuid> = wire.iter().map(|tcurve| tcurve.base.get_id() ).collect();
       let replacement_wire = new_wires.iter().filter_map(|new_wire| {
         let new_wire_ids: HashSet<Uuid> = new_wire.iter().map(|tcurve| tcurve.base.get_id() ).collect();
@@ -351,8 +351,8 @@ impl Sketch {
   }
 
   pub fn transform_profile(&self, profile: &mut Profile) {
-    for wire in profile {
-      for tcurve in wire {
+    for wire in &mut profile.rings {
+      for tcurve in wire.iter_mut() {
         tcurve.transform(&self.work_plane);
       }
     }
@@ -489,7 +489,7 @@ mod tests {
     sketch.elements.push(rc(inner_circle.into_enum()));
     let profiles = sketch.get_profiles(false);
     assert_eq!(profiles.len(), 2);
-    assert_eq!(profiles[0].len(), 2);
-    assert_eq!(profiles[1].len(), 1);
+    assert_eq!(profiles[0].rings.len(), 2);
+    assert_eq!(profiles[1].rings.len(), 1);
   }
 }

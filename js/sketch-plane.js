@@ -33,10 +33,12 @@ export default class SketchPlane extends THREE.Object3D {
   }
 
   update(camera) {
-    const pos = this.grid && this.grid.position || new THREE.Vector3()
-    const dist = Math.abs(this.up.dot(camera.position.clone().sub(pos)))
+    const relPos = camera.position.clone().sub(this.position)
+    const up = this.up.clone().applyEuler(this.rotation)
+    const dist = Math.abs(up.dot(relPos))
+    const dot = Math.abs(up.dot(relPos.normalize()))
     const size = Math.pow(10, String(Math.round(10 * dist / 4)).length) / 10
-    if(size != this.lastSize) {
+    if(size != this.lastSize && dot > 0.5) {
       this.remove(this.grid)
       const multiple = 3
       this.grid = new THREE.GridHelper(size * multiple, 10 * multiple)

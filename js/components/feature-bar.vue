@@ -257,7 +257,7 @@
       },
 
       scroll: function() {
-        if(!this.$refs.active[0]) return
+        if(!(this.$refs.active && this.$refs.active[0])) return
         const featuresLeft = this.$refs.features.getBoundingClientRect().left
         const boxWidth = this.$refs.box[0].$el.getBoundingClientRect().width
         const iconLeft = this.$refs.active[0].getBoundingClientRect().left

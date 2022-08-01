@@ -271,6 +271,7 @@
     mounted: function() {
       this.$root.$on('enter-pressed', this.confirm)
       this.$root.$on('escape', this.onEscape)
+      this.$root.$on('resize', this.updatePaths)
       this.startValues = this.activeFeature.getValues()
       setTimeout(() => {
         this.updatePaths()
@@ -295,6 +296,7 @@
       this.activeFeature.dispose()
       this.$root.$off('enter-pressed', this.confirm)
       this.$root.$off('escape', this.onEscape)
+      this.$root.$off('resize', this.updatePaths)
       this.$root.$emit('unpreview-feature')
       this.$root.$emit('activate-toolname', 'Manipulate')
     },
@@ -352,13 +354,17 @@
             this.update()
             this.updatePaths()
             this.activePicker = null
+            this.updatePicker = null
             resolve()
             if(this.activeFeature.settings[key].autoConfirm) this.confirm()
             if(this.activeFeature.settings[key].autoMulti) setTimeout(() => this.pick(type, key), 0)
           })
           this.activePicker = key
-          const { pickerPos, color } = this.getPickerInfo(key)
-          this.$root.$emit('pick', type, pickerPos, color)
+          this.updatePicker = () => {
+            const { pickerPos, color } = this.getPickerInfo(key)
+            this.$root.$emit('pick', type, pickerPos, color)
+          }
+          this.updatePicker()
         })
       },
 
@@ -376,6 +382,8 @@
             })
           }
         }
+        if(!this.updatePicker) return;
+        this.updatePicker()
       },
 
       getPickerInfo: function(key) {

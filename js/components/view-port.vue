@@ -448,7 +448,6 @@
 
       handlePick: function(pickerCoords, color, Tool) {
         if(this.activeTool) this.activeTool.dispose()
-        const mouseTarget = this.renderer
         this.pickingPath = { target: null, color, origin: pickerCoords }
         const tool = new Tool(this.activeComponent, this, (item, mesh) => {
           this.$root.$emit('picked', item)

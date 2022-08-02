@@ -156,6 +156,10 @@
           if(this.activeDocument.isFresh) this.deleteDocument(this.activeDocument)
           this.activeDocument = doc
           this.documents.push(doc)
+          setTimeout(() => {
+            doc.real.marker = doc.features.length
+            this.$root.$emit('regenerate')
+          }, 0)
         })
       },
 

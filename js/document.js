@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
 import { saveFile, loadFile } from './utils.js'
+import { deserialize } from './features.js'
 import Component from './component.js'
 
 export default class Document {
@@ -22,7 +23,7 @@ export default class Document {
     this.hasChanges = false
     this.isFresh = true
 
-    this.features = this.real.get_features().map(feature => new Feature(this.document, feature) )
+    this.features = []
 
     this.views = [
       {
@@ -68,9 +69,10 @@ export default class Document {
 
   async save(as) {
     const json = JSON.stringify({
-      tree: this.tree.serialize(),
+      componentData: this.componentData(),
+      features: this.features.map(feature => feature.serialize() ),
+      real: this.real.serialize(),
     })
-    console.log(json)
     try {
       this.filePath = await saveFile(json, 'alc', as ? null : this.filePath)
       this.hasChanges = false
@@ -90,9 +92,12 @@ export default class Document {
     }
     this.filePath = file.path
     this.isFresh = false
-    const doc = JSON.parse(file.data)
-    console.log(doc)
-    this.tree.unserialize(doc.tree)
+    const data = JSON.parse(file.data)
+    this.componentData = () => data.componentData
+    this.real.deserialize(data.real)
+    this.tree = new Component(this.real.get_tree(), null, this.componentData())
+    this.features = this.real.get_features().map((feature, i) => deserialize(this, feature, data.features[i]) )
+    this.activeComponent = this.tree
   }
 
   dispose() {

@@ -26,9 +26,10 @@ default = ["wee_alloc"]
 [dependencies]
 rand = "0.7.3"
 serde = { version = "1.0.123", features = ["derive"] }
+ron = "0.7.1"
 wasm-bindgen = { version = "0.2.69", features = ["serde-serialize"] }
 js-sys = "0.3.46"
-uuid = { version = "0.8.1", features = ["serde", "v4", "wasm-bindgen"] }
+uuid = { version = "1.1.2", features = ["serde", "v4", "js"] }
 wee_alloc = { version = "0.4.5", optional = true }
 
 solvo = { path = "lib/solvo" }

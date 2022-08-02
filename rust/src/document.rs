@@ -52,4 +52,13 @@ impl JsDocument {
       JsValue::from(JsFeature::from_real(&self.real, &feature))
     ).collect()
   }
+
+  pub fn serialize(&self) -> String {
+    let doc = self.real.borrow();
+    ron::to_string(&*doc).unwrap()
+  }
+
+  pub fn deserialize(&mut self, dump: String) {
+    self.real = rc(ron::from_str(&dump).unwrap());
+  }
 }

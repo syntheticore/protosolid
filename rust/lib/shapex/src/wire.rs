@@ -1,3 +1,5 @@
+use serde::{Serialize, Deserialize};
+
 use std::ops::Deref;
 use std::ops::DerefMut;
 
@@ -18,7 +20,7 @@ pub type Region = Vec<TrimmedCurve>;
 /// Wires fulfill all properties of Regions, but their element's
 /// bounds are ordered in the direction of the loop
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Wire(Vec<TrimmedCurve>);
 
 impl Wire {
@@ -93,7 +95,7 @@ impl DerefMut for Wire {
 /// Profiles contain one or more wires, representing the outer and inner rings
 /// The outer ring runs counter-clockwise and inner rings run clockwise
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
   pub plane: Plane,
   pub rings: Vec<Wire>,

@@ -3,6 +3,7 @@ use std::rc::{Rc, Weak};
 use std::collections::HashSet;
 
 use uuid::Uuid;
+use serde::{Serialize, Deserialize};
 
 use crate::internal::*;
 use crate::curve::*;
@@ -12,7 +13,7 @@ use crate::wire::*;
 mod volume;
 mod boolean;
 mod tesselation;
-mod serde;
+mod serialize;
 mod repair;
 
 pub mod features;
@@ -22,7 +23,7 @@ pub use boolean::BooleanType;
 pub use volume::Volume;
 
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Compound {
   pub solids: Vec<Solid>,
 }
@@ -404,7 +405,7 @@ impl Shell {
     // Create new stable id for cloned curve
     let curve_id = curve.get_id();
     let fields = curve_id.as_fields();
-    curve.set_id(Uuid::from_fields(fields.0, fields.1 + 1, fields.2, fields.3).unwrap());
+    curve.set_id(Uuid::from_fields(fields.0, fields.1 + 1, fields.2, fields.3));
     // Sweep actual surface
     let surface = make_surface(&scan.borrow().make_curve());
     // let p1 = scan_previous.borrow().origin.borrow().point;

@@ -1,3 +1,5 @@
+use serde::{Serialize, Deserialize};
+
 use std::collections::HashSet;
 
 use shapex::Profile;
@@ -21,7 +23,7 @@ use crate::Component;
 pub type CompRef = Uuid;
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileRef {
   pub sketch: Ref<Sketch>,
   pub profile: Profile,
@@ -36,7 +38,7 @@ impl ProfileRef {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FaceRef {
   pub component_id: CompRef,
   pub bounds: HashSet<Uuid>,
@@ -57,21 +59,21 @@ impl FaceRef {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeRef {
   pub component_id: CompRef,
   pub edge_id: Uuid,
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CurveRef {
   pub sketch: Ref<Sketch>,
   pub curve: Ref<CurveType>,
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PlanarRef {
   FaceRef(FaceRef),
   HelperRef(Ref<ConstructionHelper>),
@@ -103,7 +105,7 @@ impl PlanarRef {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AxialRef {
   EdgeRef(EdgeRef),
   FaceRef(FaceRef),

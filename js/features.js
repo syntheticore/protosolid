@@ -67,7 +67,29 @@ class Feature {
     Object.keys(values).forEach(key => this[key] = values[key] )
   }
 
+  serialize() {
+    return {
+      title: this.title,
+      values: this.getValues(),
+    }
+  }
+
   dispose() {}
+}
+
+export function deserialize(document, real, dump) {
+  const Klass = {
+    'New Component': CreateComponentFeature,
+    'Sketch': CreateSketchFeature,
+    'Extrusion': ExtrudeFeature,
+    'Revolution': RevolveFeature,
+    'Draft': DraftFeature,
+    'Sweep': SweepFeature,
+  }[dump.title]
+  const feature = new Klass(document, real)
+  feature.setValues(dump.values)
+  feature.id = real.id()
+  return feature
 }
 
 

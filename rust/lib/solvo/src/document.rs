@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use uuid::{uuid};
+
 use shapex::internal::Ref;
 
 use crate::Component;
@@ -24,9 +26,11 @@ pub struct Document {
 
 impl Document {
   pub fn new() -> Self {
+    let mut base_comp = Component::default();
+    base_comp.id = uuid!("00000000-0000-0000-0000-000000000000");
     Self {
       features: vec![],
-      cache: vec![Component::default()],
+      cache: vec![base_comp],
       marker: 0,
       last_change_index: 0,
       last_eval_index: 0,

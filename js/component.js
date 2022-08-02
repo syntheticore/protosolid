@@ -165,10 +165,6 @@ export default class Component {
     return params
   }
 
-  // isHidden() {
-  //   return this.hidden || (this.parent && this.parent.isHidden())
-  // }
-
   // serialize() {
   //   return {
   //     title: this.title,

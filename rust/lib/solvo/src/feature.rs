@@ -1,3 +1,5 @@
+use serde::{Serialize, Deserialize};
+
 use shapex::*;
 use shapex::internal::Ref;
 
@@ -8,7 +10,7 @@ use crate::Sketch;
 
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
   pub id: Uuid,
   pub error: Option<FeatureError>,
@@ -34,7 +36,7 @@ pub trait FeatureTrait {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FeatureType {
   CreateComponent(CreateComponentFeature),
   CreateSketch(CreateSketchFeature),
@@ -66,7 +68,7 @@ impl FeatureType {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FeatureError {
   Warning(String),
   Error(String),
@@ -90,7 +92,7 @@ impl std::fmt::Display for FeatureError {
 impl std::error::Error for FeatureError {}
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConstructionHelper {
   pub id: Uuid,
   pub helper_type: ConstructionHelperType,
@@ -106,7 +108,7 @@ impl ConstructionHelper {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConstructionHelperType {
   Axis(Axis),
   Plane(Plane),
@@ -127,7 +129,7 @@ fn update_profiles(profiles: &mut Vec<ProfileRef>) -> Result<(), FeatureError> {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateComponentFeature {
   pub component_id: CompRef,
   pub new_component_id: Uuid,
@@ -153,7 +155,7 @@ impl FeatureTrait for CreateComponentFeature {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSketchFeature {
   pub component_id: CompRef,
   pub plane: PlanarRef,
@@ -187,7 +189,7 @@ impl FeatureTrait for CreateSketchFeature {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtrusionFeature {
   pub component_id: Uuid,
   pub profiles: Vec<ProfileRef>,
@@ -245,7 +247,7 @@ impl FeatureTrait for ExtrusionFeature {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RevolutionFeature {
   pub component_id: Uuid,
   pub profiles: Vec<ProfileRef>,
@@ -307,7 +309,7 @@ impl FeatureTrait for RevolutionFeature {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DraftFeature {
   pub fixed_plane: PlanarRef,
   pub faces: Vec<FaceRef>,

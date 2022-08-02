@@ -1,9 +1,34 @@
-// use uuid::Uuid;
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
-use shapex::*;
+use shapex::internal::Ref;
 
-// use crate::Sketch;
+use crate::Feature;
+use crate::document;
+
+
+impl Serialize for document::Document {
+  fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    Document {
+      features: self.features.clone(),
+    }.serialize(serializer)
+  }
+}
+
+
+impl<'de> Deserialize<'de> for document::Document {
+  fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+    let dummy = Document::deserialize(deserializer)?;
+    let mut doc = Self::new();
+    doc.features = dummy.features;
+    Ok(doc)
+  }
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Document {
+  pub features: Vec<Ref<Feature>>,
+}
 
 
 // pub fn export_ron(comp: &crate::Component) -> String {
@@ -58,9 +83,9 @@ use shapex::*;
 // }
 
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Component {
-  pub sketches: Vec<Vec<CurveType>>,
-  pub bodies: Vec<String>,
-  pub children: Vec<Self>,
-}
+// #[derive(Debug, Serialize, Deserialize)]
+// struct Component {
+//   pub sketches: Vec<Vec<CurveType>>,
+//   pub bodies: Vec<String>,
+//   pub children: Vec<Self>,
+// }

@@ -1,7 +1,9 @@
+use serde::{Serialize, Deserialize};
+
 use crate::solid::*;
 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum BooleanType {
   Create,
   Join,

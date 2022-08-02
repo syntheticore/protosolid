@@ -3,6 +3,8 @@ use std::rc::Rc;
 use std::collections::HashSet;
 use std::cmp::Ordering;
 
+use serde::{Serialize, Deserialize};
+
 use shapex::*;
 use shapex::internal::rc;
 use shapex::internal::Ref;
@@ -12,7 +14,7 @@ use crate::Uuid;
 use crate::FeatureError;
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sketch {
   pub id: Uuid,
   pub elements: Vec<Ref<CurveType>>,

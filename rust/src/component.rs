@@ -85,16 +85,6 @@ impl JsComponent {
     meshes
   }
 
-  // pub fn serialize(&self) -> String {
-  //   let doc = self.document.borrow();
-  //   let comp = self.get_comp(&doc);
-  //   solvo::io::export_ron(&comp)
-  // }
-
-  // pub fn unserialize(&mut self, dump: String) {
-  //   self.real = rc(solvo::io::import_ron(dump));
-  // }
-
   // pub fn make_cube(&self) {
   //   let cube = features::make_cube(10.0, 10.0, 10.0).unwrap();
   //   self.get_comp(&self.document.borrow()).compound.create(cube.into_compound());

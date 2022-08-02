@@ -159,6 +159,7 @@
           setTimeout(() => {
             doc.real.marker = doc.features.length
             this.$root.$emit('regenerate')
+            doc.hasChanges = false
           }, 0)
         })
       },

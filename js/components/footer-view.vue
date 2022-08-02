@@ -127,6 +127,7 @@
     props: {
       selection: Object,
       activeComponent: Object,
+      activeFeature: Object,
     },
 
     computed: {

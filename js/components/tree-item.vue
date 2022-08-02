@@ -184,6 +184,7 @@
       border-radius: 3px
       transition: opacity 0.2s
       box-shadow: 0 1px 3px rgba(black, 0.25)
+      overflow: hidden
       > header
         display: flex
         align-items: center

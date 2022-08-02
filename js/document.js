@@ -18,7 +18,6 @@ export default class Document {
     this.activeView = null
     this.activePose = null
     this.isPoseDirty = false
-    this.isSetDirty = true
     this.filePath = null
     this.hasChanges = false
     this.isFresh = true
@@ -54,11 +53,6 @@ export default class Document {
 
     this.poses = [
       { title: 'Base', id: this.lastId++ },
-    ]
-
-    this.sets = [
-      { title: 'Filet 14', id: this.lastId++ },
-      { title: 'Extrude 2', id: this.lastId++ },
     ]
   }
 

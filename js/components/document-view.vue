@@ -13,6 +13,7 @@
       @change-view="viewChanged"
       @change-pose="document.isPoseDirty = true"
     )
+
     ToolBox(
       :document="document"
       :active-tool="activeTool"
@@ -22,6 +23,7 @@
       @add-feature="addFeature"
       @remove-feature="removeFeature"
     )
+
     .side-bar.left
       TreeView(
         :top="document.tree"
@@ -34,6 +36,7 @@
         @delete-component="deleteComponent"
         @delete-solid="deleteSolid"
       )
+
     .side-bar.right
       h1 View
       ListChooser(
@@ -58,23 +61,21 @@
         :allow-create="document.isPoseDirty"
         @create="createPose"
       )
-      //- h1 Sets
-      //- ListChooser(
-      //-   v-if="document.sets.length || document.isSetDirty"
-      //-   :list="document.sets"
-      //-   :allow-create="document.isSetDirty"
-      //-   @create="createSet"
-      //- )
+
     FooterView(
+      :class="{top: !!activeFeature}"
       :selection="selection"
       :active-component="document.activeComponent"
+      :active-feature="activeFeature"
     )
+
     FeatureBar(
       :document="document"
       :active-tool="activeTool"
       :active-feature="activeFeature"
       :selection.sync="selection"
       @update:active-feature="activateFeature"
+      @delete-feature="removeFeature"
     )
 </template>
 
@@ -129,8 +130,10 @@
 
   .footer-view
     position: absolute
-    // right: 0
     bottom: 70px
+    &.top
+      bottom: unset
+      top: 100px
 
   .feature-bar
     position: absolute
@@ -362,11 +365,6 @@
       createPose: function() {
         this.document.poses.push({ title: 'Untitled Pose', id: this.document.lastId++ })
         this.document.isPoseDirty = false
-      },
-
-      createSet: function() {
-        this.document.sets.push({ title: 'Untitled Set', id: this.document.lastId++ })
-        this.document.isSetDirty = false
       },
 
       // User changed camera from viewport

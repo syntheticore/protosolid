@@ -24,20 +24,23 @@
             :active-feature="activeFeature"
             @close="$emit('update:active-feature', null, true)"
           )
-        .feature(
-          :title="featureTitle(feature)"
-          :class="featureStyle(feature)"
-          @click="$emit('update:selection', selection.handle(feature, $root.isCtrlPressed))"
-          @dblclick="openFeature(feature)"
+        FeatureIcon(
+          :feature="feature"
+          :selection="selection"
+          :is-active="isActive(feature)"
+          @move-marker="setMarker(i + 1)"
+          v-on="$listeners"
         )
-          fa-icon(:icon="feature.icon" fixed-width)
       hr
       li.future(v-for="(feature, i) in future")
-        .feature(
-          :title="feature.title"
-          @dblclick="openFeature(feature)"
+        FeatureIcon(
+          isFuture
+          :feature="feature"
+          :selection="selection"
+          :is-active="isActive(feature)"
+          @move-marker="setMarker(past.length + i + 1)"
+          v-on="$listeners"
         )
-          fa-icon(:icon="feature.icon" fixed-width)
 
 </template>
 
@@ -103,23 +106,6 @@
       background: linear-gradient(right, $dark2, rgba($dark2, 0))
       border-top-right-radius: 4px
       border-bottom-right-radius: 4px
-    li
-      &.future
-        opacity: 0.3
-
-    .feature
-      padding: 13px
-      svg
-        transition: color 0.15s
-      &:hover svg
-        color: $bright1
-      &.active svg
-        color: $highlight
-      &.error svg
-        color: darken($red, 30%) !important
-      &.warning svg
-        color: $warn !important
-
     hr
       border: none
       width: 5px
@@ -146,12 +132,14 @@
 
 <script>
   import FeatureBox from './feature-box.vue'
+  import FeatureIcon from './feature-icon.vue'
 
   export default {
     name: 'FeatureBar',
 
     components: {
       FeatureBox,
+      FeatureIcon,
     },
 
     props: {
@@ -217,13 +205,6 @@
         this.marker = this.document.real.marker
       },
 
-      featureTitle(feature) {
-        let title = feature.title
-        const error = feature.real.error()
-        if(error) title += ': ' + error[0]
-        return title
-      },
-
       isActive(feature) {
         return this.activeFeature && (feature.id == this.activeFeature.id)
       },
@@ -251,11 +232,6 @@
         this.$root.$emit('regenerate')
       },
 
-      openFeature: function(feature) {
-        this.$root.$emit('close-feature')
-        setTimeout(() => this.$emit('update:active-feature', feature), 0)
-      },
-
       scroll: function() {
         if(!(this.$refs.active && this.$refs.active[0])) return
         const featuresLeft = this.$refs.features.getBoundingClientRect().left
@@ -265,15 +241,6 @@
         const max = document.body.clientWidth - featuresLeft - boxWidth
         this.scrolled = Math.max(-146, Math.min(scrolled, max))
         this.tip = Math.max(24, Math.min(scrolled - this.scrolled + 24, boxWidth - 60))
-      },
-
-      featureStyle: function(feature) {
-        const error = feature.real.error()
-        const style = {
-          active: this.isActive(feature) || this.selection.has(feature),
-        }
-        if(error) style[error[1]] = true
-        return style
       },
     },
   }

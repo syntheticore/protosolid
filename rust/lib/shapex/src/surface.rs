@@ -267,9 +267,6 @@ impl Surface for PlanarSurface {
     }
     let profile = Profile::new(self.plane.clone(), local_profile);
     profile.tesselate()
-    // let mut mesh = geom2d::tesselate_profile(&local_profile, self.plane.normal());
-    // mesh.transform(&trans);
-    // mesh
   }
 
   fn flip(&mut self) {
@@ -504,8 +501,6 @@ impl Surface for SplineSurface {
 
   fn flip(&mut self) {
     self.controls = self.controls.iter().rev().cloned().collect();
-    // mem::swap(&mut self.knots.1, &mut self.knots.0);
-    // self.knots.0 = self.knots.0.iter().rev().cloned().collect();
   }
 }
 
@@ -558,12 +553,9 @@ mod tests {
   fn plane_transform2() {
     let dist = 6.0;
     let vec = Vec3::new(0.4, 0.5, 1.0).normalize() * dist;
-    println!("input vector {:#?}", vec);
     let plane = Plane::from_normal(Point3::new(1.0, 2.0, 3.0), vec.normalize());
     let normal = plane.normal() * dist;
-    println!("normal {:#?}", normal);
     let gen_normal = plane.as_transform().transform_vector(Vec3::new(0.0, 0.0, dist));
-    println!("generated normal {:#?}", gen_normal);
     almost_eq!(vec, normal);
     almost_eq!(normal, gen_normal);
   }

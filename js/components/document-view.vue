@@ -295,8 +295,6 @@
           // Regenerate at feature position
           this.document.real.move_marker_to_feature(feature.real)
           this.$root.$emit('regenerate')
-          // Moving marker will cause feature bar to deactivate active feature -> Restore
-          setTimeout(() => this.activeFeature = feature, 0)
           // Activate sketch for sketch features
           if(feature.constructor === CreateSketchFeature) {
             this.document.activeSketch = this.document.tree.findSketchByFeature(feature.id)
@@ -312,20 +310,26 @@
           }
           // Make affected components visible
           compIds.forEach(id => this.getComponent(id).UIData.hidden = false )
+          // Moving marker will cause feature bar to deactivate active feature -> Restore
+          const activeSketch = this.document.activeSketch
+          setTimeout(() => {
+            this.activeFeature = feature
+            this.document.activeSketch = activeSketch
+          }, 0)
         } else {
-          this.activeFeature = null
           if(doReset && this.previousComponent) {
             // Restore previous state
             if(this.previousSketchVisibility !== null && this.document.activeSketch) {
               this.$set(this.document.activeComponent.UIData.itemsHidden, this.document.activeSketch.id(), this.previousSketchVisibility)
             }
             this.previousSketchVisibility = null
-            this.document.activeSketch = null
             Object.keys(this.oldVisibility).forEach(id => this.getComponent(id).UIData.hidden = this.oldVisibility[id] )
             this.document.real.marker = this.previousMarker
             this.$root.$emit('regenerate')
             this.activateComponent(this.getComponent(this.previousComponent.id))
           }
+          this.activeFeature = null
+          this.document.activeSketch = null
         }
       },
 

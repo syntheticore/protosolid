@@ -418,6 +418,7 @@
       },
 
       close: function() {
+        if(this.isSketchFeature) this.activeFeature.real.invalidate()
         this.$emit('close')
       },
 

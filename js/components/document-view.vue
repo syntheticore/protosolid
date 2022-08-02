@@ -176,25 +176,6 @@
       document: Object,
     },
 
-    watch: {
-      document: {
-        immediate: true,
-        handler: function(document, oldDocument) {
-          if(oldDocument) oldDocument.activeView = oldDocument.activeView || this.dirtyView
-          if(!document.activeView) {
-            document.activeView = document.views[3]
-          }
-          this.previewView = null
-          this.dirtyView = null
-          this.selection = new Selection()
-          this.highlight = null
-          this.activeFeature = null
-          // // ViewPort/transloader has consumed our faces on unload
-          // this.updateComponent(document.tree)
-        },
-      },
-    },
-
     data() {
       return {
         activeTool: null,
@@ -222,6 +203,23 @@
       }
     },
 
+    watch: {
+      document: {
+        immediate: true,
+        handler: function(document, oldDocument) {
+          if(oldDocument) oldDocument.activeView = oldDocument.activeView || this.dirtyView
+          if(!document.activeView) {
+            document.activeView = document.views[3]
+          }
+          this.previewView = null
+          this.dirtyView = null
+          this.selection = new Selection()
+          this.highlight = null
+          this.activeFeature = null
+        },
+      },
+    },
+
     mounted() {
       this.currentDisplayMode = 'wireShade'
       this.$root.$on('keydown', this.keyDown)
@@ -242,7 +240,6 @@
         })
         this.document.activeComponent = this.findValidComponent(this.document.activeComponent)
         this.selection = new Selection()
-        this.document.activeSketch = null
       },
 
       findValidComponent(comp) {
@@ -261,6 +258,7 @@
       addFeature(feature) {
         this.activeFeature = null
         this.document.insertFeature(feature, this.document.real.marker)
+        this.document.activeSketch = null
       },
 
       removeFeature(feature) {

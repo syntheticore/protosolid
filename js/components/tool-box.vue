@@ -182,7 +182,7 @@
 
     watch: {
       activeSketch: function(sketch) {
-        this.activeTab = sketch ? 1 : 4
+        if(!this.feature) this.activeTab = this.activeSketch ? 1 : 4
       },
     },
 

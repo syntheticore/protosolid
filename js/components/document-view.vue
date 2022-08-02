@@ -231,6 +231,7 @@
 
     methods: {
       regenerate: function() {
+        if(this.activeFeature) this.activeFeature.real.invalidate()
         const compIds = this.document.real.evaluate()
         console.log(compIds)
         compIds.forEach(id => {
@@ -241,6 +242,7 @@
         })
         this.document.activeComponent = this.findValidComponent(this.document.activeComponent)
         this.selection = new Selection()
+        this.document.activeSketch = null
       },
 
       findValidComponent(comp) {
@@ -259,7 +261,6 @@
       addFeature(feature) {
         this.activeFeature = null
         this.document.insertFeature(feature, this.document.real.marker)
-        this.document.activeSketch = null
       },
 
       removeFeature(feature) {

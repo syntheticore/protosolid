@@ -409,13 +409,11 @@
       confirm: function() {
         if(!this.canConfirm) return
         this.status = 'confirmed'
-        if(this.isSketchFeature || this.error) this.activeFeature.real.repair()
+        if(this.error) this.activeFeature.real.repair()
         this.close()
       },
 
       cancel: function() {
-        this.status = 'canceled'
-        if(this.isSketchFeature) this.activeFeature.real.invalidate()
         this.close()
       },
 

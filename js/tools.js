@@ -30,19 +30,21 @@ class HighlightTool extends Tool {
   constructor(component, viewport, selectors) {
     super(component, viewport)
     this.selectors = selectors
+    this.realSelectors = selectors.map(selector => selector == 'solid' ? 'face' : selector )
   }
 
-  mouseMove(vec, coords) {
+  async mouseMove(vec, coords) {
     if(this.viewport.hoveredHandle) return this.viewport.renderer.render()
-    const object = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    this.viewport.renderer.render()
-    this.viewport.$emit('update:highlight', object && object.alcObject)
+    if(this.viewport.pickingPath) this.viewport.updatePath(this.viewport.pickingPath)
+    const object = await this.getObject(coords, true)
+    this.viewport.$emit('update:highlight', object)
   }
 
   getObject(coords, any) {
     return new Promise(resolve => {
-      const items = this.viewport.renderer.objectsAtScreen(coords, this.selectors)
-        .map(obj => obj.alcObject)
+      const items = this.viewport.renderer
+        .objectsAtScreen(coords, this.realSelectors)
+        .map(obj => (obj.alcType == 'face' && this.selectors.some(s => s == 'solid' )) ? obj.alcObject.solid : obj.alcObject )
       if(items.length > 1 && !any) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({
@@ -60,27 +62,23 @@ class HighlightTool extends Tool {
 
 export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
-    super(component, viewport, ['curve'])
+    super(component, viewport, ['curve', 'solid'])
   }
 
-  click(vec, coords) {
-    this.getObject(coords, true).then(curve => {
-      if(curve || this.viewport.$root.isCtrlPressed) return this.viewport.renderer.render()
-      this.viewport.$emit('update:selection', this.viewport.selection.clear())
-      // this.viewport.renderer.removeGizmo()
-    })
+  async click(vec, coords) {
+    const curve = await this.getObject(coords, true)
+    if(curve || this.viewport.$root.isCtrlPressed) return this.viewport.renderer.render()
+    this.viewport.$emit('update:selection', this.viewport.selection.clear())
   }
 
-  mouseDown(vec, coords) {
+  async mouseDown(vec, coords) {
     if(this.viewport.activeHandle) {
       this.enableSnapping = true
       return
     }
-    this.getObject(coords).then(curve => {
-      if(!curve) return
-      this.viewport.$emit('update:selection', this.viewport.selection.handle(curve, this.viewport.$root.isCtrlPressed))
-      // this.viewport.gizmo.attach(object)
-    })
+    const curve = await this.getObject(coords)
+    if(!curve) return
+    this.viewport.$emit('update:selection', this.viewport.selection.handle(curve, this.viewport.$root.isCtrlPressed))
   }
 
   mouseUp(vec, coords) {

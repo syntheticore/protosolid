@@ -42,9 +42,10 @@ class HighlightTool extends Tool {
 
   getObject(coords, any) {
     return new Promise(resolve => {
-      const items = this.viewport.renderer
+      let items = this.viewport.renderer
         .objectsAtScreen(coords, this.realSelectors)
         .map(obj => (obj.alcType == 'face' && this.selectors.some(s => s == 'solid' )) ? obj.alcObject.solid : obj.alcObject )
+      items = Array.from(new Set(items))
       if(items.length > 1 && !any) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({

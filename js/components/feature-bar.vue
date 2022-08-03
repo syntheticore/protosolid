@@ -112,7 +112,20 @@
       height: 5px
       background: $highlight
       border-radius: 10px
-      margin: 6px
+      margin: 7px
+      flex: 0 0 auto
+      &:first-child
+        margin-left: 14px
+        margin-right: 0px
+      &:last-child
+        margin-left: 0px
+        margin-right: 14px
+      &:only-child
+        margin: 7px
+    & > li:first-of-type
+      margin-left: 14px
+    & > li:last-of-type
+      margin-right: 11px
 
   .feature-box
     bottom: 0

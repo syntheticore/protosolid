@@ -319,8 +319,8 @@
           }, 0)
         } else {
           if(this.activeFeature) this.$root.$emit('deactivate-feature', this.activeFeature)
+          // Restore previous state
           if(doReset && this.previousComponent) {
-            // Restore previous state
             if(this.previousSketchVisibility !== null && this.document.activeSketch) {
               this.$set(this.document.activeComponent.UIData.itemsHidden, this.document.activeSketch.id(), this.previousSketchVisibility)
             }

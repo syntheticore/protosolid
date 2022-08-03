@@ -8,11 +8,11 @@
     fa-icon(:icon="feature.icon" fixed-width :class="{future: isFuture}")
 
     nav.actions.bordered
-      button.delete(
-        title="Delete"
-        @click.stop="deleteFeature()"
+      button(
+        title="Move marker here"
+        @click.stop="moveMarker()"
       )
-        fa-icon(icon="trash" fixed-width)
+        fa-icon(icon="directions" fixed-width)
 
       button(
         title="Edit"
@@ -20,18 +20,19 @@
       )
         fa-icon(icon="pen" fixed-width)
 
-      button(
-        title="Move marker here"
-        @click.stop="moveMarker()"
+      button.delete(
+        title="Delete"
+        @click.stop="deleteFeature()"
       )
-        fa-icon(icon="directions" fixed-width)
-
+        fa-icon(icon="trash" fixed-width)
 </template>
 
 
 <style lang="stylus" scoped>
   .feature
+    position: relative
     padding: 13px
+    transition: all 0.15s
     > svg
       transition: color 0.15s
     &:hover > svg
@@ -43,6 +44,8 @@
     &.warning > svg
       color: $warn !important
     &:hover
+      padding-top: 0
+      padding-bottom: 26px
       .actions
         opacity: 1
         pointer-events: all
@@ -53,22 +56,25 @@
 
   .actions
     position: absolute
-    bottom: 37px
-    margin-left: -9px
+    bottom: -10px
+    left: -17px
     overflow: hidden
     display: flex
-    flex-direction: column
     opacity: 0
     pointer-events: none
     transition: all 0.15s
-    transform: scale(0.95)
+    transform: scale(0.85)
     z-index: 1
+    border-radius: 99px
+    background: rgb($dark2)
+    -webkit-backdrop-filter: none
+    backdrop-filter: none
 
   button
     background: none
     border: none
     color: $bright2
-    padding: 8px
+    padding: 4px
     transition: all 0.15s
     &:hover
       color: $bright1

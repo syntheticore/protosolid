@@ -135,7 +135,7 @@ function createWindow() {
     // fullscreenWindowTitle: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
+      contextIsolation: false,
       scrollBounce: true,
     }
   })
@@ -239,7 +239,7 @@ function showSplash() {
     // vibrancy: 'ultra-dark',
     alwaysOnTop: true,
     webPreferences: {
-      nodeIntegration: false,
+      contextIsolation: false,
     }
   })
   splash.loadFile('splash.html')

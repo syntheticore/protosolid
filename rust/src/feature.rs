@@ -285,13 +285,18 @@ impl JsFeature {
   }
 
   pub fn create_sketch(&mut self, comp_ref: JsValue, plane: &JsPlanarRef) {
-    self.process_feature(Feature::new(
-      CreateSketchFeature {
-        component_id: comp_ref.into_serde().unwrap(),
-        plane: plane.real.clone(),
-        sketch: rc(Sketch::default()),
-      }.into_enum(),
-    ));
+    let mut feature = CreateSketchFeature {
+      component_id: comp_ref.into_serde().unwrap(),
+      plane: plane.real.clone(),
+      sketch: rc(Sketch::default()),
+    };
+    // Keep existing sketch when updating
+    if let Some(this) = &mut self.real {
+      if let FeatureType::CreateSketch(existing) = &this.borrow().feature_type {
+        feature.sketch = existing.sketch.clone();
+      }
+    }
+    self.process_feature(Feature::new(feature.into_enum()));
   }
 
   pub fn extrusion(&mut self, comp_ref: JsValue, profiles: JsProfileRefList, distance: f64, op: &str) {

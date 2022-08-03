@@ -267,8 +267,7 @@ export class RevolveFeature extends Feature {
     this.profiles().forEach(profile => {
       list.push(profile)
     })
-    const sketch = this.document.tree.findSketch(this.profiles()[0].get_sketch_id())
-    const comp_ref = sketch.component_id()
+    const comp_ref = this.document.activeComponent.id
     const angle = this.angle * (this.side ? 1 : -1)
     this.real.revolution(comp_ref, list, this.axis(), angle, this.operation)
   }

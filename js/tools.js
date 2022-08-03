@@ -66,19 +66,17 @@ export class ManipulationTool extends HighlightTool {
   }
 
   async click(vec, coords) {
-    const curve = await this.getObject(coords, true)
-    if(curve || this.viewport.$root.isCtrlPressed) return this.viewport.renderer.render()
-    this.viewport.$emit('update:selection', this.viewport.selection.clear())
+    const curve = await this.getObject(coords)
+    if(curve) {
+      this.viewport.$emit('update:selection', this.viewport.selection.handle(curve, this.viewport.$root.isCtrlPressed))
+    } else {
+      if(this.viewport.$root.isCtrlPressed) return this.viewport.renderer.render()
+      this.viewport.$emit('update:selection', this.viewport.selection.clear())
+    }
   }
 
   async mouseDown(vec, coords) {
-    if(this.viewport.activeHandle) {
-      this.enableSnapping = true
-      return
-    }
-    const curve = await this.getObject(coords)
-    if(!curve) return
-    this.viewport.$emit('update:selection', this.viewport.selection.handle(curve, this.viewport.$root.isCtrlPressed))
+    if(this.viewport.activeHandle) this.enableSnapping = true
   }
 
   mouseUp(vec, coords) {

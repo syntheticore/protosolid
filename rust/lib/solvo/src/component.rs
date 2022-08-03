@@ -60,14 +60,21 @@ impl Component {
     None
   }
 
-  // pub fn find_sketch(&mut self, id: Uuid) -> Option<&mut Sketch> {
-  //   for sketch in self.sketches.iter_mut() {
-  //     if sketch.id == id {
-  //       return Some(sketch)
-  //     }
-  //   }
-  //   None
-  // }
+  pub fn find_sketch(&self, id: Uuid, recursive: bool) -> Option<&Ref<Sketch>> {
+    for sketch in &self.sketches {
+      if sketch.borrow().id == id {
+        return Some(sketch)
+      }
+    }
+    if recursive {
+      for child in &self.children {
+        if let Some(sketch) = child.find_sketch(id, true) {
+          return Some(sketch)
+        }
+      }
+    }
+    None
+  }
 
   pub fn create_component(&mut self) -> &mut Self {
     let comp = Self::default();
@@ -85,7 +92,7 @@ impl Component {
 
   pub fn deep_clone(&self) -> Self {
     let mut clone = self.clone();
-    clone.compound.solids = clone.compound.solids.into_iter().map(|solid| solid.deep_clone() ).collect();
+    clone.compound.solids = clone.compound.solids.into_iter().map(move |solid| solid.deep_clone() ).collect();
     clone
   }
 }

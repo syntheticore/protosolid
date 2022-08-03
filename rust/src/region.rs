@@ -14,16 +14,18 @@ use crate::feature::JsProfileRef;
 #[derive(Debug, Clone)]
 pub struct JsRegion {
   sketch: Ref<Sketch>,
+  document: Ref<Document>,
 
   #[wasm_bindgen(skip)]
   pub profile: Profile,
 }
 
 impl JsRegion {
-  pub fn new(profile: Profile, sketch: Ref<Sketch>) -> Self {
+  pub fn new(profile: Profile, sketch: Ref<Sketch>, document: Ref<Document>) -> Self {
     Self {
       profile,
       sketch,
+      document,
     }
   }
 }
@@ -67,9 +69,9 @@ impl JsRegion {
 
   pub fn make_reference(&self) -> JsValue {
     JsValue::from(JsProfileRef::new(ProfileRef {
-      sketch: self.sketch.clone(),
+      sketch_id: self.sketch.borrow().id,
       profile: self.profile.clone(),
-    }))
+    }, self.document.clone()))
   }
 }
 

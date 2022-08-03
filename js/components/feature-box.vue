@@ -272,6 +272,7 @@
       this.$root.$on('enter-pressed', this.confirm)
       this.$root.$on('escape', this.onEscape)
       this.$root.$on('resize', this.updatePaths)
+      this.$root.$on('deactivate-feature', this.deactivateFeature)
       this.startValues = this.activeFeature.getValues()
       setTimeout(() => {
         this.updatePaths()
@@ -280,23 +281,15 @@
     },
 
     beforeDestroy: function() {
-      if(this.status == 'confirmed') {
-        this.activeFeature.confirm(this)
-      } else {
-        if(this.showHeader) {
-          // Restore feature state on cancel
-          if(!this.isSketchFeature) {
-            this.activeFeature.setValues(this.startValues)
-            this.update()
-          }
-        } else {
-          this.$emit('remove-feature', this.activeFeature)
-        }
+      // Remove temporary feature when feature creation was not completed
+      if(this.status !== 'confirmed' && !this.showHeader) {
+        this.$emit('remove-feature', this.activeFeature)
       }
       this.activeFeature.dispose()
       this.$root.$off('enter-pressed', this.confirm)
       this.$root.$off('escape', this.onEscape)
       this.$root.$off('resize', this.updatePaths)
+      this.$root.$off('deactivate-feature', this.deactivateFeature)
       this.$root.$emit('unpreview-feature')
       this.$root.$emit('activate-toolname', 'Manipulate')
     },
@@ -410,6 +403,7 @@
         if(!this.canConfirm) return
         this.status = 'confirmed'
         if(this.error) this.activeFeature.real.repair()
+        this.activeFeature.confirm(this)
         this.close()
       },
 
@@ -420,6 +414,14 @@
       close: function() {
         if(this.isSketchFeature) this.activeFeature.real.invalidate()
         this.$emit('close')
+      },
+
+      deactivateFeature() {
+        // Restore feature state on cancel
+        if(this.status !== 'confirmed' && this.showHeader && !this.isSketchFeature) {
+          this.activeFeature.setValues(this.startValues)
+          this.update()
+        }
       },
 
       onEscape: function() {

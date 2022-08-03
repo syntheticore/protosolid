@@ -240,6 +240,7 @@
         })
         this.document.activeComponent = this.findValidComponent(this.document.activeComponent)
         this.selection = new Selection()
+        this.document.activeSketch = null
       },
 
       findValidComponent(comp) {
@@ -258,7 +259,7 @@
       addFeature(feature) {
         this.activeFeature = null
         this.document.insertFeature(feature, this.document.real.marker)
-        this.document.activeSketch = null
+        // this.document.activeSketch = null
       },
 
       removeFeature(feature) {
@@ -317,6 +318,7 @@
             this.document.activeSketch = activeSketch
           }, 0)
         } else {
+          if(this.activeFeature) this.$root.$emit('deactivate-feature', this.activeFeature)
           if(doReset && this.previousComponent) {
             // Restore previous state
             if(this.previousSketchVisibility !== null && this.document.activeSketch) {

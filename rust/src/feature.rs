@@ -128,23 +128,33 @@ impl JsFaceRef {
 
 #[wasm_bindgen]
 #[derive(Debug, Clone)]
-pub struct JsProfileRef(ProfileRef);
+pub struct JsProfileRef {
+  real: ProfileRef,
+  document: Ref<Document>,
+}
 
 impl JsProfileRef {
-  pub fn new(real: ProfileRef) -> Self {
-    Self(real)
+  pub fn new(real: ProfileRef, document: Ref<Document>) -> Self {
+    Self {
+      real,
+      document,
+    }
   }
 }
 
 #[wasm_bindgen]
 impl JsProfileRef {
   pub fn get_item(&self) -> JsValue {
-    JsValue::from(JsRegion::new(self.0.profile.clone(), self.0.sketch.clone()))
+    if let Some(sketch) = self.real.get_sketch(self.document.borrow().get_tree()) {
+      JsValue::from(JsRegion::new(self.real.profile.clone(), sketch.clone(), self.document.clone()))
+    } else {
+      JsValue::undefined()
+    }
   }
 
   pub fn get_item_id(&self) -> String {
     let mut s = String::new();
-    for wire in &self.0.profile.rings {
+    for wire in &self.real.profile.rings {
       for tcurve in wire {
         s.push_str(&tcurve.base.get_id().to_string());
       }
@@ -152,12 +162,12 @@ impl JsProfileRef {
     s
   }
 
-  pub fn get_sketch_id(&self) -> JsValue {
-    JsValue::from_serde(&self.0.sketch.borrow().id).unwrap()
-  }
+  // pub fn get_sketch_id(&self) -> JsValue {
+  //   JsValue::from_serde(&self.real.sketch.borrow().id).unwrap()
+  // }
 
   pub fn update(&mut self) {
-    self.0.update().ok();
+    self.real.update(self.document.borrow().get_tree()).ok();
   }
 }
 
@@ -239,7 +249,7 @@ impl JsFeature {
   pub fn preview(&self) -> JsValue {
     match self.real.as_ref() {
       Some(real) => {
-        if let Some(compound) = real.borrow().feature_type.as_feature().preview() {
+        if let Some(compound) = real.borrow().feature_type.as_feature().preview(self.document.borrow().get_tree()) {
           JsValue::from(JsBufferGeometry::from_compound(&compound))
         } else {
           JsValue::undefined()
@@ -289,7 +299,7 @@ impl JsFeature {
     let feature = Feature::new(
       ExtrusionFeature {
         component_id: comp_ref.into_serde().unwrap(),
-        profiles: profiles.iter().map(|profile| profile.0.clone() ).collect(),
+        profiles: profiles.iter().map(|profile| profile.real.clone() ).collect(),
         distance,
         op: get_op(op),
       }.into_enum(),
@@ -302,7 +312,7 @@ impl JsFeature {
     let feature = Feature::new(
       RevolutionFeature {
         component_id: comp_ref.into_serde().unwrap(),
-        profiles: profiles.iter().map(|profile| profile.0.clone() ).collect(),
+        profiles: profiles.iter().map(|profile| profile.real.clone() ).collect(),
         axis: axis.0.clone(),
         angle: Deg(angle),
         op: get_op(op),
@@ -361,7 +371,7 @@ impl JsFeature {
   pub fn get_profiles(&self) -> Array {
     if let Some(real) = &self.real {
       if let FeatureType::Extrusion(feature) = &real.borrow().feature_type {
-        feature.profiles.iter().map(|profile| JsValue::from(JsRegion::new(profile.profile.clone(), profile.sketch.clone())) ).collect()
+        feature.profiles.iter().map(|profile| JsValue::from(JsRegion::new(profile.profile.clone(), profile.get_sketch(self.document.borrow().get_tree()).unwrap().clone(), self.document.clone())) ).collect()
       } else {
         Array::new()
       }

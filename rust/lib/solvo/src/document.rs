@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use uuid::{uuid};
+use uuid::{uuid, Uuid};
 
 use shapex::internal::Ref;
 
@@ -45,15 +45,6 @@ impl Document {
   pub fn get_tree_mut(&mut self) -> &mut Component {
     &mut self.cache[self.marker]
   }
-
-  // pub fn find_feature(&mut self, id: Uuid) -> Option<&mut Feature> {
-  //   for feature in self.features.iter_mut() {
-  //     if feature.id == id {
-  //       return Some(feature)
-  //     }
-  //   }
-  //   None
-  // }
 
   pub fn get_marker(&self) -> usize { self.marker }
 
@@ -170,6 +161,15 @@ impl Document {
     } else {
       (to, from)
     }
+  }
+
+  pub fn find_feature(&self, id: Uuid) -> Option<&Ref<Feature>> {
+    for feature in self.features.iter() {
+      if feature.borrow().id == id {
+        return Some(feature)
+      }
+    }
+    None
   }
 
   pub fn find_feature_from_sketch(&self, sketch: &Ref<Sketch>) -> Option<&Ref<Feature>> {

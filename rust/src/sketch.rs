@@ -108,6 +108,7 @@ impl JsSketch {
     profiles.into_iter().map(|profile| JsValue::from(JsRegion::new(
       profile,
       self.real.clone(),
+      self.document.clone(),
     ))).collect()
   }
 

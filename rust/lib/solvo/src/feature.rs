@@ -29,10 +29,10 @@ impl Feature {
 
 
 pub trait FeatureTrait {
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError>;
+  fn execute(&mut self, tree: &mut Component) -> Result<(), FeatureError>;
   fn modified_components(&self) -> Vec<CompRef>;
-  fn repair(&mut self, _top_comp: &Component) {}
-  fn preview(&self) -> Option<Compound> { None }
+  fn repair(&mut self, _tree: &Component) {}
+  fn preview(&self, _tree: &Component) -> Option<Compound> { None }
 }
 
 
@@ -115,10 +115,10 @@ pub enum ConstructionHelperType {
 }
 
 
-fn update_profiles(profiles: &mut Vec<ProfileRef>) -> Result<(), FeatureError> {
+fn update_profiles(profiles: &mut Vec<ProfileRef>, tree: &Component) -> Result<(), FeatureError> {
   let mut res = Ok(());
   for profile_ref in profiles {
-    let result = profile_ref.update();
+    let result = profile_ref.update(tree);
     match result {
       Err(FeatureError::Error(_)) => return result,
       Err(FeatureError::Warning(_)) => res = result,
@@ -142,8 +142,8 @@ impl CreateComponentFeature {
 }
 
 impl FeatureTrait for CreateComponentFeature {
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
-    let comp = top_comp.find_child_mut(&self.component_id).unwrap();
+  fn execute(&mut self, tree: &mut Component) -> Result<(), FeatureError> {
+    let comp = tree.find_child_mut(&self.component_id).unwrap();
     let new_comp = comp.create_component();
     new_comp.id = self.new_component_id;
     Ok(())
@@ -169,16 +169,16 @@ impl CreateSketchFeature {
 }
 
 impl FeatureTrait for CreateSketchFeature {
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
+  fn execute(&mut self, tree: &mut Component) -> Result<(), FeatureError> {
     // Refetch sketch plane from face or plane helper
-    let result = if let Some(plane) = self.plane.get_plane(top_comp) {
+    let result = if let Some(plane) = self.plane.get_plane(tree) {
       self.sketch.borrow_mut().work_plane = plane.as_transform();
       Ok(())
     } else {
       Err(FeatureError::Warning("Sketch plane was lost".into()))
     };
     // Fetch component and add sketch
-    let comp = top_comp.find_child_mut(&self.component_id).unwrap();
+    let comp = tree.find_child_mut(&self.component_id).unwrap();
     comp.add_sketch(self.sketch.clone());
     result
   }
@@ -202,11 +202,11 @@ impl ExtrusionFeature {
     FeatureType::Extrusion(self)
   }
 
-  fn make_tool(&self, profiles: &Vec<ProfileRef>) -> Result<Compound, FeatureError> {
+  fn make_tool(&self, profiles: &Vec<ProfileRef>, tree: &Component) -> Result<Compound, FeatureError> {
     let mut tool = Compound::default();
     for profile_ref in profiles {
       let mut profile = profile_ref.profile.clone();
-      profile_ref.sketch.borrow().transform_profile(&mut profile);
+      profile_ref.get_sketch(tree).unwrap().borrow().transform_profile(&mut profile);
       match features::extrude(&profile, self.distance) {
         Ok(compound) => tool.join(compound),
         Err(error) => return Err(FeatureError::Error(error)),
@@ -217,22 +217,22 @@ impl ExtrusionFeature {
 }
 
 impl FeatureTrait for ExtrusionFeature {
-  fn preview(&self) -> Option<Compound> {
+  fn preview(&self, tree: &Component) -> Option<Compound> {
     let mut profiles = self.profiles.clone();
-    match update_profiles(&mut profiles) {
+    match update_profiles(&mut profiles, tree) {
       Err(FeatureError::Error(_)) => None,
-      Err(FeatureError::Warning(_)) | Ok(_) => self.make_tool(&profiles).ok(),
+      Err(FeatureError::Warning(_)) | Ok(_) => self.make_tool(&profiles, tree).ok(),
     }
   }
 
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
+  fn execute(&mut self, tree: &mut Component) -> Result<(), FeatureError> {
     let mut profiles = self.profiles.clone();
-    let result = update_profiles(&mut profiles);
+    let result = update_profiles(&mut profiles, tree);
     if let Err(FeatureError::Error(_)) = result {
       return result;
     }
-    let tool = self.make_tool(&profiles)?;
-    let comp = top_comp.find_child_mut(&self.component_id).unwrap();
+    let tool = self.make_tool(&profiles, tree)?;
+    let comp = tree.find_child_mut(&self.component_id).unwrap();
     comp.compound.boolean(tool.clone(), self.op);
     result
   }
@@ -241,8 +241,8 @@ impl FeatureTrait for ExtrusionFeature {
     vec![self.component_id]
   }
 
-  fn repair(&mut self, _top_comp: &Component) {
-    update_profiles(&mut self.profiles).ok();
+  fn repair(&mut self, tree: &Component) {
+    update_profiles(&mut self.profiles, tree).ok();
   }
 }
 
@@ -262,12 +262,12 @@ impl RevolutionFeature {
     FeatureType::Revolution(self)
   }
 
-  fn make_tool(&self, profiles: &Vec<ProfileRef>, top_comp: &Component) -> Result<Compound, FeatureError> {
+  fn make_tool(&self, profiles: &Vec<ProfileRef>, tree: &Component) -> Result<Compound, FeatureError> {
     let mut tool = Compound::default();
-    if let Some(axis) = self.axis.get_axis(top_comp) {
+    if let Some(axis) = self.axis.get_axis(tree) {
       for profile_ref in profiles {
         let mut profile = profile_ref.profile.clone();
-        profile_ref.sketch.borrow().transform_profile(&mut profile);
+        profile_ref.get_sketch(tree).unwrap().borrow().transform_profile(&mut profile);
         match features::revolve(&profile, axis.clone(), self.angle) {
           Ok(compound) => tool.join(compound),
           Err(error) => return Err(FeatureError::Error(error)),
@@ -281,19 +281,19 @@ impl RevolutionFeature {
 }
 
 impl FeatureTrait for RevolutionFeature {
-  fn preview(&self) -> Option<Compound> {
+  fn preview(&self, _tree: &Component) -> Option<Compound> {
     self.preview_compound.clone()
   }
 
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
+  fn execute(&mut self, tree: &mut Component) -> Result<(), FeatureError> {
     self.preview_compound = None;
     let mut profiles = self.profiles.clone();
-    let result = update_profiles(&mut profiles);
+    let result = update_profiles(&mut profiles, tree);
     if let Err(FeatureError::Error(_)) = result {
       return result;
     }
-    let tool = self.make_tool(&profiles, top_comp)?;
-    let comp = top_comp.find_child_mut(&self.component_id).unwrap();
+    let tool = self.make_tool(&profiles, tree)?;
+    let comp = tree.find_child_mut(&self.component_id).unwrap();
     comp.compound.boolean(tool.clone(), self.op);
     self.preview_compound = Some(tool);
     result
@@ -303,8 +303,8 @@ impl FeatureTrait for RevolutionFeature {
     vec![self.component_id]
   }
 
-  fn repair(&mut self, _top_comp: &Component) {
-    update_profiles(&mut self.profiles).ok();
+  fn repair(&mut self, tree: &Component) {
+    update_profiles(&mut self.profiles, tree).ok();
   }
 }
 
@@ -323,9 +323,9 @@ impl DraftFeature {
 }
 
 impl FeatureTrait for DraftFeature {
-  fn execute(&mut self, top_comp: &mut Component) -> Result<(), FeatureError> {
-    if let Some(plane) = self.fixed_plane.get_plane(top_comp) {
-      let found_faces = self.faces.iter().filter_map(|face| face.get_face(top_comp) ).cloned().collect();
+  fn execute(&mut self, tree: &mut Component) -> Result<(), FeatureError> {
+    if let Some(plane) = self.fixed_plane.get_plane(tree) {
+      let found_faces = self.faces.iter().filter_map(|face| face.get_face(tree) ).cloned().collect();
       let result = features::draft(&found_faces, &plane, self.angle)
       .map_err(|error| FeatureError::Error(error) );
       if found_faces.len() == self.faces.len() {
@@ -345,7 +345,7 @@ impl FeatureTrait for DraftFeature {
     ids
   }
 
-  fn repair(&mut self, top_comp: &Component) {
-    self.faces.retain(|face| face.get_face(top_comp).is_some() );
+  fn repair(&mut self, tree: &Component) {
+    self.faces.retain(|face| face.get_face(tree).is_some() );
   }
 }

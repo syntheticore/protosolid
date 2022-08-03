@@ -25,15 +25,19 @@ pub type CompRef = Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileRef {
-  pub sketch: Ref<Sketch>,
+  pub sketch_id: Uuid,
   pub profile: Profile,
 }
 
 impl ProfileRef {
-  pub fn update(&mut self) -> Result<(), FeatureError> {
-    let sketch = self.sketch.borrow();
+  pub fn update(&mut self, tree: &Component) -> Result<(), FeatureError> {
+    let sketch = self.get_sketch(tree).unwrap().borrow();
     self.profile.plane = (&sketch.work_plane).into();
     sketch.update_profile(&mut self.profile)
+  }
+
+  pub fn get_sketch<'a>(&self, tree: &'a Component) -> Option<&'a Ref<Sketch>> {
+    tree.find_sketch(self.sketch_id, true)
   }
 }
 
@@ -52,8 +56,8 @@ impl FaceRef {
   //   }
   // }
 
-  pub fn get_face<'a>(&self, top_comp: &'a Component) -> Option<&'a Ref<Face>> {
-    let comp = top_comp.find_child(&self.component_id).unwrap();
+  pub fn get_face<'a>(&self, tree: &'a Component) -> Option<&'a Ref<Face>> {
+    let comp = tree.find_child(&self.component_id).unwrap();
     comp.compound.find_face_from_bounds(&self.bounds)
   }
 }
@@ -80,10 +84,10 @@ pub enum PlanarRef {
 }
 
 impl PlanarRef {
-  pub fn get_plane(&self, top_comp: &Component) -> Option<Plane> {
+  pub fn get_plane(&self, tree: &Component) -> Option<Plane> {
     match self {
       Self::FaceRef(face_ref) => {
-        let face = face_ref.get_face(top_comp);
+        let face = face_ref.get_face(tree);
         if let Some(face) = face {
           let face = face.borrow();
           match &face.surface {
@@ -114,7 +118,7 @@ pub enum AxialRef {
 }
 
 impl AxialRef {
-  pub fn get_axis(&self, _top_comp: &Component) -> Option<Axis> {
+  pub fn get_axis(&self, _tree: &Component) -> Option<Axis> {
     match self {
       Self::EdgeRef(_) => todo!(),
       Self::FaceRef(_) => todo!(),

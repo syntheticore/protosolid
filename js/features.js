@@ -189,8 +189,7 @@ export class ExtrudeFeature extends Feature {
     this.profiles().forEach(profile => {
       list.push(profile)
     })
-    const sketch = this.document.tree.findSketch(this.profiles()[0].get_sketch_id())
-    const comp_ref = sketch.component_id()
+    const comp_ref = this.document.activeComponent.id
     const distance = this.distance * (this.side ? 1 : -1)
     this.real.extrusion(comp_ref, list, distance, this.operation)
   }

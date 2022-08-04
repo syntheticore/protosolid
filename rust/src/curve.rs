@@ -56,6 +56,7 @@ impl JsCurve {
   pub fn get_radius(&self) -> f64 {
     match &*self.real.borrow() {
       CurveType::Circle(c) => c.radius,
+      CurveType::Arc(a) => a.radius,
       _ => 0.0
     }
   }

@@ -226,6 +226,19 @@
               value: item.get_area()
             },
           }
+        } else if(type == 'Arc') {
+          return {
+            Radius: {
+              title: 'Radius',
+              unit: 'mm',
+              value: item.get_radius()
+            },
+            Length: {
+              title: 'Length',
+              unit: 'mm',
+              value: item.get_length()
+            },
+          }
         } else {
           return {}
         }

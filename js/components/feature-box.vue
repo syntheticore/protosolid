@@ -274,6 +274,7 @@
       this.$root.$on('resize', this.updatePaths)
       this.$root.$on('deactivate-feature', this.deactivateFeature)
       this.startValues = this.activeFeature.getValues()
+      this.activateBaseTool()
       setTimeout(() => {
         this.updatePaths()
         this.pickAll()
@@ -428,9 +429,13 @@
         if(this.activeTool.constructor === DummyTool || this.activeTool.constructor === ManipulationTool) {
           this.cancel()
         } else {
-          this.$root.$emit('activate-toolname', this.isSketchFeature ? 'Manipulate' : 'Dummy')
+          this.activateBaseTool()
         }
       },
+
+      activateBaseTool() {
+        this.$root.$emit('activate-toolname', this.isSketchFeature ? 'Manipulate' : 'Dummy')
+      }
     },
   }
 </script>

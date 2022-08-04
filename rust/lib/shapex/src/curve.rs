@@ -569,7 +569,7 @@ impl Curve for Arc {
   }
 
   fn length_between(&self, start: f64, end: f64) -> f64 {
-    std::f64::consts::PI * 2.0 * self.radius * (start - end).abs()
+    std::f64::consts::PI * 2.0 * self.radius * (start - end).abs() * self.range().abs()
   }
 }
 

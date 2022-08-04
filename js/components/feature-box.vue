@@ -215,7 +215,7 @@
 
   import * as THREE from 'three'
 
-  import { ManipulationTool } from './../tools.js'
+  import { DummyTool, ManipulationTool } from './../tools.js'
   import { CreateSketchFeature } from './../features.js'
   import { vec2three } from './../utils.js'
 
@@ -238,7 +238,7 @@
 
     watch: {
       activeTool: function(tool) {
-        if(tool.constructor !== ManipulationTool) return
+        if(tool.constructor !== DummyTool) return
         this.activePicker = null
         this.$root.$off('picked')
       },
@@ -425,10 +425,10 @@
       },
 
       onEscape: function() {
-        if(this.activeTool.constructor === ManipulationTool) {
+        if(this.activeTool.constructor === DummyTool || this.activeTool.constructor === ManipulationTool) {
           this.cancel()
         } else {
-          this.$root.$emit('activate-toolname', 'Manipulate')
+          this.$root.$emit('activate-toolname', this.isSketchFeature ? 'Manipulate' : 'Dummy')
         }
       },
     },

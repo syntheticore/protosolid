@@ -76,27 +76,35 @@
     },
 
     mounted() {
-      this.$root.$on('close-widgets', () => this.$emit('remove') )
+      this.$root.$on('close-widgets', this.remove)
+      this.$emit('change', this.widget.items[0])
+    },
+
+    beforeDestroy() {
+      this.$root.$off('close-widgets', this.remove)
     },
 
     methods: {
-      back: function() {
+      back() {
         this.index--
         if(this.index < 0) this.index = this.widget.items.length - 1
-          console.log(this.widget.items[this.index])
         this.$emit('change', this.widget.items[this.index])
       },
 
-      forward: function() {
+      forward() {
         this.index++
         if(this.index >= this.widget.items.length) this.index = 0
         this.$emit('change', this.widget.items[this.index])
       },
 
-      select: function() {
+      select() {
         this.widget.cb(this.choice)
         this.$emit('remove')
       },
+
+      remove() {
+        this.$emit('remove')
+      }
     },
   }
 </script>

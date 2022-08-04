@@ -26,6 +26,9 @@ class Tool {
 }
 
 
+export class DummyTool extends Tool {}
+
+
 class HighlightTool extends Tool {
   constructor(component, viewport, selectors) {
     super(component, viewport)

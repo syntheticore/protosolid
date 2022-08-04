@@ -188,6 +188,7 @@
   import Transloader from './../transloader.js'
   import { vec2three, matrix2three } from './../utils.js'
   import {
+    DummyTool,
     ManipulationTool,
     ObjectPickTool,
     ProfilePickTool,
@@ -295,9 +296,10 @@
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
       this.renderer.setDisplayMode(this.displayMode)
       this.renderer.on('render', () => this.updateWidgets() )
-      this.renderer.on('change-view',
-        (position, target) => this.$emit('change-view', position, target)
-      )
+      this.renderer.on('change-view', (position, target) => {
+        this.$emit('change-view', position, target)
+        this.$emit('update:highlight', null)
+      })
       this.renderer.on('change-pose', () => this.$emit('change-pose') )
 
       // Snapping
@@ -355,7 +357,6 @@
       },
 
       click: function(e) {
-        // this.viewControls.enabled = true
         const [vec, coords] = this.snap(e)
         if(coords.x != this.lastCoords.x ||
            coords.y != this.lastCoords.y) return this.renderer.render()
@@ -451,7 +452,7 @@
         this.pickingPath = { target: null, color, origin: pickerCoords }
         const tool = new Tool(this.activeComponent, this, (item, mesh) => {
           this.$root.$emit('picked', item)
-          this.$root.$emit('activate-toolname', 'Manipulate')
+          this.$root.$emit('activate-toolname', 'Dummy')
           this.pickingPath = null
         })
         this.$emit('update:active-tool', tool)
@@ -513,6 +514,7 @@
         this.pickingPath = null
         this.snapper.reset()
         const tools = {
+          Dummy: DummyTool,
           Manipulate: ManipulationTool,
           Line: LineTool,
           Spline: SplineTool,

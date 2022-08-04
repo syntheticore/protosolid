@@ -325,12 +325,15 @@ export class ArcTool extends SketchTool {
 
   mouseMove(vec) {
     if(!this.start || !this.end) return
-    this.arc = this.arc || this.sketch.add_arc(
-      this.start.toArray(),
-      vec.toArray(),
-      this.end.toArray()
-    )
-    this.arc.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()])
-    this.viewport.elementChanged(this.arc, this.component)
+    // #add_arc can fail for for colinear inputs
+    try {
+      this.arc = this.arc || this.sketch.add_arc(
+        this.start.toArray(),
+        vec.toArray(),
+        this.end.toArray()
+      )
+      this.arc.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()])
+      this.viewport.elementChanged(this.arc, this.component)
+    } catch(e) {}
   }
 }

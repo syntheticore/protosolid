@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use shapex::*;
 
 
@@ -7,11 +5,6 @@ pub trait Controllable {
   fn get_handles(&self) -> Vec<Point3>;
   fn set_handles(&mut self, handles: Vec<Point3>);
   fn get_snap_points(&self) -> Vec<Point3>;
-
-  fn set_initial_handles(&mut self, handles: Vec<Point3>) -> Result<(), String> {
-    self.set_handles(handles);
-    Ok(())
-  }
 }
 
 
@@ -35,28 +28,14 @@ impl Controllable for Line {
 impl Controllable for Arc {
   fn get_handles(&self) -> Vec<Point3> {
     let endpoints = self.endpoints();
-    vec![self.plane.origin, endpoints.0, endpoints.1]
+    vec![endpoints.0, endpoints.1]
   }
 
-  // Three points on arc
-  fn set_initial_handles(&mut self, handles: Vec<Point3>) -> Result<(), String> {
-    let [p1, p2, p3]: [Point3; 3] = handles.try_into().unwrap();
-    let circle = Circle::from_points(p1, p2, p3)?;
-    self.plane.origin = circle.plane.origin;
-    self.radius = circle.radius;
-    self.bounds.0 = circle.unsample(&p1);
-    self.bounds.1 = circle.unsample(&p3);
-    Ok(())
-  }
-
-  // Endpoints + center
   fn set_handles(&mut self, handles: Vec<Point3>) {
-    let [center, start, end]: [Point3; 3] = handles.try_into().unwrap();
-    self.plane.origin = center;
-    self.radius = (start - center).magnitude();
-    let circle = Circle::new(self.plane.origin, self.radius);
-    self.bounds.0 = circle.unsample(&start);
-    self.bounds.1 = circle.unsample(&end);
+    if let Ok(mut copy) = Self::from_points(handles[0], handles[1], handles[2]) {
+      copy.id = self.id;
+      *self = copy;
+    }
   }
 
   fn get_snap_points(&self) -> Vec<Point3> {

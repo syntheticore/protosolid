@@ -69,6 +69,10 @@ impl JsCurve {
    area
   }
 
+  pub fn get_length(&self) -> f64 {
+    self.real.borrow().as_curve().length()
+  }
+
   pub fn get_handles(&self) -> Array {
     points_to_js(as_controllable(&mut self.real.borrow()).get_handles().iter().map(|handle| {
       self.sketch.borrow().work_plane.transform_point(*handle)
@@ -80,15 +84,6 @@ impl JsCurve {
     let transform = self.sketch.borrow().work_plane.invert().unwrap();
     let points = points.iter().map(|p| transform.transform_point(*p) ).collect();
     as_controllable_mut(&mut self.real.borrow_mut()).set_handles(points);
-  }
-
-  pub fn set_initial_handles(&self, handles: Array) -> Result<(), JsValue>{
-    let mut real = self.real.borrow_mut();
-    let points = points_from_js(handles);
-    let transform = self.sketch.borrow().work_plane.invert().unwrap();
-    let points = points.iter().map(|p| transform.transform_point(*p) ).collect();
-    as_controllable_mut(&mut real).set_initial_handles(points)?;
-    Ok(())
   }
 
   pub fn get_snap_points(&self) -> Array {
@@ -106,10 +101,6 @@ impl JsCurve {
 
   pub fn remove(&self) {
     self.sketch.borrow_mut().elements.retain(|elem| !Rc::ptr_eq(elem, &self.real) );
-  }
-
-  pub fn get_length(&self) -> f64 {
-    self.real.borrow().as_curve().length()
   }
 
   pub fn make_axial_reference(&self) -> JsValue {

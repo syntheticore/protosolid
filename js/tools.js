@@ -330,7 +330,7 @@ export class ArcTool extends SketchTool {
       vec.toArray(),
       this.end.toArray()
     )
-    this.arc.set_initial_handles([this.start.toArray(), vec.toArray(), this.end.toArray()])
+    this.arc.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()])
     this.viewport.elementChanged(this.arc, this.component)
   }
 }

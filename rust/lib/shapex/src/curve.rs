@@ -513,7 +513,15 @@ impl Arc {
 
   pub fn from_points(p1: Point3, p2: Point3, p3: Point3) -> Result<Self, String> {
     let circle = Circle::from_points(p1, p2, p3)?;
-    Ok(Self::new(circle.plane.origin, circle.radius, circle.unsample(&p1), circle.unsample(&p3)))
+    let t_center = circle.unsample(&p2);
+    let mut end_params = [circle.unsample(&p1), circle.unsample(&p3)];
+    end_params.sort_by(|a, b| a.partial_cmp(b).unwrap() );
+    let bounds = if end_params[0] <= t_center && t_center <= end_params[1] {
+      end_params
+    } else {
+      [end_params[1], end_params[0] + 1.0]
+    };
+    Ok(Self::new(circle.plane.origin, circle.radius, bounds[0], bounds[1]))
   }
 
   pub fn range(&self) -> f64 {

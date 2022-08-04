@@ -202,8 +202,13 @@
         box-shadow: 0 0 0px 1px $highlight * 1.2
         color: white
       &.selected
-        background: $highlight * 0.5 !important
-        border-color: $highlight * 1.2
+        background: $highlight * 0.7 !important
+        border-color: $highlight * 1.1
+        h2
+        header svg
+          color: white
+        .controls
+          border-color: $highlight * 1.1
       &.hidden
         opacity: 0.5
 
@@ -247,6 +252,7 @@
         background: rgba($dark2 * 1.3, 0.93)
         backdrop-filter: blur(8px)
         font-size: 11px
+        transition: background-color 0.15s
         &:hover
           header svg
             color: $bright1

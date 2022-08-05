@@ -1,7 +1,7 @@
 {
-  "name": "alchemy-web",
+  "name": "protosolid-web",
   "version": "0.1.0",
-  "productName": "Alchemy",
+  "productName": "ProtoSolid",
   "description": "Parametric CAD",
   "author": "Björn Breitgoff <syntheticore@gmail.com>",
   "main": "index.js",
@@ -11,16 +11,16 @@
     "build-electron": "npm run clean && webpack --mode production --env.production",
     "dev": "npm run clean && webpack-dev-server --env.development --hot --open -d",
     "dev-electron": "npm run build-electron && electron ./dist",
-    "pack-electron": "npm run build-electron && electron-packager ./dist --overwrite --helperBundleId=com.alchemy.electron",
-    "package-mac": "electron-packager ./dist --overwrite --platform=darwin --arch=x64 --icon=./alchemy.icns --prune=true --out=release-builds",
-    "package-win": "electron-packager ./dist --overwrite --asar=true --platform=win32 --arch=ia32 --icon=./alchemy.ico --prune=true --out=release-builds --version-string.CompanyName=CE --version-string.FileDescription=CE --version-string.ProductName=\"Alchemy\"",
-    "package-linux": "electron-packager ./dist --overwrite --asar=true --platform=linux --arch=x64 --icon=./alchemy1024x1024.png --prune=true --out=release-builds",
+    "pack-electron": "npm run build-electron && electron-packager ./dist --overwrite --helperBundleId=com.protosolid.electron",
+    "package-mac": "electron-packager ./dist --overwrite --platform=darwin --arch=x64 --icon=./protosolid.icns --prune=true --out=release-builds",
+    "package-win": "electron-packager ./dist --overwrite --asar=true --platform=win32 --arch=ia32 --icon=./protosolid.ico --prune=true --out=release-builds --version-string.CompanyName=CE --version-string.FileDescription=CE --version-string.ProductName=\"ProtoSolid\"",
+    "package-linux": "electron-packager ./dist --overwrite --asar=true --platform=linux --arch=x64 --icon=./protosolid1024x1024.png --prune=true --out=release-builds",
     "test": "cargo test && wasm-pack test --headless",
     "clean": "rimraf dist rust/pkg",
     "real-clean": "npm run clean && rimraf node_modules rust/**/target"
   },
   "build": {
-    "appId": "com.alchemy.electron"
+    "appId": "com.protosolid.electron"
   },
   "devDependencies": {
     "@fortawesome/fontawesome-svg-core": "^1.2.34",

@@ -5,7 +5,7 @@
         fa-icon(icon="sliders-h")
       .about
         fa-icon(icon="atom")
-        h1 Alchemy
+        h1 ProtoSolid
         .version Version 0.11
 
       ul.actions(@click="$root.$emit('close-widgets')")

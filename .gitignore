@@ -4,6 +4,5 @@ dist
 target
 pkg
 wasm-pack.log
-Alchemy-win32-x64
+ProtoSolid-win32-x64
 debug.log
-rust/lib/shapex/old

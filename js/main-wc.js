@@ -8,6 +8,6 @@ Vue.config.productionTip = false
 Vue.config.devtools = false
 
 const wrappedElement = wrap(Vue, App)
-window.customElements.define('alchemy-editor', wrappedElement)
+window.customElements.define('protosolid-editor', wrappedElement)
 
 document.body.setAttribute('data-platform', 'browser')

@@ -1,8 +1,8 @@
-# Alchemy
+# ProtoSolid
 
-Parametric CAD based on boundary representation model and euler operators.
+Cross-platform parametric CAD. Based on boundary representation model and euler operators.
 
-Built with Rust + Electron & Vue.js
+Built with Rust & Electron + Vue.js
 
 
 ## Installation

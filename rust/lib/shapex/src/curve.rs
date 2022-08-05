@@ -526,7 +526,6 @@ impl Transformable for Line {
 /// assert_eq!(arc.midpoint(), Point3::new(0.0, 1.0, 0.0));
 /// ```
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Arc {
   pub id: Uuid,

@@ -1,5 +1,5 @@
 [package]
-name = "alchemy"
+name = "protosolid"
 version = "0.1.0"
 description = "Parametric CAD"
 authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
@@ -59,8 +59,8 @@ wasm-bindgen-test = "^0.2.45"
 wasm-bindgen-futures = "^0.3.22"
 
 [package.metadata.bundle]
-name = "Alchemy"
-identifier = "org.alchemy.Alchemy"
+name = "ProtoSolid"
+identifier = "org.protosolid.ProtoSolid"
 icon = ["128x128@2x.png"]
 resources = ["resources"]
 copyright = "Copyright (c) Björn Breitgoff 2018"

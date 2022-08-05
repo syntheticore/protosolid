@@ -656,7 +656,7 @@ impl Iterator for RingIterator {
 }
 
 
-/// Iterator that returns all [half edges](HalfEdge) emanating from this vertex.
+/// Iterator that returns all [half edges](HalfEdge) emanating from its start vertex.
 
 pub struct VertexEdgesIterator {
   start_edge: Option<Ref<HalfEdge>>,

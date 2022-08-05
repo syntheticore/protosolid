@@ -69,7 +69,7 @@
     transition(name="fade")
       .restart(v-if="restartRequired")
         | A restart is required for some changes to take effect
-        button.button(@click="restart") Restart Alchemy
+        button.button(@click="restart") Restart ProtoSolid
 
 </template>
 

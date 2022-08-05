@@ -6,7 +6,7 @@ pub fn export(meshes: &Vec<Mesh>, unit: &str) -> String {
 <model unit="{}"
   xml:lang="en-US"
   xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
-  <metadata name="Application">Alchemy</metadata>
+  <metadata name="Application">ProtoSolid</metadata>
   <resources>
   <basematerials id="1">
     <base name="Green" displaycolor="#21BB4CFF" />

@@ -1,3 +1,9 @@
+use std::rc::{Rc, Weak};
+use std::cell::RefCell;
+
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
+
 // pub use cgmath::prelude::*;
 pub use cgmath::prelude::Matrix;
 pub use cgmath::prelude::SquareMatrix;
@@ -7,9 +13,6 @@ pub use cgmath::prelude::EuclideanSpace;
 pub use cgmath::Transform;
 pub use cgmath::Rad;
 pub use cgmath::Deg;
-
-#[cfg(feature = "rayon")]
-use rayon::prelude::*;
 
 #[doc(inline)]
 pub use crate::geom3d::Axis;
@@ -32,8 +35,11 @@ pub type Matrix3 = cgmath::Matrix3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
 pub type Quaternion = cgmath::Quaternion<f64>;
 
+pub type Ref<T> = Rc<RefCell<T>>;
+pub type WeakRef<T> = Weak<RefCell<T>>;
 
-/// Allows checking values for approximate equality.
+
+/// Check values for approximate equality.
 
 pub trait Almost {
   // const EPS: f64 = core::f64::EPSILON * 100000.0;

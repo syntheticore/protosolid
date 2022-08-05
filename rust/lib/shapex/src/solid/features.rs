@@ -1,4 +1,3 @@
-use crate::internal::*;
 use crate::solid::*;
 use crate::geom3d;
 use crate::surface::intersection;

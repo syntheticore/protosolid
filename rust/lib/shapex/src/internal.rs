@@ -1,11 +1,8 @@
-use std::rc::{Rc, Weak};
+use std::rc::{Rc};
 use std::cell::RefCell;
 
 pub use crate::base::*;
 
-
-pub type Ref<T> = Rc<RefCell<T>>;
-pub type WeakRef<T> = Weak<RefCell<T>>;
 
 pub fn rc<T>(arg: T) -> Rc<RefCell<T>> {
   Rc::new(RefCell::new(arg))

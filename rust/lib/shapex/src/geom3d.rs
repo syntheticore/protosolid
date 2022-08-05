@@ -8,6 +8,8 @@ use crate::CurveType;
 use crate::Transformable;
 
 
+/// Three dimensional axis through a point.
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Axis {
   pub origin: Point3,
@@ -59,6 +61,8 @@ impl From<&Plane> for Axis {
   }
 }
 
+
+/// Three dimensional plane with a defined rotation around its normal.
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Plane {

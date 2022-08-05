@@ -13,12 +13,14 @@ use crate::geom2d;
 pub type PolyLine = Vec<Point3>;
 
 
-/// Elements in a region are sorted in a closed loop and connected by their endpoints
+/// [Elements](TrimmedCurve) in a region are sorted in a closed loop and connected by their endpoints.
 pub type Region = Vec<TrimmedCurve>;
 
 
-/// Wires fulfill all properties of Regions, but their element's
-/// bounds are ordered in the direction of the loop
+/// Wires maintain consistent orientation across a series of curves, forming a closed loop.
+///
+/// Wires fulfill all properties of [Region]s, but their element's
+/// bounds are ordered in the direction of the loop.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Wire(Vec<TrimmedCurve>);
@@ -92,8 +94,10 @@ impl DerefMut for Wire {
 // }
 
 
-/// Profiles contain one or more wires, representing the outer and inner rings
-/// The outer ring runs counter-clockwise and inner rings run clockwise
+/// Profiles use coplanar [wires](Wire) to form enclosed regions.
+///
+/// Profiles must contain one or more wires, representing the outer and inner rings.
+/// The outer ring runs counter-clockwise and inner rings run clockwise.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {

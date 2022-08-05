@@ -1,6 +1,7 @@
 use crate::surface::*;
 
 
+/// Type of intersection between two surfaces.
 #[derive(Debug, PartialEq)]
 pub enum SurfaceIntersectionType {
   Touch(CurveType),
@@ -28,6 +29,7 @@ impl SurfaceIntersectionType {
 }
 
 
+/// Type of intersection between a curve and a surface.
 #[derive(Debug, PartialEq)]
 pub enum CurveSurfaceIntersectionType {
   Pierce(CurveSurfaceIntersection),
@@ -60,6 +62,10 @@ impl CurveSurfaceIntersectionType {
   }
 }
 
+
+/// Geometric intersection between a curve and a surface.
+/// * `point` - Point of intersection
+/// * `t` - Parameter on the curve
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CurveSurfaceIntersection {

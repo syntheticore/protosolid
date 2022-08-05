@@ -2,10 +2,17 @@ use crate::internal::*;
 use crate::transform::*;
 
 
+/// All types that can be tessellated, generating a polygonal [Mesh].
+
 pub trait Meshable {
   fn tesselate(&self) -> Mesh;
 }
 
+
+/// Simple polygonal mesh.
+///
+/// Meshes are stored as a list of vertices, as well as a flat list of indices pointing into the former, representing its faces.
+/// Faces are strictly triangular. Normals are stored per vertex.
 
 #[derive(Debug, Default)]
 pub struct Mesh {

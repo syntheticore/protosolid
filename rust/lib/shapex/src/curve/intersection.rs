@@ -2,13 +2,19 @@ use crate::curve::*;
 use crate::geom2d::cross_2d;
 
 
+/// Type of intersection between two curves.
 #[derive(Debug, PartialEq)]
 pub enum CurveIntersectionType {
-  Touch(CurveIntersection), // Touching endpoints
-  Pierce(CurveIntersection), // Endpoint touching curve/surface
-  Cross(CurveIntersection), // Actual intersections
-  Extended(CurveIntersection), // Intersections outside geometric bounds
-  Contained, // Overlap, Infinite intersections
+  /// Touching endpoints
+  Touch(CurveIntersection),
+  /// Endpoint touching other curve
+  Pierce(CurveIntersection),
+  /// Actual intersection
+  Cross(CurveIntersection),
+  /// Intersection outside geometric bounds
+  Extended(CurveIntersection),
+  /// Overlap, Infinite intersections
+  Contained,
 }
 
 impl CurveIntersectionType {
@@ -49,7 +55,7 @@ impl CurveIntersectionType {
 }
 
 
-/// Geometric intersection between two curves
+/// Geometric intersection between two curves.
 /// * `point` - Point of intersection
 /// * `t1` - Parameter on first curve
 /// * `t2` - Parameter on second curve

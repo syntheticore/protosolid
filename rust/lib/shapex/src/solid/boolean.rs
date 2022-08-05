@@ -3,6 +3,10 @@ use serde::{Serialize, Deserialize};
 use crate::solid::*;
 
 
+/// Type of a boolean set operation.
+///
+/// The [Create](Self::Create) variant is used to add [Solid]s to a [Compound] without actually performing any set operation.
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum BooleanType {
   Create,
@@ -11,6 +15,9 @@ pub enum BooleanType {
   Intersection,
   Difference,
 }
+
+
+/// All types that can be combined using boolean set operations.
 
 pub trait Boolean {
   fn create(&mut self, tool: Self);

@@ -3,6 +3,8 @@ use crate::geom3d;
 use crate::geom3d::Axis;
 
 
+/// All types that can have affine transformations applied in form of a [Matrix4].
+
 pub trait Transformable {
   fn transform(&mut self, transform: &Matrix4);
 

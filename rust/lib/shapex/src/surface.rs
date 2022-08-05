@@ -7,11 +7,13 @@ use crate::mesh::*;
 use crate::wire::*;
 use crate::geom2d;
 
-pub mod intersection;
+pub(crate) mod intersection;
 pub use intersection::SurfaceIntersectionType;
 pub use intersection::CurveSurfaceIntersectionType;
 pub use intersection::CurveSurfaceIntersection;
 
+
+/// Base trait for all parametric surfaces.
 
 pub trait Surface: Transformable {
   fn sample(&self, u: f64, v: f64) -> Point3;
@@ -63,6 +65,12 @@ pub trait Surface: Transformable {
   }
 }
 
+
+/// Wrapper enum for all basic surface types.
+///
+/// This wrapper is used to pass surfaces around generically, while still being able to dispatch to their concrete types.
+/// All contained types implement [Surface], and can be accessed as such using the
+/// [as_surface](Self::as_surface) and [as_surface_mut](Self::as_surface_mut) convenience functions.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SurfaceType {
@@ -182,6 +190,11 @@ impl TrimmedCurve {
 }
 
 
+/// Bounded section of another surface.
+///
+/// Trimmed surfaces are bounded by a set of [Wire]s, defined in the parameter space of their [base surface](SurfaceType).
+/// They are especially useful to tessellate [Surface] types that are naturally unbounded in one or both parametric dimensions.
+
 #[derive(Debug)]
 pub struct TrimmedSurface {
   pub base: SurfaceType,
@@ -227,6 +240,8 @@ impl Meshable for TrimmedSurface {
   }
 }
 
+
+/// Parametric [Surface] that is entirely flat.
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanarSurface {
@@ -280,6 +295,10 @@ impl Transformable for PlanarSurface {
   }
 }
 
+
+/// Parametric [Surface] that is symmetric around an axis.
+///
+/// It can represent cylindrical and conical surfaces exactly by using using a [Line] as its generatrix.
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RevolutionSurface {
@@ -403,6 +422,15 @@ impl Transformable for RevolutionSurface {
   }
 }
 
+
+/// Non-uniform rational basis spline [Surface].
+///
+/// The shape of the surface is determined by its degrees in both dimensions
+/// and a set of weighted control vertices, as well as a two knot vectors,
+/// that control how curve parameters are mapped to control vertices.
+///
+/// The standard constructor will generate clamped, but otherwise uniform knot vectors automatically,
+/// such that the parametric range of the surface is 0-1 in both dimensions.
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SplineSurface {

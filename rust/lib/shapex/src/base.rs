@@ -19,6 +19,8 @@ pub use crate::geom3d::Plane;
 
 // pub const MAX_FLOAT: f64 = 2_i32.pow(63).into();
 pub const MAX_FLOAT: f64 = 9223372036854776000.0;
+
+/// The maximum difference between two values to be considered equal.
 pub const EPSILON: f64 = core::f64::EPSILON * 1000000.0;
 
 pub type Vec2 = cgmath::Vector2<f64>;
@@ -29,6 +31,9 @@ pub type Point3 = cgmath::Point3<f64>;
 pub type Matrix3 = cgmath::Matrix3<f64>;
 pub type Matrix4 = cgmath::Matrix4<f64>;
 pub type Quaternion = cgmath::Quaternion<f64>;
+
+
+/// Allows checking values for approximate equality.
 
 pub trait Almost {
   // const EPS: f64 = core::f64::EPSILON * 100000.0;

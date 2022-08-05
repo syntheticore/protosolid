@@ -23,11 +23,20 @@ pub use boolean::BooleanType;
 pub use volume::Volume;
 
 
+/// Collection of solids.
+///
+/// An abstraction over the number of solids returned by operations
+/// that might split or merge bodies depending on geometric conditions.
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Compound {
   pub solids: Vec<Solid>,
 }
 
+
+/// Solid body with a finite, non-zero volume.
+///
+/// May contain inner cavities, represented by additional [Shell]s.
 
 #[derive(Debug, Default, Clone)]
 pub struct Solid {
@@ -36,6 +45,8 @@ pub struct Solid {
 }
 
 
+/// Topological entity. A closed volume in space, defining the interior or exterior boundary of a [Solid].
+
 #[derive(Debug, Clone)]
 pub struct Shell {
   pub faces: Vec<Ref<Face>>,
@@ -43,6 +54,8 @@ pub struct Shell {
   pub vertices: Vec<Ref<Vertex>>,
 }
 
+
+/// Topological entity. Part of a [Shell]. Connected to other faces at its [Edge]s.
 
 #[derive(Debug, Clone)]
 pub struct Face {
@@ -54,12 +67,16 @@ pub struct Face {
 }
 
 
+/// Closed loop of [half edges](HalfEdge), forming the inner or outer boundary of a [Face].
+
 #[derive(Debug, Clone)]
 pub struct Ring {
   pub half_edge: Ref<HalfEdge>,
   pub face: WeakRef<Face>,
 }
 
+
+/// Topological entity. Consists of two [half edges](HalfEdge). Bounded by [Vertices](Vertex). An Edge joins exactly two [Face]s.
 
 #[derive(Debug, Clone)]
 pub struct Edge {
@@ -71,6 +88,8 @@ pub struct Edge {
 }
 
 
+/// Topological entity. Half edges form [Ring]s arounds the [Face]s they belong to.
+
 #[derive(Debug, Clone)]
 pub struct HalfEdge {
   pub id: Uuid, //TEMP
@@ -81,6 +100,8 @@ pub struct HalfEdge {
   pub ring: WeakRef<Ring>,
 }
 
+
+/// Topological entity. Joins [Edge]s at a point.
 
 #[derive(Debug, Clone)]
 pub struct Vertex {
@@ -601,6 +622,8 @@ impl Vertex {
 }
 
 
+/// Iterator that follows [half edges](HalfEdge) until the start element is encountered again.
+
 pub struct RingIterator {
   start_edge: Option<Ref<HalfEdge>>,
   current_edge: Ref<HalfEdge>,
@@ -632,6 +655,8 @@ impl Iterator for RingIterator {
   }
 }
 
+
+/// Iterator that returns all [half edges](HalfEdge) emanating from this vertex.
 
 pub struct VertexEdgesIterator {
   start_edge: Option<Ref<HalfEdge>>,

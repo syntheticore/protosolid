@@ -7,10 +7,15 @@ use crate::geom2d;
 use crate::wire::PolyLine;
 use crate::geom3d::Plane;
 
-pub mod intersection;
+pub(crate) mod intersection;
 pub use intersection::CurveIntersection;
 pub use intersection::CurveIntersectionType;
 
+
+/// Base trait for all parametric curves.
+///
+/// Curves are parametrized in the range 0-1.
+/// Sampling a generic curve outside this range is considered undefined behaviour.
 
 pub trait Curve: Transformable {
   fn sample(&self, t: f64) -> Point3;
@@ -31,9 +36,7 @@ pub trait Curve: Transformable {
   }
 
   fn tesselate_fixed(&self, steps: u32) -> PolyLine {
-    (0..steps + 1).map(|i| {
-      self.sample(i as f64 / steps as f64)
-    }).collect()
+    (0..=steps).map(|i| self.sample(i as f64 / steps as f64) ).collect()
   }
 
   fn tesselate_adaptive(&self, max_deviation: f64, max_angle: Deg<f64>, trims: (f64, f64)) -> PolyLine {
@@ -84,6 +87,10 @@ pub trait Curve: Transformable {
   }
 }
 
+
+/// All curves that can be split at a parameter.
+///
+/// Provides convenience methods for more complex splitting situations.
 
 pub trait Splittable: Curve + Clone {
   fn split_at(&self, t: f64) -> Option<(Self, Self)> where Self: Sized;
@@ -144,6 +151,11 @@ fn filter_splitting(intersections: Vec<CurveIntersectionType>) -> Vec<CurveInter
   }).collect()
 }
 
+
+/// Wrapper enum for all basic curve types.
+///
+/// This wrapper is used to pass curves around generically, while still being able to dispatch to their concrete types.
+/// All contained types implement [Curve], and can be accessed as such using the [as_curve](Self::as_curve) and [as_curve_mut](Self::as_curve_mut) convenience functions.
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CurveType {
@@ -254,6 +266,25 @@ impl CurveType {
   }
 }
 
+
+/// Bounded section of another curve.
+///
+/// Also useful for cheaply inverting the direction of a curve.
+///
+/// # Examples
+/// ```
+/// use shapex::*;
+///
+/// let mut curve = TrimmedCurve::new(
+///   Line::new(
+///     Point3::origin(),
+///     Point3::new(1.0, 1.0, 1.0)
+///   ).into_enum()
+/// );
+/// curve.flip();
+/// assert_eq!(curve.sample(1.0), Point3::origin());
+/// assert_eq!(curve.trims, (1.0, 0.0));
+/// ```
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrimmedCurve {
@@ -396,13 +427,14 @@ impl Curve for TrimmedCurve {
 }
 
 
-/// A finite line segment between two points
-/// # Examples
+/// Finite line segment between two [points](Point3).
 ///
+/// # Examples
 /// ```
 /// use shapex::*;
+///
 /// let line = Line::new(Point3::origin(), Point3::new(1.0, 0.0, 0.0));
-/// assert_eq!(line.midpoint(), Point3::new(0.5, 0.0, 0.0))
+/// assert_eq!(line.midpoint(), Point3::new(0.5, 0.0, 0.0));
 /// ```
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -484,6 +516,17 @@ impl Transformable for Line {
 }
 
 
+/// Circular arc between two parameters on a [Circle].
+///
+/// # Examples
+/// ```
+/// use shapex::*;
+///
+/// let arc = Arc::new(Point3::origin(), 1.0, 0.25, 0.75);
+/// assert_eq!(arc.midpoint(), Point3::new(0.0, 1.0, 0.0));
+/// ```
+
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Arc {
   pub id: Uuid,
@@ -528,41 +571,45 @@ impl Arc {
     self.bounds.1 - self.bounds.0
   }
 
-  fn convert_param(&self, u: f64) -> f64 {
-    let u = self.bounds.0 + u * self.range();
-    Self::overflow(u)
+  fn param_to_circle(&self, t: f64) -> f64 {
+    let t = self.bounds.0 + t * self.range();
+    Self::overflow(t)
   }
 
-  fn overflow(u: f64) -> f64 {
-    if u > 1.0 {
-      u % 1.0
-    } else if u < 0.0 {
-      1.0 + u % 1.0
+  fn param_from_circle(&self, t: f64) -> f64 {
+    let mut range = Self::overflow(self.bounds.1) - Self::overflow(self.bounds.0);
+    if range.almost(0.0) {
+      range = 1.0;
+    }
+    (t - Self::overflow(self.bounds.0)) / range
+  }
+
+  fn overflow(t: f64) -> f64 {
+    if t > 1.0 {
+      t % 1.0
+    } else if t < 0.0 {
+      1.0 + t % 1.0
     } else {
-      u
+      t
     }
   }
 }
 
 impl Curve for Arc {
   fn sample(&self, t: f64) -> Point3 {
-    let mut t = self.convert_param(t);
+    let mut t = self.param_to_circle(t);
     t *= std::f64::consts::PI * 2.0;
     self.plane.sample(t.cos() * self.radius, t.sin() * self.radius)
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
     let circle = Circle::from_plane(self.plane.clone(), self.radius);
-    let param = circle.unsample(p);
-    let mut range = Self::overflow(self.bounds.1) - Self::overflow(self.bounds.0);
-    if range.almost(0.0) {
-      range = 1.0;
-    }
-    (param - Self::overflow(self.bounds.0)) / range
+    let t = circle.unsample(p);
+    self.param_from_circle(t)
   }
 
   fn tangent_at(&self, t: f64) -> Vec3 {
-    let mut t = self.convert_param(t);
+    let mut t = self.param_to_circle(t);
     t *= std::f64::consts::PI * 2.0;
     let v = Vec3::new(t.sin(), -t.cos(), 0.0);
     self.plane.as_transform().transform_vector(v)
@@ -582,8 +629,16 @@ impl Curve for Arc {
 }
 
 impl Splittable for Arc {
-  fn split_at(&self, _t: f64) -> Option<(Self, Self)> {
-    todo!()
+  fn split_at(&self, t: f64) -> Option<(Self, Self)> {
+    if self.bounds.0 <= t && t <= self.bounds.1 {
+      let t = self.param_to_circle(t);
+      Some((
+        Arc::from_plane(self.plane.clone(), self.radius, self.bounds.0, t),
+        Arc::from_plane(self.plane.clone(), self.radius, t, self.bounds.1),
+      ))
+    } else {
+      None
+    }
   }
 
   fn into_enum(self) -> CurveType {
@@ -597,6 +652,20 @@ impl Transformable for Arc {
   }
 }
 
+
+/// A full circle.
+///
+/// Cannot be split at a single parameter. Yields [Arc]s when split.
+/// Sampling the curve at parameters outside the 0-1 range will result in wrapping around the circle.
+///
+/// # Examples
+/// ```
+/// use shapex::*;
+///
+/// let circle = Circle::new(Point3::origin(), 1.0);
+/// assert_eq!(circle.diameter(), 2.0);
+/// assert_eq!(circle.sample(0.5), circle.sample(1.5));
+/// ```
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Circle {
@@ -728,6 +797,28 @@ impl Transformable for Circle {
 
 
 pub type Spline = BasisSpline;
+
+/// Non-uniform rational basis spline.
+///
+/// The shape of the curve is determined by its degree and a set of weighted control vertices, as well as a knot vector,
+/// that controls how curve parameters are mapped to control vertices.
+///
+/// The standard constructor will determine the curve's degree automatically from the number of control vertices supplied
+/// and use the highest degree possible up to a maximum of 5. A clamped, but otherwise uniform knot vector is used,
+/// such that the parameter range of the actual curve is 0.0 - 1.0.
+///
+/// # Examples
+/// ```
+/// use shapex::*;
+///
+/// let spline = BasisSpline::new(vec![
+///   Point3::new(0.0, 0.0, 0.0),
+///   Point3::new(0.5, 0.0, 1.0),
+///   Point3::new(1.0, 0.0, 0.0),
+/// ]);
+/// assert_eq!(spline.degree, 2);
+/// assert_eq!(spline.tangent_at(0.5), Vec3::new(1.0, 0.0, 0.0));
+/// ```
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BasisSpline {

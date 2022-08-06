@@ -3,6 +3,7 @@ use crate::geom2d::cross_2d;
 
 
 /// Type of intersection between two curves.
+
 #[derive(Debug, PartialEq)]
 pub enum CurveIntersectionType {
   /// Touching endpoints
@@ -24,7 +25,7 @@ impl CurveIntersectionType {
       => None,
 
       Self::Touch(isect)
-      |Self::Pierce(isect)
+      | Self::Pierce(isect)
       | Self::Cross(isect)
       => Some(isect),
 
@@ -37,6 +38,26 @@ impl CurveIntersectionType {
     }
   }
 
+  /// Retrieve intersection if it would split the first element
+  pub fn get_splitting_intersection(&self) -> Option<&CurveIntersection> {
+    match self {
+      Self::Contained
+      | Self::Touch(_)
+      | Self::Extended(_)
+      => None,
+
+      Self::Cross(isect)
+      => Some(isect),
+
+      | Self::Pierce(isect)
+      => if isect.direction { // Are we piercing or being pierced?
+        None
+      } else {
+        Some(isect)
+      },
+    }
+  }
+
   pub fn get_point(&self, include_extended: bool) -> Option<Point3> {
     self.get_intersection(include_extended).map(|isect| isect.point )
   }
@@ -44,7 +65,7 @@ impl CurveIntersectionType {
   pub fn invert(&mut self) -> &Self {
     match self {
       Self::Touch(isect)
-      |Self::Pierce(isect)
+      | Self::Pierce(isect)
       | Self::Cross(isect)
       | Self::Extended(isect)
       => isect.invert(),

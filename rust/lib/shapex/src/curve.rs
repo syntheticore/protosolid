@@ -97,7 +97,10 @@ pub trait Splittable: Curve + Clone {
   fn into_enum(self) -> CurveType;
 
   fn split_with(&self, cutter: &CurveType) -> Option<Vec<CurveType>> {
-    let intersections = filter_splitting(self.clone().into_enum().intersect(cutter));
+    let intersections = self.clone().into_enum().intersect(cutter);
+    let intersections: Vec<&CurveIntersection> = intersections.iter().filter_map(|isect|
+      isect.get_splitting_intersection()
+    ).collect();
     if intersections.len() == 0 { return None }
     let points = intersections.iter().map(|hit| hit.point ).collect();
     self.split_at_points(&points) //XXX use params instead
@@ -127,28 +130,6 @@ pub trait Splittable: Curve + Clone {
     }
     Some(segments)
   }
-}
-
-
-fn filter_splitting(intersections: Vec<CurveIntersectionType>) -> Vec<CurveIntersection> {
-  intersections.into_iter().filter_map(|intersection| {
-    match intersection {
-      intersection::CurveIntersectionType::Contained
-      | intersection::CurveIntersectionType::Touch(_)
-      | intersection::CurveIntersectionType::Extended(_)
-      => None,
-
-      intersection::CurveIntersectionType::Cross(hit)
-      => Some(hit),
-
-      | intersection::CurveIntersectionType::Pierce(hit)
-      => if hit.direction { // Are we piercing or being pierced?
-        None
-      } else {
-        Some(hit)
-      },
-    }
-  }).collect()
 }
 
 

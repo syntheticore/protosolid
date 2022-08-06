@@ -42,7 +42,7 @@ impl Default for Component {
 impl Component {
   pub fn find_child(&self, id: &Uuid) -> Option<&Self> {
     if *id == self.id { return Some(self) }
-    for child in self.children.iter() {
+    for child in &self.children {
       if let Some(target) = child.find_child(id) {
         return Some(target)
       }
@@ -52,7 +52,7 @@ impl Component {
 
   pub fn find_child_mut(&mut self, id: &Uuid) -> Option<&mut Self> {
     if *id == self.id { return Some(self) }
-    for child in self.children.iter_mut() {
+    for child in &mut self.children {
       if let Some(target) = child.find_child_mut(id) {
         return Some(target)
       }

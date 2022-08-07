@@ -46,6 +46,13 @@ impl Wire {
         }
       }
     }
+    #[cfg(debug_assertions)]
+    {
+      if region.len() == 0 { panic!("Wires may not be empty") }
+      let first_point = region.first().unwrap().endpoints().0;
+      let last_point = region.last().unwrap().endpoints().1;
+      if !first_point.almost(last_point) { panic!("Wires must be closed") }
+    }
     Self(region)
   }
 

@@ -47,7 +47,7 @@ impl JsConstructionHelper {
   pub fn get_transform(&self) -> JsValue {
     let m = match &self.real.borrow().helper_type {
       ConstructionHelperType::Plane(plane) => plane.as_transform(),
-      _ => Matrix4::one(),
+      _ => Matrix4::identity(),
     };
     matrix_to_js(m)
   }

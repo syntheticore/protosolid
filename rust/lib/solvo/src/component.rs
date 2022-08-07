@@ -24,7 +24,7 @@ impl Default for Component {
   fn default() -> Self {
     Self {
       id: Uuid::new_v4(),
-      transform: Matrix4::one(),
+      transform: Matrix4::identity(),
       sketches: Default::default(),
       helpers: vec![
         Plane::from_normal(Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),

@@ -58,8 +58,11 @@ pub use solid::*;
 pub use mesh::*;
 pub use wire::*;
 
+/// Functions applicable to two-dimensional geometry only
+#[doc(hidden)]
 pub mod geom2d;
-pub mod geom3d;
+
+/// Serialization and import/export of common file formats
 pub mod io;
 
 #[doc(hidden)]

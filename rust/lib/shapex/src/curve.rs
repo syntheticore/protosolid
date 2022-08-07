@@ -5,7 +5,6 @@ use crate::internal::*;
 use crate::transform::*;
 use crate::geom2d;
 use crate::wire::PolyLine;
-use crate::geom3d::Plane;
 
 pub(crate) mod intersection;
 pub use intersection::CurveIntersection;
@@ -139,6 +138,41 @@ pub trait Splittable: BasisCurve + Clone {
 }
 
 
+macro_rules! dispatch_curve {
+  ($self:ident) => {
+    match $self {
+      Self::Line(curve) => curve,
+      Self::Arc(curve) => curve,
+      Self::Circle(curve) => curve,
+      Self::Spline(curve) => curve,
+    }
+  };
+  ($self:ident.$a:ident) => {
+    match $self {
+      Self::Line(curve) => curve.$a,
+      Self::Arc(curve) => curve.$a,
+      Self::Circle(curve) => curve.$a,
+      Self::Spline(curve) => curve.$a,
+    }
+  };
+  ($self:ident.$a:ident = $b:expr) => {
+    match $self {
+      Self::Line(curve) => curve.$a = $b,
+      Self::Arc(curve) => curve.$a = $b,
+      Self::Circle(curve) => curve.$a = $b,
+      Self::Spline(curve) => curve.$a = $b,
+    }
+  };
+  ($self:ident.$a:ident($b:expr)) => {
+    match $self {
+      Self::Line(curve) => curve.$a($b),
+      Self::Arc(curve) => curve.$a($b),
+      Self::Circle(curve) => curve.$a($b),
+      Self::Spline(curve) => curve.$a($b),
+    }
+  };
+}
+
 /// Wrapper enum for all [BasisCurve] types.
 ///
 /// This wrapper is used to pass curves around generically, while still being able to dispatch to their concrete types.
@@ -154,48 +188,23 @@ pub enum CurveType {
 
 impl CurveType {
   pub fn as_curve(&self) -> &dyn BasisCurve {
-    match self {
-      Self::Line(line) => line,
-      Self::Arc(arc) => arc,
-      Self::Circle(circle) => circle,
-      Self::Spline(spline) => spline,
-    }
+    dispatch_curve!(self)
   }
 
   pub fn as_curve_mut(&mut self) -> &mut dyn BasisCurve {
-    match self {
-      Self::Line(line) => line,
-      Self::Arc(arc) => arc,
-      Self::Circle(circle) => circle,
-      Self::Spline(spline) => spline,
-    }
+    dispatch_curve!(self)
   }
 
   pub fn get_id(&self) -> Uuid {
-    match self {
-      Self::Line(line) => line.id,
-      Self::Arc(arc) => arc.id,
-      Self::Circle(circle) => circle.id,
-      Self::Spline(spline) => spline.id,
-    }
+    dispatch_curve!(self.id)
   }
 
   pub fn set_id(&mut self, id: Uuid) {
-    match self {
-      Self::Line(line) => line.id = id,
-      Self::Arc(arc) => arc.id = id,
-      Self::Circle(circle) => circle.id = id,
-      Self::Spline(spline) => spline.id = id,
-    }
+    dispatch_curve!(self.id = id)
   }
 
   pub fn split(&self, cutter: &Self) -> Option<Vec<Self>> {
-    match self {
-      Self::Line(line) => line.split_with(cutter),
-      Self::Arc(arc) => arc.split_with(cutter),
-      Self::Circle(circle) => circle.split_with(cutter),
-      Self::Spline(spline) => spline.split_with(cutter),
-    }
+    dispatch_curve!(self.split_with(cutter))
   }
 
   pub fn split_multi(&self, others: &Vec<Self>) -> Vec<Self> {
@@ -697,7 +706,7 @@ impl Curve for Circle {
   }
 
   fn unsample(&self, p: &Point3) -> f64 {
-    let (x, y) = self.plane.unsample(*p);
+    let Point2 { x, y } = self.plane.unsample(*p);
     let atan2 = y.atan2(x) / std::f64::consts::PI / 2.0;
     if atan2 < 0.0 {
       1.0 + atan2

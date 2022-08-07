@@ -4,21 +4,16 @@ use std::cell::RefCell;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-// pub use cgmath::prelude::*;
-pub use cgmath::prelude::Matrix;
-pub use cgmath::prelude::SquareMatrix;
-pub use cgmath::prelude::InnerSpace;
-pub use cgmath::prelude::MetricSpace;
-pub use cgmath::prelude::EuclideanSpace;
-pub use cgmath::Transform;
+#[doc(hidden)]
+pub use cgmath::prelude::*;
+// pub use cgmath::prelude::Matrix;
+// pub use cgmath::prelude::SquareMatrix;
+// pub use cgmath::prelude::InnerSpace;
+// pub use cgmath::prelude::MetricSpace;
+// pub use cgmath::prelude::EuclideanSpace;
+// pub use cgmath::Transform;
 pub use cgmath::Rad;
 pub use cgmath::Deg;
-
-#[doc(inline)]
-pub use crate::geom3d::Axis;
-
-#[doc(inline)]
-pub use crate::geom3d::Plane;
 
 // pub const MAX_FLOAT: f64 = 2_i32.pow(63).into();
 pub const MAX_FLOAT: f64 = 9223372036854776000.0;

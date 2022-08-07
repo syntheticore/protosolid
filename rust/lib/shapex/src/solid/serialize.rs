@@ -236,7 +236,7 @@ mod tests {
 
   #[test]
   fn serialize() {
-    let cube = &features::make_cube(1.5, 1.5, 1.5).unwrap().solids[0];
+    let cube = &features::make_cube(1.5, 1.5, 1.5).unwrap();
     ron::to_string(cube).unwrap();
   }
 }

@@ -5,7 +5,6 @@ use crate::transform::*;
 use crate::curve::*;
 use crate::mesh::*;
 use crate::wire::*;
-use crate::geom2d;
 
 pub(crate) mod intersection;
 pub use intersection::SurfaceIntersectionType;
@@ -210,12 +209,12 @@ impl TrimmedSurface {
   }
 
   pub fn area(&self) -> f64 {
-    0.0
+    self.profile[0].area() - self.profile.iter().skip(1).fold(0.0, |acc, wire| acc + wire.area() ) //XXX Only correct for PlanarSurface
   }
 
   pub fn on_surface(&self, u: f64, v: f64) -> bool {
     let p = Point3::new(u, v, 0.0);
-    geom2d::point_in_region(p, &self.profile[0]) && !self.profile.iter().skip(1).any(|wire| geom2d::point_in_region(p, wire) )
+    self.profile[0].contains_point(p) && !self.profile.iter().skip(1).any(|wire| wire.contains_point(p) )
   }
 
   pub fn contains_point(&self, p: Point3) -> bool {
@@ -264,7 +263,8 @@ impl Surface for PlanarSurface {
   }
 
   fn unsample(&self, p: Point3) -> (f64, f64) {
-    self.plane.unsample(p)
+    let Point2 { x, y } = self.plane.unsample(p);
+    (x, y)
   }
 
   fn normal_at(&self, _u: f64, _v: f64) -> Vec3 {

@@ -26,7 +26,7 @@ impl Default for Sketch {
     Self {
       id: Uuid::new_v4(),
       elements: vec![],
-      work_plane: Matrix4::one(),
+      work_plane: Matrix4::identity(),
     }
   }
 }
@@ -87,14 +87,14 @@ impl Sketch {
           points.iter().all(|p| plane.contains_point(*p) )
         } else {
           let test_elems = vec![elem, other].iter().map(|te| te.borrow().clone() ).collect();
-          match geom3d::plane_from_curves(&test_elems) {
+          match Plane::from_curves(&test_elems) {
             Ok(plane) => {
               current_plane = Some(plane);
               true
             },
             Err(error) => match error {
-              geom3d::PlaneError::Underdefined => true, // Happens only for elems on same line -> same plane
-              geom3d::PlaneError::Inconsistent => false, // Elems don't belong to same plane
+              PlaneError::Underdefined => true, // Happens only for elems on same line -> same plane
+              PlaneError::Inconsistent => false, // Elems don't belong to same plane
             }
           }
         }
@@ -124,13 +124,13 @@ impl Sketch {
     }).collect()
   }
 
-  fn build_profiles(regions: Vec<Wire>, plane: &Plane) -> Vec<Profile> {
-    regions.iter().map(|wire| {
+  fn build_profiles(wires: Vec<Wire>, plane: &Plane) -> Vec<Profile> {
+    wires.iter().map(|wire| {
       // Find all other wires enclosed by this one
       let mut cutouts = vec![];
-      for other in &regions {
+      for other in &wires {
         if ptr::eq(&*wire, &*other) { continue }
-        if geom2d::region_in_region(other, wire) {
+        if wire.encloses(other) {
           cutouts.push(other.clone());
         }
       }
@@ -138,7 +138,7 @@ impl Sketch {
       // Only leave the outermost inner wires
       profile.append(&mut cutouts.iter().filter(|cutout|
         !cutouts.iter().any(|other|
-          !ptr::eq(&cutout[0], &other[0]) && geom2d::region_in_region(cutout, other)
+          !ptr::eq(&cutout[0], &other[0]) && other.encloses(cutout)
         )
       ).cloned().collect());
       Profile::new(plane.clone(), profile)
@@ -290,9 +290,7 @@ impl Sketch {
 
   fn remove_outer_loop(loops: &mut Vec<Wire>) {
     if loops.len() <= 1 { return }
-    loops.retain(|region| {
-      !geom2d::is_clockwise(&geom2d::poly_from_wirebounds(region))
-    });
+    loops.retain(|wire| !wire.is_clockwise() );
   }
 
   pub fn remove_dangling_segments(island: &mut Vec<TrimmedCurve>) {

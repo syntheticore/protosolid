@@ -16,6 +16,8 @@ mod tesselation;
 mod serialize;
 mod repair;
 
+/// High level modeling operations.
+
 pub mod features;
 
 pub use boolean::Boolean;
@@ -76,7 +78,7 @@ pub struct Ring {
 }
 
 
-/// Topological entity. Consists of two [half edges](HalfEdge). Bounded by [Vertices](Vertex). An Edge joins exactly two [Face]s.
+/// Topological entity. Consists of two [half edges](HalfEdge). Bounded by [Vertices](Vertex). Joins exactly two [Face]s.
 
 #[derive(Debug, Clone)]
 pub struct Edge {

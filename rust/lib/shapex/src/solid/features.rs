@@ -1,10 +1,12 @@
+use crate::transform::*;
 use crate::solid::*;
-use crate::geom3d;
 use crate::surface::intersection;
 use crate::surface::SurfaceType;
 
 
-pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
+/// Create a new [Solid] by extruding `profile` orthogonally to its plane by the given `distance`.
+
+pub fn extrude(profile: &Profile, distance: f64) -> Result<Solid, String> {
   let wire = profile.rings[0].clone();
   let vec = profile.plane.normal() * distance;
   let mut solid = Solid::lamina(wire, PlanarSurface::new(profile.plane.clone()).into_enum());
@@ -63,12 +65,14 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Compound, String> {
   if distance > 200.0 {
     Err(format!("Maximum extrusion distance exceeded"))
   } else {
-    Ok(solid.into_compound())
+    Ok(solid)
   }
 }
 
 
-pub fn revolve(profile: &Profile, mut axis: geom3d::Axis, angle: Deg<f64>) -> Result<Compound, String> {
+/// Create a new [Solid] by sweeping `profile` around the given `axis`.
+
+pub fn revolve(profile: &Profile, mut axis: Axis, angle: Deg<f64>) -> Result<Solid, String> {
   let wire = profile.rings[0].clone();
   let mut solid = Solid::lamina(wire, PlanarSurface::new(profile.plane.clone()).into_enum());
   let shell = &mut solid.shells[0];
@@ -81,7 +85,7 @@ pub fn revolve(profile: &Profile, mut axis: geom3d::Axis, angle: Deg<f64>) -> Re
   } else {
     shell.faces.first()
   }.unwrap().clone();
-  let transform = geom3d::rotation_about_axis(&axis, angle);
+  let transform = axis.rotation(angle);
   shell.sweep(
     &face,
     &transform,
@@ -108,9 +112,13 @@ pub fn revolve(profile: &Profile, mut axis: geom3d::Axis, angle: Deg<f64>) -> Re
       surface.into_enum()
     }
   );
-  Ok(solid.into_compound())
+  Ok(solid)
 }
 
+
+/// Tilt the given [Face]s by `angle` degress, such that their intersection with `fixed_plane` remains constant.
+///
+/// The faces may belong to different solids or compounds.
 
 pub fn draft(faces: &Vec<Ref<Face>>, fixed_plane: &Plane, angle: Deg<f64>) -> Result<(), String> {
   for face in faces {
@@ -132,7 +140,9 @@ pub fn draft(faces: &Vec<Ref<Face>>, fixed_plane: &Plane, angle: Deg<f64>) -> Re
 }
 
 
-pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Compound, String> {
+/// Create a solid cube, centered on [EuclideanSpace::origin].
+
+pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Solid, String> {
   let mut points = vec![
     Point3::new(0.0, 0.0, 0.0),
     Point3::new(dx, 0.0, 0.0),
@@ -155,7 +165,9 @@ pub fn make_cube(dx: f64, dy: f64, dz: f64) -> Result<Compound, String> {
 }
 
 
-pub fn make_cylinder(radius: f64, height: f64) -> Result<Compound, String> {
+/// Create a solid cylinder, centered on [EuclideanSpace::origin].
+
+pub fn make_cylinder(radius: f64, height: f64) -> Result<Solid, String> {
   let wire = Wire::new(vec![
     TrimmedCurve::new(Circle::new(Point3::origin(), radius).into_enum())
   ]);
@@ -170,7 +182,7 @@ mod tests {
 
   #[test]
   fn cube() {
-    let cube = &make_cube(1.5, 1.5, 1.5).unwrap().solids[0];
+    let cube = &make_cube(1.5, 1.5, 1.5).unwrap();
     let shell = &cube.shells[0];
     println!("\nCube finished");
     shell.print();
@@ -183,7 +195,7 @@ mod tests {
   #[test]
   #[ignore]
   fn cylinder() {
-    let cube = &make_cylinder(1.0, 1.0).unwrap().solids[0];
+    let cube = &make_cylinder(1.0, 1.0).unwrap();
     let shell = &cube.shells[0];
     println!("\nCylinder finished");
     shell.print();

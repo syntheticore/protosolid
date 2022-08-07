@@ -126,10 +126,14 @@ pub fn s_curve() -> Spline {
   ])
 }
 
-pub fn make_generic<T: Curve + Splittable>(elems: Vec<T>) -> Vec<CurveType> {
+pub fn make_generic<T: Splittable>(elems: Vec<T>) -> Vec<CurveType> {
   elems.into_iter().map(|l| l.into_enum()).collect()
 }
 
 pub fn make_region(elems: Vec<CurveType>) -> Region {
   elems.into_iter().map(|elem| TrimmedCurve::new(elem)).collect()
+}
+
+pub fn make_wire(elems: Vec<CurveType>) -> Wire {
+  Wire::new(make_region(elems))
 }

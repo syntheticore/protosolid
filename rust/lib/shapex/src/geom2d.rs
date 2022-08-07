@@ -1,7 +1,6 @@
 use earcutr;
 
 use crate::internal::*;
-use crate::curve::*;
 use crate::wire::*;
 use crate::mesh::*;
 
@@ -34,7 +33,7 @@ pub fn polygon_area(closed_loop: &PolyLine) -> f64 {
   signed_polygon_area(&closed_loop).abs()
 }
 
-fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
+pub fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
   let mut signed_area = 0.0;
   let len = closed_loop.len();
   for i in 0..len {
@@ -44,40 +43,6 @@ fn signed_polygon_area(closed_loop: &PolyLine) -> f64 {
     signed_area += p.x * next_p.y - next_p.x * p.y;
   }
   signed_area / 2.0
-}
-
-pub fn point_in_region(p: Point3, region: &Region) -> bool {
-  let ray = TrimmedCurve::new(Line::new(p, p + Vec3::unit_x() * 9999999.0).into_enum());
-  let num_hits: usize = parallel!(region).flat_map(|elem| {
-    let intersections = ray.intersect(&elem);
-    intersections.iter().map(|isect| match isect {
-      CurveIntersectionType::Pierce(_)
-      | CurveIntersectionType::Cross(_)
-        => 1,
-      _ => 0,
-    }).collect::<Vec<usize>>()
-  }).sum();
-  num_hits % 2 != 0
-}
-
-pub fn region_in_region(region: &Region, other: &Region) -> bool {
-  parallel!(region).all(|elem| point_in_region(elem.bounds.0, other))
-}
-
-pub fn tesselate_profile(profile: &Vec<Wire>) -> Mesh {
-  // log!("tesselate_profile profile {:#?}", profile);
-  let poly_rings: Vec<PolyLine> = parallel!(profile).map(|wire| {
-    tesselate_wire(wire)
-  }).collect();
-  let mut i = 0;
-  let mut holes = Vec::with_capacity(poly_rings.len());
-  for ring in &poly_rings {
-    i += ring.len();
-    holes.push(i);
-  }
-  holes.pop();
-  let vertices: Vec<Point3> = poly_rings.into_iter().flatten().collect();
-  tesselate_polygon(vertices, holes)
 }
 
 pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>) -> Mesh {
@@ -96,39 +61,17 @@ pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>) -> Mesh {
   }
 }
 
-pub fn tesselate_wire(wire: &Wire) -> PolyLine {
-  let polyline: PolyLine = parallel!(wire)
-  .flat_map(|curve| {
-    let poly = curve.tesselate();
-    let n = poly.len() - 1;
-    poly.into_iter().take(n).collect::<PolyLine>()
-  }).collect();
-  polyline
-}
-
-pub fn poly_from_wirebounds(wire: &Wire) -> PolyLine {
-  let polyline: PolyLine = wire.iter().map(|curve| curve.bounds.0 ).collect();
-  // polyline.push(wire[0].bounds.0);
-  polyline
-}
-
-pub fn trim(_elem: &CurveType, _cutters: &Vec<CurveType>, _p: Point3) {
-  // let splits = split_element(elem, cutters);
-  // splits.sort_by(|a, b| {
-  //   let a = a.as_curve();
-  //   p.distance(a.closest_point(p))
-  // })
-}
-
 
 #[cfg(test)]
 mod tests {
   use super::*;
 
   use crate::transform::*;
+  use crate::curve::*;
   use crate::test_data;
   use crate::test_data::make_generic;
   use crate::test_data::make_region;
+  use crate::test_data::make_wire;
 
   fn make_rect() -> Wire {
     let rect = test_data::rectangle();
@@ -137,22 +80,22 @@ mod tests {
 
   #[test]
   fn compare_areas() {
-    let rect_poly = tesselate_wire(&make_rect());
+    let rect_poly = &make_rect().tesselate();
     let reverse_rect_poly = rect_poly.iter().rev().cloned().collect();
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
   }
 
   #[test]
   fn rectangle_clockwise() {
-    let rect_poly = tesselate_wire(&make_rect());
+    let rect_poly = &make_rect().tesselate();
     assert!(is_clockwise(&rect_poly));
   }
 
   #[test]
   fn point_in_region() {
     let rect = make_rect();
-    assert!(super::point_in_region(Point3::origin(), &rect));
-    assert!(!super::point_in_region(Point3::new(10.0, 0.0, 0.0), &rect));
+    assert!(rect.contains_point(Point3::origin()));
+    assert!(!rect.contains_point(Point3::new(10.0, 0.0, 0.0)));
   }
 
   #[test]
@@ -175,27 +118,27 @@ mod tests {
 
   #[test]
   fn circle_in_rect() {
-    let circle = make_region(make_generic(vec![Circle::new(Point3::origin(), 0.5)]));
+    let circle = make_wire(make_generic(vec![Circle::new(Point3::origin(), 0.5)]));
     let rect = make_rect();
-    assert!(super::region_in_region(&circle, &rect));
-    assert!(!super::region_in_region(&rect, &circle));
+    assert!(rect.encloses(&circle));
+    assert!(!circle.encloses(&rect));
   }
 
   #[test]
   fn circle_in_circle() {
-    let circle = make_region(make_generic(vec![
+    let circle = make_wire(make_generic(vec![
       Circle::new(Point3::new(-27.0, 3.0, 0.0), 68.97340462273907)
     ]));
     let inner_circle = Circle::new(Point3::new(-1.0, 27.654544570311774, 0.0), 15.53598031475424);
-    let inner_circle = make_region(make_generic(vec![inner_circle]));
-    assert!(super::region_in_region(&inner_circle, &circle));
-    assert!(!super::region_in_region(&circle, &inner_circle));
+    let inner_circle = make_wire(make_generic(vec![inner_circle]));
+    assert!(circle.encloses(&inner_circle));
+    assert!(!inner_circle.encloses(&circle));
   }
 
   #[test]
   fn point_in_circle() {
-    let circle = make_region(make_generic(vec![Circle::new(Point3::origin(), 20.0)]));
-    assert!(super::point_in_region(Point3::origin(), &circle));
+    let circle = make_wire(make_generic(vec![Circle::new(Point3::origin(), 20.0)]));
+    assert!(circle.contains_point(Point3::origin()));
   }
 
   #[test]
@@ -205,15 +148,15 @@ mod tests {
     for line in &mut inner_rect {
       line.scale(0.5);
     }
-    let inner_rect = make_region(make_generic(inner_rect));
-    assert!(super::region_in_region(&inner_rect, &rect));
-    assert!(!super::region_in_region(&rect, &inner_rect));
+    let inner_rect = make_wire(make_generic(inner_rect));
+    assert!(rect.encloses(&inner_rect));
+    assert!(!inner_rect.encloses(&rect));
   }
 
   #[test]
   fn point_in_triangle() {
-    let tri = make_region(make_generic(test_data::triangle()));
-    assert!(super::point_in_region(Point3::new(-7.0, 60.0, 0.0), &tri));
+    let tri = make_wire(make_generic(test_data::triangle()));
+    assert!(tri.contains_point(Point3::new(-7.0, 60.0, 0.0)));
   }
 }
 

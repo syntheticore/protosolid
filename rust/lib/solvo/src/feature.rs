@@ -208,7 +208,7 @@ impl ExtrusionFeature {
       let mut profile = profile_ref.profile.clone();
       profile_ref.get_sketch(tree).unwrap().borrow().transform_profile(&mut profile);
       match features::extrude(&profile, self.distance) {
-        Ok(compound) => tool.join(compound),
+        Ok(solid) => tool.join(solid.into_compound()),
         Err(error) => return Err(FeatureError::Error(error)),
       }
     }
@@ -269,7 +269,7 @@ impl RevolutionFeature {
         let mut profile = profile_ref.profile.clone();
         profile_ref.get_sketch(tree).unwrap().borrow().transform_profile(&mut profile);
         match features::revolve(&profile, axis.clone(), self.angle) {
-          Ok(compound) => tool.join(compound),
+          Ok(solid) => tool.join(solid.into_compound()),
           Err(error) => return Err(FeatureError::Error(error)),
         }
       }

@@ -3,6 +3,7 @@ use std::rc::Rc;
 use uuid::{uuid, Uuid};
 
 use shapex::internal::Ref;
+use shapex::Repairable;
 
 use crate::Component;
 use crate::Feature;

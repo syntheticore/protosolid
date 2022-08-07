@@ -165,7 +165,7 @@ impl JsSolid {
       vertices,
       edges,
       faces,
-      area: solid.surface_area(),
+      area: solid.area(),
       volume: solid.volume(),
     }
   }

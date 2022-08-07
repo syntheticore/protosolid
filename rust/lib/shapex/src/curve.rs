@@ -380,7 +380,7 @@ impl Transformable for TrimmedCurve {
 }
 
 
-fn invert_intersections(mut intersections: Vec<CurveIntersectionType>) -> Vec<CurveIntersectionType>{
+fn invert_intersections(mut intersections: Vec<CurveIntersectionType>) -> Vec<CurveIntersectionType> {
   for isect in &mut intersections {
     isect.invert();
   }

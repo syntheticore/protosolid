@@ -3,18 +3,19 @@ use crate::solid::*;
 
 /// All types that have a closed boundary, separating space into what's inside and outside the volume.
 
-pub trait Volume {
-  fn surface_area(&self) -> f64;
+pub trait Volume: SurfaceArea {
   fn volume(&self) -> f64;
   fn contains_point(&self, p: Point3) -> bool;
 }
 
 
-impl Volume for Solid {
-  fn surface_area(&self) -> f64 {
-    self.shells.iter().fold(0.0, |acc, shell| acc + shell.surface_area() )
+impl SurfaceArea for Solid {
+  fn area(&self) -> f64 {
+    self.shells.iter().fold(0.0, |acc, shell| acc + shell.area() )
   }
+}
 
+impl Volume for Solid {
   fn volume(&self) -> f64 {
     self.shells[0].volume() - self.shells.iter().skip(1).fold(0.0, |acc, shell| acc + shell.volume() )
   }
@@ -25,12 +26,13 @@ impl Volume for Solid {
 }
 
 
-impl Volume for Shell {
-  fn surface_area(&self) -> f64 {
-    self.faces.iter()
-    .fold(0.0, |acc, face| acc + face.borrow().make_surface().area() )
+impl SurfaceArea for Shell {
+  fn area(&self) -> f64 {
+    self.faces.iter().fold(0.0, |acc, face| acc + face.borrow().area() )
   }
+}
 
+impl Volume for Shell {
   fn volume(&self) -> f64 {
     0.0 //XXX
   }
@@ -47,6 +49,13 @@ impl Volume for Shell {
       }).collect::<Vec<usize>>()
     }).sum();
     num_hits % 2 != 0
+  }
+}
+
+
+impl SurfaceArea for Face {
+  fn area(&self) -> f64 {
+    self.make_surface().area()
   }
 }
 

@@ -23,6 +23,7 @@ pub mod features;
 pub use boolean::Boolean;
 pub use boolean::BooleanType;
 pub use volume::Volume;
+pub use repair::Repairable;
 
 
 /// Collection of solids.
@@ -130,11 +131,7 @@ impl Compound {
   }
 
   pub fn faces_iter(&self) -> impl Iterator<Item = &Ref<Face>> {
-    self.solids.iter().flat_map(|solid|
-      solid.shells.iter().flat_map(|shell|
-        shell.faces.iter()
-      )
-    )
+    self.solids.iter().flat_map(|solid| solid.faces_iter() )
   }
 }
 
@@ -178,6 +175,11 @@ impl Solid {
     self.shells.iter().fold(0, |acc, shell| acc + shell.euler_characteristics() ) - 2 * (self.shells.len() as i32 - genus)
   }
 
+  pub fn validate(&self) -> Result<(), String> {
+    for shell in &self.shells { shell.validate()? }
+    Ok(())
+  }
+
   pub fn find_face(&self, id: Uuid) -> Option<&Ref<Face>> {
     for shell in &self.shells {
       let face = shell.find_face(id);
@@ -186,9 +188,8 @@ impl Solid {
     None
   }
 
-  pub fn validate(&self) -> Result<(), String> {
-    for shell in &self.shells { shell.validate()? }
-    Ok(())
+  pub fn faces_iter(&self) -> impl Iterator<Item = &Ref<Face>> {
+    self.shells.iter().flat_map(|shell| shell.faces.iter() )
   }
 
   pub fn mvfs(&mut self, p: Point3, surface: SurfaceType) -> (Ref<Vertex>, Ref<Face>, &mut Shell) {
@@ -265,19 +266,19 @@ impl Shell {
     }
   }
 
-  pub fn find_face(&self, id: Uuid) -> Option<&Ref<Face>> {
-    for face in &self.faces {
-      if face.borrow().id == id { return Some(face) }
-    }
-    None
-  }
-
   pub fn validate(&self) -> Result<(), String> {
     // Closed shells have odd connectivity
     if self.connectivity() % 2 == 0 {
       return Err("Open shell".into())
     }
     Ok(())
+  }
+
+  pub fn find_face(&self, id: Uuid) -> Option<&Ref<Face>> {
+    for face in &self.faces {
+      if face.borrow().id == id { return Some(face) }
+    }
+    None
   }
 
   pub fn lmev(&mut self, he1: &Ref<HalfEdge>, he2: &Ref<HalfEdge>, curve: CurveType, p: Point3) -> (Ref<Edge>, Ref<Vertex>) {

@@ -32,7 +32,7 @@
 //!   let curve = TrimmedCurve::new(circle);
 //!   let wire = Wire::new(vec![curve]).unwrap();
 //!
-//!   // Profiles use coplanar wires to form enclosed regions.
+//!   // Profiles use coplanar wires to form closed regions.
 //!   // Additional wires could be used to describe holes in the shape.
 //!   let profile = Profile::new(Plane::new(), vec![wire]);
 //!

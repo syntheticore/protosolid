@@ -131,7 +131,7 @@ impl DerefMut for Wire {
 }
 
 
-/// Profiles use coplanar [wires](Wire) to form enclosed regions.
+/// Profiles use coplanar [wires](Wire) to form closed regions.
 ///
 /// Profiles must contain one or more wires, representing the outer and inner rings.
 /// The outer ring runs counter-clockwise and inner rings run clockwise.

@@ -1,22 +1,27 @@
 use crate::solid::*;
 
 
-impl Compound {
-  pub fn repair(&mut self) -> Result<(), String> {
+/// All types that can repair and validate their inner structure without additional data.
+
+pub trait Repairable {
+  fn repair(&mut self) -> Result<(), String>;
+}
+
+
+impl Repairable for Compound {
+  fn repair(&mut self) -> Result<(), String> {
     for solid in &mut self.solids {
       solid.validate()?;
       // solid.repair()?;
     }
-    self.join_solids();
+    // self.join_solids();
     Ok(())
   }
-
-  fn join_solids(&mut self) {} //XXX
 }
 
 
-impl Solid {
-  pub fn repair(&mut self) -> Result<(), String> {
+impl Repairable for Solid {
+  fn repair(&mut self) -> Result<(), String> {
     for shell in &mut self.shells {
       shell.repair()?;
     }
@@ -25,8 +30,8 @@ impl Solid {
 }
 
 
-impl Shell {
-  pub fn repair(&mut self) -> Result<(), String> {
+impl Repairable for Shell {
+  fn repair(&mut self) -> Result<(), String> {
     for edge in &mut self.edges {
       edge.borrow_mut().repair()?;
     }
@@ -35,8 +40,8 @@ impl Shell {
 }
 
 
-impl Face {
-  pub fn repair_edges(&self) -> Result<(), String> {
+impl Repairable for Face {
+  fn repair(self: &mut Face) -> Result<(), String> {
     for he in self.outer_ring.borrow().iter() {
       let edge = he.borrow().get_edge();
       edge.borrow_mut().repair()?;
@@ -46,8 +51,8 @@ impl Face {
 }
 
 
-impl Edge {
-  pub fn repair(&mut self) -> Result<(), String> {
+impl Repairable for Edge {
+  fn repair(&mut self) -> Result<(), String> {
     let intersections = self.get_left_face().borrow().surface.intersect(&self.get_right_face().borrow().surface);
     if intersections.len() == 0 { return Err("Adjacent faces don't intersect".into()) }
     for intersection in intersections {

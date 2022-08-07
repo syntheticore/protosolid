@@ -65,6 +65,13 @@ pub trait Surface: Transformable {
 }
 
 
+/// All types that have a finite surface area.
+
+pub trait SurfaceArea {
+  fn area(&self) -> f64;
+}
+
+
 /// Wrapper enum for all basic surface types.
 ///
 /// This wrapper is used to pass surfaces around generically, while still being able to dispatch to their concrete types.
@@ -208,10 +215,6 @@ impl TrimmedSurface {
     }
   }
 
-  pub fn area(&self) -> f64 {
-    self.profile[0].area() - self.profile.iter().skip(1).fold(0.0, |acc, wire| acc + wire.area() ) //XXX Only correct for PlanarSurface
-  }
-
   pub fn on_surface(&self, u: f64, v: f64) -> bool {
     let p = Point3::new(u, v, 0.0);
     self.profile[0].contains_point(p) && !self.profile.iter().skip(1).any(|wire| wire.contains_point(p) )
@@ -224,6 +227,12 @@ impl TrimmedSurface {
 
   pub fn intersect(&self, _other: Self) -> SurfaceIntersectionType {
     todo!()
+  }
+}
+
+impl SurfaceArea for TrimmedSurface {
+  fn area(&self) -> f64 {
+    self.profile[0].area() - self.profile.iter().skip(1).fold(0.0, |acc, wire| acc + wire.area() ) //XXX Only correct for PlanarSurface
   }
 }
 

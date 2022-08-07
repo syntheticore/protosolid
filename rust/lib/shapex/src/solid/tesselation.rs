@@ -6,14 +6,23 @@ impl Meshable for Solid {
   fn tesselate(&self) -> Mesh {
     let mut mesh = Mesh::default();
     for shell in &self.shells {
-      for face in &shell.faces {
-        let face_mesh = face.borrow().tesselate();
-        mesh.append(face_mesh);
-      }
+      mesh.append(shell.tesselate());
     }
     mesh
   }
 }
+
+
+impl Meshable for Shell {
+  fn tesselate(&self) -> Mesh {
+    let mut mesh = Mesh::default();
+    for face in &self.faces {
+      mesh.append(face.borrow().tesselate());
+    }
+    mesh
+  }
+}
+
 
 impl Meshable for Face {
   fn tesselate(&self) -> Mesh {

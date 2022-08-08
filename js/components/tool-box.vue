@@ -58,6 +58,10 @@
       text-align: center
       transition: all 0.2s
       min-width: 100px
+      &:first-child
+        border-top-left-radius: 2px
+      &:last-child
+        border-top-right-radius: 2px
       & + li
         border-left: 1px solid $dark1 * 1.15
       &:hover

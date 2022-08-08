@@ -30,8 +30,8 @@ impl Default for Sketch {
 
 impl Sketch {
   pub fn get_profiles(&self, include_outer: bool) -> Vec<Profile> {
-    let planar_elements = &self.elements;
-    let cut_elements = Self::all_split(&planar_elements);
+    let elements = Self::remove_empties(&self.elements);
+    let cut_elements = Self::all_split(&elements);
     let wires = Self::get_wires(cut_elements, include_outer);
     Self::build_profiles(wires, &(&self.work_plane).into())
   }
@@ -307,6 +307,10 @@ impl Sketch {
       })
     });
     if island.len() < start_len { Self::remove_dangling_segments(island) }
+  }
+
+  fn remove_empties(elements: &Vec<Ref<CurveType>>) -> Vec<Ref<CurveType>> {
+    elements.iter().filter(|curve| !curve.borrow().as_curve().length().almost(0.0) ).cloned().collect()
   }
 
   pub fn find_element(&self, id: Uuid) -> Option<&Ref<CurveType>> {

@@ -31,7 +31,7 @@
           @move-marker="setMarker(i + 1)"
           v-on="$listeners"
         )
-      hr
+      hr(ref="marker")
       li.future(v-for="(feature, i) in future")
         FeatureIcon(
           isFuture
@@ -204,14 +204,16 @@
       activeFeature: function(feature) {
         if(!feature) return
         setTimeout(() => {
-          const scrollValue = this.$refs.active[0].offsetLeft - (this.$refs.features.clientWidth / 2)
-          if(!this.isActiveFeatureVisible()) this.$refs.features.scrollLeft = scrollValue
+          if(!this.isElemVisible(this.$refs.active[0])) this.scrollToElem(this.$refs.active[0])
           this.onScroll()
-        }, 0)
+        })
       },
 
       marker: function() {
         this.$emit('update:active-feature', null)
+        setTimeout(() => {
+          if(!this.isElemVisible(this.$refs.marker)) this.scrollToElem(this.$refs.marker)
+        })
       },
     },
 
@@ -252,10 +254,14 @@
         this.$root.$emit('regenerate')
       },
 
-      isActiveFeatureVisible() {
-        const { left, right, width } = this.$refs.active[0].getBoundingClientRect()
-        const containerRect = this.$refs.features.getBoundingClientRect()
-        return left <= containerRect.left ? containerRect.left - left <= width : right - containerRect.right <= width
+      isElemVisible(elem) {
+        const { left, right, width } = elem.getBoundingClientRect()
+        const container = this.$refs.features.getBoundingClientRect()
+        return left <= container.left ? container.left - left <= width : right - container.right <= width
+      },
+
+      scrollToElem(elem) {
+        this.$refs.features.scrollLeft = elem.offsetLeft - (this.$refs.features.clientWidth / 2)
       },
 
       onScroll: function() {

@@ -596,7 +596,11 @@ impl HalfEdge {
   }
 
   pub fn ring_iter(&self) -> RingIterator  {
-    RingIterator::new(self.mate().borrow().mate())
+    RingIterator::new(self.as_rc())
+  }
+
+  fn as_rc(&self) -> Ref<Self> {
+    self.mate().borrow().mate()
   }
 
   pub fn print(&self) {

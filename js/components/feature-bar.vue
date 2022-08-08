@@ -11,7 +11,7 @@
       button(@click="forwardMarker", :disabled="atEnd")
         fa-icon(icon="angle-double-right")
 
-    ul.features(ref="features", @scroll="scroll", :style="{'--tip': tip + 'px'}")
+    ul.features(ref="features", @scroll="onScroll", :style="{'--tip': tip + 'px'}")
       li.past(v-for="(feature, i) in past", :ref="feature == activeFeature ? 'active' : undefined")
         transition(name="fade")
           FeatureBox.tipped-bottom(ref="box"
@@ -77,6 +77,7 @@
     display: flex
     overflow-x: auto
     overflow-y: hidden
+    scroll-behavior: smooth
     padding: 0 6px
     border-radius: 15px
     align-items: center
@@ -200,8 +201,13 @@
         this.updateMarker()
       },
 
-      activeFeature: function() {
-        setTimeout(() => this.scroll(), 0)
+      activeFeature: function(feature) {
+        if(!feature) return
+        setTimeout(() => {
+          const scrollValue = this.$refs.active[0].offsetLeft - (this.$refs.features.clientWidth / 2)
+          if(!this.isActiveFeatureVisible()) this.$refs.features.scrollLeft = scrollValue
+          this.onScroll()
+        }, 0)
       },
 
       marker: function() {
@@ -211,7 +217,7 @@
 
     mounted() {
       this.$root.$on('regenerate', this.updateMarker)
-      this.$root.$on('resize', this.scroll)
+      this.$root.$on('resize', this.onScroll)
     },
 
     methods: {
@@ -246,7 +252,13 @@
         this.$root.$emit('regenerate')
       },
 
-      scroll: function() {
+      isActiveFeatureVisible() {
+        const { left, right, width } = this.$refs.active[0].getBoundingClientRect()
+        const containerRect = this.$refs.features.getBoundingClientRect()
+        return left <= containerRect.left ? containerRect.left - left <= width : right - containerRect.right <= width
+      },
+
+      onScroll: function() {
         if(!(this.$refs.active && this.$refs.active[0])) return
         const featuresLeft = this.$refs.features.getBoundingClientRect().left
         const boxWidth = this.$refs.box[0].$el.getBoundingClientRect().width

@@ -100,6 +100,7 @@
       top: 0
       height: 100%
       background: linear-gradient(left, $dark2 * 0.8, rgba($dark2, 0))
+      z-index: 1
     &::after
       left: unset
       right: 0

@@ -13,7 +13,7 @@
 
 <style lang="stylus" scoped>
   .tree-view
-    height: 100%
+    max-height: calc(100% - 72px)
     overflow-x: hidden
     overflow-y: auto
     padding-top: 10px

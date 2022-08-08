@@ -119,9 +119,11 @@
   .tree-item
     margin-left: 23px
     > header
-      display: flex
+      display: inline-flex
       align-items: center
       padding: 1px 0
+      // pointer-events: auto
+      margin-right: 10px // Needed in FF when scrollbars are active
 
   .expander
     margin-right: 0
@@ -145,6 +147,7 @@
 
   .name
     margin-right: 6px
+    white-space: nowrap
 
   .widgets
     margin-left: 43px
@@ -185,6 +188,8 @@
       transition: opacity 0.2s
       box-shadow: 0 1px 3px rgba(black, 0.25)
       overflow: hidden
+      // pointer-events: auto
+      margin-right: 10px // Needed in FF when scrollbars are active
       > header
         display: flex
         align-items: center

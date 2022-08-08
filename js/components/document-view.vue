@@ -138,7 +138,7 @@
   .feature-bar
     position: absolute
     bottom: 12px
-    max-width: 80%
+    max-width: calc(100% - 24px)
 </style>
 
 

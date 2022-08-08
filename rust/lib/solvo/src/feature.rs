@@ -1,7 +1,6 @@
 use serde::{Serialize, Deserialize};
 
 use shapex::*;
-use shapex::internal::Ref;
 
 use crate::references::*;
 use crate::Uuid;

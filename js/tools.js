@@ -92,7 +92,7 @@ export class ManipulationTool extends HighlightTool {
     if(handle) {
       let handles = handle.elem.get_handles()
       handles[handle.index] = vec.toArray()
-      handle.elem.set_handles(handles)
+      handle.elem.set_handles(handles, false)
       this.viewport.elementChanged(handle.elem, this.component)
     } else {
       super.mouseMove(vec, coords)
@@ -236,7 +236,7 @@ export class LineTool extends SketchTool {
   mouseMove(vec) {
     if(!this.line) return
     let p1 = this.line.get_handles()[0]
-    this.line.set_handles([p1, vec.toArray()])
+    this.line.set_handles([p1, vec.toArray()], false)
     this.viewport.elementChanged(this.line, this.component)
   }
 
@@ -258,7 +258,7 @@ export class SplineTool extends SketchTool {
       let points = this.spline.get_handles()
       points[points.length - 1] = vec.toArray()
       points.push(vec.toArray())
-      this.spline.set_handles(points)
+      this.spline.set_handles(points, false)
     } else {
       this.spline = this.sketch.add_spline([vec.toArray(), vec.toArray()])
     }
@@ -269,7 +269,7 @@ export class SplineTool extends SketchTool {
     if(!this.spline) return
     let points = this.spline.get_handles()
     points[points.length - 1] = vec.toArray()
-    this.spline.set_handles(points)
+    this.spline.set_handles(points, false)
     this.viewport.elementChanged(this.spline, this.component)
   }
 
@@ -277,7 +277,7 @@ export class SplineTool extends SketchTool {
     if(!this.spline) return
     let points = this.spline.get_handles()
     points.pop()
-    this.spline.set_handles(points)
+    this.spline.set_handles(points, false)
     this.viewport.elementChanged(this.spline, this.component)
   }
 }
@@ -300,7 +300,7 @@ export class CircleTool extends SketchTool {
 
   mouseMove(vec) {
     if(!this.center) return
-    this.circle.set_handles([this.center.toArray(), vec.toArray()])
+    this.circle.set_handles([this.center.toArray(), vec.toArray()], false)
     this.viewport.elementChanged(this.circle, this.component)
   }
 }
@@ -332,7 +332,7 @@ export class ArcTool extends SketchTool {
         vec.toArray(),
         this.end.toArray()
       )
-      this.arc.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()])
+      this.arc.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()], true)
       this.viewport.elementChanged(this.arc, this.component)
     } catch(e) {}
   }

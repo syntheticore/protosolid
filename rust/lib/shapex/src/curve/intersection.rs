@@ -213,8 +213,8 @@ pub fn line_circle(line: &Line, circle: &Circle) -> Vec<CurveIntersectionType> {
 
     let p1 = line.sample(t1);
     let p2 = line.sample(t2);
-    let isect1 = CurveIntersection::new(p1, t1, circle.unsample(&p1));
-    let isect2 = CurveIntersection::new(p2, t2, circle.unsample(&p2));
+    let isect1 = CurveIntersection::new(p1, t1, circle.unsample(p1));
+    let isect2 = CurveIntersection::new(p2, t2, circle.unsample(p2));
 
     intersections.push(if crossed.0 {
       CurveIntersectionType::Cross(isect1)

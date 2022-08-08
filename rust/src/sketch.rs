@@ -3,18 +3,15 @@ use std::rc::Rc;
 
 use solvo::*;
 use shapex::*;
-use shapex::internal::rc;
-use shapex::internal::Ref;
 
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
+use crate::internal::*;
 use crate::curve::JsCurve;
 use crate::region::JsRegion;
 use crate::utils::matrix_to_js;
 use crate::utils::point_from_js;
-
-// use crate::log;
 
 
 #[wasm_bindgen]

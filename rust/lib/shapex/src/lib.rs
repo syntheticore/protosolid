@@ -42,31 +42,31 @@
 //! }
 //! ```
 
+mod internal;
 mod base;
 mod transform;
+mod wire;
 mod curve;
 mod surface;
 mod solid;
 mod mesh;
-mod wire;
 
 pub use base::*;
 pub use transform::*;
+pub use wire::*;
 pub use curve::*;
 pub use surface::*;
 pub use solid::*;
 pub use mesh::*;
-pub use wire::*;
 
-/// Functions applicable to two-dimensional geometry only
-#[doc(hidden)]
-pub mod geom2d;
+/// Serialization and import/export of common file formats.
 
-/// Serialization and import/export of common file formats
 pub mod io;
 
+/// Functions applicable to two-dimensional geometry only.
+
 #[doc(hidden)]
-pub mod internal;
+pub mod geom2d;
 
 // #[cfg(test)]
 #[doc(hidden)]

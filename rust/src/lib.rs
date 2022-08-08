@@ -11,6 +11,7 @@ mod utils;
 mod buffer_geometry;
 mod controllable;
 mod construction_helper;
+mod internal;
 
 
 #[cfg(feature = "wee_alloc")]
@@ -23,7 +24,7 @@ pub fn main() -> Result<(), JsValue> {
   #[cfg(debug_assertions)]
   console_error_panic_hook::set_once();
 
-  log!("ProtoSolid running");
+  internal::log!("ProtoSolid running");
 
   Ok(())
 }

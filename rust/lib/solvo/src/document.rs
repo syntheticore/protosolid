@@ -2,17 +2,16 @@ use std::rc::Rc;
 
 use uuid::{uuid, Uuid};
 
-use shapex::internal::Ref;
+use shapex::Ref;
 use shapex::Repairable;
 
+use crate::internal::*;
 use crate::Component;
 use crate::Feature;
 use crate::FeatureType;
 use crate::Sketch;
 use crate::CompRef;
 use crate::FeatureError;
-
-use crate::log;
 
 
 #[derive(Debug)]

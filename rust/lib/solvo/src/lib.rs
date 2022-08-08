@@ -3,6 +3,7 @@ mod component;
 mod sketch;
 mod feature;
 mod references;
+mod internal;
 
 pub use document::*;
 pub use component::*;
@@ -13,12 +14,5 @@ pub use references::*;
 pub mod io;
 
 pub use uuid::Uuid;
-
 pub use shapex;
 
-
-#[macro_export] macro_rules! log {
-  ( $( $t:tt )* ) => {
-    web_sys::console::log_1(&format!( $( $t )* ).into());
-  }
-}

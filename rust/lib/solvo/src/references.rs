@@ -1,16 +1,7 @@
-use serde::{Serialize, Deserialize};
-
 use std::collections::HashSet;
 
-use shapex::Profile;
-use shapex::Axis;
-use shapex::Face;
-use shapex::Curve;
-use shapex::Plane;
-use shapex::CurveType;
-use shapex::SurfaceType;
-use shapex::Transformable;
-use shapex::internal::Ref;
+use shapex::*;
+use serde::{Serialize, Deserialize};
 
 use crate::Uuid;
 use crate::Sketch;

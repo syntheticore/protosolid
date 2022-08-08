@@ -4,7 +4,6 @@ use wasm_bindgen::prelude::*;
 
 use solvo::*;
 use shapex::*;
-use shapex::internal::Ref;
 
 use crate::feature::JsPlanarRef;
 use crate::feature::JsFaceRef;

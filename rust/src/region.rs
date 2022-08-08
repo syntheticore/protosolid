@@ -2,7 +2,6 @@ use wasm_bindgen::prelude::*;
 
 use solvo::*;
 use shapex::*;
-use shapex::internal::Ref;
 
 use crate::utils::vec_to_js;
 use crate::utils::point_to_js;

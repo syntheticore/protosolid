@@ -4,12 +4,9 @@ use std::collections::HashSet;
 use std::cmp::Ordering;
 
 use serde::{Serialize, Deserialize};
-
 use shapex::*;
-use shapex::internal::rc;
-use shapex::internal::Ref;
-use shapex::internal::tuple2_to_vec;
 
+use crate::internal::*;
 use crate::Uuid;
 use crate::FeatureError;
 

@@ -208,7 +208,7 @@
             tools: [
               { title: 'Line', tool: LineTool, icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
               { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
-              { title: 'Arc', tool: ArcTool, icon: 'bezier-curve' },
+              { title: 'Arc', tool: ArcTool, icon: 'bezier-curve', hotKey: 'A', keyCode: 65 },
               { title: 'Circle', tool: CircleTool, icon: 'ban', hotKey: 'C', keyCode: 67 },
               { title: 'Spline', tool: SplineTool, icon: 'route', hotKey: 'B', keyCode: 66},
               { title: 'Polygon', icon: 'layer-group' },

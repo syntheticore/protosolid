@@ -3,7 +3,6 @@ use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
 use shapex::*;
-use shapex::internal::Ref;
 use solvo::Sketch;
 use solvo::AxialRef;
 use solvo::CurveRef;
@@ -79,11 +78,15 @@ impl JsCurve {
     }).collect())
   }
 
-  pub fn set_handles(&self, handles: Array) {
+  pub fn set_handles(&self, handles: Array, initial: bool) {
     let points = points_from_js(handles);
     let transform = self.sketch.borrow().work_plane.invert().unwrap();
     let points = points.iter().map(|p| transform.transform_point(*p) ).collect();
-    as_controllable_mut(&mut self.real.borrow_mut()).set_handles(points);
+    if initial {
+      as_controllable_mut(&mut self.real.borrow_mut()).set_initial_handles(points);
+    } else {
+      as_controllable_mut(&mut self.real.borrow_mut()).set_handles(points);
+    }
   }
 
   pub fn get_snap_points(&self) -> Array {

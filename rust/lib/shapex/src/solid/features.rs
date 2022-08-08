@@ -95,7 +95,7 @@ pub fn revolve(profile: &Profile, mut axis: Axis, angle: Deg<f64>) -> Result<Sol
       let mut plane: Plane = (&axis).into();
       plane.origin = p_axis;
       let mut arc = Arc::from_plane(plane, radius, 0.0, 1.0);
-      let t = arc.unsample(&point);
+      let t = arc.unsample(point);
       arc.bounds.0 = t;
       arc.bounds.1 = t + (angle / Deg(360.0));
       arc.into_enum()

@@ -2,18 +2,15 @@ use wasm_bindgen::prelude::*;
 use js_sys::Array;
 
 use shapex::*;
-use shapex::internal::rc;
-use shapex::internal::Ref;
 use solvo::*;
 
+use crate::internal::*;
 use crate::document::JsDocument;
 use crate::region::JsRegion;
 use crate::solid::JsFace;
 use crate::curve::JsCurve;
 use crate::buffer_geometry::JsBufferGeometry;
 use crate::construction_helper::JsConstructionHelper;
-
-// use crate::log;
 
 
 #[wasm_bindgen]

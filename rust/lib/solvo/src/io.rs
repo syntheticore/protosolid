@@ -1,6 +1,6 @@
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
-use shapex::internal::Ref;
+use shapex::Ref;
 
 use crate::Feature;
 use crate::document;

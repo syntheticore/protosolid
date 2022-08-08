@@ -293,6 +293,7 @@
       this.$root.$off('deactivate-feature', this.deactivateFeature)
       this.$root.$emit('unpreview-feature')
       this.$root.$emit('activate-toolname', 'Manipulate')
+      this.destroyed = true
     },
 
     methods: {
@@ -363,21 +364,23 @@
       },
 
       updatePaths: function() {
-        this.$root.$emit('clear-pickers')
-        for(const key in this.activeFeature.settings) {
-          const data = this.activeFeature[key]
-          if(data && this.needsPicker(this.activeFeature.settings[key], true) && data()) {
-            const { pickerPos, color } = this.getPickerInfo(key)
-            const refs = Array.isArray(data()) ? data() : [data()]
-            refs.forEach(ref => {
-              const item = ref.get_item()
-              this.$root.$emit('show-picker', pickerPos, vec2three(item.get_center()), color)
-              item.free()
-            })
+        setTimeout(() => {
+          if(this.destroyed) return
+          this.$root.$emit('clear-pickers')
+          for(const key in this.activeFeature.settings) {
+            const data = this.activeFeature[key]
+            if(data && this.needsPicker(this.activeFeature.settings[key], true) && data()) {
+              const { pickerPos, color } = this.getPickerInfo(key)
+              const refs = Array.isArray(data()) ? data() : [data()]
+              refs.forEach(ref => {
+                const item = ref.get_item()
+                this.$root.$emit('show-picker', pickerPos, vec2three(item.get_center()), color)
+                item.free()
+              })
+            }
           }
-        }
-        if(!this.updatePicker) return;
-        this.updatePicker()
+          if(this.updatePicker) this.updatePicker()
+        })
       },
 
       getPickerInfo: function(key) {

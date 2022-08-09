@@ -177,7 +177,7 @@
             Volume: {
               title: 'Volume',
               unit: 'cm³',
-              value: item.volume,
+              value: item.volume / 1000.0,
             },
             Area: {
               title: 'Surface Area',
@@ -193,6 +193,16 @@
               unit: 'g',
               value: weight ? weight : 'No Material',
               warn: !weight,
+            },
+            Volume: {
+              title: 'Volume',
+              unit: 'cm³',
+              value: item.getVolume() / 1000.0,
+            },
+            Area: {
+              title: 'Surface Area',
+              unit: 'cm²',
+              value: item.getArea() / 100.0,
             },
           }
         } else if(type == 'Line' || type == 'Spline') {

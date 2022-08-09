@@ -149,6 +149,10 @@ export default class Component {
     }
   }
 
+  getArea() {
+    return this.solids.reduce((acc, solid) => acc + solid.area, 0.0)
+  }
+
   getVolume() {
     return this.solids.reduce((acc, solid) => acc + solid.volume, 0.0)
   }

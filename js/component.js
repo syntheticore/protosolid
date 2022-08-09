@@ -49,7 +49,7 @@ export default class Component {
 
   updateChildren(componentData) {
     this.freeChildren()
-    this.children = this.real.get_children().map( realChild => new Component(realChild, this, componentData) )
+    this.children = this.real.get_children().map(realChild => new Component(realChild, this, componentData) )
   }
 
   updateSolids() {
@@ -105,7 +105,7 @@ export default class Component {
 
   findChild(id) {
     if(this.id == id) return this
-    for(let child of this.children) {
+    for(const child of this.children) {
       const found = child.findChild(id)
       if(found) return found
     }
@@ -114,7 +114,7 @@ export default class Component {
   findSketch(id) {
     const sketch = this.sketches.find(sketch => sketch.id() == id )
     if(sketch) return sketch
-    for(let child of this.children) {
+    for(const child of this.children) {
       const found = child.findSketch(id)
       if(found) return found
     }
@@ -123,7 +123,7 @@ export default class Component {
   findSketchByFeature(id) {
     const sketch = this.sketches.find(sketch => sketch.get_feature_id() == id )
     if(sketch) return sketch
-    for(let child of this.children) {
+    for(const child of this.children) {
       const found = child.findSketchByFeature(id)
       if(found) return found
     }

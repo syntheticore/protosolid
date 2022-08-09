@@ -67,6 +67,28 @@ export default class Document {
     feature.real.free()
   }
 
+  getChildIds(comp) {
+    let ids = [comp.id]
+    for(const child of comp.children) {
+      ids = ids.concat(this.getChildIds(child))
+    }
+    return ids
+  }
+
+  getFutureComp(id, tree) {
+    if(id == tree.id) return tree
+    for(const child of tree.children) {
+      const self = this.getFutureComp(id, child)
+      if(self) return self
+    }
+  }
+
+  getFutureChildIds(compId) {
+    const tree = this.real.get_final_tree()
+    const comp = this.getFutureComp(compId, tree)
+    return this.getChildIds(comp)
+  }
+
   async save(as) {
     const json = JSON.stringify({
       componentData: this.componentData(),

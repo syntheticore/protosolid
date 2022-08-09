@@ -72,6 +72,7 @@
     FeatureBar(
       :document="document"
       :active-tool="activeTool"
+      :active-component="document.activeComponent"
       :active-feature="activeFeature"
       :selection.sync="selection"
       @update:active-feature="activateFeature"

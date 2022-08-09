@@ -11,6 +11,14 @@ pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
   vec![tuple.0, tuple.1]
 }
 
+pub fn sort_tuple2<T: PartialOrd>(from: T, to: T) -> (T, T) {
+  if from <= to {
+    (from, to)
+  } else {
+    (to, from)
+  }
+}
+
 
 #[allow(unused_macros)]
 macro_rules! almost_eq {

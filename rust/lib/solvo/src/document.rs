@@ -92,7 +92,7 @@ impl Document {
     log!("evaluate {:#?}", self.last_change_index);
     let last_change = self.last_change_index;
     self.regenerate(last_change.min(self.marker), self.marker);
-    let (from, to) = Self::sort_tuple2(self.last_eval_index, self.marker);
+    let (from, to) = sort_tuple2(self.last_eval_index, self.marker);
     self.last_eval_index = self.marker;
     self.components_modified(from.min(last_change), to)
   }
@@ -155,14 +155,6 @@ impl Document {
     false
   }
 
-  fn sort_tuple2<T: PartialOrd>(from: T, to: T) -> (T, T) {
-    if from <= to {
-      (from, to)
-    } else {
-      (to, from)
-    }
-  }
-
   pub fn find_feature(&self, id: Uuid) -> Option<&Ref<Feature>> {
     for feature in self.features.iter() {
       if feature.borrow().id == id {
@@ -181,5 +173,3 @@ impl Document {
     })
   }
 }
-
-

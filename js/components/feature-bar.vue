@@ -173,17 +173,20 @@
     props: {
       document: Object,
       activeTool: Object,
+      activeComponent: Object,
       activeFeature: Object,
       selection: Object,
     },
 
     computed: {
       past: function() {
-        return this.document.features.slice(0, this.marker)
+        const past = this.document.features.slice(0, this.marker)
+        return past.filter(feature => this.shouldDisplayFeature(feature) )
       },
 
       future: function() {
-        return this.document.features.slice(this.marker)
+        const future = this.document.features.slice(this.marker)
+        return future.filter(feature => this.shouldDisplayFeature(feature) )
       },
 
       atStart: function() {
@@ -198,6 +201,10 @@
         return {
           left: String(this.scrolled + 145) + 'px',
         }
+      },
+
+      relevantComponentIds() {
+        return this.document.getFutureChildIds(this.activeComponent.id)
       },
     },
 
@@ -280,6 +287,13 @@
       getFeatureColor(feature) {
         const compId = feature.real.modified_components()[0]
         return compId && this.document.componentData()[compId].color
+      },
+
+      shouldDisplayFeature(feature) {
+        const modified = feature.real.modified_components()
+        return modified.length == 0 || modified.some(compId =>
+          this.relevantComponentIds.some(childId => childId === compId )
+        )
       },
 
       onScroll: function() {

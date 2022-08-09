@@ -1,5 +1,3 @@
-use std::ptr;
-
 use shapex::*;
 
 use crate::internal::*;
@@ -79,10 +77,6 @@ impl Component {
     let comp = Self::default();
     self.children.push(comp);
     self.children.last_mut().unwrap()
-  }
-
-  pub fn delete_component(&mut self, comp: &Self) {
-    self.children.retain(|child| !ptr::eq(child, comp) )
   }
 
   pub fn add_sketch(&mut self, sketch: Ref<Sketch>) {

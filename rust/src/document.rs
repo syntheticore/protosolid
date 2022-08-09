@@ -1,5 +1,7 @@
 use wasm_bindgen::prelude::*;
 use js_sys::Array;
+use uuid::{uuid, Uuid};
+use serde::{Serialize};
 
 use solvo::*;
 use shapex::Ref;
@@ -43,6 +45,25 @@ impl JsDocument {
     JsComponent { component_id: comp.id, document: self.real.clone() }
   }
 
+  pub fn get_final_tree(&self) -> JsValue {
+    let doc = self.real.borrow();
+    let mut tree = DummyComponent {
+      id: uuid!("00000000-0000-0000-0000-000000000000"),
+      children: vec![],
+    };
+    for feature in &doc.features {
+      if let FeatureType::CreateComponent(create_comp) = &feature.borrow().feature_type {
+        let new_comp = DummyComponent {
+          id: create_comp.new_component_id,
+          children: vec![],
+        };
+        let parent = tree.find_child_mut(&create_comp.component_id).unwrap();
+        parent.children.push(new_comp);
+      }
+    }
+    JsValue::from_serde(&tree).unwrap()
+  }
+
   pub fn evaluate(&self) -> Array {
     self.real.borrow_mut().evaluate().iter().map(|comp_ref| JsValue::from_serde(comp_ref).unwrap() ).collect()
   }
@@ -60,5 +81,24 @@ impl JsDocument {
 
   pub fn deserialize(&mut self, dump: String) {
     self.real = rc(ron::from_str(&dump).unwrap());
+  }
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DummyComponent {
+  pub id: Uuid,
+  pub children: Vec<Self>,
+}
+
+impl DummyComponent {
+  pub fn find_child_mut(&mut self, id: &Uuid) -> Option<&mut Self> {
+    if *id == self.id { return Some(self) }
+    for child in &mut self.children {
+      if let Some(target) = child.find_child_mut(id) {
+        return Some(target)
+      }
+    }
+    None
   }
 }

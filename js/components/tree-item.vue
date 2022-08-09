@@ -1,6 +1,5 @@
 <template lang="pug">
   li.tree-item
-
     header(
       @dblclick="$emit('update:active-component', component)"
       @mouseenter="$emit('update:highlight', component)"
@@ -21,8 +20,10 @@
             icon="eye" fixed-width
             @click.stop="component.UIData.hidden = !component.UIData.hidden"
           )
-          fa-icon.assembly(icon="boxes" v-if="isAssembly")
-          fa-icon.part(icon="box" v-else)
+          fa-icon.component(
+            :icon="isAssembly ? 'boxes' : 'box'"
+            :style="{'--color': component.UIData.color}"
+          )
           span.name {{ component.UIData.title }}
           .controls.wide(:class="{'ultra-wide': !isTop}")
             fa-icon(
@@ -136,12 +137,9 @@
       transform: rotate(-0.25turn)
 
   svg
-    &.part
-      color: #139a8f
-    &.assembly
-      color: #1789ad
-    &.part, &.assembly
+    &.component
       padding-left: 2px
+      color: var(--color)
     &.blank
       visibility: hidden
 

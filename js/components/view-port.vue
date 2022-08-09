@@ -590,7 +590,7 @@
           'viewBox',
           '0 0 ' + parent.offsetWidth + ' ' + parent.offsetHeight
         )
-        this.renderer.onWindowResize()
+        setTimeout(() => this.renderer.onWindowResize() )
       },
     }
   }

@@ -182,7 +182,7 @@
             Area: {
               title: 'Surface Area',
               unit: 'cm²',
-              value: item.area,
+              value: item.area / 100.0,
             },
           }
         } else if(type == 'Component') {
@@ -223,7 +223,7 @@
             Area: {
               title: 'Area',
               unit: 'cm²',
-              value: item.get_area()
+              value: item.get_area() / 100.0
             },
           }
         } else if(type == 'Arc') {

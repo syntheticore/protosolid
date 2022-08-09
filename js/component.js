@@ -1,3 +1,5 @@
+import Please from 'pleasejs'
+
 export default class Component {
   constructor(realComponent, parent, componentData) {
     this.real = realComponent
@@ -14,6 +16,7 @@ export default class Component {
       parameters: [],
       exportConfigs: [],
       itemsHidden: {},
+      color: Please.make_color({}),
     }
     componentData[this.id] = this.UIData
 

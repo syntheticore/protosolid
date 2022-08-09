@@ -4,15 +4,22 @@
     nav.controls
       button(@click="rewindMarker", :disabled="atStart")
         fa-icon(icon="angle-double-left")
+
       button(@click="stepMarker(-1)", :disabled="atStart")
         fa-icon(icon="angle-left")
+
       button(@click="stepMarker(1)", :disabled="atEnd")
         fa-icon(icon="angle-right")
+
       button(@click="forwardMarker", :disabled="atEnd")
         fa-icon(icon="angle-double-right")
 
     ul.features(ref="features", @scroll="onScroll", :style="{'--tip': tip + 'px'}")
-      li.past(v-for="(feature, i) in past", :ref="feature == activeFeature ? 'active' : undefined")
+      li.past(
+        v-for="(feature, i) in past",
+        :ref="feature == activeFeature ? 'active' : undefined"
+        :style="{'--color': getFeatureColor(feature)}"
+      )
         transition(name="fade")
           FeatureBox.tipped-bottom(ref="box"
             v-if="isActive(feature)"
@@ -32,7 +39,10 @@
           v-on="$listeners"
         )
       hr(ref="marker")
-      li.future(v-for="(feature, i) in future")
+      li.future(
+        v-for="(feature, i) in future"
+        :style="{'--color': getFeatureColor(feature)}"
+      )
         FeatureIcon(
           isFuture
           :feature="feature"
@@ -41,7 +51,6 @@
           @move-marker="setMarker(past.length + i + 1)"
           v-on="$listeners"
         )
-
 </template>
 
 
@@ -108,7 +117,7 @@
       background: linear-gradient(right, $dark2, rgba($dark2, 0))
       border-top-right-radius: 4px
       border-bottom-right-radius: 4px
-    hr
+    > hr
       border: none
       width: 5px
       height: 5px
@@ -124,10 +133,14 @@
         margin-right: 14px
       &:only-child
         margin: 7px
-    & > li:first-of-type
-      margin-left: 14px
-    & > li:last-of-type
-      margin-right: 11px
+    > li
+      border-bottom: 2px solid var(--color)
+      &.future
+        border-width: 1px
+      &:first-of-type
+        margin-left: 14px
+      &:last-of-type
+        margin-right: 11px
 
   .feature-box
     bottom: 0
@@ -262,6 +275,11 @@
 
       scrollToElem(elem) {
         this.$refs.features.scrollLeft = elem.offsetLeft - (this.$refs.features.clientWidth / 2)
+      },
+
+      getFeatureColor(feature) {
+        const compId = feature.real.modified_components()[0]
+        return compId && this.document.componentData()[compId].color
       },
 
       onScroll: function() {

@@ -268,8 +268,12 @@ impl JsFeature {
   }
 
   pub fn modified_components(&self) -> Array {
-    self.real.as_ref().unwrap().borrow().feature_type.as_feature().modified_components()
-      .iter().map(|comp_ref| JsValue::from_serde(comp_ref).unwrap() ).collect()
+    if let Some(feature) = &self.real {
+      feature.borrow().feature_type.as_feature().modified_components()
+        .iter().map(|comp_ref| JsValue::from_serde(comp_ref).unwrap() ).collect()
+    } else {
+      Array::new()
+    }
   }
 
   pub fn create_component(&mut self, comp_ref: JsValue) {

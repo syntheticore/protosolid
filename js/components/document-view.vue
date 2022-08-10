@@ -236,7 +236,7 @@
         compIds.forEach(id => {
           const comp = this.getComponent(id)
           this.$root.$emit('component-deleted', comp)
-          this.updateComponent(comp)
+          comp.update()
           this.$root.$emit('component-changed', comp, true)
         })
         this.document.activeComponent = this.findValidComponent(this.document.activeComponent)
@@ -251,10 +251,6 @@
 
       getComponent(id) {
         return this.document.tree.findChild(id)
-      },
-
-      updateComponent(comp) {
-        comp.update(this.document.componentData())
       },
 
       addFeature(feature) {

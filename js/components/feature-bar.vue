@@ -134,9 +134,7 @@
       &:only-child
         margin: 7px
     > li
-      border-bottom: 2px solid var(--color)
-      &.future
-        border-width: 1px
+      border-bottom: 1px solid var(--color)
       &:first-of-type
         margin-left: 14px
       &:last-of-type

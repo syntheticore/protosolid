@@ -1,12 +1,12 @@
-import Please from 'pleasejs'
-
 export default class Component {
-  constructor(realComponent, parent, componentData) {
+  constructor(realComponent, parent, document) {
     this.real = realComponent
     this.parent = parent
+    this.document = document
 
     this.id = realComponent.id()
 
+    const componentData = document.componentData()
     this.UIData = componentData[this.id] || {
       title: parent ? "New Component" : "Main Assembly",
       hidden: false,
@@ -16,7 +16,7 @@ export default class Component {
       parameters: [],
       exportConfigs: [],
       itemsHidden: {},
-      color: Please.make_color({}),
+      color: document.makeColor(),
     }
     componentData[this.id] = this.UIData
 
@@ -24,7 +24,7 @@ export default class Component {
     this.sketches = []
     this.helpers = []
     this.children = []
-    this.update(componentData)
+    this.update()
 
     const cache = {
       faces: [],
@@ -40,16 +40,16 @@ export default class Component {
     return 'Component'
   }
 
-  update(componentData) {
-    this.updateChildren(componentData)
+  update() {
+    this.updateChildren()
     // this.updateSolids()
     this.updateSketches()
     this.updateHelpers()
   }
 
-  updateChildren(componentData) {
+  updateChildren() {
     this.freeChildren()
-    this.children = this.real.get_children().map(realChild => new Component(realChild, this, componentData) )
+    this.children = this.real.get_children().map(realChild => new Component(realChild, this, this.document) )
   }
 
   updateSolids() {

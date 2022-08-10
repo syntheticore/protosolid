@@ -10,9 +10,10 @@ export default class Document {
 
     const componentData = {}
     this.componentData = () => { return componentData }
+    this.colors = []
 
     this.real = new window.alcWasm.JsDocument()
-    this.tree = new Component(this.real.get_tree(), null, this.componentData())
+    this.tree = new Component(this.real.get_tree(), null, this)
 
     this.activeComponent = this.tree
     this.activeSketch = null
@@ -89,6 +90,29 @@ export default class Document {
     return this.getChildIds(comp)
   }
 
+  makeColor() {
+    const testColors = [...Array(100)].map(() => {
+      const color = {
+        h: Math.random() * 360,
+        s: 45 + Math.random() * 20,
+        l: 55 + Math.random() * 10,
+      }
+      const diffs = this.colors.map(c => this.colorDiff(c, color) )
+      const worstDiff = Math.min(...diffs)
+      return { color, diff: worstDiff }
+    })
+    testColors.sort((a, b) => Math.sign(b.diff - a.diff) )
+    const color = testColors[0].color
+    this.colors.push(color)
+    return `hsl(${color.h}, ${color.s}%, ${color.l}%)`
+  }
+
+  colorDiff(c1, c2) {
+    let hue = Math.abs(c1.h - c2.h)
+    hue = hue > 180 ? 360 - hue : hue
+    return hue + Math.abs(c1.s - c2.s) + Math.abs(c1.l - c2.l)
+  }
+
   async save(as) {
     const json = JSON.stringify({
       componentData: this.componentData(),
@@ -117,7 +141,7 @@ export default class Document {
     const data = JSON.parse(file.data)
     this.componentData = () => data.componentData
     this.real.deserialize(data.real)
-    this.tree = new Component(this.real.get_tree(), null, this.componentData())
+    this.tree = new Component(this.real.get_tree(), null, this)
     this.features = this.real.get_features().map((feature, i) => deserialize(this, feature, data.features[i]) )
     this.activeComponent = this.tree
   }

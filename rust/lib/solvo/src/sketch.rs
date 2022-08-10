@@ -203,7 +203,7 @@ impl Sketch {
       let mut island = vec![];
       Self::build_island(&start_elem, &mut island, &unused_elements);
       for island_elem in island.iter() {
-        unused_elements.retain(|elem| elem.bounds != island_elem.bounds);
+        unused_elements.retain(|elem| elem.id != island_elem.id);
       }
       if island.len() > 0 { islands.push(island) }
     }
@@ -302,7 +302,7 @@ impl Sketch {
         others.iter().any(|other_elem| {
           let (other_start, other_end) = other_elem.bounds;
           (endpoint.almost(other_start) || endpoint.almost(other_end))
-          && other_elem.bounds != elem.bounds
+          && other_elem.id != elem.id
         })
       })
     });

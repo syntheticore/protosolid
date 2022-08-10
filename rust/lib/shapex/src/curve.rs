@@ -369,6 +369,10 @@ impl Curve for TrimmedCurve {
   fn tesselate(&self) -> Vec<Point3> {
     self.tesselate_adaptive(0.025, Deg(20.0), (0.0, 1.0))
   }
+
+  fn endpoints(&self) -> (Point3, Point3) {
+    self.bounds
+  }
 }
 
 impl Transformable for TrimmedCurve {

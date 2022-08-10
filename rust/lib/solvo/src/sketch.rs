@@ -143,10 +143,7 @@ impl Sketch {
   }
 
   fn get_wires(cut_elements: Vec<TrimmedCurve>, include_outer: bool) -> Vec<Wire> {
-    let (circles, mut others) = cut_elements.into_iter().partition(|elem| match elem.base {
-      CurveType::Circle(_) => true,
-      _ => false,
-    });
+    let (circles, mut others) = cut_elements.into_iter().partition(|elem| elem.is_closed() );
     Self::remove_dangling_segments(&mut others);
     let islands = Self::build_islands(&others);
     let mut wires: Vec<Wire> = islands.iter()
@@ -295,9 +292,9 @@ impl Sketch {
     let start_len = island.len();
     island.retain(|elem| {
       if elem.length().almost(0.0) { return false }
-      let (start_point, end_point) = elem.bounds;
       // Keep closed circles, arcs and splines
-      if start_point == end_point { return true }
+      if elem.is_closed() { return true }
+      let (start_point, end_point) = elem.bounds;
       [start_point, end_point].iter().all(|endpoint| {
         others.iter().any(|other_elem| {
           let (other_start, other_end) = other_elem.bounds;

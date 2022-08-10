@@ -78,7 +78,7 @@ impl Wire {
   }
 
   pub fn contains_point(&self, p: Point3) -> bool {
-    let ray = TrimmedCurve::new(Line::new(p, p + Vec3::unit_x() * 9999999.0).into_enum());
+    let ray = TrimmedCurve::new(Line::new(p, p + Vec3::unit_x() * 999999.0).into_enum());
     let num_hits: usize = parallel!(self.0).flat_map(|elem| {
       let intersections = ray.intersect(&elem);
       intersections.iter().map(|isect| match isect {

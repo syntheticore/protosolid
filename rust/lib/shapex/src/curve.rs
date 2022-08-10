@@ -897,11 +897,11 @@ impl Spline {
   }
 
   fn unsample_recursive(&self, sample1: (f64, f64), sample2: (f64, f64), target: Point3) -> f64 {
-    if sample1.0.almost(sample2.0) { return sample1.0 }
+    if sample1.0 == sample2.0 { return sample1.0 }
     let t_center = (sample1.0 + sample2.0) / 2.0;
     let p_center = self.sample(t_center);
     let dist_center = p_center.distance2(target);
-    if p_center.almost(target) { return t_center }
+    if p_center == target { return t_center }
     let sample_center = (t_center, dist_center);
     if sample1.1 < sample2.1 {
       self.unsample_recursive(sample1, sample_center, target)
@@ -1131,8 +1131,10 @@ mod tests {
   fn unsample_spline() {
     let spline = test_data::s_curve();
     let p = spline.sample(0.5);
-    assert_eq!(p, Point3::origin());
-    assert_eq!(0.5, spline.unsample(p));
+    almost_eq!(p, Point3::origin());
+    almost_eq!(0.5, spline.unsample(p));
+    almost_eq!(0.0, spline.unsample(Point3::new(-1.5, -1.0, 0.0)));
+    almost_eq!(1.0, spline.unsample(Point3::new(1.5, 1.0, 0.0)));
   }
 
   #[test]

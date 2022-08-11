@@ -78,6 +78,8 @@
       @update:active-feature="activateFeature"
       @delete-feature="removeFeature"
     )
+
+    //- button.button(@click="splitAll") Split all
 </template>
 
 
@@ -333,7 +335,7 @@
       },
 
       activateSketch: function(sketch) {
-        const featureId = sketch.get_feature_id()
+        const featureId = sketch.feature_id()
         const feature = this.document.features.find(f => f.id == featureId )
         this.activateFeature(feature)
       },
@@ -394,6 +396,11 @@
             }
           })
         }
+      },
+
+      splitAll: function() {
+        const splits = this.document.activeSketch.get_all_split()
+        this.$root.$emit('component-changed', this.document.activeComponent)
       },
     },
   }

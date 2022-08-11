@@ -34,15 +34,15 @@ impl JsFace {
 
 #[wasm_bindgen]
 impl JsFace {
-  pub fn get_id(&self) -> JsValue {
+  pub fn id(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
   }
 
-  pub fn get_origin(&self) -> JsValue {
+  pub fn origin(&self) -> JsValue {
     point_to_js(self.make_origin())
   }
 
-  pub fn get_center(&self) -> JsValue {
+  pub fn center(&self) -> JsValue {
     let mut count = 0;
     let center = self.real.borrow().outer_ring.borrow().vertex_iter().fold(Point3::origin(), |acc, vertex| {
       count += 1;
@@ -51,11 +51,11 @@ impl JsFace {
     point_to_js(center)
   }
 
-  pub fn get_normal(&self) -> JsValue {
+  pub fn normal(&self) -> JsValue {
     point_to_js(Point3::from_vec(self.real.borrow().surface.as_surface().normal_at(0.0, 0.0)))
   }
 
-  // pub fn get_display_normal(&self) -> Array {
+  // pub fn display_normal(&self) -> Array {
   //   let normal = self.real.borrow().surface.as_surface().normal_at(0.0, 0.0);
   //   let origin = self.make_origin();
   //   points_to_js(vec![origin, origin + normal])
@@ -69,7 +69,7 @@ impl JsFace {
     }
   }
 
-  pub fn get_surface_type(&self) -> String {
+  pub fn surface_type(&self) -> String {
     match self.real.borrow().surface {
       SurfaceType::Planar(_) => "Planar".into(),
       SurfaceType::Revolution(_) => "Revolution".into(),
@@ -88,7 +88,7 @@ impl JsFace {
     let face = self.real.borrow();
     JsValue::from(JsFaceRef::new(FaceRef {
       component_id: self.component_id,
-      bounds: face.get_edge_ids(),
+      bounds: face.edge_ids(),
     }, self.document.clone()))
   }
 
@@ -97,7 +97,7 @@ impl JsFace {
     match &face.surface {
       SurfaceType::Planar(_) => JsValue::from(JsPlanarRef::new(PlanarRef::FaceRef(FaceRef {
         component_id: self.component_id,
-        bounds: face.get_edge_ids(),
+        bounds: face.edge_ids(),
       }), self.document.clone())),
       _ => unreachable!(),
     }
@@ -122,7 +122,7 @@ impl JsEdge {
     }
   }
 
-  pub fn get_id(&self) -> JsValue {
+  pub fn id(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
   }
 
@@ -176,19 +176,19 @@ impl JsSolid {
     "Solid".into()
   }
 
-  pub fn get_id(&self) -> JsValue {
+  pub fn id(&self) -> JsValue {
     JsValue::from_serde(&self.solid_id).unwrap()
   }
 
-  pub fn get_faces(&self) -> Array {
+  pub fn faces(&self) -> Array {
     self.faces.clone()
   }
 
-  pub fn get_edges(&self) -> Array {
+  pub fn edges(&self) -> Array {
     self.edges.clone()
   }
 
-  pub fn get_vertices(&self) -> Array {
+  pub fn vertices(&self) -> Array {
     self.vertices.clone()
   }
 

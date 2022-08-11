@@ -21,7 +21,7 @@ pub struct JsComponent {
 #[wasm_bindgen]
 impl JsComponent {
   fn get_comp<'a>(&'a self, doc: &'a Document) -> &Component {
-    doc.get_tree().find_child(&self.component_id).unwrap()
+    doc.tree().find_child(&self.component_id).unwrap()
   }
 
   pub fn id(&self) -> JsValue {
@@ -29,7 +29,7 @@ impl JsComponent {
     JsValue::from_serde(&self.get_comp(&doc).id).unwrap()
   }
 
-  pub fn get_children(&self) -> Array {
+  pub fn children(&self) -> Array {
     self.get_comp(&self.document.borrow()).children.iter().map(|child|
       JsValue::from(Self {
         component_id: child.id,
@@ -38,20 +38,20 @@ impl JsComponent {
     ).collect()
   }
 
-  pub fn get_sketches(&self) -> Array {
+  pub fn sketches(&self) -> Array {
     self.get_comp(&self.document.borrow()).sketches.iter().map(|sketch|
       JsValue::from(JsSketch::from(&self.document, self.component_id, sketch))
     ).collect()
   }
 
-  pub fn get_solids(&self) -> Array {
+  pub fn solids(&self) -> Array {
     let doc = self.document.borrow();
     self.get_comp(&doc).compound.solids.iter().map(|body|
       JsValue::from(JsSolid::from(body, self.component_id, self.document.clone()))
     ).collect()
   }
 
-  pub fn get_planes(&self) -> Array {
+  pub fn planes(&self) -> Array {
     self.get_comp(&self.document.borrow()).helpers.iter().filter_map(|helper|
       if let ConstructionHelperType::Plane(_) = &helper.borrow().helper_type {
         // Some(matrix_to_js(plane.as_transform()))

@@ -19,7 +19,7 @@ pub use cgmath::Deg;
 pub const MAX_FLOAT: f64 = 9223372036854776000.0;
 
 /// The maximum difference between two values to be considered equal.
-pub const EPSILON: f64 = core::f64::EPSILON * 1000000.0;
+pub const EPSILON: f64 = core::f64::EPSILON * 100000000.0;
 
 pub type Vec2 = cgmath::Vector2<f64>;
 pub type Vec3 = cgmath::Vector3<f64>;

@@ -13,7 +13,7 @@ export default class Document {
     this.colors = []
 
     this.real = new window.alcWasm.JsDocument()
-    this.tree = new Component(this.real.get_tree(), null, this)
+    this.tree = new Component(this.real.tree(), null, this)
 
     this.activeComponent = this.tree
     this.activeSketch = null
@@ -85,7 +85,7 @@ export default class Document {
   }
 
   getFutureChildIds(compId) {
-    const tree = this.real.get_final_tree()
+    const tree = this.real.final_tree()
     const comp = this.getFutureComp(compId, tree)
     return this.getChildIds(comp)
   }
@@ -141,8 +141,8 @@ export default class Document {
     const data = JSON.parse(file.data)
     this.componentData = () => data.componentData
     this.real.deserialize(data.real)
-    this.tree = new Component(this.real.get_tree(), null, this)
-    this.features = this.real.get_features().map((feature, i) => deserialize(this, feature, data.features[i]) )
+    this.tree = new Component(this.real.tree(), null, this)
+    this.features = this.real.features().map((feature, i) => deserialize(this, feature, data.features[i]) )
     this.activeComponent = this.tree
   }
 

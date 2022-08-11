@@ -44,11 +44,11 @@ impl JsSketch {
     JsValue::from_serde(&self.component_id).unwrap()
   }
 
-  pub fn get_feature_id(&self) -> JsValue {
+  pub fn feature_id(&self) -> JsValue {
     JsValue::from_serde(&self.document.borrow().find_feature_from_sketch(&self.real).unwrap().borrow().id).unwrap()
   }
 
-  pub fn get_sketch_elements(&self) -> Array {
+  pub fn sketch_elements(&self) -> Array {
     self.real.borrow_mut().elements.iter().map(|elem| {
       JsValue::from(JsCurve::from(elem.clone(), self.real.clone()))
     }).collect()
@@ -93,12 +93,12 @@ impl JsSketch {
     Ok(JsCurve::from(sketch.elements.last().unwrap().clone(), self.real.clone()))
   }
 
-  pub fn get_workplane(&self) -> JsValue {
+  pub fn workplane(&self) -> JsValue {
     let plane = self.real.borrow_mut().work_plane;
     matrix_to_js(plane)
   }
 
-  pub fn get_profiles(&self) -> Array {
+  pub fn profiles(&self) -> Array {
     // web_sys::console::time_with_label("get_profiles");
     let profiles = self.real.borrow_mut().get_profiles(false);
     // web_sys::console::time_end_with_label("get_profiles");
@@ -115,17 +115,10 @@ impl JsSketch {
     let planar_elements = &sketch.elements;
     let splits: Vec<TrimmedCurve> = Sketch::all_split(&planar_elements);
 
-    let (mut circles, mut others): (Vec<TrimmedCurve>, Vec<TrimmedCurve>) = splits.into_iter().partition(|elem| match elem.base {
-      CurveType::Circle(_) => true,
-      _ => false,
-    });
+    let (mut circles, mut others): (Vec<TrimmedCurve>, Vec<TrimmedCurve>) = splits.into_iter().partition(|elem| elem.is_closed() );
 
-    Sketch::remove_dangling_segments(&mut others);
+    // Sketch::remove_dangling_segments(&mut others);
     others.append(&mut circles);
-
-    for tcurve in &mut others {
-      tcurve.transform(&sketch.work_plane);
-    }
 
     sketch.elements.clear();
     for split in others.iter() {

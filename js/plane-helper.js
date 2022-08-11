@@ -18,6 +18,6 @@ export default class PlaneHelper extends THREE.Mesh {
     this.alcType = 'plane'
     this.alcObject = alcObject
 
-    this.applyMatrix4(matrix2three(alcObject.get_transform()))
+    this.applyMatrix4(matrix2three(alcObject.transform()))
   }
 }

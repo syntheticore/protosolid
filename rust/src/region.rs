@@ -31,22 +31,22 @@ impl JsRegion {
 
 #[wasm_bindgen]
 impl JsRegion {
-  pub fn get_id(&self) -> String {
+  pub fn id(&self) -> String {
     let mut s = String::new();
     for wire in &self.profile.rings {
       for tcurve in wire {
-        s.push_str(&tcurve.base.get_id().to_string());
+        s.push_str(&tcurve.base.id().to_string());
       }
     }
     s
   }
 
-  pub fn get_mesh(&self) -> JsBufferGeometry {
+  pub fn mesh(&self) -> JsBufferGeometry {
     let mesh = self.profile.tesselate();
     JsBufferGeometry::from(mesh.to_buffer_geometry())
   }
 
-  pub fn get_center(&self) -> JsValue {
+  pub fn center(&self) -> JsValue {
     let center = self.profile.rings[0].iter().fold(
       Point3::origin(),
       |acc, elem| acc + match &elem.base {
@@ -57,7 +57,7 @@ impl JsRegion {
     point_to_js(self.sketch.borrow().work_plane.transform_point(center))
   }
 
-  pub fn get_normal(&self) -> JsValue {
+  pub fn normal(&self) -> JsValue {
     let normal = self.sketch.borrow().work_plane.transform_vector(Vec3::new(0.0, 0.0, 1.0));
     vec_to_js(normal)
   }

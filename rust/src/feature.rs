@@ -31,10 +31,10 @@ impl JsPlanarRef {
 
 #[wasm_bindgen]
 impl JsPlanarRef {
-  pub fn get_item(&self) -> JsValue {
+  pub fn item(&self) -> JsValue {
     match &self.real {
       PlanarRef::FaceRef(face_ref)
-      => if let Some(face) = face_ref.get_face(self.document.borrow().get_tree()) {
+      => if let Some(face) = face_ref.get_face(self.document.borrow().tree()) {
         JsValue::from(JsFace::from(face, face_ref.component_id, self.document.clone()))
       } else {
         JsValue::undefined()
@@ -43,10 +43,10 @@ impl JsPlanarRef {
     }
   }
 
-  pub fn get_item_id(&self) -> JsValue {
+  pub fn item_id(&self) -> JsValue {
     match &self.real {
       PlanarRef::FaceRef(face_ref)
-      => if let Some(face) = face_ref.get_face(self.document.borrow().get_tree()) {
+      => if let Some(face) = face_ref.get_face(self.document.borrow().tree()) {
         JsValue::from_serde(&face.borrow().id).unwrap()
       } else {
         JsValue::undefined()
@@ -69,7 +69,7 @@ impl JsAxialRef {
 
 #[wasm_bindgen]
 impl JsAxialRef {
-  pub fn get_item(&self) -> JsValue {
+  pub fn item(&self) -> JsValue {
     match &self.0 {
       AxialRef::CurveRef(curve_ref)
       => JsValue::from(JsCurve::from(curve_ref.curve.clone(), curve_ref.sketch.clone())),
@@ -77,10 +77,10 @@ impl JsAxialRef {
     }
   }
 
-  pub fn get_item_id(&self) -> JsValue {
+  pub fn item_id(&self) -> JsValue {
     match &self.0 {
       AxialRef::CurveRef(curve_ref)
-      => JsValue::from_serde(&curve_ref.curve.borrow().get_id()).unwrap(),
+      => JsValue::from_serde(&curve_ref.curve.borrow().id()).unwrap(),
       _ => todo!(),
     }
   }
@@ -105,16 +105,16 @@ impl JsFaceRef {
 
 #[wasm_bindgen]
 impl JsFaceRef {
-  pub fn get_item(&self) -> JsValue {
-    if let Some(face) = self.real.get_face(self.document.borrow().get_tree()) {
+  pub fn item(&self) -> JsValue {
+    if let Some(face) = self.real.get_face(self.document.borrow().tree()) {
       JsValue::from(JsFace::from(face, self.real.component_id, self.document.clone()))
     } else {
       JsValue::undefined()
     }
   }
 
-  pub fn get_item_id(&self) -> JsValue {
-    if let Some(face) = self.real.get_face(self.document.borrow().get_tree()) {
+  pub fn item_id(&self) -> JsValue {
+    if let Some(face) = self.real.get_face(self.document.borrow().tree()) {
       JsValue::from_serde(&face.borrow().id).unwrap()
     } else {
       JsValue::undefined()
@@ -141,19 +141,19 @@ impl JsProfileRef {
 
 #[wasm_bindgen]
 impl JsProfileRef {
-  pub fn get_item(&self) -> JsValue {
-    if let Some(sketch) = self.real.get_sketch(self.document.borrow().get_tree()) {
+  pub fn item(&self) -> JsValue {
+    if let Some(sketch) = self.real.get_sketch(self.document.borrow().tree()) {
       JsValue::from(JsRegion::new(self.real.profile.clone(), sketch.clone(), self.document.clone()))
     } else {
       JsValue::undefined()
     }
   }
 
-  pub fn get_item_id(&self) -> String {
+  pub fn item_id(&self) -> String {
     let mut s = String::new();
     for wire in &self.real.profile.rings {
       for tcurve in wire {
-        s.push_str(&tcurve.base.get_id().to_string());
+        s.push_str(&tcurve.base.id().to_string());
       }
     }
     s
@@ -164,7 +164,7 @@ impl JsProfileRef {
   // }
 
   pub fn update(&mut self) {
-    self.real.update(self.document.borrow().get_tree()).ok();
+    self.real.update(self.document.borrow().tree()).ok();
   }
 }
 
@@ -246,7 +246,7 @@ impl JsFeature {
   pub fn preview(&self) -> JsValue {
     match self.real.as_ref() {
       Some(real) => {
-        if let Some(compound) = real.borrow().feature_type.as_feature().preview(self.document.borrow().get_tree()) {
+        if let Some(compound) = real.borrow().feature_type.as_feature().preview(self.document.borrow().tree()) {
           JsValue::from(JsBufferGeometry::from_compound(&compound))
         } else {
           JsValue::undefined()
@@ -374,10 +374,10 @@ impl JsFeature {
     }
   }
 
-  pub fn get_profiles(&self) -> Array {
+  pub fn profiles(&self) -> Array {
     if let Some(real) = &self.real {
       if let FeatureType::Extrusion(feature) = &real.borrow().feature_type {
-        feature.profiles.iter().map(|profile| JsValue::from(JsRegion::new(profile.profile.clone(), profile.get_sketch(self.document.borrow().get_tree()).unwrap().clone(), self.document.clone())) ).collect()
+        feature.profiles.iter().map(|profile| JsValue::from(JsRegion::new(profile.profile.clone(), profile.get_sketch(self.document.borrow().tree()).unwrap().clone(), self.document.clone())) ).collect()
       } else {
         Array::new()
       }
@@ -386,7 +386,7 @@ impl JsFeature {
     }
   }
 
-  pub fn get_face_refs(&self) -> Array {
+  pub fn face_refs(&self) -> Array {
     if let Some(real) = &self.real {
       if let FeatureType::Draft(feature) = &real.borrow().feature_type {
         feature.faces.iter().map(|face_ref| JsValue::from(JsFaceRef::new(face_ref.clone(), self.document.clone())) ).collect()

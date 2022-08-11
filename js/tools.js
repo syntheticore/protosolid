@@ -90,7 +90,7 @@ export class ManipulationTool extends HighlightTool {
   mouseMove(vec, coords) {
     const handle = this.viewport.activeHandle
     if(handle) {
-      let handles = handle.elem.get_handles()
+      let handles = handle.elem.handles()
       handles[handle.index] = vec.toArray()
       handle.elem.set_handles(handles, false)
       this.viewport.elementChanged(handle.elem, this.component)
@@ -108,16 +108,16 @@ export class ManipulationTool extends HighlightTool {
 
 //   click(vec, coords) {
 //     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-//     if(face && face.alcObject.get_surface_type() == 'Planar') {
-//       const position = vec2three(face.alcObject.get_origin())
-//       let rotation = rotationFromNormal(vec2three(face.alcObject.get_normal()))
+//     if(face && face.alcObject.surface_type() == 'Planar') {
+//       const position = vec2three(face.alcObject.origin())
+//       let rotation = rotationFromNormal(vec2three(face.alcObject.normal()))
 
 //       this.viewport.renderer.sketchPlane.position = position
 //       this.viewport.renderer.sketchPlane.rotation.setFromRotationMatrix(rotation)
 
 //       rotation.setPosition(position)
 //       this.viewport.snapper.planeTransform = rotation
-//       this.component.real.get_sketch().set_workplane(matrixFromThree(rotation))
+//       this.component.real.sketch().set_workplane(matrixFromThree(rotation))
 
 //       this.viewport.regionsDirty = true
 //       this.viewport.updateRegions()
@@ -218,10 +218,10 @@ export class LineTool extends SketchTool {
 
   mouseDown(vec) {
     this.mouseMove(vec)
-    const elems = this.sketch.get_sketch_elements()
+    const elems = this.sketch.sketch_elements()
     elems.pop()
     const touchesExisting = elems
-      .flatMap(elem => elem.get_snap_points() )
+      .flatMap(elem => elem.snap_points() )
       .map(p => vec2three(p) )
       .some(p => p.equals(vec) )
     // Restart tool when we hit an existing point
@@ -235,7 +235,7 @@ export class LineTool extends SketchTool {
 
   mouseMove(vec) {
     if(!this.line) return
-    let p1 = this.line.get_handles()[0]
+    let p1 = this.line.handles()[0]
     this.line.set_handles([p1, vec.toArray()], false)
     this.viewport.elementChanged(this.line, this.component)
   }
@@ -255,7 +255,7 @@ export class SplineTool extends SketchTool {
 
   mouseDown(vec) {
     if(this.spline) {
-      let points = this.spline.get_handles()
+      let points = this.spline.handles()
       points[points.length - 1] = vec.toArray()
       points.push(vec.toArray())
       this.spline.set_handles(points, false)
@@ -267,7 +267,7 @@ export class SplineTool extends SketchTool {
 
   mouseMove(vec) {
     if(!this.spline) return
-    let points = this.spline.get_handles()
+    let points = this.spline.handles()
     points[points.length - 1] = vec.toArray()
     this.spline.set_handles(points, false)
     this.viewport.elementChanged(this.spline, this.component)
@@ -275,7 +275,7 @@ export class SplineTool extends SketchTool {
 
   dispose() {
     if(!this.spline) return
-    let points = this.spline.get_handles()
+    let points = this.spline.handles()
     points.pop()
     this.spline.set_handles(points, false)
     this.viewport.elementChanged(this.spline, this.component)

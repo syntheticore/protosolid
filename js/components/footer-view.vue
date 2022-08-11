@@ -210,7 +210,7 @@
             Length: {
               title: 'Length',
               unit: 'mm',
-              value: item.get_length(),
+              value: item.length(),
             },
           }
         } else if(type == 'Circle') {
@@ -218,22 +218,22 @@
             Radius: {
               title: 'Radius',
               unit: 'mm',
-              value: item.get_radius()
+              value: item.radius()
             },
             Diameter: {
               title: 'Diameter',
               unit: 'mm',
-              value: item.get_radius() * 2
+              value: item.radius() * 2
             },
             Length: {
               title: 'Circumfence',
               unit: 'mm',
-              value: item.get_length()
+              value: item.length()
             },
             Area: {
               title: 'Area',
               unit: 'cm²',
-              value: item.get_area() / 100.0
+              value: item.area() / 100.0
             },
           }
         } else if(type == 'Arc') {
@@ -241,12 +241,12 @@
             Radius: {
               title: 'Radius',
               unit: 'mm',
-              value: item.get_radius()
+              value: item.radius()
             },
             Length: {
               title: 'Length',
               unit: 'mm',
-              value: item.get_length()
+              value: item.length()
             },
           }
         } else {
@@ -255,7 +255,7 @@
       },
 
       splitAll: function() {
-        const splits = this.activeComponent.real.get_sketch().get_all_split()
+        const splits = this.activeComponent.real.sketch().get_all_split()
         this.$root.$emit('component-changed', this.activeComponent)
       },
 

@@ -8,6 +8,7 @@ use crate::transform::*;
 use crate::curve::*;
 use crate::mesh::*;
 use crate::geom2d;
+use crate::SurfaceArea;
 
 
 pub type PolyLine = Vec<Point3>;
@@ -67,10 +68,6 @@ impl Wire {
     }
   }
 
-  pub fn area(&self) -> f64 {
-    geom2d::polygon_area(&self.cage())
-  }
-
   pub fn cage(&self) -> PolyLine {
     let polyline = self.iter().map(|curve| curve.bounds.0 ).collect();
     // polyline.push(self[0].bounds.0);
@@ -103,6 +100,12 @@ impl Wire {
       poly.into_iter().take(n).collect::<PolyLine>()
     }).collect();
     polyline
+  }
+}
+
+impl SurfaceArea for Wire {
+  fn area(&self) -> f64 {
+    geom2d::polygon_area(&self.cage())
   }
 }
 
@@ -157,13 +160,15 @@ impl Profile {
     }
   }
 
-  pub fn area(&self) -> f64 {
-    self.rings[0].area() - self.rings.iter().skip(1).fold(0.0, |acc, wire| acc + wire.area() )
-  }
-
   pub fn contains_point(&self, p: Point3) -> bool {
     let p = Point3::from_vec(self.plane.unsample(p).to_vec().extend(0.0));
     self.rings[0].contains_point(p) && !self.rings.iter().skip(1).any(|wire| wire.contains_point(p) )
+  }
+}
+
+impl SurfaceArea for Profile {
+  fn area(&self) -> f64 {
+    self.rings[0].area() - self.rings.iter().skip(1).fold(0.0, |acc, wire| acc + wire.area() )
   }
 }
 

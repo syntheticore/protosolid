@@ -38,15 +38,15 @@ impl Document {
     }
   }
 
-  pub fn get_tree(&self) -> &Component {
+  pub fn tree(&self) -> &Component {
     &self.cache[self.marker]
   }
 
-  pub fn get_tree_mut(&mut self) -> &mut Component {
+  pub fn tree_mut(&mut self) -> &mut Component {
     &mut self.cache[self.marker]
   }
 
-  pub fn get_marker(&self) -> usize { self.marker }
+  pub fn marker(&self) -> usize { self.marker }
 
   pub fn move_marker(&mut self, to: usize) {
     self.marker = to.min(self.features.len()).max(0);

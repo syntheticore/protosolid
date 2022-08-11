@@ -167,7 +167,7 @@ impl CurveType {
 impl TrimmedCurve {
   pub fn intersect_surface(&self, other: &TrimmedSurface) -> Vec<CurveSurfaceIntersectionType> {
     let intersections = self.base.intersect_surface(&other.base);
-    intersections.into_iter().map(move |intersection| {
+    intersections.into_iter().map(|intersection| {
       match intersection {
         CurveSurfaceIntersectionType::Contained
         => intersection,

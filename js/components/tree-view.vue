@@ -17,7 +17,7 @@
     overflow-x: hidden
     overflow-y: auto
     padding-top: 10px
-    padding-bottom: 26px // Neccessary to avoid scroll container flickering
+    padding-bottom: 80px // Neccessary to avoid scroll container flickering
     pointer-events: auto
     scrollbar-color: $dark1 * 1.15 $dark2 * 0.9
     scrollbar-width: thin

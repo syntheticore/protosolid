@@ -332,7 +332,7 @@
               const currentItems = (this.activeFeature[key] && this.activeFeature[key]()) || []
               this.activeFeature[key] = () => currentItems
               const oldItem = currentItems.find(otherRef => {
-                return otherRef.get_item_id() == item.get_id()
+                return otherRef.item_id() == item.id()
               })
               if(oldItem) {
                 oldItem.free()
@@ -373,8 +373,8 @@
               const { pickerPos, color } = this.getPickerInfo(key)
               const refs = Array.isArray(data()) ? data() : [data()]
               refs.forEach(ref => {
-                const item = ref.get_item()
-                this.$root.$emit('show-picker', pickerPos, vec2three(item.get_center()), color)
+                const item = ref.item()
+                this.$root.$emit('show-picker', pickerPos, vec2three(item.center()), color)
                 item.free()
               })
             }

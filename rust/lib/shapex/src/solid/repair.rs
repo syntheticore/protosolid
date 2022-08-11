@@ -1,7 +1,7 @@
 use crate::solid::*;
 
 
-/// All types that can repair and validate their inner structure without additional data.
+/// All types that can validate and repair their inner structure without additional data.
 
 pub trait Repairable {
   fn repair(&mut self) -> Result<(), String>;
@@ -43,7 +43,7 @@ impl Repairable for Shell {
 impl Repairable for Face {
   fn repair(self: &mut Face) -> Result<(), String> {
     for he in self.outer_ring.borrow().iter() {
-      let edge = he.borrow().get_edge();
+      let edge = he.borrow().edge();
       edge.borrow_mut().repair()?;
     }
     Ok(())
@@ -53,7 +53,7 @@ impl Repairable for Face {
 
 impl Repairable for Edge {
   fn repair(&mut self) -> Result<(), String> {
-    let intersections = self.get_left_face().borrow().surface.intersect(&self.get_right_face().borrow().surface);
+    let intersections = self.left_face().borrow().surface.intersect(&self.right_face().borrow().surface);
     if intersections.len() == 0 { return Err("Adjacent faces don't intersect".into()) }
     for intersection in intersections {
       match intersection {
@@ -64,14 +64,14 @@ impl Repairable for Edge {
         | SurfaceIntersectionType::Cross(curve)
         | SurfaceIntersectionType::Extended(curve)
         => {
-          let top_sect = curve.intersect_surface(&self.get_top_face().borrow().surface);
+          let top_sect = curve.intersect_surface(&self.top_face().borrow().surface);
           let top_sect = top_sect.first().and_then(|isect| isect.get_point(true) ); //XXX Select correct intersection
-          let bottom_sect = curve.intersect_surface(&self.get_bottom_face().borrow().surface);
+          let bottom_sect = curve.intersect_surface(&self.bottom_face().borrow().surface);
           let bottom_sect = bottom_sect.first().and_then(|isect| isect.get_point(true) );
           if let (Some(top_bound), Some(bottom_bound)) = (top_sect, bottom_sect) {
             self.left_half.borrow().origin.borrow_mut().point = bottom_bound;
             self.right_half.borrow().origin.borrow_mut().point = top_bound;
-            let id = self.curve.get_id();
+            let id = self.curve.id();
             self.curve = curve;
             self.curve.set_id(id);
           } else {

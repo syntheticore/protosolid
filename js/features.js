@@ -199,10 +199,10 @@ export class ExtrudeFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo.set(this.distance, this.side)
       } else {
-        const item = this.profiles()[0].get_item()
-        const center = vec2three(item.get_center())
+        const item = this.profiles()[0].item()
+        const center = vec2three(item.center())
         const axis = this.axis && this.axis()
-        const direction = axis || vec2three(item.get_normal())
+        const direction = axis || vec2three(item.normal())
         item.free()
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.distance, (dist, side) => {
           this.distance = dist
@@ -277,10 +277,10 @@ export class RevolveFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo.set(this.angle, this.side)
       } else {
-        const item = this.profiles()[0].get_item()
-        const center = vec2three(item.get_center())
+        const item = this.profiles()[0].item()
+        const center = vec2three(item.center())
         const axis = this.axis && this.axis()
-        const direction = vec2three(item.get_normal())
+        const direction = vec2three(item.normal())
         item.free()
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.angle, (dist, side) => {
           this.angle = dist
@@ -367,7 +367,7 @@ export class DraftFeature extends Feature {
   confirm() {
     // Refetch faces in case they've been repaired
     this.faces().forEach(faceRef => faceRef.free())
-    const faces = this.real.get_face_refs()
+    const faces = this.real.face_refs()
     this.faces = () => faces
   }
 

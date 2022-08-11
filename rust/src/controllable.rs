@@ -3,16 +3,16 @@ use shapex::*;
 // use crate::internal::*;
 
 pub trait Controllable {
-  fn get_handles(&self) -> Vec<Point3>;
+  fn handles(&self) -> Vec<Point3>;
   fn set_handles(&mut self, handles: Vec<Point3>);
-  fn get_snap_points(&self) -> Vec<Point3>;
+  fn snap_points(&self) -> Vec<Point3>;
 
   fn set_initial_handles(&mut self, handles: Vec<Point3>) { self.set_handles(handles) }
 }
 
 
 impl Controllable for Line {
-  fn get_handles(&self) -> Vec<Point3> {
+  fn handles(&self) -> Vec<Point3> {
     vec![self.points.0, self.points.1]
   }
 
@@ -20,8 +20,8 @@ impl Controllable for Line {
     self.points = (handles[0], handles[1]);
   }
 
-  fn get_snap_points(&self) -> Vec<Point3> {
-    let mut points = self.get_handles();
+  fn snap_points(&self) -> Vec<Point3> {
+    let mut points = self.handles();
     points.push(self.midpoint());
     points
   }
@@ -29,7 +29,7 @@ impl Controllable for Line {
 
 
 impl Controllable for Arc {
-  fn get_handles(&self) -> Vec<Point3> {
+  fn handles(&self) -> Vec<Point3> {
     let endpoints = self.endpoints();
     vec![endpoints.0, endpoints.1]
   }
@@ -57,7 +57,7 @@ impl Controllable for Arc {
     }
   }
 
-  fn get_snap_points(&self) -> Vec<Point3> {
+  fn snap_points(&self) -> Vec<Point3> {
     let endpoints = self.endpoints();
     vec![self.plane.origin, endpoints.0, endpoints.1, self.midpoint()]
   }
@@ -65,7 +65,7 @@ impl Controllable for Arc {
 
 
 impl Controllable for Circle {
-  fn get_handles(&self) -> Vec<Point3> {
+  fn handles(&self) -> Vec<Point3> {
     vec![self.plane.origin]
   }
 
@@ -77,14 +77,14 @@ impl Controllable for Circle {
     }
   }
 
-  fn get_snap_points(&self) -> Vec<Point3> {
+  fn snap_points(&self) -> Vec<Point3> {
     vec![self.plane.origin]
   }
 }
 
 
 impl Controllable for Spline {
-  fn get_handles(&self) -> Vec<Point3> {
+  fn handles(&self) -> Vec<Point3> {
     self.controls.clone()
   }
 
@@ -94,8 +94,8 @@ impl Controllable for Spline {
     *self = copy;
   }
 
-  fn get_snap_points(&self) -> Vec<Point3> {
-    self.get_handles()
+  fn snap_points(&self) -> Vec<Point3> {
+    self.handles()
   }
 }
 

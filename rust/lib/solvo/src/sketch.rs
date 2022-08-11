@@ -169,7 +169,7 @@ impl Sketch {
           &mut used_forward,
           &mut used_backward,
         );
-        let mut new_wires = loops.into_iter().map(move |region| Wire::new(region) ).collect();
+        let mut new_wires = loops.into_iter().map(|region| Wire::new(region) ).collect();
         wires.append(&mut new_wires);
       }
     }
@@ -312,7 +312,7 @@ impl Sketch {
 
   pub fn find_element(&self, id: Uuid) -> Option<&Ref<CurveType>> {
     for elem in &self.elements {
-      if elem.borrow().get_id() == id {
+      if elem.borrow().id() == id {
         return Some(&elem)
       }
     }
@@ -325,9 +325,9 @@ impl Sketch {
     let new_wires = Self::get_wires(cut_elements, false);
     let mut was_repair_needed = false;
     for wire in &mut profile.rings {
-      let wire_ids: HashSet<Uuid> = wire.iter().map(|tcurve| tcurve.base.get_id() ).collect();
+      let wire_ids: HashSet<Uuid> = wire.iter().map(|tcurve| tcurve.base.id() ).collect();
       let replacement_wire = new_wires.iter().filter_map(|new_wire| {
-        let new_wire_ids: HashSet<Uuid> = new_wire.iter().map(|tcurve| tcurve.base.get_id() ).collect();
+        let new_wire_ids: HashSet<Uuid> = new_wire.iter().map(|tcurve| tcurve.base.id() ).collect();
         let count = wire_ids.intersection(&new_wire_ids).count();
         // log!("{:#?} {:#?} {:#?}", wire_ids, new_wire_ids, count);
         if count > 0 {

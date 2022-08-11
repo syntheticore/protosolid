@@ -246,7 +246,7 @@
       activeSketch: function(sketch) {
         this.transloader.setActiveSketch(sketch)
         if(sketch) {
-          let plane = matrix2three(sketch.get_workplane())
+          let plane = matrix2three(sketch.workplane())
           this.snapper.planeTransform = plane
           this.renderer.sketchPlane.setPlane(plane)
         }
@@ -565,7 +565,7 @@
         const elemId = elem.id()
         this.handles[compId] = this.handles[compId] || {}
         this.handles[compId][elemId] = this.handles[compId][elemId] || []
-        elem.get_handles().forEach((handle, i) => {
+        elem.handles().forEach((handle, i) => {
           handle = vec2three(handle)
           this.handles[compId][elemId].push({
             type: 'handle',

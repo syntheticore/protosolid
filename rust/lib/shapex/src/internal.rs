@@ -13,6 +13,10 @@ pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
   vec![tuple.0, tuple.1]
 }
 
+pub fn is_between(value: f64, start: f64, end: f64) -> bool {
+  (start - EPSILON <= value && value <= end + EPSILON) || (end - EPSILON <= value && value <= start + EPSILON)
+}
+
 
 #[allow(unused_macros)]
 macro_rules! almost_eq {

@@ -34,7 +34,7 @@ impl JsCurve {
 #[wasm_bindgen]
 impl JsCurve {
   pub fn id(&self) -> JsValue {
-    JsValue::from_serde(&self.real.borrow().get_id()).unwrap()
+    JsValue::from_serde(&self.real.borrow().id()).unwrap()
   }
 
   pub fn typename(&self) -> String {
@@ -46,13 +46,13 @@ impl JsCurve {
     }.to_string()
   }
 
-  pub fn get_center(&self) -> JsValue {
+  pub fn center(&self) -> JsValue {
     let mut midpoint = self.real.borrow().as_curve().midpoint();
     midpoint = self.sketch.borrow().work_plane.transform_point(midpoint);
     point_to_js(midpoint)
   }
 
-  pub fn get_radius(&self) -> f64 {
+  pub fn radius(&self) -> f64 {
     match &*self.real.borrow() {
       CurveType::Circle(c) => c.radius,
       CurveType::Arc(a) => a.radius,
@@ -60,7 +60,7 @@ impl JsCurve {
     }
   }
 
-  pub fn get_area(&self) -> f64 {
+  pub fn area(&self) -> f64 {
     let area = match &*self.real.borrow() {
       CurveType::Circle(c) => c.area(),
       _ => 0.0
@@ -68,12 +68,12 @@ impl JsCurve {
    area
   }
 
-  pub fn get_length(&self) -> f64 {
+  pub fn length(&self) -> f64 {
     self.real.borrow().as_curve().length()
   }
 
-  pub fn get_handles(&self) -> Array {
-    points_to_js(as_controllable(&mut self.real.borrow()).get_handles().iter().map(|handle| {
+  pub fn handles(&self) -> Array {
+    points_to_js(as_controllable(&mut self.real.borrow()).handles().iter().map(|handle| {
       self.sketch.borrow().work_plane.transform_point(*handle)
     }).collect())
   }
@@ -89,8 +89,8 @@ impl JsCurve {
     }
   }
 
-  pub fn get_snap_points(&self) -> Array {
-    let points = as_controllable(&mut self.real.borrow()).get_snap_points();
+  pub fn snap_points(&self) -> Array {
+    let points = as_controllable(&mut self.real.borrow()).snap_points();
     let plane = self.sketch.borrow().work_plane;
     let points = points.iter().map(|p| plane.transform_point(*p) ).collect();
     points_to_js(points)

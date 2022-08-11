@@ -27,7 +27,7 @@ impl JsDocument {
 
   #[wasm_bindgen(getter)]
   pub fn marker(&self) -> usize {
-    self.real.borrow().get_marker()
+    self.real.borrow().marker()
   }
 
   #[wasm_bindgen(setter)]
@@ -39,13 +39,13 @@ impl JsDocument {
     self.real.borrow_mut().move_marker_to_feature(&feature.real.as_ref().unwrap());
   }
 
-  pub fn get_tree(&self) -> JsComponent {
+  pub fn tree(&self) -> JsComponent {
     let real = self.real.borrow();
-    let comp = real.get_tree();
+    let comp = real.tree();
     JsComponent { component_id: comp.id, document: self.real.clone() }
   }
 
-  pub fn get_final_tree(&self) -> JsValue {
+  pub fn final_tree(&self) -> JsValue {
     let doc = self.real.borrow();
     let mut tree = DummyComponent {
       id: uuid!("00000000-0000-0000-0000-000000000000"),
@@ -68,7 +68,7 @@ impl JsDocument {
     self.real.borrow_mut().evaluate().iter().map(|comp_ref| JsValue::from_serde(comp_ref).unwrap() ).collect()
   }
 
-  pub fn get_features(&self) -> Array {
+  pub fn features(&self) -> Array {
     self.real.borrow().features.iter().map(|feature|
       JsValue::from(JsFeature::from_real(&self.real, &feature))
     ).collect()

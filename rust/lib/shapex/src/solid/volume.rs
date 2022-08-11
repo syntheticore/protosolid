@@ -9,6 +9,23 @@ pub trait Volume: SurfaceArea {
 }
 
 
+impl SurfaceArea for Compound {
+  fn area(&self) -> f64 {
+    self.solids.iter().fold(0.0, |acc, solid| acc + solid.area() )
+  }
+}
+
+impl Volume for Compound {
+  fn volume(&self) -> f64 {
+    self.solids.iter().fold(0.0, |acc, solid| acc + solid.volume() )
+  }
+
+  fn contains_point(&self, p: Point3) -> bool {
+    self.solids.iter().any(|solid| solid.contains_point(p) )
+  }
+}
+
+
 impl SurfaceArea for Solid {
   fn area(&self) -> f64 {
     self.shells.iter().fold(0.0, |acc, shell| acc + shell.area() )

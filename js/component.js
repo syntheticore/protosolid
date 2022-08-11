@@ -49,24 +49,24 @@ export default class Component {
 
   updateChildren() {
     this.freeChildren()
-    this.children = this.real.get_children().map(realChild => new Component(realChild, this, this.document) )
+    this.children = this.real.children().map(realChild => new Component(realChild, this, this.document) )
   }
 
   updateSolids() {
     this.freeSolids()
-    this.solids = this.real.get_solids()
+    this.solids = this.real.solids()
     this.solids.forEach(solid => solid.component = this )
   }
 
   updateSketches() {
     this.freeSketches()
-    this.sketches = this.real.get_sketches()
+    this.sketches = this.real.sketches()
     this.sketches.forEach(sketch => sketch.component = this )
   }
 
   updateHelpers() {
     this.freeHelpers()
-    this.helpers = this.real.get_planes()
+    this.helpers = this.real.planes()
     this.helpers.forEach(helper => helper.component = this )
   }
 
@@ -121,7 +121,7 @@ export default class Component {
   }
 
   findSketchByFeature(id) {
-    const sketch = this.sketches.find(sketch => sketch.get_feature_id() == id )
+    const sketch = this.sketches.find(sketch => sketch.feature_id() == id )
     if(sketch) return sketch
     for(const child of this.children) {
       const found = child.findSketchByFeature(id)

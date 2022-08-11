@@ -88,7 +88,7 @@ export default class Transloader {
       const mode = this.renderer.displayMode
       // Load Faces
       if(mode == 'shaded' || mode == 'wireShade') {
-        const faces = solid.get_faces()
+        const faces = solid.faces()
         faces.forEach(face => {
           face.solid = solid
           const faceMesh = this.renderer.convertMesh(
@@ -106,13 +106,13 @@ export default class Transloader {
           const vnh = new VertexNormalsHelper( faceMesh, 5, 0xff0000 )
           // this.renderer.add( vnh )
           // vnhs.push(vnh)
-          // const normal = this.convertLine(face.get_display_normal(), this.renderer.materials.selectionLine)
+          // const normal = this.convertLine(face.display_normal(), this.renderer.materials.selectionLine)
           // this.renderer.add(normal)
         })
       }
       // Load Edges
       if(mode == 'wireframe' || (isActive && mode == 'wireShade')) {
-        const edges = solid.get_edges()
+        const edges = solid.edges()
         const wireMaterial = this.getWireMaterial(comp, solid)
         cache.edges = (cache.edges || []).concat(edges.map(edge => {
           const line = this.renderer.convertLine(edge.tesselate(), wireMaterial)
@@ -127,7 +127,7 @@ export default class Transloader {
     })
     // Load Sketch Elements
     if(comp === this.activeComponent) {
-      const elements = comp.sketches.filter(sketch => !comp.UIData.itemsHidden[sketch.id()] ).flatMap(sketch => sketch.get_sketch_elements() )
+      const elements = comp.sketches.filter(sketch => !comp.UIData.itemsHidden[sketch.id()] ).flatMap(sketch => sketch.sketch_elements() )
       elements.forEach(element => this.loadElement(element, comp))
       if(!cache.regions.length) this.updateRegions(comp)
     }
@@ -191,7 +191,7 @@ export default class Transloader {
   updateRegions(comp) {
     this.purgeRegions(comp)
     let t = performance.now()
-    const regions = comp.sketches.filter(sketch => !comp.UIData.itemsHidden[sketch.id()] ).flatMap(sketch => sketch.get_profiles())
+    const regions = comp.sketches.filter(sketch => !comp.UIData.itemsHidden[sketch.id()] ).flatMap(sketch => sketch.profiles())
     // console.log('get_profiles took ' + (performance.now() - t))
     t = performance.now()
     comp.cache().regions = regions
@@ -199,7 +199,7 @@ export default class Transloader {
       // let material = this.renderer.materials.region.clone()
       // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
       const mesh = this.renderer.convertMesh(
-        region.get_mesh(),
+        region.mesh(),
         this.renderer.materials.region
       )
       mesh.alcType = 'region'

@@ -30,18 +30,18 @@ impl JsConstructionHelper {
 
 #[wasm_bindgen]
 impl JsConstructionHelper {
-  pub fn get_id(&self) -> JsValue {
+  pub fn id(&self) -> JsValue {
     JsValue::from_serde(&self.real.borrow().id).unwrap()
   }
 
-  pub fn get_center(&self) -> JsValue {
+  pub fn center(&self) -> JsValue {
     point_to_js( match &self.real.borrow().helper_type {
       ConstructionHelperType::Axis(axis) => axis.origin,
       ConstructionHelperType::Plane(plane) => plane.origin,
     })
   }
 
-  pub fn get_transform(&self) -> JsValue {
+  pub fn transform(&self) -> JsValue {
     let m = match &self.real.borrow().helper_type {
       ConstructionHelperType::Plane(plane) => plane.as_transform(),
       _ => Matrix4::identity(),

@@ -5,6 +5,7 @@ use crate::Uuid;
 use crate::Sketch;
 use crate::ConstructionHelper;
 use crate::ConstructionHelperType;
+use shapex::DeepClone;
 
 
 #[derive(Debug, Clone)]
@@ -85,7 +86,7 @@ impl Component {
 
   pub fn deep_clone(&self) -> Self {
     let mut clone = self.clone();
-    clone.compound.solids = clone.compound.solids.into_iter().map(move |solid| solid.deep_clone() ).collect();
+    clone.compound = clone.compound.deep_clone();
     clone
   }
 }

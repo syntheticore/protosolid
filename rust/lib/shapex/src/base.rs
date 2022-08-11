@@ -6,12 +6,6 @@ use rayon::prelude::*;
 
 #[doc(hidden)]
 pub use cgmath::prelude::*;
-// pub use cgmath::prelude::Matrix;
-// pub use cgmath::prelude::SquareMatrix;
-// pub use cgmath::prelude::InnerSpace;
-// pub use cgmath::prelude::MetricSpace;
-// pub use cgmath::prelude::EuclideanSpace;
-// pub use cgmath::Transform;
 pub use cgmath::Rad;
 pub use cgmath::Deg;
 

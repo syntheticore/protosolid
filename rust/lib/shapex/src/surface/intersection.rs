@@ -102,7 +102,7 @@ pub fn line_plane(line: &Line, plane: &Plane) -> Option<CurveSurfaceIntersection
   } else {
     let s = n.dot(plane.origin - line.points.0) / n_dot_u;
     let p = line.points.0 + u * s;
-    if s >= 0.0 && s <= 1.0 {
+    if is_between(s, 0.0, 1.0) {
       // Line segment intersects plane
       if s.almost(0.0) || s.almost(1.0) {
         Some(CurveSurfaceIntersectionType::Pierce(CurveSurfaceIntersection::new(p, s)))

@@ -8,9 +8,16 @@ pub fn rc<T>(arg: T) -> Rc<RefCell<T>> {
   Rc::new(RefCell::new(arg))
 }
 
-
 pub fn tuple2_to_vec<T>(tuple: (T, T)) -> Vec<T> {
   vec![tuple.0, tuple.1]
+}
+
+pub fn sort_tuple2<T: PartialOrd>(from: T, to: T) -> (T, T) {
+  if from <= to {
+    (from, to)
+  } else {
+    (to, from)
+  }
 }
 
 pub fn is_between(value: f64, start: f64, end: f64) -> bool {

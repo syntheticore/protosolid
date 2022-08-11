@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use uuid::Uuid;
 use serde::{ Serialize, Deserialize };
 
@@ -5,6 +7,7 @@ use crate::internal::*;
 use crate::transform::*;
 use crate::geom2d;
 use crate::wire::PolyLine;
+use crate::surface::SurfaceArea;
 
 pub(crate) mod intersection;
 pub use intersection::CurveIntersection;
@@ -195,7 +198,7 @@ impl CurveType {
     dispatch_curve!(self)
   }
 
-  pub fn get_id(&self) -> Uuid {
+  pub fn id(&self) -> Uuid {
     dispatch_curve!(self.id)
   }
 
@@ -310,7 +313,7 @@ impl TrimmedCurve {
 
   pub fn intersect(&self, other: &Self) -> Vec<CurveIntersectionType> {
     let intersections = self.base.as_curve().intersect(&other.base);
-    intersections.into_iter().map(move |intersection| {
+    intersections.into_iter().map(|intersection| {
       match intersection {
         CurveIntersectionType::Contained //XXX Could now be Touch. Contained needs to store its range
         => intersection,
@@ -321,19 +324,7 @@ impl TrimmedCurve {
         | CurveIntersectionType::Extended(mut isect)
         => {
           self.convert_intersection(&mut isect, other);
-          let first_at_end = isect.t1.almost(0.0) || isect.t1.almost(1.0);
-          let second_at_end = isect.t2.almost(0.0) || isect.t2.almost(1.0);
-          if first_at_end && second_at_end {
-            CurveIntersectionType::Touch(isect)
-          } else if first_at_end || second_at_end {
-            isect.direction = first_at_end;
-            CurveIntersectionType::Pierce(isect)
-          } else if 0.0 <= isect.t1 && isect.t1 <= 1.0 && 0.0 <= isect.t2 && isect.t2 <= 1.0 {
-            CurveIntersectionType::Cross(isect)
-          } else {
-            isect.direction = 0.0 <= isect.t2 && isect.t2 <= 1.0;
-            CurveIntersectionType::Extended(isect)
-          }
+          CurveIntersectionType::new(isect)
         },
       }
     }).collect()
@@ -464,7 +455,7 @@ impl BasisCurve for Line {
     match other {
       CurveType::Line(line) => intersection::line_line(self, line).map_or(vec![], |isect| vec![isect] ),
       CurveType::Circle(circle) => intersection::line_circle(self, circle),
-      CurveType::Arc(_arc) => vec![],
+      CurveType::Arc(arc) => intersection::line_arc(self, arc),
       CurveType::Spline(spline) => intersection::line_spline(self, spline),
     }
   }
@@ -476,8 +467,12 @@ impl BasisCurve for Line {
 
 impl Splittable for Line {
   fn split_at(&self, t: f64) -> Option<(Self, Self)> {
-    let p = self.sample(t);
-    Some((Line::new(self.points.0, p), Line::new(p, self.points.1)))
+    if EPSILON < t && t < 1.0 - EPSILON {
+      let p = self.sample(t);
+      Some((Line::new(self.points.0, p), Line::new(p, self.points.1)))
+    } else {
+      None
+    }
   }
 }
 
@@ -551,15 +546,15 @@ impl Arc {
 
   pub fn param_to_circle(&self, t: f64) -> f64 {
     let t = self.bounds.0 + t * self.range();
-    Self::overflow(t)
+    t
   }
 
   pub fn param_from_circle(&self, t: f64) -> f64 {
-    let mut range = Self::overflow(self.bounds.1) - Self::overflow(self.bounds.0);
+    let mut range = self.bounds.1 - self.bounds.0;
     if range.almost(0.0) {
       range = 1.0;
     }
-    (t - Self::overflow(self.bounds.0)) / range
+    (t - self.bounds.0) / range
   }
 
   pub fn invert(&mut self) {
@@ -570,15 +565,15 @@ impl Arc {
     self.bounds = (self.bounds.1 - 1.0, self.bounds.0);
   }
 
-  fn overflow(t: f64) -> f64 {
-    if t > 1.0 {
-      t % 1.0
-    } else if t < 0.0 {
-      1.0 + t % 1.0
-    } else {
-      t
-    }
-  }
+  // fn overflow(t: f64) -> f64 {
+  //   if t > 1.0 {
+  //     t % 1.0
+  //   } else if t < 0.0 {
+  //     1.0 + t % 1.0
+  //   } else {
+  //     t
+  //   }
+  // }
 }
 
 impl Curve for Arc {
@@ -590,7 +585,17 @@ impl Curve for Arc {
 
   fn unsample(&self, p: Point3) -> f64 {
     let circle = Circle::from_plane(self.plane.clone(), self.radius);
-    let t = circle.unsample(p);
+    let mut t = circle.unsample(p);
+    // Offset circle param such that the produced arc parameters are in the 0-1 range
+    // instead of wrapping into this range, for arcs with bounds < 0 or > 1
+    let ordered = sort_tuple2(self.bounds.0, self.bounds.1);
+    t = if ordered.1 > 1.0 && t <= ordered.1 % 1.0 + EPSILON {
+      t + 1.0
+    } else if ordered.0 < 0.0 && 1.0 - t <= ordered.0.abs() % 1.0 + EPSILON {
+      t - 1.0
+    } else {
+      t
+    };
     self.param_from_circle(t)
   }
 
@@ -617,7 +622,7 @@ impl Curve for Arc {
 impl BasisCurve for Arc {
   fn intersect(&self, other: &CurveType) -> Vec<CurveIntersectionType> {
     match other {
-      CurveType::Line(_line) => vec![],
+      CurveType::Line(line) => invert_intersections(intersection::line_arc(line, self)),
       CurveType::Circle(_circle) => vec![],
       CurveType::Arc(_arc) => vec![],
       CurveType::Spline(_spline) => vec![],
@@ -631,7 +636,7 @@ impl BasisCurve for Arc {
 
 impl Splittable for Arc {
   fn split_at(&self, t: f64) -> Option<(Self, Self)> {
-    if self.bounds.0 <= t && t <= self.bounds.1 {
+    if EPSILON < t && t < 1.0 - EPSILON {
       let t = self.param_to_circle(t);
       Some((
         Arc::from_plane(self.plane.clone(), self.radius, self.bounds.0, t),
@@ -709,10 +714,6 @@ impl Circle {
   pub fn circumfence(&self) -> f64 {
     std::f64::consts::PI * 2.0 * self.radius
   }
-
-  pub fn area(&self) -> f64 {
-    std::f64::consts::PI * self.radius.powf(2.0)
-  }
 }
 
 impl Curve for Circle {
@@ -782,7 +783,7 @@ impl Splittable for Circle {
       let mut params: Vec<f64> = points.iter().map(|p| self.unsample(*p) ).collect();
       params.sort_by(|a, b| a.partial_cmp(b).unwrap() );
       let first_arc = Arc::new(self.plane.origin, self.radius, params[0], params[1]);
-      let second_arc = Arc::new(self.plane.origin, self.radius, params[1], params[0]);
+      let second_arc = Arc::new(self.plane.origin, self.radius, params[1] - 1.0, params[0]);
       if points.len() > 2 {
         let remaining_points = points.iter().skip(2).cloned().collect();
         let mut arcs = vec![first_arc.into_enum()];
@@ -794,6 +795,12 @@ impl Splittable for Circle {
     } else {
       None
     }
+  }
+}
+
+impl SurfaceArea for Circle {
+  fn area(&self) -> f64 {
+    std::f64::consts::PI * self.radius.powf(2.0)
   }
 }
 
@@ -1017,48 +1024,6 @@ mod tests {
   }
 
   #[test]
-  fn split_crossing_lines() {
-    let lines = test_data::crossing_lines();
-    let segments = lines[0].split_with(&lines[1].clone().into_enum()).unwrap();
-    assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
-    assert_eq!(segments[0].as_curve().length(), 0.5, "Segment had wrong length");
-  }
-
-  #[test]
-  fn split_touching_lines() {
-    let lines = test_data::rectangle();
-    let segments = lines[0].split_with(&lines[1].clone().into_enum());
-    assert_eq!(segments, None, "Line should not have been split");
-  }
-
-  #[test]
-  fn split_t_section1() {
-    let lines = test_data::t_section();
-    let segments = lines[0].split_with(&lines[1].clone().into_enum()).unwrap();
-    assert_eq!(segments.len(), 2, "{} segments found instead of 2", segments.len());
-    assert_eq!(segments[0].as_curve().length(), 1.0, "Segment had wrong length");
-    assert_eq!(segments[1].as_curve().length(), 1.0, "Segment had wrong length");
-  }
-
-  #[test]
-  fn split_t_section2() {
-    let lines = test_data::t_section();
-    let segments = lines[1].split_with(&lines[0].clone().into_enum());
-    assert_eq!(segments, None, "Line should not have been split");
-  }
-
-  #[test]
-  fn pierce_direction() {
-    let lines = test_data::t_section();
-    let intersections = lines[0].intersect(&lines[1].clone().into_enum());
-    assert_eq!(intersections.len(), 1, "{} intersections instead of 1", intersections.len());
-    match &intersections[0] {
-      CurveIntersectionType::Pierce(hit) => assert_eq!(hit.direction, false, "Pierce orientation was wrong"),
-      _ => panic!("Intersection type should be Pierce instead of {:#?}", intersections[0]),
-    };
-  }
-
-  #[test]
   fn angle_90() {
     let lines = test_data::crossing_lines();
     let angle = lines[0].angle_to(&lines[1]);
@@ -1146,13 +1111,9 @@ mod tests {
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)).into_enum();
     let bounds = (Point3::new(0.0, 0.6, 0.0), Point3::new(0.0, 0.1, 0.0));
     let mut trimmed = TrimmedCurve::from_bounds(line.clone(), bounds, line.clone());
-    println!("As constructed: {:#?}", trimmed);
-    println!("{:#?}", trimmed.endpoints());
     almost_eq!(trimmed.endpoints().0, bounds.0);
     almost_eq!(trimmed.endpoints().1, bounds.1);
     trimmed.flip();
-    println!("Flipped: {:#?}", trimmed);
-    println!("{:#?}", trimmed.endpoints());
     almost_eq!(trimmed.endpoints().0, bounds.1);
     almost_eq!(trimmed.endpoints().1, bounds.0);
   }
@@ -1162,7 +1123,6 @@ mod tests {
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)).into_enum();
     let bounds = (Point3::new(0.0, -1.0, 0.0), Point3::new(0.0, 0.5, 0.0));
     let trimmed = TrimmedCurve::from_bounds(line.clone(), bounds, line.clone());
-    println!("{:#?}", trimmed);
     almost_eq!(trimmed.trims.0, -1.0);
     almost_eq!(trimmed.trims.1, 0.5);
   }
@@ -1172,5 +1132,29 @@ mod tests {
     let line = Line::new(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0));
     let p = Point3::new(1.0, 2.0, 1.0);
     almost_eq!(line.closest_point(&p), Point3::new(0.0, 2.0, 0.0));
+  }
+
+  #[test]
+  fn split_arc() {
+    let arc = Arc::new(Point3::origin(), 1.0, -0.51, 0.12);
+    arc.split_at(0.8).unwrap();
+  }
+
+  #[test]
+  fn circle_to_arc() {
+    let arc = Arc::new(Point3::origin(), 1.0, 0.59, 1.24);
+    let t = arc.param_from_circle(0.48);
+    assert!(!is_between(t, 0.0, 1.0));
+    almost_eq!(0.0, arc.unsample(arc.sample(0.0)));
+    almost_eq!(1.0, arc.unsample(arc.sample(1.0)));
+  }
+
+    #[test]
+  fn circle_to_arc2() {
+    let arc = Arc::new(Point3::origin(), 1.0, -0.2, 0.7);
+    let t = arc.param_from_circle(0.48);
+    assert!(is_between(t, 0.0, 1.0));
+    almost_eq!(0.0, arc.unsample(arc.sample(0.0)));
+    almost_eq!(1.0, arc.unsample(arc.sample(1.0)));
   }
 }

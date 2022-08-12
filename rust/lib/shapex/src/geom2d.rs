@@ -65,37 +65,21 @@ pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>) -> Mesh {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  use crate::transform::*;
-  use crate::curve::*;
   use crate::test_data;
   use crate::test_data::make_generic;
-  use crate::test_data::make_region;
   use crate::test_data::make_wire;
-
-  fn make_rect() -> Wire {
-    let rect = test_data::rectangle();
-    Wire::new(make_region(make_generic(rect)))
-  }
 
   #[test]
   fn compare_areas() {
-    let rect_poly = &make_rect().tesselate();
+    let rect_poly = &make_wire(make_generic(test_data::rectangle())).tesselate();
     let reverse_rect_poly = rect_poly.iter().rev().cloned().collect();
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
   }
 
   #[test]
   fn rectangle_clockwise() {
-    let rect_poly = &make_rect().tesselate();
+    let rect_poly = &make_wire(make_generic(test_data::rectangle())).tesselate();
     assert!(is_clockwise(&rect_poly));
-  }
-
-  #[test]
-  fn point_in_region() {
-    let rect = make_rect();
-    assert!(rect.contains_point(Point3::origin()));
-    assert!(!rect.contains_point(Point3::new(10.0, 0.0, 0.0)));
   }
 
   #[test]
@@ -114,49 +98,6 @@ mod tests {
   fn angle_straight() {
     let angle = test_data::angle_straight();
     assert_eq!(clockwise(angle[0].points.0, angle[0].points.1, angle[1].points.1), 0.0);
-  }
-
-  #[test]
-  fn circle_in_rect() {
-    let circle = make_wire(make_generic(vec![Circle::new(Point3::origin(), 0.5)]));
-    let rect = make_rect();
-    assert!(rect.encloses(&circle));
-    assert!(!circle.encloses(&rect));
-  }
-
-  #[test]
-  fn circle_in_circle() {
-    let circle = make_wire(make_generic(vec![
-      Circle::new(Point3::new(-27.0, 3.0, 0.0), 68.97340462273907)
-    ]));
-    let inner_circle = Circle::new(Point3::new(-1.0, 27.654544570311774, 0.0), 15.53598031475424);
-    let inner_circle = make_wire(make_generic(vec![inner_circle]));
-    assert!(circle.encloses(&inner_circle));
-    assert!(!inner_circle.encloses(&circle));
-  }
-
-  #[test]
-  fn point_in_circle() {
-    let circle = make_wire(make_generic(vec![Circle::new(Point3::origin(), 20.0)]));
-    assert!(circle.contains_point(Point3::origin()));
-  }
-
-  #[test]
-  fn rect_in_rect() {
-    let rect = make_rect();
-    let mut inner_rect = test_data::rectangle();
-    for line in &mut inner_rect {
-      line.scale(0.5);
-    }
-    let inner_rect = make_wire(make_generic(inner_rect));
-    assert!(rect.encloses(&inner_rect));
-    assert!(!inner_rect.encloses(&rect));
-  }
-
-  #[test]
-  fn point_in_triangle() {
-    let tri = make_wire(make_generic(test_data::triangle()));
-    assert!(tri.contains_point(Point3::new(-7.0, 60.0, 0.0)));
   }
 }
 

@@ -106,6 +106,19 @@ pub fn arc_rectangle() -> Vec<CurveType> {
   ]
 }
 
+pub fn diamond() -> Vec<Line> {
+  let top = Point3::new(0.0, 1.0, 0.0);
+  let left = Point3::new(-1.0, 0.0, 0.0);
+  let bottom = Point3::new(0.0, -1.0, 0.0);
+  let right = Point3::new(1.0, 0.0, 0.0);
+  vec![
+    Line::new(top, left),
+    Line::new(left, bottom),
+    Line::new(bottom, right),
+    Line::new(right, top),
+  ]
+}
+
 pub fn triangle() -> Vec<Line> {
   let p1 = Point3::new(46.0, 48.0, 0.0);
   let p2 = Point3::new(-41.0, 3.0, 0.0);

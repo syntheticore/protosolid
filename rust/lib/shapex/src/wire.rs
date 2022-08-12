@@ -75,13 +75,21 @@ impl Wire {
   }
 
   pub fn contains_point(&self, p: Point3) -> bool {
+    use CurveIntersectionType::*;
     let ray = TrimmedCurve::new(Line::new(p, p + Vec3::unit_x() * 999999.0).into_enum());
-    let num_hits: usize = parallel!(self.0).flat_map(|elem| {
-      let intersections = ray.intersect(&elem);
+    let per_elem: Vec<Vec<CurveIntersectionType>> = self.0.iter().map(|elem| ray.intersect(&elem) ).collect();
+    let num_hits: usize = per_elem.iter().enumerate().flat_map(|(i, intersections)| {
       intersections.iter().map(|isect| match isect {
-        CurveIntersectionType::Pierce(_)
-        | CurveIntersectionType::Cross(_)
-          => 1,
+        Cross(_) => 1,
+        Pierce(_) => {
+          let j = (i + 1) % self.0.len();
+          let next_intersections = &per_elem[j];
+          if i != j && next_intersections.iter().any(|next_isect| matches!(next_isect, Pierce(_)) ) {
+            0
+          } else {
+            1
+          }
+        },
         _ => 0,
       }).collect::<Vec<usize>>()
     }).sum();
@@ -188,5 +196,71 @@ impl Meshable for Profile {
     let mut mesh = geom2d::tesselate_polygon(vertices, holes);
     mesh.transform(&self.plane.as_transform());
     mesh
+  }
+}
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::test_data;
+  use crate::test_data::make_generic;
+  use crate::test_data::make_wire;
+
+  #[test]
+  fn point_in_rect() {
+    let rect = make_wire(make_generic(test_data::rectangle()));
+    assert!(rect.contains_point(Point3::origin()));
+    assert!(!rect.contains_point(Point3::new(10.0, 0.0, 0.0)));
+  }
+
+  #[test]
+  fn point_in_triangle() {
+    let tri = make_wire(make_generic(test_data::triangle()));
+    assert!(tri.contains_point(Point3::new(-7.0, 60.0, 0.0)));
+  }
+
+  #[test]
+  fn point_in_circle() {
+    let circle = make_wire(make_generic(vec![Circle::new(Point3::origin(), 20.0)]));
+    assert!(circle.contains_point(Point3::origin()));
+  }
+
+  #[test]
+  fn point_in_diamond() {
+    let diamond = test_data::diamond();
+    let wire = make_wire(make_generic(diamond));
+    assert!(wire.contains_point(Point3::origin()));
+  }
+
+  #[test]
+  fn circle_in_rect() {
+    let circle = make_wire(make_generic(vec![Circle::new(Point3::origin(), 0.5)]));
+    let rect = make_wire(make_generic(test_data::rectangle()));
+    assert!(rect.encloses(&circle));
+    assert!(!circle.encloses(&rect));
+  }
+
+  #[test]
+  fn circle_in_circle() {
+    let circle = make_wire(make_generic(vec![
+      Circle::new(Point3::new(-27.0, 3.0, 0.0), 68.97340462273907)
+    ]));
+    let inner_circle = Circle::new(Point3::new(-1.0, 27.654544570311774, 0.0), 15.53598031475424);
+    let inner_circle = make_wire(make_generic(vec![inner_circle]));
+    assert!(circle.encloses(&inner_circle));
+    assert!(!inner_circle.encloses(&circle));
+  }
+
+  #[test]
+  fn rect_in_rect() {
+    let rect = make_wire(make_generic(test_data::rectangle()));
+    let mut inner_rect = test_data::rectangle();
+    for line in &mut inner_rect {
+      line.scale(0.5);
+    }
+    let inner_rect = make_wire(make_generic(inner_rect));
+    assert!(rect.encloses(&inner_rect));
+    assert!(!inner_rect.encloses(&rect));
   }
 }

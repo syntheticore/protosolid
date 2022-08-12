@@ -14,13 +14,20 @@ class Tool {
     this.enableSnapping = false
   }
 
-  click() {}
+  click(vec, coords) {}
 
-  mouseDown() {}
+  mouseDown(vec, coords) {
+    this.lastCoords = coords
+  }
 
-  mouseUp() {}
+  mouseUp(vec, coords) {
+    if(!this.lastCoords ||
+      coords.x != this.lastCoords.x ||
+      coords.y != this.lastCoords.y) return this.viewport.renderer.render()
+    this.click(vec, coords)
+  }
 
-  mouseMove() {}
+  mouseMove(vec, coords) {}
 
   dispose() {}
 }
@@ -81,10 +88,12 @@ export class ManipulationTool extends HighlightTool {
   }
 
   async mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
     if(this.viewport.activeHandle) this.enableSnapping = true
   }
 
   mouseUp(vec, coords) {
+    super.mouseUp(vec, coords)
     this.enableSnapping = false
   }
 
@@ -142,6 +151,7 @@ export class TrimTool extends Tool {
   }
 
   mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
     const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
     if(!curve) return this.viewport.renderer.render()
 
@@ -164,6 +174,7 @@ class PickTool extends HighlightTool {
   }
 
   mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
     const mesh = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
     if(!mesh) return
     const selection = this.select(mesh)
@@ -217,7 +228,8 @@ export class LineTool extends SketchTool {
     super(component, viewport, sketch)
   }
 
-  mouseDown(vec) {
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
     this.mouseMove(vec)
     const elems = this.sketch.sketch_elements()
     elems.pop()
@@ -254,7 +266,8 @@ export class SplineTool extends SketchTool {
     super(component, viewport, sketch)
   }
 
-  mouseDown(vec) {
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
     if(this.spline) {
       let points = this.spline.handles()
       points[points.length - 1] = vec.toArray()
@@ -289,7 +302,8 @@ export class CircleTool extends SketchTool {
     super(component, viewport, sketch)
   }
 
-  mouseDown(vec) {
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
     if(this.center) {
       this.center = null
       this.circle = null
@@ -312,7 +326,8 @@ export class ArcTool extends SketchTool {
     super(component, viewport, sketch)
   }
 
-  mouseDown(vec) {
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
     if(this.start && this.end) {
       this.start = null
       this.end = null

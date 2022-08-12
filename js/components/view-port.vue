@@ -4,7 +4,6 @@
     //- GL Viewport
     canvas(
       ref="canvas"
-      @click="click"
       @dblclick="doubleClick"
       @pointerup="mouseUp"
       @pointerdown="mouseDown"
@@ -354,14 +353,6 @@
       getMouseCoords: function(e) {
         var rect = this.$refs.canvas.getBoundingClientRect()
         return new THREE.Vector2(e.clientX, e.clientY - rect.top)
-      },
-
-      click: function(e) {
-        const [vec, coords] = this.snap(e)
-        if(coords.x != this.lastCoords.x ||
-           coords.y != this.lastCoords.y) return this.renderer.render()
-        if(e.altKey) return
-        this.activeTool.click(vec, coords)
       },
 
       doubleClick: function(e) {

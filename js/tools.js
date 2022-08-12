@@ -39,6 +39,10 @@ export class DummyTool extends Tool {}
 class HighlightTool extends Tool {
   constructor(component, viewport, selectors) {
     super(component, viewport)
+    this.setSelectors(selectors)
+  }
+
+  setSelectors(selectors) {
     this.selectors = selectors
     this.realSelectors = selectors.map(selector => selector == 'solid' ? 'face' : selector )
   }
@@ -74,7 +78,8 @@ class HighlightTool extends Tool {
 
 export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
-    super(component, viewport, ['curve', 'solid'])
+    super(component, viewport, [])
+    this.setSelectors(this.viewport.activeSketch ? ['curve'] : ['curve', 'solid'])
   }
 
   async click(vec, coords) {

@@ -48,6 +48,7 @@ class HighlightTool extends Tool {
       let items = this.viewport.renderer
         .objectsAtScreen(coords, this.realSelectors)
         .map(obj => (obj.alcType == 'face' && this.selectors.some(s => s == 'solid' )) ? obj.alcObject.solid : obj.alcObject )
+        .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
       if(items.length > 1 && !any) {
         // Combat close-widgets event

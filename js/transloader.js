@@ -38,8 +38,8 @@ export default class Transloader {
     this.applyMaterials(obj)
   }
 
-  isActive(comp) {
-    return comp.hasAncestor(this.activeComponent)
+  isActive(obj) {
+    return this.hasAncestor(obj, this.activeComponent)
   }
 
   isSelected(obj) {

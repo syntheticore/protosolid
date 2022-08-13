@@ -251,6 +251,7 @@ export class LineTool extends SketchTool {
       this.line = null
     } else {
       this.line = this.sketch.add_line(vec.toArray(), vec.toArray())
+      this.line.sketch = this.sketch
       this.viewport.elementChanged(this.line, this.component)
     }
   }
@@ -284,6 +285,7 @@ export class SplineTool extends SketchTool {
       this.spline.set_handles(points, false)
     } else {
       this.spline = this.sketch.add_spline([vec.toArray(), vec.toArray()])
+      this.spline.sketch = this.sketch
     }
     this.viewport.elementChanged(this.spline, this.component)
   }
@@ -319,6 +321,7 @@ export class CircleTool extends SketchTool {
     } else {
       this.center = vec
       this.circle = this.sketch.add_circle(vec.toArray(), 1)
+      this.circle.sketch = this.sketch
     }
   }
 
@@ -357,6 +360,7 @@ export class ArcTool extends SketchTool {
         vec.toArray(),
         this.end.toArray()
       )
+      this.arc.sketch = this.sketch
       this.arc.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()], true)
       this.viewport.elementChanged(this.arc, this.component)
     } catch(e) {}

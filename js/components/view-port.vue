@@ -243,6 +243,7 @@
       },
 
       activeSketch: function(sketch) {
+        // Show sketch plane
         this.transloader.setActiveSketch(sketch)
         if(sketch) {
           let plane = matrix2three(sketch.workplane())
@@ -250,6 +251,12 @@
           this.renderer.sketchPlane.setPlane(plane)
         }
         this.renderer.sketchPlane.visible = !!sketch
+        // Display grab handles
+        this.handles = {}
+        this.activeComponent.cache().curves.forEach(curve => {
+          if(curve.sketch !== sketch) return
+          this.onLoadElement(curve)
+        })
         this.renderer.render()
       },
 
@@ -277,7 +284,7 @@
     computed: {
       allHandles: function() {
         if(!this.activeSketch) return {}
-        const handles = Object.values(this.handles).map(e => Object.values(e)).flat().flat()
+        const handles = Object.values(this.handles).map(e => Object.values(e)).flat()
         const set = {}
         handles.forEach(handle => set[JSON.stringify(handle.pos)] = handle)
         return Object.values(set)
@@ -468,14 +475,11 @@
         if(this.snapAnchor) this.snapAnchor.pos = this.renderer.toScreen(this.snapAnchor.vec)
         // Update Handles
         if(this.activeSketch) {
-          for(let compId in this.handles) {
-            const compHandles = this.handles[compId]
-            for(let elemId in compHandles) {
-              const elemHandles = compHandles[elemId]
-              elemHandles.forEach(handle => {
-                handle.pos = this.renderer.toScreen(handle.vec)
-              })
-            }
+          for(let elemId in this.handles) {
+            const elemHandles = this.handles[elemId]
+            elemHandles.forEach(handle => {
+              handle.pos = this.renderer.toScreen(handle.vec)
+            })
           }
           this.handles = Object.assign({}, this.handles)
         }
@@ -551,27 +555,22 @@
         this.transloader.unpreviewFeature()
       },
 
-      onLoadElement: function(elem, comp) {
-        const compId = comp.id
-        const elemId = elem.id()
-        this.handles[compId] = this.handles[compId] || {}
-        this.handles[compId][elemId] = this.handles[compId][elemId] || []
-        elem.handles().forEach((handle, i) => {
+      onLoadElement: function(elem) {
+        this.handles[elem.id()] = elem.handles().map((handle, i) => {
           handle = vecToThree(handle)
-          this.handles[compId][elemId].push({
+          return {
             type: 'handle',
             pos: this.renderer.toScreen(handle),
             vec: handle,
             id: Math.random(),
-            elem: elem,
+            elem,
             index: i,
-          })
+          }
         })
       },
 
-      onUnloadElement: function(elem, comp) {
-        const compId = comp.id
-        if(this.handles[compId]) delete this.handles[compId][elem.id()]
+      onUnloadElement: function(elem) {
+        delete this.handles[elem.id()]
         this.handles = Object.assign({}, this.handles)
       },
 

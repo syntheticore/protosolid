@@ -15,7 +15,7 @@ Built with Rust & Electron + Vue.js
 
 ## Usage
 
-  ### Run in a browser
+  ### Debug in a browser
   ```sh
   npm run dev
   ```

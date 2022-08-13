@@ -127,8 +127,13 @@ export default class Transloader {
     })
     // Load Sketch Elements
     if(comp === this.activeComponent) {
-      const elements = comp.sketches.filter(sketch => !comp.UIData.itemsHidden[sketch.id()] ).flatMap(sketch => sketch.sketch_elements() )
-      elements.forEach(element => this.loadElement(element, comp))
+      comp.sketches.forEach(sketch => {
+        if(comp.UIData.itemsHidden[sketch.id()]) return
+        sketch.sketch_elements().forEach(elem => {
+          elem.sketch = sketch
+          this.loadElement(elem, comp)
+        })
+      })
       if(!cache.regions.length) this.updateRegions(comp)
     }
     // Load Construction Helpers
@@ -178,7 +183,7 @@ export default class Transloader {
     elem.component = comp
     this.renderer.add(line, true)
     comp.cache().curves.push(elem)
-    this.onLoadElement(elem, comp)
+    this.onLoadElement(elem)
   }
 
   unloadElement(elem, comp) {

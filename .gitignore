@@ -4,5 +4,5 @@ dist
 target
 pkg
 wasm-pack.log
-ProtoSolid-win32-x64
+ProtoSolid-*
 debug.log

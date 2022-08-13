@@ -12,7 +12,7 @@ import Materials from './materials.js'
 import SketchPlane from './sketch-plane.js'
 import ShadowCatcher from './shadow-catcher.js'
 import ArrowControls from './arrow-controls.js'
-import { vec2three } from './utils.js'
+import { vecToThree } from './utils.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
 
 
@@ -334,7 +334,7 @@ export default class Renderer {
 
   // convertLineBasic(vertices, material) {
   //   var geometry = new THREE.Geometry()
-  //   geometry.vertices = vertices.map(vertex => vec2three(vertex))
+  //   geometry.vertices = vertices.map(vertex => vecToThree(vertex))
   //   const line = new THREE.Line(geometry, material)
   //   return line
   // }

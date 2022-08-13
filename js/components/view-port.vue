@@ -185,7 +185,7 @@
   import Snapper from './../snapping.js'
   import Renderer from './../renderer.js'
   import Transloader from './../transloader.js'
-  import { vec2three, matrix2three } from './../utils.js'
+  import { vecToThree, matrix2three } from './../utils.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -557,7 +557,7 @@
         this.handles[compId] = this.handles[compId] || {}
         this.handles[compId][elemId] = this.handles[compId][elemId] || []
         elem.handles().forEach((handle, i) => {
-          handle = vec2three(handle)
+          handle = vecToThree(handle)
           this.handles[compId][elemId].push({
             type: 'handle',
             pos: this.renderer.toScreen(handle),

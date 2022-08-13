@@ -217,7 +217,7 @@
 
   import { DummyTool, ManipulationTool } from './../tools.js'
   import { CreateSketchFeature } from './../features.js'
-  import { vec2three } from './../utils.js'
+  import { vecToThree } from './../utils.js'
 
   export default {
     name: 'FeatureBox',
@@ -374,7 +374,7 @@
               const refs = Array.isArray(data()) ? data() : [data()]
               refs.forEach(ref => {
                 const item = ref.item()
-                this.$root.$emit('show-picker', pickerPos, vec2three(item.center()), color)
+                this.$root.$emit('show-picker', pickerPos, vecToThree(item.center()), color)
                 item.free()
               })
             }

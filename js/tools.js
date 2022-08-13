@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 import {
-  vec2three,
+  vecToThree,
   matrix2three,
   matrixFromThree,
   rotationFromNormal
@@ -33,7 +33,11 @@ class Tool {
 }
 
 
-export class DummyTool extends Tool {}
+export class DummyTool extends Tool {
+  mouseMove(vec, coords) {
+    this.viewport.renderer.render()
+  }
+}
 
 
 class HighlightTool extends Tool {
@@ -124,8 +128,8 @@ export class ManipulationTool extends HighlightTool {
 //   click(vec, coords) {
 //     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
 //     if(face && face.alcObject.surface_type() == 'Planar') {
-//       const position = vec2three(face.alcObject.origin())
-//       let rotation = rotationFromNormal(vec2three(face.alcObject.normal()))
+//       const position = vecToThree(face.alcObject.origin())
+//       let rotation = rotationFromNormal(vecToThree(face.alcObject.normal()))
 
 //       this.viewport.renderer.sketchPlane.position = position
 //       this.viewport.renderer.sketchPlane.rotation.setFromRotationMatrix(rotation)
@@ -240,7 +244,7 @@ export class LineTool extends SketchTool {
     elems.pop()
     const touchesExisting = elems
       .flatMap(elem => elem.snap_points() )
-      .map(p => vec2three(p) )
+      .map(p => vecToThree(p) )
       .some(p => p.equals(vec) )
     // Restart tool when we hit an existing point
     if(touchesExisting && this.line) {

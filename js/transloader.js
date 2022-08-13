@@ -214,11 +214,7 @@ export default class Transloader {
   purgeRegions(comp) {
     const cache = comp.cache()
     cache.regions.forEach(region => {
-      if(region.noFree) {
-        region.unused = true
-      } else {
-        region.free()
-      }
+      region.free()
       this.renderer.remove(region.mesh)
     })
     cache.regions = []

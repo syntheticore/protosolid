@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import { vec2three } from './utils.js'
+import { vecToThree } from './utils.js'
 import { LengthGizmo, AngleGizmo } from './gizmos.js'
 
 
@@ -200,9 +200,9 @@ export class ExtrudeFeature extends Feature {
         this.lengthGizmo.set(this.distance, this.side)
       } else {
         const item = this.profiles()[0].item()
-        const center = vec2three(item.center())
+        const center = vecToThree(item.center())
         const axis = this.axis && this.axis()
-        const direction = axis || vec2three(item.normal())
+        const direction = axis || vecToThree(item.normal())
         item.free()
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.distance, (dist, side) => {
           this.distance = dist
@@ -278,9 +278,9 @@ export class RevolveFeature extends Feature {
         this.lengthGizmo.set(this.angle, this.side)
       } else {
         const item = this.profiles()[0].item()
-        const center = vec2three(item.center())
+        const center = vecToThree(item.center())
         const axis = this.axis && this.axis()
-        const direction = vec2three(item.normal())
+        const direction = vecToThree(item.normal())
         item.free()
         this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.angle, (dist, side) => {
           this.angle = dist

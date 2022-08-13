@@ -83,7 +83,7 @@ export function rotationFromNormal(normal) {
   // return new THREE.Quaternion().setFromAxisAngle(xAxis, radians)
 }
 
-export function vec2three(array) {
+export function vecToThree(array) {
   return new THREE.Vector3().fromArray(array)
 }
 

@@ -4,7 +4,7 @@ import {
   LineTool,
   SplineTool,
 } from './tools.js'
-import { vec2three } from './utils.js'
+import { vecToThree } from './utils.js'
 
 const snapDistance = 14 // px
 const maxSnapReferences = 5
@@ -42,10 +42,10 @@ export default class Snapper {
     if((tool.constructor === LineTool && tool.line) || (tool.constructor === SplineTool && tool.spline)) sketchElements.pop()
     return sketchElements.flatMap(elem => {
       let points = elem.snap_points()
-        .map(p => vec2three(p))
+        .map(p => vecToThree(p))
       // Filter out handle actively being dragged
       if(this.viewport.activeHandle && elem.id() == this.viewport.activeHandle.elem.id()) {
-        const handlePoint = vec2three(this.viewport.activeHandle.elem.handles()[this.viewport.activeHandle.index])
+        const handlePoint = vecToThree(this.viewport.activeHandle.elem.handles()[this.viewport.activeHandle.index])
         points = points.filter(p => !p.equals(handlePoint))
       }
       return points

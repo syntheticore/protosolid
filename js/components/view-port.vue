@@ -556,6 +556,7 @@
       },
 
       onLoadElement: function(elem) {
+        if(elem.sketch !== this.activeSketch) return
         this.handles[elem.id()] = elem.handles().map((handle, i) => {
           handle = vecToThree(handle)
           return {

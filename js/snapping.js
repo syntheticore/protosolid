@@ -39,7 +39,7 @@ export default class Snapper {
     const localTransform = this.planeTransform.clone().invert()
     // Filter out sketch element actively being drawn
     const tool = this.viewport.activeTool
-    if((tool.constructor === LineTool && tool.line) || (tool.constructor === SplineTool && tool.spline)) sketchElements.pop()
+    if(tool.curve) sketchElements.pop()
     return sketchElements.flatMap(elem => {
       let points = elem.snap_points()
         .map(p => vecToThree(p))

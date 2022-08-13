@@ -247,25 +247,25 @@ export class LineTool extends SketchTool {
       .map(p => vecToThree(p) )
       .some(p => p.equals(vec) )
     // Restart tool when we hit an existing point
-    if(touchesExisting && this.line) {
-      this.line = null
+    if(touchesExisting && this.curve) {
+      this.curve = null
     } else {
-      this.line = this.sketch.add_line(vec.toArray(), vec.toArray())
-      this.line.sketch = this.sketch
-      this.viewport.elementChanged(this.line, this.component)
+      this.curve = this.sketch.add_line(vec.toArray(), vec.toArray())
+      this.curve.sketch = this.sketch
+      this.viewport.elementChanged(this.curve, this.component)
     }
   }
 
   mouseMove(vec) {
-    if(!this.line) return
-    let p1 = this.line.handles()[0]
-    this.line.set_handles([p1, vec.toArray()], false)
-    this.viewport.elementChanged(this.line, this.component)
+    if(!this.curve) return
+    let p1 = this.curve.handles()[0]
+    this.curve.set_handles([p1, vec.toArray()], false)
+    this.viewport.elementChanged(this.curve, this.component)
   }
 
   dispose() {
-    if(!this.line) return
-    this.line.remove()
+    if(!this.curve) return
+    this.curve.remove()
     this.viewport.componentChanged(this.component)
   }
 }
@@ -278,32 +278,32 @@ export class SplineTool extends SketchTool {
 
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    if(this.spline) {
-      let points = this.spline.handles()
+    if(this.curve) {
+      let points = this.curve.handles()
       points[points.length - 1] = vec.toArray()
       points.push(vec.toArray())
-      this.spline.set_handles(points, false)
+      this.curve.set_handles(points, false)
     } else {
-      this.spline = this.sketch.add_spline([vec.toArray(), vec.toArray()])
-      this.spline.sketch = this.sketch
+      this.curve = this.sketch.add_spline([vec.toArray(), vec.toArray()])
+      this.curve.sketch = this.sketch
     }
-    this.viewport.elementChanged(this.spline, this.component)
+    this.viewport.elementChanged(this.curve, this.component)
   }
 
   mouseMove(vec) {
-    if(!this.spline) return
-    let points = this.spline.handles()
+    if(!this.curve) return
+    let points = this.curve.handles()
     points[points.length - 1] = vec.toArray()
-    this.spline.set_handles(points, false)
-    this.viewport.elementChanged(this.spline, this.component)
+    this.curve.set_handles(points, false)
+    this.viewport.elementChanged(this.curve, this.component)
   }
 
   dispose() {
-    if(!this.spline) return
-    let points = this.spline.handles()
+    if(!this.curve) return
+    let points = this.curve.handles()
     points.pop()
-    this.spline.set_handles(points, false)
-    this.viewport.elementChanged(this.spline, this.component)
+    this.curve.set_handles(points, false)
+    this.viewport.elementChanged(this.curve, this.component)
   }
 }
 
@@ -317,18 +317,18 @@ export class CircleTool extends SketchTool {
     super.mouseDown(vec, coords)
     if(this.center) {
       this.center = null
-      this.circle = null
+      this.curve = null
     } else {
       this.center = vec
-      this.circle = this.sketch.add_circle(vec.toArray(), 1)
-      this.circle.sketch = this.sketch
+      this.curve = this.sketch.add_circle(vec.toArray(), 1)
+      this.curve.sketch = this.sketch
     }
   }
 
   mouseMove(vec) {
     if(!this.center) return
-    this.circle.set_handles([this.center.toArray(), vec.toArray()], false)
-    this.viewport.elementChanged(this.circle, this.component)
+    this.curve.set_handles([this.center.toArray(), vec.toArray()], false)
+    this.viewport.elementChanged(this.curve, this.component)
   }
 }
 
@@ -343,7 +343,7 @@ export class ArcTool extends SketchTool {
     if(this.start && this.end) {
       this.start = null
       this.end = null
-      this.arc = null
+      this.curve = null
     } else if(this.start) {
       this.end = vec
     } else {
@@ -355,14 +355,14 @@ export class ArcTool extends SketchTool {
     if(!this.start || !this.end) return
     // #add_arc can fail for for colinear inputs
     try {
-      this.arc = this.arc || this.sketch.add_arc(
+      this.curve = this.curve || this.sketch.add_arc(
         this.start.toArray(),
         vec.toArray(),
         this.end.toArray()
       )
-      this.arc.sketch = this.sketch
-      this.arc.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()], true)
-      this.viewport.elementChanged(this.arc, this.component)
+      this.curve.sketch = this.sketch
+      this.curve.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()], true)
+      this.viewport.elementChanged(this.curve, this.component)
     } catch(e) {}
   }
 }

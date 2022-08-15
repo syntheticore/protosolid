@@ -236,6 +236,7 @@ function showSplash() {
     height: 200,
     transparent: true,
     frame: false,
+    show: false,
     // vibrancy: 'ultra-dark',
     alwaysOnTop: true,
     webPreferences: {
@@ -243,7 +244,10 @@ function showSplash() {
     }
   })
   splash.loadFile('splash.html')
-  setTimeout(createWindow, 250)
+  setTimeout(() => {
+    splash.show()
+    setTimeout(createWindow, 1500)
+  }, 500)
 }
 
 function setDarkMode() {
@@ -288,7 +292,7 @@ ipcMain.on('vue-ready', function() {
   setTimeout(() => {
     splash.destroy()
     mainWindow.show()
-  }, 2000)
+  }, 1000)
 });
 
 ipcMain.handle('get-save-path', (e, format) => {

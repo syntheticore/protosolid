@@ -64,16 +64,23 @@ pub fn tesselate_polygon(vertices: PolyLine, holes: Vec<usize>) -> Mesh {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+use super::*;
   use crate::test_data;
   use crate::test_data::make_generic;
   use crate::test_data::make_wire;
+  use crate::surface::SurfaceArea;
 
   #[test]
   fn compare_areas() {
     let rect_poly = &make_wire(make_generic(test_data::rectangle())).tesselate();
     let reverse_rect_poly = rect_poly.iter().rev().cloned().collect();
     assert_eq!(signed_polygon_area(&rect_poly), -signed_polygon_area(&reverse_rect_poly));
+  }
+
+  #[test]
+  fn rectangle_area() {
+    let rect_poly = &make_wire(make_generic(test_data::rectangle()));
+    assert_eq!(4.0, rect_poly.area());
   }
 
   #[test]

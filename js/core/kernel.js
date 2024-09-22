@@ -1040,6 +1040,10 @@ export class Timeline {
     this.marker = this.features.indexOf(feature) + 1
   }
 
+  isCurrentFeature(feature) {
+    return this.marker == this.features.indexOf(feature) + 1
+  }
+
   insertFeature(feature) {
     this.features.splice(this.marker, 0, feature)
     this.last_change_index = Math.min(this.last_change_index, this.marker)

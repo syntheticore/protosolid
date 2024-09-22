@@ -46,7 +46,7 @@ export class Feature {
   }
 
   execute(tree) {
-    if(!this.isComplete()) return
+    if(this.suppressUpdate || !this.isComplete()) return
     this.updateFeature(tree)
   }
 
@@ -420,7 +420,6 @@ export class DraftFeature extends Feature {
       faces: {
         title: 'Faces',
         type: 'face',
-        multi: true,
         autoMulti: true,
       },
       angle: {
@@ -523,7 +522,7 @@ export class FilletFeature extends Feature {
       edges: {
         title: 'Edges',
         type: 'edge',
-        multi: true,
+        autoMulti: true,
       },
       radius: {
         title: 'Radius',

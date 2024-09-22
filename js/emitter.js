@@ -9,7 +9,8 @@ export default class Emitter {
   }
 
   emit(name, ...args) {
-    if(this.listeners[name]) this.listeners[name].forEach(handler => handler(...args) )
+    const handlers = this.listeners[name] || []
+    handlers.forEach(handler => handler(...args) )
   }
 
   off(name, handler) {

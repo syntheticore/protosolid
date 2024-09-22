@@ -17,7 +17,7 @@
     ul.features(ref="features", @scroll="onScroll", :style="{'--tip': tip + 'px'}")
       li.past(
         v-for="(feature, i) in past",
-        :ref="feature == document.activeFeature ? 'active' : undefined"
+        :ref="feature === document.activeFeature ? 'active' : 'dummy'"
         :style="{'--color': getFeatureColor(feature)}"
       )
         transition(name="fade")
@@ -246,12 +246,6 @@
       isActive(feature) {
         return this.document.activeFeature && (feature == this.document.activeFeature)
       },
-
-      // moveMarker: function(i) {
-      //   this.document.activateFeature(null, true, false)
-      //   this.document.timeline.marker = i
-      //   this.document.regenerate()
-      // },
 
       rewindMarker: function() {
         this.document.moveMarker(0)

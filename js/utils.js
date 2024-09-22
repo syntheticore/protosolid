@@ -70,6 +70,16 @@ export function arrayRange(start, end, step=1) {
   )
 }
 
+export function shallowEqual(a, b) {
+  const keys1 = Object.keys(a)
+  const keys2 = Object.keys(b)
+  if(keys1.length !== keys2.length) return false
+  for(let key of keys1) {
+    if(a[key] !== b[key]) return false
+  }
+  return true
+}
+
 export function vueEqual(a, b) {
   return vueRaw(a) == vueRaw(b)
 }

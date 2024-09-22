@@ -95,8 +95,6 @@ export default class Document extends Emitter {
 
   regenerate(at) {
     const oldTop = this.top()
-    // console.log('oldTop', JSON.stringify(oldTop.children.length))
-    if(this.activeFeature) this.timeline.invalidateFeature(this.activeFeature)
     if(at !== undefined) {
       if(at instanceof Feature) {
         this.timeline.moveMarkerToFeature(at)
@@ -108,7 +106,6 @@ export default class Document extends Emitter {
     const top = this.top()
     console.log('TOP', top.children.length)
     compIds.forEach(id => {
-      // console.log('ID', id, oldTop.findChild(id))
       const oldComp = oldTop.findChild(id)
       if(oldComp) this.emit('component-deleted', oldComp)
       const newComp = this.getComponent(id)
@@ -147,7 +144,7 @@ export default class Document extends Emitter {
       comps.forEach(comp => this.oldVisibility[comp.id] = comp.creator.hidden )
 
       // Regenerate at feature position
-      this.regenerate(feature)
+      if(!this.timeline.isCurrentFeature(feature)) this.regenerate(feature)
 
       // Activate sketch for sketch features
       if(feature.constructor === CreateSketchFeature) {
@@ -190,7 +187,7 @@ export default class Document extends Emitter {
         Object.keys(this.oldVisibility).forEach(id => this.getComponent(id).creator.hidden = this.oldVisibility[id] )
 
         // Restore marker
-        if(resetMarker) this.regenerate(this.previousMarker)
+        if(resetMarker && this.previousMarker != this.timeline.marker) this.regenerate(this.previousMarker)
 
         // Restore active component
         if(this.previousComponent) this.activateComponent(this.getComponent(this.previousComponent.id))

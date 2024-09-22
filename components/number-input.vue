@@ -108,7 +108,7 @@
 
     mounted() {
       // Update immediately to make features use preferred unit
-      this.update()
+      // this.update()
       this.focusInput()
     },
 

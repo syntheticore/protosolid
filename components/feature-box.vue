@@ -59,7 +59,7 @@
       button.cancel(
         title="Cancel"
         v-if="!isSketchFeature || !showHeader"
-        @click="cancel"
+        @click="close"
       )
         Icon(icon="times-circle")
 
@@ -216,6 +216,7 @@
   import * as THREE from 'three'
 
   import { DummyTool, ManipulationTool } from './../js/tools.js'
+  import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
 
   export default {
@@ -235,18 +236,6 @@
       activeTool: Object,
       activeFeature: Object,
       showHeader: Boolean,
-    },
-
-    watch: {
-      activeTool: function(tool) {
-        if(tool.constructor !== DummyTool) return
-        this.activePicker = null
-        this.bus.off('picked')
-      },
-
-      activeFeature: function() {
-        console.log('CHANGED activeFeature', this.activeFeature)
-      },
     },
 
     data() {
@@ -282,6 +271,7 @@
       this.activateBaseTool()
       setTimeout(() => {
         this.updatePaths()
+        this.activeFeature.updateGizmos()
         this.pickAll()
       }, 0)
     },
@@ -289,7 +279,6 @@
     beforeUnmount: function() {
       // Remove temporary feature when feature creation was not completed
       if(this.status !== 'confirmed' && !this.showHeader) {
-        // this.$emit('remove-feature', this.activeFeature)
         this.document.removeFeature(this.activeFeature)
       }
       this.activeFeature.dispose()
@@ -321,23 +310,34 @@
       },
 
       pick: function(type, key) {
+        // Toggle picker off if active
+        if(this.activePicker) {
+          this.onEscape()
+          return
+        }
+        const setting = this.activeFeature.settings[key]
+
         return new Promise((resolve) => {
           this.bus.off('picked')
-          this.bus.once('picked', (item) => {
+
+          this.bus.once('picked', async (item) => {
+            // Build reference of requested type from item
             let itemRef;
-            if(this.activeFeature.settings[key].type == 'profile') {
+            if(type == 'profile') {
               itemRef = item.reference()
-            } else if(this.activeFeature.settings[key].type == 'face') {
+            } else if(type == 'face') {
               itemRef = item.faceReference()
-            } else if(this.activeFeature.settings[key].type == 'edge') {
+            } else if(type == 'edge') {
               itemRef = item.edgeReference()
-            } else if(this.activeFeature.settings[key].type == 'plane') {
+            } else if(type == 'plane') {
               itemRef = item.planarReference()
-              console.log('picked itemRef', itemRef)
-            } else if(this.activeFeature.settings[key].type == 'axis') {
+            } else if(type == 'axis') {
               itemRef = item.axialReference()
             }
-            if(this.activeFeature.settings[key].multi) {
+
+            // Add item reference to feature
+            if(setting.multi || setting.autoMulti) {
+              // Toggle items in multi select mode
               const currentItems = (this.activeFeature[key] && this.activeFeature[key]()) || []
               this.activeFeature[key] = () => currentItems
               const oldItem = currentItems.find(otherRef => {
@@ -352,17 +352,28 @@
             } else {
               // const oldRef = this.activeFeature[key]
               // if(oldRef) oldRef().free()
+
               // Hide heavy data from Vue in a closure
               this.activeFeature[key] = () => itemRef
             }
-            this.update()
+
+            // Regenerate feature once unsuppressed
+            this.cancelPick()
+            if(!setting.autoMulti) this.update()
             this.updatePaths()
-            this.activePicker = null
-            this.updatePicker = null
+
+            // Auto-close or auto-repick
+            if(setting.autoConfirm) this.confirm()
+            if(setting.autoMulti) await this.pick(type, key)
+
             resolve()
-            if(this.activeFeature.settings[key].autoConfirm) this.confirm()
-            if(this.activeFeature.settings[key].autoMulti) setTimeout(() => this.pick(type, key), 0)
           })
+
+          // Show old model state while picker is active
+          this.activeFeature.suppressUpdate = true
+          if(this.activeFeature.isComplete()) this.update() // Don't regenerate for fresh features
+
+          // Generate picker curve
           this.activePicker = key
           this.updatePicker = () => {
             const { pickerPos, color } = this.getPickerInfo(key)
@@ -370,6 +381,13 @@
           }
           this.updatePicker()
         })
+      },
+
+      cancelPick: function() {
+        this.bus.off('picked')
+        this.activePicker = null
+        this.updatePicker = null
+        this.activeFeature.suppressUpdate = false
       },
 
       updatePaths: function() {
@@ -421,35 +439,39 @@
         this.close()
       },
 
-      cancel: function() {
-        this.close()
-      },
-
       close: function() {
-        if(this.isSketchFeature) this.document.timeline.invalidateFeature(this.activeFeature)
         this.$emit('close')
       },
 
       deactivateFeature() {
+        // Always consider sketches as modified
+        if(this.isSketchFeature) this.document.timeline.invalidateFeature(this.activeFeature)
         // Restore feature state on cancel
-        if(this.status !== 'confirmed' && this.showHeader && !this.isSketchFeature) {
+        if(
+          this.status !== 'confirmed' &&
+          this.showHeader && // Only for existing features
+          !this.isSketchFeature && // Never reset sketches
+          !shallowEqual(this.activeFeature.getValues(), this.startValues) // Only if feature actually changed
+        ) {
           this.activeFeature.setValues(this.startValues)
           this.update()
         }
       },
 
       onEscape: function() {
+        const wasPicking = !!this.activePicker
+        this.cancelPick()
         if(this.activeTool.constructor === DummyTool || this.activeTool.constructor === ManipulationTool) {
-          this.cancel()
+          this.close()
         } else {
           this.activateBaseTool()
+          if(wasPicking) this.update() // Regenerate with full feature applied
         }
       },
 
       activateBaseTool() {
-        console.log('feature box', this.isSketchFeature ? 'Manipulate' : 'Dummy')
         this.bus.emit('activate-toolname', this.isSketchFeature ? 'Manipulate' : 'Dummy')
-      }
+      },
     },
   }
 </script>

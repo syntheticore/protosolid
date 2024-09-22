@@ -49,7 +49,8 @@ pub struct Solid {
 }
 
 
-/// Topological entity. A closed volume in space, defining the interior or exterior boundary of a [Solid].
+/// Topological entity.
+/// A closed volume in space, defining the interior or exterior boundary of a [Solid].
 
 #[derive(Debug, Clone)]
 pub struct Shell {
@@ -80,7 +81,9 @@ pub struct Ring {
 }
 
 
-/// Topological entity. Consists of two [half edges](HalfEdge). Bounded by [Vertices](Vertex). Joins exactly two [Face]s.
+/// Topological entity.
+/// Consists of two [half edges](HalfEdge).
+/// Bounded by [Vertices](Vertex). Joins exactly two [Face]s.
 
 #[derive(Debug, Clone)]
 pub struct Edge {

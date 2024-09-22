@@ -117,6 +117,14 @@ impl SurfaceArea for Wire {
   }
 }
 
+impl Transformable for Wire {
+  fn transform(&mut self, transform: &Matrix4) {
+    for tcurve in self.iter_mut() {
+      tcurve.transform(transform);
+    }
+  }
+}
+
 impl<'a> IntoIterator for &'a Wire {
   type Item = &'a TrimmedCurve;
   type IntoIter = std::slice::Iter<'a, TrimmedCurve>;
@@ -177,6 +185,14 @@ impl Profile {
 impl SurfaceArea for Profile {
   fn area(&self) -> f64 {
     self.rings[0].area() - self.rings.iter().skip(1).fold(0.0, |acc, wire| acc + wire.area() )
+  }
+}
+
+impl Transformable for Profile {
+  fn transform(&mut self, transform: &Matrix4) {
+    for wire in &mut self.rings {
+      wire.transform(transform);
+    }
   }
 }
 

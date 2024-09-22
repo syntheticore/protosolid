@@ -347,14 +347,6 @@ impl Sketch {
       Err(FeatureError::Warning("Profile has been repaired".into()))
     } else { Ok(()) }
   }
-
-  pub fn transform_profile(&self, profile: &mut Profile) {
-    for wire in &mut profile.rings {
-      for tcurve in wire.iter_mut() {
-        tcurve.transform(&self.work_plane);
-      }
-    }
-  }
 }
 
 

@@ -205,7 +205,7 @@ impl ExtrusionFeature {
     let mut tool = Compound::default();
     for profile_ref in profiles {
       let mut profile = profile_ref.profile.clone();
-      profile_ref.get_sketch(tree).unwrap().borrow().transform_profile(&mut profile);
+      profile.transform(&profile_ref.get_sketch(tree).unwrap().borrow().work_plane);
       match features::extrude(&profile, self.distance) {
         Ok(solid) => tool.join(solid.into_compound()),
         Err(error) => return Err(FeatureError::Error(error)),
@@ -266,7 +266,7 @@ impl RevolutionFeature {
     if let Some(axis) = self.axis.get_axis(tree) {
       for profile_ref in profiles {
         let mut profile = profile_ref.profile.clone();
-        profile_ref.get_sketch(tree).unwrap().borrow().transform_profile(&mut profile);
+        profile.transform(&profile_ref.get_sketch(tree).unwrap().borrow().work_plane);
         match features::revolve(&profile, axis.clone(), self.angle) {
           Ok(solid) => tool.join(solid.into_compound()),
           Err(error) => return Err(FeatureError::Error(error)),

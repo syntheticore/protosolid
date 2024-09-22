@@ -49,7 +49,7 @@ impl Document {
   pub fn marker(&self) -> usize { self.marker }
 
   pub fn move_marker(&mut self, to: usize) {
-    self.marker = to.min(self.features.len()).max(0);
+    self.marker = to.min(self.features.len());
   }
 
   pub fn move_marker_to_feature(&mut self, feature: &Ref<Feature>) {

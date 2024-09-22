@@ -943,7 +943,7 @@ impl Curve for Spline {
     Point3::from_vec(homogeneous[span].truncate() / homogeneous[span].w)
   }
 
-  //XXX Exact solution -> Page 219 https://scholarsarchive.byu.edu/cgi/viewcontent.cgi?article=1000&context=facpub
+  //XXX Exact solution -> Page 219 (Computer Aided Geometric Design) https://scholarsarchive.byu.edu/cgi/viewcontent.cgi?article=1000&context=facpub
   fn unsample(&self, point: Point3) -> f64 {
     self.unsample_recursive(
       (0.0, self.sample(0.0).distance2(point)),

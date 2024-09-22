@@ -116,7 +116,7 @@ pub fn revolve(profile: &Profile, mut axis: Axis, angle: Deg<f64>) -> Result<Sol
 }
 
 
-/// Tilt the given [Face]s by `angle` degress, such that their intersection with `fixed_plane` remains constant.
+/// Tilt the given [Face]s by `angle` degrees, such that their intersection with `fixed_plane` remains constant.
 ///
 /// The faces may belong to different solids or compounds.
 

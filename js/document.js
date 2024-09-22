@@ -4,6 +4,8 @@ import { saveFile, loadFile } from './utils.js'
 import { deserialize } from './features.js'
 import Component from './component.js'
 
+window.registry ||= new FinalizationRegistry(real => real.free() )
+
 export default class Document {
   constructor() {
     this.lastId = 1
@@ -59,13 +61,14 @@ export default class Document {
   }
 
   insertFeature(feature, index) {
-    this.features.splice(index, 0, feature);
+    window.registry.register(feature, feature.real)
+    this.features.splice(index, 0, feature)
   }
 
   removeFeature(feature) {
     this.features = this.features.filter(f => f != feature )
     feature.real.remove()
-    feature.real.free()
+    // feature.real.free()
   }
 
   getChildIds(comp) {

@@ -1,11 +1,23 @@
-// All of the Node.js APIs are available in the preload process.
-// It has the same sandbox as a Chrome extension.
-
 const electron = require('electron')
 
-window.electron = {
-  fs: require('fs'),
-  ipc: electron.ipcRenderer,
-  platform: require('os').platform(),
-  platformVersion: require('os').release(),
-}
+electron.contextBridge.exposeInMainWorld('platform', require('os').platform())
+electron.contextBridge.exposeInMainWorld('platformVersion', require('os').release())
+
+electron.contextBridge.exposeInMainWorld('ipc', {
+  on(...args) {
+    const [channel, listener] = args
+    return electron.ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
+  },
+  off(...args) {
+    const [channel, ...omit] = args
+    return electron.ipcRenderer.off(channel, ...omit)
+  },
+  send(...args) {
+    const [channel, ...omit] = args
+    return electron.ipcRenderer.send(channel, ...omit)
+  },
+  invoke(...args) {
+    const [channel, ...omit] = args
+    return electron.ipcRenderer.invoke(channel, ...omit)
+  },
+})

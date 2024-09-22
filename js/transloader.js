@@ -1,8 +1,9 @@
-import * as THREE from 'three'
+// import * as THREE from 'three'
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js'
 
-import Component from './component.js'
-import PlaneHelper from './plane-helper.js'
+import Component from './core/component.js'
+import PlaneHelperObject from './three/plane-helper-object.js'
+import { Edge, Face, Solid, Profile, Sketch, SketchElement, ConstructionHelper } from './core/kernel.js'
 
 let vnhs = [];
 
@@ -25,8 +26,6 @@ export default class Transloader {
   setSelection(selection) {
     const old = this.selection
     this.selection = [...selection.set]
-    const uniqueComps = this.selection.map(obj => this.getComponent(obj) )
-      .filter((value, index, self) => self.indexOf(value) === index )
     this.getComponents(old).forEach(comp => this.applyMaterials(comp) )
     this.getComponents(this.selection).forEach(comp => this.applyMaterials(comp) )
   }
@@ -47,28 +46,24 @@ export default class Transloader {
   }
 
   isHighlighted(obj) {
+    if(!this.highlight) return false
     return this.hasAncestor(obj, this.highlight)
   }
 
   hasAncestor(obj, ancestor) {
-    if(obj === ancestor) return true
-    if(obj.constructor === alcWasm.JsFace) return this.hasAncestor(obj.solid, ancestor)
+    if(obj === ancestor || (ancestor && obj.id && obj.id == ancestor.id)) return true
+    if(obj.constructor === Edge || obj.constructor === Face) return this.hasAncestor(obj.solid, ancestor)
+    if(obj instanceof SketchElement) return this.hasAncestor(obj.sketch, ancestor)
     return this.getComponent(obj).hasAncestor(ancestor)
   }
 
   getComponent(obj) {
-    switch(obj.constructor) {
-      case Component:
-        return obj
-
-      case alcWasm.JsSolid:
-      case alcWasm.JsRegion:
-      case alcWasm.JsCurve:
-      case alcWasm.JsConstructionHelper:
-        return obj.component
-
-      case alcWasm.JsFace:
-        return obj.solid.component
+    if(obj instanceof Component) {
+      return obj
+    } else if(obj instanceof Solid || obj instanceof Profile || obj instanceof SketchElement || obj instanceof Sketch || obj instanceof ConstructionHelper) {
+      return obj.component
+    } else if(obj instanceof Edge || obj instanceof Face) {
+      return obj.solid.component
     }
   }
 
@@ -78,15 +73,17 @@ export default class Transloader {
   }
 
   loadTree(comp, recursive) {
-    if(comp.UIData.hidden) return
+    if(comp.creator.hidden) return
     vnhs.forEach(vnh => this.renderer.remove(vnh) )
+
     // Load Bodies
     const isActive = this.isActive(comp)
-    comp.updateSolids()
-    const cache = comp.cache()
-    comp.solids.forEach(solid => {
-      const mode = this.renderer.displayMode
+    const cache = comp.creator.cache()
+    comp.compound.solids().forEach(solid => {
+      solid.component = comp
+
       // Load Faces
+      const mode = this.renderer.displayMode
       if(mode == 'shaded' || mode == 'wireShade') {
         const faces = solid.faces()
         faces.forEach(face => {
@@ -95,7 +92,7 @@ export default class Transloader {
             face.tesselate(),
             this.getSurfaceMaterial(comp, face),
           )
-          face.mesh = faceMesh
+          face.mesh = () => faceMesh
           faceMesh.alcType = 'face'
           faceMesh.alcObject = face
           faceMesh.alcProjectable = isActive
@@ -110,62 +107,71 @@ export default class Transloader {
           // this.renderer.add(normal)
         })
       }
+
       // Load Edges
       if(mode == 'wireframe' || (isActive && mode == 'wireShade')) {
         const edges = solid.edges()
-        const wireMaterial = this.getWireMaterial(comp, solid)
         cache.edges = (cache.edges || []).concat(edges.map(edge => {
-          const line = this.renderer.convertLine(edge.tesselate(), wireMaterial)
+          const line = this.renderer.convertLine(edge.tesselate(), this.getWireMaterial(comp, edge))
           line.alcType = 'edge'
           line.alcObject = edge
-          edge.mesh = line
+          edge.mesh = () => line
           edge.solid = solid
           this.renderer.add(line, true)
           return edge
         }))
       }
     })
+
     // Load Sketch Elements
-    if(comp === this.activeComponent) {
+    // if(comp === this.activeComponent) {
       comp.sketches.forEach(sketch => {
-        if(comp.UIData.itemsHidden[sketch.id()]) return
-        sketch.sketch_elements().forEach(elem => {
-          elem.sketch = sketch
+        // console.log('loading sketch', comp.sketches.length)
+        sketch.component = comp
+        if(comp.creator.itemsHidden[sketch.id]) return
+        // sketch.sketch_elements().forEach(elem => {
+        sketch.elements.forEach(elem => {
+          // elem.sketch = sketch
           this.loadElement(elem, comp)
         })
       })
       if(!cache.regions.length) this.updateRegions(comp)
-    }
+    // }
+
     // Load Construction Helpers
     comp.helpers.forEach(plane => {
-      const mesh = new PlaneHelper(plane)
-      plane.mesh = mesh
+      const mesh = new PlaneHelperObject(plane)
+      plane.mesh = () => mesh
+      plane.component = comp
       this.renderer.add(mesh, true)
+      cache.helpers.push(plane)
     })
+
     // Recurse
     if(recursive) comp.children.forEach(child => this.loadTree(child, true))
   }
 
   unloadTree(comp, recursive) {
-    const cache = comp.cache()
+    const cache = comp.creator.cache()
 
     cache.curves.forEach(elem => this.unloadElement(elem, comp))
 
     cache.edges.forEach(edge => {
-      this.renderer.remove(edge.mesh)
-      edge.free()
+      this.renderer.remove(edge.mesh())
+      // edge.free()
     })
     cache.edges = []
 
     cache.faces.forEach(face => {
-      this.renderer.remove(face.mesh)
-      face.free()
+      this.renderer.remove(face.mesh())
+      // face.free()
     })
     cache.faces = []
 
-    comp.helpers.forEach(helper => {
-      this.renderer.remove(helper.mesh)
+    cache.helpers.forEach(helper => {
+      this.renderer.remove(helper.mesh())
     })
+    cache.helpers = []
 
     this.purgeRegions(comp)
 
@@ -176,40 +182,46 @@ export default class Transloader {
 
   loadElement(elem, comp) {
     this.unloadElement(elem, comp)
-    const line = this.renderer.convertLine(elem.tesselate(), this.renderer.materials.line)
+    const vertices = elem.tesselate()
+    if(!vertices) return
+    const line = this.renderer.convertLine(vertices, this.renderer.materials.line)
+    line.applyMatrix4(elem.sketch.workplane)
     line.alcType = 'curve'
     line.alcObject = elem
-    elem.mesh = line
+    elem.mesh = () => line
     elem.component = comp
     this.renderer.add(line, true)
-    comp.cache().curves.push(elem)
+    comp.creator.cache().curves.push(elem)
     this.onLoadElement(elem)
   }
 
   unloadElement(elem, comp) {
-    const cache = comp.cache()
-    this.renderer.remove(elem.mesh)
-    cache.curves = cache.curves.filter(e => e != elem)
+    if(elem.mesh) {
+      const cache = comp.creator.cache()
+      this.renderer.remove(elem.mesh())
+      cache.curves = cache.curves.filter(e => e != elem )
+    }
     this.onUnloadElement(elem, comp)
   }
 
   updateRegions(comp) {
     this.purgeRegions(comp)
     let t = performance.now()
-    const regions = comp.sketches.filter(sketch => !comp.UIData.itemsHidden[sketch.id()] ).flatMap(sketch => sketch.profiles())
+    const regions = comp.sketches.filter(sketch => !comp.creator.itemsHidden[sketch.id] ).flatMap(sketch => sketch.profiles(comp) )
     // console.log('get_profiles took ' + (performance.now() - t))
     t = performance.now()
-    comp.cache().regions = regions
+    comp.creator.cache().regions = regions
     regions.forEach(region => {
       // let material = this.renderer.materials.region.clone()
       // material.color = new THREE.Color(Math.random(), Math.random(), Math.random())
       const mesh = this.renderer.convertMesh(
-        region.mesh(),
+        region.tesselate(),
         this.renderer.materials.region
       )
+      mesh.applyMatrix4(region.sketch.workplane)
       mesh.alcType = 'region'
       mesh.alcObject = region
-      region.mesh = mesh
+      region.mesh = () => mesh
       region.component = comp
       this.renderer.add(mesh, true)
     })
@@ -217,10 +229,10 @@ export default class Transloader {
   }
 
   purgeRegions(comp) {
-    const cache = comp.cache()
+    const cache = comp.creator.cache()
     cache.regions.forEach(region => {
-      region.free()
-      this.renderer.remove(region.mesh)
+      // region.free()
+      this.renderer.remove(region.mesh())
     })
     cache.regions = []
   }
@@ -236,8 +248,8 @@ export default class Transloader {
         surfaceMaterial : this.renderer.materials.ghostSurface
   }
 
-  getWireMaterial(comp, solid) {
-    return this.isHighlighted(solid) || this.isSelected(solid) ?
+  getWireMaterial(comp, edge) {
+    return this.isHighlighted(edge) || this.isSelected(edge) ?
       this.renderer.materials.selectionLine :
       this.isActive(comp) ?
         this.renderer.materials.wire : this.renderer.materials.ghostWire
@@ -256,27 +268,27 @@ export default class Transloader {
         this.renderer.materials.plane,
       face: highlighted ? this.renderer.materials.highlightSurface :
         this.renderer.materials.surface,
-    }[elem.mesh.alcType]
+    }[elem.mesh().alcType]
   }
 
   applyMaterials(obj) {
-    if(!obj || obj.deallocated) return
+    if(!obj) return
     const comp = this.getComponent(obj)
     if(!comp) return
-    const cache = comp.cache()
-    for(const solid of comp.solids) {
-      const wireMaterial = this.getWireMaterial(comp, solid)
-      const edges = cache.edges.filter(e => e.solid === solid )
-      edges.forEach(edge => edge.mesh.material = wireMaterial )
-    }
-    cache.faces.forEach(face => face.mesh.material = this.getSurfaceMaterial(comp, face) )
-    cache.regions.forEach(region => region.mesh.material = this.getElemMaterial(region) )
-    cache.curves.forEach(curve => curve.mesh.material = this.getElemMaterial(curve) )
-    comp.helpers.forEach(helper => helper.mesh.material = this.getElemMaterial(helper) )
+    const cache = comp.creator.cache()
+    // for(const solid of comp.compound.solids()) {
+    //   const edges = cache.edges.filter(e => e.solid.id === solid.id )
+    //   edges.forEach(edge => edge.mesh().material = this.getWireMaterial(comp, edge) )
+    // }
+    cache.edges.forEach(edge => edge.mesh().material = this.getWireMaterial(comp, edge) )
+    cache.faces.forEach(face => face.mesh().material = this.getSurfaceMaterial(comp, face) )
+    cache.regions.forEach(region => region.mesh().material = this.getElemMaterial(region) )
+    cache.curves.forEach(curve => curve.mesh().material = this.getElemMaterial(curve) )
+    comp.helpers.forEach(helper => helper.mesh().material = this.getElemMaterial(helper) )
     comp.children.forEach(child => this.applyMaterials(child) )
   }
 
-  previewFeature(comp, bufferGeometry) {
+  previewFeature(bufferGeometry) {
     this.renderer.remove(this.previewMesh)
     this.previewMesh = this.renderer.convertMesh(
       bufferGeometry,

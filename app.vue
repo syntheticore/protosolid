@@ -1,0 +1,204 @@
+<template lang="pug">
+
+  #app(
+    v-if="activeDocument"
+    :class="{fullscreen: isFullscreen, maximized: isMaximized}"
+  )
+
+    TabBar(
+      :documents="documents"
+      v-model:active-document="activeDocument"
+      :is-maximized="isMaximized"
+      @create-document="createDocument"
+      @open-document="loadDocument"
+      @save-document="saveDocument"
+      @save-document-as="saveDocumentAs"
+      @delete-document="closeDocument"
+    )
+
+    DocumentView(
+      :document="activeDocument"
+    )
+
+</template>
+
+
+<style lang="stylus" scoped>
+
+  #app
+    width: 100%
+    height: 100%
+    display: grid
+    grid-template-rows: 38px 1fr
+    // grid-gap: 1px
+    // grid-auto-rows: minmax(100px, auto)
+    grid-template-areas:
+      "header"\
+      "main"
+    user-select: none
+    cursor: default
+    overflow: hidden
+    color: $bright1
+    &.fullscreen
+    &.maximized
+    [data-platform="browser"] &
+      grid-template-rows: 33px 1fr
+
+  .tool-bar
+    grid-area: header
+
+  .document-view
+    grid-area: main
+    position: relative
+
+</style>
+
+
+<style lang="stylus">
+
+  @import 'styles/main.styl'
+
+</style>
+
+
+<script setup>
+
+  import { provide } from 'vue'
+
+  import { loadPreferences } from './../js/preferences.js'
+  import Document from './../js/core/document.js'
+  import Emitter from './../js/emitter.js'
+  // const wasmP = import('../../rust/pkg/wasm-index.js')
+
+  document.body.setAttribute('data-platform', window.platform || 'browser')
+
+  const oc = await useOC()
+  window.oc = oc
+
+  const bus = new Emitter()
+  provide('bus', bus)
+
+  const store = useMainStore()
+
+  const isFullscreen = ref(false)
+  const isMaximized = ref(false)
+  const activeDocument = ref(null)
+  const documents = ref([])
+
+  loadPreferences()
+
+  window.addEventListener('resize', () => {
+    bus.emit('resize')
+  }, false)
+
+  createDocument()
+
+  if(window.ipc) {
+    window.ipc.on('fullscreen-changed', (e, isFullscreen) => {
+      isFullscreen.value = isFullscreen
+    })
+
+    window.ipc.on('maximize-changed', (e, isMaximized) => {
+      isMaximized.value = isMaximized
+    })
+
+    window.ipc.on('dark-mode', (e, darkMode) => {
+      if(darkMode) {
+        document.body.setAttribute('data-dark-mode', true)
+      } else {
+        document.body.removeAttribute('data-dark-mode')
+      }
+      bus.emit('resize')
+    })
+  }
+
+  onMounted(() => {
+    window.addEventListener('keydown', (e) => {
+      // console.log(e.keyCode)
+      if(e.keyCode === 27) {
+        bus.emit('escape')
+      } else if(e.keyCode === 13) {
+        bus.emit('enter-pressed')
+      } else if(e.keyCode === 16) {
+        bus.emit('shift-pressed')
+        bus.isShiftPressed = true
+      } else if(e.keyCode === 17) {
+        bus.emit('ctrl-pressed')
+        bus.isCtrlPressed = true
+      } else {
+        bus.emit('keydown', e.keyCode)
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      bus.emit('keyup', e.keyCode)
+      if(e.keyCode === 16) {
+        bus.isShiftPressed = false
+      } else if(e.keyCode === 17) {
+        bus.isCtrlPressed = false
+      }
+    });
+
+    // bus.on('component-changed', () => {
+    //   activeDocument.value.hasChanges = true
+    //   activeDocument.value.isFresh = false
+    // })
+
+    if(!window.ipc) return
+    setTimeout(() => window.ipc.send('vue-ready'), 0)
+  })
+
+
+  function createDocument() {
+    // return wasmP.then((wasm) => {
+      // window.alcWasm = wasm
+      activeDocument.value = new Document()
+      documents.value.push(activeDocument.value)
+    // })
+  }
+
+  function loadDocument(path) {
+    const doc = new Document()
+    doc.load(path).then(() => {
+      // Close untouched documents on load
+      if(activeDocument.value.isFresh) deleteDocument(activeDocument.value)
+      activeDocument.value = doc
+      documents.value.push(doc)
+      setTimeout(() => {
+        doc.real.marker = doc.features.length
+        bus.emit('regenerate')
+        doc.hasChanges = false
+      }, 0)
+    })
+  }
+
+  async function saveDocument() {
+    activeDocument.value.save()
+  }
+
+  async function saveDocumentAs() {
+    activeDocument.value.save(true)
+  }
+
+  function closeDocument(doc) {
+    const name = doc.filePath || 'Untitled Document'
+    if(doc.hasChanges &&
+      !window.confirm(name + ' has unsaved changes. Close anyway?')
+    ) return
+    const index = documents.value.indexOf(doc)
+    deleteDocument(doc)
+    if(!documents.value.length) {
+      createDocument()
+    } else if(activeDocument.value === doc) {
+      activeDocument.value = documents.value[Math.min(index, documents.value.length - 1)]
+    }
+  }
+
+  function deleteDocument(doc) {
+    const index = documents.value.indexOf(doc)
+    documents.value = documents.value.filter(d => d !== doc)
+    // Free Rust memory when old doc has been removed by viewport
+    setTimeout(() => doc.dispose() )
+  }
+
+</script>

@@ -2,17 +2,16 @@ import * as THREE from 'three'
 import { createNanoEvents } from 'nanoevents'
 
 import { HDRCubeTextureLoader } from 'three/examples/jsm/loaders/HDRCubeTextureLoader.js'
-import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
+// import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
 
 import Materials from './materials.js'
-import SketchPlane from './sketch-plane.js'
-import ShadowCatcher from './shadow-catcher.js'
-import ArrowControls from './arrow-controls.js'
-import { vecToThree } from './utils.js'
+import SketchPlane from './three/sketch-plane.js'
+import ShadowCatcher from './three/shadow-catcher.js'
+// import ArrowControls from './arrow-controls.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
 
 
@@ -20,7 +19,8 @@ export default class Renderer {
   constructor(canvas) {
     this.canvas = canvas
 
-    THREE.Object3D.DefaultUp = new THREE.Vector3(0, 0, 1)
+    // THREE.Object3D.DefaultUp = new THREE.Vector3(0, 0, 1)
+    // THREE.Object3D.DEFAULT_UP.set(0, 0, 1)
 
     this.emitter = createNanoEvents()
 
@@ -51,8 +51,8 @@ export default class Renderer {
     this.scene.add(atmosphere)
 
     new HDRCubeTextureLoader()
-    .setPath('textures/cubemap/')
-    .setDataType(THREE.UnsignedByteType)
+    .setPath('cubemap/')
+    // .setDataType(THREE.HalfFloatType)
     .load(['px.hdr', 'nx.hdr', 'py.hdr', 'ny.hdr', 'pz.hdr', 'nz.hdr'], (texture) => {
       var pmremGenerator = new THREE.PMREMGenerator(this.renderer)
       pmremGenerator.compileCubemapShader()
@@ -69,7 +69,7 @@ export default class Renderer {
     this.camera.position.set(90, 90, 90)
 
     this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -200, 10000)
-    this.cameraOrtho.position.set(0, 0, 10)
+    this.cameraOrtho.position.set(0, 10, 0)
     this.cameraOrtho.lookAt(this.scene.position)
 
     // Scene Objects
@@ -77,6 +77,8 @@ export default class Renderer {
     this.world = new THREE.Object3D()
     this.traceables.add(this.world)
     this.scene.add(this.traceables)
+
+    // this.scene.add(new THREE.AxesHelper(10.0))
 
     // Materials
     this.materials = new Materials()
@@ -130,7 +132,7 @@ export default class Renderer {
     this.viewControls.dampingFactor = 0.4
     this.viewControls.panSpeed = 1.0
     this.viewControls.keyPanSpeed = 12
-    this.viewControls.zoomSpeed = 0.6
+    this.viewControls.zoomSpeed = 2.6
     this.viewControls.screenSpacePanning = true
     this.viewControls.rotateSpeed = 1.2
     this.viewControls.minPolarAngle = - Math.PI
@@ -178,6 +180,7 @@ export default class Renderer {
 
   remove(obj) {
     if(!obj) return
+
     this.world.remove(obj)
     this.scene.remove(obj)
     this.dropResources(obj, true)
@@ -266,10 +269,11 @@ export default class Renderer {
     })
 
     gizmo.addEventListener('objectChange', () => {
-      this.emitter.emit('change-pose')
       this.updateShadows()
       this.render()
     })
+
+    gizmo.addEventListener('change', () => this.render() )
 
     // Recreate View Controls to achieve correct event order
     this.scene.add(gizmo)
@@ -322,6 +326,7 @@ export default class Renderer {
   }
 
   convertLine(vertices, material) {
+    // console.log(vertices)
     const geometry = new LineGeometry()
     const positions = vertices.flat()
     geometry.setPositions(positions)
@@ -354,9 +359,10 @@ export default class Renderer {
 
   convertBufferGeometry(bufferGeometry, material) {
     const geometry = new THREE.BufferGeometry()
-    const vertices = new Float32Array(bufferGeometry.position())
-    const normals = new Float32Array(bufferGeometry.normal())
-    bufferGeometry.free()
+    const vertices = new Float32Array(bufferGeometry.positions)
+    const normals = new Float32Array(bufferGeometry.normals)
+    // console.log('vertices', bufferGeometry.positions)
+    // bufferGeometry.free()
     // const uvs = new Float32Array(Array(vertices.length / 3 * 2).fill(1))
     geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
     geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))

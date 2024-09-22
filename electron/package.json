@@ -1,0 +1,12 @@
+{
+  "name": "protosolid",
+  "private": true,
+  "version": "0.1.0",
+  "productName": "ProtoSolid",
+  "description": "Parametric CAD",
+  "author": "Björn Breitgoff <syntheticore@gmail.com>",
+  "main": "main.js",
+  "devDependencies": {
+    "electron": "^31.3.0"
+  }
+}

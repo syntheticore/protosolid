@@ -1,11 +1,13 @@
-import * as THREE from 'three'
+// import * as THREE from 'three'
 
-import {
-  vecToThree,
-  matrix2three,
-  matrixFromThree,
-  rotationFromNormal
-} from './utils.js'
+// import {
+//   vecToThree,
+//   matrix2three,
+//   matrixFromThree,
+//   rotationFromNormal
+// } from './utils.js'
+
+import { Line, Circle } from './core/kernel.js'
 
 class Tool {
   constructor(component, viewport) {
@@ -25,6 +27,7 @@ class Tool {
       coords.x != this.lastCoords.x ||
       coords.y != this.lastCoords.y) return this.viewport.renderer.render()
     this.click(vec, coords)
+    window.gc && window.gc()
   }
 
   mouseMove(vec, coords) {}
@@ -35,7 +38,11 @@ class Tool {
 
 export class DummyTool extends Tool {
   mouseMove(vec, coords) {
-    this.viewport.renderer.render()
+    // this.viewport.renderer.render()
+  }
+
+  async click(vec, coords) {
+    this.viewport.$emit('update:selection', this.viewport.selection.clear())
   }
 }
 
@@ -60,9 +67,11 @@ class HighlightTool extends Tool {
 
   getObject(coords, any) {
     return new Promise(resolve => {
+      // console.log('getObject')
       let items = this.viewport.renderer
         .objectsAtScreen(coords, this.realSelectors)
         .map(obj => (obj.alcType == 'face' && this.selectors.some(s => s == 'solid' )) ? obj.alcObject.solid : obj.alcObject )
+        // .map(obj => {console.log(obj); return obj})
         .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
       if(items.length > 1 && !any) {
@@ -89,9 +98,9 @@ export class ManipulationTool extends HighlightTool {
   async click(vec, coords) {
     const curve = await this.getObject(coords)
     if(curve) {
-      this.viewport.$emit('update:selection', this.viewport.selection.handle(curve, this.viewport.$root.isCtrlPressed))
+      this.viewport.$emit('update:selection', this.viewport.selection.handle(curve, this.viewport.bus.isCtrlPressed))
     } else {
-      if(this.viewport.$root.isCtrlPressed) return this.viewport.renderer.render()
+      if(this.viewport.bus.isCtrlPressed) return this.viewport.renderer.render()
       this.viewport.$emit('update:selection', this.viewport.selection.clear())
     }
   }
@@ -110,8 +119,8 @@ export class ManipulationTool extends HighlightTool {
     const handle = this.viewport.activeHandle
     if(handle) {
       let handles = handle.elem.handles()
-      handles[handle.index] = vec.toArray()
-      handle.elem.set_handles(handles, false)
+      handles[handle.index] = vec//.toArray()
+      handle.elem.setHandles(handles, false)
       this.viewport.elementChanged(handle.elem, this.component)
     } else {
       super.mouseMove(vec, coords)
@@ -216,6 +225,12 @@ export class FacePickTool extends PickTool {
   }
 }
 
+export class EdgePickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['edge'], callback)
+  }
+}
+
 export class PlanePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['plane', 'face'], callback)
@@ -240,18 +255,20 @@ export class LineTool extends SketchTool {
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
     this.mouseMove(vec)
-    const elems = this.sketch.sketch_elements()
+    const elems = [...this.sketch.elements]
     elems.pop()
     const touchesExisting = elems
-      .flatMap(elem => elem.snap_points() )
-      .map(p => vecToThree(p) )
+      .flatMap(elem => elem.snapPoints() )
+      // .map(p => vecToThree(p) )
       .some(p => p.equals(vec) )
     // Restart tool when we hit an existing point
     if(touchesExisting && this.curve) {
       this.curve = null
     } else {
-      this.curve = this.sketch.add_line(vec.toArray(), vec.toArray())
-      this.curve.sketch = this.sketch
+      // this.curve = this.sketch.add_line(vec.toArray(), vec.toArray())
+      this.curve = new Line(vec, vec)
+      this.sketch.add(this.curve)
+      // this.curve.sketch = this.sketch
       this.viewport.elementChanged(this.curve, this.component)
     }
   }
@@ -259,7 +276,8 @@ export class LineTool extends SketchTool {
   mouseMove(vec) {
     if(!this.curve) return
     let p1 = this.curve.handles()[0]
-    this.curve.set_handles([p1, vec.toArray()], false)
+    // this.curve.setHandles([p1, vec.toArray()], false)
+    this.curve.setHandles([p1, vec], false)
     this.viewport.elementChanged(this.curve, this.component)
   }
 
@@ -280,12 +298,13 @@ export class SplineTool extends SketchTool {
     super.mouseDown(vec, coords)
     if(this.curve) {
       let points = this.curve.handles()
-      points[points.length - 1] = vec.toArray()
-      points.push(vec.toArray())
-      this.curve.set_handles(points, false)
+      points[points.length - 1] = vec//.toArray()
+      // points.push(vec.toArray())
+      points.push(vec)
+      this.curve.setHandles(points, false)
     } else {
       this.curve = this.sketch.add_spline([vec.toArray(), vec.toArray()])
-      this.curve.sketch = this.sketch
+      // this.curve.sketch = this.sketch
     }
     this.viewport.elementChanged(this.curve, this.component)
   }
@@ -293,8 +312,8 @@ export class SplineTool extends SketchTool {
   mouseMove(vec) {
     if(!this.curve) return
     let points = this.curve.handles()
-    points[points.length - 1] = vec.toArray()
-    this.curve.set_handles(points, false)
+    points[points.length - 1] = vec//.toArray()
+    this.curve.setHandles(points, false)
     this.viewport.elementChanged(this.curve, this.component)
   }
 
@@ -302,7 +321,7 @@ export class SplineTool extends SketchTool {
     if(!this.curve) return
     let points = this.curve.handles()
     points.pop()
-    this.curve.set_handles(points, false)
+    this.curve.setHandles(points, false)
     this.viewport.elementChanged(this.curve, this.component)
   }
 }
@@ -320,14 +339,18 @@ export class CircleTool extends SketchTool {
       this.curve = null
     } else {
       this.center = vec
-      this.curve = this.sketch.add_circle(vec.toArray(), 1)
-      this.curve.sketch = this.sketch
+      // this.curve = this.sketch.add_circle(vec.toArray(), 1)
+      // this.curve = this.sketch.add_circle(vec, 1)
+      this.curve = new Circle(vec, 1.0)
+      this.sketch.add(this.curve)
+      // this.curve.sketch = this.sketch
     }
   }
 
   mouseMove(vec) {
     if(!this.center) return
-    this.curve.set_handles([this.center.toArray(), vec.toArray()], false)
+    // this.curve.setHandles([this.center.toArray(), vec.toArray()], false)
+    this.curve.setHandles([this.center, vec], false)
     this.viewport.elementChanged(this.curve, this.component)
   }
 }
@@ -356,12 +379,13 @@ export class ArcTool extends SketchTool {
     // #add_arc can fail for for colinear inputs
     try {
       this.curve = this.curve || this.sketch.add_arc(
-        this.start.toArray(),
-        vec.toArray(),
-        this.end.toArray()
+        this.start,//.toArray(),
+        vec,//.toArray(),
+        this.end//.toArray()
       )
       this.curve.sketch = this.sketch
-      this.curve.set_handles([this.start.toArray(), vec.toArray(), this.end.toArray()], true)
+      // this.curve.setHandles([this.start.toArray(), vec.toArray(), this.end.toArray()], true)
+      this.curve.setHandles([this.start, vec, this.end], true)
       this.viewport.elementChanged(this.curve, this.component)
     } catch(e) {}
   }

@@ -1,10 +1,9 @@
 import * as THREE from 'three'
 
-import {
-  LineTool,
-  SplineTool,
-} from './tools.js'
-import { vecToThree } from './utils.js'
+// import {
+//   LineTool,
+//   SplineTool,
+// } from './tools.js'
 
 const snapDistance = 14 // px
 const maxSnapReferences = 5
@@ -29,23 +28,24 @@ export default class Snapper {
   snap(vec, coords) {
     this.guides = []
     this.catchSnapPoints(coords)
-    vec = this.snapToGuides(vec) || vec
+    vec = this.snapToGuides(vec)
+    if(vec) vec.z = 0.0 //XXX project vec to plane before snapping
     this.updateView(this.guides, this.snapAnchor)
     return vec
   }
 
   getSnapPoints() {
-    const sketchElements = this.viewport.activeSketch.sketch_elements()
-    const localTransform = this.planeTransform.clone().invert()
+    const sketchElements = [...this.viewport.activeSketch.elements]
+    // const localTransform = this.planeTransform.clone().invert()
     // Filter out sketch element actively being drawn
     const tool = this.viewport.activeTool
     if(tool.curve) sketchElements.pop()
     return sketchElements.flatMap(elem => {
-      let points = elem.snap_points()
-        .map(p => vecToThree(p))
+      let points = elem.snapPoints()
+        // .map(p => vecToThree(p))
       // Filter out handle actively being dragged
-      if(this.viewport.activeHandle && elem.id() == this.viewport.activeHandle.elem.id()) {
-        const handlePoint = vecToThree(this.viewport.activeHandle.elem.handles()[this.viewport.activeHandle.index])
+      if(this.viewport.activeHandle && elem.id == this.viewport.activeHandle.elem.id) {
+        const handlePoint = this.viewport.activeHandle.elem.handles()[this.viewport.activeHandle.index]
         points = points.filter(p => !p.equals(handlePoint))
       }
       return points
@@ -57,7 +57,7 @@ export default class Snapper {
     let closestDist = 99999
     let target
     snapPoints.forEach(p => {
-      const dist = this.viewport.renderer.toScreen(p).distanceTo(coords)
+      const dist = this.viewport.renderer.toScreen(p.clone().applyMatrix4(this.planeTransform)).distanceTo(coords)
       if(dist < snapDistance && dist < closestDist) {
         closestDist = dist
         target = p
@@ -74,10 +74,11 @@ export default class Snapper {
     if(!vec) return
     const localTransform = this.planeTransform.clone().invert()
     const localVec = vec.clone().applyMatrix4(localTransform)
+    // return localVec
     const screenVec = this.viewport.renderer.toScreen(vec)
     let snapX = this.lastSnaps.find(snap => {
       // Compare plane space X axis..
-      const testSnap = snap.clone().applyMatrix4(localTransform)
+      const testSnap = snap.clone()//.applyMatrix4(localTransform)
       testSnap.setY(localVec.y)
       testSnap.setZ(localVec.z)
       testSnap.applyMatrix4(this.planeTransform)
@@ -86,22 +87,27 @@ export default class Snapper {
       return screenVec.distanceTo(screenSnap) < snapDistance
     })
     let snapY = this.lastSnaps.find(snap => {
-      const testSnap = snap.clone().applyMatrix4(localTransform)
+      const testSnap = snap.clone()//.applyMatrix4(localTransform)
       testSnap.setX(localVec.x)
       testSnap.setZ(localVec.z)
       testSnap.applyMatrix4(this.planeTransform)
       const screenSnap = this.viewport.renderer.toScreen(testSnap)
       return screenVec.distanceTo(screenSnap) < snapDistance
     })
+    // const snapVec = new THREE.Vector3(
+    //   snapX ? snapX.clone().applyMatrix4(localTransform).x : localVec.x,
+    //   snapY ? snapY.clone().applyMatrix4(localTransform).y : localVec.y,
+    //   localVec.z
+    // ) //XXX z-imprecision
     const snapVec = new THREE.Vector3(
-      snapX ? snapX.clone().applyMatrix4(localTransform).x : localVec.x,
-      snapY ? snapY.clone().applyMatrix4(localTransform).y : localVec.y,
+      snapX ? snapX.x : localVec.x,
+      snapY ? snapY.y : localVec.y,
       localVec.z
-    ) //XXX z-imprecision
-    snapVec.applyMatrix4(this.planeTransform)
-    const screenSnapVec = this.viewport.renderer.toScreen(snapVec)
+    )
+    const worldSnapVec = snapVec.clone().applyMatrix4(this.planeTransform)
+    const screenSnapVec = this.viewport.renderer.toScreen(worldSnapVec)
     if(snapX) {
-      const start = this.viewport.renderer.toScreen(snapX)
+      const start = this.viewport.renderer.toScreen(snapX.clone().applyMatrix4(this.planeTransform))
       this.guides.push({
         id: 'v' + start.x + start.y,
         start,
@@ -109,7 +115,7 @@ export default class Snapper {
       })
     }
     if(snapY) {
-      const start = this.viewport.renderer.toScreen(snapY)
+      const start = this.viewport.renderer.toScreen(snapY.clone().applyMatrix4(this.planeTransform))
       this.guides.push({
         id: 'h' + start.x + start.y,
         start,
@@ -119,14 +125,17 @@ export default class Snapper {
     if(snapX && snapY) {
       this.snapAnchor = this.snapAnchor || {
         type: 'snap',
-        pos: this.viewport.renderer.toScreen(snapVec),
-        vec: snapVec,
+        pos: screenSnapVec,
+        vec: worldSnapVec,
         id: '' + snapVec.x + snapVec.y + snapVec.z,
       }
-      if(snapX === snapY) return snapX
+      if(snapX === snapY) return snapX//.clone().applyMatrix4(localTransform)
     } else {
       this.snapAnchor = null
     }
+
     if(snapX || snapY) return snapVec
+
+    return localVec
   }
 }

@@ -1,8 +1,6 @@
 # ProtoSolid
 
-Cross-platform parametric CAD. Based on boundary representation model and euler operators.
-
-Built with Rust & Electron + Vue.js
+Cross-platform parametric CAD. Built with Rust & Electron + Nuxt
 
 
 ## Installation

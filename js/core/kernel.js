@@ -92,6 +92,7 @@ export class SketchElement {
   clone() {
     const clone = this._clone()
     clone.id = this.id
+    clone.sketch = this.sketch
     return clone
   }
 
@@ -135,7 +136,7 @@ export class Line extends SketchElement {
     return this.points[0].clone().add(this.points[1]).divideScalar(2.0)
   }
 
-  center() { return this.midpoint().applyMatrix4(this.sketch.workplane) }
+  center() { return this.midpoint() }
 
   handles() {
     return this.points
@@ -180,7 +181,7 @@ export class Line extends SketchElement {
 export class Circle extends SketchElement {
   constructor(center, radius, geom) {
     super()
-    this.center = center
+    this._center = center
     this.radius = radius
     this.update(geom)
   }
@@ -195,23 +196,23 @@ export class Circle extends SketchElement {
   typename() { return 'Circle' }
 
   snapPoints() {
-    return [this.center]
+    return [this._center]
   }
 
-  center() { return this.center.applyMatrix4(this.sketch.workplane) }
+  center() { return this._center }
 
   handles() {
-    return [this.center]
+    return [this._center]
   }
 
   setHandles(handles) {
-    this.center = handles[0]
+    this._center = handles[0]
     if(handles[1]) this.radius = handles[0].distanceTo(handles[1])
     this.update()
   }
 
   geometry() {
-    const center = new window.oc.oc.gp_Pnt2d_3(this.center.x, this.center.y)
+    const center = new window.oc.oc.gp_Pnt2d_3(this._center.x, this._center.y)
     const v = new window.oc.oc.gp_Dir2d_4(0.0, 1.0)
     const axis = new window.oc.oc.gp_Ax2d_2(center, v)
     return new window.oc.oc.Handle_Geom2d_Curve_2(new window.oc.oc.Geom2d_Circle_2(axis, this.radius, false))
@@ -234,7 +235,7 @@ export class Circle extends SketchElement {
   }
 
   _clone() {
-    return new Circle(this.center, this.radius)
+    return new Circle(this._center, this.radius)
   }
 }
 
@@ -575,7 +576,7 @@ export class Profile {
 
   center() {
     const out = new THREE.Vector3()
-    this.rings[0].segments.forEach(seg => out.add(seg.endpoints()[0]) )
+    this.rings[0].segments.forEach(seg => out.add(seg.center()) )
     out.divideScalar(this.rings[0].segments.length)
     return out.applyMatrix4(this.sketch.workplane)
   }
@@ -666,16 +667,6 @@ export class Shape {
   collectShapes(type) {
     const geom = this.geom()
 
-    const enums = {
-      edge: window.oc.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
-      face: window.oc.oc.TopAbs_ShapeEnum.TopAbs_FACE,
-      solid: window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID,
-    }
-    const converters = {
-      edge: window.oc.oc.TopoDS.Edge_1,
-      face: window.oc.oc.TopoDS.Face_1,
-      solid: window.oc.oc.TopoDS.Solid_1,
-    }
     const constructors = {
       edge: Edge,
       face: Face,
@@ -690,12 +681,7 @@ export class Shape {
       false
     )
 
-    const map = new window.oc.oc.TopTools_IndexedMapOfShape_1()
-    window.oc.oc.TopExp.MapShapes_1(geom, enums[type], map)
-
-    return arrayRange(1, map.Extent())
-      .map(i => map.FindKey(i) )
-      .map(shape => converters[type](shape) )
+    return collectShapes(geom, type)
       .map(item => new constructors[type](this, item) )
   }
 
@@ -785,6 +771,20 @@ export class Face extends Shape {
     const plane = isPlanar.Plan()
     return matrix4FromOcPln(plane)
   }
+
+  normal(u, v, useCurvature) {
+    const geom = this.geom()
+    const uMin = { current: 0 }
+    const uMax = { current: 0 }
+    const vMin = { current: 0 }
+    const vMax = { current: 0 }
+    window.oc.oc.BRepTools.UVBounds_1(geom.get(), uMin, uMax, vMin, vMax)
+    u = uMin.current + (uMax.current - uMin.current) * u
+    v = vMin.current + (vMax.current - vMin.current) * v
+    const surface = window.oc.oc.BRep_Tool.Surface_2(geom)
+    const props = new window.oc.oc.GeomLProp_SLProps_1(surface, u, v, useCurvature ? 2 : 1, 0.01)
+    return vecFromOc(props.Normal())
+  }
 }
 
 
@@ -806,6 +806,16 @@ export class Edge extends Shape {
   }
 
   getAxis() {}
+
+  center() {
+    const curve = new window.oc.oc.BRepAdaptor_Curve_2(this.geom())
+    const middle = (curve.FirstParameter() + curve.LastParameter()) / 2.0
+    return vecFromOc(curve.Value(middle))
+  }
+
+  vertices() {
+    return collectShapes(this.geom(), 'vertex').map(vertex => vecFromOc(window.oc.oc.BRep_Tool.Pnt(vertex)) )
+  }
 
   tesselate() {
     // const location = new window.oc.oc.TopLoc_Location_1()
@@ -872,10 +882,8 @@ export class Compound extends Volumetric {
   }
 
   fillet(edges, radius) {
-    console.log('FILLet')
     const fillet = new window.oc.oc.BRepFilletAPI_MakeFillet(this.geom(), window.oc.oc.ChFi3d_FilletShape.ChFi3d_Rational)
     edges.forEach(edge => {
-      console.log('adding edge', edge.id)
       fillet.Add_2(radius, edge.geom())
     })
     // const shape = window.oc.oc.TopoDS.Solid_1(fillet.Shape())
@@ -1223,6 +1231,28 @@ function tesselateCurve(geom) {
     1.0e-9, 1.0e-7
   )
   return arrayRange(1, deflection.NbPoints()).map(i => coords(deflection.Value(i)) )
+}
+
+function collectShapes(geom, type) {
+  const enums = {
+    vertex: window.oc.oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+    edge: window.oc.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+    face: window.oc.oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    solid: window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+  }
+  const converters = {
+    vertex: window.oc.oc.TopoDS.Vertex_1,
+    edge: window.oc.oc.TopoDS.Edge_1,
+    face: window.oc.oc.TopoDS.Face_1,
+    solid: window.oc.oc.TopoDS.Solid_1,
+  }
+
+  const map = new window.oc.oc.TopTools_IndexedMapOfShape_1()
+  window.oc.oc.TopExp.MapShapes_1(geom, enums[type], map)
+
+  return arrayRange(1, map.Extent())
+    .map(i => map.FindKey(i) )
+    .map(shape => converters[type](shape) )
 }
 
 function ordered(a, b) {

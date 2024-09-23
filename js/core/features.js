@@ -286,10 +286,10 @@ export class ExtrudeFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo().set(this.distance, this.side)
       } else {
-        const item = this.profiles()[0].getItem(this.document.top())
-        const center = item.center()
+        const profile = this.profiles()[0].getItem(this.document.top())
+        const center = profile.center()
         const axis = this.axis && this.axis()
-        const direction = axis || item.normal()
+        const direction = axis || profile.normal()
         const lengthGizmo = new LengthGizmo(center, direction, this.distance, this.side, (dist, side) => {
           this.distance = dist
           this.side = side
@@ -563,10 +563,9 @@ export class FilletFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo().set(this.radius, true)
       } else {
-        const item = this.edges()[0].getItem(this.document.top())
-        const center = item.center()
-        const direction = new THREE.Vector3(0,0,1)
-        console.log(center)
+        const edge = this.edges()[0].getItem(this.document.top())
+        const center = edge.center()
+        const direction = new THREE.Vector3(0,1,0)
         const lengthGizmo = new LengthGizmo(center, direction, this.radius, true, (dist, _side) => {
           this.radius = dist
         })

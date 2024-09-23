@@ -340,6 +340,12 @@ mainBuild:
 
     - symbol: GeomLib_IsPlanarSurface
 
+    - symbol: GeomLProp
+    - symbol: GeomLProp_CLProps
+    - symbol: GeomLProp_CurveTool
+    - symbol: GeomLProp_SLProps
+    - symbol: GeomLProp_SurfaceTool
+
     - symbol: ShapeFix
     - symbol: ShapeFix_ComposeShell
     # - symbol: ShapeFix_DataMapIteratorOfDataMapOfShapeBox2d
@@ -367,7 +373,7 @@ mainBuild:
     - symbol: ShapeFix_Wireframe
 
     # - symbol: TopOpeBRepTool_PurgeInternalEdges
-    # - symbol: TopOpeBRepTool_FuseEdges
+    - symbol: TopOpeBRepTool_FuseEdges
 
     - symbol: ShapeUpgrade_UnifySameDomain
     - symbol: ShapeUpgrade_ShellSewing

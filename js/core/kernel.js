@@ -582,7 +582,8 @@ export class Profile {
   }
 
   normal() {
-    return new THREE.Vector3(0,0,1).applyMatrix4(this.sketch.workplane)
+    const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
+    return new THREE.Vector3(0,0,1).applyQuaternion(rot)
   }
 
   extrude(componentId, height) {
@@ -713,15 +714,15 @@ export class Volumetric extends Shape {
     // fix.Perform(new window.oc.oc.Message_ProgressRange_1())
     // shape = fix.Shape()
 
-    const purge = new window.oc.oc.TopOpeBRepTool_FuseEdges(shape, true)
-    purge.Perform()
-    shape = purge.Shape()
+    // const purge = new window.oc.oc.TopOpeBRepTool_FuseEdges(shape, true)
+    // purge.Perform()
+    // shape = purge.Shape()
 
     const unify = new window.oc.oc.ShapeUpgrade_UnifySameDomain_2(shape, true, true, false)
     unify.Build()
     shape = unify.Shape()
 
-    shape = new window.oc.oc.ShapeUpgrade_ShellSewing().ApplySewing(shape, 0.01)
+    // shape = new window.oc.oc.ShapeUpgrade_ShellSewing().ApplySewing(shape, 0.01)
 
     // console.log('open', window.oc.oc.BOPTools_AlgoTools.IsOpenShell(shell))
     // const explorer = new window.oc.oc.TopExp_Explorer_2(shape, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHELL, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)

@@ -3,7 +3,7 @@ import earcut from 'earcut'
 
 import { arrayRange } from '../utils.js'
 import Component from './component.js'
-import { CreateComponentFeature } from './features.js'
+import { CreateComponentFeature, Feature } from './features.js'
 
 // Sketches
 
@@ -637,7 +637,7 @@ export class Profile {
 
 export class Shape {
   isSame(other) {
-    return this.geom().IsSame(other.geom())
+    return (this.id && this.id == other.id) || this.geom().IsSame(other.geom())
   }
 
   area() {
@@ -753,7 +753,7 @@ export class Face extends Shape {
     super()
     this.solid = solid
     this.geom = () => geom
-    this.id = crypto.randomUUID()
+    // this.id = crypto.randomUUID()
   }
 
   planarReference() {
@@ -794,7 +794,7 @@ export class Edge extends Shape {
     super()
     this.solid = solid
     this.geom = () => geom
-    this.id = crypto.randomUUID()
+    // this.id = crypto.randomUUID()
   }
 
   axialReference() {
@@ -834,17 +834,21 @@ export class Solid extends Volumetric {
     this.compound = compound
     // geom = Solid.repair(geom)
     this.geom = () => geom
-    this.id = crypto.randomUUID()
+    // this.id = crypto.randomUUID()
   }
 
   typename() { return 'Solid' }
 
   faces() {
-    return this.collectShapes('face')
+    const faces = this.collectShapes('face')
+    faces.forEach((face, i) => face.id = this.id + '/face/' + i )
+    return faces
   }
 
   edges() {
-    return this.collectShapes('edge')
+    const edges = this.collectShapes('edge')
+    edges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
+    return edges
   }
 }
 
@@ -860,7 +864,7 @@ export class Compound extends Volumetric {
   solids() {
     if(!this.geom) return []
     this.cachedSolids ||= this.collectShapes('solid')
-    this.cachedSolids.forEach((solid, i) => solid.id = this.id + i )
+    this.cachedSolids.forEach((solid, i) => solid.id = this.id + '/solid/' + i )
     return this.cachedSolids
   }
 
@@ -913,7 +917,8 @@ export class Reference {
 
 export class PlanarReference extends Reference {
   getPlane() {
-    return this.getItem().getPlane()
+    const item = this.getItem()
+    return item && item.getPlane()
   }
 
   getItem() {
@@ -944,16 +949,19 @@ export class FaceReference extends Reference {
     const comp = tree.findChild(this.item.solid.compound.componentId)
     const i = this.item.solid.faces().map((f, i) => [f, i] ).find(([f, i]) => f.isSame(this.item) )[1]
     const solid = comp.compound.solids().find(solid => solid.id == this.item.solid.id )
-    this.item = solid.faces()[i]
+    const face = solid.faces()[i]
+    if(!face) return { type: 'error', msg: 'Face reference was lost' }
+    this.item = face
   }
 }
 
 export class EdgeReference extends Reference {
   update(tree) {
     const comp = tree.findChild(this.item.solid.compound.componentId)
-    const i = this.item.solid.edges().map((e, i) => [e, i] ).find(([e, i]) => e.isSame(this.item) )[1]
     const solid = comp.compound.solids().find(solid => solid.id == this.item.solid.id )
-    this.item = solid.edges()[i]
+    const edge = solid.edges().find(edge => edge.isSame(this.item) )
+    if(!edge) return { type: 'error', msg: "Edge reference was lost" }
+    this.item = edge
   }
 }
 
@@ -1040,9 +1048,10 @@ export class Timeline {
     // removal_modifications: Vec<CompRef>,
   }
 
-  tree() {
+  tree(at = this.marker) {
+    if(at instanceof Feature) at = this.features.indexOf(at) + 1
     // Return last state if current feature hasn't been executed yet
-    return this.cache[this.marker]// || this.cache[this.marker - 1]
+    return this.cache[at]// || this.cache[this.marker - 1]
   }
 
   moveMarkerToFeature(feature) {
@@ -1051,6 +1060,11 @@ export class Timeline {
 
   isCurrentFeature(feature) {
     return this.marker == this.features.indexOf(feature) + 1
+  }
+
+  previousFeature(feature) {
+    let i = this.features.indexOf(feature)
+    return this.features[i - 1]
   }
 
   insertFeature(feature) {

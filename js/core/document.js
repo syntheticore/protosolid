@@ -61,8 +61,8 @@ export default class Document extends Emitter {
     })
   }
 
-  top() {
-    return this.timeline.tree()
+  top(at) {
+    return this.timeline.tree(at)
   }
 
   createComponent(parent) {

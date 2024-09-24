@@ -184,7 +184,10 @@ export class CreateSketchFeature extends Feature {
     const planeRef = this.plane()
     this.error = planeRef.update(tree)
 
-    if(this.error) this.error = { type: 'error', msg: 'Sketch plane was lost' }
+    if(this.error) {
+      this.error = { type: 'error', msg: 'Sketch plane was lost' }
+      return
+    }
 
     const plane = planeRef.getPlane()
     this.sketch.workplane = plane
@@ -286,7 +289,7 @@ export class ExtrudeFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo().set(this.distance, this.side)
       } else {
-        const profile = this.profiles()[0].getItem(this.document.top())
+        const profile = this.profiles()[0].getItem()
         const center = profile.center()
         const axis = this.axis && this.axis()
         const direction = axis || profile.normal()
@@ -543,12 +546,12 @@ export class FilletFeature extends Feature {
     this.error = null
 
     const edges = this.edges().map(edgeRef => {
-      edgeRef = edgeRef.clone()
-      const error = edgeRef.update(tree)
-      const edge = edgeRef.getItem()
-      this.error = (error && error.type == 'error' ? error : this.error || error)
-      if(error && error.type == 'error') return
-      return edge
+      const clone = edgeRef.clone()
+      const error = clone.update(tree)
+      this.error ||= error
+      if(error) return
+      edgeRef.update(tree) // Update intact references such that their center etc. can be calculated
+      return edgeRef.getItem()
     }).filter(Boolean)
 
     if(edges.length && this.error) this.error.type = 'warning'
@@ -563,7 +566,7 @@ export class FilletFeature extends Feature {
       if(this.lengthGizmo) {
         this.lengthGizmo().set(this.radius, true)
       } else {
-        const edge = this.edges()[0].getItem(this.document.top())
+        const edge = this.edges()[0].getItem()
         const center = edge.center()
         const direction = new THREE.Vector3(0,1,0)
         const lengthGizmo = new LengthGizmo(center, direction, this.radius, true, (dist, _side) => {
@@ -576,6 +579,13 @@ export class FilletFeature extends Feature {
       if(this.lengthGizmo) window.alcRenderer.removeGizmo(this.lengthGizmo())
       this.lengthGizmo = null
     }
+  }
+
+  repair() {
+    const tree = this.document.top(this.document.timeline.previousFeature(this))
+    const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
+    this.edges = () => remainingEdges
+    this.error = null
   }
 
   dispose() {

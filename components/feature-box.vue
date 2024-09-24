@@ -188,6 +188,7 @@
     margin: 0 1px
     transition: all 0.25s
     text-align: center
+    white-space: nowrap
     &:not(.has-header)
       margin-left: 0
       border-bottom-left-radius: 4px
@@ -271,6 +272,8 @@
       this.activateBaseTool()
       setTimeout(() => {
         this.updatePaths()
+        // if(this.activeFeature.error) this.update()
+        this.error = this.activeFeature.error
         this.activeFeature.updateGizmos()
         this.pickAll()
       }, 0)
@@ -434,7 +437,8 @@
       confirm: function() {
         if(!this.canConfirm) return
         this.status = 'confirmed'
-        if(this.error) this.activeFeature.repair()
+        // if(this.error) this.activeFeature.repair()
+        this.activeFeature.repair()
         if(!this.showHeader) this.activeFeature.confirm()
         this.close()
       },

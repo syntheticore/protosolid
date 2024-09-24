@@ -469,7 +469,7 @@
       },
 
       addPath: function(pickerCoords, center, color) {
-        console.log('addpath', pickerCoords, center, color)
+        // console.log('addpath', pickerCoords, center, color)
         const path = {
           target: center,
           origin: pickerCoords,

@@ -1420,15 +1420,16 @@ class TransformControlsGizmo extends Object3D {
 
             if ( handle.tag === 'fwd' ) {
 
-              handle.visible = false;
+              // handle.visible = false;
 
             } else {
 
-              handle.scale.x *= - 1;
+              // handle.scale.x *= - 1;
 
             }
 
-          } else if ( handle.tag === 'bwd' ) {
+          }
+          if ( handle.tag === 'bwd' ) {
 
             handle.visible = false;
 
@@ -1442,15 +1443,16 @@ class TransformControlsGizmo extends Object3D {
 
             if ( handle.tag === 'fwd' ) {
 
-              handle.visible = false;
+              // handle.visible = false;
 
             } else {
 
-              handle.scale.y *= - 1;
+              // handle.scale.y *= - 1;
 
             }
 
-          } else if ( handle.tag === 'bwd' ) {
+          }
+          if ( handle.tag === 'bwd' ) {
 
             handle.visible = false;
 
@@ -1464,15 +1466,16 @@ class TransformControlsGizmo extends Object3D {
 
             if ( handle.tag === 'fwd' ) {
 
-              handle.visible = false;
+              // handle.visible = false;
 
             } else {
 
-              handle.scale.z *= - 1;
+              // handle.scale.z *= - 1;
 
             }
 
-          } else if ( handle.tag === 'bwd' ) {
+          }
+          if ( handle.tag === 'bwd' ) {
 
             handle.visible = false;
 

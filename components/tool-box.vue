@@ -156,6 +156,7 @@
     DraftFeature,
     RevolveFeature,
     SweepFeature,
+    OffsetFeature,
     // MaterialFeature,
   } from './../js/core/features.js'
 
@@ -263,7 +264,7 @@
           {
             title: 'Edit Solid',
             tools: [
-              { title: 'Shell', icon: 'magnet' },
+              { title: 'Shell', feature: OffsetFeature },
               { title: 'Boolean', icon: 'boxes' },
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },

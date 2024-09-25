@@ -591,7 +591,7 @@ export class Profile {
     const wire = this.rings[0].geometry()
     const face = new window.oc.oc.BRepBuilderAPI_MakeFace_15(wire, true).Face()
     const dir = new window.oc.oc.gp_Vec_4(0, 0, height)
-    let makePrism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true)
+    let makePrism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
     let prism = window.oc.oc.TopoDS.Solid_1(makePrism.Shape())
 
     const compound = new Compound(componentId, prism)
@@ -773,7 +773,7 @@ export class Face extends Shape {
     return matrix4FromOcPln(plane)
   }
 
-  normal(u, v, useCurvature) {
+  normal(u, v, useCurvature) { //XXX use BOPTools_AlgoTools3D::GetNormalToSurface or BOPTools_AlgoTools3D::GetNormalToFaceOnEdge
     const geom = this.geom()
     const uMin = { current: 0 }
     const uMax = { current: 0 }
@@ -882,6 +882,8 @@ export class Compound extends Volumetric {
       cut: window.oc.oc.BRepAlgoAPI_Cut_3,
     }
 
+    if(!other.geom) throw { type: 'error', msg: "Tool body has no volume" }
+
     const result = new ops[op](this.geom(), other.geom(), new window.oc.oc.Message_ProgressRange_1())
     return this.clone(Solid.repair(result.Shape()))
   }
@@ -891,8 +893,30 @@ export class Compound extends Volumetric {
     edges.forEach(edge => {
       fillet.Add_2(radius, edge.geom())
     })
-    // const shape = window.oc.oc.TopoDS.Solid_1(fillet.Shape())
-    return this.clone(Solid.repair(fillet.Shape()))
+    fillet.Build(new window.oc.oc.Message_ProgressRange_1())
+    if(!fillet.IsDone()) throw { type: 'error', msg: "Fillet could not be built" }
+    // return this.clone(Solid.repair(fillet.Shape()))
+    return this.clone(fillet.Shape())
+  }
+
+  offset(openFaces, distance) {
+    const faces = new window.oc.oc.TopTools_ListOfShape_1()
+    openFaces.forEach(face => faces.Append_1(face.geom()) )
+    const thicken = new window.oc.oc.BRepOffsetAPI_MakeThickSolid()
+    thicken.MakeThickSolidByJoin(
+      this.geom(),
+      faces,
+      distance,
+      1.0e-6, // window.oc.oc.Precision.Confusion()
+      window.oc.oc.BRepOffset_Mode.BRepOffset_Skin,
+      false,
+      false,
+      window.oc.oc.GeomAbs_JoinType.GeomAbs_Arc,
+      false,
+      new window.oc.oc.Message_ProgressRange_1()
+    )
+    if(!thicken.IsDone()) throw { type: 'error', msg: "Offset could not be built" }
+    return this.clone(thicken.Shape())
   }
 }
 
@@ -947,10 +971,9 @@ export class AxialReference extends Reference {
 export class FaceReference extends Reference {
   update(tree) {
     const comp = tree.findChild(this.item.solid.compound.componentId)
-    const i = this.item.solid.faces().map((f, i) => [f, i] ).find(([f, i]) => f.isSame(this.item) )[1]
     const solid = comp.compound.solids().find(solid => solid.id == this.item.solid.id )
-    const face = solid.faces()[i]
-    if(!face) return { type: 'error', msg: 'Face reference was lost' }
+    const face = solid.faces().find(face => face.isSame(this.item) )
+    if(!face) return { type: 'error', msg: "Face reference was lost" }
     this.item = face
   }
 }
@@ -1268,6 +1291,10 @@ function collectShapes(geom, type) {
   return arrayRange(1, map.Extent())
     .map(i => map.FindKey(i) )
     .map(shape => converters[type](shape) )
+}
+
+function cloneShape(shape) {
+  return new window.oc.oc.BRepBuilderAPI_Copy_2(shape, true, false).Shape() // copyGeom, copyMesh
 }
 
 function ordered(a, b) {

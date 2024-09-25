@@ -407,8 +407,9 @@ mainBuild:
     # - symbol: BRepMesh_ConstrainedBaseMeshAlgo
 
     - symbol: GCPnts_TangentialDeflection
-
     # - symbol: StdPrs_ToolTriangulatedShape
+
+    - symbol: Precision
 
     # - symbol: XCAFDoc_VisMaterial
     # - symbol: Handle_XCAFDoc_VisMaterial

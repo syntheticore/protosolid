@@ -264,22 +264,18 @@ export class ExtrudeFeature extends Feature {
 
     if(profiles.length && this.error) this.error.type = 'warning'
 
-    console.log('profiles', profiles, this.error)
-
     let tool = new Compound(this.componentId)
     profiles.forEach(profile => {
       try {
         const extrusion = profile.extrude(this.componentId, distance)
-        // console.log('extrusion', extrusion.numFaces(), tool.numFaces())
-        console.log('bool1')
         tool = tool.boolean(extrusion, 'join')
-        // console.log('extrusion after', extrusion.numFaces(), tool.numFaces())
       } catch(err) { this.error = err || this.error }
     })
 
     const comp = tree.findChild(this.componentId)
-    console.log('bool2')
-    comp.compound = comp.compound.boolean(tool, this.operation)
+    try {
+      comp.compound = comp.compound.boolean(tool, this.operation)
+    } catch(err) { this.error = err || this.error }
 
     return tool
   }
@@ -306,14 +302,8 @@ export class ExtrudeFeature extends Feature {
     }
   }
 
-  // confirm() {
-  //   // Refetch profiles in case they've been repaired
-  //   this.profiles().forEach(profile => profile.update() )
-  // }
-
   repair() {
     const newProfiles = this.profiles().filter(profileRef => {
-      // const error = profileRef.getItem(this.document.top()).update()
       const error = profileRef.update(this.document.top())
       return !error || error.type == 'warning'
     })
@@ -592,6 +582,59 @@ export class FilletFeature extends Feature {
     super.dispose()
     if(this.lengthGizmo) window.alcRenderer.removeGizmo(this.lengthGizmo())
     this.lengthGizmo = null
+  }
+}
+
+
+export class OffsetFeature extends Feature {
+  static icon = 'magnet'
+  constructor(doc) {
+    super(doc, false, 'Shell', {
+      faces: {
+        title: 'Open Faces',
+        type: 'face',
+        multi: true,
+      },
+      distance: {
+        title: 'Distance',
+        type: 'length',
+      },
+      side: {
+        title: 'Side',
+        type: 'bool',
+        icons: ['caret-up', 'caret-down']
+      },
+    })
+
+    this.faces = null
+    this.distance = 1.0
+    this.side = false
+  }
+
+  isComplete() {
+    return this.faces && this.faces().length
+  }
+
+  updateFeature(tree) {
+    this.error = null
+
+    const faces = this.faces().map(faceRef => {
+      const clone = faceRef.clone()
+      const error = clone.update(tree)
+      this.error ||= error
+      if(error) return
+      faceRef.update(tree)
+      return faceRef.getItem()
+    }).filter(Boolean)
+
+    if(faces.length && this.error) this.error.type = 'warning'
+
+    const distance = this.distance * (this.side ? 1 : -1)
+    const comp = tree.findChild(this.componentId)
+
+    try {
+      comp.compound = comp.compound.offset(faces, distance)
+    } catch(err) { this.error = err || this.error }
   }
 }
 

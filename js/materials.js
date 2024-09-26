@@ -29,7 +29,7 @@ export default class Materials {
     this.wire.linewidth = 2
 
     this.ghostWire = this.wire.clone()
-    this.ghostWire.color.set('rgb(8, 8, 8)')
+    this.ghostWire.color.set('rgb(45, 49, 53)')
     this.ghostWire.linewidth = 1.5
 
     // Line Materials

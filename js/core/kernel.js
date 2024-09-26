@@ -875,14 +875,14 @@ export class Compound extends Volumetric {
   }
 
   boolean(other, op) {
+    if(!other.geom) throw { type: 'error', msg: "Tool body has no volume" }
+
     if(!this.geom) return this.clone(other.geom())
 
     const ops = {
       join: window.oc.oc.BRepAlgoAPI_Fuse_3,
       cut: window.oc.oc.BRepAlgoAPI_Cut_3,
     }
-
-    if(!other.geom) throw { type: 'error', msg: "Tool body has no volume" }
 
     const result = new ops[op](this.geom(), other.geom(), new window.oc.oc.Message_ProgressRange_1())
     return this.clone(Solid.repair(result.Shape()))
@@ -940,17 +940,17 @@ export class Reference {
 }
 
 export class PlanarReference extends Reference {
-  getPlane() {
-    const item = this.getItem()
-    return item && item.getPlane()
-  }
-
-  getItem() {
+  getReal() {
     if(this.item instanceof PlaneHelper) {
       return this.item
     } else if(this.item instanceof FaceReference) {
       return this.item.getItem()
     }
+  }
+
+  getItem() {
+    const item = this.getReal()
+    return item && item.getPlane()
   }
 
   update(tree) {

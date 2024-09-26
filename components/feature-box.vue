@@ -10,7 +10,7 @@
         .setting(v-for="(setting, key) in activeFeature.settings")
           span {{ setting.title }}
           .picker(
-            v-if="needsPicker(setting, true)"
+            v-if="activeFeature.needsPicker(key, true)"
             :ref="key"
             :class="{ active: activePicker == key, filled: activeFeature[key] }"
             @click="pick(setting.type, key)"
@@ -297,19 +297,13 @@
     methods: {
       pickAll: function() {
         const pickerKeys = Object.keys(this.activeFeature.settings).filter(key =>
-          !this.activeFeature[key] && this.needsPicker(this.activeFeature.settings[key])
+          !this.activeFeature[key] && this.activeFeature.needsPicker(key)
         )
         let chain = Promise.resolve()
         for(const key of pickerKeys) {
           const setting = this.activeFeature.settings[key]
           chain = chain.then(() => this.pick(setting.type, key) )
         }
-      },
-
-      needsPicker: function(setting, includeOptionals) {
-        return ['profile', 'curve', 'axis', 'plane', 'face', 'edge'].some(type =>
-          type == setting.type && (!setting.optional || includeOptionals)
-        )
       },
 
       pick: function(type, key) {
@@ -399,18 +393,26 @@
           this.bus.emit('clear-pickers')
           for(const key in this.activeFeature.settings) {
             const data = this.activeFeature[key]
-            if(data && this.needsPicker(this.activeFeature.settings[key], true) && data()) {
+            if(data && this.activeFeature.needsPicker(key, true) && data()) {
               const { pickerPos, color } = this.getPickerInfo(key)
               const refs = Array.isArray(data()) ? data() : [data()]
               refs.forEach(ref => {
-                const item = ref.getItem(this.document.top())
-                this.bus.emit('show-picker', pickerPos, item.center(), color)
+                const item = ref.getItem()
+                this.bus.emit('show-picker', pickerPos, this.getCenter(item), color)
                 // item.free()
               })
             }
           }
           if(this.updatePicker) this.updatePicker()
         })
+      },
+
+      getCenter(item) {
+        if(item instanceof THREE.Matrix4) {
+          return new THREE.Vector3().setFromMatrixPosition(item)
+        } else {
+          return item.center()
+        }
       },
 
       getPickerInfo: function(key) {

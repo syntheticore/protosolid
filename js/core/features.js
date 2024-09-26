@@ -8,9 +8,7 @@ import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
 export class Feature {
   constructor(document, booleanOutput, title, settings) {
     this.document = document
-    // this.real = real || new window.alcWasm.JsFeature(document.real)
     this.title = title
-    // this.icon = icon
     this.settings = settings
     this.error = null
     this.componentId = this.document.activeComponent.id
@@ -47,20 +45,65 @@ export class Feature {
 
   execute(tree) {
     if(this.suppressUpdate || !this.isComplete()) return
-    this.updateFeature(tree)
+    this.error = null
+    const references = this.updateReferences(tree)
+    if(!this.error || this.error.type== 'warning') this.updateFeature(tree, references)
+  }
+
+  updateReferences(tree) {
+    const results = {}
+    const errors = []
+
+    Object.keys(this.settings).forEach(key => {
+      if(!this[key] || !this.needsPicker(key, true)) return
+
+      const setting = this.settings[key]
+      const isMulti = (setting.multi || setting.autoMulti)
+      const refs = isMulti ? this[key]() : [this[key]()]
+
+      let settingError
+
+      const items = refs.map(ref => {
+        const clone = ref.clone()
+        const error = clone.update(tree)
+        const severe = (error && error.type == 'error')
+        settingError = (severe ? error : (settingError || error))
+        if(severe) return
+        if(!error) ref.update(tree) // Update intact references without user consent, such that their center etc. can be calculated
+        return clone.getItem()
+      }).filter(Boolean)
+
+      if(items.length && settingError) settingError.type = 'warning'
+
+      if(settingError) errors.push(settingError)
+      results[key] = isMulti ? items : items[0]
+    })
+
+    const severe = errors.filter(error => error.type == 'error' )
+    this.error = severe.length ? severe[0] : errors[0]
+
+    return results
+  }
+
+  needsPicker(setting, includeOptionals) {
+    setting = this.settings[setting]
+    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge'].some(type =>
+      type == setting.type && (!setting.optional || includeOptionals)
+    )
+  }
+
+  isComplete() {
+    return Object.keys(this.settings)
+      .filter(key => this.needsPicker(key) )
+      .every(key => this[key] && (!(this.settings[key].multi || this.settings[key].autoMulti) || this[key]().length) )
   }
 
   preview() {}
   confirm() {}
-  isComplete() {}
+  updateFeature() {}
   updateGizmos() {}
   modifiedComponents() { return [this.componentId] }
   repair() {}
-
-  // update() {
-  //   this.updateGizmos()
-  //   this.execute()
-  // }
 
   getValues() {
     const values = {}
@@ -114,11 +157,9 @@ export class CreateComponentFeature extends Feature {
 
     const parentId = parent.id
     this.parent = () => parentId
-    // this.newComponentId = crypto.randomUUID()
 
     this.component = new Component(parent, crypto.randomUUID())
     this.component.creator = this
-    console.log('CREATED', this.component.id)
 
     this.title = "New Component"
     this.hidden = false
@@ -141,14 +182,8 @@ export class CreateComponentFeature extends Feature {
     this.cache = () => cache
   }
 
-  isComplete() {
-    return !!this.parent
-  }
-
   updateFeature(tree) {
-    // let parent = this.document.top().findChild(this.parent())
     let parent = tree.findChild(this.parent())
-    // const child = comp.createChild(this.newComponentId)
     parent.children.push(this.component)
   }
 
@@ -170,39 +205,19 @@ export class CreateSketchFeature extends Feature {
     })
 
     this.plane = null
-    // this.sketch = new Sketch(this.document.activeComponent.id)
     this.sketch = new Sketch()
     this.sketch.creator = this
   }
 
-  isComplete() {
-    return !!this.plane
-  }
-
-  updateFeature(tree) {
-    // let comp = this.document.getComponent(this.sketch.componentId)
-    const planeRef = this.plane()
-    this.error = planeRef.update(tree)
-
-    if(this.error) {
-      this.error = { type: 'error', msg: 'Sketch plane was lost' }
-      return
-    }
-
-    const plane = planeRef.getPlane()
+  updateFeature(tree, references) {
+    const plane = references.plane
     this.sketch.workplane = plane
     tree.findChild(this.componentId).sketches.push(this.sketch)
   }
 
   confirm() {
-    // this.document.activeSketch = this.document.activeComponent.sketches.slice(-1)[0]
-    // this.document.timeline.marker++
     this.document.activateFeature(this)
   }
-
-  // modifiedComponents() {
-  //   return [this.sketch.componentId]
-  // }
 }
 
 
@@ -244,28 +259,11 @@ export class ExtrudeFeature extends Feature {
     this.side = true
   }
 
-  isComplete() {
-    return this.profiles && this.profiles().length
-  }
-
-  updateFeature(tree) {
+  updateFeature(tree, references) {
     const distance = this.distance * (this.side ? 1 : -1)
 
-    this.error = null
-
-    const profiles = this.profiles().map(profileRef => {
-      const ref = profileRef.clone()
-      const error = ref.update(tree)
-      const profile = ref.getItem()
-      this.error = (error && error.type == 'error' ? error : this.error || error)
-      if(error && error.type == 'error') return
-      return profile
-    }).filter(Boolean)
-
-    if(profiles.length && this.error) this.error.type = 'warning'
-
     let tool = new Compound(this.componentId)
-    profiles.forEach(profile => {
+    references.profiles.forEach(profile => {
       try {
         const extrusion = profile.extrude(this.componentId, distance)
         tool = tool.boolean(extrusion, 'join')
@@ -349,10 +347,6 @@ export class RevolveFeature extends Feature {
     this.side = true
   }
 
-  isComplete() {
-    return this.axis && this.profiles && this.profiles().length
-  }
-
   updateFeature() {
     const list = new window.alcWasm.JsProfileRefList()
     this.profiles().forEach(profile => {
@@ -389,10 +383,10 @@ export class RevolveFeature extends Feature {
     }
   }
 
-  confirm() {
-    // Refetch profiles in case they've been repaired
-    this.profiles().forEach(profile => profile.update())
-  }
+  // confirm() {
+  //   // Refetch profiles in case they've been repaired
+  //   this.profiles().forEach(profile => profile.update())
+  // }
 
   dispose() {
     super.dispose()
@@ -426,10 +420,6 @@ export class DraftFeature extends Feature {
     this.angle = 0.0
   }
 
-  isComplete() {
-    return this.ref_plane && this.faces && this.faces().length
-  }
-
   updateFeature() {
     const list = new window.alcWasm.JsFaceRefList()
     this.faces().forEach(face => {
@@ -455,12 +445,12 @@ export class DraftFeature extends Feature {
     }
   }
 
-  confirm() {
-    // Refetch faces in case they've been repaired
-    this.faces().forEach(faceRef => faceRef.free())
-    const faces = this.real.face_refs()
-    this.faces = () => faces
-  }
+  // confirm() {
+  //   // Refetch faces in case they've been repaired
+  //   this.faces().forEach(faceRef => faceRef.free())
+  //   const faces = this.real.face_refs()
+  //   this.faces = () => faces
+  // }
 
   dispose() {
     super.dispose()
@@ -527,27 +517,10 @@ export class FilletFeature extends Feature {
     this.radius = 1.0
   }
 
-  isComplete() {
-    return this.edges && this.edges().length
-  }
-
-  updateFeature(tree) {
+  updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
-    this.error = null
-
-    const edges = this.edges().map(edgeRef => {
-      const clone = edgeRef.clone()
-      const error = clone.update(tree)
-      this.error ||= error
-      if(error) return
-      edgeRef.update(tree) // Update intact references such that their center etc. can be calculated
-      return edgeRef.getItem()
-    }).filter(Boolean)
-
-    if(edges.length && this.error) this.error.type = 'warning'
-
     try {
-      comp.compound = comp.compound.fillet(edges, this.radius)
+      comp.compound = comp.compound.fillet(references.edges, this.radius)
     } catch(err) { this.error = err || this.error }
   }
 
@@ -611,29 +584,12 @@ export class OffsetFeature extends Feature {
     this.side = false
   }
 
-  isComplete() {
-    return this.faces && this.faces().length
-  }
-
-  updateFeature(tree) {
-    this.error = null
-
-    const faces = this.faces().map(faceRef => {
-      const clone = faceRef.clone()
-      const error = clone.update(tree)
-      this.error ||= error
-      if(error) return
-      faceRef.update(tree)
-      return faceRef.getItem()
-    }).filter(Boolean)
-
-    if(faces.length && this.error) this.error.type = 'warning'
-
+  updateFeature(tree, references) {
     const distance = this.distance * (this.side ? 1 : -1)
     const comp = tree.findChild(this.componentId)
 
     try {
-      comp.compound = comp.compound.offset(faces, distance)
+      comp.compound = comp.compound.offset(references.faces, distance)
     } catch(err) { this.error = err || this.error }
   }
 }

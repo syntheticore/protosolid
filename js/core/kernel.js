@@ -150,7 +150,7 @@ export class Line extends SketchElement {
   geometry() {
     const [p1, p2] = this.points
     if(p1.almost(p2)) return
-    return new window.oc.oc.Handle_Geom2d_Curve_2(new window.oc.oc.GCE2d_MakeSegment_1(ocPntFromVec(p1), ocPntFromVec(p2)).Value().get())
+    return new window.oc.oc.Handle_Geom2d_Curve_2(new window.oc.oc.GCE2d_MakeSegment_1(ocPnt2dFromVec(p1), ocPnt2dFromVec(p2)).Value().get())
   }
 
   flip() {
@@ -168,8 +168,16 @@ export class Line extends SketchElement {
   //   return this.points[0].distanceTo(this.points[1])
   // }
 
+  direction() {
+    return this.points[1].clone().sub(this.points[0])
+  }
+
   axialReference() {
-    return new AxialReference(this)
+    return new AxialReference(new CurveReference(this))
+  }
+
+  getAxis() {
+    return rotationFromNormal(this.direction().normalize()).setPosition(this.points[0])
   }
 
   _clone() {
@@ -588,13 +596,34 @@ export class Profile {
 
   extrude(componentId, height) {
     if(!height) throw { type: 'error', msg: 'Extrusion has no volume' }
-    const wire = this.rings[0].geometry()
-    const face = new window.oc.oc.BRepBuilderAPI_MakeFace_15(wire, true).Face()
+    const face = this.makeFace()
     const dir = new window.oc.oc.gp_Vec_4(0, 0, height)
-    let makePrism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
-    let prism = window.oc.oc.TopoDS.Solid_1(makePrism.Shape())
+    let prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
+    return this.makeCompound(componentId, prism.Shape())
+  }
 
-    const compound = new Compound(componentId, prism)
+  revolve(componentId, axis, angle) {
+    if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
+
+    const face = this.makeFace()
+
+    const pos = new THREE.Vector3().setFromMatrixPosition(axis)
+    const rot = new THREE.Quaternion().setFromRotationMatrix(axis)
+    const axDir = new THREE.Vector3(0,0,1).applyQuaternion(rot)
+    const ax = new window.oc.oc.gp_Ax1_2(ocPntFromVec(pos), ocDirFromVec(axDir))
+
+    let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
+    return this.makeCompound(componentId, revolution.Shape())
+  }
+
+  makeFace() {
+    const wire = this.rings[0].geometry()
+    return new window.oc.oc.BRepBuilderAPI_MakeFace_15(wire, true).Face()
+  }
+
+  makeCompound(componentId, shape) {
+    const solid = window.oc.oc.TopoDS.Solid_1(shape)
+    const compound = new Compound(componentId, solid)
     compound.transform(this.sketch.workplane)
     compound.id = this.id
     return compound
@@ -947,35 +976,6 @@ export class Reference {
   }
 }
 
-export class PlanarReference extends Reference {
-  getReal() {
-    if(this.item instanceof PlaneHelper) {
-      return this.item
-    } else if(this.item instanceof FaceReference) {
-      return this.item.getItem()
-    }
-  }
-
-  getItem() {
-    const item = this.getReal()
-    return item && item.getPlane()
-  }
-
-  update(tree) {
-    if(this.item instanceof FaceReference) {
-      return this.item.update(tree)
-    }
-  }
-
-  clone() {
-    return new PlanarReference(this.item instanceof FaceReference ? this.item.clone() : this.item)
-  }
-}
-
-export class AxialReference extends Reference {
-  getAxis() {}
-}
-
 export class FaceReference extends Reference {
   update(tree) {
     const comp = tree.findChild(this.item.solid.compound.componentId)
@@ -1005,6 +1005,56 @@ export class ProfileReference extends Reference {
 
   clone() {
     return new ProfileReference(this.item.clone())
+  }
+}
+
+export class PlanarReference extends Reference {
+  getReal() {
+    if(this.item instanceof PlaneHelper) {
+      return this.item
+    } else if(this.item instanceof FaceReference) {
+      return this.item.getItem()
+    }
+  }
+
+  getItem() {
+    const item = this.getReal()
+    return item && item.getPlane()
+  }
+
+  update(tree) {
+    if(this.item instanceof FaceReference) {
+      return this.item.update(tree)
+    }
+  }
+
+  clone() {
+    return new PlanarReference(this.item instanceof FaceReference ? this.item.clone() : this.item)
+  }
+}
+
+export class AxialReference extends Reference {
+  getReal() {
+    if(this.item instanceof AxisHelper) {
+      return this.item
+    } else if(this.item instanceof CurveReference) {
+      return this.item.getItem()
+    }
+  }
+
+  getItem() {
+    const item = this.getReal()
+    return item && item.getAxis()
+  }
+
+  update(tree) {
+    if(this.item instanceof CurveReference) {
+      return this.item.update(tree)
+    }
+  }
+
+  clone() {
+    return new AxialReference(this.item instanceof CurveReference ? this.item.clone() : this.item)
   }
 }
 
@@ -1045,6 +1095,10 @@ export class AxisHelper extends ConstructionHelper {
 
   axialReference() {
     return new AxialReference(this)
+  }
+
+  getAxis() {
+    return this.transform
   }
 }
 
@@ -1228,6 +1282,7 @@ export class Timeline {
   }
 }
 
+
 function coords(ocVec) {
   return [ocVec.X(), ocVec.Y(), (ocVec.Z && ocVec.Z()) || 0.0]
 }
@@ -1236,11 +1291,20 @@ function vecFromOc(ocVec) {
   return new THREE.Vector3().fromArray(coords(ocVec))
 }
 
-function ocPntFromVec(vec) {
+
+function ocPnt2dFromVec(vec) {
   return new window.oc.oc.gp_Pnt2d_3(vec.x, vec.y)
 }
 
+function ocPntFromVec(vec) {
+  return new window.oc.oc.gp_Pnt_3(vec.x, vec.y, vec.z)
+}
+
 function ocDirFromVec(vec) {
+  return new window.oc.oc.gp_Dir_4(vec.x, vec.y, vec.z)
+}
+
+function ocDir2dFromVec(vec) {
   return new window.oc.oc.gp_Dir2d_4(vec.x, vec.y)
 }
 
@@ -1256,6 +1320,7 @@ function matrix4FromOcPln(pln) {
     .makeBasis(x, y, z)
     .setPosition(vecFromOc(pln.Axis().Location()))
 }
+
 
 function tesselateCurveFixed(geom, steps) {
   const start = geom.FirstParameter()

@@ -352,51 +352,24 @@ export class RevolveFeature extends Feature {
     this.side = true
   }
 
-  updateFeature() {
-    const list = new window.alcWasm.JsProfileRefList()
-    this.profiles().forEach(profile => {
-      list.push(profile)
-    })
-    const comp_ref = this.document.activeComponent.id
+  updateFeature(tree, references) {
     const angle = this.angle * (this.side ? 1 : -1)
-    this.real.revolution(comp_ref, list, this.axis(), angle, this.operation)
-  }
 
-  updateGizmos() {
-    if(this.isComplete()) {
-      if(this.lengthGizmo) {
-        this.lengthGizmo.set(this.angle, this.side)
-      } else {
-        const item = this.profiles()[0].item()
-        const center = vecToThree(item.center())
-        const axis = this.axis && this.axis()
-        const direction = vecToThree(item.normal())
-        item.free()
-        this.lengthGizmo = new LengthGizmo(center, direction, this.side, this.angle, (dist, side) => {
-          this.angle = dist
-          this.side = side
-        })
-        // this.angleGizmo = new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
-        //   console.log(angle)
-        //   this.angle = angle
-        // })
-        window.alcRenderer.addGizmo(this.lengthGizmo)
-      }
-    } else {
-      window.alcRenderer.removeGizmo(this.lengthGizmo)
-      this.lengthGizmo = null
-    }
-  }
+    let tool = new Compound(this.componentId)
+    references.profiles.forEach(profile => {
+      try {
+        const revolution = profile.revolve(this.componentId, references.axis, angle)
+        tool = tool.boolean(revolution, 'join')
+      } catch(err) { this.error = err || this.error }
+    })
 
-  // confirm() {
-  //   // Refetch profiles in case they've been repaired
-  //   this.profiles().forEach(profile => profile.update())
-  // }
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.boolean(tool, this.operation)
+      comp.compound.repair()
+    } catch(err) { this.error = err || this.error }
 
-  dispose() {
-    super.dispose()
-    window.alcRenderer.removeGizmo(this.lengthGizmo)
-    this.lengthGizmo = null
+    return tool
   }
 }
 

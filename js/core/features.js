@@ -45,9 +45,13 @@ export class Feature {
 
   execute(tree) {
     if(this.suppressUpdate || !this.isComplete()) return
+
     this.error = null
     const references = this.updateReferences(tree)
-    if(!this.error || this.error.type== 'warning') this.updateFeature(tree, references)
+
+    if(this.error && this.error.type == 'error') return
+
+    this.updateFeature(tree, references)
   }
 
   updateReferences(tree) {
@@ -273,6 +277,7 @@ export class ExtrudeFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.boolean(tool, this.operation)
+      comp.compound.repair()
     } catch(err) { this.error = err || this.error }
 
     return tool
@@ -521,6 +526,7 @@ export class FilletFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.fillet(references.edges, this.radius)
+      comp.compound.repair()
     } catch(err) { this.error = err || this.error }
   }
 
@@ -590,6 +596,7 @@ export class OffsetFeature extends Feature {
 
     try {
       comp.compound = comp.compound.offset(references.faces, distance)
+      comp.compound.repair()
     } catch(err) { this.error = err || this.error }
   }
 }

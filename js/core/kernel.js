@@ -710,9 +710,6 @@ export class Shape {
 
 export class Volumetric extends Shape {
   static repair(shape) {
-    // const fix = new window.oc.oc.ShapeFix_Shape_2(shape)
-    // fix.Perform(new window.oc.oc.Message_ProgressRange_1())
-    // shape = fix.Shape()
 
     // const purge = new window.oc.oc.TopOpeBRepTool_FuseEdges(shape, true)
     // purge.Perform()
@@ -721,6 +718,10 @@ export class Volumetric extends Shape {
     const unify = new window.oc.oc.ShapeUpgrade_UnifySameDomain_2(shape, true, true, false)
     unify.Build()
     shape = unify.Shape()
+
+    const fix = new window.oc.oc.ShapeFix_Shape_2(shape)
+    fix.Perform(new window.oc.oc.Message_ProgressRange_1())
+    shape = fix.Shape()
 
     // shape = new window.oc.oc.ShapeUpgrade_ShellSewing().ApplySewing(shape, 0.01)
 
@@ -732,6 +733,12 @@ export class Volumetric extends Shape {
     //   explorer.Next()
     // }
     return shape
+  }
+
+  repair() {
+    if(!this.geom) return
+    const repaired = Volumetric.repair(this.geom())
+    this.geom = () => repaired
   }
 
   volume() {
@@ -885,7 +892,8 @@ export class Compound extends Volumetric {
     }
 
     const result = new ops[op](this.geom(), other.geom(), new window.oc.oc.Message_ProgressRange_1())
-    return this.clone(Solid.repair(result.Shape()))
+    // return this.clone(Solid.repair(result.Shape()))
+    return this.clone(result.Shape())
   }
 
   fillet(edges, radius) {

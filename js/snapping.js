@@ -25,28 +25,30 @@ export default class Snapper {
     this.updateView([], null)
   }
 
-  snap(vec, coords) {
+  snap(vec, coords, snapToGuides, snapToPoints, localSpace) {
     this.guides = []
-    this.catchSnapPoints(coords)
-    vec = this.snapToGuides(vec)
-    if(vec) vec.z = 0.0 //XXX project vec to plane before snapping
-    this.updateView(this.guides, this.snapAnchor)
+    if(localSpace) {
+      if((snapToGuides || snapToPoints) && this.viewport.activeSketch) this.catchSnapPoints(coords)
+      vec = this.snapToGuides(vec, snapToGuides, snapToPoints)
+      if(vec) vec.z = 0.0 //XXX project vec to plane before snapping
+    }
+    this.updateView(this.guides, snapToPoints ? this.snapAnchor : null)
     return vec
   }
 
   getSnapPoints() {
-    const sketchElements = [...this.viewport.activeSketch.elements]
-    // const localTransform = this.planeTransform.clone().invert()
+    let sketchElements = [...this.viewport.activeSketch.elements]
     // Filter out sketch element actively being drawn
     const tool = this.viewport.activeTool
     if(tool.curve) sketchElements.pop()
     return sketchElements.flatMap(elem => {
       let points = elem.snapPoints()
-        // .map(p => vecToThree(p))
-      // Filter out handle actively being dragged
-      if(this.viewport.activeHandle && elem.id == this.viewport.activeHandle.elem.id) {
+      // Filter out handle actively being dragged & connected neighboors
+      if(this.viewport.activeHandle) {
         const handlePoint = this.viewport.activeHandle.elem.handles()[this.viewport.activeHandle.index]
-        points = points.filter(p => !p.equals(handlePoint))
+        const constrainedPoints = this.viewport.activeHandle.elem.constraints().flatMap(constraint => constraint.pair.flatMap(item => item.curve.handles() ) )
+        const omit = [handlePoint, ...constrainedPoints]
+        points = points.filter(p => !omit.some(hp => p.almost(hp) ) )
       }
       return points
     })
@@ -70,11 +72,14 @@ export default class Snapper {
     }
   }
 
-  snapToGuides(vec) {
+  snapToGuides(vec, snapToGuides, snapToPoints) {
     if(!vec) return
+
     const localTransform = this.planeTransform.clone().invert()
     const localVec = vec.clone().applyMatrix4(localTransform)
-    // return localVec
+
+    if(!(snapToGuides || snapToPoints)) return localVec
+
     const screenVec = this.viewport.renderer.toScreen(vec)
     let snapX = this.lastSnaps.find(snap => {
       // Compare plane space X axis..
@@ -106,21 +111,23 @@ export default class Snapper {
     )
     const worldSnapVec = snapVec.clone().applyMatrix4(this.planeTransform)
     const screenSnapVec = this.viewport.renderer.toScreen(worldSnapVec)
-    if(snapX) {
-      const start = this.viewport.renderer.toScreen(snapX.clone().applyMatrix4(this.planeTransform))
-      this.guides.push({
-        id: 'v' + start.x + start.y,
-        start,
-        end: screenSnapVec,
-      })
-    }
-    if(snapY) {
-      const start = this.viewport.renderer.toScreen(snapY.clone().applyMatrix4(this.planeTransform))
-      this.guides.push({
-        id: 'h' + start.x + start.y,
-        start,
-        end: screenSnapVec,
-      })
+    if(snapToGuides) {
+      if(snapX) {
+        const start = this.viewport.renderer.toScreen(snapX.clone().applyMatrix4(this.planeTransform))
+        this.guides.push({
+          id: 'v' + start.x + start.y,
+          start,
+          end: screenSnapVec,
+        })
+      }
+      if(snapY) {
+        const start = this.viewport.renderer.toScreen(snapY.clone().applyMatrix4(this.planeTransform))
+        this.guides.push({
+          id: 'h' + start.x + start.y,
+          start,
+          end: screenSnapVec,
+        })
+      }
     }
     if(snapX && snapY) {
       this.snapAnchor = this.snapAnchor || {
@@ -129,12 +136,12 @@ export default class Snapper {
         vec: worldSnapVec,
         id: '' + snapVec.x + snapVec.y + snapVec.z,
       }
-      if(snapX === snapY) return snapX//.clone().applyMatrix4(localTransform)
+      if(snapX === snapY && snapToPoints) return snapX//.clone().applyMatrix4(localTransform)
     } else {
       this.snapAnchor = null
     }
 
-    if(snapX || snapY) return snapVec
+    if((snapX || snapY) && snapToGuides) return snapVec
 
     return localVec
   }

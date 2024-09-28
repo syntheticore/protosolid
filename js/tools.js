@@ -7,13 +7,15 @@
 //   rotationFromNormal
 // } from './utils.js'
 
-import { Line, Circle } from './core/kernel.js'
+import { Line, Circle, CoincidentConstraint, PerpendicularConstraint } from './core/kernel.js'
 
 class Tool {
   constructor(component, viewport) {
     this.component = component
     this.viewport = viewport
-    this.enableSnapping = false
+    this.snapToGuides = false
+    this.snapToPoints = false
+    this.localSpace = false
   }
 
   click(vec, coords) {}
@@ -33,6 +35,16 @@ class Tool {
   mouseMove(vec, coords) {}
 
   dispose() {}
+
+  async updateSketch() {
+    const sketch = this.viewport.activeSketch
+    if(!sketch) return
+    const handle = this.viewport.activeHandle
+    if(handle) handle.elem.constraints().forEach(c => c.temporary = true )
+    await sketch.solve()
+    if(handle) handle.elem.constraints().forEach(c => c.temporary = false )
+    sketch.elements.forEach(elem => this.viewport.elementChanged(elem, this.component) )
+  }
 }
 
 
@@ -92,6 +104,7 @@ class HighlightTool extends Tool {
 export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, [])
+    this.localSpace = true
     this.setSelectors(this.viewport.activeSketch ? ['curve'] : ['curve', 'solid'])
   }
 
@@ -107,12 +120,12 @@ export class ManipulationTool extends HighlightTool {
 
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    if(this.viewport.activeHandle) this.enableSnapping = true
+    if(this.viewport.activeHandle) this.snapToPoints = true
   }
 
   mouseUp(vec, coords) {
     super.mouseUp(vec, coords)
-    this.enableSnapping = false
+    this.snapToPoints = false
   }
 
   mouseMove(vec, coords) {
@@ -121,7 +134,8 @@ export class ManipulationTool extends HighlightTool {
       let handles = handle.elem.handles()
       handles[handle.index] = vec//.toArray()
       handle.elem.setHandles(handles, false)
-      this.viewport.elementChanged(handle.elem, this.component)
+      this.updateSketch()
+      // this.viewport.elementChanged(handle.elem, this.component)
     } else {
       super.mouseMove(vec, coords)
     }
@@ -189,6 +203,7 @@ class PickTool extends HighlightTool {
   constructor(component, viewport, selectors, callback) {
     super(component, viewport, selectors)
     this.callback = callback
+    this.localSpace = false
   }
 
   mouseDown(vec, coords) {
@@ -242,7 +257,9 @@ export class SketchTool extends Tool {
   constructor(component, viewport, sketch) {
     super(component, viewport)
     this.sketch = sketch
-    this.enableSnapping = true
+    this.localSpace = true
+    this.snapToGuides = true
+    this.snapToPoints = true
   }
 }
 
@@ -255,28 +272,31 @@ export class LineTool extends SketchTool {
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
     this.mouseMove(vec)
+
     const elems = [...this.sketch.elements]
-    elems.pop()
-    const touchesExisting = elems
-      .flatMap(elem => elem.snapPoints() )
-      // .map(p => vecToThree(p) )
-      .some(p => p.equals(vec) )
+    if(this.curve) elems.pop()
+    const touchesExisting = elems.find(elem => elem.snapPoints().some(p => p.equals(vec) ) )
+    const endpoints = touchesExisting && touchesExisting.handles()
+    const index = touchesExisting && endpoints.indexOf(endpoints.find(sp => sp.equals(vec) ))
+
     // Restart tool when we hit an existing point
     if(touchesExisting && this.curve) {
+      this.sketch.add(this.curve)
+      if(index != -1) this.sketch.addConstraint(new CoincidentConstraint(this.curve, 1, touchesExisting, index))
       this.curve = null
     } else {
-      // this.curve = this.sketch.add_line(vec.toArray(), vec.toArray())
+      const old = this.curve
       this.curve = new Line(vec, vec)
       this.sketch.add(this.curve)
-      // this.curve.sketch = this.sketch
-      this.viewport.elementChanged(this.curve, this.component)
+      const other = touchesExisting || old
+      const otherIndex = touchesExisting ? index : 1
+      if(old || touchesExisting) this.sketch.addConstraint(new CoincidentConstraint(this.curve, 0, other, otherIndex))
     }
   }
 
   mouseMove(vec) {
     if(!this.curve) return
     let p1 = this.curve.handles()[0]
-    // this.curve.setHandles([p1, vec.toArray()], false)
     this.curve.setHandles([p1, vec], false)
     this.viewport.elementChanged(this.curve, this.component)
   }
@@ -388,5 +408,30 @@ export class ArcTool extends SketchTool {
       this.curve.setHandles([this.start, vec, this.end], true)
       this.viewport.elementChanged(this.curve, this.component)
     } catch(e) {}
+  }
+}
+
+
+export class ConstraintTool extends HighlightTool {
+  constructor(component, viewport, sketch) {
+    super(component, viewport, ['curve'])
+    this.sketch = sketch
+    this.items = []
+  }
+
+  async mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    const curve = await this.getObject(coords)
+    if(!curve || !(curve instanceof Line)) {
+      this.items = []
+      return
+    }
+    this.items.push(curve)
+    if(this.items.length == 2) {
+      const constraint = new PerpendicularConstraint(...this.items)
+      this.sketch.addConstraint(constraint)
+      this.updateSketch()
+      this.items = []
+    }
   }
 }

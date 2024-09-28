@@ -13,14 +13,21 @@ import opencascadeWasm from '~/assets/oc/oc.wasm?url'
 // import opencascade from '~/assets/oc/opencascade.full.js'
 // import opencascadeWasm from '~/assets/oc/opencascade.full.wasm?url'
 
-const p = opencascade({
+const ocp = opencascade({
   locateFile: () => opencascadeWasm,
 })
 
+import { init_planegcs_module, GcsWrapper } from '@salusoft89/planegcs'
+import wasm_url from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url'
+
+const gcsp = init_planegcs_module({ locateFile: () => wasm_url })
+
 export async function useOC() {
-  const oc = await p
+  const oc = await ocp
+  const gcs = await gcsp
   return {
     oc,
+    gcs,
 
     // Takes a TDocStd_Document, creates a GLB file from it and returns a ObjectURL
     tesselateDoc(doc) {
@@ -48,6 +55,24 @@ export async function useOC() {
 
       // Return our visualized document
       return this.tesselateDoc(doc)
+    },
+
+    solveSystem(primitives) {
+      const system = new gcs.GcsSystem()
+      const solver = new GcsWrapper(system)
+
+      solver.set_max_iterations(200) // 100
+      solver.set_convergence_threshold(1e-10)
+
+      solver.push_primitives_and_params(primitives)
+      solver.solve()
+      solver.apply_solution()
+
+      const results = solver.sketch_index.get_primitives()
+
+      solver.destroy_gcs_module()
+
+      return results
     },
   }
 }

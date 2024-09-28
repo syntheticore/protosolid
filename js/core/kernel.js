@@ -89,6 +89,10 @@ export class SketchElement {
     return [...this.constructor.fromGeometry(left, this.id).split(others), ...this.constructor.fromGeometry(right, this.id).split(others)]
   }
 
+  constraints() {
+    return this.sketch.constraints.filter(constraint => constraint.pair.some(item => item.curve == this ) )
+  }
+
   clone() {
     const clone = this._clone()
     clone.id = this.id
@@ -252,6 +256,7 @@ export class Sketch {
   constructor() {
     this.id = crypto.randomUUID()
     this.elements = []
+    this.constraints = []
     this.workplane = new THREE.Matrix4()
     // this.componentId = componentId
     this.hidden = false
@@ -266,6 +271,7 @@ export class Sketch {
 
   remove(elem) {
     this.elements = this.elements.filter(e => e != elem )
+    this.constraints = this.constraints.filter(c => !c.pair.some(item => item.curve == elem ) )
   }
 
   profiles(comp, includeOuter) {
@@ -457,7 +463,79 @@ export class Sketch {
       }
     })
   }
+
+  addConstraint(constraint) {
+    this.constraints.push(constraint)
+    return constraint
+  }
+
+  async solve() {
+    let id = 1
+    const idMap = {}
+
+    // Convert entire sketch to GCS format
+    const primitives = this.elements.flatMap(elem => {
+      let primitives
+      if(elem instanceof Line) {
+        const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: false }
+        const p2 = { id: `${id++}`, type: 'point', x: elem.points[1].x, y: elem.points[1].y, fixed: false }
+        const line = { id: `${id++}`, type: 'line', p1_id: p1.id, p2_id: p2.id }
+        primitives = [p1, p2, line]
+      } else if(elem instanceof Circle) {
+        const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: false }
+        const circle = { id: `${id++}`, type: 'circle', c_id: center.id, radius: elem.radius }
+        primitives = [center, circle]
+      }
+      idMap[elem.id] = primitives
+      return primitives
+    }).filter(Boolean)
+
+    const constraints = this.constraints.flatMap(c => {
+      if(c instanceof PerpendicularConstraint) {
+        const constraintPrims = c.pair.map(item => idMap[item.curve.id][2] )
+        return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+      } else if(c instanceof CoincidentConstraint) {
+        const constraintPrims = c.pair.map(item => idMap[item.curve.id][item.index] )
+        return { id: `${id++}`, type: 'p2p_coincident', p1_id: constraintPrims[0].id, p2_id: constraintPrims[1].id, temporary: c.temporary }
+      }
+    })
+
+    // Solve
+    const results = window.oc.solveSystem([...primitives, ...constraints])
+
+    // Write back results
+    const vecFromPrim = (prim) => {
+      const updated = results.find(res => res.id == prim.id )
+      return new THREE.Vector3(updated.x, updated.y, 0.0)
+    }
+
+    this.elements.forEach(elem => {
+      if(elem instanceof Line) {
+        let [p1, p2, _line] = idMap[elem.id]
+        elem.setHandles([vecFromPrim(p1), vecFromPrim(p2)])
+      } else if(elem instanceof Circle) {
+        let [center, _circle] = idMap[elem.id]
+        elem.setHandles([vecFromPrim(center)])
+      }
+    })
+  }
 }
+
+
+export class Constraint {
+  constructor(a, b) {
+    this.pair = [{ curve: a }, { curve: b }]
+  }
+}
+
+export class CoincidentConstraint extends Constraint {
+  constructor(a, ai, b, bi) {
+    super()
+    this.pair = [{ curve: a, index: ai }, { curve: b, index: bi }]
+  }
+}
+
+export class PerpendicularConstraint extends Constraint {}
 
 
 export class Wire {
@@ -466,8 +544,8 @@ export class Wire {
 
     if(region.length >= 2) {
       // Find starting point from element order
-      let bounds = region[0].endpoints();
-      let next_bounds = region[1].endpoints();
+      let bounds = region[0].endpoints()
+      let next_bounds = region[1].endpoints()
       let point = (bounds[0].almost(next_bounds[0]) || bounds[0].almost(next_bounds[1])) ? bounds[1] : bounds[0]
 
       // Flip curves to flow consistently along element order

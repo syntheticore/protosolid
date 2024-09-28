@@ -170,6 +170,7 @@
     ArcTool,
     // PlaneTool,
     TrimTool,
+    ConstraintTool,
   } from './../js/tools.js'
 
   export default {
@@ -242,7 +243,7 @@
               { title: 'Dimension', icon: 'ruler' },
               { title: 'Touch', icon: 'object-group' },
               { title: 'Parallel', icon: 'code-branch' }, //XXX Use also for hor/vert
-              { title: 'Perpendicular', icon: 'object-group' },
+              { title: 'Perpendicular', tool: ConstraintTool, icon: 'object-group' },
               { title: 'Tangent', icon: 'bezier-curve' },
               { title: 'Equal', icon: 'exchange-alt' },
               { title: 'Fix', icon: 'lock' }, //XXX also ground for assemblies

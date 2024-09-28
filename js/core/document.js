@@ -74,7 +74,7 @@ export default class Document extends Emitter {
 
   activateComponent(comp) {
     if(comp) comp.creator.hidden = false
-    this.activeComponent = comp //XXX activeComponent should never be null. Search for parent that exists
+    this.activeComponent = comp
     this.selection = this.selection.clear()
     this.activeSketch = null
   }

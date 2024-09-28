@@ -16,6 +16,7 @@ class Tool {
     this.snapToGuides = false
     this.snapToPoints = false
     this.localSpace = false
+    this.cursor = 'auto'
   }
 
   click(vec, coords) {}
@@ -120,12 +121,15 @@ export class ManipulationTool extends HighlightTool {
 
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    if(this.viewport.activeHandle) this.snapToPoints = true
+    if(!this.viewport.activeHandle) return
+    this.snapToPoints = true
+    this.cursor = 'grabbing'
   }
 
   mouseUp(vec, coords) {
     super.mouseUp(vec, coords)
     this.snapToPoints = false
+    this.cursor = 'auto'
   }
 
   mouseMove(vec, coords) {
@@ -260,6 +264,7 @@ export class SketchTool extends Tool {
     this.localSpace = true
     this.snapToGuides = true
     this.snapToPoints = true
+    this.cursor = 'crosshair'
   }
 }
 

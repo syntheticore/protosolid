@@ -51,6 +51,10 @@ export class SketchElement {
     return bound.almost(points[0]) ? points[1] : points[0]
   }
 
+  commonHandle(other) {
+    return this.handles().find(p => other.handles().some(op => p.almost(op) ) )
+  }
+
   length() {
     if(!this.geom) return 0.0
     const adaptor = new window.oc.oc.Geom2dAdaptor_Curve_2(this.geom())
@@ -270,8 +274,12 @@ export class Sketch {
   }
 
   remove(elem) {
-    this.elements = this.elements.filter(e => e != elem )
-    this.constraints = this.constraints.filter(c => !c.pair.some(item => item.curve == elem ) )
+    if(elem instanceof SketchElement) {
+      this.elements = this.elements.filter(e => e != elem )
+      this.constraints = this.constraints.filter(c => !c.pair.some(item => item.curve == elem ) )
+    } else if(elem instanceof Constraint) {
+      this.constraints = this.constraints.filter(c => c != elem )
+    }
   }
 
   profiles(comp, includeOuter) {
@@ -465,6 +473,7 @@ export class Sketch {
   }
 
   addConstraint(constraint) {
+    constraint.sketch = this
     this.constraints.push(constraint)
     return constraint
   }
@@ -528,14 +537,29 @@ export class Constraint {
   }
 }
 
+
 export class CoincidentConstraint extends Constraint {
+  static icon = 'bullseye'
+
   constructor(a, ai, b, bi) {
     super()
     this.pair = [{ curve: a, index: ai }, { curve: b, index: bi }]
   }
+
+  typename() { return 'Coincident Constraint' }
 }
 
-export class PerpendicularConstraint extends Constraint {}
+
+export class PerpendicularConstraint extends Constraint {
+  static icon = 'angle-up'
+  typename() { return 'Perpendicular Constraint' }
+}
+
+
+export class Dimension extends Constraint {
+  static icon = 'ruler'
+  typename() { return 'Dimension' }
+}
 
 
 export class Wire {

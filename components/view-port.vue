@@ -1,5 +1,5 @@
 <template lang="pug">
-  .view-port
+  .view-port(:style="{ cursor: (activeTool && activeTool.cursor) || 'auto' }")
 
     //- GL Viewport
     canvas(
@@ -48,6 +48,14 @@
         @contextmenu.prevent
       )
 
+    Icon.constraint(
+      v-for="constraint in constraints"
+      :icon="constraint.constraint.constructor.icon"
+      :class="{ selected: document.selection.has(constraint.constraint) }"
+      :style="{ top: constraint.coords.y + 'px', left: constraint.coords.x + 'px' }"
+      @click="document.selection = document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
+    )
+
     //- Floating UI widgets
     transition-group(name="hide2")
       SelectorWidget(
@@ -73,7 +81,6 @@
   .drawpad
   .handles
   .anchors
-  .widgets
     position: absolute
     left: 0
     top: 0
@@ -152,6 +159,7 @@
 
   .handles > *
     pointer-events: auto
+    cursor: grab
     &:hover
       &::before
         width: 5px
@@ -160,6 +168,27 @@
       &::before
         width:  5px
         height: 5px
+
+  .constraint
+    position: absolute
+    // cursor: pointer
+    margin-left: -9px
+    margin-top: -9px
+    border-radius: 99px
+    padding: 2px
+    width: 19px
+    height: 19px
+    transition: background 0.1s
+    color: #1c2127
+    background: $bright1
+    box-shadow: 0 1px 3px rgba(black, 0.5)
+
+    &:hover
+    &.selected
+      color: white
+
+    &.selected
+      background: $highlight
 
   .selector-widget
     pointer-events: auto
@@ -188,6 +217,7 @@
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
   import Transloader from './../js/transloader.js'
+  import { CoincidentConstraint } from './../js/core/kernel.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -234,6 +264,7 @@
         pickingPath: null,
         guides: [],
         widgets: [],
+        constraints: [],
       }
     },
 
@@ -486,8 +517,11 @@
       updateWidgets: function() {
         // Update Snap Anchor
         if(this.snapAnchor) this.snapAnchor.pos = this.renderer.toScreen(this.snapAnchor.vec)
-        // Update Handles
+
+        this.constraints = []
+
         if(this.activeSketch) {
+          // Update Handles
           for(let elemId in this.handles) {
             const elemHandles = this.handles[elemId]
             elemHandles.forEach(handle => {
@@ -495,7 +529,18 @@
             })
           }
           this.handles = Object.assign({}, this.handles)
+
+          // Update constraints
+          this.constraints = this.activeSketch.constraints.flatMap(c => {
+            if(c instanceof CoincidentConstraint) return
+            return c.pair.map((item, i) => ({
+              constraint: c,
+              curve: item.curve,
+              coords: this.renderer.toScreen(item.curve.commonHandle(c.pair[1 - i].curve).clone().add(item.curve.center()).divideScalar(2.0))
+            }))
+          }).filter(Boolean)
         }
+
         // Update Paths
         this.paths.forEach((path, i) => {
           this.updatePath(path)

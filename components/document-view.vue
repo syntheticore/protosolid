@@ -56,6 +56,7 @@
         @hover="previewDisplayMode = $event"
         @unhover="previewDisplayMode = null"
       )
+      //- Icon(icon="users-viewfinder")
 
     FooterView(
       :class="{top: !!document.activeFeature}"

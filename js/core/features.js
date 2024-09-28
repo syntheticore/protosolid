@@ -217,6 +217,7 @@ export class CreateSketchFeature extends Feature {
     const plane = references.plane
     this.sketch.workplane = plane
     tree.findChild(this.componentId).sketches.push(this.sketch)
+    this.sketch.solve()
   }
 
   confirm() {
@@ -483,7 +484,7 @@ export class FilletFeature extends Feature {
       edges: {
         title: 'Edges',
         type: 'edge',
-        autoMulti: true,
+        multi: true,
       },
       radius: {
         title: 'Radius',

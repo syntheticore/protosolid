@@ -536,7 +536,12 @@
             return c.pair.map((item, i) => ({
               constraint: c,
               curve: item.curve,
-              coords: this.renderer.toScreen(item.curve.commonHandle(c.pair[1 - i].curve).clone().add(item.curve.center()).divideScalar(2.0))
+              coords: this.renderer.toScreen(
+                item.curve.commonHandle(c.pair[1 - i].curve).clone()
+                  .add(item.curve.center())
+                  .divideScalar(2.0)
+                  .applyMatrix4(item.curve.sketch.workplane)
+              ),
             }))
           }).filter(Boolean)
         }

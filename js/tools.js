@@ -37,13 +37,13 @@ class Tool {
 
   dispose() {}
 
-  async updateSketch() {
+  async updateSketch(temporary) {
     const sketch = this.viewport.activeSketch
     if(!sketch) return
     const handle = this.viewport.activeHandle
-    if(handle) handle.elem.constraints().forEach(c => c.temporary = true )
+    if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
     await sketch.solve()
-    if(handle) handle.elem.constraints().forEach(c => c.temporary = false )
+    if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = false )
     sketch.elements.forEach(elem => this.viewport.elementChanged(elem, this.component) )
   }
 }
@@ -127,6 +127,7 @@ export class ManipulationTool extends HighlightTool {
   }
 
   mouseUp(vec, coords) {
+    this.updateSketch()
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'
@@ -138,7 +139,7 @@ export class ManipulationTool extends HighlightTool {
       let handles = handle.elem.handles()
       handles[handle.index] = vec//.toArray()
       handle.elem.setHandles(handles, false)
-      this.updateSketch()
+      this.updateSketch(true)
       // this.viewport.elementChanged(handle.elem, this.component)
     } else {
       super.mouseMove(vec, coords)

@@ -1039,23 +1039,32 @@ export class Compound extends Volumetric {
   }
 
   offset(openFaces, distance) {
+    // Build face list
     const faces = new window.oc.oc.TopTools_ListOfShape_1()
     openFaces.forEach(face => faces.Append_1(face.geom()) )
-    const thicken = new window.oc.oc.BRepOffsetAPI_MakeThickSolid()
-    thicken.MakeThickSolidByJoin(
-      this.geom(),
-      faces,
-      distance,
-      1.0e-6, // window.oc.oc.Precision.Confusion()
-      window.oc.oc.BRepOffset_Mode.BRepOffset_Skin,
-      false,
-      false,
-      window.oc.oc.GeomAbs_JoinType.GeomAbs_Arc,
-      false,
-      new window.oc.oc.Message_ProgressRange_1()
-    )
-    if(!thicken.IsDone()) throw { type: 'error', msg: "Offset could not be built" }
-    return this.clone(thicken.Shape())
+    // Offset each affected solid individually
+    const solids = this.solids().filter(solid => solid.faces().some(face => openFaces.some(of => of.id == face.id ) ) )
+    const substitution = new window.oc.oc.BRepTools_ReShape()
+    solids.forEach(solid => {
+      const thicken = new window.oc.oc.BRepOffsetAPI_MakeThickSolid()
+      thicken.MakeThickSolidByJoin(
+        solid.geom(),
+        faces,
+        distance,
+        1.0e-6, // window.oc.oc.Precision.Confusion()
+        window.oc.oc.BRepOffset_Mode.BRepOffset_Skin,
+        false,
+        false,
+        window.oc.oc.GeomAbs_JoinType.GeomAbs_Arc,
+        false,
+        new window.oc.oc.Message_ProgressRange_1()
+      )
+      if(!thicken.IsDone()) throw { type: 'error', msg: "Offset could not be built" }
+      substitution.Replace(solid.geom(), thicken.Shape())
+    })
+    // Replace updated solids in compound
+    const compound = substitution.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID)
+    return this.clone(compound)
   }
 }
 

@@ -277,8 +277,14 @@ mainBuild:
     - symbol: TopoDS_Builder
 
     - symbol: BRepLib
-    - symbol: BRepTools
     # - symbol: BRepLib_ToolTriangulatedShape
+
+    - symbol: BRepTools
+    # - symbol: BRepTools_Substitution
+    - symbol: BRepTools_ReShape
+    - symbol: BRepTools_History
+    - symbol: BRepTools_Quilt
+    - symbol: BRepTools_WireExplorer
 
     - symbol: BRep_Builder
     - symbol: BRep_Tool

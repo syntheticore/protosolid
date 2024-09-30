@@ -181,6 +181,7 @@ export class CreateComponentFeature extends Feature {
       regions: [],
       curves: [],
       helpers: [],
+      dimensions: [],
     }
     // Hide cache from Vue
     this.cache = () => cache

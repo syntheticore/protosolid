@@ -27,6 +27,14 @@
           :y2="guide.end.y"
         )
 
+    Icon.constraint(
+      v-for="constraint in constraints"
+      :icon="constraint.constraint.constructor.icon"
+      :class="{ selected: document.selection.has(constraint.constraint) }"
+      :style="{ top: constraint.coords.y + 'px', left: constraint.coords.x + 'px' }"
+      @click="document.selection = document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
+    )
+
     //- Snap anchor highlights active snap point
     .anchors
 
@@ -47,14 +55,6 @@
         @mousemove="handleMouseMove($event, handle)"
         @contextmenu.prevent
       )
-
-    Icon.constraint(
-      v-for="constraint in constraints"
-      :icon="constraint.constraint.constructor.icon"
-      :class="{ selected: document.selection.has(constraint.constraint) }"
-      :style="{ top: constraint.coords.y + 'px', left: constraint.coords.x + 'px' }"
-      @click="document.selection = document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
-    )
 
     //- Floating UI widgets
     transition-group(name="hide2")
@@ -159,7 +159,7 @@
 
   .handles > *
     pointer-events: auto
-    cursor: grab
+    // cursor: grab
     &:hover
       &::before
         width: 5px
@@ -217,7 +217,7 @@
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
   import Transloader from './../js/transloader.js'
-  import { CoincidentConstraint } from './../js/core/kernel.js'
+  import { CoincidentConstraint, Dimension } from './../js/core/kernel.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -230,7 +230,8 @@
     SplineTool,
     CircleTool,
     ArcTool,
-    ConstraintTool,
+    PerpendicularConstraintTool,
+    DimensionTool,
   } from './../js/tools.js'
 
   // import SelectorWidget from './selector-widget.vue'
@@ -278,7 +279,7 @@
         const tree = this.document.top()
         this.componentChanged(tree, true)
         // console.log('from viewport')
-        // this.bus.emit('activate-toolname', 'Manipulate')
+        // this.bus.emit('activate-tool', ManipulationTool)
       },
 
       activeSketch: function(sketch) {
@@ -380,7 +381,7 @@
 
       this.bus.on('show-picker', this.addPath)
       this.bus.on('clear-pickers', this.clearPaths)
-      this.bus.on('activate-toolname', this.activateTool)
+      this.bus.on('activate-tool', this.activateTool)
       this.document.on('component-changed', this.componentChanged)
       this.document.on('component-deleted', this.componentDeleted)
       this.bus.on('render-needed', () => this.renderer.render())
@@ -493,7 +494,7 @@
         this.pickingPath = { target: null, color, origin: pickerCoords }
         const tool = new Tool(this.activeComponent, this, (item, mesh) => {
           this.bus.emit('picked', item)
-          this.bus.emit('activate-toolname', 'Dummy')
+          this.bus.emit('activate-tool', DummyTool)
           this.pickingPath = null
         })
         this.$emit('update:active-tool', tool)
@@ -532,15 +533,19 @@
 
           // Update constraints
           this.constraints = this.activeSketch.constraints.flatMap(c => {
-            if(c instanceof CoincidentConstraint) return
-            return c.pair.map((item, i) => ({
+            if(c instanceof CoincidentConstraint || c instanceof Dimension) return
+            const pair = c.items()
+            return pair.map((item, i) => ({
               constraint: c,
               curve: item.curve,
               coords: this.renderer.toScreen(
-                item.curve.commonHandle(c.pair[1 - i].curve).clone()
-                  .add(item.curve.center())
-                  .divideScalar(2.0)
-                  .applyMatrix4(item.curve.sketch.workplane)
+                (pair.length == 1 ?
+                  item.curve.center()
+                  :
+                  item.curve.center().clone()
+                    .add(item.curve.commonHandle(pair[1 - i].curve))
+                    .divideScalar(2.0)
+                ).applyMatrix4(item.curve.sketch.workplane)
               ),
             }))
           }).filter(Boolean)
@@ -549,9 +554,6 @@
         // Update Paths
         this.paths.forEach((path, i) => {
           this.updatePath(path)
-          // this.$set(this.paths, i, path)
-          // this.paths.splice(i, 1, path)
-          // this.paths[i] = path
         })
         if(!this.pickingPath || !this.pickingPath.target) return
         this.updatePath(this.pickingPath)
@@ -569,24 +571,13 @@
         return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
       },
 
-      activateTool: function(toolName) {
-        console.log('activating', toolName)
+      activateTool: function(Tool) {
+        console.log('activating', Tool)
         if(this.activeTool) this.activeTool.dispose()
         this.pickingPath = null
         this.snapper.reset()
-        const tools = {
-          Dummy: DummyTool,
-          Manipulate: ManipulationTool,
-          Line: LineTool,
-          Spline: SplineTool,
-          Circle: CircleTool,
-          Arc: ArcTool,
-          Perpendicular: ConstraintTool,
-        }
-        const Tool = tools[toolName]
         if(!Tool) return
         const tool = new Tool(this.activeComponent, this, this.activeSketch)
-        // console.log(tool)
         this.$emit('update:active-tool', tool)
         this.$emit('update:highlight', null)
         this.renderer.render()
@@ -626,7 +617,6 @@
       onLoadElement: function(elem) {
         if(elem.sketch !== this.activeSketch) return
         this.handles[elem.id] = elem.handles().map((handle, i) => {
-          // handle = vecToThree(handle)
           handle = handle.clone().applyMatrix4(elem.sketch.workplane)
           return {
             type: 'handle',

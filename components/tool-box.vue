@@ -19,7 +19,7 @@
             :disabled="!tool.tool && !tool.feature && !tool.action"
             @click="activateTool(tool)"
           )
-            Icon(:icon="(tool.feature && tool.feature.icon) || tool.icon" fixed-width)
+            Icon(:icon="(tool.feature && tool.feature.icon) || (tool.tool && tool.tool.icon) || tool.icon" fixed-width)
             .title(v-html="tool.title")
             .hot-key(v-if="tool.hotKey") {{ tool.hotKey }}
 
@@ -31,8 +31,6 @@
               :active-feature="feature"
               @close="closeFeature"
             )
-            //- @remove-feature="$emit('remove-feature', $event)"
-            //- @update:active-sketch="$emit('update:active-sketch', $event)"
 </template>
 
 
@@ -147,8 +145,6 @@
 
 
 <script>
-  // import FeatureBox from './feature-box.vue'
-
   import {
     CreateSketchFeature,
     ExtrudeFeature,
@@ -157,20 +153,19 @@
     RevolveFeature,
     SweepFeature,
     OffsetFeature,
-    // MaterialFeature,
   } from './../js/core/features.js'
 
   import {
     ManipulationTool,
-    // ObjectSelectionTool,
-    // ProfileSelectionTool,
     LineTool,
     SplineTool,
     CircleTool,
     ArcTool,
-    // PlaneTool,
     TrimTool,
-    ConstraintTool,
+    PerpendicularConstraintTool,
+    HorizontalConstraintTool,
+    VerticalConstraintTool,
+    DimensionTool,
   } from './../js/tools.js'
 
   export default {
@@ -178,15 +173,9 @@
 
     inject: ['bus'],
 
-    // components: {
-    //   FeatureBox,
-    // },
-
     props: {
       document: Object,
       activeTool: Object,
-      // activeComponent: Object,
-      // activeSketch: Object,
     },
 
     watch: {
@@ -203,7 +192,7 @@
           {
             title: 'Construct',
             tools: [
-              { title: 'Sketch', feature: CreateSketchFeature, icon: 'edit', hotKey: 'S', keyCode: 83 },
+              { title: 'Sketch', feature: CreateSketchFeature, hotKey: 'S', keyCode: 83 },
               // { title: 'Plane', tool: PlaneTool, icon: 'edit', hotKey: 'P', keyCode: 80 },
               { title: 'Axis', icon: 'edit' },
               { title: 'Point', icon: 'edit' },
@@ -215,11 +204,11 @@
             title: 'Sketch',
             sketchOnly: true,
             tools: [
-              { title: 'Line', tool: LineTool, icon: 'project-diagram', hotKey: 'L', keyCode: 76 },
+              { title: 'Line', tool: LineTool, hotKey: 'L', keyCode: 76 },
               { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
-              { title: 'Arc', tool: ArcTool, icon: 'bezier-curve', hotKey: 'A', keyCode: 65 },
-              { title: 'Circle', tool: CircleTool, icon: 'ban', hotKey: 'C', keyCode: 67 },
-              { title: 'Spline', tool: SplineTool, icon: 'route', hotKey: 'B', keyCode: 66},
+              { title: 'Arc', tool: ArcTool, hotKey: 'A', keyCode: 65 },
+              { title: 'Circle', tool: CircleTool, hotKey: 'C', keyCode: 67 },
+              { title: 'Spline', tool: SplineTool, hotKey: 'B', keyCode: 66},
               { title: 'Polygon', icon: 'layer-group' },
               { title: 'Text', icon: 'layer-group' },
             ]
@@ -228,7 +217,7 @@
             title: 'Edit Sketch',
             sketchOnly: true,
             tools: [
-              { title: 'Trim', tool: TrimTool,  icon: 'route',  hotKey: 'T', keyCode: 84},
+              { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
               { title: 'Break', icon: 'layer-group' },
               { title: 'Extend', icon: 'layer-group' },
               { title: 'Offset', icon: 'layer-group' },
@@ -240,10 +229,12 @@
             title: 'Constrain',
             sketchOnly: true,
             tools: [
-              { title: 'Dimension', icon: 'ruler' },
+              { title: 'Dimension', tool: DimensionTool },
               { title: 'Touch', icon: 'object-group' },
               { title: 'Parallel', icon: 'code-branch' }, //XXX Use also for hor/vert
-              { title: 'Perpendicular', tool: ConstraintTool, icon: 'object-group' },
+              { title: 'Perpendicular', tool: PerpendicularConstraintTool },
+              { title: 'Horizontal', tool: HorizontalConstraintTool },
+              { title: 'Vertical', tool: VerticalConstraintTool },
               { title: 'Tangent', icon: 'bezier-curve' },
               { title: 'Equal', icon: 'exchange-alt' },
               { title: 'Fix', icon: 'lock' }, //XXX also ground for assemblies
@@ -334,10 +325,12 @@
             this.feature = new tool.feature(this.document)
             // this.$emit('add-feature', this.feature)
             this.document.addFeature(this.feature)
+
           } else if(tool.action) {
             tool.action()
-          } else {
-            this.bus.emit('activate-toolname', tool.title)
+
+          } else if(tool.tool) {
+            this.bus.emit('activate-tool', tool.tool)
           }
         })
       },

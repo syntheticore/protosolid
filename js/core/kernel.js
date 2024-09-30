@@ -94,7 +94,7 @@ export class SketchElement {
   }
 
   constraints() {
-    return this.sketch.constraints.filter(constraint => constraint.pair.some(item => item.curve == this ) )
+    return this.sketch.constraints.filter(constraint => constraint.items().some(item => item.curve == this ) )
   }
 
   clone() {
@@ -215,7 +215,7 @@ export class Circle extends SketchElement {
     return [this._center]
   }
 
-  center() { return this._center }
+  center() { return this._center.clone() }
 
   handles() {
     return [this._center]
@@ -276,7 +276,7 @@ export class Sketch {
   remove(elem) {
     if(elem instanceof SketchElement) {
       this.elements = this.elements.filter(e => e != elem )
-      this.constraints = this.constraints.filter(c => !c.pair.some(item => item.curve == elem ) )
+      this.constraints = this.constraints.filter(c => !c.items().some(item => item.curve == elem ) )
     } else if(elem instanceof Constraint) {
       this.constraints = this.constraints.filter(c => c != elem )
     }
@@ -485,16 +485,19 @@ export class Sketch {
     // Convert entire sketch to GCS format
     const primitives = this.elements.flatMap(elem => {
       let primitives
+
       if(elem instanceof Line) {
         const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: false }
         const p2 = { id: `${id++}`, type: 'point', x: elem.points[1].x, y: elem.points[1].y, fixed: false }
         const line = { id: `${id++}`, type: 'line', p1_id: p1.id, p2_id: p2.id }
         primitives = [p1, p2, line]
+
       } else if(elem instanceof Circle) {
         const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: false }
         const circle = { id: `${id++}`, type: 'circle', c_id: center.id, radius: elem.radius }
         primitives = [center, circle]
       }
+
       idMap[elem.id] = primitives
       return primitives
     }).filter(Boolean)
@@ -503,9 +506,23 @@ export class Sketch {
       if(c instanceof PerpendicularConstraint) {
         const constraintPrims = c.pair.map(item => idMap[item.curve.id][2] )
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+
       } else if(c instanceof CoincidentConstraint) {
         const constraintPrims = c.pair.map(item => idMap[item.curve.id][item.index] )
         return { id: `${id++}`, type: 'p2p_coincident', p1_id: constraintPrims[0].id, p2_id: constraintPrims[1].id, temporary: c.temporary }
+
+      } else if(c instanceof Dimension) {
+        const pointPrim = idMap[c.pair[0].curve.id][0]
+        const linePrim = idMap[c.pair[1].curve.id][2]
+        return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
+
+      } else if(c instanceof HorizontalConstraint) {
+        const pointPrims = idMap[c.item.curve.id].slice(0, 2)
+        return { id: `${id++}`, type: 'horizontal_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
+
+      } else if(c instanceof VerticalConstraint) {
+        const pointPrims = idMap[c.item.curve.id].slice(0, 2)
+        return { id: `${id++}`, type: 'vertical_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
       }
     })
 
@@ -522,6 +539,7 @@ export class Sketch {
       if(elem instanceof Line) {
         let [p1, p2, _line] = idMap[elem.id]
         elem.setHandles([vecFromPrim(p1), vecFromPrim(p2)])
+
       } else if(elem instanceof Circle) {
         let [center, _circle] = idMap[elem.id]
         elem.setHandles([vecFromPrim(center)])
@@ -532,32 +550,56 @@ export class Sketch {
 
 
 export class Constraint {
-  constructor(a, b) {
-    this.pair = [{ curve: a }, { curve: b }]
+  constructor(a) {
+    this.item = { curve: a }
   }
+
+  items() { return [this.item] }
 }
 
 
-export class CoincidentConstraint extends Constraint {
-  static icon = 'bullseye'
+export class HorizontalConstraint extends Constraint {
+  static icon = 'ruler-horizontal'
+  typename() { return 'Perpendicular Constraint' }
+}
 
-  constructor(a, ai, b, bi) {
+
+export class VerticalConstraint extends Constraint {
+  static icon = 'ruler-vertical'
+  typename() { return 'Perpendicular Constraint' }
+}
+
+
+export class PairConstraint extends Constraint {
+  constructor(a, b, ai, bi) {
     super()
     this.pair = [{ curve: a, index: ai }, { curve: b, index: bi }]
   }
 
+  items() { return this.pair }
+}
+
+
+export class CoincidentConstraint extends PairConstraint {
+  static icon = 'bullseye'
   typename() { return 'Coincident Constraint' }
 }
 
 
-export class PerpendicularConstraint extends Constraint {
+export class PerpendicularConstraint extends PairConstraint {
   static icon = 'angle-up'
   typename() { return 'Perpendicular Constraint' }
 }
 
 
-export class Dimension extends Constraint {
+export class Dimension extends PairConstraint {
   static icon = 'ruler'
+
+  constructor(a, b, distance) {
+    super(a, b)
+    this.distance = distance || a.handles()[0].distanceTo(b.center())
+  }
+
   typename() { return 'Dimension' }
 }
 
@@ -1233,6 +1275,7 @@ export class Timeline {
       regions: [],
       curves: [],
       helpers: [],
+      dimensions: [],
     }
     baseComp.creator.cache = () => cache
 

@@ -3,7 +3,8 @@ import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHel
 
 import Component from './core/component.js'
 import PlaneHelperObject from './three/plane-helper-object.js'
-import { Edge, Face, Solid, Profile, Sketch, SketchElement, ConstructionHelper } from './core/kernel.js'
+import DimensionControls from './three/dimension-controls.js'
+import { Edge, Face, Solid, Profile, Sketch, SketchElement, ConstructionHelper, Dimension } from './core/kernel.js'
 
 let vnhs = [];
 
@@ -126,13 +127,16 @@ export default class Transloader {
     // Load Sketch Elements
     // if(comp === this.activeComponent) {
       comp.sketches.forEach(sketch => {
-        // console.log('loading sketch', comp.sketches.length)
         sketch.component = comp
         if(comp.creator.itemsHidden[sketch.id]) return
-        // sketch.sketch_elements().forEach(elem => {
         sketch.elements.forEach(elem => {
-          // elem.sketch = sketch
           this.loadElement(elem, comp)
+        })
+        sketch.constraints.filter(c => c instanceof Dimension).forEach(constraint => {
+          const dimension = new DimensionControls(constraint, this.renderer)
+          constraint.controls = () => dimension
+          this.renderer.add(dimension)
+          cache.dimensions.push(constraint)
         })
       })
       if(!cache.regions.length) this.updateRegions(comp)
@@ -172,6 +176,11 @@ export default class Transloader {
       this.renderer.remove(helper.mesh())
     })
     cache.helpers = []
+
+    cache.dimensions.forEach(dimension => {
+      this.renderer.remove(dimension.controls())
+    })
+    cache.dimensions = []
 
     this.purgeRegions(comp)
 

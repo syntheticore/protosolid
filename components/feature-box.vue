@@ -290,7 +290,7 @@
       this.bus.off('resize', this.updatePaths)
       this.document.off('deactivate-feature', this.deactivateFeature)
       this.bus.emit('unpreview-feature')
-      this.bus.emit('activate-toolname', 'Manipulate')
+      this.bus.emit('activate-tool', ManipulationTool)
       this.destroyed = true
     },
 
@@ -476,7 +476,7 @@
       },
 
       activateBaseTool() {
-        this.bus.emit('activate-toolname', this.isSketchFeature ? 'Manipulate' : 'Dummy')
+        this.bus.emit('activate-tool', this.isSketchFeature ? ManipulationTool : DummyTool)
       },
     },
   }

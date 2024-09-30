@@ -156,6 +156,8 @@
     CreateSketchFeature,
   } from './../js/core/features.js'
 
+  import { ManipulationTool } from './../js/tools.js'
+
   export default {
     name: 'DocumentView',
 
@@ -219,7 +221,7 @@
       this.currentDisplayMode = 'wireShade'
       this.bus.on('keydown', this.keyDown)
       // this.bus.on('regenerate', () => this.document.regenerate() )
-      this.bus.emit('activate-toolname', 'Manipulate')
+      this.bus.emit('activate-tool', ManipulationTool)
     },
 
     methods: {

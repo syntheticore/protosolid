@@ -7,9 +7,11 @@
 //   rotationFromNormal
 // } from './utils.js'
 
-import { Line, Circle, CoincidentConstraint, PerpendicularConstraint } from './core/kernel.js'
+import { Line, Circle, CoincidentConstraint, PerpendicularConstraint, HorizontalConstraint, VerticalConstraint, Dimension } from './core/kernel.js'
 
 class Tool {
+  static icon = 'bullseye'
+
   constructor(component, viewport) {
     this.component = component
     this.viewport = viewport
@@ -45,6 +47,7 @@ class Tool {
     await sketch.solve()
     if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = false )
     sketch.elements.forEach(elem => this.viewport.elementChanged(elem, this.component) )
+    this.viewport.document.emit('component-changed', this.viewport.activeComponent)
   }
 }
 
@@ -127,6 +130,7 @@ export class ManipulationTool extends HighlightTool {
   }
 
   mouseUp(vec, coords) {
+    this.mouseMove(vec, coords)
     this.updateSketch()
     super.mouseUp(vec, coords)
     this.snapToPoints = false
@@ -180,6 +184,8 @@ export class ManipulationTool extends HighlightTool {
 
 
 export class TrimTool extends Tool {
+  static icon = 'route'
+
   click(vec, coords) {
     const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
     if(curve) return this.viewport.renderer.render()
@@ -271,6 +277,8 @@ export class SketchTool extends Tool {
 
 
 export class LineTool extends SketchTool {
+  static icon = 'pen'
+
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
   }
@@ -281,14 +289,14 @@ export class LineTool extends SketchTool {
 
     const elems = [...this.sketch.elements]
     if(this.curve) elems.pop()
-    const touchesExisting = elems.find(elem => elem.snapPoints().some(p => p.equals(vec) ) )
+    const touchesExisting = elems.find(elem => elem.handles().some(p => p.equals(vec) ) )
     const endpoints = touchesExisting && touchesExisting.handles()
     const index = touchesExisting && endpoints.indexOf(endpoints.find(sp => sp.equals(vec) ))
 
     // Restart tool when we hit an existing point
     if(touchesExisting && this.curve) {
       this.sketch.add(this.curve)
-      if(index != -1) this.sketch.addConstraint(new CoincidentConstraint(this.curve, 1, touchesExisting, index))
+      if(index != -1) this.sketch.addConstraint(new CoincidentConstraint(this.curve, touchesExisting, 1, index))
       this.curve = null
     } else {
       const old = this.curve
@@ -296,7 +304,7 @@ export class LineTool extends SketchTool {
       this.sketch.add(this.curve)
       const other = touchesExisting || old
       const otherIndex = touchesExisting ? index : 1
-      if(old || touchesExisting) this.sketch.addConstraint(new CoincidentConstraint(this.curve, 0, other, otherIndex))
+      if(old || touchesExisting) this.sketch.addConstraint(new CoincidentConstraint(this.curve, other, 0, otherIndex))
     }
   }
 
@@ -316,6 +324,8 @@ export class LineTool extends SketchTool {
 
 
 export class SplineTool extends SketchTool {
+  static icon = 'route'
+
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
   }
@@ -354,6 +364,8 @@ export class SplineTool extends SketchTool {
 
 
 export class CircleTool extends SketchTool {
+  static icon = 'ban'
+
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
   }
@@ -383,6 +395,8 @@ export class CircleTool extends SketchTool {
 
 
 export class ArcTool extends SketchTool {
+  static icon = 'bezier-curve'
+
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
   }
@@ -423,6 +437,7 @@ export class ConstraintTool extends HighlightTool {
     super(component, viewport, ['curve'])
     this.sketch = sketch
     this.items = []
+    this.cursor = 'move'
   }
 
   async mouseDown(vec, coords) {
@@ -433,11 +448,35 @@ export class ConstraintTool extends HighlightTool {
       return
     }
     this.items.push(curve)
-    if(this.items.length == 2) {
-      const constraint = new PerpendicularConstraint(...this.items)
+    if(this.items.length == this.constructor.numItems) {
+      const constraint = new this.constructor.constraintType(...this.items)
       this.sketch.addConstraint(constraint)
       this.updateSketch()
       this.items = []
     }
   }
+}
+
+export class HorizontalConstraintTool extends ConstraintTool {
+  static constraintType = HorizontalConstraint
+  static numItems = 1
+  static icon = 'ruler-horizontal'
+}
+
+export class VerticalConstraintTool extends ConstraintTool {
+  static constraintType = VerticalConstraint
+  static numItems = 1
+  static icon = 'ruler-vertical'
+}
+
+export class PerpendicularConstraintTool extends ConstraintTool {
+  static constraintType = PerpendicularConstraint
+  static numItems = 2
+  static icon = 'angle-up'
+}
+
+export class DimensionTool extends ConstraintTool {
+  static constraintType = Dimension
+  static numItems = 2
+  static icon = 'ruler'
 }

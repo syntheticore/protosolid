@@ -7,6 +7,6 @@
   "author": "Björn Breitgoff <syntheticore@gmail.com>",
   "main": "main.js",
   "devDependencies": {
-    "electron": "^31.3.0"
+    "electron": "31.3.0"
   }
 }

@@ -28,7 +28,7 @@
     "@pinia/nuxt": "^0.5.2",
     "@salusoft89/planegcs": "^1.1.6",
     "earcut": "^3.0.0",
-    "electron": "^31.3.0",
+    "electron": "31.3.0",
     "electron-builder": "^24.13.3",
     "jszip": "^3.10.1",
     "nanoevents": "^9.0.0",

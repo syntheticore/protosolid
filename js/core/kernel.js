@@ -814,6 +814,7 @@ export class Shape {
   }
 
   area() {
+    if(!this.geom) return 0
     const gprops = new window.oc.oc.GProp_GProps_1()
     window.oc.oc.BRepGProp.SurfaceProperties_1(this.geom(), gprops, false, false)
     return gprops.Mass() // Mass really corresponds to surface area here
@@ -915,12 +916,14 @@ export class Volumetric extends Shape {
   }
 
   volume() {
+    if(!this.geom) return 0
     const gprops = new window.oc.oc.GProp_GProps_1() //XXX use GProp_GProps_2 to supply point close to center for better accuracy
     window.oc.oc.BRepGProp.VolumeProperties_1(this.geom(), gprops, false, false, false)
     return gprops.Mass()
   }
 
   center() {
+    if(!this.geom) return
     const gprops = new window.oc.oc.GProp_GProps_1()
     window.oc.oc.BRepGProp.VolumeProperties_1(this.geom(), gprops, false, false, false)
     return gprops.CentreOfMass()

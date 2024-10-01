@@ -126,7 +126,7 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     devTools: false,
     // backgroundColor: isMac ? false : '#000',
-    backgroundColor: '#000',
+    backgroundColor: '#1c2127',
     // show: false,
     frame: isMac,
     // vibrancy: isMac ? 'dark' : undefined,

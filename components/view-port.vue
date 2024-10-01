@@ -234,24 +234,14 @@
     DimensionTool,
   } from './../js/tools.js'
 
-  // import SelectorWidget from './selector-widget.vue'
-
   export default {
     name: 'ViewPort',
 
     inject: ['bus'],
 
-    // components: {
-    //   SelectorWidget,
-    // },
-
     props: {
       document: Object,
-      activeComponent: Object,
-      activeSketch: Object,
-      activeFeature: Object,
       activeTool: Object,
-      selection: Object,
       highlight: Object,
       activeView: Object,
       displayMode: String,
@@ -274,41 +264,38 @@
         this.transloader.unloadTree(oldDocument.top(), true)
       },
 
-      activeComponent: function(comp) {
+      'document.activeComponent': function(comp) {
         this.transloader.setActiveComponent(comp)
         const tree = this.document.top()
         this.componentChanged(tree, true)
-        // console.log('from viewport')
         // this.bus.emit('activate-tool', ManipulationTool)
       },
 
-      activeSketch: function(sketch) {
+      'document.activeSketch': function(sketch) {
         // Show sketch plane
         this.transloader.setActiveSketch(sketch)
         if(sketch) {
-          // let plane = matrix2three(sketch.workplane)
           let plane = sketch.workplane
           this.snapper.planeTransform = plane
-          console.log('activeSketch', sketch)
+          // console.log('activeSketch', sketch)
           this.renderer.sketchPlane.setPlane(plane)
         }
         this.renderer.sketchPlane.visible = !!sketch
         // Display grab handles
         this.handles = {}
-        this.activeComponent.creator.cache().curves.forEach(curve => {
+        this.document.activeComponent.creator.cache().curves.forEach(curve => {
           if(curve.sketch !== sketch) return
           this.onLoadElement(curve)
         })
         this.renderer.render()
       },
 
-      selection: function(selection) {
+      'document.selection': function(selection) {
         this.transloader.setSelection(selection)
         this.renderer.render()
       },
 
       highlight: function(highlight) {
-        // console.log('highlight', highlight)
         this.transloader.setHighlight(highlight)
         this.renderer.render()
       },
@@ -326,9 +313,8 @@
 
     computed: {
       allHandles: function() {
-        if(!this.activeSketch) return {}
+        if(!this.document.activeSketch) return {}
         const handles = Object.values(this.handles).map(e => Object.values(e) ).flat()
-        // console.log(handles)
         const set = {}
         handles.forEach(handle => set[JSON.stringify(handle.pos)] = handle )
         return Object.values(set)
@@ -347,7 +333,7 @@
       this.renderer.setDisplayMode(this.displayMode)
       this.renderer.on('render', () => this.updateWidgets() )
       this.renderer.on('change-view', (position, target) => {
-        this.$emit('change-view', position, target)
+        this.document.viewChanged(position, target)
         this.$emit('update:highlight', null)
       })
 
@@ -363,7 +349,7 @@
         this.onLoadElement.bind(this),
         this.onUnloadElement.bind(this),
       )
-      this.transloader.setActiveComponent(this.activeComponent)
+      this.transloader.setActiveComponent(this.document.activeComponent)
       this.transloader.loadTree(this.document.top(), true)
 
       // Events
@@ -421,7 +407,7 @@
 
       updateRegions: function() {
         if(!this.regionsDirty) return
-        this.transloader.updateRegions(this.activeComponent)
+        this.transloader.updateRegions(this.document.activeComponent)
         this.renderer.render()
         this.regionsDirty = false
       },
@@ -460,8 +446,8 @@
       keyDown: function(keyCode) {
         if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection
-          if(this.selection.set.size) {
-            this.selection.set.forEach(item => {
+          if(this.document.selection.set.size) {
+            this.document.selection.set.forEach(item => {
               const type = item.typename()
               if(type != 'Solid' && type != 'Component') {
                 this.deleteElement(item)
@@ -492,7 +478,7 @@
       handlePick: function(pickerCoords, color, Tool) {
         if(this.activeTool) this.activeTool.dispose()
         this.pickingPath = { target: null, color, origin: pickerCoords }
-        const tool = new Tool(this.activeComponent, this, (item, mesh) => {
+        const tool = new Tool(this.document.activeComponent, this, (item, mesh) => {
           this.bus.emit('picked', item)
           this.bus.emit('activate-tool', DummyTool)
           this.pickingPath = null
@@ -521,7 +507,7 @@
 
         this.constraints = []
 
-        if(this.activeSketch) {
+        if(this.document.activeSketch) {
           // Update Handles
           for(let elemId in this.handles) {
             const elemHandles = this.handles[elemId]
@@ -532,7 +518,7 @@
           this.handles = Object.assign({}, this.handles)
 
           // Update constraints
-          this.constraints = this.activeSketch.constraints.flatMap(c => {
+          this.constraints = this.document.activeSketch.constraints.flatMap(c => {
             if(c instanceof CoincidentConstraint || c instanceof Dimension) return
             const pair = c.items()
             return pair.map((item, i) => ({
@@ -565,7 +551,7 @@
       },
 
       buildPath: function(origin, pos) {
-        const sign = this.activeFeature ? -1 : 1
+        const sign = this.document.activeFeature ? -1 : 1
         const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200) * sign
         const dy = Math.abs(origin.y - pos.y) / 2.0 * sign
         return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
@@ -577,7 +563,7 @@
         this.pickingPath = null
         this.snapper.reset()
         if(!Tool) return
-        const tool = new Tool(this.activeComponent, this, this.activeSketch)
+        const tool = new Tool(this.document.activeComponent, this, this.document.activeSketch)
         this.$emit('update:active-tool', tool)
         this.$emit('update:highlight', null)
         this.renderer.render()
@@ -586,8 +572,8 @@
       deleteElement: function(elem) {
         // this.renderer.removeGizmo()
         elem.sketch.remove(elem)
-        this.$emit('update:selection', this.selection.delete(elem))
-        this.componentChanged(this.activeComponent)
+        this.document.selection = this.document.selection.delete(elem)
+        this.componentChanged(this.document.activeComponent)
       },
 
       componentChanged: function(comp, recursive) {
@@ -615,7 +601,7 @@
       },
 
       onLoadElement: function(elem) {
-        if(elem.sketch !== this.activeSketch) return
+        if(elem.sketch !== this.document.activeSketch) return
         this.handles[elem.id] = elem.handles().map((handle, i) => {
           handle = handle.clone().applyMatrix4(elem.sketch.workplane)
           return {

@@ -40,14 +40,14 @@ class Tool {
   dispose() {}
 
   async updateSketch(temporary) {
-    const sketch = this.viewport.activeSketch
+    const sketch = this.viewport.document.activeSketch
     if(!sketch) return
     const handle = this.viewport.activeHandle
     if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
     await sketch.solve()
     if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = false )
     sketch.elements.forEach(elem => this.viewport.elementChanged(elem, this.component) )
-    this.viewport.document.emit('component-changed', this.viewport.activeComponent)
+    this.viewport.document.emit('component-changed', this.viewport.document.activeComponent)
   }
 }
 
@@ -58,7 +58,7 @@ export class DummyTool extends Tool {
   }
 
   async click(vec, coords) {
-    this.viewport.$emit('update:selection', this.viewport.selection.clear())
+    this.viewport.document.selection = this.viewport.document.selection.clear()
   }
 }
 
@@ -109,16 +109,16 @@ export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, [])
     this.localSpace = true
-    this.setSelectors(this.viewport.activeSketch ? ['curve'] : ['curve', 'solid'])
+    this.setSelectors(this.viewport.document.activeSketch ? ['curve'] : ['curve', 'solid'])
   }
 
   async click(vec, coords) {
     const curve = await this.getObject(coords)
     if(curve) {
-      this.viewport.$emit('update:selection', this.viewport.selection.handle(curve, this.viewport.bus.isCtrlPressed))
+      this.viewport.document.selection = this.viewport.document.selection.handle(curve, this.viewport.bus.isCtrlPressed)
     } else {
       if(this.viewport.bus.isCtrlPressed) return this.viewport.renderer.render()
-      this.viewport.$emit('update:selection', this.viewport.selection.clear())
+      this.viewport.document.selection = this.viewport.document.selection.clear()
     }
   }
 

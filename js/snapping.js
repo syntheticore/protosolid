@@ -1,10 +1,5 @@
 import * as THREE from 'three'
 
-// import {
-//   LineTool,
-//   SplineTool,
-// } from './tools.js'
-
 const snapDistance = 14 // px
 const maxSnapReferences = 5
 
@@ -28,7 +23,7 @@ export default class Snapper {
   snap(vec, coords, snapToGuides, snapToPoints, localSpace) {
     this.guides = []
     if(localSpace) {
-      if((snapToGuides || snapToPoints) && this.viewport.activeSketch) this.catchSnapPoints(coords)
+      if((snapToGuides || snapToPoints) && this.viewport.document.activeSketch) this.catchSnapPoints(coords)
       vec = this.snapToGuides(vec, snapToGuides, snapToPoints)
       if(vec) vec.z = 0.0 //XXX project vec to plane before snapping
     }
@@ -37,7 +32,7 @@ export default class Snapper {
   }
 
   getSnapPoints() {
-    let sketchElements = [...this.viewport.activeSketch.elements]
+    let sketchElements = [...this.viewport.document.activeSketch.elements]
     // Filter out sketch element actively being drawn
     const tool = this.viewport.activeTool
     if(tool.curve) sketchElements.pop()

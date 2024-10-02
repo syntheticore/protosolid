@@ -4,16 +4,17 @@
   "type": "module",
   "version": "0.1.0",
   "scripts": {
-    "build": "nuxt build",
     "dev": "nuxt dev",
-    "generate": "nuxt generate",
-    "preview": "nuxt preview",
-    "postinstall": "nuxt prepare",
-    "build-oc": "cd assets/oc && docker run --rm -it -v \".\\:/src\" donalffons/opencascade.js oc.yml",
-    "build-electron": "npm run clean && npm run generate && mv -v .output/public/* electron/app",
     "dev-electron": "electron ./electron",
-    "pack-electron": "npm run build-electron && cd electron && electron-builder",
-    "clean": "rm -rf .output electron/app/*"
+    "build": "npm run build-oc && npm run build-app",
+    "pack": "npm run build-app && cd electron && electron-builder",
+
+    "build-oc": "cd assets/oc && docker run --rm -it -v \".\\:/src\" donalffons/opencascade.js oc.yml",
+    "build-app": "npm run clean && npm run generate && mv -v .output/public/* electron/app",
+    "generate": "nuxt generate",
+    "clean": "rm -rf .output electron/app/*",
+
+    "postinstall": "nuxt prepare"
   },
   "dependencies": {
     "nuxt": "^3.12.4",

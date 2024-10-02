@@ -9,6 +9,7 @@
       @pointerdown="mouseDown"
       @mousemove="mouseMove"
     )
+    //- @click="dimensions.forEach(d => d.constraint.active = false )"
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
 
@@ -17,7 +18,7 @@
       circle(v-for="path in allPaths", :cx="path.targetPos.x", :cy="path.targetPos.y", r="5", :fill="path.color")
 
       //- Snap guides
-      transition-group(name="hide" tag="g")
+      TransitionGroup(name="hide-guides" tag="g")
         line(
           v-for="guide in guides"
           :key="guide.id"
@@ -27,13 +28,32 @@
           :y2="guide.end.y"
         )
 
+    //- Sketch constraint proxies
     Icon.constraint(
-      v-for="constraint in constraints"
+      v-for="constraint in nonDimensions"
       :icon="constraint.constraint.constructor.icon"
       :class="{ selected: document.selection.has(constraint.constraint) }"
       :style="{ top: constraint.coords.y + 'px', left: constraint.coords.x + 'px' }"
-      @click="document.selection = document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
+      @click.stop="document.selection = document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
     )
+
+    //- Sketch dimensions
+    .dimension(
+      v-for="dimension in dimensions"
+      :class="{ selected: document.selection.has(dimension.constraint) }"
+      :style="{ top: dimension.coords.y + 'px', left: dimension.coords.x + 'px' }"
+      @click.stop="document.selection = document.selection.handle(dimension.constraint, bus.isCtrlPressed)"
+      @dblclick="dimension.constraint.active = true"
+    )
+      span {{ dimension.constraint.distance.toFixed(2) }}mm
+
+      TransitionGroup(name="hide-dimension")
+        NumberInput(
+          v-if="dimension.constraint.active"
+          :component="document.top()"
+          v-model:value="dimension.constraint.distance"
+          @enter="dimension.constraint.active = false; updateSketch()"
+        )
 
     //- Snap anchor highlights active snap point
     .anchors
@@ -44,9 +64,9 @@
       )
 
     //- Draggable sketch handles
-    ul.handles
+    .handles
 
-      li(
+      div(
         v-for="handle in allHandles"
         :key="handle.id"
         :style="{ top: handle.pos.y + 'px', left: handle.pos.x + 'px' }"
@@ -57,7 +77,7 @@
       )
 
     //- Floating UI widgets
-    transition-group(name="hide2")
+    TransitionGroup(name="hide-selector")
       SelectorWidget(
         v-for="(widget, i) in widgets"
         :key="widget.pos.x"
@@ -190,24 +210,42 @@
     &.selected
       background: $highlight
 
+  .dimension
+    position: absolute
+
+    .number-input
+      margin-top: -8px
+      margin-left: -40px
+
+    > *
+      position: absolute
+
   .selector-widget
     pointer-events: auto
     position: absolute
 
-  .hide-enter-active
-  .hide-leave-active
+  .hide-guides-enter-active
+  .hide-guides-leave-active
     transition: all 0.2s
-  .hide-enter-from
-  .hide-leave-to
+  .hide-guides-enter-from
+  .hide-guides-leave-to
     opacity: 0
 
-  .hide2-enter-active
-  .hide2-leave-active
+  .hide-selector-enter-active
+  .hide-selector-leave-active
     transition: all 0.15s
-  .hide2-enter-from
-  .hide2-leave-to
+  .hide-selector-enter-from
+  .hide-selector-leave-to
     opacity: 0
     transform: translateY(6px)
+
+  .hide-dimension-enter-active
+  .hide-dimension-leave-active
+    transition: all 0.2s
+  .hide-dimension-enter-from
+  .hide-dimension-leave-to
+    opacity: 0
+    transform: scale(90%)
 </style>
 
 
@@ -324,6 +362,15 @@
         const paths = [...this.paths]
         if(this.pickingPath && this.pickingPath.target) paths.push(this.pickingPath)
         return paths
+      },
+
+      dimensions: function() {
+        return this.constraints.filter(c => c.constraint instanceof Dimension )
+      },
+
+      nonDimensions: function() {
+        return this.constraints.filter(c => !(c.constraint instanceof Dimension) )
+
       },
     },
 
@@ -519,7 +566,8 @@
 
           // Update constraints
           this.constraints = this.document.activeSketch.constraints.flatMap(c => {
-            if(c instanceof CoincidentConstraint || c instanceof Dimension) return
+            // if(c instanceof CoincidentConstraint || c instanceof Dimension) return
+            if(c instanceof CoincidentConstraint) return
             const pair = c.items()
             return pair.map((item, i) => ({
               constraint: c,
@@ -529,7 +577,7 @@
                   item.curve.center()
                   :
                   item.curve.center().clone()
-                    .add(item.curve.commonHandle(pair[1 - i].curve))
+                    .add(item.curve.commonHandle(pair[1 - i].curve) || pair[1 - i].curve.center())
                     .divideScalar(2.0)
                 ).applyMatrix4(item.curve.sketch.workplane)
               ),
@@ -555,6 +603,17 @@
         const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200) * sign
         const dy = Math.abs(origin.y - pos.y) / 2.0 * sign
         return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
+      },
+
+      updateSketch: async function(temporary) {
+        const sketch = this.document.activeSketch
+        if(!sketch) return
+        const handle = this.activeHandle
+        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
+        await sketch.solve()
+        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
+        sketch.elements.forEach(elem => this.elementChanged(elem, this.document.activeComponent) )
+        this.document.emit('component-changed', this.document.activeComponent) //XXX make sketch-changed
       },
 
       activateTool: function(Tool) {

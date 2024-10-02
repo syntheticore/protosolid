@@ -229,7 +229,7 @@
             title: 'Constrain',
             sketchOnly: true,
             tools: [
-              { title: 'Dimension', tool: DimensionTool },
+              { title: 'Dimension', tool: DimensionTool, hotKey: 'D', keyCode: 68 },
               { title: 'Touch', icon: 'object-group' },
               { title: 'Parallel', icon: 'code-branch' }, //XXX Use also for hor/vert
               { title: 'Perpendicular', tool: PerpendicularConstraintTool },

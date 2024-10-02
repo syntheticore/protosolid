@@ -19,6 +19,7 @@
             v-if="setting.type == 'length' || setting.type == 'angle'"
             :component="document.top()"
             v-model:value="activeFeature[key]"
+            :auto-focus="true"
             @update:value="update"
             @error="error = $event"
           )
@@ -103,6 +104,7 @@
     font-size: 12px
     color: $bright1
     font-weight: bold
+    white-space: nowrap
     & + .setting
       margin-left: 12px
     &:nth-of-type(1) .picker
@@ -209,11 +211,6 @@
 
 
 <script>
-  // import IconToggle from './icon-toggle.vue'
-  // import RadioBar from './radio-bar.vue'
-  // import NumberInput from './number-input.vue'
-  // import MaterialSelector from './material-selector.vue'
-
   import * as THREE from 'three'
 
   import { DummyTool, ManipulationTool } from './../js/tools.js'
@@ -224,13 +221,6 @@
     name: 'FeatureBox',
 
     inject: ['bus'],
-
-    // components: {
-    //   IconToggle,
-    //   RadioBar,
-    //   NumberInput,
-    //   MaterialSelector,
-    // },
 
     props: {
       document: Object,

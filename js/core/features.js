@@ -545,12 +545,12 @@ export class OffsetFeature extends Feature {
   constructor(doc) {
     super(doc, false, 'Shell', {
       faces: {
-        title: 'Open Faces',
+        title: 'Openings',
         type: 'face',
         multi: true,
       },
-      distance: {
-        title: 'Distance',
+      thickness: {
+        title: 'Thickness',
         type: 'length',
       },
       side: {
@@ -561,16 +561,16 @@ export class OffsetFeature extends Feature {
     })
 
     this.faces = null
-    this.distance = 1.0
+    this.thickness = 1.0
     this.side = false
   }
 
   updateFeature(tree, references) {
-    const distance = this.distance * (this.side ? 1 : -1)
+    const thickness = this.thickness * (this.side ? 1 : -1)
     const comp = tree.findChild(this.componentId)
 
     try {
-      comp.compound = comp.compound.offset(references.faces, distance)
+      comp.compound = comp.compound.offset(references.faces, thickness)
       comp.compound.repair()
     } catch(err) { this.error = err || this.error }
   }

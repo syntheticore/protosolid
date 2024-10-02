@@ -314,8 +314,8 @@ export default class Renderer {
     // this.camera.updateMatrixWorld()
     const vector = vec.clone().project(this.activeCamera)
     return new THREE.Vector2(
-      (vector.x * widthHalf) + widthHalf,
-      - (vector.y * heightHalf) + heightHalf
+      Math.round((vector.x * widthHalf) + widthHalf),
+      Math.round(-(vector.y * heightHalf) + heightHalf)
     )
   }
 

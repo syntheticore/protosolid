@@ -1,22 +1,30 @@
 <template lang="pug">
+
   .number-input
+
     button.button
       Icon(icon="tape")
+
     input(
       type="text"
       ref="input"
       :style="inputStyle"
       :value="inner.expression"
+      :class="{ problem }"
       spellcheck="false"
-      @blur="focusInput"
+      @blur="onBlur"
       @keydown="keydown"
-      @keydown.enter="enter"
+      @keydown.enter="enter()"
     )
+
     .controls
+
       button.button(@click="increase")
         Icon(icon="caret-up")
+
       button.button(@click="decrease")
         Icon(icon="caret-down")
+
 </template>
 
 
@@ -40,6 +48,9 @@
         background: lighten($highlight, 80%)
       &::selection
         background: none
+      &.problem
+        border-color: $red
+        background: lighten($red, 80%)
 
   .button
     margin: 0
@@ -77,11 +88,14 @@
     props: {
       component: Object,
       value: Number,
+      autoFocus: Boolean,
     },
 
     data() {
       return {
         inner: new Expression(this.value, this.component.getParameters()),
+        allowBlur: false,
+        problem: false,
       }
     },
 
@@ -109,22 +123,26 @@
     mounted() {
       // Update immediately to make features use preferred unit
       // this.update()
-      this.focusInput()
+      this.focusInput(() => this.allowBlur = true )
     },
 
     methods: {
-      enter: function() {
+      enter: function(noFocus) {
+        this.problem = false
         try {
           this.inner.set(this.$refs.input.value)
-          this.update()
+          this.update(noFocus)
+          this.$emit('enter')
         } catch(e) {
+          this.problem = true
           this.$emit('error', { type: 'error', msg: "Please enter a valid expression" })
+          this.focusInput()
         }
       },
 
-      update: function() {
+      update: function(noFocus) {
         this.$emit('update:value', this.inner.getBase())
-        this.focusInput()
+        if(!noFocus) this.focusInput()
       },
 
       keydown: function(e) {
@@ -148,15 +166,23 @@
         this.update()
       },
 
-      focusInput: function() {
+      focusInput: function(cb) {
         const input = this.$refs.input
         if(!input) return
         clearTimeout(this.timeout)
         this.timeout = setTimeout(() => {
           input.setSelectionRange(0, input.value.length)
-          // console.log(input.selectionStart)
           input.focus()
+          if(cb) setTimeout(cb)
         })
+      },
+
+      onBlur: function() {
+        if(this.autoFocus ) {
+          this.focusInput()
+        } else if(this.allowBlur) {
+          this.enter(true)
+        }
       },
     },
   }

@@ -32,23 +32,12 @@ class Tool {
       coords.x != this.lastCoords.x ||
       coords.y != this.lastCoords.y) return this.viewport.renderer.render()
     this.click(vec, coords)
-    window.gc && window.gc()
+    // window.gc && window.gc()
   }
 
   mouseMove(vec, coords) {}
 
   dispose() {}
-
-  async updateSketch(temporary) {
-    const sketch = this.viewport.document.activeSketch
-    if(!sketch) return
-    const handle = this.viewport.activeHandle
-    if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
-    await sketch.solve()
-    if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = false )
-    sketch.elements.forEach(elem => this.viewport.elementChanged(elem, this.component) )
-    this.viewport.document.emit('component-changed', this.viewport.document.activeComponent)
-  }
 }
 
 
@@ -131,7 +120,7 @@ export class ManipulationTool extends HighlightTool {
 
   mouseUp(vec, coords) {
     this.mouseMove(vec, coords)
-    this.updateSketch()
+    this.viewport.updateSketch()
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'
@@ -143,7 +132,7 @@ export class ManipulationTool extends HighlightTool {
       let handles = handle.elem.handles()
       handles[handle.index] = vec//.toArray()
       handle.elem.setHandles(handles, false)
-      this.updateSketch(true)
+      this.viewport.updateSketch(true)
       // this.viewport.elementChanged(handle.elem, this.component)
     } else {
       super.mouseMove(vec, coords)
@@ -437,7 +426,7 @@ export class ConstraintTool extends HighlightTool {
     super(component, viewport, ['curve'])
     this.sketch = sketch
     this.items = []
-    this.cursor = 'move'
+    // this.cursor = 'move'
   }
 
   async mouseDown(vec, coords) {
@@ -451,7 +440,7 @@ export class ConstraintTool extends HighlightTool {
     if(this.items.length == this.constructor.numItems) {
       const constraint = new this.constructor.constraintType(...this.items)
       this.sketch.addConstraint(constraint)
-      this.updateSketch()
+      this.viewport.updateSketch()
       this.items = []
     }
   }

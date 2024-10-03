@@ -302,7 +302,7 @@ export default class Renderer {
   }
 
   fromScreen(coords) {
-    const intersects = this.hitTest(coords).filter(obj => obj.object.alcProjectable)
+    const intersects = this.hitTest(coords).filter(obj => obj.object.alcProjectable )
     const hit = intersects[0]
     return hit && hit.point
   }
@@ -322,7 +322,7 @@ export default class Renderer {
   objectsAtScreen(coords, types) {
     const intersects = this.hitTest(coords)
     const objects = Array.from(new Set(intersects.map(obj => obj.object)))
-    return objects.filter(obj => types.some(t => obj.alcType == t))
+    return objects.filter(obj => !types || types.some(t => obj.alcType == t ) )
   }
 
   convertLine(vertices, material) {

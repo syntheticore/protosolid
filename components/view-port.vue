@@ -45,7 +45,7 @@
       @click.stop="document.selection = document.selection.handle(dimension.constraint, bus.isCtrlPressed)"
       @dblclick="dimension.constraint.active = true"
     )
-      span {{ dimension.constraint.distance.toFixed(2) }}mm
+      .dim-value {{ dimension.constraint.distance.toFixed(2) }}
 
       TransitionGroup(name="hide-dimension")
         NumberInput(
@@ -212,13 +212,33 @@
 
   .dimension
     position: absolute
+    transition: color 0.1s
 
-    .number-input
-      margin-top: -8px
-      margin-left: -40px
+    &.selected .dim-value
+      border-color: $highlight
+      background: lighten($highlight, 73%) !important
 
     > *
       position: absolute
+
+    .dim-value
+      margin-top: -12px
+      margin-left: -24px
+      background: $bright2
+      padding: 0.25rem 0.5rem
+      border-radius: 99px
+      font-size: 0.9rem
+      font-weight: bold
+      color: $dark2
+      border: 2px solid $bright1
+      transition: all 0.1s
+
+      &:hover
+        background: $bright1
+
+    .number-input
+      margin-top: -14px
+      margin-left: -60px
 
   .selector-widget
     pointer-events: auto
@@ -573,13 +593,13 @@
               constraint: c,
               curve: item.curve,
               coords: this.renderer.toScreen(
-                (pair.length == 1 ?
+                ((c.position && c.position.clone()) || (pair.length == 1 ?
                   item.curve.center()
                   :
                   item.curve.center().clone()
                     .add(item.curve.commonHandle(pair[1 - i].curve) || pair[1 - i].curve.center())
                     .divideScalar(2.0)
-                ).applyMatrix4(item.curve.sketch.workplane)
+                )).applyMatrix4(item.curve.sketch.workplane)
               ),
             }))
           }).filter(Boolean)

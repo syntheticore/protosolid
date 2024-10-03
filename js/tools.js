@@ -464,8 +464,34 @@ export class PerpendicularConstraintTool extends ConstraintTool {
   static icon = 'angle-up'
 }
 
-export class DimensionTool extends ConstraintTool {
-  static constraintType = Dimension
-  static numItems = 2
+export class DimensionTool extends HighlightTool {
   static icon = 'ruler'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, ['curve'])
+    this.sketch = sketch
+    this.items = []
+  }
+
+  async mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+
+    const pickingCurves = (this.items.length < 2)
+
+    if(pickingCurves) {
+      const curve = await this.getObject(coords)
+      if(!curve && !(curve instanceof Line)) {
+        this.items = []
+        return
+      }
+      this.items.push(curve)
+    } else {
+      const toSketch = this.sketch.workplane.clone().invert()
+      const position = this.viewport.renderer.fromScreen(coords).applyMatrix4(toSketch)
+      const constraint = new Dimension(...this.items, position)
+      this.sketch.addConstraint(constraint)
+      this.viewport.updateSketch()
+      this.items = []
+    }
+  }
 }

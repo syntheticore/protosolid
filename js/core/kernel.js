@@ -595,8 +595,9 @@ export class PerpendicularConstraint extends PairConstraint {
 export class Dimension extends PairConstraint {
   static icon = 'ruler'
 
-  constructor(a, b, distance) {
+  constructor(a, b, pos, distance) {
     super(a, b)
+    this.position = pos
     this.distance = distance || a.handles()[0].distanceTo(b.center())
   }
 

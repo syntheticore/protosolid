@@ -9,17 +9,45 @@ export default class DimensionControls extends THREE.Object3D {
     this.alcObject = constraint
 
     const itemL = constraint.items()[0]
-    const posL = itemL.curve.handles()[0]
-
     const itemR = constraint.items()[1]
-    const posR = itemR.curve.center()
 
-    const dir = posR.clone().sub(posL)
-    const upline = dir.clone().normalize().cross(new THREE.Vector3(0,0,1)).multiplyScalar(10)
+    const [posL, posR] = constraint.items().map(item =>
+      item.curve.handles().minMaxBy(Math.min, handle => handle.distanceTo(constraint.position) ).clone()
+    )
 
-    const lineL = renderer.convertLine([posL.toArray(), posL.clone().add(upline).toArray()], renderer.materials.wire)
-    const lineR = renderer.convertLine([posR.toArray(), posR.clone().add(upline).toArray()], renderer.materials.wire)
-    const lineTop = renderer.convertLine([posL.clone().add(upline).toArray(), posR.clone().add(upline).toArray()], renderer.materials.wire)
+    const dirL = itemL.curve.direction().normalize()
+    const dirR = itemR.curve.direction().negate().normalize()
+
+    const projL = constraint.position.clone().sub(posL).projectOnVector(dirL)
+    const projR = constraint.position.clone().sub(posR).projectOnVector(dirR)
+
+    const [closerProj, closerPos] = [[projL, posL], [projR, posR]].minMaxBy(Math.min, ([proj, _]) => proj.length() )
+    const [otherProj, otherPos] = [[projL, posL], [projR, posR]].find(([proj, _]) => proj != closerProj )
+
+    const posLT = closerPos.clone().add(closerProj)
+    const posRT = otherPos.clone().add(otherProj)
+
+    const lineL = renderer.convertLine([closerPos.toArray(), posLT.toArray()], renderer.materials.wire)
+    const lineR = renderer.convertLine([otherPos.toArray(), posRT.toArray()], renderer.materials.wire)
+
+    // const dir = posRT.clone().sub(posLT)
+    // const distance = dir.length()
+    // dir.normalize()
+
+    // const lineTopL = renderer.convertLine([
+    //   posLT.toArray(),
+    //   posLT.clone().add(dir.clone().multiplyScalar(distance * 0.4)).toArray(),
+    // ], renderer.materials.wire)
+
+    // const lineTopR = renderer.convertLine([
+    //   posRT.clone().add(dir.clone().multiplyScalar(-distance * 0.4)).toArray(),
+    //   posRT.toArray(),
+    // ], renderer.materials.wire)
+
+    const lineTop = renderer.convertLine([
+      posLT.toArray(),
+      posRT.toArray(),
+    ], renderer.materials.wire)
 
     this.add(lineL)
     this.add(lineR)

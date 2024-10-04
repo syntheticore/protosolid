@@ -698,6 +698,11 @@ export class Wire {
     window.oc.oc.BOPTools_AlgoTools.OrientEdgesOnWire(wire)
     return wire
   }
+
+  transformed(workplane) {
+    const shape = transformGeometry(this.geometry(), workplane)
+    return window.oc.oc.TopoDS.Wire_1(shape)
+  }
 }
 
 
@@ -742,7 +747,7 @@ export class Profile {
   extrude(componentId, height) {
     if(!height) throw { type: 'error', msg: 'Extrusion has no volume' }
     const face = this.makeFace()
-    const dir = new window.oc.oc.gp_Vec_4(0, 0, height)
+    const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyMatrix4(this.sketch.workplane))
     let prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
     return this.makeCompound(componentId, prism.Shape())
   }
@@ -762,14 +767,13 @@ export class Profile {
   }
 
   makeFace() {
-    const wire = this.rings[0].geometry()
+    const wire = this.rings[0].transformed(this.sketch.workplane)
     return new window.oc.oc.BRepBuilderAPI_MakeFace_15(wire, true).Face()
   }
 
   makeCompound(componentId, shape) {
     const solid = window.oc.oc.TopoDS.Solid_1(shape)
     const compound = new Compound(componentId, solid)
-    compound.transform(this.sketch.workplane)
     compound.id = this.id
     return compound
   }
@@ -828,15 +832,7 @@ export class Shape {
   }
 
   transform(workplane) {
-    const pos = new THREE.Vector3().setFromMatrixPosition(workplane)
-    const rot = new THREE.Quaternion().setFromRotationMatrix(workplane)
-
-    const trans = new window.oc.oc.gp_Trsf_1()
-    const quat = new window.oc.oc.gp_Quaternion_2(rot.x, rot.y, rot.z, rot.w)
-    trans.SetRotationPart(quat)
-    trans.SetTranslationPart(ocVecFromVec(pos))
-
-    const transformed = new window.oc.oc.BRepBuilderAPI_Transform_2(this.geom(), trans, true).Shape()
+    const transformed = transformGeometry(this.geom(), workplane)
     this.geom = () => transformed
   }
 
@@ -983,14 +979,21 @@ export class Edge extends Shape {
 
   axialReference() {
     if(!this.getAxis()) throw "Cannot provide axis from non-linear edge"
-    return new AxialReference(this)
+    return new AxialReference(this.edgeReference())
   }
 
   edgeReference() {
     return new EdgeReference(this)
   }
 
-  getAxis() {}
+  getAxis() {
+    const curve = new window.oc.oc.BRepAdaptor_Curve_2(this.geom())
+    if(curve.GetType() != window.oc.oc.GeomAbs_CurveType.GeomAbs_Line) return
+    const line = curve.Line()
+    const dir = vecFromOc(line.Direction()).normalize()
+    const loc = vecFromOc(line.Location())
+    return rotationFromNormal(dir).setPosition(loc)
+  }
 
   center() {
     const curve = new window.oc.oc.BRepAdaptor_Curve_2(this.geom())
@@ -1194,7 +1197,7 @@ export class AxialReference extends Reference {
   getReal() {
     if(this.item instanceof AxisHelper) {
       return this.item
-    } else if(this.item instanceof CurveReference) {
+    } else {
       return this.item.getItem()
     }
   }
@@ -1205,13 +1208,13 @@ export class AxialReference extends Reference {
   }
 
   update(tree) {
-    if(this.item instanceof CurveReference) {
+    if(!(this.item instanceof AxisHelper)) {
       return this.item.update(tree)
     }
   }
 
   clone() {
-    return new AxialReference(this.item instanceof CurveReference ? this.item.clone() : this.item)
+    return new AxialReference(this.item instanceof AxisHelper ? this.item : this.item.clone())
   }
 }
 
@@ -1500,6 +1503,18 @@ function tesselateCurve(geom) {
     1.0e-9, 1.0e-7
   )
   return arrayRange(1, deflection.NbPoints()).map(i => coords(deflection.Value(i)) )
+}
+
+function transformGeometry(geom, workplane) {
+  const pos = new THREE.Vector3().setFromMatrixPosition(workplane)
+  const rot = new THREE.Quaternion().setFromRotationMatrix(workplane)
+
+  const trans = new window.oc.oc.gp_Trsf_1()
+  const quat = new window.oc.oc.gp_Quaternion_2(rot.x, rot.y, rot.z, rot.w)
+  trans.SetRotationPart(quat)
+  trans.SetTranslationPart(ocVecFromVec(pos))
+
+  return new window.oc.oc.BRepBuilderAPI_Transform_2(geom, trans, true).Shape()
 }
 
 function collectShapes(geom, type) {

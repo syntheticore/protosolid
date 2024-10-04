@@ -283,11 +283,12 @@
   import {
     DummyTool,
     ManipulationTool,
-    ObjectPickTool,
+    CurvePickTool,
     ProfilePickTool,
     EdgePickTool,
     FacePickTool,
     PlanePickTool,
+    AxisPickTool,
     LineTool,
     SplineTool,
     CircleTool,
@@ -428,8 +429,8 @@
         // console.log('picking')
         this.handlePick(pickerCoords, color, {
           profile: ProfilePickTool,
-          curve: ObjectPickTool,
-          axis: ObjectPickTool,
+          curve: CurvePickTool,
+          axis: AxisPickTool,
           edge: EdgePickTool,
           face: FacePickTool,
           plane: PlanePickTool,

@@ -155,6 +155,7 @@ mainBuild:
     - symbol: Handle_Geom_VectorWithMagnitude
 
     - symbol: GeomAbs_JoinType
+    - symbol: GeomAbs_CurveType
 
     - symbol: Geom2d_AxisPlacement
     - symbol: Geom2d_BSplineCurve
@@ -242,6 +243,9 @@ mainBuild:
     - symbol: Adaptor3d_Curve
 
     - symbol: BRepAdaptor_Curve
+    - symbol: BRepAdaptor_Curve2d
+    - symbol: BRepAdaptor_Surface
+    - symbol: BRepAdaptor_CompCurve
 
     - symbol: GC_MakeArcOfCircle
     - symbol: GC_MakeArcOfEllipse

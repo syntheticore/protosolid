@@ -229,19 +229,17 @@ class PickTool extends HighlightTool {
 }
 
 
-export class ObjectPickTool extends PickTool {
+export class CurvePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['curve'], callback)
   }
 }
-
 
 export class ProfilePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['region'], callback)
   }
 }
-
 
 export class FacePickTool extends PickTool {
   constructor(component, viewport, callback) {
@@ -252,6 +250,12 @@ export class FacePickTool extends PickTool {
 export class EdgePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['edge'], callback)
+  }
+}
+
+export class AxisPickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['curve', 'edge'], callback)
   }
 }
 

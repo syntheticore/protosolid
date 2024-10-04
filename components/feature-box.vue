@@ -325,21 +325,17 @@
             // Add item reference to feature
             if(setting.multi || setting.autoMulti) {
               // Toggle items in multi select mode
-              const currentItems = (this.activeFeature[key] && this.activeFeature[key]()) || []
+              const currentItems = (this.activeFeature[key] && [...this.activeFeature[key]()]) || []
               this.activeFeature[key] = () => currentItems
               const oldItem = currentItems.find(otherRef => {
                 return otherRef.item.id == item.id
               })
               if(oldItem) {
-                // oldItem.free()
                 currentItems.splice(currentItems.indexOf(oldItem), 1)
               } else {
                 currentItems.push(itemRef)
               }
             } else {
-              // const oldRef = this.activeFeature[key]
-              // if(oldRef) oldRef().free()
-
               // Hide heavy data from Vue in a closure
               this.activeFeature[key] = () => itemRef
             }

@@ -16,33 +16,35 @@ export default class DimensionControls extends THREE.Object3D {
     )
 
     const dirL = itemL.curve.direction().normalize()
-    const dirR = itemR.curve.direction().negate().normalize()
+    const dirR = itemR.curve.direction().normalize()
 
     const projL = constraint.position.clone().sub(posL).projectOnVector(dirL)
     const projR = constraint.position.clone().sub(posR).projectOnVector(dirR)
 
-    const [closerProj, closerPos] = [[projL, posL], [projR, posR]].minMaxBy(Math.min, ([proj, _]) => proj.length() )
-    const [otherProj, otherPos] = [[projL, posL], [projR, posR]].find(([proj, _]) => proj != closerProj )
+    let posLT = posL.clone().add(projL)
+    let posRT = posR.clone().add(projR)
 
-    const posLT = closerPos.clone().add(closerProj)
-    const posRT = otherPos.clone().add(otherProj)
+    const lineL = renderer.convertLine([posL.toArray(), posLT.toArray()], renderer.materials.wire)
+    const lineR = renderer.convertLine([posR.toArray(), posRT.toArray()], renderer.materials.wire)
 
-    const lineL = renderer.convertLine([closerPos.toArray(), posLT.toArray()], renderer.materials.wire)
-    const lineR = renderer.convertLine([otherPos.toArray(), posRT.toArray()], renderer.materials.wire)
+    const cross = posRT.clone().sub(posLT)
+    const contraintRel = constraint.position.clone().sub(posLT)
 
-    // const dir = posRT.clone().sub(posLT)
-    // const distance = dir.length()
-    // dir.normalize()
+    const helperDir = cross.clone().normalize()
 
-    // const lineTopL = renderer.convertLine([
-    //   posLT.toArray(),
-    //   posLT.clone().add(dir.clone().multiplyScalar(distance * 0.4)).toArray(),
-    // ], renderer.materials.wire)
+    const arrowHelperL = new THREE.ArrowHelper(helperDir.clone().negate(), posLT, 0.0, 'darkgray', 2, 1)
+    const arrowHelperR = new THREE.ArrowHelper(helperDir, posRT, 0.0, 'darkgray', 2, 1)
 
-    // const lineTopR = renderer.convertLine([
-    //   posRT.clone().add(dir.clone().multiplyScalar(-distance * 0.4)).toArray(),
-    //   posRT.toArray(),
-    // ], renderer.materials.wire)
+    this.add(arrowHelperL)
+    this.add(arrowHelperR)
+
+    if(cross.dot(contraintRel) > 0.0) {
+      if(contraintRel.length() > cross.length()) {
+        posRT = constraint.position
+      }
+    } else {
+      posLT = constraint.position
+    }
 
     const lineTop = renderer.convertLine([
       posLT.toArray(),

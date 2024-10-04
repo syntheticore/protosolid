@@ -64,7 +64,7 @@ class HighlightTool extends Tool {
   }
 
   async mouseMove(vec, coords) {
-    if(this.viewport.hoveredHandle) return this.viewport.renderer.render()
+    if(this.viewport.hoveredHandle || this.viewport.hoveredDimension) return this.viewport.renderer.render()
     if(this.viewport.pickingPath) this.viewport.updatePath(this.viewport.pickingPath)
     const object = await this.getObject(coords, true)
     this.viewport.$emit('update:highlight', object)
@@ -75,7 +75,12 @@ class HighlightTool extends Tool {
       // console.log('getObject')
       let items = this.viewport.renderer
         .objectsAtScreen(coords, this.realSelectors)
-        .map(obj => (obj.alcType == 'face' && this.selectors.some(s => s == 'solid' )) ? obj.alcObject.solid : obj.alcObject )
+        .map(obj =>
+          obj.alcType == 'face' && this.selectors.some(s => s == 'solid' ) ?
+            obj.alcObject.solid
+            :
+            obj.alcObject
+        )
         // .map(obj => {console.log(obj); return obj})
         .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
@@ -113,7 +118,7 @@ export class ManipulationTool extends HighlightTool {
 
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    if(!this.viewport.activeHandle) return
+    if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
     this.snapToPoints = true
     this.cursor = 'grabbing'
   }
@@ -128,12 +133,16 @@ export class ManipulationTool extends HighlightTool {
 
   mouseMove(vec, coords) {
     const handle = this.viewport.activeHandle
+    const dimension = this.viewport.activeDimension
     if(handle) {
       let handles = handle.elem.handles()
       handles[handle.index] = vec//.toArray()
       handle.elem.setHandles(handles, false)
       this.viewport.updateSketch(true)
       // this.viewport.elementChanged(handle.elem, this.component)
+    } else if(dimension) {
+      dimension.position = vec
+      this.viewport.updateSketch()
     } else {
       super.mouseMove(vec, coords)
     }

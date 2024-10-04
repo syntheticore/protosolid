@@ -1,4 +1,5 @@
 <template lang="pug">
+
   .view-port(:style="{ cursor: (activeTool && activeTool.cursor) || 'auto' }")
 
     //- GL Viewport
@@ -28,45 +29,47 @@
           :y2="guide.end.y"
         )
 
-    //- Sketch constraint proxies
-    Icon.constraint(
-      v-for="constraint in nonDimensions"
-      :icon="constraint.constraint.constructor.icon"
-      :class="{ selected: document.selection.has(constraint.constraint) }"
-      :style="{ top: constraint.coords.y + 'px', left: constraint.coords.x + 'px' }"
-      @click.stop="document.selection = document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
-    )
+    .floaters
 
-    //- Sketch dimensions
-    .dimension(
-      v-for="dimension in dimensions"
-      :class="{ selected: document.selection.has(dimension.constraint) }"
-      :style="{ top: dimension.coords.y + 'px', left: dimension.coords.x + 'px' }"
-      @click.stop="document.selection = document.selection.handle(dimension.constraint, bus.isCtrlPressed)"
-      @dblclick="dimension.constraint.active = true"
-    )
-      .dim-value {{ dimension.constraint.distance.toFixed(2) }}
+      //- Sketch constraint proxies
+      Icon.constraint(
+        v-for="constraint in nonDimensions"
+        :icon="constraint.constraint.constructor.icon"
+        :class="{ selected: document.selection.has(constraint.constraint) }"
+        :style="{ top: constraint.coords.y + 'px', left: constraint.coords.x + 'px' }"
+        @click.stop="document.selection = document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
+      )
 
-      TransitionGroup(name="hide-dimension")
-        NumberInput(
-          v-if="dimension.constraint.active"
-          :component="document.top()"
-          v-model:value="dimension.constraint.distance"
-          @enter="dimension.constraint.active = false; updateSketch()"
-        )
+      //- Sketch dimensions
+      .dimension(
+        v-for="dimension in dimensions"
+        :class="{ selected: document.selection.has(dimension.constraint) }"
+        :style="{ top: dimension.coords.y + 'px', left: dimension.coords.x + 'px' }"
+        @click.stop="document.selection = document.selection.handle(dimension.constraint, bus.isCtrlPressed)"
+        @dblclick="dimension.constraint.active = true"
+      )
+        .dim-value(
+          @mouseup="mouseUp"
+          @mousedown="dimensionMouseDown($event, dimension.constraint)"
+          @mousemove="dimensionMouseMove($event, dimension.constraint)"
+        ) {{ dimension.constraint.distance.toFixed(2) }}
 
-    //- Snap anchor highlights active snap point
-    .anchors
+        Transition(name="hide-dimension")
+          NumberInput(
+            v-if="dimension.constraint.active"
+            :component="document.top()"
+            v-model:value="dimension.constraint.distance"
+            @enter="dimension.constraint.active = false; updateSketch()"
+          )
 
-      div(
+      //- Snap anchor highlights active snap point
+      .anchor.handle(
         v-if="snapAnchor"
         :style="{ top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px' }"
       )
 
-    //- Draggable sketch handles
-    .handles
-
-      div(
+      //- Draggable sketch handles
+      .drag-handle.handle(
         v-for="handle in allHandles"
         :key="handle.id"
         :style="{ top: handle.pos.y + 'px', left: handle.pos.x + 'px' }"
@@ -76,15 +79,15 @@
         @contextmenu.prevent
       )
 
-    //- Floating UI widgets
-    TransitionGroup(name="hide-selector")
-      SelectorWidget(
-        v-for="(widget, i) in widgets"
-        :key="widget.pos.x"
-        :widget="widget"
-        @remove="widgets.splice(i, 1)"
-        @change="$emit('update:highlight', $event)"
-      )
+      //- Floating UI widgets
+      TransitionGroup(name="hide-selector")
+        SelectorWidget(
+          v-for="(widget, i) in widgets"
+          :key="widget.pos.x"
+          :widget="widget"
+          @remove="widgets.splice(i, 1)"
+          @change="$emit('update:highlight', $event)"
+        )
 
 </template>
 
@@ -99,8 +102,7 @@
     background: radial-gradient(farthest-corner at 50% 150%, #333333, #1c2127)
 
   .drawpad
-  .handles
-  .anchors
+  .floaters
     position: absolute
     left: 0
     top: 0
@@ -120,43 +122,42 @@
       opacity: 0.7
       stroke-dasharray: 4, 7
 
-  .handles, .anchors
-    > *
-      size = 21px
-      // padding: 7px
+  .handle
+    size = 21px
+    // padding: 7px
+    position: absolute
+    display: block
+    width: size
+    height: size
+    margin-left: -(size / 2)
+    margin-top: -(size / 2)
+    display: flex
+    align-items: center
+    justify-content: center
+    // pointer-events: auto
+    &::before
       position: absolute
       display: block
-      width: size
-      height: size
-      margin-left: -(size / 2)
-      margin-top: -(size / 2)
-      display: flex
-      align-items: center
-      justify-content: center
-      // pointer-events: auto
-      &::before
-        position: absolute
-        display: block
-        content: ''
-        margin: 0
-        padding: 0
-        width:  7px
-        height: 7px
-        border-radius: 99px
-        background: white
-      &::after
-        position: absolute
-        display: block
-        content: ''
-        margin: 0
-        padding: 0
-        width:  calc(100% - 10px)
-        height: calc(100% - 10px)
-        border-radius: 99px
-        border: 2px solid $highlight * 1.6
-        pointer-events: none
+      content: ''
+      margin: 0
+      padding: 0
+      width:  7px
+      height: 7px
+      border-radius: 99px
+      background: white
+    &::after
+      position: absolute
+      display: block
+      content: ''
+      margin: 0
+      padding: 0
+      width:  calc(100% - 10px)
+      height: calc(100% - 10px)
+      border-radius: 99px
+      border: 2px solid $highlight * 1.6
+      pointer-events: none
 
-  .anchors > *
+  .anchor
     &::after
       transform: scale(1)
       opacity: 1
@@ -177,7 +178,7 @@
       }
     }
 
-  .handles > *
+  .drag-handle
     pointer-events: auto
     // cursor: grab
     &:hover
@@ -190,8 +191,8 @@
         height: 5px
 
   .constraint
+    pointer-events: auto
     position: absolute
-    // cursor: pointer
     margin-left: -9px
     margin-top: -9px
     border-radius: 99px
@@ -232,6 +233,8 @@
       color: $dark2
       border: 2px solid $bright1
       transition: all 0.1s
+      cursor: grab
+      pointer-events: auto
 
       &:hover
         background: $bright1
@@ -266,6 +269,7 @@
   .hide-dimension-leave-to
     opacity: 0
     transform: scale(90%)
+
 </style>
 
 
@@ -466,6 +470,7 @@
 
       mouseUp: function(e) {
         this.activeHandle = null
+        this.activeDimension = null
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseUp(vec, coords)
         this.snapper.reset()
@@ -499,6 +504,18 @@
         this.hoveredHandle = handle
         this.mouseMove(e)
         this.hoveredHandle = null
+      },
+
+      dimensionMouseDown: function(e, dimension) {
+        if(e.button != 0) return
+        this.activeDimension = dimension
+        this.mouseDown(e)
+      },
+
+      dimensionMouseMove: function(e, dimension) {
+        this.hoveredDimension = dimension
+        this.mouseMove(e)
+        this.hoveredDimension = null
       },
 
       mouseMove: function(e) {

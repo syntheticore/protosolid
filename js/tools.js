@@ -125,7 +125,6 @@ export class ManipulationTool extends HighlightTool {
 
   mouseUp(vec, coords) {
     this.mouseMove(vec, coords)
-    this.viewport.updateSketch()
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'

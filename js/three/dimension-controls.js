@@ -24,8 +24,8 @@ export default class DimensionControls extends THREE.Object3D {
     let posLT = posL.clone().add(projL)
     let posRT = posR.clone().add(projR)
 
-    const lineL = renderer.convertLine([posL.toArray(), posLT.toArray()], renderer.materials.wire)
-    const lineR = renderer.convertLine([posR.toArray(), posRT.toArray()], renderer.materials.wire)
+    const lineL = renderer.convertLine([posL.toArray(), posLT.clone().add(projL.normalize()).toArray()], renderer.materials.wire)
+    const lineR = renderer.convertLine([posR.toArray(), posRT.clone().add(projR.normalize()).toArray()], renderer.materials.wire)
 
     const cross = posRT.clone().sub(posLT)
     const contraintRel = constraint.position.clone().sub(posLT)

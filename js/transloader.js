@@ -124,22 +124,25 @@ export default class Transloader {
       }
     })
 
-    // Load Sketch Elements
     // if(comp === this.activeComponent) {
+
+      // Load Sketches
       comp.sketches.forEach(sketch => {
         sketch.component = comp
         if(comp.creator.itemsHidden[sketch.id]) return
+
+        // Load Sketch Elements
         sketch.elements.forEach(elem => {
           this.loadElement(elem, comp)
         })
-        sketch.constraints.filter(c => c instanceof Dimension).forEach(constraint => {
-          const dimension = new DimensionControls(constraint, this.renderer)
-          constraint.controls = () => dimension
-          this.renderer.add(dimension)
-          cache.dimensions.push(constraint)
-        })
+
+        // Load Dimensions
+        this.updateDimensions(comp, sketch)
       })
+
+      // Update regions
       if(!cache.regions.length) this.updateRegions(comp)
+
     // }
 
     // Load Construction Helpers
@@ -177,10 +180,7 @@ export default class Transloader {
     })
     cache.helpers = []
 
-    cache.dimensions.forEach(dimension => {
-      this.renderer.remove(dimension.controls())
-    })
-    cache.dimensions = []
+    this.purgeDimensions(comp)
 
     this.purgeRegions(comp)
 
@@ -244,6 +244,25 @@ export default class Transloader {
       this.renderer.remove(region.mesh())
     })
     cache.regions = []
+  }
+
+  updateDimensions(comp, sketch) {
+    const cache = comp.creator.cache()
+    this.purgeDimensions(comp)
+    sketch.constraints.filter(c => c instanceof Dimension).forEach(constraint => {
+      const dimension = new DimensionControls(constraint, this.renderer)
+      constraint.controls = () => dimension
+      this.renderer.add(dimension)
+      cache.dimensions.push(constraint)
+    })
+  }
+
+  purgeDimensions(comp, sketch) {
+    const cache = comp.creator.cache();
+    ((sketch && sketch.constraints.filter(c => c instanceof Dimension)) || [...cache.dimensions]).forEach(dimension => {
+      this.renderer.remove(dimension.controls())
+      cache.dimensions.splice(cache.dimensions.indexOf(dimension), 1)
+    })
   }
 
   getSurfaceMaterial(comp, face) {

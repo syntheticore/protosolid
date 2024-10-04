@@ -224,7 +224,7 @@
 
     .dim-value
       margin-top: -12px
-      margin-left: -24px
+      margin-left: -28px
       background: $bright2
       padding: 0.25rem 0.5rem
       border-radius: 99px
@@ -426,7 +426,6 @@
 
       // Events
       this.bus.on('pick', (type, pickerCoords, color) => {
-        // console.log('picking')
         this.handlePick(pickerCoords, color, {
           profile: ProfilePickTool,
           curve: CurvePickTool,
@@ -480,9 +479,25 @@
 
       updateRegions: function() {
         if(!this.regionsDirty) return
+        this.updateSketch()
         this.transloader.updateRegions(this.document.activeComponent)
         this.renderer.render()
         this.regionsDirty = false
+      },
+
+      updateSketch: async function(temporary) {
+        const sketch = this.document.activeSketch
+        if(!sketch) return
+        // Solve
+        const handle = this.activeHandle
+        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
+        sketch.solve()
+        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
+        // Update elements
+        sketch.elements.forEach(elem => this.elementChanged(elem, this.document.activeComponent, true) )
+        // Update dimensions
+        this.transloader.updateDimensions(this.document.activeComponent, this.document.activeSketch)
+        this.renderer.render()
       },
 
       mouseDown: function(e) {
@@ -572,7 +587,6 @@
       },
 
       addPath: function(pickerCoords, center, color) {
-        // console.log('addpath', pickerCoords, center, color)
         const path = {
           target: center,
           origin: pickerCoords,
@@ -643,17 +657,6 @@
         return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
       },
 
-      updateSketch: async function(temporary) {
-        const sketch = this.document.activeSketch
-        if(!sketch) return
-        const handle = this.activeHandle
-        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
-        await sketch.solve()
-        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
-        sketch.elements.forEach(elem => this.elementChanged(elem, this.document.activeComponent) )
-        this.document.emit('component-changed', this.document.activeComponent) //XXX make sketch-changed
-      },
-
       activateTool: function(Tool) {
         console.log('activating', Tool)
         if(this.activeTool) this.activeTool.dispose()
@@ -686,10 +689,10 @@
         this.renderer.render()
       },
 
-      elementChanged: function(elem, comp) {
+      elementChanged: function(elem, comp, noRender) {
         this.regionsDirty = true
         this.transloader.loadElement(elem, comp)
-        this.renderer.render()
+        if(!noRender) this.renderer.render()
       },
 
       unpreviewFeature: function() {

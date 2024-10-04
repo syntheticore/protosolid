@@ -52,8 +52,6 @@
       :active-tool="activeTool"
     )
 
-    //- button.button(@click="splitAll") Split all
-
 </template>
 
 
@@ -203,11 +201,6 @@
             }
           })
         }
-      },
-
-      splitAll: function() {
-        const splits = this.document.activeSketch.get_all_split()
-        this.document.emit('component-changed', this.document.activeComponent)
       },
     },
   }

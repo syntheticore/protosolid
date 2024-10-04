@@ -165,13 +165,11 @@ export default class Transloader {
 
     cache.edges.forEach(edge => {
       this.renderer.remove(edge.mesh())
-      // edge.free()
     })
     cache.edges = []
 
     cache.faces.forEach(face => {
       this.renderer.remove(face.mesh())
-      // face.free()
     })
     cache.faces = []
 

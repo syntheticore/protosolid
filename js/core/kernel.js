@@ -79,17 +79,17 @@ export class SketchElement {
   }
 
   split(others) {
-    const isect = this.intersect(others)[0]
-    if(!isect) return [this]
     const geom = this.geom()
-    const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(isect, geom)
-    const u = projection.LowerDistanceParameter()
     const start = geom.get().FirstParameter()
     const end = geom.get().LastParameter()
-    if(start.almost(u) || end.almost(u)) return [this]
+    const [p, u] = this.intersect(others).map(p => {
+      const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, geom)
+      const u = projection.LowerDistanceParameter()
+      return [p, u]
+    }).find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
+    if(!p) return [this]
     const left = new window.oc.oc.Geom2d_TrimmedCurve(geom, start, u, true, true)
     const right = new window.oc.oc.Geom2d_TrimmedCurve(geom, u, end, true, true)
-    console.log('left right', left, right)
     return [...this.constructor.fromGeometry(left, this.id).split(others), ...this.constructor.fromGeometry(right, this.id).split(others)]
   }
 
@@ -478,7 +478,7 @@ export class Sketch {
     return constraint
   }
 
-  async solve() {
+  solve() {
     let id = 1
     const idMap = {}
 

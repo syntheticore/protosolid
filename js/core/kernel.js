@@ -185,7 +185,7 @@ export class Line extends SketchElement {
   }
 
   getAxis() {
-    return rotationFromNormal(this.direction().normalize()).setPosition(this.points[0])
+    return rotationFromNormal(this.direction().normalize()).setPosition(this.points[0]).premultiply(this.sketch.workplane)
   }
 
   _clone() {
@@ -754,14 +754,8 @@ export class Profile {
 
   revolve(componentId, axis, angle) {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
-
     const face = this.makeFace()
-
-    const pos = new THREE.Vector3().setFromMatrixPosition(axis)
-    const rot = new THREE.Quaternion().setFromRotationMatrix(axis)
-    const axDir = new THREE.Vector3(0,0,1).applyQuaternion(rot)
-    const ax = new window.oc.oc.gp_Ax1_2(ocPntFromVec(pos), ocDirFromVec(axDir))
-
+    const ax = ocAxFromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
     return this.makeCompound(componentId, revolution.Shape())
   }
@@ -1471,6 +1465,13 @@ function ocDir2dFromVec(vec) {
 
 function ocVecFromVec(vec) {
   return new window.oc.oc.gp_Vec_4(vec.x, vec.y, vec.z)
+}
+
+function ocAxFromMatrix(m) {
+  const pos = new THREE.Vector3().setFromMatrixPosition(m)
+  const rot = new THREE.Quaternion().setFromRotationMatrix(m)
+  const axDir = new THREE.Vector3(0,0,1).applyQuaternion(rot)
+  return new window.oc.oc.gp_Ax1_2(ocPntFromVec(pos), ocDirFromVec(axDir))
 }
 
 function matrix4FromOcPln(pln) {

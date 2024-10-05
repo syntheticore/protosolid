@@ -90,7 +90,7 @@ export class SketchElement {
     if(!p) return [this]
     const left = new window.oc.oc.Geom2d_TrimmedCurve(geom, start, u, true, true)
     const right = new window.oc.oc.Geom2d_TrimmedCurve(geom, u, end, true, true)
-    return [...this.constructor.fromGeometry(left, this.id).split(others), ...this.constructor.fromGeometry(right, this.id).split(others)]
+    return [...this.constructor.fromGeometry(left, this.id + '/1').split(others), ...this.constructor.fromGeometry(right, this.id + '/2').split(others)]
   }
 
   constraints() {
@@ -747,7 +747,8 @@ export class Profile {
   extrude(componentId, height) {
     if(!height) throw { type: 'error', msg: 'Extrusion has no volume' }
     const face = this.makeFace()
-    const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyMatrix4(this.sketch.workplane))
+    const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
+    const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyQuaternion(rot))
     let prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
     return this.makeCompound(componentId, prism.Shape())
   }
@@ -789,7 +790,7 @@ export class Profile {
         return wire
       }
       const [count, newWire] = replacementWire
-      console.log('update', count, wireIds.size)
+      console.log('update profile', count, wireIds.size)
       if(count != wireIds.size) wasRepairNeeded = true
       return newWire
     })
@@ -1590,11 +1591,11 @@ function clockwise(p1, p2, p3) {
 }
 
 function isClockwise(closedPolyline) {
-  signedPolygonArea(closedPolyline) < 0.0
+  return signedPolygonArea(closedPolyline) < 0.0
 }
 
 function polygon_area(closedPolyline) {
-  signedPolygonArea(closedPolyline).abs()
+  return signedPolygonArea(closedPolyline).abs()
 }
 
 function signedPolygonArea(closedPolyline) {
@@ -1609,7 +1610,7 @@ function signedPolygonArea(closedPolyline) {
   return signedArea / 2.0
 }
 
-export const EPSILON = 0.0000001
+export const EPSILON = 0.000001
 
 Number.prototype.almost = function(other) {
   return Math.abs(this - other) < EPSILON

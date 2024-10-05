@@ -237,10 +237,22 @@ mainBuild:
     - symbol: GeomAPI_ProjectPointOnCurve
     - symbol: GeomAPI_ProjectPointOnSurf
 
-    - symbol: CPnts_AbscissaPoint
+    - symbol: GeomAdaptor
+    - symbol: GeomAdaptor_Curve
+    - symbol: GeomAdaptor_Surface
     - symbol: Geom2dAdaptor_Curve
     - symbol: Adaptor2d_Curve2d
     - symbol: Adaptor3d_Curve
+    - symbol: Adaptor3d_Surface
+
+    - symbol: Handle_GeomAdaptor_Curve
+    - symbol: Handle_GeomAdaptor_Surface
+    - symbol: Handle_Geom2dAdaptor_Curve
+    - symbol: Handle_Adaptor2d_Curve2d
+    - symbol: Handle_Adaptor3d_Curve
+    - symbol: Handle_Adaptor3d_Surface
+
+    - symbol: CPnts_AbscissaPoint
 
     - symbol: BRepAdaptor_Curve
     - symbol: BRepAdaptor_Curve2d
@@ -418,6 +430,10 @@ mainBuild:
 
     - symbol: GCPnts_TangentialDeflection
     # - symbol: StdPrs_ToolTriangulatedShape
+
+    - symbol: HLRAlgo_Projector # Remove hidden lines
+
+    - symbol: ProjLib_ProjectOnPlane
 
     - symbol: Precision
 

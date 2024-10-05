@@ -37,7 +37,7 @@ export class SketchElement {
     if(!this.geom) return
     const geom = this.geom().get()
     const start = geom.FirstParameter()
-    const range = Math.abs(start - geom.LastParameter())
+    const range = geom.LastParameter() - start
     const p = geom.Value(start + u * range)
     return vecFromOc(p)
   }
@@ -261,6 +261,7 @@ export class Sketch {
     this.id = crypto.randomUUID()
     this.elements = []
     this.constraints = []
+    this.projections = []
     this.workplane = new THREE.Matrix4()
     // this.componentId = componentId
     this.hidden = false
@@ -271,6 +272,16 @@ export class Sketch {
   add(elem) {
     this.elements.push(elem)
     elem.sketch = this
+  }
+
+  addConstraint(constraint) {
+    constraint.sketch = this
+    this.constraints.push(constraint)
+  }
+
+  addProjection(projection) {
+    projection.sketch = this
+    this.projections.push(projection)
   }
 
   remove(elem) {
@@ -472,12 +483,6 @@ export class Sketch {
     })
   }
 
-  addConstraint(constraint) {
-    constraint.sketch = this
-    this.constraints.push(constraint)
-    return constraint
-  }
-
   solve() {
     let id = 1
     const idMap = {}
@@ -549,9 +554,40 @@ export class Sketch {
 }
 
 
+export class Projection {
+  constructor(edge) {
+    this.edgeRef = new EdgeReference(edge)
+  }
+
+  geometry() {
+    const edge = this.edgeRef.getItem()
+    const curve = new window.oc.oc.BRepAdaptor_Curve_2(edge.geom())
+    const ax = ocAx3FromMatrix(this.sketch.workplane)
+    const plane = ocPlnFromMatrix(this.sketch.workplane)
+
+    const project = new window.oc.oc.ProjLib_ProjectOnPlane_2(ax)
+    project.Load(curve.ShallowCopy(), EPSILON, true) // ShallowCopy upcasts BRepAdaptor_Curve -> Adaptor3d_Curve
+
+    const projected = project.GetResult().get()
+    const [u1, u2] = [projected.FirstParameter(), projected.LastParameter()]
+
+    let curve2d = window.oc.oc.GeomAPI.To2d(projected.Curve(), plane)
+    const handle = new window.oc.oc.Handle_Geom2d_Curve_2(curve2d.get())
+
+    const trimmed = new window.oc.oc.Geom2d_TrimmedCurve(handle, u1, u2, true, true)
+
+    if(project.GetType() == window.oc.oc.GeomAbs_CurveType.GeomAbs_Line) {
+      const line = Line.fromGeometry(trimmed, edge.id)
+      line.sketch = this.sketch
+      return line
+    }
+  }
+}
+
+
 export class Constraint {
-  constructor(a) {
-    this.item = { curve: a }
+  constructor(curve) {
+    this.item = { curve }
   }
 
   items() { return [this.item] }
@@ -560,13 +596,13 @@ export class Constraint {
 
 export class HorizontalConstraint extends Constraint {
   static icon = 'ruler-horizontal'
-  typename() { return 'Perpendicular Constraint' }
+  typename() { return 'Horizontal Constraint' }
 }
 
 
 export class VerticalConstraint extends Constraint {
   static icon = 'ruler-vertical'
-  typename() { return 'Perpendicular Constraint' }
+  typename() { return 'Vertical Constraint' }
 }
 
 
@@ -756,7 +792,7 @@ export class Profile {
   revolve(componentId, axis, angle) {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
     const face = this.makeFace()
-    const ax = ocAxFromMatrix(axis)
+    const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
     return this.makeCompound(componentId, revolution.Shape())
   }
@@ -945,7 +981,7 @@ export class Face extends Shape {
     const isPlanar = new window.oc.oc.GeomLib_IsPlanarSurface(surface, 1.0e-7) //XXX Surface->IsKind(STANDARD_TYPE(Geom_Plane)) could be faster
     if(!isPlanar.IsPlanar()) return
     const plane = isPlanar.Plan()
-    return matrix4FromOcPln(plane)
+    return matrixFromOcPln(plane)
   }
 
   normal(u, v, useCurvature) { //XXX use BOPTools_AlgoTools3D::GetNormalToSurface or BOPTools_AlgoTools3D::GetNormalToFaceOnEdge
@@ -1447,7 +1483,6 @@ function vecFromOc(ocVec) {
   return new THREE.Vector3().fromArray(coords(ocVec))
 }
 
-
 function ocPnt2dFromVec(vec) {
   return new window.oc.oc.gp_Pnt2d_3(vec.x, vec.y)
 }
@@ -1468,14 +1503,22 @@ function ocVecFromVec(vec) {
   return new window.oc.oc.gp_Vec_4(vec.x, vec.y, vec.z)
 }
 
-function ocAxFromMatrix(m) {
+function ocAx1FromMatrix(m, constructor=window.oc.oc.gp_Ax1_2) {
   const pos = new THREE.Vector3().setFromMatrixPosition(m)
   const rot = new THREE.Quaternion().setFromRotationMatrix(m)
   const axDir = new THREE.Vector3(0,0,1).applyQuaternion(rot)
   return new window.oc.oc.gp_Ax1_2(ocPntFromVec(pos), ocDirFromVec(axDir))
 }
 
-function matrix4FromOcPln(pln) {
+function ocAx3FromMatrix(m, constructor=window.oc.oc.gp_Ax1_2) {
+  const pos = new THREE.Vector3().setFromMatrixPosition(m)
+  const rot = new THREE.Quaternion().setFromRotationMatrix(m)
+  const axDir = new THREE.Vector3(0,0,1).applyQuaternion(rot)
+  const xDir = new THREE.Vector3(1,0,0).applyQuaternion(rot)
+  return new window.oc.oc.gp_Ax3_3(ocPntFromVec(pos), ocDirFromVec(axDir), ocDirFromVec(xDir))
+}
+
+function matrixFromOcPln(pln) {
   const x = vecFromOc(pln.XAxis().Direction())
   const y = vecFromOc(pln.YAxis().Direction())
   const z = vecFromOc(pln.Axis().Direction())
@@ -1484,10 +1527,13 @@ function matrix4FromOcPln(pln) {
     .setPosition(vecFromOc(pln.Axis().Location()))
 }
 
+function ocPlnFromMatrix(m) {
+  return new window.oc.oc.gp_Pln_2(ocAx3FromMatrix(m))
+}
 
 function tesselateCurveFixed(geom, steps) {
   const start = geom.FirstParameter()
-  const range = Math.abs(start - geom.LastParameter())
+  const range = geom.LastParameter() - start
 
   const vertices = arrayRange(0, steps - 1).map(i => {
     const u = start + i / (steps - 1) * range

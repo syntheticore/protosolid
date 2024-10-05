@@ -166,6 +166,7 @@
     HorizontalConstraintTool,
     VerticalConstraintTool,
     DimensionTool,
+    ProjectTool,
   } from './../js/tools.js'
 
   export default {
@@ -221,7 +222,7 @@
               { title: 'Break', icon: 'layer-group' },
               { title: 'Extend', icon: 'layer-group' },
               { title: 'Offset', icon: 'layer-group' },
-              { title: 'Project', icon: 'layer-group' },
+              { title: 'Project', tool: ProjectTool },
               { title: 'Intersect', icon: 'layer-group' },
             ]
           },

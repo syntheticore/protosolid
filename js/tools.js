@@ -7,7 +7,7 @@
 //   rotationFromNormal
 // } from './utils.js'
 
-import { Line, Circle, CoincidentConstraint, PerpendicularConstraint, HorizontalConstraint, VerticalConstraint, Dimension } from './core/kernel.js'
+import { Line, Circle, CoincidentConstraint, PerpendicularConstraint, HorizontalConstraint, VerticalConstraint, Dimension, Projection } from './core/kernel.js'
 
 class Tool {
   static icon = 'bullseye'
@@ -145,6 +145,25 @@ export class ManipulationTool extends HighlightTool {
     } else {
       super.mouseMove(vec, coords)
     }
+  }
+}
+
+
+export class ProjectTool extends HighlightTool {
+  static icon = 'layer-group'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, ['edge'])
+    this.sketch = sketch
+    this.localSpace = true
+  }
+
+  async click(vec, coords) {
+    const edge = await this.getObject(coords)
+    if(!edge) return
+    const projection = new Projection(edge)
+    this.sketch.addProjection(projection)
+    this.viewport.componentChanged(this.component)
   }
 }
 

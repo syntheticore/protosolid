@@ -35,6 +35,7 @@
 
 
 <style lang="stylus" scoped>
+
   .tool-box
     border-top-left-radius: 3px
     border-top-right-radius: 3px
@@ -141,10 +142,12 @@
   .fade-enter-from, .fade-leave-to
     opacity: 0
     transform: translateY(10px)
+
 </style>
 
 
 <script>
+
   import {
     CreateSketchFeature,
     ExtrudeFeature,
@@ -222,7 +225,7 @@
               { title: 'Break', icon: 'layer-group' },
               { title: 'Extend', icon: 'layer-group' },
               { title: 'Offset', icon: 'layer-group' },
-              { title: 'Project', tool: ProjectTool },
+              { title: 'Project', tool: ProjectTool, hotKey: 'P', keyCode: 80 },
               { title: 'Intersect', icon: 'layer-group' },
             ]
           },
@@ -302,12 +305,12 @@
     },
 
     mounted: function() {
-      this.bus.on('keydown', (keyCode) => {
+      this.bus.on('keydown', (key) => {
         const tool = this.tabs.flatMap(tab => tab.tools ).find(
-          tool => tool.keyCode == keyCode
+          tool => tool.hotKey && tool.hotKey.toLowerCase() == key
         )
         if(tool) this.activateTool(tool)
-      });
+      })
       this.bus.on('close-feature', this.closeFeature)
     },
 
@@ -368,4 +371,5 @@
       },
     },
   }
+
 </script>

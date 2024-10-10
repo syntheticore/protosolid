@@ -16,12 +16,8 @@ export default class Transloader {
     this.selection = []
   }
 
-  setActiveComponent(comp) {
-    this.activeComponent = comp
-  }
-
-  setActiveSketch(sketch) {
-    this.activeSketch = sketch
+  setDocument(doc) {
+    this.document = doc
   }
 
   setSelection(selection) {
@@ -39,7 +35,7 @@ export default class Transloader {
   }
 
   isActive(obj) {
-    return this.hasAncestor(obj, this.activeComponent)
+    return this.hasAncestor(obj, this.document.activeComponent)
   }
 
   isSelected(obj) {
@@ -124,7 +120,7 @@ export default class Transloader {
       }
     })
 
-    // if(comp === this.activeComponent) {
+    // if(comp === this.document.activeComponent) {
 
       // Load Sketches
       comp.sketches.forEach(sketch => {
@@ -138,7 +134,7 @@ export default class Transloader {
 
         // Load Projections
         sketch.projections.forEach(projection => {
-          const elem = projection.geometry()
+          const elem = projection.geometry(this.document.top())
           if(elem) this.loadElement(elem, comp)
         })
 

@@ -325,10 +325,10 @@
     watch: {
       document: function(document, oldDocument) {
         this.transloader.unloadTree(oldDocument.top(), true)
+        this.transloader.setDocument(document)
       },
 
       'document.activeComponent': function(comp) {
-        this.transloader.setActiveComponent(comp)
         const tree = this.document.top()
         this.componentChanged(tree, true)
         // this.bus.emit('activate-tool', ManipulationTool)
@@ -336,11 +336,9 @@
 
       'document.activeSketch': function(sketch) {
         // Show sketch plane
-        this.transloader.setActiveSketch(sketch)
         if(sketch) {
           let plane = sketch.workplane
           this.snapper.planeTransform = plane
-          // console.log('activeSketch', sketch)
           this.renderer.sketchPlane.setPlane(plane)
         }
         this.renderer.sketchPlane.visible = !!sketch
@@ -421,7 +419,7 @@
         this.onLoadElement.bind(this),
         this.onUnloadElement.bind(this),
       )
-      this.transloader.setActiveComponent(this.document.activeComponent)
+      this.transloader.setDocument(this.document)
       this.transloader.loadTree(this.document.top(), true)
 
       // Events

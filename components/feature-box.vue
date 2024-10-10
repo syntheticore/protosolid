@@ -1,20 +1,28 @@
 <template lang="pug">
+
   .bordered.feature-box(:class="{'has-header': this.showHeader}")
 
     header(v-if="showHeader")
+
       Icon(:icon="activeFeature.constructor.icon" title="Confirm")
+
       .title {{ activeFeature.title }}
 
     .main
+
       .settings
+
         .setting(v-for="(setting, key) in activeFeature.settings")
+
           span {{ setting.title }}
+
           .picker(
             v-if="activeFeature.needsPicker(key, true)"
             :ref="key"
             :class="{ active: activePicker == key, filled: activeFeature[key] }"
             @click="pick(setting.type, key)"
           )
+
           NumberInput(
             v-if="setting.type == 'length' || setting.type == 'angle'"
             :component="document.top()"
@@ -23,33 +31,39 @@
             @update:value="update"
             @error="error = $event"
           )
+
           input(
             type="text"
             v-if="setting.type == 'text'"
             v-model="activeFeature[key]"
             spellcheck="false"
           )
+
           IconToggle(
             v-if="setting.type == 'bool'"
             :icons="setting.icons"
             v-model:active="activeFeature[key]"
             @update:active="update"
           )
+
           RadioBar(
             v-if="setting.type == 'select'"
             :items="setting.options"
             v-model:chosen="activeFeature[key]"
             @update:chosen="update"
           )
+
           MaterialSelector(
             v-if="setting.type == 'material'"
             v-model:chosen="activeFeature[key]"
             @update:chosen="update"
           )
+
       transition(name="fade")
         .error-msg(v-if="error", :class="errorStyle") {{ error.msg }}
 
     .confirmation
+
       button.ok(
         title="Confirm"
         v-if="!isSketchFeature || showHeader"
@@ -57,6 +71,7 @@
         @click="confirm"
       )
         Icon(icon="check-circle")
+
       button.cancel(
         title="Cancel"
         v-if="!isSketchFeature || !showHeader"
@@ -68,6 +83,7 @@
 
 
 <style lang="stylus" scoped>
+
   .feature-box
     font-size: 12px
     display: flex
@@ -207,6 +223,7 @@
     padding-top: 0
     padding-bottom: 0
     margin-bottom: -12px
+
 </style>
 
 

@@ -559,8 +559,10 @@ export class Projection {
     this.edgeRef = new EdgeReference(edge)
   }
 
-  geometry() {
+  geometry(tree) {
+    this.edgeRef.update(tree)
     const edge = this.edgeRef.getItem()
+    // BRep_Tool.Curve()
     const curve = new window.oc.oc.BRepAdaptor_Curve_2(edge.geom())
     const ax = ocAx3FromMatrix(this.sketch.workplane)
     const plane = ocPlnFromMatrix(this.sketch.workplane)
@@ -1018,6 +1020,7 @@ export class Edge extends Shape {
   }
 
   getAxis() {
+    // BRep_Tool.Curve()
     const curve = new window.oc.oc.BRepAdaptor_Curve_2(this.geom())
     if(curve.GetType() != window.oc.oc.GeomAbs_CurveType.GeomAbs_Line) return
     const line = curve.Line()

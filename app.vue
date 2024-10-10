@@ -115,29 +115,29 @@
   onMounted(() => {
     window.addEventListener('keydown', (e) => {
       // console.log(e.keyCode)
-      if(e.keyCode === 27) {
+      if(e.key === 'Escape') {
         bus.emit('escape')
-      } else if(e.keyCode === 13) {
+      } else if(e.key === 'Enter') {
         bus.emit('enter-pressed')
-      } else if(e.keyCode === 16) {
+      } else if(e.key === 'Shift') {
         bus.emit('shift-pressed')
         bus.isShiftPressed = true
-      } else if(e.keyCode === 17) {
+      } else if(e.key === 'Control') {
         bus.emit('ctrl-pressed')
         bus.isCtrlPressed = true
       } else {
-        bus.emit('keydown', e.keyCode)
+        bus.emit('keydown', e.key)
       }
-    });
+    })
 
     window.addEventListener('keyup', (e) => {
-      bus.emit('keyup', e.keyCode)
-      if(e.keyCode === 16) {
+      bus.emit('keyup', e.key)
+      if(e.key === 'Shift') {
         bus.isShiftPressed = false
-      } else if(e.keyCode === 17) {
+      } else if(e.key === 'Control') {
         bus.isCtrlPressed = false
       }
-    });
+    })
 
     // bus.on('component-changed', () => {
     //   activeDocument.value.hasChanges = true

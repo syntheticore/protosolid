@@ -13,6 +13,8 @@ export class SketchElement {
     this.geom = null
   }
 
+  typename(base) { return base + (this.projected ? ' Projection' : '') }
+
   clear() {
     if(this.geom) this.geom().get().Delete()
     this.geom = null
@@ -130,7 +132,7 @@ export class Line extends SketchElement {
     return line
   }
 
-  typename() { return 'Line' }
+  typename() { return super.typename('Line') }
 
   snapPoints() {
     return [...this.points, this.midpoint()]
@@ -209,7 +211,7 @@ export class Circle extends SketchElement {
     return circle
   }
 
-  typename() { return 'Circle' }
+  typename() { return super.typename('Circle') }
 
   snapPoints() {
     return [this._center]
@@ -306,7 +308,7 @@ export class Sketch {
   }
 
   removeEmpties(elements) {
-    return elements.filter(curve => !curve.length().almost(0.0) )
+    return elements.filter(curve => !curve.isReference && !curve.length().almost(0.0) )
   }
 
   getWires(cutElements, includeOuter) {
@@ -483,19 +485,26 @@ export class Sketch {
     })
   }
 
-  solve() {
+  solve(tree) {
     let id = 1
     const idMap = {}
 
     // Convert entire sketch to GCS format
-    const primitives = this.elements.flatMap(elem => {
+    const primitives = this.elements.concat(this.projections.map(p => p.geometry(tree) ).filter(Boolean)).flatMap(elem => {
       let primitives
 
       if(elem instanceof Line) {
         const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: false }
         const p2 = { id: `${id++}`, type: 'point', x: elem.points[1].x, y: elem.points[1].y, fixed: false }
         const line = { id: `${id++}`, type: 'line', p1_id: p1.id, p2_id: p2.id }
-        primitives = [p1, p2, line]
+        let fix = []
+        if(elem.projected) {
+          fix.push({ id: `${id++}`, type: 'coordinate_x', p_id: p1.id, x: p1.x })
+          fix.push({ id: `${id++}`, type: 'coordinate_y', p_id: p1.id, y: p1.y })
+          fix.push({ id: `${id++}`, type: 'coordinate_x', p_id: p2.id, x: p2.x })
+          fix.push({ id: `${id++}`, type: 'coordinate_y', p_id: p2.id, y: p2.y })
+        }
+        primitives = [p1, p2, ...fix, line]
 
       } else if(elem instanceof Circle) {
         const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: false }
@@ -509,7 +518,7 @@ export class Sketch {
 
     const constraints = this.constraints.flatMap(c => {
       if(c instanceof PerpendicularConstraint) {
-        const constraintPrims = c.pair.map(item => idMap[item.curve.id][2] )
+        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof CoincidentConstraint) {
@@ -518,7 +527,7 @@ export class Sketch {
 
       } else if(c instanceof Dimension) {
         const pointPrim = idMap[c.pair[0].curve.id][0]
-        const linePrim = idMap[c.pair[1].curve.id][2]
+        const linePrim = idMap[c.pair[1].curve.id].slice(-1)[0]
         return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
 
       } else if(c instanceof HorizontalConstraint) {
@@ -581,6 +590,7 @@ export class Projection {
     if(project.GetType() == window.oc.oc.GeomAbs_CurveType.GeomAbs_Line) {
       const line = Line.fromGeometry(trimmed, edge.id)
       line.sketch = this.sketch
+      line.projected = true
       return line
     }
   }

@@ -199,6 +199,7 @@ export default class Transloader {
     line.alcObject = elem
     elem.mesh = () => line
     elem.component = comp
+    line.material = this.getElemMaterial(elem)
     this.renderer.add(line, true)
     comp.creator.cache().curves.push(elem)
     this.onLoadElement(elem)
@@ -289,7 +290,9 @@ export default class Transloader {
     return {
       curve: selected ? this.renderer.materials.selectionLine :
         highlighted ? this.renderer.materials.highlightLine :
-          this.renderer.materials.line,
+          elem.projected ? this.renderer.materials.projectedLine :
+            elem.isReference ? this.renderer.materials.referenceLine :
+              this.renderer.materials.line,
       region: highlighted ? this.renderer.materials.highlightRegion :
         this.renderer.materials.region,
       plane: highlighted ? this.renderer.materials.highlightPlane :

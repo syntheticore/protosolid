@@ -59,7 +59,7 @@
             v-if="dimension.constraint.active"
             :component="document.top()"
             v-model:value="dimension.constraint.distance"
-            @enter="dimension.constraint.active = false; updateSketch()"
+            @enter="dimension.constraint.active = false; updateRegions(true)"
           )
 
       //- Snap anchor highlights active snap point
@@ -93,6 +93,7 @@
 
 
 <style lang="stylus" scoped>
+
   .view-port
     position: relative
     overflow: hidden
@@ -274,6 +275,7 @@
 
 
 <script>
+
   import * as THREE from 'three'
 
   import Snapper from './../js/snapping.js'
@@ -475,8 +477,8 @@
         this.updateRegions()
       },
 
-      updateRegions: function() {
-        if(!this.regionsDirty) return
+      updateRegions: function(force) {
+        if(!this.regionsDirty && !force) return
         this.updateSketch()
         this.transloader.updateRegions(this.document.activeComponent)
         this.renderer.render()
@@ -489,7 +491,7 @@
         // Solve
         const handle = this.activeHandle
         if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
-        sketch.solve()
+        sketch.solve(this.document.top())
         if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
         // Update elements
         sketch.elements.forEach(elem => this.elementChanged(elem, this.document.activeComponent, true) )
@@ -541,8 +543,8 @@
         if(vec) this.activeTool.mouseMove(vec, coords)
       },
 
-      keyDown: function(keyCode) {
-        if(keyCode == 46 || keyCode == 8) { // Del / Backspace
+      keyDown: function(key) {
+        if(key == 'Delete' || key == 'Backspace') {
           // Delete Selection
           if(this.document.selection.set.size) {
             this.document.selection.set.forEach(item => {
@@ -552,14 +554,14 @@
               }
             })
           }
-        } else if(keyCode == 18) { // alt
+        } else if(key == 'Alt') {
           // this.guides = []
         }
       },
 
-      keyUp: function(keyCode) {
-        if(keyCode == 18) { // alt
-        } else if(keyCode == 79) { // o
+      keyUp: function(key) {
+        if(key == 'Alt') {
+        } else if(key == 'o') {
           this.renderer.switchCamera()
         }
       },
@@ -699,7 +701,7 @@
       },
 
       onLoadElement: function(elem) {
-        if(elem.sketch !== this.document.activeSketch) return
+        if(elem.projected || elem.sketch !== this.document.activeSketch) return
         this.handles[elem.id] = elem.handles().map((handle, i) => {
           handle = handle.clone().applyMatrix4(elem.sketch.workplane)
           return {
@@ -728,4 +730,5 @@
       },
     }
   }
+
 </script>

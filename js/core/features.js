@@ -218,7 +218,7 @@ export class CreateSketchFeature extends Feature {
     const plane = references.plane
     this.sketch.workplane = plane
     tree.findChild(this.componentId).sketches.push(this.sketch)
-    this.sketch.solve()
+    this.sketch.solve(tree)
   }
 
   confirm() {

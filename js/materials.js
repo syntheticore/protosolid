@@ -9,6 +9,7 @@ export default class Materials {
       linewidth: 3,
       vertexColors: true,
       dashed: false,
+      // dashScale, dashSize, gapSize
       // precision: "highp",
       polygonOffset: true,
       polygonOffsetFactor: -2,
@@ -23,6 +24,15 @@ export default class Materials {
 
     this.highlightLine = this.line.clone()
     this.highlightLine.color.set('#2590e1')
+
+    this.referenceLine = this.line.clone()
+    this.referenceLine.color.set('#8eca53')
+    this.referenceLine.dashed = true
+    this.referenceLine.dashScale = 0.5
+    this.referenceLine.linewidth = 2
+
+    this.projectedLine = this.line.clone()
+    this.projectedLine.color.set('#51bb89')
 
     this.wire = this.line.clone()
     this.wire.color.set('darkgray')

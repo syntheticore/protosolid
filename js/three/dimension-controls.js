@@ -32,8 +32,8 @@ export default class DimensionControls extends THREE.Object3D {
 
     const helperDir = cross.clone().normalize()
 
-    const arrowHelperL = new THREE.ArrowHelper(helperDir.clone().negate(), posLT, 0.0, 'darkgray', 2, 1)
-    const arrowHelperR = new THREE.ArrowHelper(helperDir, posRT, 0.0, 'darkgray', 2, 1)
+    const arrowHelperL = new THREE.ArrowHelper(helperDir.clone().negate(), posLT, 0.0, 'darkgray', 1.5, 0.75)
+    const arrowHelperR = new THREE.ArrowHelper(helperDir, posRT, 0.0, 'darkgray', 1.5, 0.75)
 
     this.add(arrowHelperL)
     this.add(arrowHelperR)

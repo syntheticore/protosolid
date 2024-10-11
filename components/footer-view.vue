@@ -164,7 +164,7 @@
 
     methods: {
       produceProperties: function(item) {
-        const type = item.typename()
+        const type = item.typename().split(' ')[0]
         if(type == 'Solid') {
           const volume = item.volume()
           const weight = item.component.material ? volume * item.component.material.density : 'No Material'

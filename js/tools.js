@@ -163,7 +163,7 @@ export class ProjectTool extends HighlightTool {
     if(!edge) return
     const projection = new Projection(edge)
     this.sketch.addProjection(projection)
-    this.viewport.componentChanged(this.component)
+    this.viewport.document.emit('component-changed', this.component)
   }
 }
 
@@ -471,7 +471,7 @@ export class ConstraintTool extends HighlightTool {
     if(this.items.length == this.constructor.numItems) {
       const constraint = new this.constructor.constraintType(...this.items)
       this.sketch.addConstraint(constraint)
-      this.viewport.updateSketch()
+      this.viewport.updateRegions(true)
       this.items = []
     }
   }
@@ -521,7 +521,7 @@ export class DimensionTool extends HighlightTool {
       const position = this.viewport.renderer.fromScreen(coords).applyMatrix4(toSketch)
       const constraint = new Dimension(...this.items, position)
       this.sketch.addConstraint(constraint)
-      this.viewport.updateSketch()
+      this.viewport.updateRegions(true)
       this.items = []
     }
   }

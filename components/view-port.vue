@@ -492,7 +492,7 @@
         const handle = this.activeHandle
         if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
         sketch.solve(this.document.top())
-        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
+        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = false )
         // Update elements
         sketch.elements.forEach(elem => this.elementChanged(elem, this.document.activeComponent, true) )
         // Update dimensions

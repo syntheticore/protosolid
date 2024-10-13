@@ -77,6 +77,7 @@
 
   const bus = new Emitter()
   provide('bus', bus)
+  window.bus = bus
 
   const store = useMainStore()
 

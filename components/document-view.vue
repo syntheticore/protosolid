@@ -41,10 +41,8 @@
       //- Icon(icon="users-viewfinder")
 
     FooterView(
-      :class="{top: !!document.activeFeature}"
-      :selection="document.selection"
-      :active-component="document.activeComponent"
-      :active-feature="document.activeFeature"
+      :document="document"
+      :class="{ top: !!document.activeFeature }"
     )
 
     FeatureBar(
@@ -120,8 +118,6 @@
 
 
 <script>
-
-  import { inject } from 'vue'
 
   import {
     CreateComponentFeature,

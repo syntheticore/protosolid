@@ -495,20 +495,13 @@ export class Sketch {
       let primitives
 
       if(elem instanceof Line) {
-        const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: false }
-        const p2 = { id: `${id++}`, type: 'point', x: elem.points[1].x, y: elem.points[1].y, fixed: false }
+        const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: elem.projected }
+        const p2 = { id: `${id++}`, type: 'point', x: elem.points[1].x, y: elem.points[1].y, fixed: elem.projected }
         const line = { id: `${id++}`, type: 'line', p1_id: p1.id, p2_id: p2.id }
-        let fix = []
-        if(elem.projected) {
-          fix.push({ id: `${id++}`, type: 'coordinate_x', p_id: p1.id, x: p1.x })
-          fix.push({ id: `${id++}`, type: 'coordinate_y', p_id: p1.id, y: p1.y })
-          fix.push({ id: `${id++}`, type: 'coordinate_x', p_id: p2.id, x: p2.x })
-          fix.push({ id: `${id++}`, type: 'coordinate_y', p_id: p2.id, y: p2.y })
-        }
-        primitives = [p1, p2, ...fix, line]
+        primitives = [p1, p2, line]
 
       } else if(elem instanceof Circle) {
-        const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: false }
+        const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projected }
         const circle = { id: `${id++}`, type: 'circle', c_id: center.id, radius: elem.radius }
         primitives = [center, circle]
       }
@@ -572,7 +565,14 @@ export class Sketch {
     })
 
     // Solve
-    const results = window.oc.solveSystem([...primitives, ...constraints])
+    const { results, conflicting, _dof } = window.oc.solveSystem([...primitives, ...constraints])
+
+    if(conflicting) {
+      window.bus.emit('toast', 'Sketch was over-constrained')
+      this.constraints.pop()
+      this.solve(tree)
+      return
+    }
 
     // Write back results
     const vecFromPrim = (prim) => {

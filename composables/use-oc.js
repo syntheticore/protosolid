@@ -69,10 +69,12 @@ export async function useOC() {
       solver.apply_solution()
 
       const results = solver.sketch_index.get_primitives()
+      const conflicting = solver.has_gcs_conflicting_constraints() || solver.has_gcs_partially_redundant_constraints() || solver.has_gcs_redundant_constraints()
+      const dof = solver.gcs.dof()
 
       solver.destroy_gcs_module()
 
-      return results
+      return { results, conflicting, dof }
     },
   }
 }

@@ -9,20 +9,27 @@
     //-   | Bring up actions
 
     transition(name="fade")
-      .selection-info.bordered(v-if="selection.set.size")
-        div
-          span {{ description.title }}
+      .selection-info.bordered(v-if="toast || document.selection.set.size")
 
-        div(v-if="description.isMixed")
-          span # Total
-          span
-            | {{ selection.set.size }}
+        template(v-if="toast")
+          div
+            span Rejected
+            span.warn &nbsp;{{ toast }}
 
-        div(v-for="prop in description.properties")
-          span {{ prop.title }}
-          span(v-if="!prop.warn")
-            | {{ prop.value.toFixed(2) }} {{ prop.unit }}
-          span.warn(v-else) {{ prop.value }}
+        template(v-else-if="document.selection.set.size")
+          div
+            span {{ description.title }}
+
+          div(v-if="description.isMixed")
+            span # Total
+            span
+              | {{ document.selection.set.size }}
+
+          div(v-for="prop in description.properties")
+            span {{ prop.title }}
+            span(v-if="!prop.warn")
+              | {{ prop.value.toFixed(2) }} {{ prop.unit }}
+            span.warn(v-else) {{ prop.value }}
 
     //- .debug-panel
     //-   button.button(@click="splitAll") Split all
@@ -110,6 +117,7 @@
 
 
 <script>
+
   import pluralize from 'pluralize'
 
   function groupBy(xs, key) {
@@ -122,17 +130,28 @@
   export default {
     name: 'FooterView',
 
-    // components: {},
+    inject: ['bus'],
 
     props: {
-      selection: Object,
-      activeComponent: Object,
-      activeFeature: Object,
+      document: Object,
+    },
+
+    data() {
+      return{
+        toast: null,
+      }
+    },
+
+    mounted() {
+      this.bus.on('toast', (msg) => {
+        this.toast = msg
+        setTimeout(() => this.toast = null, 5000)
+      })
     },
 
     computed: {
       description: function() {
-        const selection = [...this.selection.set]
+        const selection = [...this.document.selection.set]
         const uniqueNames = selection.map(item => item.typename() ).filter((value, index, self) => self.indexOf(value) === index )
         const groups = groupBy(selection, 'typename')
         const numGroups = Object.keys(groups).length
@@ -256,18 +275,18 @@
       },
 
       splitAll: function() {
-        const splits = this.activeComponent.real.sketch().get_all_split()
-        this.document.emit('component-changed', this.activeComponent)
+        const splits = this.document.activeComponent.real.sketch().get_all_split()
+        this.document.emit('component-changed', this.document.activeComponent)
       },
 
       makeCube: function() {
-        this.activeComponent.real.make_cube()
-        this.document.emit('component-changed', this.activeComponent)
+        this.document.activeComponent.real.make_cube()
+        this.document.emit('component-changed', this.document.activeComponent)
       },
 
       makeCylinder: function() {
-        this.activeComponent.real.make_cylinder()
-        this.document.emit('component-changed', this.activeComponent)
+        this.document.activeComponent.real.make_cylinder()
+        this.document.emit('component-changed', this.document.activeComponent)
       },
     },
   }

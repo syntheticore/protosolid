@@ -41,7 +41,7 @@ export default class Snapper {
       // Filter out handle actively being dragged & connected neighboors
       if(this.viewport.activeHandle) {
         const handlePoint = this.viewport.activeHandle.elem.handles()[this.viewport.activeHandle.index]
-        const constrainedPoints = this.viewport.activeHandle.elem.constraints().flatMap(constraint => constraint.items().flatMap(item => item.curve.handles() ) )
+        const constrainedPoints = this.viewport.activeHandle.elem.constraints().flatMap(constraint => constraint.items.flatMap(item => item.curve().handles() ) )
         const omit = [handlePoint, ...constrainedPoints]
         points = points.filter(p => !omit.some(hp => p.almost(hp) ) )
       }

@@ -620,20 +620,22 @@
           this.constraints = this.document.activeSketch.constraints.flatMap(c => {
             // if(c instanceof CoincidentConstraint || c instanceof Dimension) return
             if(c instanceof CoincidentConstraint) return
-            const pair = c.items()
-            return pair.map((item, i) => ({
-              constraint: c,
-              curve: item.curve,
-              coords: this.renderer.toScreen(
-                ((c.position && c.position.clone()) || (pair.length == 1 ?
-                  item.curve.center()
-                  :
-                  item.curve.center().clone()
-                    .add(item.curve.commonHandle(pair[1 - i].curve) || pair[1 - i].curve.center())
-                    .divideScalar(2.0)
-                )).applyMatrix4(item.curve.sketch.workplane)
-              ),
-            }))
+            return c.items.map((item, i) => {
+              const curve = item.curve()
+              return {
+                constraint: c,
+                curve,
+                coords: this.renderer.toScreen(
+                  ((c.position && c.position.clone()) || (c.items.length == 1 ?
+                    curve.center()
+                    :
+                    curve.center().clone()
+                      .add(curve.commonHandle(c.items[1 - i].curve()) || c.items[1 - i].curve().center())
+                      .divideScalar(2.0)
+                  )).applyMatrix4(curve.sketch.workplane)
+                ),
+              }
+            })
           }).filter(Boolean)
         }
 

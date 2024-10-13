@@ -20,6 +20,7 @@ import {
   FixConstraint,
   Dimension,
   Projection,
+  ElemRef,
 } from './core/kernel.js'
 
 class Tool {
@@ -329,7 +330,9 @@ export class LineTool extends SketchTool {
     // Restart tool when we hit an existing point
     if(touchesExisting && this.curve) {
       this.sketch.add(this.curve)
-      if(index != -1) this.sketch.addConstraint(new CoincidentConstraint(this.curve, touchesExisting, 1, index))
+      if(index != -1) this.sketch.addConstraint(
+        new CoincidentConstraint(new ElemRef(this.curve, 1), new ElemRef(touchesExisting, index))
+      )
       this.curve = null
     } else {
       const old = this.curve
@@ -337,7 +340,9 @@ export class LineTool extends SketchTool {
       this.sketch.add(this.curve)
       const other = touchesExisting || old
       const otherIndex = touchesExisting ? index : 1
-      if(old || touchesExisting) this.sketch.addConstraint(new CoincidentConstraint(this.curve, other, 0, otherIndex))
+      if(old || touchesExisting) this.sketch.addConstraint(
+        new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(other, otherIndex))
+      )
     }
   }
 

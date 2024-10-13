@@ -96,7 +96,7 @@ export class SketchElement {
   }
 
   constraints() {
-    return this.sketch.constraints.filter(constraint => constraint.items().some(item => item.curve == this ) )
+    return this.sketch.constraints.filter(constraint => constraint.items.some(item => item.curve() == this ) )
   }
 
   clone() {
@@ -289,7 +289,7 @@ export class Sketch {
   remove(elem) {
     if(elem instanceof SketchElement) {
       this.elements = this.elements.filter(e => e != elem )
-      this.constraints = this.constraints.filter(c => !c.items().some(item => item.curve == elem ) )
+      this.constraints = this.constraints.filter(c => !c.items.some(item => item.curve() == elem ) )
     } else if(elem instanceof Constraint) {
       this.constraints = this.constraints.filter(c => c != elem )
     }
@@ -490,7 +490,8 @@ export class Sketch {
     const idMap = {}
 
     // Convert entire sketch to GCS format
-    const primitives = this.elements.concat(this.projections.map(p => p.geometry(tree) ).filter(Boolean)).flatMap(elem => {
+    const projections = this.projections.map(p => p.update(tree) ).filter(Boolean)
+    const primitives = this.elements.concat(projections).flatMap(elem => {
       let primitives
 
       if(elem instanceof Line) {
@@ -518,17 +519,21 @@ export class Sketch {
 
     const constraints = this.constraints.flatMap(c => {
 
+      c.update(tree)
+      // Strictly only necessary for DimensionControls to reference the updated projections.
+      // The solver itself works without it.
+
       // Single curve constraints
       if(c instanceof HorizontalConstraint) {
-        const pointPrims = idMap[c.item.curve.id].slice(0, 2)
+        const pointPrims = idMap[c.items[0].curve().id].slice(0, 2)
         return { id: `${id++}`, type: 'horizontal_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof VerticalConstraint) {
-        const pointPrims = idMap[c.item.curve.id].slice(0, 2)
+        const pointPrims = idMap[c.items[0].curve().id].slice(0, 2)
         return { id: `${id++}`, type: 'vertical_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof FixConstraint) {
-        const pointPrims = idMap[c.item.curve.id].slice(0, 2)
+        const pointPrims = idMap[c.items[0].curve().id].slice(0, 2)
         return [
           { id: `${id++}`, type: 'coordinate_x', p_id: pointPrims[0].id, x: pointPrims[0].x },
           { id: `${id++}`, type: 'coordinate_y', p_id: pointPrims[0].id, y: pointPrims[0].y },
@@ -538,30 +543,30 @@ export class Sketch {
 
       // Pair constraints
       } else if(c instanceof PerpendicularConstraint) {
-        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
+        const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof ParallelConstraint) {
-        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
+        const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'parallel', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof EqualConstraint) {
-        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
+        const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'equal_length', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof TangentConstraint) {
-        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
+        const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'tangent_lc', l_id: constraintPrims[0].id, c_id: constraintPrims[1].id, temporary: c.temporary }
 
       // Point constraints
       } else if(c instanceof CoincidentConstraint) {
-        const constraintPrims = c.pair.map(item => idMap[item.curve.id][item.index] )
+        const constraintPrims = c.items.map(item => idMap[item.curve().id][item.index] )
         return { id: `${id++}`, type: 'p2p_coincident', p1_id: constraintPrims[0].id, p2_id: constraintPrims[1].id, temporary: c.temporary }
 
       // Dimension
       } else if(c instanceof Dimension) {
-        const pointPrim = idMap[c.pair[0].curve.id][0]
-        const linePrim = idMap[c.pair[1].curve.id].slice(-1)[0]
+        const pointPrim = idMap[c.items[0].curve().id][0]
+        const linePrim = idMap[c.items[1].curve().id].slice(-1)[0]
         return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
       }
     })
@@ -577,7 +582,7 @@ export class Sketch {
 
     this.elements.forEach(elem => {
       if(elem instanceof Line) {
-        let [p1, p2, _line] = idMap[elem.id]
+        let [p1, p2] = idMap[elem.id]
         elem.setHandles([vecFromPrim(p1), vecFromPrim(p2)])
 
       } else if(elem instanceof Circle) {
@@ -594,7 +599,7 @@ export class Projection {
     this.edgeRef = new EdgeReference(edge)
   }
 
-  geometry(tree) {
+  update(tree) {
     this.edgeRef.update(tree)
     const edge = this.edgeRef.getItem()
     // BRep_Tool.Curve()
@@ -617,18 +622,42 @@ export class Projection {
       const line = Line.fromGeometry(trimmed, edge.id)
       line.sketch = this.sketch
       line.projected = true
-      return line
+      this.output = line
+      return this.output
     }
+  }
+
+  geometry() {
+    return this.output
   }
 }
 
 
-export class Constraint {
-  constructor(curve) {
-    this.item = { curve }
+export class ElemRef {
+  constructor(curve, index) {
+    this.curveRef = new CurveReference(curve)
+    this.index = index
   }
 
-  items() { return [this.item] }
+  update(tree) {
+    this.curveRef.update(tree)
+  }
+
+  curve() {
+    return this.curveRef.getItem()
+  }
+
+  isPoint() { return this.index !== undefined }
+}
+
+export class Constraint {
+  constructor(...items) {
+    this.items = items.map(item => item instanceof ElemRef ? item : new ElemRef(item) )
+  }
+
+  update(tree) {
+    this.items.forEach(item => item.update(tree) )
+  }
 }
 
 export class HorizontalConstraint extends Constraint {
@@ -643,46 +672,37 @@ export class VerticalConstraint extends Constraint {
 
 export class FixConstraint extends Constraint {
   static icon = 'lock'
-  typename() { return 'Parallel Constraint' }
+  typename() { return 'Fix Constraint' }
 }
 
-
-export class PairConstraint extends Constraint {
-  constructor(a, b, ai, bi) {
-    super()
-    this.pair = [{ curve: a, index: ai }, { curve: b, index: bi }]
-  }
-
-  items() { return this.pair }
-}
-
-export class CoincidentConstraint extends PairConstraint {
+export class CoincidentConstraint extends Constraint {
   static icon = 'bullseye'
   typename() { return 'Coincident Constraint' }
 }
 
-export class PerpendicularConstraint extends PairConstraint {
+export class PerpendicularConstraint extends Constraint {
   static icon = 'angle-up'
   typename() { return 'Perpendicular Constraint' }
 }
 
-export class ParallelConstraint extends PairConstraint {
+export class ParallelConstraint extends Constraint {
   static icon = 'exchange-alt'
   typename() { return 'Parallel Constraint' }
 }
 
-export class EqualConstraint extends PairConstraint {
+export class EqualConstraint extends Constraint {
   static icon = 'equals'
-  typename() { return 'Parallel Constraint' }
+  typename() { return 'Equal Constraint' }
 }
 
-export class TangentConstraint extends PairConstraint {
+export class TangentConstraint extends Constraint {
   static icon = 'bezier-curve'
-  typename() { return 'Parallel Constraint' }
+  typename() { return 'Tangent Constraint' }
 }
 
-export class Dimension extends PairConstraint {
+export class Dimension extends Constraint {
   static icon = 'ruler'
+  typename() { return 'Dimension' }
 
   constructor(a, b, pos, distance) {
     super(a, b)
@@ -694,8 +714,6 @@ export class Dimension extends PairConstraint {
     }
     this.distance = distance
   }
-
-  typename() { return 'Dimension' }
 }
 
 
@@ -1246,7 +1264,13 @@ export class EdgeReference extends Reference {
   }
 }
 
-export class CurveReference extends Reference {}
+export class CurveReference extends Reference {
+  update(_tree) {
+    if(!this.item.projected) return
+    const projection = this.item.sketch.projections.find(proj => this.item.id == proj.edgeRef.item.id )
+    this.item = projection.geometry()
+  }
+}
 
 export class ProfileReference extends Reference {
   update(_tree) {

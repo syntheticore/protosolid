@@ -8,15 +8,15 @@ export default class DimensionControls extends THREE.Object3D {
     this.alcType = 'dimension'
     this.alcObject = constraint
 
-    const itemL = constraint.items()[0]
-    const itemR = constraint.items()[1]
+    const itemL = constraint.items[0]
+    const itemR = constraint.items[1]
 
-    const [posL, posR] = constraint.items().map(item =>
-      item.curve.handles().minMaxBy(Math.min, handle => handle.distanceTo(constraint.position) ).clone()
+    const [posL, posR] = constraint.items.map(item =>
+      item.curve().handles().minMaxBy(Math.min, handle => handle.distanceTo(constraint.position) ).clone()
     )
 
-    const dirL = itemL.curve.direction().normalize()
-    const dirR = itemR.curve.direction().normalize()
+    const dirL = itemL.curve().direction().normalize()
+    const dirR = itemR.curve().direction().normalize()
 
     const projL = constraint.position.clone().sub(posL).projectOnVector(dirL)
     const projR = constraint.position.clone().sub(posR).projectOnVector(dirR)

@@ -134,7 +134,7 @@ export default class Transloader {
 
         // Load Projections
         sketch.projections.forEach(projection => {
-          const elem = projection.geometry(this.document.top())
+          const elem = projection.geometry()
           if(elem) this.loadElement(elem, comp)
         })
 

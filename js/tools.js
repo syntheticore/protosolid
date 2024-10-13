@@ -177,6 +177,7 @@ export class ProjectTool extends HighlightTool {
     if(!edge) return
     const projection = new Projection(edge)
     this.sketch.addProjection(projection)
+    this.viewport.updateRegions(true)
     this.viewport.document.emit('component-changed', this.component)
   }
 }

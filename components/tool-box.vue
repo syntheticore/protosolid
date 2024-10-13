@@ -149,6 +149,10 @@
 <script>
 
   import {
+    SketchElement,
+  } from './../js/core/kernel.js'
+
+  import {
     CreateSketchFeature,
     ExtrudeFeature,
     FilletFeature,
@@ -168,6 +172,10 @@
     PerpendicularConstraintTool,
     HorizontalConstraintTool,
     VerticalConstraintTool,
+    ParallelConstraintTool,
+    EqualConstraintTool,
+    TangentConstraintTool,
+    FixConstraintTool,
     DimensionTool,
     ProjectTool,
   } from './../js/tools.js'
@@ -215,12 +223,14 @@
               { title: 'Spline', tool: SplineTool, hotKey: 'B', keyCode: 66},
               { title: 'Polygon', icon: 'layer-group' },
               { title: 'Text', icon: 'layer-group' },
+              { title: 'Split all', action: this.splitAll, icon: 'file-export' },
             ]
           },
           {
             title: 'Edit Sketch',
             sketchOnly: true,
             tools: [
+              { title: 'Reference', action: this.toggleReference, icon: 'asterisk' },
               { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
               { title: 'Break', icon: 'layer-group' },
               { title: 'Extend', icon: 'layer-group' },
@@ -235,13 +245,13 @@
             tools: [
               { title: 'Dimension', tool: DimensionTool, hotKey: 'D', keyCode: 68 },
               { title: 'Touch', icon: 'object-group' },
-              { title: 'Parallel', icon: 'code-branch' }, //XXX Use also for hor/vert
+              { title: 'Parallel', tool: ParallelConstraintTool }, //XXX Use also for hor/vert
               { title: 'Perpendicular', tool: PerpendicularConstraintTool },
               { title: 'Horizontal', tool: HorizontalConstraintTool },
               { title: 'Vertical', tool: VerticalConstraintTool },
-              { title: 'Tangent', icon: 'bezier-curve' },
-              { title: 'Equal', icon: 'exchange-alt' },
-              { title: 'Fix', icon: 'lock' }, //XXX also ground for assemblies
+              { title: 'Tangent', tool: TangentConstraintTool },
+              { title: 'Equal', tool: EqualConstraintTool },
+              { title: 'Fix', tool: FixConstraintTool }, //XXX also ground for assemblies
             ],
           },
           {
@@ -368,6 +378,22 @@
           maxAngle: 1.0,
           autoSave: false,
         })
+      },
+
+      toggleReference: function() {
+        [...this.document.selection.set]
+          .filter(item => item instanceof SketchElement )
+          .forEach(elem => elem.isReference = !elem.isReference )
+        this.document.emit('component-changed', this.document.activeComponent)
+      },
+
+      splitAll: function() {
+        const elements = this.document.activeSketch.removeEmpties(this.document.activeSketch.elements)
+        this.document.activeSketch.elements.forEach(elem => this.document.activeSketch.remove(elem))
+        const cutElements = elements.flatMap(elem => elem.split(elements) )
+        const removed = this.document.activeSketch.removeDanglingSegments(cutElements)
+        removed.forEach(elem => this.document.activeSketch.add(elem) )
+        this.document.emit('component-changed', this.document.activeComponent)
       },
     },
   }

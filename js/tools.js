@@ -7,7 +7,20 @@
 //   rotationFromNormal
 // } from './utils.js'
 
-import { Line, Circle, CoincidentConstraint, PerpendicularConstraint, HorizontalConstraint, VerticalConstraint, Dimension, Projection } from './core/kernel.js'
+import {
+  Line,
+  Circle,
+  CoincidentConstraint,
+  PerpendicularConstraint,
+  HorizontalConstraint,
+  VerticalConstraint,
+  ParallelConstraint,
+  EqualConstraint,
+  TangentConstraint,
+  FixConstraint,
+  Dimension,
+  Projection,
+} from './core/kernel.js'
 
 class Tool {
   static icon = 'bullseye'
@@ -489,10 +502,34 @@ export class VerticalConstraintTool extends ConstraintTool {
   static icon = 'ruler-vertical'
 }
 
+export class FixConstraintTool extends ConstraintTool {
+  static constraintType = FixConstraint
+  static numItems = 1
+  static icon = 'lock'
+}
+
 export class PerpendicularConstraintTool extends ConstraintTool {
   static constraintType = PerpendicularConstraint
   static numItems = 2
   static icon = 'angle-up'
+}
+
+export class ParallelConstraintTool extends ConstraintTool {
+  static constraintType = ParallelConstraint
+  static numItems = 2
+  static icon = 'exchange-alt'
+}
+
+export class EqualConstraintTool extends ConstraintTool {
+  static constraintType = EqualConstraint
+  static numItems = 2
+  static icon = 'equals'
+}
+
+export class TangentConstraintTool extends ConstraintTool {
+  static constraintType = TangentConstraint
+  static numItems = 2
+  static icon = 'bezier-curve'
 }
 
 export class DimensionTool extends HighlightTool {

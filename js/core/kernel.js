@@ -517,26 +517,52 @@ export class Sketch {
     }).filter(Boolean)
 
     const constraints = this.constraints.flatMap(c => {
-      if(c instanceof PerpendicularConstraint) {
-        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
-        return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
-      } else if(c instanceof CoincidentConstraint) {
-        const constraintPrims = c.pair.map(item => idMap[item.curve.id][item.index] )
-        return { id: `${id++}`, type: 'p2p_coincident', p1_id: constraintPrims[0].id, p2_id: constraintPrims[1].id, temporary: c.temporary }
-
-      } else if(c instanceof Dimension) {
-        const pointPrim = idMap[c.pair[0].curve.id][0]
-        const linePrim = idMap[c.pair[1].curve.id].slice(-1)[0]
-        return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
-
-      } else if(c instanceof HorizontalConstraint) {
+      // Single curve constraints
+      if(c instanceof HorizontalConstraint) {
         const pointPrims = idMap[c.item.curve.id].slice(0, 2)
         return { id: `${id++}`, type: 'horizontal_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof VerticalConstraint) {
         const pointPrims = idMap[c.item.curve.id].slice(0, 2)
         return { id: `${id++}`, type: 'vertical_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
+
+      } else if(c instanceof FixConstraint) {
+        const pointPrims = idMap[c.item.curve.id].slice(0, 2)
+        return [
+          { id: `${id++}`, type: 'coordinate_x', p_id: pointPrims[0].id, x: pointPrims[0].x },
+          { id: `${id++}`, type: 'coordinate_y', p_id: pointPrims[0].id, y: pointPrims[0].y },
+          { id: `${id++}`, type: 'coordinate_x', p_id: pointPrims[1].id, x: pointPrims[1].x },
+          { id: `${id++}`, type: 'coordinate_y', p_id: pointPrims[1].id, y: pointPrims[1].y },
+        ]
+
+      // Pair constraints
+      } else if(c instanceof PerpendicularConstraint) {
+        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
+        return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+
+      } else if(c instanceof ParallelConstraint) {
+        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
+        return { id: `${id++}`, type: 'parallel', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+
+      } else if(c instanceof EqualConstraint) {
+        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
+        return { id: `${id++}`, type: 'equal_length', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+
+      } else if(c instanceof TangentConstraint) {
+        const constraintPrims = c.pair.map(item => idMap[item.curve.id].slice(-1)[0] )
+        return { id: `${id++}`, type: 'tangent_lc', l_id: constraintPrims[0].id, c_id: constraintPrims[1].id, temporary: c.temporary }
+
+      // Point constraints
+      } else if(c instanceof CoincidentConstraint) {
+        const constraintPrims = c.pair.map(item => idMap[item.curve.id][item.index] )
+        return { id: `${id++}`, type: 'p2p_coincident', p1_id: constraintPrims[0].id, p2_id: constraintPrims[1].id, temporary: c.temporary }
+
+      // Dimension
+      } else if(c instanceof Dimension) {
+        const pointPrim = idMap[c.pair[0].curve.id][0]
+        const linePrim = idMap[c.pair[1].curve.id].slice(-1)[0]
+        return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
       }
     })
 
@@ -605,16 +631,19 @@ export class Constraint {
   items() { return [this.item] }
 }
 
-
 export class HorizontalConstraint extends Constraint {
   static icon = 'ruler-horizontal'
   typename() { return 'Horizontal Constraint' }
 }
 
-
 export class VerticalConstraint extends Constraint {
   static icon = 'ruler-vertical'
   typename() { return 'Vertical Constraint' }
+}
+
+export class FixConstraint extends Constraint {
+  static icon = 'lock'
+  typename() { return 'Parallel Constraint' }
 }
 
 
@@ -627,18 +656,30 @@ export class PairConstraint extends Constraint {
   items() { return this.pair }
 }
 
-
 export class CoincidentConstraint extends PairConstraint {
   static icon = 'bullseye'
   typename() { return 'Coincident Constraint' }
 }
-
 
 export class PerpendicularConstraint extends PairConstraint {
   static icon = 'angle-up'
   typename() { return 'Perpendicular Constraint' }
 }
 
+export class ParallelConstraint extends PairConstraint {
+  static icon = 'exchange-alt'
+  typename() { return 'Parallel Constraint' }
+}
+
+export class EqualConstraint extends PairConstraint {
+  static icon = 'equals'
+  typename() { return 'Parallel Constraint' }
+}
+
+export class TangentConstraint extends PairConstraint {
+  static icon = 'bezier-curve'
+  typename() { return 'Parallel Constraint' }
+}
 
 export class Dimension extends PairConstraint {
   static icon = 'ruler'
@@ -646,7 +687,12 @@ export class Dimension extends PairConstraint {
   constructor(a, b, pos, distance) {
     super(a, b)
     this.position = pos
-    this.distance = distance || a.handles()[0].distanceTo(b.center())
+    if(!distance) {
+      const aPoint = a.handles()[0].clone().sub(b.handles()[0])
+      const dir = b.direction()
+      distance = aPoint.clone().projectOnVector(dir).distanceTo(aPoint)
+    }
+    this.distance = distance
   }
 
   typename() { return 'Dimension' }

@@ -142,6 +142,17 @@ export class ManipulationTool extends HighlightTool {
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'
+    const sketch = this.viewport.document.activeSketch
+    const handle = this.viewport.activeHandle
+    if(sketch && handle) {
+      sketch.elements.forEach(elem => {
+        if(elem == handle.elem) return
+        const idx = elem.handles().findIndex(h => h.almost(vec) )
+        if(idx != -1) sketch.addConstraint(
+          new CoincidentConstraint(new ElemRef(handle.elem, handle.index), new ElemRef(elem, idx))
+        )
+      })
+    }
   }
 
   mouseMove(vec, coords) {

@@ -469,10 +469,10 @@
       },
 
       mouseUp: function(e) {
-        this.activeHandle = null
-        this.activeDimension = null
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseUp(vec, coords)
+        this.activeHandle = null
+        this.activeDimension = null
         this.snapper.reset()
         this.updateRegions()
       },

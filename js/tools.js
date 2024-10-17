@@ -344,6 +344,14 @@ export class LineTool extends SketchTool {
       if(old || touchesExisting) this.sketch.addConstraint(
         new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(other, otherIndex))
       )
+      if(old) {
+        const ySnapped = old.handles()[0].x.almost(vec.x)
+        const xSnapped = old.handles()[0].y.almost(vec.y)
+        if(xSnapped || ySnapped) {
+          const type = (xSnapped ? HorizontalConstraint : VerticalConstraint)
+          this.sketch.addConstraint(new type(old))
+        }
+      }
     }
   }
 

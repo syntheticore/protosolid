@@ -103,7 +103,15 @@ export class Feature {
   }
 
   preview() {}
-  confirm() {}
+  confirm() {
+    const comp = this.document.top().findChild(this.componentId)
+    const sketches = Object.entries(this.settings)
+      .filter(([key, setting]) => this[key] && ['profile', 'curve'].some(type => type == setting.type ) )
+      .forEach(([key, _]) =>
+        [this[key]()].flat().forEach(elem => comp.creator.itemsHidden[elem.getItem().sketch.id] = true )
+      )
+    this.document.emit('component-changed', comp) //XXX should not re-tesselate, only update sketch visibility
+  }
   updateFeature() {}
   updateGizmos() {}
   modifiedComponents() { return [this.componentId] }

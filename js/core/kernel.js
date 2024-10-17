@@ -266,7 +266,6 @@ export class Sketch {
     this.projections = []
     this.workplane = new THREE.Matrix4()
     // this.componentId = componentId
-    this.hidden = false
   }
 
   typename() { return 'Sketch' }
@@ -1338,7 +1337,6 @@ export class AxialReference extends Reference {
 export class ConstructionHelper {
   constructor() {
     this.id = crypto.randomUUID()
-    this.hidden = false
   }
 
   center() {

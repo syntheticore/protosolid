@@ -10,6 +10,7 @@
 import {
   Line,
   Circle,
+  Arc,
   CoincidentConstraint,
   PerpendicularConstraint,
   HorizontalConstraint,
@@ -474,18 +475,12 @@ export class ArcTool extends SketchTool {
 
   mouseMove(vec) {
     if(!this.start || !this.end) return
-    // #add_arc can fail for for colinear inputs
-    try {
-      this.curve = this.curve || this.sketch.add_arc(
-        this.start,//.toArray(),
-        vec,//.toArray(),
-        this.end//.toArray()
-      )
-      this.curve.sketch = this.sketch
-      // this.curve.setHandles([this.start.toArray(), vec.toArray(), this.end.toArray()], true)
-      this.curve.setHandles([this.start, vec, this.end], true)
-      this.viewport.elementChanged(this.curve, this.component)
-    } catch(e) {}
+    if(!this.curve) {
+      this.curve = Arc.fromPoints([this.start, vec, this.end])
+      this.sketch.add(this.curve)
+    }
+    this.curve.setPoints([this.start, vec, this.end], true)
+    this.viewport.elementChanged(this.curve, this.component)
   }
 }
 

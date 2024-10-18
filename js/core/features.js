@@ -103,6 +103,7 @@ export class Feature {
   }
 
   preview() {}
+
   confirm() {
     const comp = this.document.top().findChild(this.componentId)
     const sketches = Object.entries(this.settings)
@@ -112,6 +113,7 @@ export class Feature {
       )
     this.document.emit('component-changed', comp) //XXX should not re-tesselate, only update sketch visibility
   }
+
   updateFeature() {}
   updateGizmos() {}
   modifiedComponents() { return [this.componentId] }

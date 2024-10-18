@@ -120,6 +120,8 @@ export class SketchElement {
 
 
 export class Line extends SketchElement {
+  typename() { return super.typename('Line') }
+
   constructor(p1, p2, geom) {
     super()
     this.points = [p1, p2]
@@ -131,8 +133,6 @@ export class Line extends SketchElement {
     line.id = id
     return line
   }
-
-  typename() { return super.typename('Line') }
 
   snapPoints() {
     return [...this.points, this.midpoint()]
@@ -197,6 +197,8 @@ export class Line extends SketchElement {
 
 
 export class Circle extends SketchElement {
+  typename() { return super.typename('Circle') }
+
   constructor(center, radius, geom) {
     super()
     this._center = center
@@ -210,8 +212,6 @@ export class Circle extends SketchElement {
     circle.id = id
     return circle
   }
-
-  typename() { return super.typename('Circle') }
 
   snapPoints() {
     return [this._center]
@@ -254,6 +254,93 @@ export class Circle extends SketchElement {
 
   _clone() {
     return new Circle(this._center, this.radius)
+  }
+}
+
+
+export class Arc extends SketchElement {
+  typename() { return super.typename('Arc') }
+
+  constructor(center, radius, bounds, geom) {
+    super()
+    this._center = center
+    this.radius = radius
+    this.bounds = bounds
+    this.update(geom)
+  }
+
+  static fromPoints(points) {
+    const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_4(
+      ocPnt2dFromVec(points[0]),
+      ocPnt2dFromVec(points[1]),
+      ocPnt2dFromVec(points[2]),
+    )
+    if(!arc.IsDone()) return
+    const trimmed = arc.Value().get()
+    const basis = new window.oc.oc.Geom2dAdaptor_Curve_2(trimmed.BasisCurve())
+    const circle = basis.Circle()
+    const center = vecFromOc(circle.Location())
+    const radius = circle.Radius()
+    const bounds = [trimmed.FirstParameter(), trimmed.LastParameter()]
+    return new Arc(center, radius, bounds, new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
+  }
+
+  static fromGeometry(geom, id) {
+    const basis = geom.BasisCurve().get()
+    const arc = new Arc(vecFromOc(basis.Location()), basis.Radius(), basis.FirstParameter(), basis.LastParameter(), new window.oc.oc.Handle_Geom2d_Curve_2(geom))
+    arc.id = id
+    return arc
+  }
+
+  snapPoints() {
+    return [this._center, ...this.endpoints()]
+  }
+
+  handles() {
+    return [this._center, ...this.endpoints()]
+  }
+
+  setHandles(handles) {
+    this._center = handles[0]
+    const circ = ocCirc2dFromVec(this._center, this.radius)
+    const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(handles[1]), ocPnt2dFromVec(handles[2]), true)
+    if(!arc.IsDone()) return
+    const trimmed = arc.Value().get()
+    const basis = new window.oc.oc.Geom2dAdaptor_Curve_2(trimmed.BasisCurve())
+    const circle = basis.Circle()
+    this.radius = circle.Radius()
+    this.bounds = [trimmed.FirstParameter(), trimmed.LastParameter()]
+    this.update(new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
+  }
+
+  setPoints(points) {
+    const arc = Arc.fromPoints(points)
+    this._center = arc._center
+    this.radius = arc.radius
+    this.bounds = arc.bounds
+    this.geom = arc.geom
+  }
+
+  geometry() {
+    const circ = ocCirc2dFromVec(this._center, this.radius)
+    return new window.oc.oc.Handle_Geom2d_Curve_2(new window.oc.oc.GCE2d_MakeArcOfCircle_1(circ, this.bounds[0], this.bounds[1], true).Value().get())
+  }
+
+  isClosed() {
+    return false
+  }
+
+  flip() {
+    this.bounds = [this.bounds[1], this.bounds[0]]
+    this.update()
+  }
+
+  direction() {
+    return this.bounds[1].clone().sub(this.bounds[0])
+  }
+
+  _clone() {
+    return new Arc(this._center, this.radius, this.bounds)
   }
 }
 
@@ -1582,6 +1669,13 @@ function ocDir2dFromVec(vec) {
 
 function ocVecFromVec(vec) {
   return new window.oc.oc.gp_Vec_4(vec.x, vec.y, vec.z)
+}
+
+function ocCirc2dFromVec(center, radius) {
+  center = ocPnt2dFromVec(center)
+  const v = new window.oc.oc.gp_Dir2d_4(0.0, 1.0)
+  const axis = new window.oc.oc.gp_Ax2d_2(center, v)
+  return new window.oc.oc.gp_Circ2d_2(axis, radius, true)
 }
 
 function ocAx1FromMatrix(m, constructor=window.oc.oc.gp_Ax1_2) {

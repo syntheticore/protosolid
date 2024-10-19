@@ -651,7 +651,15 @@ export class Sketch {
 
       } else if(c instanceof EqualConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
-        return { id: `${id++}`, type: 'equal_length', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+        // Equal radius circle/circle
+        if(c.items[0].curve() instanceof Circle) {
+          return { id: `${id++}`, type: 'equal_radius_cc', c1_id: constraintPrims[0].id, c2_id: constraintPrims[1].id, temporary: c.temporary }
+
+        // Equal length line/line
+        } else {
+          return { id: `${id++}`, type: 'equal_length', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+
+        }
 
       } else if(c instanceof TangentConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
@@ -664,9 +672,19 @@ export class Sketch {
 
       // Dimension
       } else if(c instanceof Dimension) {
-        const pointPrim = idMap[c.items[0].curve().id][0]
-        const linePrim = idMap[c.items[1].curve().id].slice(-1)[0]
-        return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
+        // Circle diameter
+        if(c.items[0].curve() instanceof Circle) {
+          const circlePrim = idMap[c.items[0].curve().id].slice(-1)[0]
+          const foo = { id: `${id++}`, type: 'circle_diameter', c_id: circlePrim.id, diameter: c.distance, driving: true, temporary: c.temporary }
+          console.log(foo)
+          return foo
+
+        // Line to line distance
+        } else {
+          const pointPrim = idMap[c.items[0].curve().id][0]
+          const linePrim = idMap[c.items[1].curve().id].slice(-1)[0]
+          return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
+        }
       }
     })
 
@@ -681,22 +699,25 @@ export class Sketch {
     }
 
     // Write back results
+    const updatePrim = (prim) => results.find(res => res.id == prim.id )
+
     const vecFromPrim = (prim) => {
-      const updated = results.find(res => res.id == prim.id )
+      const updated = updatePrim(prim)
       return new THREE.Vector3(updated.x, updated.y, 0.0)
     }
 
     this.elements.forEach(elem => {
       if(elem instanceof Line) {
-        let [p1, p2] = idMap[elem.id]
+        const [p1, p2] = idMap[elem.id]
         elem.setHandles([vecFromPrim(p1), vecFromPrim(p2)])
 
       } else if(elem instanceof Circle) {
-        let [center, _circle] = idMap[elem.id]
+        const [center, circle] = idMap[elem.id]
+        elem.radius = updatePrim(circle).radius
         elem.setHandles([vecFromPrim(center)])
 
       } else if(elem instanceof Arc) {
-        let [start, end, center, _arc, _rules] = idMap[elem.id]
+        const [start, end, center, _arc, _rules] = idMap[elem.id]
         elem.setHandles([vecFromPrim(center), vecFromPrim(start), vecFromPrim(end)])
       }
     })
@@ -814,15 +835,17 @@ export class Dimension extends Constraint {
   static icon = 'ruler'
   typename() { return 'Dimension' }
 
-  constructor(a, b, pos, distance) {
-    super(a, b)
+  constructor(items, pos) {
+    super(...items)
     this.position = pos
-    if(!distance) {
+    if(items[0] instanceof Circle) {
+      this.distance = items[0].radius * 2.0
+    } else {
+      const [a, b] = items
       const aPoint = a.handles()[0].clone().sub(b.handles()[0])
       const dir = b.direction()
-      distance = aPoint.clone().projectOnVector(dir).distanceTo(aPoint)
+      this.distance = aPoint.clone().projectOnVector(dir).distanceTo(aPoint)
     }
-    this.distance = distance
   }
 }
 

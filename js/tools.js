@@ -565,19 +565,20 @@ export class DimensionTool extends HighlightTool {
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
 
-    const pickingCurves = (this.items.length < 2)
+    const done = (this.items.length == 2 || this.items[0] instanceof Circle)
 
-    if(pickingCurves) {
+    if(!done) {
       const curve = await this.getObject(coords)
-      if(!curve && !(curve instanceof Line)) {
-        this.items = []
-        return
-      }
+      // if(!curve || !(curve instanceof Line)) {
+      //   this.items = []
+      //   return
+      // }
+      if(!curve) return
       this.items.push(curve)
     } else {
       const toSketch = this.sketch.workplane.clone().invert()
       const position = this.viewport.renderer.fromScreen(coords).applyMatrix4(toSketch)
-      const constraint = new Dimension(...this.items, position)
+      const constraint = new Dimension(this.items, position)
       this.sketch.addConstraint(constraint)
       this.viewport.updateRegions(true)
       this.items = []

@@ -148,7 +148,7 @@ export class ManipulationTool extends HighlightTool {
     if(sketch && handle) {
       sketch.elements.forEach(elem => {
         if(elem == handle.elem) return
-        const idx = elem.handles().findIndex(h => h.almost(vec) )
+        const idx = elem.endpoints().findIndex(p => p.almost(vec) )
         if(idx != -1) sketch.addConstraint(
           new CoincidentConstraint(new ElemRef(handle.elem, handle.index), new ElemRef(elem, idx))
         )
@@ -336,8 +336,8 @@ export class LineTool extends SketchTool {
 
     const elems = [...this.sketch.elements]
     if(this.curve) elems.pop()
-    const touchesExisting = elems.find(elem => elem.handles().some(p => p.equals(vec) ) )
-    const endpoints = touchesExisting && touchesExisting.handles()
+    const touchesExisting = elems.find(elem => elem.endpoints().some(p => p.equals(vec) ) )
+    const endpoints = touchesExisting && touchesExisting.endpoints()
     const index = touchesExisting && endpoints.indexOf(endpoints.find(sp => sp.equals(vec) ))
 
     // Restart tool when we hit an existing point
@@ -353,12 +353,13 @@ export class LineTool extends SketchTool {
       this.sketch.add(this.curve)
       const other = touchesExisting || old
       const otherIndex = touchesExisting ? index : 1
+      if(old || touchesExisting) console.log(other, otherIndex, touchesExisting)
       if(old || touchesExisting) this.sketch.addConstraint(
         new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(other, otherIndex))
       )
       if(old) {
-        const ySnapped = old.handles()[0].x.almost(vec.x)
-        const xSnapped = old.handles()[0].y.almost(vec.y)
+        const ySnapped = old.endpoints()[0].x.almost(vec.x)
+        const xSnapped = old.endpoints()[0].y.almost(vec.y)
         if(xSnapped || ySnapped) {
           const type = (xSnapped ? HorizontalConstraint : VerticalConstraint)
           this.sketch.addConstraint(new type(old))
@@ -369,7 +370,7 @@ export class LineTool extends SketchTool {
 
   mouseMove(vec) {
     if(!this.curve) return
-    let p1 = this.curve.handles()[0]
+    let p1 = this.curve.endpoints()[0]
     this.curve.setHandles([p1, vec], false)
     this.viewport.elementChanged(this.curve, this.component)
   }

@@ -292,6 +292,8 @@ export class Arc extends SketchElement {
     return arc
   }
 
+  center() { return this._center.clone() }
+
   snapPoints() {
     return [this._center, ...this.endpoints()]
   }
@@ -590,6 +592,24 @@ export class Sketch {
         const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projected }
         const circle = { id: `${id++}`, type: 'circle', c_id: center.id, radius: elem.radius }
         primitives = [center, circle]
+
+      } else if(elem instanceof Arc) {
+        const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projected }
+        const endpoints = elem.endpoints()
+        const start =  { id: `${id++}`, type: 'point', x: endpoints[0].x, y: endpoints[0].y, fixed: elem.projected }
+        const end =    { id: `${id++}`, type: 'point', x: endpoints[1].x, y: endpoints[1].y, fixed: elem.projected }
+        const arc = {
+          id: `${id++}`,
+          type: 'arc',
+          c_id: center.id,
+          radius: elem.radius,
+          start_angle: elem.geom().get().FirstParameter(),
+          end_angle: elem.geom().get().LastParameter(),
+          start_id: start.id,
+          end_id: end.id,
+        }
+        // const rules = { id: `${id++}`, type: 'arc_rules', a_id: arc.id  }
+        primitives = [start, end, center, arc]
       }
 
       idMap[elem.id] = primitives
@@ -674,6 +694,10 @@ export class Sketch {
       } else if(elem instanceof Circle) {
         let [center, _circle] = idMap[elem.id]
         elem.setHandles([vecFromPrim(center)])
+
+      } else if(elem instanceof Arc) {
+        let [start, end, center, _arc, _rules] = idMap[elem.id]
+        elem.setHandles([vecFromPrim(center), vecFromPrim(start), vecFromPrim(end)])
       }
     })
   }

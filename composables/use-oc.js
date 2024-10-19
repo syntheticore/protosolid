@@ -61,7 +61,7 @@ export async function useOC() {
       const system = new gcs.GcsSystem()
       const solver = new GcsWrapper(system)
 
-      solver.set_max_iterations(200) // 100
+      solver.set_max_iterations(800) // 100
       solver.set_convergence_threshold(1e-10)
 
       solver.push_primitives_and_params(primitives)

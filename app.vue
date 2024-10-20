@@ -2,8 +2,12 @@
 
   #app(
     v-if="activeDocument"
-    :class="{fullscreen: isFullscreen, maximized: isMaximized}"
+    :class="{ fullscreen: isFullscreen, maximized: isMaximized }"
   )
+
+    DocumentView(
+      :document="activeDocument"
+    )
 
     TabBar(
       :documents="documents"
@@ -16,10 +20,6 @@
       @delete-document="closeDocument"
     )
 
-    DocumentView(
-      :document="activeDocument"
-    )
-
 </template>
 
 
@@ -28,28 +28,29 @@
   #app
     width: 100%
     height: 100%
-    display: grid
-    grid-template-rows: 38px 1fr
-    // grid-gap: 1px
-    // grid-auto-rows: minmax(100px, auto)
-    grid-template-areas:
-      "header"\
-      "main"
     user-select: none
     cursor: default
     overflow: hidden
     color: $bright1
-    &.fullscreen
-    &.maximized
-    [data-platform="browser"] &
-      grid-template-rows: 33px 1fr
 
-  .tool-bar
-    grid-area: header
+  .tab-bar
+    position: absolute
+    top: 1px
+    left: 1px
+    right: 1px
+    height: 38px
+    .fullscreen &
+    .maximized &
+    [data-platform="browser"] &
+      height: 33px
 
   .document-view
     grid-area: main
-    position: relative
+    position: absolute
+    left: 1px
+    right: 1px
+    top: 1px
+    bottom: 1px
 
 </style>
 

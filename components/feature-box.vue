@@ -424,7 +424,7 @@
         const pickerRect = picker.getBoundingClientRect()
         const pickerPos = {
           x: pickerRect.left + (pickerRect.width / 2),
-          y: pickerRect.top + (pickerRect.height / 2) - 38,
+          y: pickerRect.top + (pickerRect.height / 2),
         }
         const style = window.getComputedStyle(picker)
         const color = style.getPropertyValue('background-color')

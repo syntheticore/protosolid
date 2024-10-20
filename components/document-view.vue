@@ -60,16 +60,15 @@
     display: flex
     justify-content: center
     min-width: 770px
-    border-top: 1px solid #323840
 
   .tool-box
     position: absolute
-    margin-top: 12px
+    margin-top: (12 + 38)px
     z-index: 2
 
   .side-bar
     position: absolute
-    top: 0
+    top: 38px
     bottom: 0
     pointer-events: none
     h1
@@ -86,7 +85,7 @@
       left: 0
       overflow: hidden
     &.right
-      top: 14px
+      top: (14 + 38)px
       right: 14px
       bottom: 35px
       display: flex

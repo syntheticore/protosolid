@@ -1163,7 +1163,7 @@ export class Volumetric extends Shape {
     if(!this.geom) return
     const repaired = Volumetric.repair(this.geom())
     this.geom = () => repaired
-    return this.validate()
+    if(!this.validate()) throw { type: 'error', msg: "Operation produced invalid geometry" }
   }
 
   volume() {
@@ -1374,8 +1374,6 @@ export class Compound extends Volumetric {
       // Replace updated solids in compound
       const compound = substitution.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID)
       const out = this.clone(compound)
-      // Check validity
-      if(!out.repair()) throw null
       return out
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }

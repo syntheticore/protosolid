@@ -52,6 +52,10 @@ export class Feature {
     if(this.error && this.error.type == 'error') return
 
     this.updateFeature(tree, references)
+
+    try {
+      tree.findChild(this.componentId).compound.repair()
+    } catch(err) { this.error = (this.error && this.error.type == 'error') ? this.error : err }
   }
 
   updateReferences(tree) {
@@ -113,7 +117,7 @@ export class Feature {
     this.document.emit('component-changed', comp) //XXX should not re-tesselate, only update sketch visibility
   }
 
-  updateFeature() {}
+  updateFeature(tree, references) {}
   updateGizmos() {}
   modifiedComponents() { return [this.componentId] }
   repair() {}
@@ -288,7 +292,6 @@ export class ExtrudeFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.boolean(tool, this.operation)
-      comp.compound.repair()
     } catch(err) { this.error = err || this.error }
 
     return tool
@@ -377,7 +380,6 @@ export class RevolveFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.boolean(tool, this.operation)
-      comp.compound.repair()
     } catch(err) { this.error = err || this.error }
 
     return tool
@@ -510,7 +512,6 @@ export class FilletFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.fillet(references.edges, this.radius)
-      comp.compound.repair()
     } catch(err) { this.error = err || this.error }
   }
 

@@ -1353,28 +1353,33 @@ export class Compound extends Volumetric {
     // Offset each affected solid individually
     const solids = this.solids().filter(solid => solid.faces().some(face => openFaces.some(of => of.id == face.id ) ) )
     const substitution = new window.oc.oc.BRepTools_ReShape()
-    solids.forEach(solid => {
-      const thicken = new window.oc.oc.BRepOffsetAPI_MakeThickSolid()
-      thicken.MakeThickSolidByJoin(
-        solid.geom(),
-        faces,
-        distance,
-        1.0e-6, // window.oc.oc.Precision.Confusion()
-        window.oc.oc.BRepOffset_Mode.BRepOffset_Skin,
-        false,
-        false,
-        window.oc.oc.GeomAbs_JoinType.GeomAbs_Arc,
-        false,
-        new window.oc.oc.Message_ProgressRange_1()
-      )
-      if(!thicken.IsDone()) throw { type: 'error', msg: "Offset could not be built" }
-      substitution.Replace(solid.geom(), thicken.Shape())
-    })
-    // Replace updated solids in compound
-    const compound = substitution.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID)
-    const out = this.clone(compound)
-    if(!out.repair()) throw { type: 'error', msg: "Could not close shell" }
-    return out
+    try {
+      solids.forEach(solid => {
+        const thicken = new window.oc.oc.BRepOffsetAPI_MakeThickSolid()
+        thicken.MakeThickSolidByJoin(
+          solid.geom(),
+          faces,
+          distance,
+          1.0e-6, // window.oc.oc.Precision.Confusion()
+          window.oc.oc.BRepOffset_Mode.BRepOffset_Skin,
+          false,
+          false,
+          window.oc.oc.GeomAbs_JoinType.GeomAbs_Arc,
+          false,
+          new window.oc.oc.Message_ProgressRange_1()
+        )
+        if(!thicken.IsDone()) throw null
+        substitution.Replace(solid.geom(), thicken.Shape())
+      })
+      // Replace updated solids in compound
+      const compound = substitution.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID)
+      const out = this.clone(compound)
+      // Check validity
+      if(!out.repair()) throw null
+      return out
+    } catch(_) {
+      throw { type: 'error', msg: "Offset could not be built" }
+    }
   }
 }
 

@@ -84,7 +84,7 @@ export default class Transloader {
       if(mode == 'shaded' || mode == 'wireShade') {
         const faces = solid.faces()
         faces.forEach(face => {
-          face.solid = solid
+          // face.solid = solid
           const faceMesh = this.renderer.convertMesh(
             face.tesselate(),
             this.getSurfaceMaterial(comp, face),
@@ -113,7 +113,7 @@ export default class Transloader {
           line.alcType = 'edge'
           line.alcObject = edge
           edge.mesh = () => line
-          edge.solid = solid
+          // edge.solid = solid
           this.renderer.add(line, true)
           return edge
         }))
@@ -290,7 +290,7 @@ export default class Transloader {
     return {
       curve: selected ? this.renderer.materials.selectionLine :
         highlighted ? this.renderer.materials.highlightLine :
-          elem.projected ? this.renderer.materials.projectedLine :
+          elem.projection ? this.renderer.materials.projectedLine :
             elem.isReference ? this.renderer.materials.referenceLine :
               this.renderer.materials.line,
       region: highlighted ? this.renderer.materials.highlightRegion :

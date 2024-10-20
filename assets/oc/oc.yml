@@ -400,6 +400,22 @@ mainBuild:
     - symbol: ShapeUpgrade_UnifySameDomain
     - symbol: ShapeUpgrade_ShellSewing
 
+    - symbol: BRepCheck_Analyzer
+
+    # - symbol: ShapeAnalysis
+    # # - symbol: ShapeAnalysis_CanonicalRecognition
+    # - symbol: ShapeAnalysis_CheckSmallFace
+    # - symbol: ShapeAnalysis_Curve
+    # - symbol: ShapeAnalysis_Edge
+    # - symbol: ShapeAnalysis_Geom
+    # - symbol: ShapeAnalysis_ShapeContents
+    # - symbol: ShapeAnalysis_ShapeTolerance
+    # - symbol: ShapeAnalysis_Shell
+    # - symbol: ShapeAnalysis_Surface
+    # - symbol: ShapeAnalysis_Wire
+    # - symbol: ShapeAnalysis_WireOrder
+    # - symbol: ShapeAnalysis_WireVertex
+
     - symbol: Standard_Transient
     - symbol: Message_ProgressRange
 

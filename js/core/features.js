@@ -581,7 +581,6 @@ export class OffsetFeature extends Feature {
 
     try {
       comp.compound = comp.compound.offset(references.faces, thickness)
-      comp.compound.repair()
     } catch(err) { this.error = err || this.error }
   }
 }

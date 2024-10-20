@@ -13,7 +13,7 @@ export class SketchElement {
     this.geom = null
   }
 
-  typename(base) { return base + (this.projected ? ' Projection' : '') }
+  typename(base) { return base + (this.projection ? ' Projection' : '') }
 
   clear() {
     if(this.geom) this.geom().get().Delete()
@@ -42,6 +42,12 @@ export class SketchElement {
     const range = geom.LastParameter() - start
     const p = geom.Value(start + u * range)
     return vecFromOc(p)
+  }
+
+  unsample(p) {
+    if(p instanceof THREE.Vector3) p = ocPnt2dFromVec(p)
+    const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, this.geom())
+    return projection.LowerDistanceParameter()
   }
 
   endpoints() {
@@ -84,11 +90,10 @@ export class SketchElement {
     const geom = this.geom()
     const start = geom.get().FirstParameter()
     const end = geom.get().LastParameter()
-    const [p, u] = this.intersect(others).map(p => {
-      const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, geom)
-      const u = projection.LowerDistanceParameter()
-      return [p, u]
-    }).find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
+    const [p, u] = this
+      .intersect(others)
+      .map(p => [p, this.unsample(p)] )
+      .find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
     if(!p) return [this]
     const left = new window.oc.oc.Geom2d_TrimmedCurve(geom, start, u, true, true)
     const right = new window.oc.oc.Geom2d_TrimmedCurve(geom, u, end, true, true)
@@ -337,10 +342,6 @@ export class Arc extends SketchElement {
     this.update()
   }
 
-  direction() {
-    return this.bounds[1].clone().sub(this.bounds[0])
-  }
-
   _clone() {
     return new Arc(this._center, this.radius, this.bounds)
   }
@@ -378,6 +379,8 @@ export class Sketch {
     if(elem instanceof SketchElement) {
       this.elements = this.elements.filter(e => e != elem )
       this.constraints = this.constraints.filter(c => !c.items.some(item => item.curve() == elem ) )
+      if(elem.projection) this.projections = this.projections.filter(p => p != elem.projection )
+
     } else if(elem instanceof Constraint) {
       this.constraints = this.constraints.filter(c => c != elem )
     }
@@ -675,9 +678,11 @@ export class Sketch {
         // Circle diameter
         if(c.items[0].curve() instanceof Circle) {
           const circlePrim = idMap[c.items[0].curve().id].slice(-1)[0]
-          const foo = { id: `${id++}`, type: 'circle_diameter', c_id: circlePrim.id, diameter: c.distance, driving: true, temporary: c.temporary }
-          console.log(foo)
-          return foo
+          return { id: `${id++}`, type: 'circle_diameter', c_id: circlePrim.id, diameter: c.distance, temporary: c.temporary }
+
+        } else if(c.items[0].curve() instanceof Arc) {
+          const arcPrim = idMap[c.items[0].curve().id].slice(-1)[0]
+          return { id: `${id++}`, type: 'arc_radius', a_id: arcPrim.id, radius: c.distance, temporary: c.temporary }
 
         // Line to line distance
         } else {
@@ -752,7 +757,7 @@ export class Projection {
     if(project.GetType() == window.oc.oc.GeomAbs_CurveType.GeomAbs_Line) {
       const line = Line.fromGeometry(trimmed, edge.id)
       line.sketch = this.sketch
-      line.projected = true
+      line.projection = this
       this.output = line
       return this.output
     }
@@ -840,6 +845,10 @@ export class Dimension extends Constraint {
     this.position = pos
     if(items[0] instanceof Circle) {
       this.distance = items[0].radius * 2.0
+
+    } else if(items[0] instanceof Arc) {
+      this.distance = items[0].radius
+
     } else {
       const [a, b] = items
       const aPoint = a.handles()[0].clone().sub(b.handles()[0])
@@ -1100,7 +1109,6 @@ export class Shape {
   tesselate() {
     const location = new window.oc.oc.TopLoc_Location_1()
     const triangulation = window.oc.oc.BRep_Tool.Triangulation(this.geom(), location, 0).get()
-    // if(!triangulation) return { positions: [], normals: [] }
     triangulation.ComputeNormals()
     let positions = []
     let normals = []
@@ -1146,10 +1154,16 @@ export class Volumetric extends Shape {
     return shape
   }
 
+  validate() {
+    const analyzer = new window.oc.oc.BRepCheck_Analyzer(this.geom(), true, false)
+    return analyzer.IsValid_2()
+  }
+
   repair() {
     if(!this.geom) return
     const repaired = Volumetric.repair(this.geom())
     this.geom = () => repaired
+    return this.validate()
   }
 
   volume() {
@@ -1322,10 +1336,14 @@ export class Compound extends Volumetric {
     edges.forEach(edge => {
       fillet.Add_2(radius, edge.geom())
     })
-    fillet.Build(new window.oc.oc.Message_ProgressRange_1())
-    if(!fillet.IsDone()) throw { type: 'error', msg: "Fillet could not be built" }
-    // return this.clone(Solid.repair(fillet.Shape()))
-    return this.clone(fillet.Shape())
+    try {
+      fillet.Build(new window.oc.oc.Message_ProgressRange_1())
+      if(!fillet.IsDone()) throw null
+      // return this.clone(Solid.repair(fillet.Shape()))
+      return this.clone(fillet.Shape())
+    } catch(_) {
+      throw { type: 'error', msg: "Fillet could not be built" }
+    }
   }
 
   offset(openFaces, distance) {
@@ -1354,7 +1372,9 @@ export class Compound extends Volumetric {
     })
     // Replace updated solids in compound
     const compound = substitution.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID)
-    return this.clone(compound)
+    const out = this.clone(compound)
+    if(!out.repair()) throw { type: 'error', msg: "Could not close shell" }
+    return out
   }
 }
 
@@ -1399,9 +1419,8 @@ export class EdgeReference extends Reference {
 
 export class CurveReference extends Reference {
   update(_tree) {
-    if(!this.item.projected) return
-    const projection = this.item.sketch.projections.find(proj => this.item.id == proj.edgeRef.item.id )
-    this.item = projection.geometry()
+    if(!this.item.projection) return
+    this.item = this.item.projection.geometry()
   }
 }
 

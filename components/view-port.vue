@@ -703,7 +703,7 @@
       },
 
       onLoadElement: function(elem) {
-        if(elem.projected || elem.sketch !== this.document.activeSketch) return
+        if(elem.projection || elem.sketch !== this.document.activeSketch) return
         this.handles[elem.id] = elem.handles().map((handle, i) => {
           handle = handle.clone().applyMatrix4(elem.sketch.workplane)
           return {

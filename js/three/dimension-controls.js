@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import { Circle } from '../core/kernel.js'
+import { Circle, Arc } from '../core/kernel.js'
 
 
 export default class DimensionControls extends THREE.Object3D {
@@ -13,24 +13,74 @@ export default class DimensionControls extends THREE.Object3D {
     const itemL = constraint.items[0]
     const itemR = constraint.items[1]
 
-    if(itemL.curve() instanceof Circle) {
+    const isCircle = itemL.curve() instanceof Circle
+    const isArc = itemL.curve() instanceof Arc
+
+    // Circle/Arc diameter/radius
+    if(isCircle || isArc) {
       const circle = itemL.curve()
 
       const left = constraint.position.clone().sub(circle.center()).x > 0
       const constraintPos = constraint.position.clone().add(new THREE.Vector3(left ? -10 : 10, 0, 0))
 
-      const dir = constraintPos.clone().sub(circle.center()).normalize().multiplyScalar(circle.radius)
-      const p1 = circle.center().clone().add(dir)
-      const p2 = circle.center().clone().add(dir.negate())
+      const cdir = constraint.position.clone().sub(circle.center())
+      const isOutside = (cdir.length() > circle.radius)
+      cdir.normalize()
+      const dir = constraintPos.clone().sub(circle.center()).normalize()
+      const pOffset = dir.clone().multiplyScalar(circle.radius)
+      const p1 = circle.center().clone().add(pOffset)
+      const p2 = circle.center().clone().add(pOffset.negate())
 
-      const line = renderer.convertLine([constraintPos.toArray(), p2.toArray()], renderer.materials.wire)
+      if(isCircle) {
 
-      const p3 = constraintPos.clone().add(new THREE.Vector3(left ? 10 : -10, 0, 0))
-      const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], renderer.materials.wire)
+        if(isOutside) {
+          const line = renderer.convertLine([constraintPos.toArray(), p2.toArray()], renderer.materials.wire)
 
-      this.add(line)
-      this.add(dimLine)
+          const p3 = constraintPos.clone().add(new THREE.Vector3(left ? 10 : -10, 0, 0))
+          const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], renderer.materials.wire)
 
+          this.add(line)
+          this.add(dimLine)
+
+          this.add(makeArrow(p1, dir))
+          this.add(makeArrow(p2, dir.negate()))
+
+        } else {
+          const offset = cdir.clone().multiplyScalar(circle.radius)
+          const p1 = circle.center().clone().add(offset)
+          const p2 = circle.center().clone().add(offset.negate())
+
+          const line = renderer.convertLine([p1.toArray(), p2.toArray()], renderer.materials.wire)
+          this.add(line)
+
+          this.add(makeArrow(p1, cdir))
+          this.add(makeArrow(p2, cdir.clone().negate()))
+        }
+
+      } else {
+
+        if(isOutside) {
+          const line = renderer.convertLine([constraintPos.toArray(), p1.toArray()], renderer.materials.wire)
+          const p3 = constraintPos.clone().add(new THREE.Vector3(left ? 10 : -10, 0, 0))
+          const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], renderer.materials.wire)
+
+          this.add(line)
+          this.add(dimLine)
+          this.add(makeArrow(p1, dir.negate()))
+          makeArc(this, renderer, circle, constraintPos)
+
+        } else {
+
+          const p = circle.center().clone().add(cdir.clone().multiplyScalar(circle.radius))
+          const line = renderer.convertLine([circle.center().toArray(), p.toArray()], renderer.materials.wire)
+
+          this.add(line)
+          this.add(makeArrow(p, cdir))
+          makeArc(this, renderer, circle, constraint.position)
+        }
+      }
+
+    // Line/line distance
     } else {
       const [posL, posR] = constraint.items.map(item =>
         item.curve().endpoints().minMaxBy(Math.min, handle => handle.distanceTo(constraint.position) ).clone()
@@ -53,8 +103,8 @@ export default class DimensionControls extends THREE.Object3D {
 
       const helperDir = cross.clone().normalize()
 
-      const arrowHelperL = new THREE.ArrowHelper(helperDir.clone().negate(), posLT, 0.0, 'darkgray', 1.5, 0.75)
-      const arrowHelperR = new THREE.ArrowHelper(helperDir, posRT, 0.0, 'darkgray', 1.5, 0.75)
+      const arrowHelperL = makeArrow(posLT, helperDir.clone().negate())
+      const arrowHelperR = makeArrow(posRT, helperDir)
 
       this.add(arrowHelperL)
       this.add(arrowHelperR)
@@ -78,5 +128,24 @@ export default class DimensionControls extends THREE.Object3D {
     }
 
     this.applyMatrix4(constraint.sketch.workplane)
+  }
+}
+
+function makeArrow(pos, dir) {
+  return new THREE.ArrowHelper(dir, pos, 0.0, 'darkgray', 1.5, 0.75)
+}
+
+function makeArc(controls, renderer, circle, constraintPos) {
+  const start = circle.geom().get().FirstParameter()
+  const end = circle.geom().get().LastParameter()
+  const u = new Circle(circle.center(), circle.radius, circle.geom().get().BasisCurve()).unsample(constraintPos)
+
+  if(u < start || u > end) {
+    const closer = [start, end].minMaxBy(Math.min, param => Math.abs(u - param) )
+
+    const arc = new Arc(circle.center().clone(), circle.radius, [closer, u].sort())
+    arc.update()
+
+    controls.add(renderer.convertLine(arc.tesselate(), renderer.materials.wire))
   }
 }

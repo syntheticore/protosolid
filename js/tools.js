@@ -139,7 +139,7 @@ export class ManipulationTool extends HighlightTool {
   }
 
   mouseUp(vec, coords) {
-    this.mouseMove(vec, coords)
+    // this.mouseMove(vec, coords)
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'
@@ -565,7 +565,11 @@ export class DimensionTool extends HighlightTool {
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
 
-    const done = (this.items.length == 2 || this.items[0] instanceof Circle)
+    const done = (
+      this.items.length == 2 ||
+      this.items[0] instanceof Circle ||
+      this.items[0] instanceof Arc
+    )
 
     if(!done) {
       const curve = await this.getObject(coords)

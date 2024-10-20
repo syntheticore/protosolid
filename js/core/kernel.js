@@ -1107,6 +1107,7 @@ export class Shape {
   }
 
   tesselate() {
+    if(this.cachedTesselation) return this.cachedTesselation
     const location = new window.oc.oc.TopLoc_Location_1()
     const triangulation = window.oc.oc.BRep_Tool.Triangulation(this.geom(), location, 0).get()
     triangulation.ComputeNormals()
@@ -1119,10 +1120,11 @@ export class Shape {
       positions = positions.concat(pos)
       normals = normals.concat(norm)
     })
-    return {
+    this.cachedTesselation = {
       positions,
       normals,
     }
+    return this.cachedTesselation
   }
 }
 
@@ -1261,11 +1263,13 @@ export class Edge extends Shape {
   }
 
   tesselate() {
+    if(this.cachedTesselation) return this.cachedTesselation
     // const location = new window.oc.oc.TopLoc_Location_1()
     // const poly = window.oc.oc.BRep_Tool.Polygon3D(this.geom(), location).get()
     // const nodes = poly.Nodes()
     const curve = new window.oc.oc.BRepAdaptor_Curve_2(this.geom())
-    return tesselateCurve(curve)
+    this.cachedTesselation = tesselateCurve(curve)
+    return this.cachedTesselation
   }
 }
 
@@ -1282,15 +1286,15 @@ export class Solid extends Volumetric {
   typename() { return 'Solid' }
 
   faces() {
-    const faces = this.collectShapes('face')
-    faces.forEach((face, i) => face.id = this.id + '/face/' + i )
-    return faces
+    this.cachedFaces ||= this.collectShapes('face')
+    this.cachedFaces.forEach((face, i) => face.id = this.id + '/face/' + i )
+    return this.cachedFaces
   }
 
   edges() {
-    const edges = this.collectShapes('edge')
-    edges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
-    return edges
+    this.cachedEdges ||= this.collectShapes('edge')
+    this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
+    return this.cachedEdges
   }
 }
 

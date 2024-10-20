@@ -340,7 +340,7 @@
             }
 
             // Add item reference to feature
-            if(setting.multi || setting.autoMulti) {
+            if(setting.multi) {
               // Toggle items in multi select mode
               const currentItems = (this.activeFeature[key] && [...this.activeFeature[key]()]) || []
               this.activeFeature[key] = () => currentItems
@@ -357,14 +357,15 @@
               this.activeFeature[key] = () => itemRef
             }
 
-            // Regenerate feature once unsuppressed
             this.cancelPick()
-            if(!setting.autoMulti) this.update()
+            // Regenerate feature once unsuppressed
+            const repick = this.bus.isCtrlPressed
+            if(!repick) this.update()
             this.updatePaths()
 
             // Auto-close or auto-repick
             if(setting.autoConfirm) this.confirm()
-            if(setting.autoMulti) await this.pick(type, key)
+            if(repick) await this.pick(type, key)
 
             resolve()
           })

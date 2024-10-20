@@ -62,8 +62,7 @@ export class Feature {
       if(!this[key] || !this.needsPicker(key, true)) return
 
       const setting = this.settings[key]
-      const isMulti = (setting.multi || setting.autoMulti)
-      const refs = isMulti ? this[key]() : [this[key]()]
+      const refs = setting.multi ? this[key]() : [this[key]()]
 
       let settingError
 
@@ -80,7 +79,7 @@ export class Feature {
       if(items.length && settingError) settingError.type = 'warning'
 
       if(settingError) errors.push(settingError)
-      results[key] = isMulti ? items : items[0]
+      results[key] = setting.multi ? items : items[0]
     })
 
     const severe = errors.filter(error => error.type == 'error' )
@@ -99,7 +98,7 @@ export class Feature {
   isComplete() {
     return Object.keys(this.settings)
       .filter(key => this.needsPicker(key) )
-      .every(key => this[key] && (!(this.settings[key].multi || this.settings[key].autoMulti) || this[key]().length) )
+      .every(key => this[key] && (!this.settings[key].multi || this[key]().length) )
   }
 
   preview() {}
@@ -397,7 +396,7 @@ export class DraftFeature extends Feature {
       faces: {
         title: 'Faces',
         type: 'face',
-        autoMulti: true,
+        multi: true,
       },
       angle: {
         title: 'Angle',

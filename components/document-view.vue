@@ -3,7 +3,7 @@
   main.document-view(@pointerdown="bus.emit('close-widgets')")
     ViewPort(
       :document="document"
-      :active-view="document.previewView || document.activeView"
+      :active-view="document.dirtyView || document.previewView || document.activeView"
       :display-mode="previewDisplayMode || currentDisplayMode"
       v-model:active-tool="activeTool"
       v-model:highlight="highlight"

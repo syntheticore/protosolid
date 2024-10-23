@@ -443,6 +443,10 @@
       this.bus.on('activate-tool', this.activateTool)
       this.document.on('component-changed', this.componentChanged)
       this.document.on('component-deleted', this.componentDeleted)
+      this.document.on('sketch-changed', (sketch) => {
+        this.transloader.updateRegions(this.document.activeComponent)
+        this.reloadSketch(sketch)
+      })
       this.document.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
       this.document.on('look-at', (plane) => setTimeout(() => this.renderer.lookAt(plane) ) )
       this.bus.on('render-needed', () => this.renderer.render() )
@@ -497,10 +501,15 @@
         if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
         sketch.solve(this.document.top())
         if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = false )
+        this.regionsDirty = true
+        this.reloadSketch(sketch)
+      },
+
+      reloadSketch(sketch) {
         // Update elements
-        sketch.elements.forEach(elem => this.elementChanged(elem, this.document.activeComponent, true) )
+        sketch.elements.forEach(elem => this.transloader.loadElement(elem, this.document.activeComponent) )
         // Update dimensions
-        this.transloader.updateDimensions(this.document.activeComponent, this.document.activeSketch)
+        this.transloader.updateDimensions(this.document.activeComponent, sketch)
         this.renderer.render()
       },
 
@@ -695,10 +704,10 @@
         this.renderer.render()
       },
 
-      elementChanged: function(elem, comp, noRender) {
+      elementChanged: function(elem, comp) {
         this.regionsDirty = true
         this.transloader.loadElement(elem, comp)
-        if(!noRender) this.renderer.render()
+        this.renderer.render()
       },
 
       unpreviewFeature: function() {

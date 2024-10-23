@@ -146,6 +146,9 @@ export default class Document extends Emitter {
       // Regenerate at feature position
       if(!this.timeline.isCurrentFeature(feature)) this.regenerate(feature)
 
+      // Activate matching component
+      this.activeComponent = this.getComponent(feature.componentId)
+
       // Activate sketch for sketch features
       if(feature.constructor === CreateSketchFeature) {
         this.activeSketch = feature.sketch
@@ -155,12 +158,17 @@ export default class Document extends Emitter {
         this.previousDirtyView = this.dirtyView
         this.emit('look-at', this.activeSketch.workplane)
 
-        // Activate matching component
-        this.activeComponent = this.getComponent(feature.componentId)
-
         // Make sketch visible & store previous visibility
-        this.previousSketchVisibility = this.activeComponent.creator.itemsHidden[this.activeSketch.id]
+        this.oldVisibility[this.activeSketch.id] = this.activeComponent.creator.itemsHidden[this.activeSketch.id]
         this.activeComponent.creator.itemsHidden[this.activeSketch.id] = false
+
+      // Show involved sketches for non-sketch features
+      } else {
+        feature.involvedSketches().forEach(sketch => {
+          this.oldVisibility[sketch.id] = this.activeComponent.creator.itemsHidden[sketch.id]
+          this.activeComponent.creator.itemsHidden[sketch.id] = false
+          this.emit('sketch-changed', sketch)
+        })
       }
 
       // Make affected components visible
@@ -171,23 +179,26 @@ export default class Document extends Emitter {
 
       // Cancel FeatureBox & restore old feature state
       this.emit('deactivate-feature', this.activeFeature)
-      this.activeFeature = null
 
       // Restore previous state
       if(doReset && this.previousComponent) {
 
-        // Restore sketch visiblity
-        if(this.previousSketchVisibility !== null && this.activeSketch) {
-          this.activeComponent.creator.itemsHidden[this.activeSketch.id] = this.previousSketchVisibility
+        // Restore sketch visiblities
+        if(this.activeSketch) {
+          this.activeComponent.creator.itemsHidden[this.activeSketch.id] = this.oldVisibility[this.activeSketch.id]
           this.activeView = this.previousActiveView
           this.dirtyView = this.previousDirtyView
           const view = this.dirtyView || this.previewView || this.activeView
           this.emit('force-view', view)
+        } else {
+          this.activeFeature.involvedSketches().forEach(sketch => {
+            this.activeComponent.creator.itemsHidden[sketch.id] = this.oldVisibility[sketch.id]
+            this.emit('sketch-changed', sketch)
+          })
         }
-        this.previousSketchVisibility = null
 
-        // Restore component visiblity
-        Object.keys(this.oldVisibility).forEach(id => this.getComponent(id).creator.hidden = this.oldVisibility[id] )
+        // Restore component visiblities
+        this.activeFeature.modifiedComponents().forEach(id => this.getComponent(id).creator.hidden = this.oldVisibility[id] )
 
         // Restore marker
         if(resetMarker && this.previousMarker != this.timeline.marker) this.regenerate(this.previousMarker)
@@ -196,6 +207,7 @@ export default class Document extends Emitter {
         if(this.previousComponent) this.activateComponent(this.getComponent(this.previousComponent.id))
         this.previousComponent = null
       }
+      this.activeFeature = null
       this.activeSketch = null
     }
   }

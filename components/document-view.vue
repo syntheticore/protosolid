@@ -106,7 +106,7 @@
     bottom: 70px
     &.top
       bottom: unset
-      top: 100px
+      top: (100 + 38)px
 
   .feature-bar
     position: absolute

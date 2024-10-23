@@ -122,6 +122,13 @@ export class Feature {
   modifiedComponents() { return [this.componentId] }
   repair() {}
 
+  involvedSketches() {
+    return Object.keys(this.settings).flatMap(key => {
+      if(this.settings[key].type != 'profile') return []
+      return this[key] ? this[key]().map(ref => ref.getItem().sketch ) : []
+    })
+  }
+
   getValues() {
     const values = {}
     Object.keys(this.settings).forEach(key => values[key] = this[key] )

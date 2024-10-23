@@ -191,6 +191,7 @@ export default class Transloader {
 
   loadElement(elem, comp) {
     this.unloadElement(elem, comp)
+    if(comp.creator.itemsHidden[elem.sketch.id]) return
     const vertices = elem.tesselate()
     if(!vertices) return
     const line = this.renderer.convertLine(vertices, this.renderer.materials.line)

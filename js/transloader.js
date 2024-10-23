@@ -139,7 +139,7 @@ export default class Transloader {
         })
 
         // Load Dimensions
-        this.updateDimensions(comp, sketch)
+        if(sketch == this.document.activeSketch) this.updateDimensions(comp, sketch)
       })
 
       // Update regions

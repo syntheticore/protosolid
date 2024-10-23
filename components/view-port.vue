@@ -337,11 +337,13 @@
       },
 
       'document.activeSketch': function(sketch) {
+        this.transloader.purgeDimensions(this.document.activeComponent)
         // Show sketch plane
         if(sketch) {
           let plane = sketch.workplane
           this.snapper.planeTransform = plane
           this.renderer.sketchPlane.setPlane(plane)
+          this.transloader.updateDimensions(this.document.activeComponent, sketch)
         }
         this.renderer.sketchPlane.visible = !!sketch
         // Display grab handles

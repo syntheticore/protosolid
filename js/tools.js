@@ -501,6 +501,7 @@ export class ConstraintTool extends HighlightTool {
       this.items = []
       return
     }
+    if(curve == this.items.slice(-1)[0]) return
     this.items.push(curve)
     if(this.items.length == this.constructor.numItems) {
       const constraint = new this.constructor.constraintType(...this.items)

@@ -153,6 +153,7 @@ export default class Document extends Emitter {
         // Store camera view
         this.previousActiveView = this.activeView
         this.previousDirtyView = this.dirtyView
+        this.emit('look-at', this.activeSketch.workplane)
 
         // Activate matching component
         this.activeComponent = this.getComponent(feature.componentId)
@@ -180,6 +181,8 @@ export default class Document extends Emitter {
           this.activeComponent.creator.itemsHidden[this.activeSketch.id] = this.previousSketchVisibility
           this.activeView = this.previousActiveView
           this.dirtyView = this.previousDirtyView
+          const view = this.dirtyView || this.previewView || this.activeView
+          this.emit('force-view', view)
         }
         this.previousSketchVisibility = null
 

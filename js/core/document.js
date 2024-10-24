@@ -157,19 +157,14 @@ export default class Document extends Emitter {
         this.previousActiveView = this.activeView
         this.previousDirtyView = this.dirtyView
         this.emit('look-at', this.activeSketch.workplane)
-
-        // Make sketch visible & store previous visibility
-        this.oldVisibility[this.activeSketch.id] = this.activeComponent.creator.itemsHidden[this.activeSketch.id]
-        this.activeComponent.creator.itemsHidden[this.activeSketch.id] = false
-
-      // Show involved sketches for non-sketch features
-      } else {
-        feature.involvedSketches().forEach(sketch => {
-          this.oldVisibility[sketch.id] = this.activeComponent.creator.itemsHidden[sketch.id]
-          this.activeComponent.creator.itemsHidden[sketch.id] = false
-          this.emit('sketch-changed', sketch)
-        })
       }
+
+      // Show involved sketches & store previous visibility
+      feature.involvedSketches().forEach(sketch => {
+        this.oldVisibility[sketch.id] = this.activeComponent.creator.itemsHidden[sketch.id]
+        this.activeComponent.creator.itemsHidden[sketch.id] = false
+        this.emit('sketch-changed', sketch)
+      })
 
       // Make affected components visible
       compIds.forEach(id => this.getComponent(id).creator.hidden = false )

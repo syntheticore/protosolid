@@ -127,10 +127,10 @@ function createWindow() {
     devTools: false,
     // backgroundColor: isMac ? false : '#000',
     backgroundColor: '#1c2127',
-    // show: false,
+    show: false,
     frame: isMac,
     // vibrancy: isMac ? 'dark' : undefined,
-    // transparent: !isMac,
+    transparent: !isMac,
     // opacity: 0.9,
     // fullscreenWindowTitle: true,
     webPreferences: {

@@ -147,7 +147,7 @@
     // })
 
     if(!window.ipc) return
-    setTimeout(() => window.ipc.send('vue-ready'), 0)
+    setTimeout(() => window.ipc.send('vue-ready'), 200)
   })
 
 

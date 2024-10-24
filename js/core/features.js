@@ -241,6 +241,10 @@ export class CreateSketchFeature extends Feature {
     this.sketch.solve(tree)
   }
 
+  involvedSketches() {
+    return [this.sketch]
+  }
+
   confirm() {
     this.document.activateFeature(this)
   }

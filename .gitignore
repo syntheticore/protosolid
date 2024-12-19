@@ -33,3 +33,5 @@ debug.log
 assets/oc/*.js
 assets/oc/*.ts
 assets/oc/*.wasm
+
+electron/app

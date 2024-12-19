@@ -204,7 +204,7 @@ export default class Renderer {
   }
 
   lookAt(plane) {
-    const normal = new THREE.Vector3(0,0,1).applyMatrix4(plane)
+    const normal = new THREE.Vector3(0,0,1).applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(plane))
     const dir = this.camera.position.clone().sub(this.viewControls.target).projectOnVector(normal)
     this.setView(this.viewControls.target.clone().add(dir), this.viewControls.target.clone())
   }

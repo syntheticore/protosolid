@@ -35,3 +35,4 @@ assets/oc/*.ts
 assets/oc/*.wasm
 
 electron/app
+docs

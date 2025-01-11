@@ -53,8 +53,13 @@ mainBuild:
     - symbol: TopExp_Explorer
     - symbol: TopTools_ListOfShape
     - symbol: TopTools_IndexedMapOfShape
+    - symbol: TopTools_IndexedDataMapOfShapeListOfShape
     - symbol: TopAbs_ShapeEnum
     - symbol: TopAbs_Orientation
+
+    - symbol: TopOpeBRepBuild_Tools
+    - symbol: TopOpeBRepBuild_HBuilder
+    - symbol: Handle_TopOpeBRepBuild_HBuilder
 
     - symbol: Poly_Triangle
     - symbol: Poly_Triangulation
@@ -299,8 +304,17 @@ mainBuild:
     # - symbol: BRepTools_Substitution
     - symbol: BRepTools_ReShape
     - symbol: BRepTools_History
+    - symbol: Handle_BRepTools_History
     - symbol: BRepTools_Quilt
     - symbol: BRepTools_WireExplorer
+
+    - symbol: TNaming
+    - symbol: TNaming_Selector
+    - symbol: TNaming_NamedShape
+    - symbol: TNaming_UsedShapes
+    - symbol: TNaming_Builder
+    - symbol: TNaming_Tool
+    - symbol: Handle_TNaming_NamedShape
 
     - symbol: BRep_Builder
     - symbol: BRep_Tool
@@ -427,6 +441,8 @@ mainBuild:
     - symbol: TCollection_ExtendedString
 
     - symbol: TDataStd_GenericEmpty
+    - symbol: TDataStd_Integer
+
     - symbol: TColStd_IndexedDataMapOfStringString
     - symbol: TDocStd_Document
     - symbol: Handle_TDocStd_Document
@@ -462,10 +478,18 @@ mainBuild:
     # - symbol: XCAFDoc_VisMaterialTool
     # - symbol: Handle_XCAFDoc_VisMaterialTool
 
+    - symbol: Standard_Failure
+
     - symbol: CDM_Document
     - symbol: TDF_Label
     - symbol: TDF_LabelSequence
+    - symbol: TDF_LabelMap
     - symbol: TDF_Attribute
+    - symbol: TDF_ChildIterator
+    - symbol: TDF_Tool
+    - symbol: TDF_TagSource
+    - symbol: TDF_Data
+
     - symbol: IFSelect_ReturnStatus
     - symbol: STEPCAFControl_Reader
     - symbol: RWGltf_CafWriter
@@ -496,12 +520,13 @@ mainBuild:
     # - symbol: NCollection_BaseMap
 
     # - symbol: CustomClass
+    - symbol: OCJS
 
   emccFlags:
     # Improve performance & build size
-    - -flto
-    - -fexceptions
-    - -sDISABLE_EXCEPTION_CATCHING=1
+    # - -flto
+    # - -fexceptions
+    # - -sDISABLE_EXCEPTION_CATCHING=1
 
     # Other stuff from recommended minimal config
     # - -sLLD_REPORT_UNDEFINED
@@ -515,23 +540,22 @@ mainBuild:
     - -sINITIAL_MEMORY=100MB
     - -sMAXIMUM_MEMORY=4GB
     - -sALLOW_MEMORY_GROWTH=1
-    # - -sUSE_FREETYPE=1
-    # - -sDISABLE_EXCEPTION_CATCHING=1
+    - -sUSE_FREETYPE=0
 
-# additionalCppCode: |
-#   #include <iostream>
+additionalCppCode: |
+  #include <iostream>
 
-#   class CustomClass {
-#   public:
-#     static void SayHello() {
-#       std::cout << "Hello, World" << std::endl;
-#     }
-#   };
+  // class CustomClass {
+  // public:
+  //   static void SayHello() {
+  //     std::cout << "Hello, World" << std::endl;
+  //   }
+  // };
 
-#   // typedef Handle(IMeshTools_Context) Handle_IMeshTools_Context;
-#   // class OCJS {
-#   // public:
-#   //   static Standard_Failure* getStandard_FailureData(intptr_t exceptionPtr) {
-#   //     return reinterpret_cast<Standard_Failure*>(exceptionPtr);
-#   //   }
-#   // };
+  // typedef Handle(IMeshTools_Context) Handle_IMeshTools_Context;
+  class OCJS {
+  public:
+    static Standard_Failure* getStandard_FailureData(intptr_t exceptionPtr) {
+      return reinterpret_cast<Standard_Failure*>(exceptionPtr);
+    }
+  };

@@ -673,7 +673,6 @@
       },
 
       activateTool: function(Tool) {
-        console.log('activating', Tool)
         if(this.activeTool) this.activeTool.dispose()
         this.pickingPath = null
         this.snapper.reset()

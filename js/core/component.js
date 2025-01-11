@@ -99,7 +99,7 @@ export default class Component {
     const clone = new Component(parent, this.id)
     Object.assign(clone, {
       transform: this.transform.clone(),
-      compound: this.compound.clone(),
+      compound: this.compound.cloneCached(),
       sketches: [...this.sketches],
       helpers: [...this.helpers],
       children: this.children.map(child => child.deepClone(clone) ),

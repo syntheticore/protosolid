@@ -54,7 +54,8 @@ export class Feature {
     this.updateFeature(tree, references)
 
     try {
-      tree.findChild(this.componentId).compound.repair()
+      const comp = tree.findChild(this.componentId)
+      comp.compound = comp.compound.repair()
     } catch(err) { this.error = (this.error && this.error.type == 'error') ? this.error : err }
   }
 
@@ -291,6 +292,7 @@ export class ExtrudeFeature extends Feature {
 
   updateFeature(tree, references) {
     const distance = this.distance * (this.side ? 1 : -1)
+    const comp = tree.findChild(this.componentId)
 
     let tool = new Compound(this.componentId)
     references.profiles.forEach(profile => {
@@ -299,8 +301,6 @@ export class ExtrudeFeature extends Feature {
         tool = tool.boolean(extrusion, 'join')
       } catch(err) { this.error = err || this.error }
     })
-
-    const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.boolean(tool, this.operation)
     } catch(err) { this.error = err || this.error }

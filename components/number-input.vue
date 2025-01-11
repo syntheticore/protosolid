@@ -135,7 +135,7 @@
           this.$emit('enter')
         } catch(e) {
           this.problem = true
-          this.$emit('error', { type: 'error', msg: "Please enter a valid expression" })
+          this.$emit('error', { type: 'error', msg: "Enter a valid expression" })
           this.focusInput()
         }
       },

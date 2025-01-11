@@ -292,7 +292,13 @@ export class Arc extends SketchElement {
 
   static fromGeometry(geom, id) {
     const basis = geom.BasisCurve().get()
-    const arc = new Arc(vecFromOc(basis.Location()), basis.Radius(), basis.FirstParameter(), basis.LastParameter(), new window.oc.oc.Handle_Geom2d_Curve_2(geom))
+    const arc = new Arc(vecFromOc(
+      basis.Location()),
+      basis.Radius(),
+      basis.FirstParameter(),
+      basis.LastParameter(),
+      new window.oc.oc.Handle_Geom2d_Curve_2(geom)
+    )
     arc.id = id
     return arc
   }
@@ -1004,6 +1010,9 @@ export class Profile {
     const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
     const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyQuaternion(rot))
     let prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
+    // const args = new window.oc.oc.TopTools_ListOfShape_1()
+    // args.Append_1(face)
+    // const history = new window.oc.oc.BRepTools_History_2(args, prism)
     return this.makeCompound(componentId, prism.Shape())
   }
 
@@ -1021,9 +1030,25 @@ export class Profile {
   }
 
   makeCompound(componentId, shape) {
-    const solid = window.oc.oc.TopoDS.Solid_1(shape)
-    const compound = new Compound(componentId, solid)
-    compound.id = this.id
+    const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
+
+    const originals = [...this.rings[0].segments]
+    const solid = compound.solids()[0]
+
+    // Name faces
+    const faces = solid.faces()
+    originals.forEach((seg, i) => {
+      faces[i].id = solid.id + '/face/swept/' + seg.id
+    })
+    faces[faces.length - 2].id = solid.id + '/face/bottom'
+    faces[faces.length - 1].id = solid.id + '/face/top'
+
+    // Name all edges in new solid according to their connected faces
+    solid.edges().forEach(edge => {
+      const faces = edge.connectedFaces()
+      edge.id = faces[0].id + faces[1].id
+    })
+
     return compound
   }
 
@@ -1064,7 +1089,7 @@ export class Profile {
 
 export class Shape {
   isSame(other) {
-    return (this.id && this.id == other.id) || this.geom().IsSame(other.geom())
+    return this.id == other.id
   }
 
   area() {
@@ -1130,42 +1155,82 @@ export class Shape {
 
 
 export class Volumetric extends Shape {
-  static repair(shape) {
+  // static repair(shape) {
+  //   const purge = new window.oc.oc.TopOpeBRepTool_FuseEdges(shape, true)
+  //   purge.Perform()
+  //   shape = purge.Shape()
 
-    // const purge = new window.oc.oc.TopOpeBRepTool_FuseEdges(shape, true)
-    // purge.Perform()
-    // shape = purge.Shape()
+  //   shape = new window.oc.oc.ShapeUpgrade_ShellSewing().ApplySewing(shape, 0.01)
 
-    const unify = new window.oc.oc.ShapeUpgrade_UnifySameDomain_2(shape, true, true, false)
-    unify.Build()
-    shape = unify.Shape()
+  //   console.log('open', window.oc.oc.BOPTools_AlgoTools.IsOpenShell(shell))
+  //   const explorer = new window.oc.oc.TopExp_Explorer_2(shape, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHELL, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
+  //   while(explorer.More()) {
+  //     const shell = window.oc.oc.TopoDS.Shell_1(explorer.Current())
+  //     window.oc.oc.BOPTools_AlgoTools.OrientFacesOnShell(shell)
+  //     explorer.Next()
+  //   }
 
-    const fix = new window.oc.oc.ShapeFix_Shape_2(shape)
-    fix.Perform(new window.oc.oc.Message_ProgressRange_1())
-    shape = fix.Shape()
-
-    // shape = new window.oc.oc.ShapeUpgrade_ShellSewing().ApplySewing(shape, 0.01)
-
-    // console.log('open', window.oc.oc.BOPTools_AlgoTools.IsOpenShell(shell))
-    // const explorer = new window.oc.oc.TopExp_Explorer_2(shape, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHELL, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
-    // while(explorer.More()) {
-    //   const shell = window.oc.oc.TopoDS.Shell_1(explorer.Current())
-    //   window.oc.oc.BOPTools_AlgoTools.OrientFacesOnShell(shell)
-    //   explorer.Next()
-    // }
-    return shape
-  }
+  //   return shape
+  // }
 
   validate() {
     const analyzer = new window.oc.oc.BRepCheck_Analyzer(this.geom(), true, false)
     return analyzer.IsValid_2()
   }
 
+  track(algorithm, algoName, shape, history) {
+    const out = this.clone(shape || algorithm.Shape())
+    history ||= algorithm
+
+    const oldSolid = this.solids()[0]
+    const solid = out.solids()[0]
+
+    // Find unchanged faces in new solid & use original IDs
+    solid.faces().forEach(face => {
+      const original = oldSolid.faces().find(f => f.geom().IsSame(face.geom()) )
+      if(original) face.id = original.id
+    })
+
+    // Find modified faces in new solid & use original IDs
+    oldSolid.faces().forEach(oldFace => {
+      const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => window.oc.oc.TopoDS.Face_1(m) )
+      const faces = modified.map(modFace => solid.faces().find(f => f.geom().IsSame(modFace) ) )
+      faces.forEach(f => f.id = oldFace.id )
+    })
+
+    // Find new faces generated from the original edges and name them accordingly
+    oldSolid.edges().forEach(edge => {
+      const generated = arrayFromOcList(history.Generated(edge.geom())).map(face => window.oc.oc.TopoDS.Face_1(face) )
+      const faces = generated.map(genFace => solid.faces().find(face => face.geom().IsSame(genFace) ) )
+      faces.forEach((face, i) => face.id = edge.id + '/' + algoName + '/' + i )
+    })
+
+    // Name all edges in new solid according to their connected faces
+    solid.edges().forEach(edge => {
+      const faces = edge.connectedFaces()
+      edge.id = faces[0].id + faces[1].id
+    })
+
+    return out
+  }
+
   repair() {
-    if(!this.geom) return
-    const repaired = Volumetric.repair(this.geom())
-    this.geom = () => repaired
-    if(!this.validate()) throw { type: 'error', msg: "Operation produced invalid geometry" }
+    if(!this.geom) return this
+    const out = this.unifyFaces().fixShape()
+    if(!out.validate()) throw { type: 'error', msg: "Operation produced invalid geometry" }
+    return out
+  }
+
+  unifyFaces() {
+    const unify = new window.oc.oc.ShapeUpgrade_UnifySameDomain_2(this.geom(), true, true, false)
+    unify.Build()
+    return this.track(unify, 'unify')
+  }
+
+  fixShape() {
+    const fix = new window.oc.oc.ShapeFix_Shape_2(this.geom())
+    fix.Perform(new window.oc.oc.Message_ProgressRange_1())
+    return this.track(fix, 'fix')
   }
 
   volume() {
@@ -1185,11 +1250,11 @@ export class Volumetric extends Shape {
 
 
 export class Face extends Shape {
-  constructor(solid, geom) {
+  constructor(solid, geom, id) {
     super()
     this.solid = solid
     this.geom = () => geom
-    // this.id = crypto.randomUUID()
+    this.id = id
   }
 
   planarReference() {
@@ -1226,11 +1291,11 @@ export class Face extends Shape {
 
 
 export class Edge extends Shape {
-  constructor(solid, geom) {
+  constructor(solid, geom, id) {
     super()
     this.solid = solid
     this.geom = () => geom
-    // this.id = crypto.randomUUID()
+    this.id = id
   }
 
   axialReference() {
@@ -1250,6 +1315,20 @@ export class Edge extends Shape {
     const dir = vecFromOc(line.Direction()).normalize()
     const loc = vecFromOc(line.Location())
     return rotationFromNormal(dir).setPosition(loc)
+  }
+
+  connectedFaces() {
+    const edgeFaceMap = new window.oc.oc.TopTools_IndexedDataMapOfShapeListOfShape_1()
+    window.oc.oc.TopExp.MapShapesAndAncestors(
+      this.solid.geom(),
+      window.oc.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      window.oc.oc.TopAbs_ShapeEnum.TopAbs_FACE,
+      edgeFaceMap
+    )
+    let faces = edgeFaceMap.ChangeFromKey(this.geom())
+    return [faces.First_1(), faces.Last_1()].map(f =>
+      this.solid.faces().find(sf => sf.geom().IsSame(f) )
+    )
   }
 
   center() {
@@ -1278,23 +1357,31 @@ export class Solid extends Volumetric {
   constructor(compound, geom) {
     super()
     this.compound = compound
-    // geom = Solid.repair(geom)
     this.geom = () => geom
-    // this.id = crypto.randomUUID()
   }
 
   typename() { return 'Solid' }
 
   faces() {
-    this.cachedFaces ||= this.collectShapes('face')
+    if(this.cachedFaces) return this.cachedFaces
+    this.cachedFaces = this.collectShapes('face')
     this.cachedFaces.forEach((face, i) => face.id = this.id + '/face/' + i )
     return this.cachedFaces
   }
 
   edges() {
-    this.cachedEdges ||= this.collectShapes('edge')
+    if(this.cachedEdges) return this.cachedEdges
+    this.cachedEdges = this.collectShapes('edge')
     this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
     return this.cachedEdges
+  }
+
+  cloneCached(newCompound) {
+    const clone = new Solid(newCompound, this.geom())
+    clone.id = this.id
+    clone.cachedFaces = this.faces().map(face => new Face(clone, face.geom(), face.id) )
+    clone.cachedEdges = this.edges().map(edge => new Edge(clone, edge.geom(), edge.id) )
+    return clone
   }
 }
 
@@ -1304,35 +1391,37 @@ export class Compound extends Volumetric {
     super()
     this.componentId = componentId
     if(geom) this.geom = () => geom
-    this.id = crypto.randomUUID()
   }
 
   solids() {
     if(!this.geom) return []
-    this.cachedSolids ||= this.collectShapes('solid')
-    this.cachedSolids.forEach((solid, i) => solid.id = this.id + '/solid/' + i )
+    if(this.cachedSolids) return this.cachedSolids
+    this.cachedSolids = this.collectShapes('solid')
+    this.cachedSolids.forEach((solid, i) => solid.id = this.componentId + '/solid/' + i )
     return this.cachedSolids
   }
 
   clone(geom) {
-    const clone = new Compound(this.componentId, geom || (this.geom && this.geom()))
-    clone.id = this.id
+    return new Compound(this.componentId, geom || (this.geom && this.geom()))
+  }
+
+  cloneCached(geom, cachedSolids) {
+    const clone = this.clone(geom)
+    cachedSolids ||= this.solids()
+    clone.cachedSolids = cachedSolids.map(solid => solid.cloneCached(clone) )
     return clone
   }
 
   boolean(other, op) {
     if(!other.geom) throw { type: 'error', msg: "Tool body has no volume" }
-
-    if(!this.geom) return this.clone(other.geom())
+    if(!this.geom) return this.cloneCached(other.geom(), other.solids())
 
     const ops = {
       join: window.oc.oc.BRepAlgoAPI_Fuse_3,
       cut: window.oc.oc.BRepAlgoAPI_Cut_3,
     }
-
-    const result = new ops[op](this.geom(), other.geom(), new window.oc.oc.Message_ProgressRange_1())
-    // return this.clone(Solid.repair(result.Shape()))
-    return this.clone(result.Shape())
+    const algo = new ops[op](this.geom(), other.geom(), new window.oc.oc.Message_ProgressRange_1())
+    return this.track(algo, op)
   }
 
   fillet(edges, radius) {
@@ -1343,8 +1432,8 @@ export class Compound extends Volumetric {
     try {
       fillet.Build(new window.oc.oc.Message_ProgressRange_1())
       if(!fillet.IsDone()) throw null
-      // return this.clone(Solid.repair(fillet.Shape()))
-      return this.clone(fillet.Shape())
+      return this.track(fillet, 'fillet')
+
     } catch(_) {
       throw { type: 'error', msg: "Fillet could not be built" }
     }
@@ -1376,9 +1465,9 @@ export class Compound extends Volumetric {
         substitution.Replace(solid.geom(), thicken.Shape())
       })
       // Replace updated solids in compound
-      const compound = substitution.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID)
-      const out = this.clone(compound)
-      return out
+      const compoundShape = substitution.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID)
+      return this.track(substitution, 'offset', compoundShape, substitution.History().get())
+
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }
     }
@@ -1404,21 +1493,41 @@ export class Reference {
   }
 }
 
-export class FaceReference extends Reference {
+class TopoReference extends Reference {
+  constructor(item) {
+    super(item)
+    // const root = window.oc.mainDoc.Main()
+    // this.label = root.NewChild()
+    // this.selector = new window.oc.oc.TNaming_Selector(this.label)
+    // const geom = this.item.geom()
+    // console.log(this.selector.Select_2(geom, false, false))
+  }
+}
+
+export class FaceReference extends TopoReference {
   update(tree) {
     const comp = tree.findChild(this.item.solid.compound.componentId)
     const solid = comp.compound.solids().find(solid => solid.id == this.item.solid.id )
+    const error = { type: 'error', msg: "Face reference was lost" }
+    if(!solid) return error
     const face = solid.faces().find(face => face.isSame(this.item) )
-    if(!face) return { type: 'error', msg: "Face reference was lost" }
+    if(!face) return error
     this.item = face
   }
 }
 
-export class EdgeReference extends Reference {
+export class EdgeReference extends TopoReference {
   update(tree) {
     const comp = tree.findChild(this.item.solid.compound.componentId)
     const solid = comp.compound.solids().find(solid => solid.id == this.item.solid.id )
+
+    // const labelMap = new window.oc.oc.TDF_LabelMap_1()
+    // this.selector.Solve(labelMap)
+    // const ns = this.selector.NamedShape().get()
+    // const shape = ns.Get()
+
     const edge = solid.edges().find(edge => edge.isSame(this.item) )
+    // const edge = solid.edges().find(edge => edge.geom().IsSame(shape) )
     if(!edge) return { type: 'error', msg: "Edge reference was lost" }
     this.item = edge
   }
@@ -1724,6 +1833,15 @@ function vecFromOc(ocVec) {
   return new THREE.Vector3().fromArray(coords(ocVec))
 }
 
+function arrayFromOcList(list) {
+  const out = []
+  while(list.Size()) {
+    out.push(list.First_1())
+    list.RemoveFirst()
+  }
+  return out
+}
+
 function ocPnt2dFromVec(vec) {
   return new window.oc.oc.gp_Pnt2d_3(vec.x, vec.y)
 }
@@ -1779,6 +1897,18 @@ function ocPlnFromMatrix(m) {
   return new window.oc.oc.gp_Pln_2(ocAx3FromMatrix(m))
 }
 
+function ocCatch(cb) {
+  try {
+    cb()
+  } catch(e) {
+    if(typeof e === "number") {
+      const exceptionData = window.oc.oc.OCJS.getStandard_FailureData(e)
+      console.error(exceptionData.GetMessageString())
+    }
+    throw e
+  }
+}
+
 function tesselateCurveFixed(geom, steps) {
   const start = geom.FirstParameter()
   const range = geom.LastParameter() - start
@@ -1832,7 +1962,7 @@ function collectShapes(geom, type) {
 
   return arrayRange(1, map.Extent())
     .map(i => map.FindKey(i) )
-    .map(shape => converters[type](shape) )
+    .map(shape => new converters[type](shape) )
 }
 
 function cloneShape(shape) {

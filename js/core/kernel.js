@@ -1038,15 +1038,18 @@ export class Profile {
     // Name faces
     const faces = solid.faces()
     originals.forEach((seg, i) => {
-      faces[i].id = solid.id + '/face/swept/' + seg.id
+      // faces[i].id = solid.id + '/face/swept/' + seg.id
+      faces[i].id = '/face/swept/' + seg.id
     })
-    faces[faces.length - 2].id = solid.id + '/face/bottom'
-    faces[faces.length - 1].id = solid.id + '/face/top'
+    // faces[faces.length - 2].id = solid.id + '/face/bottom'
+    faces[faces.length - 2].id = '/face/bottom'
+    // faces[faces.length - 1].id = solid.id + '/face/top'
+    faces[faces.length - 1].id = '/face/top'
 
     // Name all edges in new solid according to their connected faces
     solid.edges().forEach(edge => {
       const faces = edge.connectedFaces()
-      edge.id = faces[0].id + faces[1].id
+      edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
     })
 
     return compound
@@ -1105,10 +1108,11 @@ export class Shape {
     return vecFromOc(gprops.CentreOfMass())
   }
 
-  transform(workplane) {
-    const transformed = transformGeometry(this.geom(), workplane)
-    this.geom = () => transformed
-  }
+  // transform(workplane) {
+  //   //XXX Track transformation
+  //   const transformed = transformGeometry(this.geom(), workplane)
+  //   this.geom = () => transformed
+  // }
 
   collectShapes(type) {
     const geom = this.geom()
@@ -1188,6 +1192,7 @@ export class Volumetric extends Shape {
     // Find unchanged faces in new solid & use original IDs
     solid.faces().forEach(face => {
       const original = oldSolid.faces().find(f => f.geom().IsSame(face.geom()) )
+      if(original) console.log('original', original)
       if(original) face.id = original.id
     })
 
@@ -1195,20 +1200,35 @@ export class Volumetric extends Shape {
     oldSolid.faces().forEach(oldFace => {
       const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => window.oc.oc.TopoDS.Face_1(m) )
       const faces = modified.map(modFace => solid.faces().find(f => f.geom().IsSame(modFace) ) )
+      if(faces.length) console.log('modified', faces)
       faces.forEach(f => f.id = oldFace.id )
     })
 
     // Find new faces generated from the original edges and name them accordingly
     oldSolid.edges().forEach(edge => {
-      const generated = arrayFromOcList(history.Generated(edge.geom())).map(face => window.oc.oc.TopoDS.Face_1(face) )
+      const shapes = arrayFromOcList(history.Generated(edge.geom()))
+      const generated = shapes.map(shape => {
+        try {
+          return window.oc.oc.TopoDS.Face_1(shape)
+        } catch(err) {}
+      }).filter(Boolean)
       const faces = generated.map(genFace => solid.faces().find(face => face.geom().IsSame(genFace) ) )
+      if(faces.length) console.log('generated from edges', faces)
       faces.forEach((face, i) => face.id = edge.id + '/' + algoName + '/' + i )
+    })
+
+    // Find new faces generated from the original faces and name them accordingly
+    oldSolid.faces().forEach(face => {
+      const generated = arrayFromOcList(history.Generated(face.geom())).map(f => window.oc.oc.TopoDS.Face_1(f) )
+      const faces = generated.map(genFace => solid.faces().find(f => f.geom().IsSame(genFace) ) )
+      if(faces.length) console.log('generated from faces', faces)
+      faces.forEach((f, i) => f.id = face.id + '/' + algoName + '/' + i )
     })
 
     // Name all edges in new solid according to their connected faces
     solid.edges().forEach(edge => {
       const faces = edge.connectedFaces()
-      edge.id = faces[0].id + faces[1].id
+      edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
     })
 
     return out
@@ -1444,10 +1464,9 @@ export class Compound extends Volumetric {
     const faces = new window.oc.oc.TopTools_ListOfShape_1()
     openFaces.forEach(face => faces.Append_1(face.geom()) )
     // Offset each affected solid individually
-    const solids = this.solids().filter(solid => solid.faces().some(face => openFaces.some(of => of.id == face.id ) ) )
-    const substitution = new window.oc.oc.BRepTools_ReShape()
+    const solids = this.solids()
     try {
-      solids.forEach(solid => {
+      const thickened = solids.map(solid => {
         const thicken = new window.oc.oc.BRepOffsetAPI_MakeThickSolid()
         thicken.MakeThickSolidByJoin(
           solid.geom(),
@@ -1462,11 +1481,10 @@ export class Compound extends Volumetric {
           new window.oc.oc.Message_ProgressRange_1()
         )
         if(!thicken.IsDone()) throw null
-        substitution.Replace(solid.geom(), thicken.Shape())
+        return this.track(thicken, 'thicken')
       })
-      // Replace updated solids in compound
-      const compoundShape = substitution.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID)
-      return this.track(substitution, 'offset', compoundShape, substitution.History().get())
+      // Merge resulting solids, in case overlaps occured
+      return thickened.reduce((acc, next) => acc ? acc.boolean(next, 'join') : next )
 
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }

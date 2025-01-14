@@ -1182,51 +1182,56 @@ export class Volumetric extends Shape {
     return analyzer.IsValid_2()
   }
 
-  track(algorithm, algoName, shape, history) {
-    const out = this.clone(shape || algorithm.Shape())
-    history ||= algorithm
+  track(algorithm, algoName, other) {
+    const out = this.clone(algorithm.Shape())
 
-    const oldSolid = this.solids()[0]
-    const solid = out.solids()[0]
+    const solids = out.solids()
+    const oldSolids = this.solids().concat(other ? other.solids() : [])
 
-    // Find unchanged faces in new solid & use original IDs
-    solid.faces().forEach(face => {
-      const original = oldSolid.faces().find(f => f.geom().IsSame(face.geom()) )
+    const newFaces = solids.flatMap(solid => solid.faces() )
+    const newEdges = solids.flatMap(solid => solid.edges() )
+
+    const oldFaces = oldSolids.flatMap(solid => solid.faces() )
+    const oldEdges = oldSolids.flatMap(solid => solid.edges() )
+
+    // Find unchanged faces in new solids & use original IDs
+    newFaces.forEach(face => {
+      const original = oldFaces.find(f => f.geom().IsSame(face.geom()) )
       if(original) console.log('original', original)
       if(original) face.id = original.id
     })
 
     // Find modified faces in new solid & use original IDs
-    oldSolid.faces().forEach(oldFace => {
-      const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => window.oc.oc.TopoDS.Face_1(m) )
-      const faces = modified.map(modFace => solid.faces().find(f => f.geom().IsSame(modFace) ) )
+    oldFaces.forEach(oldFace => {
+      const modified = arrayFromOcList(algorithm.Modified(oldFace.geom())).map(m => window.oc.oc.TopoDS.Face_1(m) )
+      const faces = modified.map(modFace => newFaces.find(f => f.geom().IsSame(modFace) ) )
       if(faces.length) console.log('modified', faces)
       faces.forEach(f => f.id = oldFace.id )
     })
 
     // Find new faces generated from the original edges and name them accordingly
-    oldSolid.edges().forEach(edge => {
-      const shapes = arrayFromOcList(history.Generated(edge.geom()))
+    oldEdges.forEach(edge => {
+      const shapes = arrayFromOcList(algorithm.Generated(edge.geom()))
       const generated = shapes.map(shape => {
         try {
           return window.oc.oc.TopoDS.Face_1(shape)
         } catch(err) {}
       }).filter(Boolean)
-      const faces = generated.map(genFace => solid.faces().find(face => face.geom().IsSame(genFace) ) )
+      const faces = generated.map(genFace => newFaces.find(face => face.geom().IsSame(genFace) ) )
       if(faces.length) console.log('generated from edges', faces)
       faces.forEach((face, i) => face.id = edge.id + '/' + algoName + '/' + i )
     })
 
     // Find new faces generated from the original faces and name them accordingly
-    oldSolid.faces().forEach(face => {
-      const generated = arrayFromOcList(history.Generated(face.geom())).map(f => window.oc.oc.TopoDS.Face_1(f) )
-      const faces = generated.map(genFace => solid.faces().find(f => f.geom().IsSame(genFace) ) )
+    oldFaces.forEach(face => {
+      const generated = arrayFromOcList(algorithm.Generated(face.geom())).map(f => window.oc.oc.TopoDS.Face_1(f) )
+      const faces = generated.map(genFace => newFaces.find(f => f.geom().IsSame(genFace) ) )
       if(faces.length) console.log('generated from faces', faces)
       faces.forEach((f, i) => f.id = face.id + '/' + algoName + '/' + i )
     })
 
     // Name all edges in new solid according to their connected faces
-    solid.edges().forEach(edge => {
+    newEdges.forEach(edge => {
       const faces = edge.connectedFaces()
       edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
     })
@@ -1441,7 +1446,7 @@ export class Compound extends Volumetric {
       cut: window.oc.oc.BRepAlgoAPI_Cut_3,
     }
     const algo = new ops[op](this.geom(), other.geom(), new window.oc.oc.Message_ProgressRange_1())
-    return this.track(algo, op)
+    return this.track(algo, op, other)
   }
 
   fillet(edges, radius) {

@@ -303,10 +303,14 @@ mainBuild:
     - symbol: BRepTools
     # - symbol: BRepTools_Substitution
     - symbol: BRepTools_ReShape
+    - symbol: Handle_BRepTools_ReShape
     - symbol: BRepTools_History
     - symbol: Handle_BRepTools_History
     - symbol: BRepTools_Quilt
     - symbol: BRepTools_WireExplorer
+
+    - symbol: ShapeBuild_ReShape
+    - symbol: Handle_ShapeBuild_ReShape
 
     - symbol: TNaming
     - symbol: TNaming_Selector

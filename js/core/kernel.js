@@ -1185,6 +1185,8 @@ export class Volumetric extends Shape {
   track(algorithm, algoName, other) {
     const out = this.clone(algorithm.Shape())
 
+    const history = algorithm.Modified ? algorithm : (algorithm.History_1 ? algorithm.History_1().get() : algorithm.Context().get().History().get())
+
     const solids = out.solids()
     const oldSolids = this.solids().concat(other ? other.solids() : [])
 
@@ -1203,7 +1205,7 @@ export class Volumetric extends Shape {
 
     // Find modified faces in new solid & use original IDs
     oldFaces.forEach(oldFace => {
-      const modified = arrayFromOcList(algorithm.Modified(oldFace.geom())).map(m => window.oc.oc.TopoDS.Face_1(m) )
+      const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => new window.oc.oc.TopoDS.Face_1(m) )
       const faces = modified.map(modFace => newFaces.find(f => f.geom().IsSame(modFace) ) )
       if(faces.length) console.log('modified', faces)
       faces.forEach(f => f.id = oldFace.id )
@@ -1211,7 +1213,7 @@ export class Volumetric extends Shape {
 
     // Find new faces generated from the original edges and name them accordingly
     oldEdges.forEach(edge => {
-      const shapes = arrayFromOcList(algorithm.Generated(edge.geom()))
+      const shapes = arrayFromOcList(history.Generated(edge.geom()))
       const generated = shapes.map(shape => {
         try {
           return window.oc.oc.TopoDS.Face_1(shape)
@@ -1224,7 +1226,11 @@ export class Volumetric extends Shape {
 
     // Find new faces generated from the original faces and name them accordingly
     oldFaces.forEach(face => {
-      const generated = arrayFromOcList(algorithm.Generated(face.geom())).map(f => window.oc.oc.TopoDS.Face_1(f) )
+      const generated = arrayFromOcList(history.Generated(face.geom())).map(f => {
+        try {
+          return window.oc.oc.TopoDS.Face_1(f)
+        } catch(err) {}
+      }).filter(Boolean)
       const faces = generated.map(genFace => newFaces.find(f => f.geom().IsSame(genFace) ) )
       if(faces.length) console.log('generated from faces', faces)
       faces.forEach((f, i) => f.id = face.id + '/' + algoName + '/' + i )
@@ -1920,7 +1926,7 @@ function ocPlnFromMatrix(m) {
   return new window.oc.oc.gp_Pln_2(ocAx3FromMatrix(m))
 }
 
-function ocCatch(cb) {
+export function ocCatch(cb) {
   try {
     cb()
   } catch(e) {

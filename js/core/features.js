@@ -12,6 +12,7 @@ export class Feature {
     this.settings = settings
     this.error = null
     this.componentId = this.document.activeComponent.id
+    this.id = crypto.randomUUID()
 
     if(!booleanOutput) return
     this.operation = 'join'
@@ -297,7 +298,7 @@ export class ExtrudeFeature extends Feature {
     let tool = new Compound(this.componentId)
     references.profiles.forEach(profile => {
       try {
-        const extrusion = profile.extrude(this.componentId, distance)
+        const extrusion = profile.extrude(this.componentId, distance, this.id)
         tool = tool.boolean(extrusion, 'join')
       } catch(err) { this.error = err || this.error }
     })
@@ -383,7 +384,7 @@ export class RevolveFeature extends Feature {
     let tool = new Compound(this.componentId)
     references.profiles.forEach(profile => {
       try {
-        const revolution = profile.revolve(this.componentId, references.axis, angle)
+        const revolution = profile.revolve(this.componentId, references.axis, angle, this.id)
         tool = tool.boolean(revolution, 'join')
       } catch(err) { this.error = err || this.error }
     })

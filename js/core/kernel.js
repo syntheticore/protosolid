@@ -1004,7 +1004,7 @@ export class Profile {
     return new THREE.Vector3(0,0,1).applyQuaternion(rot)
   }
 
-  extrude(componentId, height) {
+  extrude(componentId, height, featureId) {
     if(!height) throw { type: 'error', msg: 'Extrusion has no volume' }
     const face = this.makeFace()
     const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
@@ -1013,15 +1013,15 @@ export class Profile {
     // const args = new window.oc.oc.TopTools_ListOfShape_1()
     // args.Append_1(face)
     // const history = new window.oc.oc.BRepTools_History_2(args, prism)
-    return this.makeCompound(componentId, prism.Shape())
+    return this.makeCompound(componentId, prism.Shape(), 'extrude-' + featureId)
   }
 
-  revolve(componentId, axis, angle) {
+  revolve(componentId, axis, angle, featureId) {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
     const face = this.makeFace()
     const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
-    return this.makeCompound(componentId, revolution.Shape())
+    return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId)
   }
 
   makeFace() {
@@ -1029,7 +1029,7 @@ export class Profile {
     return new window.oc.oc.BRepBuilderAPI_MakeFace_15(wire, true).Face()
   }
 
-  makeCompound(componentId, shape) {
+  makeCompound(componentId, shape, featureId) {
     const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
 
     const originals = [...this.rings[0].segments]
@@ -1038,13 +1038,10 @@ export class Profile {
     // Name faces
     const faces = solid.faces()
     originals.forEach((seg, i) => {
-      // faces[i].id = solid.id + '/face/swept/' + seg.id
-      faces[i].id = '/face/swept/' + seg.id
+      faces[i].id = '/' + featureId + '/swept/' + seg.id
     })
-    // faces[faces.length - 2].id = solid.id + '/face/bottom'
-    faces[faces.length - 2].id = '/face/bottom'
-    // faces[faces.length - 1].id = solid.id + '/face/top'
-    faces[faces.length - 1].id = '/face/top'
+    faces[faces.length - 2].id = '/' + featureId + '/bottom'
+    faces[faces.length - 1].id = '/' + featureId + '/top'
 
     // Name all edges in new solid according to their connected faces
     solid.edges().forEach(edge => {
@@ -1684,7 +1681,7 @@ export class Timeline {
       parameters: [],
       exportConfigs: [],
       itemsHidden: {},
-      color: 'purple',
+      color: '#e45d5d',
     }
     const cache = {
       faces: [],

@@ -1182,88 +1182,6 @@ export class Volumetric extends Shape {
     return analyzer.IsValid_2()
   }
 
-  track(algorithm, algoName, other) {
-    const out = this.clone(algorithm.Shape())
-
-    const history = algorithm.Modified ? algorithm : (algorithm.History_1 ? algorithm.History_1().get() : algorithm.Context().get().History().get())
-
-    const solids = out.solids()
-    const oldSolids = this.solids().concat(other ? other.solids() : [])
-
-    const newFaces = solids.flatMap(solid => solid.faces() )
-    const newEdges = solids.flatMap(solid => solid.edges() )
-
-    const oldFaces = oldSolids.flatMap(solid => solid.faces() )
-    const oldEdges = oldSolids.flatMap(solid => solid.edges() )
-
-    // Find unchanged faces in new solids & use original IDs
-    newFaces.forEach(face => {
-      const original = oldFaces.find(f => f.geom().IsSame(face.geom()) )
-      if(original) console.log('original', original)
-      if(original) face.id = original.id
-    })
-
-    // Find modified faces in new solid & use original IDs
-    oldFaces.forEach(oldFace => {
-      const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => new window.oc.oc.TopoDS.Face_1(m) )
-      const faces = modified.map(modFace => newFaces.find(f => f.geom().IsSame(modFace) ) )
-      if(faces.length) console.log('modified', faces)
-      faces.forEach(f => f.id = oldFace.id )
-    })
-
-    // Find new faces generated from the original edges and name them accordingly
-    oldEdges.forEach(edge => {
-      const shapes = arrayFromOcList(history.Generated(edge.geom()))
-      const generated = shapes.map(shape => {
-        try {
-          return window.oc.oc.TopoDS.Face_1(shape)
-        } catch(err) {}
-      }).filter(Boolean)
-      const faces = generated.map(genFace => newFaces.find(face => face.geom().IsSame(genFace) ) )
-      if(faces.length) console.log('generated from edges', faces)
-      faces.forEach((face, i) => face.id = edge.id + '/' + algoName + '/' + i )
-    })
-
-    // Find new faces generated from the original faces and name them accordingly
-    oldFaces.forEach(face => {
-      const generated = arrayFromOcList(history.Generated(face.geom())).map(f => {
-        try {
-          return window.oc.oc.TopoDS.Face_1(f)
-        } catch(err) {}
-      }).filter(Boolean)
-      const faces = generated.map(genFace => newFaces.find(f => f.geom().IsSame(genFace) ) )
-      if(faces.length) console.log('generated from faces', faces)
-      faces.forEach((f, i) => f.id = face.id + '/' + algoName + '/' + i )
-    })
-
-    // Name all edges in new solid according to their connected faces
-    newEdges.forEach(edge => {
-      const faces = edge.connectedFaces()
-      edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
-    })
-
-    return out
-  }
-
-  repair() {
-    if(!this.geom) return this
-    const out = this.unifyFaces().fixShape()
-    if(!out.validate()) throw { type: 'error', msg: "Operation produced invalid geometry" }
-    return out
-  }
-
-  unifyFaces() {
-    const unify = new window.oc.oc.ShapeUpgrade_UnifySameDomain_2(this.geom(), true, true, false)
-    unify.Build()
-    return this.track(unify, 'unify')
-  }
-
-  fixShape() {
-    const fix = new window.oc.oc.ShapeFix_Shape_2(this.geom())
-    fix.Perform(new window.oc.oc.Message_ProgressRange_1())
-    return this.track(fix, 'fix')
-  }
-
   volume() {
     if(!this.geom) return 0
     const gprops = new window.oc.oc.GProp_GProps_1() //XXX use GProp_GProps_2 to supply point close to center for better accuracy
@@ -1441,6 +1359,88 @@ export class Compound extends Volumetric {
     cachedSolids ||= this.solids()
     clone.cachedSolids = cachedSolids.map(solid => solid.cloneCached(clone) )
     return clone
+  }
+
+  track(algorithm, algoName, other) {
+    const out = this.clone(algorithm.Shape())
+
+    const history = algorithm.Modified ? algorithm : (algorithm.History_1 ? algorithm.History_1().get() : algorithm.Context().get().History().get())
+
+    const solids = out.solids()
+    const oldSolids = this.solids().concat(other ? other.solids() : [])
+
+    const newFaces = solids.flatMap(solid => solid.faces() )
+    const newEdges = solids.flatMap(solid => solid.edges() )
+
+    const oldFaces = oldSolids.flatMap(solid => solid.faces() )
+    const oldEdges = oldSolids.flatMap(solid => solid.edges() )
+
+    // Find unchanged faces in new solids & use original IDs
+    newFaces.forEach(face => {
+      const original = oldFaces.find(f => f.geom().IsSame(face.geom()) )
+      if(original) console.log('original', original)
+      if(original) face.id = original.id
+    })
+
+    // Find modified faces in new solid & use original IDs
+    oldFaces.forEach(oldFace => {
+      const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => new window.oc.oc.TopoDS.Face_1(m) )
+      const faces = modified.map(modFace => newFaces.find(f => f.geom().IsSame(modFace) ) )
+      if(faces.length) console.log('modified', faces)
+      faces.forEach(f => f.id = oldFace.id )
+    })
+
+    // Find new faces generated from the original edges and name them accordingly
+    oldEdges.forEach(edge => {
+      const shapes = arrayFromOcList(history.Generated(edge.geom()))
+      const generated = shapes.map(shape => {
+        try {
+          return window.oc.oc.TopoDS.Face_1(shape)
+        } catch(err) {}
+      }).filter(Boolean)
+      const faces = generated.map(genFace => newFaces.find(face => face.geom().IsSame(genFace) ) )
+      if(faces.length) console.log('generated from edges', faces)
+      faces.forEach((face, i) => face.id = edge.id + '/' + algoName + '/' + i )
+    })
+
+    // Find new faces generated from the original faces and name them accordingly
+    oldFaces.forEach(face => {
+      const generated = arrayFromOcList(history.Generated(face.geom())).map(f => {
+        try {
+          return window.oc.oc.TopoDS.Face_1(f)
+        } catch(err) {}
+      }).filter(Boolean)
+      const faces = generated.map(genFace => newFaces.find(f => f.geom().IsSame(genFace) ) )
+      if(faces.length) console.log('generated from faces', faces)
+      faces.forEach((f, i) => f.id = face.id + '/' + algoName + '/' + i )
+    })
+
+    // Name all edges in new compound according to their connected faces
+    newEdges.forEach(edge => {
+      const faces = edge.connectedFaces()
+      edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
+    })
+
+    return out
+  }
+
+  repair() {
+    if(!this.geom) return this
+    const out = this.unifyFaces().fixShape()
+    if(!out.validate()) throw { type: 'error', msg: "Operation produced invalid geometry" }
+    return out
+  }
+
+  unifyFaces() {
+    const unify = new window.oc.oc.ShapeUpgrade_UnifySameDomain_2(this.geom(), true, true, false)
+    unify.Build()
+    return this.track(unify, 'unify')
+  }
+
+  fixShape() {
+    const fix = new window.oc.oc.ShapeFix_Shape_2(this.geom())
+    fix.Perform(new window.oc.oc.Message_ProgressRange_1())
+    return this.track(fix, 'fix')
   }
 
   boolean(other, op) {
@@ -1934,6 +1934,7 @@ export function ocCatch(cb) {
       const exceptionData = window.oc.oc.OCJS.getStandard_FailureData(e)
       console.error(exceptionData.GetMessageString())
     }
+    console.error(e.stack)
     throw e
   }
 }

@@ -32,6 +32,16 @@
         @hover="document.previewView = $event"
         @unhover="document.previewView = document.dirtyView"
       )
+
+      .flex
+
+        button.button(@click="document.emit('zoom-to-fit')")
+          Icon(icon="camera")
+
+        button.button
+          Icon(icon="record-vinyl")
+
+      h1 DISPLAY
       RadioBar(
         :items="displayModes"
         v-model:chosen="currentDisplayMode"
@@ -90,12 +100,16 @@
       bottom: 35px
       display: flex
       flex-direction: column
-      h1
-        flex: 0 0 content
+      h1:not(:first-child)
+        margin-top: 1rem
+        // flex: 0 0 content
       .list-chooser
       .radio-bar
-        flex: 0 1 auto
-        margin-bottom: 16px
+        // flex: 0 1 auto
+        margin-bottom: 0.5rem
+
+  .flex
+    pointer-events: auto
 
   .view-port
     width: 100%

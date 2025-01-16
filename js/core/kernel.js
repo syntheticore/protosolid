@@ -1375,7 +1375,7 @@ export class Compound extends Volumetric {
     // Find unchanged faces in new solids & use original IDs
     newFaces.forEach(face => {
       const original = oldFaces.find(f => f.geom().IsSame(face.geom()) )
-      if(original) console.log('original', original)
+      // if(original) console.log('original', original)
       if(original) face.id = original.id
     })
 
@@ -1383,7 +1383,7 @@ export class Compound extends Volumetric {
     oldFaces.forEach(oldFace => {
       const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => new window.oc.oc.TopoDS.Face_1(m) )
       const faces = modified.map(modFace => newFaces.find(f => f.geom().IsSame(modFace) ) )
-      if(faces.length) console.log('modified', faces)
+      // if(faces.length) console.log('modified', faces)
       faces.forEach(f => f.id = oldFace.id )
     })
 
@@ -1396,7 +1396,7 @@ export class Compound extends Volumetric {
         } catch(err) {}
       }).filter(Boolean)
       const faces = generated.map(genFace => newFaces.find(face => face.geom().IsSame(genFace) ) )
-      if(faces.length) console.log('generated from edges', faces)
+      // if(faces.length) console.log('generated from edges', faces)
       faces.forEach((face, i) => face.id = edge.id + '/' + algoName + '/' + i )
     })
 
@@ -1408,7 +1408,7 @@ export class Compound extends Volumetric {
         } catch(err) {}
       }).filter(Boolean)
       const faces = generated.map(genFace => newFaces.find(f => f.geom().IsSame(genFace) ) )
-      if(faces.length) console.log('generated from faces', faces)
+      // if(faces.length) console.log('generated from faces', faces)
       faces.forEach((f, i) => f.id = face.id + '/' + algoName + '/' + i )
     })
 
@@ -1681,7 +1681,7 @@ export class Timeline {
       parameters: [],
       exportConfigs: [],
       itemsHidden: {},
-      color: '#e45d5d',
+      color: '#ffd52f',
     }
     const cache = {
       faces: [],
@@ -1837,7 +1837,7 @@ export class Timeline {
 
   finalTree() {
     let tree = new Component(null, "00000000-0000-0000-0000-000000000000")
-    tree.creator = { color: 'purple' }
+    tree.creator = { color: '#ffd52f' }
     this.features.forEach(feature => {
       if(feature instanceof CreateComponentFeature) {
         let parent = tree.findChild(feature.parent())

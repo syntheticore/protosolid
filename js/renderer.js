@@ -199,6 +199,7 @@ export default class Renderer {
 
   setPivot(coords) {
     const vec = this.fromScreen(coords)
+    if(!vec) return
     const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.camera.position)
     this.setView(cameraTarget, vec)
   }
@@ -207,6 +208,33 @@ export default class Renderer {
     const normal = new THREE.Vector3(0,0,1).applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(plane))
     const dir = this.camera.position.clone().sub(this.viewControls.target).projectOnVector(normal)
     this.setView(this.viewControls.target.clone().add(dir), this.viewControls.target.clone())
+  }
+
+  zoomToFit(objects) {
+    objects ||= [this.world]
+    const box = new THREE.Box3()
+    objects.forEach(obj => box.expandByObject(obj) )
+    const target = box.getCenter(new THREE.Vector3())
+    const size = box.getSize(new THREE.Vector3())
+    const radius = Math.max(...size.toArray()) / 2.0
+
+    if(this.activeCamera == this.cameraOrtho) {
+      const width = this.camera.right - this.camera.left
+      const height = this.camera.top - this.camera.bottom
+      const diameter = radius * 2.0
+      const zoom = Math.min(width / diameter, height / diameter)
+      // this.zoomTo(zoom)
+
+    } else {
+      const vFOV = this.camera.getEffectiveFOV() * THREE.MathUtils.DEG2RAD
+      const hFOV = Math.atan(Math.tan(vFOV * 0.5) * this.camera.aspect) * 2.0
+      const fov = this.camera.aspect > 1.0 ? vFOV : hFOV
+      const distanceToFit = radius / (Math.sin(fov * 0.5))
+      const dir = this.camera.position.clone().sub(this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.5)
+      const position = target.clone().add(dir)
+      this.setView(position, target)
+      return [position, target]
+    }
   }
 
   setView(position, target) {

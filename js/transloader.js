@@ -167,16 +167,19 @@ export default class Transloader {
 
     cache.edges.forEach(edge => {
       this.renderer.remove(edge.mesh())
+      delete edge.mesh
     })
     cache.edges = []
 
     cache.faces.forEach(face => {
       this.renderer.remove(face.mesh())
+      delete face.mesh
     })
     cache.faces = []
 
     cache.helpers.forEach(helper => {
       this.renderer.remove(helper.mesh())
+      delete helper.mesh
     })
     cache.helpers = []
 
@@ -210,6 +213,7 @@ export default class Transloader {
     if(elem.mesh) {
       const cache = comp.creator.cache()
       this.renderer.remove(elem.mesh())
+      delete elem.mesh
       cache.curves = cache.curves.filter(e => e != elem )
     }
     this.onUnloadElement(elem, comp)
@@ -244,6 +248,7 @@ export default class Transloader {
     cache.regions.forEach(region => {
       // region.free()
       this.renderer.remove(region.mesh())
+      delete region.mesh
     })
     cache.regions = []
   }
@@ -263,6 +268,7 @@ export default class Transloader {
     const cache = comp.creator.cache();
     ((sketch && sketch.constraints.filter(c => c instanceof Dimension)) || [...cache.dimensions]).forEach(dimension => {
       this.renderer.remove(dimension.controls())
+      delete dimension.controls
       cache.dimensions.splice(cache.dimensions.indexOf(dimension), 1)
     })
   }

@@ -281,7 +281,7 @@
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
   import Transloader from './../js/transloader.js'
-  import { CoincidentConstraint, Dimension } from './../js/core/kernel.js'
+  import { CoincidentConstraint, Dimension, Solid } from './../js/core/kernel.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -449,6 +449,12 @@
       })
       this.document.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
       this.document.on('look-at', (plane) => setTimeout(() => this.renderer.lookAt(plane) ) )
+      this.document.on('zoom-to-fit', () => {
+        const solids = [...this.document.selection.set].filter(sel => sel instanceof Solid )
+        const meshes = solids.flatMap(solid => solid.faces() ).map(face => face.mesh() )
+        const [position, target] = this.renderer.zoomToFit(meshes.length && meshes)
+        this.document.viewChanged(position, target)
+      })
       this.bus.on('render-needed', () => this.renderer.render() )
       this.bus.on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.bus.on('unpreview-feature', this.unpreviewFeature)

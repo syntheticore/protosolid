@@ -180,7 +180,6 @@ export default class Renderer {
 
   remove(obj) {
     if(!obj) return
-
     this.world.remove(obj)
     this.scene.remove(obj)
     this.dropResources(obj, true)
@@ -230,7 +229,7 @@ export default class Renderer {
       const hFOV = Math.atan(Math.tan(vFOV * 0.5) * this.camera.aspect) * 2.0
       const fov = this.camera.aspect > 1.0 ? vFOV : hFOV
       const distanceToFit = radius / (Math.sin(fov * 0.5))
-      const dir = this.camera.position.clone().sub(this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.5)
+      const dir = this.camera.position.clone().sub(this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.6)
       const position = target.clone().add(dir)
       this.setView(position, target)
       return [position, target]

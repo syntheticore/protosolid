@@ -592,21 +592,21 @@ export class Sketch {
       let primitives
 
       if(elem instanceof Line) {
-        const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: elem.projected }
-        const p2 = { id: `${id++}`, type: 'point', x: elem.points[1].x, y: elem.points[1].y, fixed: elem.projected }
+        const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: elem.projection }
+        const p2 = { id: `${id++}`, type: 'point', x: elem.points[1].x, y: elem.points[1].y, fixed: elem.projection }
         const line = { id: `${id++}`, type: 'line', p1_id: p1.id, p2_id: p2.id }
         primitives = [p1, p2, line]
 
       } else if(elem instanceof Circle) {
-        const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projected }
+        const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projection }
         const circle = { id: `${id++}`, type: 'circle', c_id: center.id, radius: elem.radius }
         primitives = [center, circle]
 
       } else if(elem instanceof Arc) {
-        const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projected }
+        const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projection }
         const endpoints = elem.endpoints()
-        const start =  { id: `${id++}`, type: 'point', x: endpoints[0].x, y: endpoints[0].y, fixed: elem.projected }
-        const end =    { id: `${id++}`, type: 'point', x: endpoints[1].x, y: endpoints[1].y, fixed: elem.projected }
+        const start =  { id: `${id++}`, type: 'point', x: endpoints[0].x, y: endpoints[0].y, fixed: elem.projection }
+        const end =    { id: `${id++}`, type: 'point', x: endpoints[1].x, y: endpoints[1].y, fixed: elem.projection }
         const arc = {
           id: `${id++}`,
           type: 'arc',
@@ -667,7 +667,6 @@ export class Sketch {
         // Equal length line/line
         } else {
           return { id: `${id++}`, type: 'equal_length', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
-
         }
 
       } else if(c instanceof TangentConstraint) {

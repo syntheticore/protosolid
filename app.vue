@@ -69,6 +69,7 @@
   import Emitter from './js/emitter.js'
   // const wasmP = import('../../rust/pkg/wasm-index.js')
 
+  loadPreferences()
   const blurry = ref(preferences.blurredOverlays)
   prefEmitter.on('updated', () => blurry.value = preferences.blurredOverlays )
 
@@ -87,8 +88,6 @@
   const maximized = ref(false)
   const activeDocument = ref(null)
   const documents = ref([])
-
-  loadPreferences()
 
   window.addEventListener('resize', () => {
     bus.emit('resize')

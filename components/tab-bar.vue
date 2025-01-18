@@ -70,7 +70,7 @@
 <style lang="stylus" scoped>
   .tab-bar
     display: flex
-    background: rgba($dark2, 0.9)
+    background: $dark2
     // background: linear-gradient(to bottom, $dark1 * 0.9, $dark2 * 0.95)
     border-bottom: 1px solid black
     outline: 1px solid #323840
@@ -81,6 +81,7 @@
     .blurry &
       -webkit-backdrop-filter: blur(16px)
       backdrop-filter: blur(16px)
+      background: rgba($dark2, 0.9)
 
     [data-platform="darwin"]:not([data-darwin-old]) &
       border-radius: 4px 4px 0px 0px

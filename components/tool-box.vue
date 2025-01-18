@@ -41,7 +41,6 @@
     border-top-right-radius: 3px
     border-bottom-left-radius: 6px
     border-bottom-right-radius: 6px
-    background: rgba($dark2, 0.95)
     min-width: 565px
     // overflow: hidden
 

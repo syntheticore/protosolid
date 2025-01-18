@@ -69,9 +69,7 @@
     transform: scale(0.85)
     z-index: 1
     border-radius: 99px
-    background: rgb($dark2)
-    -webkit-backdrop-filter: none
-    backdrop-filter: none
+    background: $dark2
 
   button
     background: none

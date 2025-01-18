@@ -281,7 +281,7 @@
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
   import Transloader from './../js/transloader.js'
-  import { CoincidentConstraint, Dimension, Solid } from './../js/core/kernel.js'
+  import { CoincidentConstraint, Dimension, Solid, Face, SketchElement } from './../js/core/kernel.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -449,12 +449,9 @@
       })
       this.document.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
       this.document.on('look-at', (plane) => setTimeout(() => this.renderer.lookAt(plane) ) )
-      this.document.on('zoom-to-fit', () => {
-        const solids = [...this.document.selection.set].filter(sel => sel instanceof Solid )
-        const meshes = solids.flatMap(solid => solid.faces() ).map(face => face.mesh() )
-        const [position, target] = this.renderer.zoomToFit(meshes.length && meshes)
-        this.document.viewChanged(position, target)
-      })
+      this.document.on('zoom-all', () => this.zoomToFit() )
+      this.document.on('zoom-active', () => this.zoomToFit(this.document.activeComponent.compound.solids()) )
+      this.document.on('zoom-selection', () => this.zoomToFit([...this.document.selection.set]) )
       this.bus.on('render-needed', () => this.renderer.render() )
       this.bus.on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.bus.on('unpreview-feature', this.unpreviewFeature)
@@ -694,6 +691,14 @@
         elem.sketch.remove(elem)
         this.document.selection = this.document.selection.delete(elem)
         this.componentChanged(this.document.activeComponent)
+      },
+
+      zoomToFit: function(objects=[]) {
+        const solidFaces = objects.filter(sel => sel instanceof Solid ).flatMap(solid => solid.faces() )
+        const rest = objects.filter(sel => sel instanceof Face || sel instanceof SketchElement )
+        const meshes = solidFaces.concat(rest).map(obj => obj.mesh() )
+        const [position, target] = this.renderer.zoomToFit(meshes.length && meshes)
+        this.document.viewChanged(position, target)
       },
 
       componentChanged: function(comp, recursive) {

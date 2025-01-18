@@ -1,6 +1,7 @@
 <template lang="pug">
 
   main.document-view(@pointerdown="bus.emit('close-widgets')")
+
     ViewPort(
       :document="document"
       :active-view="document.previewView || document.activeView"
@@ -15,6 +16,7 @@
     )
 
     .side-bar.left
+
       TreeView(
         :top="tree"
         :document="document"
@@ -22,7 +24,9 @@
       )
 
     .side-bar.right
+
       h1 View
+
       ListChooser(
         :list="document.views"
         :active="document.activeView"
@@ -35,13 +39,16 @@
 
       .flex
 
-        button.button(@click="document.emit('zoom-to-fit')")
-          Icon(icon="camera")
+        IconButton(v-if="document.selection.set.size" icon="search-plus" @click="document.emit('zoom-selection')" title="Fit Selection")
 
-        button.button
-          Icon(icon="record-vinyl")
+        template(v-else)
+
+          IconButton(icon="camera" @click="document.emit('zoom-all')" title="Fit All")
+
+          IconButton(icon="crop-alt" @click="document.emit('zoom-active')" title="Fit Active")
 
       h1 DISPLAY
+
       RadioBar(
         :items="displayModes"
         v-model:chosen="currentDisplayMode"

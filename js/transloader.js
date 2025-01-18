@@ -120,41 +120,39 @@ export default class Transloader {
       }
     })
 
-    // if(comp === this.document.activeComponent) {
+    // Load Sketches
+    comp.sketches.forEach(sketch => {
+      sketch.component = comp
+      if(comp.creator.itemsHidden[sketch.id]) return
 
-      // Load Sketches
-      comp.sketches.forEach(sketch => {
-        sketch.component = comp
-        if(comp.creator.itemsHidden[sketch.id]) return
-
-        // Load Sketch Elements
-        sketch.elements.forEach(elem => {
-          this.loadElement(elem, comp)
-        })
-
-        // Load Projections
-        sketch.projections.forEach(projection => {
-          const elem = projection.geometry()
-          if(elem) this.loadElement(elem, comp)
-        })
-
-        // Load Dimensions
-        if(sketch == this.document.activeSketch) this.updateDimensions(comp, sketch)
+      // Load Sketch Elements
+      sketch.elements.forEach(elem => {
+        this.loadElement(elem, comp)
       })
 
-      // Update regions
-      if(!cache.regions.length) this.updateRegions(comp)
+      // Load Projections
+      sketch.projections.forEach(projection => {
+        const elem = projection.geometry()
+        if(elem) this.loadElement(elem, comp)
+      })
 
-    // }
-
-    // Load Construction Helpers
-    comp.helpers.forEach(plane => {
-      const mesh = new PlaneHelperObject(plane)
-      plane.mesh = () => mesh
-      plane.component = comp
-      this.renderer.add(mesh, true)
-      cache.helpers.push(plane)
+      // Load Dimensions
+      if(sketch == this.document.activeSketch) this.updateDimensions(comp, sketch)
     })
+
+    // Update regions
+    if(!cache.regions.length) this.updateRegions(comp)
+
+    if(comp === this.document.activeComponent) {
+      // Load Construction Helpers
+      comp.helpers.forEach(plane => {
+        const mesh = new PlaneHelperObject(plane)
+        plane.mesh = () => mesh
+        plane.component = comp
+        this.renderer.add(mesh, true)
+        cache.helpers.push(plane)
+      })
+    }
 
     // Recurse
     if(recursive) comp.children.forEach(child => this.loadTree(child, true))
@@ -322,7 +320,7 @@ export default class Transloader {
     cache.faces.forEach(face => face.mesh().material = this.getSurfaceMaterial(comp, face) )
     cache.regions.forEach(region => region.mesh().material = this.getElemMaterial(region) )
     cache.curves.forEach(curve => curve.mesh().material = this.getElemMaterial(curve) )
-    comp.helpers.forEach(helper => helper.mesh().material = this.getElemMaterial(helper) )
+    comp.helpers.forEach(helper => { if(helper.mesh) helper.mesh().material = this.getElemMaterial(helper) })
     comp.children.forEach(child => this.applyMaterials(child) )
   }
 

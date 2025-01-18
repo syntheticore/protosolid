@@ -148,8 +148,10 @@ input[type="color"]
   border-top-color: $dark1 * 1.25
   background: rgba($dark2, 0.95)
   box-shadow: 0 0 0 1px $dark2 * 0.5, 0 2px 5px rgba(black, 0.15)
-  -webkit-backdrop-filter: blur(8px)
-  backdrop-filter: blur(8px)
+
+  .blurry &
+    -webkit-backdrop-filter: blur(8px)
+    backdrop-filter: blur(8px)
 
 .tipped
   position: relative

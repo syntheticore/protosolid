@@ -8,9 +8,6 @@
       v-bind="$attrs"
       is-top
     )
-    //- v-on="$listeners"
-    //- :selection="selection"
-    //- :active-component="activeComponent"
 
 </template>
 
@@ -51,22 +48,5 @@
 <script setup>
 
   const props = defineProps(['top', 'document'])
-
-  // import TreeItem from './tree-item.vue'
-
-  // export default {
-  //   name: 'TreeView',
-
-  //   // components: {
-  //   //   TreeItem,
-  //   // },
-
-  //   props: {
-  //     top: Object,
-  //     document: Object,
-  //     // activeComponent: Object,
-  //     // selection: Object,
-  //   },
-  // }
 
 </script>

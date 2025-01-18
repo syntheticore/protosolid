@@ -1471,9 +1471,8 @@ export class Compound extends Volumetric {
     const faces = new window.oc.oc.TopTools_ListOfShape_1()
     openFaces.forEach(face => faces.Append_1(face.geom()) )
     // Offset each affected solid individually
-    const solids = this.solids()
     try {
-      const thickened = solids.map(solid => {
+      const thickened = this.solids().map(solid => {
         const thicken = new window.oc.oc.BRepOffsetAPI_MakeThickSolid()
         thicken.MakeThickSolidByJoin(
           solid.geom(),
@@ -1673,7 +1672,7 @@ export class AxisHelper extends ConstructionHelper {
 
 export class Timeline {
   constructor() {
-    const baseComp = new Component(null, "00000000-0000-0000-0000-000000000000")
+    const baseComp = new Component(null, '00000000-0000-0000-0000-000000000000')
     baseComp.creator = {
       title: "Main Assembly",
       sectionViews: [],
@@ -1835,7 +1834,7 @@ export class Timeline {
   // }
 
   finalTree() {
-    let tree = new Component(null, "00000000-0000-0000-0000-000000000000")
+    let tree = new Component(null, '00000000-0000-0000-0000-000000000000')
     tree.creator = { color: '#ffd52f' }
     this.features.forEach(feature => {
       if(feature instanceof CreateComponentFeature) {

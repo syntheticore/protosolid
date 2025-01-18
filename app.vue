@@ -2,17 +2,15 @@
 
   #app(
     v-if="activeDocument"
-    :class="{ fullscreen: isFullscreen, maximized: isMaximized }"
+    :class="{ fullscreen, maximized, blurry }"
   )
 
-    DocumentView(
-      :document="activeDocument"
-    )
+    DocumentView(:document="activeDocument")
 
     TabBar(
       :documents="documents"
       v-model:active-document="activeDocument"
-      :is-maximized="isMaximized"
+      :maximized="maximized"
       @create-document="createDocument"
       @open-document="loadDocument"
       @save-document="saveDocument"
@@ -66,10 +64,13 @@
 
   import { provide } from 'vue'
 
-  import { loadPreferences } from './../js/preferences.js'
-  import Document from './../js/core/document.js'
-  import Emitter from './../js/emitter.js'
+  import { default as preferences, loadPreferences, emitter as prefEmitter } from './js/preferences.js'
+  import Document from './js/core/document.js'
+  import Emitter from './js/emitter.js'
   // const wasmP = import('../../rust/pkg/wasm-index.js')
+
+  const blurry = ref(preferences.blurredOverlays)
+  prefEmitter.on('updated', () => blurry.value = preferences.blurredOverlays )
 
   document.body.setAttribute('data-platform', window.platform || 'browser')
 
@@ -82,8 +83,8 @@
 
   const store = useMainStore()
 
-  const isFullscreen = ref(false)
-  const isMaximized = ref(false)
+  const fullscreen = ref(false)
+  const maximized = ref(false)
   const activeDocument = ref(null)
   const documents = ref([])
 
@@ -96,12 +97,12 @@
   createDocument()
 
   if(window.ipc) {
-    window.ipc.on('fullscreen-changed', (e, isFullscreen) => {
-      isFullscreen.value = isFullscreen
+    window.ipc.on('fullscreen-changed', (e, value) => {
+      fullscreen.value = value
     })
 
-    window.ipc.on('maximize-changed', (e, isMaximized) => {
-      isMaximized.value = isMaximized
+    window.ipc.on('maximize-changed', (e, value) => {
+      maximized.value = value
     })
 
     window.ipc.on('dark-mode', (e, darkMode) => {

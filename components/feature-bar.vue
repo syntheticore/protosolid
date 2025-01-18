@@ -31,16 +31,16 @@
             :active-feature="document.activeFeature"
             @close="document.activateFeature(null, true, true)"
           )
-          //- @close="$emit('update:active-feature', null, true)"
+
         FeatureIcon(
           :document="document"
           :feature="feature"
           :is-active="isActive(feature)"
           @move-marker="document.moveMarker(i + 1)"
         )
-        //- v-on="$listeners"
-        //- :selection="document.selection"
+
       hr(ref="marker")
+
       li.future(
         v-for="(feature, i) in future"
         :style="{'--color': getFeatureColor(feature)}"
@@ -52,8 +52,7 @@
           :is-active="isActive(feature)"
           @move-marker="document.moveMarker(past.length + i + 1)"
         )
-        //- v-on="$listeners"
-        //- :selection="document.selection"
+
 </template>
 
 

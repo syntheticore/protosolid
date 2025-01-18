@@ -1,5 +1,5 @@
 <template lang="pug">
-  .app-menu(:class="{open: open}")
+  .app-menu(:class="{ open }")
     .file-menu
       button.button.settings-btn(@click="toggleSettings" title="Preferences")
         Icon(icon="sliders-h")

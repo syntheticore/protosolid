@@ -4,7 +4,7 @@
     MenuButton.left.app-menu-btn(icon="atom")
       AppMenu(
         :document="activeDocument"
-        v-on="$listeners"
+        v-bind="$attrs"
       )
 
     ul.tabs
@@ -55,7 +55,7 @@
       button(@click="minimize")
         Icon(icon="window-minimize")
 
-      button(v-if="isMaximized" @click="unmaximize")
+      button(v-if="maximized" @click="unmaximize")
         Icon(icon="window-restore")
 
       button(v-else @click="maximize")
@@ -72,16 +72,22 @@
     display: flex
     background: rgba($dark2, 0.9)
     // background: linear-gradient(to bottom, $dark1 * 0.9, $dark2 * 0.95)
-    -webkit-backdrop-filter: blur(16px)
-    backdrop-filter: blur(16px)
     border-bottom: 1px solid black
     outline: 1px solid #323840
     max-width: 100vw
     align-items: center
+    z-index: 2
+
+    .blurry &
+      -webkit-backdrop-filter: blur(16px)
+      backdrop-filter: blur(16px)
+
     [data-platform="darwin"]:not([data-darwin-old]) &
       border-radius: 4px 4px 0px 0px
+
     [data-platform="darwin"] &
       padding-left: 74px
+
     > *
       flex: 0 0 auto
 
@@ -215,7 +221,7 @@
     props: {
       documents: Array,
       activeDocument: Object,
-      isMaximized: Boolean,
+      maximized: Boolean,
     },
 
     methods: {

@@ -92,9 +92,6 @@
         :solid="solid"
         :index="i"
       )
-      //- v-on="$listeners"
-      //- :component="component"
-      //- :selection="selection"
 
       //- Sketches
       TreeletSketch(
@@ -106,7 +103,6 @@
         :sketch="sketch"
         :index="i"
       )
-      //- v-on="$listeners"
 
     //- Children
     transition-group(name="list" tag="ul" v-if="isAssembly && expanded")
@@ -118,9 +114,6 @@
         :component="child"
         :parent-hidden="!isVisible"
       )
-      //- v-on="$listeners"
-      //- :active-component="document.activeComponent"
-      //- :selection="selection"
 
 </template>
 
@@ -244,7 +237,7 @@
         width: 79px
 
     svg
-      font-size: 21px
+      font-size: 16px
       padding: 4px
       color: $bright2
 
@@ -260,12 +253,17 @@
         transition: none
 
     .widgets li
+
       .box
         background: rgba($dark2 * 1.3, 0.93)
-        backdrop-filter: blur(8px)
         font-size: 11px
         transition: background-color 0.15s
+
+        .blurry &
+          backdrop-filter: blur(8px)
+
         &:hover
+
           header svg
             color: $bright1
 

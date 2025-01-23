@@ -327,6 +327,7 @@
     watch: {
       document: function(document, oldDocument) {
         this.transloader.unloadTree(oldDocument.top(), true)
+        this.registerDocument(this.document, oldDocument)
         this.transloader.setDocument(document)
       },
 
@@ -441,23 +442,17 @@
       this.bus.on('show-picker', this.addPath)
       this.bus.on('clear-pickers', this.clearPaths)
       this.bus.on('activate-tool', this.activateTool)
-      this.document.on('component-changed', this.componentChanged)
-      this.document.on('component-deleted', this.componentDeleted)
-      this.document.on('sketch-changed', (sketch) => {
-        this.transloader.updateRegions(this.document.activeComponent)
-        this.reloadSketch(sketch)
-      })
-      this.document.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
-      this.document.on('look-at', (plane) => setTimeout(() => this.renderer.lookAt(plane) ) )
-      this.document.on('zoom-all', () => this.zoomToFit() )
-      this.document.on('zoom-active', () => this.zoomToFit(this.document.activeComponent.compound.solids()) )
-      this.document.on('zoom-selection', () => this.zoomToFit([...this.document.selection.set]) )
+      this.bus.on('zoom-all', () => this.zoomToFit() )
+      this.bus.on('zoom-active', () => this.zoomToFit(this.document.activeComponent.compound.solids()) )
+      this.bus.on('zoom-selection', () => this.zoomToFit([...this.document.selection.set]) )
       this.bus.on('render-needed', () => this.renderer.render() )
       this.bus.on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.bus.on('unpreview-feature', this.unpreviewFeature)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
       this.bus.on('keyup', this.keyUp)
+
+      this.registerDocument(this.document)
 
       // Window Resize
       setTimeout(() => this.onWindowResize(), 1000)
@@ -470,6 +465,24 @@
     },
 
     methods: {
+      registerDocument: function(doc, oldDoc) {
+        if(oldDoc) {
+          oldDoc.off('component-changed')
+          oldDoc.off('component-deleted')
+          oldDoc.off('sketch-changed')
+          oldDoc.off('force-view')
+          oldDoc.off('look-at')
+        }
+        doc.on('component-changed', this.componentChanged)
+        doc.on('component-deleted', this.componentDeleted)
+        doc.on('sketch-changed', (sketch) => {
+          this.transloader.updateRegions(doc.activeComponent)
+          this.reloadSketch(sketch)
+        })
+        doc.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
+        doc.on('look-at', (plane) => setTimeout(() => this.renderer.lookAt(plane) ) )
+      },
+
       getMouseCoords: function(e) {
         var rect = this.$refs.canvas.getBoundingClientRect()
         return new THREE.Vector2(e.clientX, e.clientY - rect.top)

@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 
 import Component from './component.js'
-import { Sketch, Compound, EdgeReference } from './kernel.js'
+import { Sketch, Compound, Reference } from './kernel.js'
+import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
+import { makeID } from './id.js'
 
 
 export class Feature {
@@ -12,7 +14,7 @@ export class Feature {
     this.settings = settings
     this.error = null
     this.componentId = this.document.activeComponent.id
-    this.id = crypto.randomUUID()
+    this.id = makeID()
 
     if(!booleanOutput) return
     this.operation = 'join'
@@ -133,43 +135,40 @@ export class Feature {
 
   getValues() {
     const values = {}
-    Object.keys(this.settings).forEach(key => values[key] = this[key] )
+    Object.keys(this.settings).forEach(key => {
+      values[key] = (this[key] && this.needsPicker(key, true) ? this[key]() : this[key])
+    })
     return values
   }
 
   setValues(values) {
-    Object.keys(values).forEach(key => this[key] = values[key] )
+    Object.keys(values).forEach(key => {
+      const value = values[key]
+      this[key] = (value && this.needsPicker(key, true) ? () => value : value)
+    })
   }
 
-  serialize() {
+  dump() {
     return {
-      title: this.title,
+      id: this.id,
       values: this.getValues(),
     }
+  }
+
+  static undump(dump, context) {
+    const feature = new this(context.document)
+    feature.id = dump.id
+    feature.setValues(dump.values)
+    return feature
   }
 
   dispose() {}
 }
 
-export function deserialize(document, real, dump) {
-  const Klass = {
-    'New Component': CreateComponentFeature,
-    'Sketch': CreateSketchFeature,
-    'Extrusion': ExtrudeFeature,
-    'Revolution': RevolveFeature,
-    'Draft': DraftFeature,
-    'Sweep': SweepFeature,
-  }[dump.title]
-  const feature = new Klass(document, real)
-  feature.setValues(dump.values)
-  feature.id = real.id()
-  return feature
-}
-
 
 export class CreateComponentFeature extends Feature {
   static icon = 'box'
-  constructor(doc, parent) {
+  constructor(doc, parentId) {
     super(doc, false, 'New Component', {
       parent: {
         title: 'Parent Component',
@@ -181,11 +180,7 @@ export class CreateComponentFeature extends Feature {
       },
     })
 
-    const parentId = parent.id
-    this.parent = () => parentId
-
-    this.component = new Component(parent, crypto.randomUUID())
-    this.component.creator = this
+    this.parent = parentId
 
     this.title = "New Component"
     this.hidden = false
@@ -195,7 +190,7 @@ export class CreateComponentFeature extends Feature {
     this.parameters = []
     this.exportConfigs = []
     this.itemsHidden = {}
-    this.color = doc.makeColor()
+    this.color = this.makeColor()
 
     const cache = {
       faces: [],
@@ -209,15 +204,70 @@ export class CreateComponentFeature extends Feature {
     this.cache = () => cache
   }
 
+  makeColor() {
+    const existingColors = this.document.timeline.features
+      .filter(feature => feature instanceof CreateComponentFeature )
+      .map(feature => this.parseHsl(feature.color) )
+    const testColors = [...Array(100)].map(() => {
+      const color = {
+        h: Math.random() * 360,
+        s: 45 + Math.random() * 20,
+        l: 55 + Math.random() * 10,
+      }
+      const diffs = existingColors.map(c => this.colorDiff(c, color) )
+      const worstDiff = Math.min(...diffs)
+      return { color, diff: worstDiff }
+    })
+    testColors.sort((a, b) => Math.sign(b.diff - a.diff) )
+    const color = testColors[0].color
+    return `hsl(${color.h}, ${color.s}%, ${color.l}%)`
+  }
+
+  colorDiff(c1, c2) {
+    let hue = Math.abs(c1.h - c2.h)
+    hue = hue > 180 ? 360 - hue : hue
+    return hue + Math.abs(c1.s - c2.s) + Math.abs(c1.l - c2.l)
+  }
+
+  parseHsl(str) {
+    const match = /hsl\((.+),\s*(.+)%,\s*(.+)%\)/g.exec(str).slice(1,4).map(v => Number(v) )
+    return { h: match[0], s: match[1], l: match[2] }
+  }
+
   updateFeature(tree) {
-    let parent = tree.findChild(this.parent())
-    parent.children.push(this.component)
+    let parent = tree.findChild(this.parent)
+    const comp = new Component(parent, this.id)
+    comp.creator = this
+    parent.children.push(comp)
   }
 
   modifiedComponents() {
-    return [this.parent()]
+    return [this.parent]
+  }
+
+  dump() {
+    return {
+      ...super.dump(),
+      hidden: this.hidden,
+      material: this.material,
+      cog: this.cog,
+      sectionViews: this.sectionViews,
+      parameters: this.parameters,
+      exportConfigs: this.exportConfigs,
+      itemsHidden: this.itemsHidden,
+      color: this.color,
+    }
+  }
+
+  static undump(dump, context) {
+    const feature = super.undump(dump, context)
+    Object.assign(feature, dump)
+    delete feature.values
+    return feature
   }
 }
+
+Serialize.register(CreateComponentFeature, 'CreateComponentFeature')
 
 
 export class CreateSketchFeature extends Feature {
@@ -250,7 +300,23 @@ export class CreateSketchFeature extends Feature {
   confirm() {
     this.document.activateFeature(this)
   }
+
+  dump() {
+    return {
+      ...super.dump(),
+      sketch: this.sketch,
+    }
+  }
+
+  static undump(dump, context) {
+    const feature = super.undump(dump, context)
+    feature.sketch = dump.sketch
+    feature.sketch.creator = this
+    return feature
+  }
 }
+
+Serialize.register(CreateSketchFeature, 'CreateSketchFeature')
 
 
 export class ExtrudeFeature extends Feature {
@@ -347,6 +413,8 @@ export class ExtrudeFeature extends Feature {
   }
 }
 
+Serialize.register(ExtrudeFeature, 'ExtrudeFeature')
+
 
 export class RevolveFeature extends Feature {
   static icon = 'wave-square'
@@ -397,6 +465,8 @@ export class RevolveFeature extends Feature {
     return tool
   }
 }
+
+Serialize.register(RevolveFeature, 'RevolveFeature')
 
 
 export class DraftFeature extends Feature {
@@ -462,6 +532,8 @@ export class DraftFeature extends Feature {
   }
 }
 
+Serialize.register(DraftFeature, 'DraftFeature')
+
 
 export class SweepFeature extends Feature {
   static icon = 'route'
@@ -499,6 +571,8 @@ export class SweepFeature extends Feature {
     this.profile.extrude(1.0)
   }
 }
+
+Serialize.register(SweepFeature, 'SweepFeature')
 
 
 export class FilletFeature extends Feature {
@@ -561,6 +635,8 @@ export class FilletFeature extends Feature {
   }
 }
 
+Serialize.register(FilletFeature, 'FilletFeature')
+
 
 export class OffsetFeature extends Feature {
   static icon = 'magnet'
@@ -596,6 +672,8 @@ export class OffsetFeature extends Feature {
     } catch(err) { this.error = err || this.error }
   }
 }
+
+Serialize.register(OffsetFeature, 'OffsetFeature')
 
 
 // export class MaterialFeature extends Feature {

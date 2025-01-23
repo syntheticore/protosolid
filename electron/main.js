@@ -248,7 +248,7 @@ ipcMain.on('vue-ready', function() {
 });
 
 ipcMain.handle('get-save-path', (e, format) => {
-  const name = (format == 'alc' ? 'ProtoSolid Documents' : format + ' Files')
+  const name = (format == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
   return dialog.showSaveDialog({
     properties: ['createDirectory', 'showOverwriteConfirmation'],
     filters: [
@@ -259,7 +259,7 @@ ipcMain.handle('get-save-path', (e, format) => {
 })
 
 ipcMain.handle('get-load-path', (e, format) => {
-  const name = (format == 'alc' ? 'ProtoSolid Documents' : format + ' Files')
+  const name = (format == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
   return dialog.showOpenDialog({
     properties: [],
     filters: [

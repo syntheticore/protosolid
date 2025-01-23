@@ -152,11 +152,8 @@
 
 
   function createDocument() {
-    // return wasmP.then((wasm) => {
-      // window.alcWasm = wasm
-      activeDocument.value = new Document()
-      documents.value.push(activeDocument.value)
-    // })
+    activeDocument.value = new Document(bus)
+    documents.value.push(activeDocument.value)
   }
 
   function loadDocument(path) {
@@ -166,11 +163,6 @@
       if(activeDocument.value.isFresh) deleteDocument(activeDocument.value)
       activeDocument.value = doc
       documents.value.push(doc)
-      setTimeout(() => {
-        doc.real.marker = doc.features.length
-        bus.emit('regenerate')
-        doc.hasChanges = false
-      }, 0)
     })
   }
 
@@ -199,8 +191,6 @@
   function deleteDocument(doc) {
     const index = documents.value.indexOf(doc)
     documents.value = documents.value.filter(d => d !== doc)
-    // Free Rust memory when old doc has been removed by viewport
-    setTimeout(() => doc.dispose() )
   }
 
 </script>

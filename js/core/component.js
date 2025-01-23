@@ -1,99 +1,24 @@
 import * as THREE from 'three'
 
+import Serialize from './serialize.js'
 import { Compound, PlaneHelper, rotationFromNormal } from './kernel.js'
 
 export default class Component {
   constructor(parent, id) {
-    // this.real = realComponent
     this.parent = parent
-    // this.document = doc
-
-    // this.id = realComponent.id()
-    // this.id = crypto.randomUUID()
-
     this.id = id
-
-    // // Fixed component data that is not changed by timeline and shared between component instances
-    // const componentData = doc.componentData()
-    // this.UIData = componentData[this.id] || {
-    //   title: parent ? "New Component" : "Main Assembly",
-    //   hidden: false,
-    //   material: null,
-    //   cog: false,
-    //   sectionViews: [],
-    //   parameters: [],
-    //   exportConfigs: [],
-    //   itemsHidden: {},
-    //   color: doc.makeColor(),
-    // }
-    // componentData[this.id] = this.UIData
-
-    // Transient component data that is managed by timeline and differs for every timestep of this component
     this.transform = new THREE.Matrix4()
     this.compound = new Compound(this.id)
-    // this.solids = []
     this.sketches = []
     this.helpers = [
-      new PlaneHelper(rotationFromNormal(new THREE.Vector3(1.0, 0.0, 0.0))),
-      new PlaneHelper(rotationFromNormal(new THREE.Vector3(0.0, 1.0, 0.0))),
-      new PlaneHelper(rotationFromNormal(new THREE.Vector3(0.0, 0.0, 1.0))),
+      new PlaneHelper(this.id, rotationFromNormal(new THREE.Vector3(1.0, 0.0, 0.0)), this.id + '/YZ'),
+      new PlaneHelper(this.id, rotationFromNormal(new THREE.Vector3(0.0, 1.0, 0.0)), this.id + '/XZ'),
+      new PlaneHelper(this.id, rotationFromNormal(new THREE.Vector3(0.0, 0.0, 1.0)), this.id + '/XY'),
     ]
     this.children = []
-    // this.update()
-
-    // const cache = {
-    //   faces: [],
-    //   edges: [],
-    //   regions: [],
-    //   curves: [],
-    // }
-    // // Hide cache from Vue
-    // this.cache = () => cache
   }
 
-  typename() {
-    return 'Component'
-  }
-
-  // update() {
-  //   this.updateChildren()
-  //   // this.updateSolids()
-  //   this.updateSketches()
-  //   this.updateHelpers()
-  // }
-
-  // updateChildren() {
-  //   return
-  //   this.freeChildren()
-  //   this.children = this.real.children().map(realChild => new Component(realChild, this, this.document) )
-  // }
-
-  // updateSolids() {
-  //   return
-  //   this.freeSolids()
-  //   this.solids = this.real.solids()
-  //   this.solids.forEach(solid => solid.component = this )
-  // }
-
-  // updateSketches() {
-  //   return
-  //   this.freeSketches()
-  //   this.sketches = this.real.sketches()
-  //   this.sketches.forEach(sketch => sketch.component = this )
-  // }
-
-  // updateHelpers() {
-  //   return
-  //   this.freeHelpers()
-  //   this.helpers = this.real.planes()
-  //   this.helpers.forEach(helper => helper.component = this )
-  // }
-
-  // createChild(id) {
-  //   const child = new Component(this, id)
-  //   this.children.push(child)
-  //   return child
-  // }
+  typename() { return 'Component' }
 
   deepClone(parent) {
     const clone = new Component(parent, this.id)
@@ -107,39 +32,6 @@ export default class Component {
     })
     return clone
   }
-
-  // freeChildren() {
-  //   // this.children.forEach(child => child.free() )
-  //   this.children = []
-  // }
-
-  // freeSolids() {
-  //   this.solids.forEach(solid => {
-  //     solid.free()
-  //     solid.deallocated = true
-  //   })
-  //   this.solids = []
-  // }
-
-  // freeSketches() {
-  //   // this.sketches.forEach(sketch => sketch.free() )
-  //   this.sketches = []
-  // }
-
-  // freeHelpers() {
-  //   // this.helpers.forEach(helper => helper.free() )
-  //   this.helpers = []
-  // }
-
-  // free(keepSelf) {
-  //   this.freeChildren()
-  //   this.freeSolids()
-  //   this.freeSketches()
-  //   this.freeHelpers()
-  //   if(!this.real || keepSelf) return
-  //   this.real.free()
-  //   this.real = null
-  // }
 
   findChild(id) {
     if(this.id == id) return this
@@ -157,15 +49,6 @@ export default class Component {
       if(found) return found
     }
   }
-
-  // findSketchByFeature(id) {
-  //   const sketch = this.sketches.find(sketch => sketch.feature_id() == id )
-  //   if(sketch) return sketch
-  //   for(const child of this.children) {
-  //     const found = child.findSketchByFeature(id)
-  //     if(found) return found
-  //   }
-  // }
 
   getChildIds() {
     let ids = [this.id]
@@ -210,31 +93,8 @@ export default class Component {
     return params
   }
 
-  // serialize() {
-  //   return {
-  //     title: this.title,
-  //     hidden: this.hidden,
-  //     cog: this.cog,
-  //     sectionViews: this.sectionViews,
-  //     parameters: this.UIData.parameters,
-  //     exportConfigs: this.exportConfigs,
-  //     real: this.real.serialize(),
-  //     children: this.children.map(child => child.serialize() ),
-  //   }
-  // }
-
-  // unserialize(dump) {
-  //   console.log(dump)
-  //   this.title = dump.title
-  //   this.hidden = dump.hidden
-  //   this.cog = dump.cog
-  //   this.sectionViews = dump.sectionViews || []
-  //   this.UIData.parameters = dump.parameters || []
-  //   this.exportConfigs = dump.exportConfigs || []
-  //   this.real.unserialize(dump.real)
-  //   dump.children.forEach(childDump => {
-  //     let child = this.createComponent()
-  //     child.unserialize(childDump)
-  //   })
-  // }
+  // Terminate component during serialization to avoid cyclic references
+  dump() { return {} }
+  static undump() { return null }
 }
+Serialize.register(Component, 'Component')

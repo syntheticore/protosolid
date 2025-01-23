@@ -3,13 +3,15 @@ import earcut from 'earcut'
 
 import { arrayRange } from '../utils.js'
 import Component from './component.js'
+import Serialize from './serialize.js'
 import { CreateComponentFeature, Feature } from './features.js'
+import { makeID } from './id.js'
 
 // Sketches
 
 export class SketchElement {
   constructor() {
-    this.id = crypto.randomUUID()
+    this.id = makeID()
     this.geom = null
   }
 
@@ -196,9 +198,24 @@ export class Line extends SketchElement {
   }
 
   _clone() {
-    return new Line(this.points[0], this.points[1])
+    return new Line(...this.points)
+  }
+
+  dump() {
+    return {
+      id: this.id,
+      points: this.points,
+    }
+  }
+
+  static undump(dump) {
+    const line = new Line(...dump.points)
+    line.id = dump.id
+    return line
   }
 }
+
+Serialize.register(Line, 'Line')
 
 
 export class Circle extends SketchElement {
@@ -260,7 +277,23 @@ export class Circle extends SketchElement {
   _clone() {
     return new Circle(this._center, this.radius)
   }
+
+  dump() {
+    return {
+      id: this.id,
+      _center: this._center,
+      radius: this.radius,
+    }
+  }
+
+  static undump(dump) {
+    const circle = new Circle(dump._center, dump.radius)
+    circle.id = dump.id
+    return circle
+  }
 }
+
+Serialize.register(Circle, 'Circle')
 
 
 export class Arc extends SketchElement {
@@ -356,7 +389,7 @@ export class Arc extends SketchElement {
 
 export class Sketch {
   constructor() {
-    this.id = crypto.randomUUID()
+    this.id = makeID()
     this.elements = []
     this.constraints = []
     this.projections = []
@@ -732,12 +765,30 @@ export class Sketch {
       }
     })
   }
+
+  dump() {
+    return {
+      id: this.id,
+      elements: this.elements,
+      constraints: this.constraints,
+      projections: this.projections,
+    }
+  }
+
+  static undump(dump, context) {
+    const sketch = new Sketch()
+    Object.assign(sketch, dump)
+    sketch.elements.forEach(elem => elem.sketch = sketch )
+    context.sketches[sketch.id] = sketch
+    return sketch
+  }
 }
+Serialize.register(Sketch, 'Sketch')
 
 
 export class Projection {
-  constructor(edge) {
-    this.edgeRef = new EdgeReference(edge)
+  constructor(edgeOrRef) {
+    this.edgeRef = edgeOrRef instanceof EdgeReference ? edgeOrRef : new EdgeReference(edgeOrRef)
   }
 
   update(tree) {
@@ -768,15 +819,16 @@ export class Projection {
     }
   }
 
-  geometry() {
-    return this.output
-  }
+  geometry() { return this.output }
+
+  static undump(dump) { return new Projection(dump.edgeRef) }
 }
+Serialize.register(Projection, 'Projection')
 
 
 export class ElemRef {
-  constructor(curve, index) {
-    this.curveRef = new CurveReference(curve)
+  constructor(curveOrRef, index) {
+    this.curveRef = curveOrRef instanceof CurveReference ? curveOrRef : new CurveReference(curveOrRef)
     this.index = index
   }
 
@@ -789,7 +841,11 @@ export class ElemRef {
   }
 
   isPoint() { return this.index !== undefined }
+
+  static undump(dump) { return new ElemRef(dump.curveRef, dump.index) }
 }
+Serialize.register(ElemRef, 'ElemRef')
+
 
 export class Constraint {
   constructor(...items) {
@@ -799,6 +855,8 @@ export class Constraint {
   update(tree) {
     this.items.forEach(item => item.update(tree) )
   }
+
+  static undump(dump) { return new Constraint(...dump.items) }
 }
 
 export class HorizontalConstraint extends Constraint {
@@ -820,6 +878,7 @@ export class CoincidentConstraint extends Constraint {
   static icon = 'bullseye'
   typename() { return 'Coincident Constraint' }
 }
+Serialize.register(CoincidentConstraint, 'CoincidentConstraint')
 
 export class PerpendicularConstraint extends Constraint {
   static icon = 'angle-up'
@@ -970,7 +1029,7 @@ export class Profile {
     // this.component = comp
     this.sketch = sketch
     this.rings = rings
-    this.id = crypto.randomUUID()
+    this.id = makeID() //XXX is this being used?
   }
 
   reference() {
@@ -1087,8 +1146,8 @@ export class Profile {
 // BREP
 
 export class Shape {
-  isSame(other) {
-    return this.id == other.id
+  isSame(otherOrId) {
+    return this.id == (otherOrId.id || otherOrId)
   }
 
   area() {
@@ -1518,44 +1577,65 @@ export class Reference {
 }
 
 class TopoReference extends Reference {
-  constructor(item) {
+  constructor(item, componentId, solidId, topoId) {
     super(item)
+    this.componentId = componentId || item.solid.compound.componentId
+    this.solidId = solidId || item.solid.id
+    this.topoId = topoId || item.id
     // const root = window.oc.mainDoc.Main()
     // this.label = root.NewChild()
     // this.selector = new window.oc.oc.TNaming_Selector(this.label)
     // const geom = this.item.geom()
     // console.log(this.selector.Select_2(geom, false, false))
   }
+
+  clone() {
+    return new this.constructor(this.item, this.componentId, this.solidId, this.topoId)
+  }
+
+  dump() {
+    return {
+      componentId: this.componentId,
+      solidId: this.solidId,
+      topoId: this.topoId,
+    }
+  }
+
+  static undump(dump, context) {
+    return new this(null, dump.componentId, dump.solidId, dump.topoId)
+  }
 }
 
 export class FaceReference extends TopoReference {
   update(tree) {
-    const comp = tree.findChild(this.item.solid.compound.componentId)
-    const solid = comp.compound.solids().find(solid => solid.id == this.item.solid.id )
+    const comp = tree.findChild(this.componentId)
+    const solid = comp.compound.solids().find(solid => solid.id == this.solidId )
     const error = { type: 'error', msg: "Face reference was lost" }
     if(!solid) return error
-    const face = solid.faces().find(face => face.isSame(this.item) )
+    const face = solid.faces().find(face => face.isSame(this.topoId) )
     if(!face) return error
     this.item = face
   }
 }
+Serialize.register(FaceReference, 'FaceReference')
 
 export class EdgeReference extends TopoReference {
   update(tree) {
-    const comp = tree.findChild(this.item.solid.compound.componentId)
-    const solid = comp.compound.solids().find(solid => solid.id == this.item.solid.id )
+    const comp = tree.findChild(this.componentId)
+    const solid = comp.compound.solids().find(solid => solid.id == this.solidId )
 
     // const labelMap = new window.oc.oc.TDF_LabelMap_1()
     // this.selector.Solve(labelMap)
     // const ns = this.selector.NamedShape().get()
     // const shape = ns.Get()
 
-    const edge = solid.edges().find(edge => edge.isSame(this.item) )
+    const edge = solid.edges().find(edge => edge.isSame(this.topoId) )
     // const edge = solid.edges().find(edge => edge.geom().IsSame(shape) )
     if(!edge) return { type: 'error', msg: "Edge reference was lost" }
     this.item = edge
   }
 }
+Serialize.register(EdgeReference, 'EdgeReference')
 
 export class CurveReference extends Reference {
   update(_tree) {
@@ -1572,55 +1652,96 @@ export class ProfileReference extends Reference {
   clone() {
     return new ProfileReference(this.item.clone())
   }
-}
 
-export class PlanarReference extends Reference {
-  getReal() {
-    if(this.item instanceof PlaneHelper) {
-      return this.item
-    } else if(this.item instanceof FaceReference) {
-      return this.item.getItem()
+  dump() {
+    return {
+      id: this.item.id,
+      sketchId: this.item.sketch.id,
+      rings: this.item.rings.map(wire => wire.segments.map(seg => seg.id) )
     }
   }
 
+  static undump(dump, context) {
+    const sketch = context.sketches[dump.sketchId]
+    const rings = dump.rings.map(ring => {
+      const region = ring.map(segId => sketch.elements.find(elem => elem.id == segId ) )
+      return new Wire(region)
+    })
+    const profile = new Profile(sketch, rings)
+    profile.id = dump.id
+    return new ProfileReference(profile)
+  }
+}
+Serialize.register(ProfileReference, 'ProfileReference')
+
+export class HelperReference extends Reference {
+  constructor(item, componentId, helperId) {
+    super(item)
+    this.componentId = componentId || item.componentId
+    this.helperId = helperId || item.id
+  }
+
+  update(tree) {
+    const comp = tree.findChild(this.componentId)
+    const error = { type: 'error', msg: "Helper reference was lost" }
+    if(!comp) return error
+    const helper = comp.helpers.find(helper => helper.id == this.helperId)
+    if(!helper) return error
+    this.item = helper
+  }
+
+  clone() {
+    return new HelperReference(this.item, this.componentId, this.helperId)
+  }
+
+  dump() {
+    return {
+      componentId: this.item.componentId,
+      helperId: this.item.id,
+    }
+  }
+
+  static undump(dump) {
+    return new HelperReference(null, dump.componentId, dump.helperId)
+  }
+}
+Serialize.register(HelperReference, 'HelperReference')
+
+
+// Can be HelperReference(PlaneHelper) or FaceReference
+export class PlanarReference extends Reference {
   getItem() {
-    const item = this.getReal()
+    const item = this.item.getItem()
     return item && item.getPlane()
   }
 
   update(tree) {
-    if(this.item instanceof FaceReference) {
-      return this.item.update(tree)
-    }
+    return this.item.update(tree)
   }
 
   clone() {
-    return new PlanarReference(this.item instanceof FaceReference ? this.item.clone() : this.item)
+    return new PlanarReference(this.item.clone())
+  }
+
+  static undump(dump) {
+    return new PlanarReference(dump.item)
   }
 }
+Serialize.register(PlanarReference, 'PlanarReference')
+
 
 export class AxialReference extends Reference {
-  getReal() {
-    if(this.item instanceof AxisHelper) {
-      return this.item
-    } else {
-      return this.item.getItem()
-    }
-  }
-
   getItem() {
-    const item = this.getReal()
+    const item = this.item.getItem()
     return item && item.getAxis()
   }
 
   update(tree) {
-    if(!(this.item instanceof AxisHelper)) {
-      return this.item.update(tree)
-    }
+    return this.item.update(tree)
   }
 
   clone() {
-    return new AxialReference(this.item instanceof AxisHelper ? this.item : this.item.clone())
+    return new AxialReference(this.item.clone())
   }
 }
 
@@ -1628,8 +1749,9 @@ export class AxialReference extends Reference {
 // Helpers
 
 export class ConstructionHelper {
-  constructor() {
-    this.id = crypto.randomUUID()
+  constructor(componentId, id) {
+    this.id = id || makeID()
+    this.componentId = componentId
   }
 
   center() {
@@ -1638,13 +1760,13 @@ export class ConstructionHelper {
 }
 
 export class PlaneHelper extends ConstructionHelper {
-  constructor(plane) {
-    super()
+  constructor(componentId, plane, id) {
+    super(componentId, id)
     this.transform = plane
   }
 
   planarReference() {
-    return new PlanarReference(this)
+    return new PlanarReference(new HelperReference(this))
   }
 
   getPlane() {
@@ -1653,13 +1775,13 @@ export class PlaneHelper extends ConstructionHelper {
 }
 
 export class AxisHelper extends ConstructionHelper {
-  constructor(axis) {
-    super()
+  constructor(componentId, axis) {
+    super(componentId)
     this.transform = axis
   }
 
   axialReference() {
-    return new AxialReference(this)
+    return new AxialReference(new HelperReference(this))
   }
 
   getAxis() {
@@ -1672,7 +1794,7 @@ export class AxisHelper extends ConstructionHelper {
 
 export class Timeline {
   constructor() {
-    const baseComp = new Component(null, '00000000-0000-0000-0000-000000000000')
+    const baseComp = new Component(null, 'id-0')
     baseComp.creator = {
       title: "Main Assembly",
       sectionViews: [],
@@ -1834,19 +1956,33 @@ export class Timeline {
   // }
 
   finalTree() {
-    let tree = new Component(null, '00000000-0000-0000-0000-000000000000')
+    let tree = new Component(null, 'id-0')
     tree.creator = { color: '#ffd52f' }
     this.features.forEach(feature => {
       if(feature instanceof CreateComponentFeature) {
-        let parent = tree.findChild(feature.parent())
-        const child = new Component(parent, feature.component.id)
+        let parent = tree.findChild(feature.parent)
+        const child = new Component(parent, feature.id)
         child.creator = feature
         parent.children.push(child)
       }
     })
     return tree
   }
+
+  dump() {
+    return {
+      marker: this.marker,
+      features: this.features,
+    }
+  }
+
+  static undump(dump) {
+    const out = new Timeline()
+    Object.assign(out, dump)
+    return out
+  }
 }
+Serialize.register(Timeline, 'Timeline')
 
 
 function coords(ocVec) {

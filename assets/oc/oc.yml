@@ -373,6 +373,7 @@ mainBuild:
     - symbol: BOPTools_AlgoTools
 
     - symbol: BRepFilletAPI_MakeFillet
+    - symbol: BRepFilletAPI_MakeChamfer
     - symbol: BRepFilletAPI_LocalOperation
 
     - symbol: GProp_GProps

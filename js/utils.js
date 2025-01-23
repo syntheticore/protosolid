@@ -37,7 +37,7 @@ function loadFileWeb(filetype) {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.alc'
+    input.accept = '.cad'
     document.body.appendChild(input)
     input.addEventListener('change', (event) => {
       document.body.removeChild(input)

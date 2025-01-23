@@ -2,10 +2,11 @@ import * as THREE from 'three'
 
 import { Timeline } from './kernel.js'
 import { saveFile, loadFile } from '../utils.js'
-import { deserialize, Feature, CreateComponentFeature, CreateSketchFeature } from './features.js'
+import { Feature, CreateComponentFeature, CreateSketchFeature } from './features.js'
 import { Selection } from '../selection.js'
 import Component from './component.js'
 import Emitter from '../emitter.js'
+import Serialize from './serialize.js'
 
 export default class Document extends Emitter {
   constructor() {
@@ -65,9 +66,9 @@ export default class Document extends Emitter {
   }
 
   createComponent(parent) {
-    const feature = new CreateComponentFeature(this, parent)
+    const feature = new CreateComponentFeature(this, parent.id)
     this.addFeature(feature)
-    const newComp = this.top().findChild(feature.component.id)
+    const newComp = this.top().findChild(feature.id)
     this.activateComponent(newComp)
   }
 
@@ -249,44 +250,14 @@ export default class Document extends Emitter {
     this.dirtyView = null
   }
 
-  makeColor() {
-    const existingColors = this.timeline.features
-      .filter(feature => feature instanceof CreateComponentFeature )
-      .map(feature => this.parseHsl(feature.color) )
-    const testColors = [...Array(100)].map(() => {
-      const color = {
-        h: Math.random() * 360,
-        s: 45 + Math.random() * 20,
-        l: 55 + Math.random() * 10,
-      }
-      const diffs = existingColors.map(c => this.colorDiff(c, color) )
-      const worstDiff = Math.min(...diffs)
-      return { color, diff: worstDiff }
-    })
-    testColors.sort((a, b) => Math.sign(b.diff - a.diff) )
-    const color = testColors[0].color
-    return `hsl(${color.h}, ${color.s}%, ${color.l}%)`
-  }
-
-  colorDiff(c1, c2) {
-    let hue = Math.abs(c1.h - c2.h)
-    hue = hue > 180 ? 360 - hue : hue
-    return hue + Math.abs(c1.s - c2.s) + Math.abs(c1.l - c2.l)
-  }
-
-  parseHsl(str) {
-    const match = /hsl\((.+),\s*(.+)%,\s*(.+)%\)/g.exec(str).slice(1,4).map(v => Number(v) )
-    return { h: match[0], s: match[1], l: match[2] }
-  }
-
   async save(as) {
-    const json = JSON.stringify({
-      // componentData: this.componentData(),
-      features: this.features.map(feature => feature.serialize() ),
-      real: this.real.serialize(),
-    })
+    const dump = {
+      lastId: this.lastId,
+      timeline: this.timeline,
+    }
+    const json = Serialize.stringify(dump)
     try {
-      this.filePath = await saveFile(json, 'alc', as ? null : this.filePath)
+      this.filePath = await saveFile(json, 'cad', as ? null : this.filePath)
       this.hasChanges = false
     } catch(error) {
       if(error != 'canceled') alert(error)
@@ -297,18 +268,16 @@ export default class Document extends Emitter {
   async load(path) {
     let file
     try {
-      file = await loadFile('alc', path)
+      file = await loadFile('cad', path)
     } catch(error) {
       if(error != 'canceled') alert(error)
       throw error
     }
     this.filePath = file.path
     this.isFresh = false
-    const data = JSON.parse(file.data)
-    // this.componentData = () => data.componentData
-    this.real.deserialize(data.real)
-    this.timeline.tree = new Component(this.real.tree(), null, this)
-    this.timeline.features = this.real.features().map((feature, i) => deserialize(this, feature, data.features[i]) )
-    this.activeComponent = this.timeline.tree
+    const dump = Serialize.parse(file.data, { document: this, sketches: {} })
+    Object.assign(this, dump)
+    this.timeline.evaluate()
+    this.activeComponent = this.top()
   }
 }

@@ -39,13 +39,13 @@
 
       .flex
 
-        IconButton(v-if="document.selection.set.size" icon="search-plus" @click="document.emit('zoom-selection')" title="Fit Selection")
+        IconButton(v-if="document.selection.set.size" icon="search-plus" @click="bus.emit('zoom-selection')" title="Fit Selection")
 
         template(v-else)
 
-          IconButton(icon="camera" @click="document.emit('zoom-all')" title="Fit All")
+          IconButton(icon="camera" @click="bus.emit('zoom-all')" title="Fit All")
 
-          IconButton(icon="crop-alt" @click="document.emit('zoom-active')" title="Fit Active")
+          IconButton(icon="crop-alt" @click="bus.emit('zoom-active')" title="Fit Active")
 
       h1 DISPLAY
 

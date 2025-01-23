@@ -151,6 +151,7 @@ export class Feature {
   dump() {
     return {
       id: this.id,
+      componentId: this.componentId,
       values: this.getValues(),
     }
   }
@@ -158,6 +159,7 @@ export class Feature {
   static undump(dump, context) {
     const feature = new this(context.document)
     feature.id = dump.id
+    feature.componentId = dump.componentId
     feature.setValues(dump.values)
     return feature
   }

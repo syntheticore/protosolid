@@ -710,8 +710,7 @@
         const solidFaces = objects.filter(sel => sel instanceof Solid ).flatMap(solid => solid.faces() )
         const rest = objects.filter(sel => sel instanceof Face || sel instanceof SketchElement )
         const meshes = solidFaces.concat(rest).map(obj => obj.mesh() )
-        const [position, target] = this.renderer.zoomToFit(meshes.length && meshes)
-        this.document.viewChanged(position, target)
+        this.renderer.zoomToFit(meshes.length && meshes)
       },
 
       componentChanged: function(comp, recursive) {

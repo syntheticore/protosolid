@@ -123,13 +123,21 @@ export default class Renderer {
     return preferences.highDPI ? window.devicePixelRatio : 1
   }
 
+  reportViewChange() {
+    this.emitter.emit(
+      'change-view',
+      this.cameraTarget || this.camera.position,
+      this.viewControlsTarget || this.viewControls.target
+    )
+  }
+
   setActiveCamera(camera) {
     if(this.viewControls) this.viewControls.dispose()
 
     const target = this.viewControls && this.viewControls.target
     this.viewControls = new OrbitControls(camera, this.renderer.domElement)
     this.viewControls.enableDamping = true
-    this.viewControls.dampingFactor = 0.4
+    this.viewControls.dampingFactor = 0.6
     this.viewControls.panSpeed = 1.0
     this.viewControls.keyPanSpeed = 12
     this.viewControls.zoomSpeed = 2.6
@@ -147,14 +155,14 @@ export default class Renderer {
       this.gizmos.forEach(gizmo => gizmo.enabled = false)
       this.cameraTarget = null
       this.viewControlsTarget = null
-      this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
+      this.reportViewChange()
       this.startAnimation()
     })
 
     this.viewControls.addEventListener('end', () => {
       this.isOrbiting = false
       this.gizmos.forEach(gizmo => gizmo.enabled = true)
-      this.emitter.emit('change-view', this.camera.position, this.viewControls.target)
+      this.reportViewChange()
       this.endAnimation()
     })
 
@@ -206,7 +214,10 @@ export default class Renderer {
   lookAt(plane) {
     const normal = new THREE.Vector3(0,0,1).applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(plane))
     const dir = this.camera.position.clone().sub(this.viewControls.target).projectOnVector(normal)
-    this.setView(this.viewControls.target.clone().add(dir), this.viewControls.target.clone())
+    const position = this.viewControls.target.clone().add(dir)
+    const target = this.viewControls.target.clone()
+    this.setView(position, target)
+    this.reportViewChange()
   }
 
   zoomToFit(objects) {
@@ -232,8 +243,8 @@ export default class Renderer {
       const dir = this.camera.position.clone().sub(this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.6)
       const position = target.clone().add(dir)
       this.setView(position, target)
-      return [position, target]
     }
+    this.reportViewChange()
   }
 
   setView(position, target) {

@@ -83,6 +83,7 @@ class HighlightTool extends Tool {
     if(this.viewport.pickingPath) this.viewport.updatePath(this.viewport.pickingPath)
     const object = await this.getObject(coords, true)
     this.viewport.$emit('update:highlight', object)
+    if(object && object.id) console.log(object.id)
   }
 
   getObject(coords, any) {
@@ -182,6 +183,7 @@ export class ProjectTool extends HighlightTool {
     super(component, viewport, ['edge'])
     this.sketch = sketch
     this.localSpace = true
+    this.cursor = 'copy'
   }
 
   async click(vec, coords) {
@@ -353,7 +355,6 @@ export class LineTool extends SketchTool {
       this.sketch.add(this.curve)
       const other = touchesExisting || old
       const otherIndex = touchesExisting ? index : 1
-      if(old || touchesExisting) console.log(other, otherIndex, touchesExisting)
       if(old || touchesExisting) this.sketch.addConstraint(
         new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(other, otherIndex))
       )
@@ -478,6 +479,7 @@ export class ArcTool extends SketchTool {
     if(!this.start || !this.end) return
     if(!this.curve) {
       this.curve = Arc.fromPoints([this.start, vec, this.end])
+      if(!this.curve) return
       this.sketch.add(this.curve)
     }
     this.curve.setPoints([this.start, vec, this.end], true)

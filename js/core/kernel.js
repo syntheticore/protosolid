@@ -83,7 +83,7 @@ export class SketchElement {
     const geom = this.geom()
     return others.flatMap(other => {
       if(!other.geom || other == this) return []
-      const isect = new window.oc.oc.Geom2dAPI_InterCurveCurve_2(geom, other.geom(), 1.0e-6)
+      const isect = new window.oc.oc.Geom2dAPI_InterCurveCurve_2(geom, other.geom(), EPSILON / 10.0)// 1.0e-6)
       return arrayRange(1, isect.NbPoints()).map(i => isect.Point(i) )
     })
   }
@@ -92,14 +92,39 @@ export class SketchElement {
     const geom = this.geom()
     const start = geom.get().FirstParameter()
     const end = geom.get().LastParameter()
-    const [p, u] = this
-      .intersect(others)
-      .map(p => [p, this.unsample(p)] )
-      .find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
-    if(!p) return [this]
-    const left = new window.oc.oc.Geom2d_TrimmedCurve(geom, start, u, true, true)
-    const right = new window.oc.oc.Geom2d_TrimmedCurve(geom, u, end, true, true)
-    return [...this.constructor.fromGeometry(left, this.id + '/1').split(others), ...this.constructor.fromGeometry(right, this.id + '/2').split(others)]
+    const isCircle = (this.constructor == Circle)
+
+    if(isCircle) {
+      const intersections = [...new Set(
+        this.intersect(others)
+        .map(p => this.unsample(p) )
+        .filter(u => !start.almost(u) && !end.almost(u) && !(u < start) && !(u > end) )
+        // .filter(u => !start.almost(u) && !end.almost(u) )
+      )].sort()
+      if(!intersections.length) return [this]
+      const constructor = isCircle ? Arc : this.constructor
+      let params
+      // if(isCircle) {
+        if(intersections.length < 2) return [this]
+        params = [...intersections, intersections[0]]
+      // } else {
+      //   params = [start, ...intersections, end]
+      // }
+      const curves = ocCatch(() => params.slice(0, -1).map((param, i) =>
+        new window.oc.oc.Geom2d_TrimmedCurve(geom, param, params[i + 1], true, true)
+      ))
+      return curves.map((curve, i) => constructor.fromGeometry(curve, this.id + '/' + i) )
+
+    } else {
+      const [p, u] = this
+        .intersect(others)
+        .map(p => [p, this.unsample(p)] )
+        .find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
+      if(!p) return [this]
+      const left = new window.oc.oc.Geom2d_TrimmedCurve(geom, start, u, true, true)
+      const right = new window.oc.oc.Geom2d_TrimmedCurve(geom, u, end, true, true)
+      return [...this.constructor.fromGeometry(left, this.id + '/1').split(others), ...this.constructor.fromGeometry(right, this.id + '/2').split(others)]
+    }
   }
 
   constraints() {
@@ -252,8 +277,8 @@ export class Circle extends SketchElement {
   }
 
   geometry() {
-    const center = new window.oc.oc.gp_Pnt2d_3(this._center.x, this._center.y)
-    const v = new window.oc.oc.gp_Dir2d_4(0.0, 1.0)
+    const center = ocPnt2dFromVec(this._center)
+    const v = new window.oc.oc.gp_Dir2d_4(1.0, 0.0)
     const axis = new window.oc.oc.gp_Ax2d_2(center, v)
     return new window.oc.oc.Handle_Geom2d_Curve_2(new window.oc.oc.Geom2d_Circle_2(axis, this.radius, false))
   }
@@ -299,11 +324,12 @@ Serialize.register(Circle, 'Circle')
 export class Arc extends SketchElement {
   typename() { return super.typename('Arc') }
 
-  constructor(center, radius, bounds, geom) {
+  constructor(center, radius, bounds, forward=true, geom) {
     super()
     this._center = center
     this.radius = radius
     this.bounds = bounds
+    this.forward = forward
     this.update(geom)
   }
 
@@ -315,25 +341,30 @@ export class Arc extends SketchElement {
     )
     if(!arc.IsDone()) return
     const trimmed = arc.Value().get()
-    const basis = new window.oc.oc.Geom2dAdaptor_Curve_2(trimmed.BasisCurve())
-    const circle = basis.Circle()
+    // const basis = new window.oc.oc.Geom2dAdaptor_Curve_2(trimmed.BasisCurve())
+    // const circle = basis.Circle()
+    const circle = trimmed.BasisCurve().get()
     const center = vecFromOc(circle.Location())
     const radius = circle.Radius()
     const bounds = [trimmed.FirstParameter(), trimmed.LastParameter()]
-    return new Arc(center, radius, bounds, new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
+    return new Arc(center, radius, bounds, true, new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
   }
 
   static fromGeometry(geom, id) {
     const basis = geom.BasisCurve().get()
-    const arc = new Arc(vecFromOc(
-      basis.Location()),
+    const arc = new Arc(
+      vecFromOc(basis.Location()),
       basis.Radius(),
-      basis.FirstParameter(),
-      basis.LastParameter(),
+      [geom.FirstParameter(), geom.LastParameter()],
+      true,
       new window.oc.oc.Handle_Geom2d_Curve_2(geom)
     )
     arc.id = id
     return arc
+  }
+
+  sample(u) {
+    return super.sample(this.forward ? u : 1.0 - u)
   }
 
   center() { return this._center.clone() }
@@ -352,10 +383,10 @@ export class Arc extends SketchElement {
     const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(handles[1]), ocPnt2dFromVec(handles[2]), true)
     if(!arc.IsDone()) return
     const trimmed = arc.Value().get()
-    const basis = new window.oc.oc.Geom2dAdaptor_Curve_2(trimmed.BasisCurve())
-    const circle = basis.Circle()
+    const circle = trimmed.BasisCurve().get()
     this.radius = circle.Radius()
     this.bounds = [trimmed.FirstParameter(), trimmed.LastParameter()]
+    this.forward = true
     this.update(new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
   }
 
@@ -364,6 +395,7 @@ export class Arc extends SketchElement {
     this._center = arc._center
     this.radius = arc.radius
     this.bounds = arc.bounds
+    this.forward = arc.forward
     this.geom = arc.geom
   }
 
@@ -376,15 +408,43 @@ export class Arc extends SketchElement {
     return false
   }
 
+  update(geom) {
+    super.update(geom)
+    geom = this.geom().get()
+    this.bounds = [geom.FirstParameter(), geom.LastParameter()]
+  }
+
   flip() {
-    this.bounds = [this.bounds[1], this.bounds[0]]
-    this.update()
+    this.forward = !this.forward
+  }
+
+  tesselate() {
+    const tess = super.tesselate()
+    if(!this.forward) tess.reverse()
+    return tess
   }
 
   _clone() {
-    return new Arc(this._center, this.radius, this.bounds)
+    return new Arc(this._center, this.radius, this.bounds, this.forward)
+  }
+
+  dump() {
+    return {
+      id: this.id,
+      _center: this._center,
+      radius: this.radius,
+      bounds: this.bounds,
+      forward: this.forward,
+    }
+  }
+
+  static undump(dump) {
+    const arc = new Arc(dump._center, dump.radius, dump.bounds, dump.forward)
+    arc.id = dump.id
+    return arc
   }
 }
+Serialize.register(Arc, 'Arc')
 
 
 export class Sketch {
@@ -400,7 +460,7 @@ export class Sketch {
   typename() { return 'Sketch' }
 
   add(elem) {
-    this.elements.push(elem)
+    if(!this.elements.includes(elem)) this.elements.push(elem)
     elem.sketch = this
   }
 
@@ -427,11 +487,8 @@ export class Sketch {
 
   profiles(comp, includeOuter) {
     const elements = this.removeEmpties(this.elements)
-    // console.log('elements', elements)
     const cutElements = elements.flatMap(elem => elem.split(elements) )
-    // console.log('cutElements', cutElements)
     const wires = this.getWires(cutElements, includeOuter)
-    // console.log('wires', wires)
     const profiles = this.buildProfiles(comp, wires)
 
     return profiles
@@ -444,13 +501,9 @@ export class Sketch {
   getWires(cutElements, includeOuter) {
     const circles = cutElements.filter(elem => elem.isClosed() )
     let others = cutElements.filter(elem => !elem.isClosed() )
-    // console.log('others', others)
     others = this.removeDanglingSegments(others)
-    // console.log('others2', others)
     let islands = this.buildIslands(others)
-    // console.log('islands', islands)
     let wires = islands.flatMap(island => this.buildWiresFromIsland(island, includeOuter) )
-    // console.log('wires2', wires)
     const circleWires = circles.map(circle => new Wire([circle]) )
     wires = wires.concat(circleWires)
     return wires
@@ -479,23 +532,20 @@ export class Sketch {
     let wires = []
     let usedForward = new Set()
     let usedBackward = new Set()
-    // console.log('buildWiresFromIsland island', island)
     island.forEach(startElem => {
-      // let points = tuple2_to_vec(startElem.endpoints())
       startElem.endpoints().forEach(point => {
-        let loops = this.buildLoop(
+        const path = []
+        this.buildLoop(
           point,
           startElem,
-          [],
+          path,
           island,
           usedForward,
           usedBackward,
         )
-        let newWires = loops.map(region => new Wire(region) )
-        wires = wires.concat(newWires)
+        if(path.length >= 2) wires.push(new Wire(path))
       })
     })
-    // console.log('buildWiresFromIsland wires1', wires)
     if(!includeOuter) { wires = this.removeOuterLoop(wires) }
     return wires
   }
@@ -519,7 +569,6 @@ export class Sketch {
       // Only leave the outermost inner wires
       profile = profile.concat(cutouts.filter(cutout =>
         !cutouts.some(other =>
-          // !ptr::eq(&cutout[0], &other[0]) && other.encloses(cutout)
           cutout[0] !== other[0] && other.encloses(cutout)
         )
       ))
@@ -535,20 +584,21 @@ export class Sketch {
     usedForward,
     usedBackward,
   ) {
-    let regions = []
     // Traverse edges only once in every direction
     let startElemId = startElem.id
     if(startPoint.almost(startElem.endpoints()[0])) {
-      if(usedForward.has(startElemId)) return regions
+      if(usedForward.has(startElemId)) return
       usedForward.add(startElemId)
     } else {
-      if(usedBackward.has(startElemId)) return regions
+      if(usedBackward.has(startElemId)) return
       usedBackward.add(startElemId)
     }
     // Add startElem to path
     path.push(startElem)
-    // Find connected segments
+    // Terminate loop
     let endPoint = startElem.otherBound(startPoint)
+    if(path[0] != startElem && path[0].endpoints().some(p => p.almost(endPoint) )) return
+    // Find connected segments
     let connectedElems = allElements.filter(otherElem => {
       let [otherStart, otherEnd] = otherElem.endpoints()
       return (endPoint.almost(otherStart) || endPoint.almost(otherEnd)) &&
@@ -556,19 +606,15 @@ export class Sketch {
     })
     if(connectedElems.length) {
       // Sort connected segments in clockwise order
-      connectedElems.sort((a, b) => { //XXX min_by_key
-        let finalPointA = a.otherBound(endPoint)
-        let finalPointB = b.otherBound(endPoint)
-        return clockwise(startPoint, endPoint, finalPointB) > clockwise(startPoint, endPoint, finalPointA)
+      connectedElems.sort((a, b) => {
+        let finalPointA = a.sample(0.5)
+        let finalPointB = b.sample(0.5)
+        return clockwise(startPoint, endPoint, finalPointA) - clockwise(startPoint, endPoint, finalPointB)
       })
       // Follow the leftmost segment to complete loop in anti-clockwise order
       let nextElem = connectedElems[0]
-      if(path[0].id == nextElem.id) {
-        // We are closing a loop
-        regions.push(path)
-      } else {
-        // Follow loop
-        let newRegions = this.buildLoop(
+      if(path[0].id != nextElem.id) {
+        this.buildLoop(
           endPoint,
           nextElem,
           path,
@@ -576,10 +622,8 @@ export class Sketch {
           usedForward,
           usedBackward,
         )
-        regions = regions.concat(newRegions)
       }
     }
-    return regions
   }
 
   buildIslands(elements) {
@@ -589,7 +633,6 @@ export class Sketch {
       let startElem = unusedElements.pop()
       let island = []
       this.buildIsland(startElem, island, unusedElements)
-      // console.log('buildIslands island', island)
       island.forEach(islandElem => {
         unusedElements = unusedElements.filter(elem => elem.id != islandElem.id )
       })
@@ -926,8 +969,8 @@ export class Dimension extends Constraint {
 export class Wire {
   constructor(region) {
     region = region.map(seg => seg.clone() )
-
-    if(region.length >= 2) {
+    if(region.length == 0) throw "Wires may not be empty"
+    else if(region.length >= 2) {
       // Find starting point from element order
       let bounds = region[0].endpoints()
       let next_bounds = region[1].endpoints()
@@ -939,12 +982,12 @@ export class Wire {
           point = tcurve.endpoints()[0]
           tcurve.flip()
         } else {
+          if(!tcurve.endpoints()[0].almost(point)) throw "Wire segments must be connected"
           point = tcurve.endpoints()[1]
         }
       })
     }
 
-    if(region.length == 0) throw "Wires may not be empty"
     let firstPoint = region[0].endpoints()[0]
     let lastPoint = region.slice(-1)[0].endpoints()[1]
     if(!firstPoint.almost(lastPoint)) throw "Wires must be closed"
@@ -963,7 +1006,7 @@ export class Wire {
   }
 
   cage() {
-    let polyline = this.segments.map(curve => curve.sample(0.0) )
+    let polyline = this.segments.flatMap(curve => [curve.sample(0.0), curve.sample(0.5)] )
     // polyline.push(this.segments[0].endpoints()[0])
     return polyline
   }
@@ -2024,9 +2067,9 @@ function ocVecFromVec(vec) {
 
 function ocCirc2dFromVec(center, radius) {
   center = ocPnt2dFromVec(center)
-  const v = new window.oc.oc.gp_Dir2d_4(0.0, 1.0)
+  const v = new window.oc.oc.gp_Dir2d_4(1.0, 0.0)
   const axis = new window.oc.oc.gp_Ax2d_2(center, v)
-  return new window.oc.oc.gp_Circ2d_2(axis, radius, true)
+  return new window.oc.oc.gp_Circ2d_2(axis, radius, false)
 }
 
 function ocAx1FromMatrix(m, constructor=window.oc.oc.gp_Ax1_2) {
@@ -2059,13 +2102,12 @@ function ocPlnFromMatrix(m) {
 
 export function ocCatch(cb) {
   try {
-    cb()
+    return cb()
   } catch(e) {
     if(typeof e === "number") {
       const exceptionData = window.oc.oc.OCJS.getStandard_FailureData(e)
       console.error(exceptionData.GetMessageString())
     }
-    console.error(e.stack)
     throw e
   }
 }

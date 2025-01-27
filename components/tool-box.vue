@@ -387,8 +387,9 @@
       },
 
       splitAll: function() {
-        const elements = this.document.activeSketch.removeEmpties(this.document.activeSketch.elements)
-        this.document.activeSketch.elements.forEach(elem => this.document.activeSketch.remove(elem))
+        const elems = this.document.activeSketch.elements
+        const elements = this.document.activeSketch.removeEmpties(elems)
+        elems.forEach(elem => this.document.activeSketch.remove(elem))
         const cutElements = elements.flatMap(elem => elem.split(elements) )
         const removed = this.document.activeSketch.removeDanglingSegments(cutElements)
         removed.forEach(elem => this.document.activeSketch.add(elem) )

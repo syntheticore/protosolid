@@ -1517,9 +1517,13 @@ export class Compound extends Volumetric {
     })
 
     // Name all edges in new compound according to their connected faces
+    // Enumerate too, since circular faces may connect to the same neighboor twice
+    const namesUsed = {}
     newEdges.forEach(edge => {
       const faces = edge.connectedFaces()
       edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
+      namesUsed[edge.id] = (namesUsed[edge.id] || 0) + 1
+      edge.id += '/' + namesUsed[edge.id]
     })
 
     return out

@@ -1483,37 +1483,25 @@ export class Compound extends Volumetric {
       if(original) face.id = original.id
     })
 
-    // Find modified faces in new solid & use original IDs
+    // Find modified faces in new solids & use original IDs
     oldFaces.forEach(oldFace => {
       const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => new window.oc.oc.TopoDS.Face_1(m) )
       const faces = modified.map(modFace => newFaces.find(f => f.geom().IsSame(modFace) ) )
       // if(faces.length) console.log('modified', faces)
       faces.forEach(f => f.id = oldFace.id )
-    })
+    });
 
-    // Find new faces generated from the original edges and name them accordingly
-    oldEdges.forEach(edge => {
-      const shapes = arrayFromOcList(history.Generated(edge.geom()))
+    // Find new faces generated from the original edges & faces and name them accordingly
+    [...oldEdges, ...oldFaces].forEach(old => {
+      const shapes = arrayFromOcList(history.Generated(old.geom()))
       const generated = shapes.map(shape => {
         try {
           return window.oc.oc.TopoDS.Face_1(shape)
         } catch(err) {}
       }).filter(Boolean)
       const faces = generated.map(genFace => newFaces.find(face => face.geom().IsSame(genFace) ) )
-      // if(faces.length) console.log('generated from edges', faces)
-      faces.forEach((face, i) => face.id = edge.id + '/' + algoName + '/' + i )
-    })
-
-    // Find new faces generated from the original faces and name them accordingly
-    oldFaces.forEach(face => {
-      const generated = arrayFromOcList(history.Generated(face.geom())).map(f => {
-        try {
-          return window.oc.oc.TopoDS.Face_1(f)
-        } catch(err) {}
-      }).filter(Boolean)
-      const faces = generated.map(genFace => newFaces.find(f => f.geom().IsSame(genFace) ) )
-      // if(faces.length) console.log('generated from faces', faces)
-      faces.forEach((f, i) => f.id = face.id + '/' + algoName + '/' + i )
+      // if(faces.length) console.log('generated', faces)
+      faces.forEach((face, i) => face.id = old.id + '/' + algoName + '/' + i )
     })
 
     // Name all edges in new compound according to their connected faces

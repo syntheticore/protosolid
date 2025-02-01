@@ -153,6 +153,7 @@
 
   import {
     CreateSketchFeature,
+    PlaneFeature,
     ExtrudeFeature,
     FilletFeature,
     DraftFeature,
@@ -205,8 +206,9 @@
             tools: [
               { title: 'Sketch', feature: CreateSketchFeature, hotKey: 'S', keyCode: 83 },
               // { title: 'Plane', tool: PlaneTool, icon: 'edit', hotKey: 'P', keyCode: 80 },
-              { title: 'Axis', icon: 'edit' },
-              { title: 'Point', icon: 'edit' },
+              { title: 'Plane', feature: PlaneFeature },
+              { title: 'Axis', icon: 'grip-lines' },
+              { title: 'Point', icon: 'asterisk' },
               { title: 'Center of Mass', action: this.addCog, icon: 'atom' },
               { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
             ]

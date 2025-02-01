@@ -1101,8 +1101,7 @@ export class Profile {
   }
 
   normal() {
-    const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
-    return new THREE.Vector3(0,0,1).applyQuaternion(rot)
+    return normalFromMatrix(this.sketch.workplane)
   }
 
   extrude(componentId, height, featureId) {
@@ -2067,14 +2066,13 @@ function ocCirc2dFromVec(center, radius) {
   return new window.oc.oc.gp_Circ2d_2(axis, radius, false)
 }
 
-function ocAx1FromMatrix(m, constructor=window.oc.oc.gp_Ax1_2) {
+function ocAx1FromMatrix(m) {
   const pos = new THREE.Vector3().setFromMatrixPosition(m)
-  const rot = new THREE.Quaternion().setFromRotationMatrix(m)
-  const axDir = new THREE.Vector3(0,0,1).applyQuaternion(rot)
+  const axDir = normalFromMatrix(m)
   return new window.oc.oc.gp_Ax1_2(ocPntFromVec(pos), ocDirFromVec(axDir))
 }
 
-function ocAx3FromMatrix(m, constructor=window.oc.oc.gp_Ax1_2) {
+function ocAx3FromMatrix(m) {
   const pos = new THREE.Vector3().setFromMatrixPosition(m)
   const rot = new THREE.Quaternion().setFromRotationMatrix(m)
   const axDir = new THREE.Vector3(0,0,1).applyQuaternion(rot)
@@ -2093,6 +2091,11 @@ function matrixFromOcPln(pln) {
 
 function ocPlnFromMatrix(m) {
   return new window.oc.oc.gp_Pln_2(ocAx3FromMatrix(m))
+}
+
+export function normalFromMatrix(m) {
+  const rot = new THREE.Quaternion().setFromRotationMatrix(m)
+  return new THREE.Vector3(0,0,1).applyQuaternion(rot)
 }
 
 export function ocCatch(cb) {

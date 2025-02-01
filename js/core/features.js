@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 import Component from './component.js'
-import { Sketch, Compound, Reference } from './kernel.js'
+import { Sketch, Compound, Reference, PlaneHelper, normalFromMatrix } from './kernel.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
 import { makeID } from './id.js'
@@ -183,8 +183,8 @@ export class CreateComponentFeature extends Feature {
     })
 
     this.parent = parentId
-
     this.title = "New Component"
+
     this.hidden = false
     this.material = null
     this.cog = false
@@ -273,7 +273,7 @@ Serialize.register(CreateComponentFeature, 'CreateComponentFeature')
 
 
 export class CreateSketchFeature extends Feature {
-  static icon = 'edit'
+  static icon = 'solar-panel'
   constructor(doc) {
     super(doc, false, 'Sketch', {
       plane: {
@@ -284,6 +284,7 @@ export class CreateSketchFeature extends Feature {
     })
 
     this.plane = null
+
     this.sketch = new Sketch()
     this.sketch.creator = this
   }
@@ -319,6 +320,51 @@ export class CreateSketchFeature extends Feature {
 }
 
 Serialize.register(CreateSketchFeature, 'CreateSketchFeature')
+
+
+export class PlaneFeature extends Feature {
+  static icon = 'map'
+  constructor(doc) {
+    super(doc, false, 'Plane', {
+      base: {
+        title: 'Base',
+        type: 'plane',
+      },
+      offset: {
+        title: 'Offset',
+        type: 'length',
+      },
+    })
+
+    this.base = null
+    this.offset = 1.0
+
+    this.planeId = makeID()
+  }
+
+  updateFeature(tree, references) {
+    const vec = normalFromMatrix(references.base).multiplyScalar(this.offset)
+    const pos = new THREE.Vector3().setFromMatrixPosition(references.base)
+    const plane = references.base.clone().setPosition(pos.add(vec))
+    const helper = new PlaneHelper(this.componentId, plane, this.planeId)
+    tree.findChild(this.componentId).helpers.push(helper)
+  }
+
+  dump() {
+    return {
+      ...super.dump(),
+      planeId: this.planeId,
+    }
+  }
+
+  static undump(dump, context) {
+    return Object.assign(super.undump(dump, context), {
+      planeId: dump.planeId,
+    })
+  }
+}
+
+Serialize.register(PlaneFeature, 'PlaneFeature')
 
 
 export class ExtrudeFeature extends Feature {

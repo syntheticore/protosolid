@@ -116,17 +116,25 @@
 
   onMounted(() => {
     window.addEventListener('keydown', (e) => {
-      // console.log(e.keyCode)
+      // console.log(e.keyCode, e.key)
       if(e.key === 'Escape') {
         bus.emit('escape')
+
       } else if(e.key === 'Enter') {
         bus.emit('enter-pressed')
+
       } else if(e.key === 'Shift') {
-        bus.emit('shift-pressed')
         bus.isShiftPressed = true
+        bus.emit('shift-pressed', true)
+
       } else if(e.key === 'Control') {
-        bus.emit('ctrl-pressed')
         bus.isCtrlPressed = true
+        bus.emit('ctrl-pressed', true)
+
+      } else if(e.key === 'Alt') {
+        bus.isAltPressed = true
+        bus.emit('alt-pressed', true)
+
       } else {
         bus.emit('keydown', e.key)
       }
@@ -136,8 +144,15 @@
       bus.emit('keyup', e.key)
       if(e.key === 'Shift') {
         bus.isShiftPressed = false
+        bus.emit('shift-pressed', false)
+
       } else if(e.key === 'Control') {
         bus.isCtrlPressed = false
+        bus.emit('ctrl-pressed', false)
+
+      } else if(e.key === 'Alt') {
+        bus.isAltPressed = false
+        bus.emit('alt-pressed', false)
       }
     })
 

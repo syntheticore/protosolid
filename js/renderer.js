@@ -136,6 +136,7 @@ export default class Renderer {
 
     const target = this.viewControls && this.viewControls.target
     this.viewControls = new OrbitControls(camera, this.renderer.domElement)
+    this.viewControls.enableRotate = false
     this.viewControls.enableDamping = true
     this.viewControls.dampingFactor = 0.6
     this.viewControls.panSpeed = 1.0
@@ -151,7 +152,7 @@ export default class Renderer {
     this.viewControls.addEventListener('change', () => this.render() )
 
     this.viewControls.addEventListener('start', () => {
-      this.isOrbiting = true
+      // this.isOrbiting = true
       this.gizmos.forEach(gizmo => gizmo.enabled = false)
       this.cameraTarget = null
       this.viewControlsTarget = null
@@ -160,7 +161,7 @@ export default class Renderer {
     })
 
     this.viewControls.addEventListener('end', () => {
-      this.isOrbiting = false
+      // this.isOrbiting = false
       this.gizmos.forEach(gizmo => gizmo.enabled = true)
       this.reportViewChange()
       this.endAnimation()

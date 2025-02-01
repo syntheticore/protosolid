@@ -1,6 +1,10 @@
 <template lang="pug">
 
-  .view-port(:style="{ cursor: (activeTool && activeTool.cursor) || 'auto' }")
+  .view-port(
+    :style="{ cursor: (activeTool && activeTool.cursor) || 'auto' }"
+    :class="{ orbiting: isOrbiting }"
+    @contextmenu.prevent
+  )
 
     //- GL Viewport
     canvas(
@@ -76,7 +80,6 @@
         @mouseup="mouseUp"
         @mousedown="handleMouseDown($event, handle)"
         @mousemove="handleMouseMove($event, handle)"
-        @contextmenu.prevent
       )
 
       //- Floating UI widgets
@@ -190,6 +193,9 @@
       &::before
         width:  5px
         height: 5px
+
+    .orbiting &
+      pointer-events: none
 
   .constraint
     pointer-events: auto
@@ -321,6 +327,7 @@
         guides: [],
         widgets: [],
         constraints: [],
+        isOrbiting: false,
       }
     },
 
@@ -452,6 +459,11 @@
       this.bus.on('keydown', this.keyDown)
       this.bus.on('keyup', this.keyUp)
 
+      bus.on('alt-pressed', (pressed) => {
+        this.renderer.viewControls.enableRotate = pressed
+        this.isOrbiting = pressed
+      })
+
       this.registerDocument(this.document)
 
       // Window Resize
@@ -565,7 +577,7 @@
 
       mouseMove: function(e) {
         if(e.button != 0) return
-        if(this.renderer.isOrbiting) return
+        if(this.isOrbiting) return
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(this.pickingPath && vec) this.pickingPath.target = vec
@@ -583,8 +595,6 @@
               }
             })
           }
-        } else if(key == 'Alt') {
-          // this.guides = []
         }
       },
 

@@ -1234,27 +1234,6 @@ export class Shape {
     return collectShapes(geom, type)
       .map(item => new constructors[type](this, item) )
   }
-
-  tesselate() {
-    if(this.cachedTesselation) return this.cachedTesselation
-    const location = new window.oc.oc.TopLoc_Location_1()
-    const triangulation = window.oc.oc.BRep_Tool.Triangulation(this.geom(), location, 0).get()
-    triangulation.ComputeNormals()
-    let positions = []
-    let normals = []
-    arrayRange(1, triangulation.NbTriangles()).forEach(i => {
-      const triangle = triangulation.Triangle(i)
-      const pos = arrayRange(1, 3).flatMap(j => coords(triangulation.Node(triangle.Value(j))) )
-      const norm = arrayRange(1, 3).flatMap(j => coords(triangulation.Normal_1(triangle.Value(j))) )
-      positions = positions.concat(pos)
-      normals = normals.concat(norm)
-    })
-    this.cachedTesselation = {
-      positions,
-      normals,
-    }
-    return this.cachedTesselation
-  }
 }
 
 
@@ -1335,6 +1314,27 @@ export class Face extends Shape {
     const surface = window.oc.oc.BRep_Tool.Surface_2(geom)
     const props = new window.oc.oc.GeomLProp_SLProps_1(surface, u, v, useCurvature ? 2 : 1, 0.01)
     return vecFromOc(props.Normal())
+  }
+
+  tesselate() {
+    if(this.cachedTesselation) return this.cachedTesselation
+    const location = new window.oc.oc.TopLoc_Location_1()
+    const triangulation = window.oc.oc.BRep_Tool.Triangulation(this.geom(), location, 0).get()
+    triangulation.ComputeNormals()
+    let positions = []
+    let normals = []
+    arrayRange(1, triangulation.NbTriangles()).forEach(i => {
+      const triangle = triangulation.Triangle(i)
+      const pos = arrayRange(1, 3).flatMap(j => coords(triangulation.Node(triangle.Value(j))) )
+      const norm = arrayRange(1, 3).flatMap(j => coords(triangulation.Normal_1(triangle.Value(j))) )
+      positions = positions.concat(pos)
+      normals = normals.concat(norm)
+    })
+    this.cachedTesselation = {
+      positions,
+      normals,
+    }
+    return this.cachedTesselation
   }
 }
 
@@ -1431,6 +1431,14 @@ export class Solid extends Volumetric {
     clone.cachedFaces = this.faces().map(face => new Face(clone, face.geom(), face.id) )
     clone.cachedEdges = this.edges().map(edge => new Edge(clone, edge.geom(), edge.id) )
     return clone
+  }
+
+  tesselate() {
+    const tesselations = this.faces().map(face => face.tesselate() )
+    return {
+      positions: tesselations.map(tess => tess.positions ).flat(),
+      normals: tesselations.map(tess => tess.normals ).flat(),
+    }
   }
 }
 
@@ -1590,6 +1598,14 @@ export class Compound extends Volumetric {
 
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }
+    }
+  }
+
+  tesselate() {
+    const tesselations = this.solids().map(solid => solid.tesselate() )
+    return {
+      positions: tesselations.map(tess => tess.positions ).flat(),
+      normals: tesselations.map(tess => tess.normals ).flat(),
     }
   }
 }

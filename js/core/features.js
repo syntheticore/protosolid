@@ -109,7 +109,7 @@ export class Feature {
       .every(key => this[key] && (!this.settings[key].multi || this[key]().length) )
   }
 
-  preview() {}
+  preview() { return this.previewBody }
 
   confirm() {
     const comp = this.document.top().findChild(this.componentId)
@@ -420,7 +420,7 @@ export class ExtrudeFeature extends Feature {
       comp.compound = comp.compound.boolean(tool, this.operation)
     } catch(err) { this.error = err || this.error }
 
-    return tool
+    this.previewBody = tool
   }
 
   updateGizmos() {
@@ -510,7 +510,7 @@ export class RevolveFeature extends Feature {
       comp.compound = comp.compound.boolean(tool, this.operation)
     } catch(err) { this.error = err || this.error }
 
-    return tool
+    this.previewBody = tool
   }
 }
 
@@ -604,19 +604,6 @@ export class SweepFeature extends Feature {
     this.profile = null
     this.rail = null
     this.bounds = [0.0, 1.0]
-  }
-
-  isComplete() {
-    return this.profile && this.rail
-  }
-
-  preview() {
-    this.profile.noFree = true
-    return this.profile.extrude_preview(1.0)
-  }
-
-  confirm() {
-    this.profile.extrude(1.0)
   }
 }
 

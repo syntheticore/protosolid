@@ -106,6 +106,7 @@ export default class Materials {
     })
 
     this.previewAddSurface = new THREE.MeshStandardMaterial({
+      side: THREE.DoubleSide,
       color: '#0070ff',
       transparent: true,
       opacity: 0.4,
@@ -114,10 +115,11 @@ export default class Materials {
     })
 
     this.previewSubtractSurface = new THREE.MeshStandardMaterial({
+      side: THREE.DoubleSide,
       color: 'red',
       transparent: true,
       opacity: 0.4,
-      depthTest: false,
+      // depthTest: false,
       polygonOffset: true,
       polygonOffsetFactor: 0.5,
     })

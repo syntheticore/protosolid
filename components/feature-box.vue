@@ -282,6 +282,7 @@
         // if(this.activeFeature.error) this.update()
         this.error = this.activeFeature.error
         this.activeFeature.updateGizmos()
+        this.previewFeature()
         this.pickAll()
       }, 0)
     },
@@ -436,8 +437,12 @@
         this.document.regenerate()
         this.activeFeature.updateGizmos()
         this.error = this.activeFeature.error
+        this.previewFeature()
+      },
+
+      previewFeature: function() {
         const preview = this.activeFeature.preview()
-        if(preview) this.bus.emit('preview-feature', preview)
+        if(preview) this.bus.emit('preview-feature', preview, this.activeFeature.operation == 'cut')
       },
 
       confirm: function() {

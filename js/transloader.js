@@ -324,11 +324,11 @@ export default class Transloader {
     comp.children.forEach(child => this.applyMaterials(child) )
   }
 
-  previewFeature(bufferGeometry) {
+  previewFeature(compound, subtracting) {
     this.renderer.remove(this.previewMesh)
     this.previewMesh = this.renderer.convertMesh(
-      bufferGeometry,
-      this.renderer.materials.previewAddSurface,
+      compound.tesselate(),
+      subtracting ? this.renderer.materials.previewSubtractSurface : this.renderer.materials.previewAddSurface,
     )
     this.renderer.add(this.previewMesh)
     this.renderer.render()

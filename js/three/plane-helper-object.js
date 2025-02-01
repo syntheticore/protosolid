@@ -5,15 +5,10 @@ import * as THREE from 'three'
 
 
 export default class PlaneHelperObject extends THREE.Mesh {
-  constructor(alcObject) {
+  constructor(alcObject, renderer) {
     var groundGeo = new THREE.PlaneGeometry(20, 20)
 
-    super(groundGeo, new THREE.MeshBasicMaterial({
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.04,
-      depthTest: false,
-    }))
+    super(groundGeo, renderer.materials.plane)
 
     this.alcType = 'plane'
     this.alcObject = alcObject

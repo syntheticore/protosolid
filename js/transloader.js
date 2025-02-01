@@ -97,7 +97,7 @@ export default class Transloader {
           faceMesh.receiveShadow = isActive
           this.renderer.add(faceMesh, true)
           cache.faces.push(face)
-          const vnh = new VertexNormalsHelper( faceMesh, 5, 0xff0000 )
+          // const vnh = new VertexNormalsHelper( faceMesh, 5, 0xff0000 )
           // this.renderer.add( vnh )
           // vnhs.push(vnh)
           // const normal = this.convertLine(face.display_normal(), this.renderer.materials.selectionLine)
@@ -146,7 +146,7 @@ export default class Transloader {
     if(comp === this.document.activeComponent) {
       // Load Construction Helpers
       comp.helpers.forEach(plane => {
-        const mesh = new PlaneHelperObject(plane)
+        const mesh = new PlaneHelperObject(plane, this.renderer)
         plane.mesh = () => mesh
         plane.component = comp
         this.renderer.add(mesh, true)

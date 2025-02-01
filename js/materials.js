@@ -69,7 +69,7 @@ export default class Materials {
     this.plane = new THREE.MeshBasicMaterial({
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.1,
+      opacity: 0.04,
       depthTest: false,
     })
 

@@ -122,8 +122,30 @@ export class Feature {
   }
 
   updateFeature(tree, references) {}
-  updateGizmos() {}
+
+  getGizmo() {}
+
+  updateGizmos() {
+    if(this.isComplete()) {
+      let gizmo = this.getGizmo()
+      if(!gizmo) return
+      gizmo = gizmo.distance
+      if(!gizmo) return
+      if(this.distanceGizmo) {
+        this.distanceGizmo().set(gizmo.distance, gizmo.side)
+      } else {
+        const distanceGizmo = new LengthGizmo(gizmo.center, gizmo.direction, gizmo.distance, gizmo.side, gizmo.cb)
+        this.distanceGizmo = () => distanceGizmo
+        window.alcRenderer.addGizmo(distanceGizmo)
+      }
+    } else {
+      if(this.distanceGizmo) window.alcRenderer.removeGizmo(this.distanceGizmo())
+      this.distanceGizmo = null
+    }
+  }
+
   modifiedComponents() { return [this.componentId] }
+
   repair() {}
 
   involvedSketches() {
@@ -148,6 +170,11 @@ export class Feature {
     })
   }
 
+  dispose() {
+    if(this.distanceGizmo) window.alcRenderer.removeGizmo(this.distanceGizmo())
+    this.distanceGizmo = null
+  }
+
   dump() {
     return {
       id: this.id,
@@ -163,8 +190,6 @@ export class Feature {
     feature.setValues(dump.values)
     return feature
   }
-
-  dispose() {}
 }
 
 
@@ -423,25 +448,19 @@ export class ExtrudeFeature extends Feature {
     this.previewBody = tool
   }
 
-  updateGizmos() {
-    if(this.isComplete()) {
-      if(this.lengthGizmo) {
-        this.lengthGizmo().set(this.distance, this.side)
-      } else {
-        const profile = this.profiles()[0].getItem()
-        const center = profile.center()
-        const axis = this.axis && this.axis()
-        const direction = axis || profile.normal()
-        const lengthGizmo = new LengthGizmo(center, direction, this.distance, this.side, (dist, side) => {
+  getGizmo() {
+    const profile = this.profiles()[0].getItem()
+    return {
+      distance: {
+        center: profile.center(),
+        direction: (this.axis && this.axis()) || profile.normal(),
+        distance: this.distance,
+        side: this.side,
+        cb: (dist, side) => {
           this.distance = dist
           this.side = side
-        })
-        this.lengthGizmo = () => lengthGizmo
-        window.alcRenderer.addGizmo(this.lengthGizmo())
+        },
       }
-    } else {
-      if(this.lengthGizmo) window.alcRenderer.removeGizmo(this.lengthGizmo())
-      this.lengthGizmo = null
     }
   }
 
@@ -452,12 +471,6 @@ export class ExtrudeFeature extends Feature {
     })
     this.profiles = () => newProfiles
     this.error = null
-  }
-
-  dispose() {
-    super.dispose()
-    if(this.lengthGizmo) window.alcRenderer.removeGizmo(this.lengthGizmo())
-    this.lengthGizmo = null
   }
 }
 
@@ -622,6 +635,7 @@ export class FilletFeature extends Feature {
       radius: {
         title: 'Radius',
         type: 'length',
+        gizmo: true,
       },
     })
 
@@ -636,23 +650,15 @@ export class FilletFeature extends Feature {
     } catch(err) { this.error = err || this.error }
   }
 
-  updateGizmos() {
-    if(this.isComplete()) {
-      if(this.lengthGizmo) {
-        this.lengthGizmo().set(this.radius, true)
-      } else {
-        const edge = this.edges()[0].getItem()
-        const center = edge.center()
-        const direction = new THREE.Vector3(0,1,0)
-        const lengthGizmo = new LengthGizmo(center, direction, this.radius, true, (dist, _side) => {
-          this.radius = dist
-        })
-        this.lengthGizmo = () => lengthGizmo
-        window.alcRenderer.addGizmo(this.lengthGizmo())
+  getGizmo() {
+    return {
+      distance: {
+        center: this.edges()[0].getItem().center(),
+        direction: new THREE.Vector3(0,1,0),
+        distance: this.radius,
+        side: true,
+        cb: (dist, _side) => { this.radius = dist },
       }
-    } else {
-      if(this.lengthGizmo) window.alcRenderer.removeGizmo(this.lengthGizmo())
-      this.lengthGizmo = null
     }
   }
 
@@ -661,12 +667,6 @@ export class FilletFeature extends Feature {
     const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
     this.edges = () => remainingEdges
     this.error = null
-  }
-
-  dispose() {
-    super.dispose()
-    if(this.lengthGizmo) window.alcRenderer.removeGizmo(this.lengthGizmo())
-    this.lengthGizmo = null
   }
 }
 

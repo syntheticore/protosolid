@@ -1139,7 +1139,7 @@ export class Profile {
     // Name faces
     const faces = solid.faces()
     originals.forEach((seg, i) => {
-      faces[i].id = '/' + featureId + '/swept/' + seg.id
+      faces[i].id = '/' + featureId + '/swept/' + this.getBaseId(seg)
     })
     faces[faces.length - 2].id = '/' + featureId + '/bottom'
     faces[faces.length - 1].id = '/' + featureId + '/top'
@@ -1153,25 +1153,28 @@ export class Profile {
     return compound
   }
 
+  getBaseId(curve) {
+    return curve.id.split('/')[0]
+  }
+
   update() {
     const cutElements = this.sketch.elements.flatMap(elem => elem.split(this.sketch.elements) )
     const newWires = this.sketch.getWires(cutElements, false)
     let wasRepairNeeded = false
     let error
     this.rings = this.rings.map(wire => {
-      const wireIds = new Set(wire.segments.map(seg => seg.id ))
+      const wireIds = new Set(wire.segments.map(seg => this.getBaseId(seg) ))
       const replacementWire = newWires.map(newWire => {
-        const newWireIds = new Set(newWire.segments.map(tcurve => tcurve.id ))
-        const count = wireIds.intersection(newWireIds).size
-        if(count > 0) return [count, newWire]
+        const newWireIds = new Set(newWire.segments.map(tcurve => this.getBaseId(tcurve) ))
+        const matched = wireIds.intersection(newWireIds).size
+        if(matched > 0) return [matched, newWireIds.size, newWire]
       }).filter(Boolean).minMaxBy(Math.max, pair => pair[0] )
       if(!replacementWire) {
         error = { type: 'error', msg: "Profile was lost" }
         return wire
       }
-      const [count, newWire] = replacementWire
-      console.log('update profile', count, wireIds.size)
-      if(count != wireIds.size) wasRepairNeeded = true
+      const [matched, newSize, newWire] = replacementWire
+      if(matched != wireIds.size || matched != newSize) wasRepairNeeded = true
       return newWire
     })
     if(error) return error

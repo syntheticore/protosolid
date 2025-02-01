@@ -127,7 +127,7 @@
         bus.isShiftPressed = true
         bus.emit('shift-pressed', true)
 
-      } else if(e.key === 'Control') {
+      } else if(e.key === 'Control' || e.key === 'Meta') {
         bus.isCtrlPressed = true
         bus.emit('ctrl-pressed', true)
 
@@ -146,7 +146,7 @@
         bus.isShiftPressed = false
         bus.emit('shift-pressed', false)
 
-      } else if(e.key === 'Control') {
+      } else if(e.key === 'Control' || e.key === 'Meta') {
         bus.isCtrlPressed = false
         bus.emit('ctrl-pressed', false)
 

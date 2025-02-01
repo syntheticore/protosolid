@@ -150,6 +150,7 @@
           e.keyCode == 27 || // Escape
           e.altKey ||
           e.ctrlKey ||
+          e.metaKey ||
           (e.keyCode == 13 && (this.$refs.input.selectionStart != this.$refs.input.selectionEnd)) // Enter pressed without cursor in input
         if(!allowPropagation) e.stopPropagation()
       },

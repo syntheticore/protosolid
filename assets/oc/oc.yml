@@ -442,6 +442,10 @@ mainBuild:
     - symbol: NCollection_BaseSequence
     - symbol: NCollection_BaseMap
 
+    - symbol: TColgp_Array1OfPnt2d
+    - symbol: TColStd_Array1OfReal
+    - symbol: TColStd_Array1OfInteger
+
     - symbol: TCollection_AsciiString
     - symbol: TCollection_ExtendedString
 

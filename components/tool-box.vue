@@ -149,7 +149,7 @@
 
   import {
     SketchElement,
-  } from './../js/core/kernel.js'
+  } from './../js/core/geom2d.js'
 
   import {
     CreateSketchFeature,

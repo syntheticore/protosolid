@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import { Circle, Arc } from '../core/kernel.js'
+import { Circle, Arc } from '../core/geom2d.js'
 
 
 export default class DimensionControls extends THREE.Object3D {

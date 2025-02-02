@@ -63,13 +63,6 @@ function saveFileWeb(data, filetype, filename) {
   }, 0)
 }
 
-export function arrayRange(start, end, step=1) {
-  return Array.from(
-    { length: (end - start) / step + 1 },
-    (_, i) => start + i * step
-  )
-}
-
 export function shallowEqual(a, b) {
   const keys1 = Object.keys(a)
   const keys2 = Object.keys(b)

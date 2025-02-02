@@ -287,7 +287,9 @@
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
   import Transloader from './../js/transloader.js'
-  import { CoincidentConstraint, Dimension, Solid, Face, SketchElement } from './../js/core/kernel.js'
+  import { SketchElement } from './../js/core/geom2d.js'
+  import { Dimension, CoincidentConstraint } from './../js/core/sketch.js'
+  import { Solid, Face } from './../js/core/geom3d.js'
   import {
     DummyTool,
     ManipulationTool,

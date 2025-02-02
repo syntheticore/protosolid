@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 
 import Serialize from './serialize.js'
-import { Compound, PlaneHelper, rotationFromNormal } from './kernel.js'
+import { Compound } from './geom3d.js'
+import { PlaneHelper } from './helpers.js'
+import { rotationFromNormal } from './utils.js'
 
 export default class Component {
   constructor(parent, id) {

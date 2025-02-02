@@ -1,7 +1,11 @@
 import * as THREE from 'three'
 
 import Component from './component.js'
-import { Sketch, Compound, Reference, PlaneHelper, normalFromMatrix } from './kernel.js'
+import { Sketch } from './sketch.js'
+import { Compound } from './geom3d.js'
+import { Reference } from './references.js'
+import { PlaneHelper } from './helpers.js'
+import { normalFromMatrix } from './utils.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
 import { makeID } from './id.js'

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import { Timeline } from './kernel.js'
+import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
 import { Feature, CreateComponentFeature, CreateSketchFeature } from './features.js'
 import { Selection } from '../selection.js'

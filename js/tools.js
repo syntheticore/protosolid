@@ -11,6 +11,10 @@ import {
   Line,
   Circle,
   Arc,
+  Spline,
+} from './core/geom2d.js'
+
+import {
   CoincidentConstraint,
   PerpendicularConstraint,
   HorizontalConstraint,
@@ -22,7 +26,8 @@ import {
   Dimension,
   Projection,
   ElemRef,
-} from './core/kernel.js'
+} from './core/sketch.js'
+
 
 class Tool {
   static icon = 'bullseye'
@@ -400,7 +405,9 @@ export class SplineTool extends SketchTool {
       points.push(vec)
       this.curve.setHandles(points, false)
     } else {
-      this.curve = this.sketch.add_spline([vec.toArray(), vec.toArray()])
+      this.curve = new Spline([vec, vec])
+      this.sketch.add(this.curve)
+      // this.curve = this.sketch.add_spline([vec.toArray(), vec.toArray()])
       // this.curve.sketch = this.sketch
     }
     this.viewport.elementChanged(this.curve, this.component)

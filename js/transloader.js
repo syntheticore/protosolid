@@ -2,9 +2,12 @@
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js'
 
 import Component from './core/component.js'
+import { SketchElement } from './core/geom2d.js'
+import { Edge, Face, Solid, Profile } from './core/geom3d.js'
+import { Sketch, Dimension } from './core/sketch.js'
+import { ConstructionHelper } from './core/helpers.js'
 import PlaneHelperObject from './three/plane-helper-object.js'
 import DimensionControls from './three/dimension-controls.js'
-import { Edge, Face, Solid, Profile, Sketch, SketchElement, ConstructionHelper, Dimension } from './core/kernel.js'
 
 let vnhs = [];
 

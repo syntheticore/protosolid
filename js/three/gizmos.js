@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 import ArrowControls from './arrow-controls.js'
-import { rotationFromNormal } from '../core/kernel.js'
+import { rotationFromNormal } from '../core/utils.js'
 
 export class LengthGizmo extends ArrowControls {
   constructor(startPosition, direction, startValue, startSide, cb) {

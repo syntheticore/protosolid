@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
-import { Line, Circle, Arc, SketchElement } from './geom2d.js'
+import { Line, Circle, Arc, Spline, SketchElement } from './geom2d.js'
 import { Wire, Profile } from './geom3d.js'
 import { EPSILON, clockwise, ocAx3FromMatrix, ocPlnFromMatrix } from './utils.js'
 import { CurveReference, EdgeReference } from './references.js'
@@ -256,6 +256,11 @@ export class Sketch {
         }
         // const rules = { id: `${id++}`, type: 'arc_rules', a_id: arc.id  }
         primitives = [start, end, center, arc]
+
+      } else if(elem instanceof Spline) {
+        const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: elem.projection }
+        const p2 = { id: `${id++}`, type: 'point', x: elem.points.slice(-1)[0].x, y: elem.points.slice(-1)[0].y, fixed: elem.projection }
+        primitives = [p1, p2]
       }
 
       idMap[elem.id] = primitives
@@ -366,6 +371,13 @@ export class Sketch {
       } else if(elem instanceof Arc) {
         const [start, end, center, _arc, _rules] = idMap[elem.id]
         elem.setHandles([vecFromPrim(center), vecFromPrim(start), vecFromPrim(end)])
+
+      } else if(elem instanceof Spline) {
+        const [p1, p2] = idMap[elem.id]
+        const handles = elem.handles()
+        handles[0] = vecFromPrim(p1)
+        handles[handles.length - 1] = vecFromPrim(p2)
+        elem.setHandles(handles)
       }
     })
   }

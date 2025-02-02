@@ -513,8 +513,13 @@ export class Spline extends SketchElement {
     return new window.oc.oc.Handle_Geom2d_Curve_2(spline)
   }
 
+  flip() {
+    this.points.reverse()
+    this.update()
+  }
+
   _clone() {
-    return new Spline(this.points)
+    return new Spline([...this.points])
   }
 
   dump() {

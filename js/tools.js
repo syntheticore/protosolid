@@ -403,7 +403,7 @@ export class SplineTool extends SketchTool {
       points[points.length - 1] = vec//.toArray()
       // points.push(vec.toArray())
       points.push(vec)
-      this.curve.setHandles(points, false)
+      this.curve.setHandles(points)
     } else {
       this.curve = new Spline([vec, vec])
       this.sketch.add(this.curve)
@@ -417,7 +417,7 @@ export class SplineTool extends SketchTool {
     if(!this.curve) return
     let points = this.curve.handles()
     points[points.length - 1] = vec//.toArray()
-    this.curve.setHandles(points, false)
+    this.curve.setHandles(points)
     this.viewport.elementChanged(this.curve, this.component)
   }
 
@@ -425,7 +425,7 @@ export class SplineTool extends SketchTool {
     if(!this.curve) return
     let points = this.curve.handles()
     points.pop()
-    this.curve.setHandles(points, false)
+    this.curve.setHandles(points)
     this.viewport.elementChanged(this.curve, this.component)
   }
 }

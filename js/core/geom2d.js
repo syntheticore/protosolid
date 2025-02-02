@@ -453,6 +453,87 @@ export class Arc extends SketchElement {
 Serialize.register(Arc, 'Arc')
 
 
+export class Spline extends SketchElement {
+  typename() { return super.typename('Spline') }
+
+  constructor(points, geom) {
+    super()
+    this.points = points
+    this.update(geom)
+  }
+
+  static clampedKnots(n, degree) {
+    if(degree >= n) { return [] }
+    const d = degree + 1
+    const uniform = arrayRange(1, n - d)
+    const last = n - d + 1
+    return [
+      [0.0, ...uniform, last],
+      [d, ...Array(uniform.length).fill(1), d],
+    ]
+  }
+
+  endpoints() {
+    return [this.points[0], this.points.slice(-1)[0]]
+  }
+
+  snapPoints() {
+    return this.endpoints()
+  }
+
+  handles() {
+    return [...this.points]
+  }
+
+  setHandles(handles) {
+    this.points = handles
+    this.update()
+  }
+
+  center() { return this.sample(0.5) }
+
+  geometry() {
+    const n = this.points.length
+    if(n < 2) throw "Splines need at least two control vertices"
+
+    const degree = Math.min(5, n - 1)
+    const [knots, multiplicities] = Spline.clampedKnots(n, degree)
+
+    const points = new window.oc.oc.TColgp_Array1OfPnt2d_2(1, this.points.length)
+    this.points.forEach((p, i) => points.SetValue(i + 1, ocPnt2dFromVec(p)) )
+
+    const knts = new window.oc.oc.TColStd_Array1OfReal_2(1, knots.length)
+    knots.forEach((knot, i) => knts.SetValue(i + 1, knot) )
+
+    const mults = new window.oc.oc.TColStd_Array1OfInteger_2(1, multiplicities.length)
+    multiplicities.forEach((mult, i) => mults.SetValue(i + 1, mult) )
+
+    const spline = new window.oc.oc.Geom2d_BSplineCurve_1(points, knts, mults, degree, false)
+
+    return new window.oc.oc.Handle_Geom2d_Curve_2(spline)
+  }
+
+  _clone() {
+    return new Spline(this.points)
+  }
+
+  dump() {
+    return {
+      id: this.id,
+      points: this.points,
+    }
+  }
+
+  static undump(dump) {
+    const line = new Spline(dump.points)
+    line.id = dump.id
+    return line
+  }
+}
+
+Serialize.register(Spline, 'Spline')
+
+
 function tesselateCurveFixed(geom, steps) {
   const start = geom.FirstParameter()
   const range = geom.LastParameter() - start

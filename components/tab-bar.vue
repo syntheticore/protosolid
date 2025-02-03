@@ -1,17 +1,23 @@
 <template lang="pug">
+
   header.tab-bar
 
     MenuButton.left.app-menu-btn(icon="atom")
+
       AppMenu(
         :document="activeDocument"
         v-bind="$attrs"
       )
 
     ul.tabs
+
       li(v-for="doc in documents"
-         @click="$emit('update:active-document', doc)"
-         :class="{active: doc == activeDocument}")
+        @click="$emit('update:active-document', doc)"
+        :class="{active: doc == activeDocument}"
+      )
+
         span.title {{ doc.filePath || 'Untitled Document' }} {{ doc.hasChanges ? '*' : null }}
+
         button(@click.stop="$emit('delete-document', doc)")
           Icon(icon="times")
 
@@ -68,12 +74,13 @@
 
 
 <style lang="stylus" scoped>
+
   .tab-bar
-    display: flex
     background: $dark2
+    display: flex
     // background: linear-gradient(to bottom, $dark1 * 0.9, $dark2 * 0.95)
     border-bottom: 1px solid black
-    outline: 1px solid #323840
+    box-shadow: 0 1px 0 #323840
     max-width: 100vw
     align-items: center
     z-index: 2
@@ -83,23 +90,24 @@
       backdrop-filter: blur(16px)
       background: rgba($dark2, 0.9)
 
-    [data-platform="darwin"]:not([data-darwin-old]) &
-      border-radius: 4px 4px 0px 0px
-
     [data-platform="darwin"] &
+      border-radius: 4px 4px 0px 0px
       padding-left: 74px
 
     > *
       flex: 0 0 auto
 
   .fullscreen
-  .maximized
+  .maximized[data-platform="win32"]
   [data-platform="browser"]
+
     .tab-bar
       padding-left: 0px
       border-radius: 0 !important
+
     .window-controls button:last-child
       border-radius: 0
+
     .app-menu-btn
       margin-left: 3px
       margin-right: 4px
@@ -116,8 +124,10 @@
     -ms-overflow-style: none
     scrollbar-width: none
     height: 100%
+
     &::-webkit-scrollbar
       display: none
+
     li
       display: flex
       align-items: center
@@ -129,19 +139,24 @@
       transition: all 0.2s
       color: $bright2
       text-shadow: 0 -1px 0px black
+
       &:hover
         background: $dark2 * 1.2
         svg
           opacity: 1
+
       &.active
         color: $bright1
         background: $dark1 * 1.2
+
       button
         background: none
         border: none
         padding: 6px 11px 6px 10px
+
         &:hover svg
           color: $bright1
+
         svg
           color: $bright2
           transition: all 0.2s
@@ -153,11 +168,14 @@
     -webkit-user-select: none
     min-width: 24px
     height: 100%
+
     &.dynamic
       flex: 100 1 auto
       min-width: 44px
+
     &.fixed
       display: none
+
       [data-platform="win32"] &
         display: block
 
@@ -167,8 +185,10 @@
   .window-controls
     display: none
     height: 100%
+
     [data-platform="win32"] &
       display: block
+
     button
       background: none
       border: none
@@ -178,11 +198,14 @@
       padding: 0 12px
       height: 100%
       transition: all 0.15s
+
       &:last-child
         // border-radius: 0px 4px 0px 0px
+
       &:hover
         background: $dark1
         color: white
+
         &:last-child
           background: #b70f0f
 
@@ -202,10 +225,12 @@
 
   .inset
     margin-left: 8px
+
 </style>
 
 
 <script>
+
   // import AppMenu from './app-menu.vue'
   // import MenuButton from './menu-button.vue'
   // import IconView from './icon-view.vue'
@@ -243,4 +268,5 @@
       },
     }
   }
+
 </script>

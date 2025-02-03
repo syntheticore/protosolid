@@ -140,7 +140,6 @@
 
   svg
     &.component
-      padding-left: 2px
       color: var(--color)
     &.blank
       visibility: hidden
@@ -183,7 +182,7 @@
       background: $dark2
       font-size: 0.75rem
       font-weight: bold
-      border: 0.5px solid $dark1 * 1.3
+      border: 1px solid $dark1 * 1.3
       border-radius: 3px
       transition: opacity 0.2s
       box-shadow: 0 1px 3px rgba(black, 0.25)
@@ -218,7 +217,7 @@
         opacity: 0.5
 
     .controls
-      border-left: 0.5px solid $dark1 * 1.3
+      border-left: 1px solid $dark1 * 1.3
       white-space: nowrap
       overflow: hidden
       width: 0
@@ -237,7 +236,7 @@
         width: 79px
 
     svg
-      font-size: 16px
+      font-size: 13px
       padding: 4px
       color: $bright2
 

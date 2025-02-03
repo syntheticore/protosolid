@@ -37,8 +37,9 @@
     left: 1px
     right: 1px
     height: 38px
+
     .fullscreen &
-    .maximized &
+    .maximized[data-platform="win32"] &
     [data-platform="browser"] &
       height: 33px
 

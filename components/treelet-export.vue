@@ -1,17 +1,24 @@
 <template lang="pug">
 
   .box.treelet-export(:class="{expanded: expanded}")
+
     header(@click="expanded = !expanded")
+
       Icon(icon="file-export" fixed-width)
+
       h2 {{ config.title }} - {{ config.format.toUpperCase() }}
+
       Icon.expand(icon="angle-right")
+
       .controls.wide
+
         Icon(
           icon="file-export" fixed-width
           title="Export"
           :disabled="!path"
           @click.stop="exportFile"
         )
+
         Icon.delete(
           icon="trash-alt" fixed-width
           title="Delete"
@@ -19,7 +26,9 @@
         )
 
     .content.form(v-if="expanded")
+
       fieldset.physical
+
         h3 Export Settings
 
         label

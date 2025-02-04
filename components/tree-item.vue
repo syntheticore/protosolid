@@ -1,12 +1,14 @@
 <template lang="pug">
 
-  li.tree-item
+  li.tree-item(:class="{ hidden: !isVisible }")
+
     header(
       @dblclick="document.activateComponent(component)"
       @mouseenter="$emit('update:highlight', component)"
       @mouseleave="$emit('update:highlight', null)"
       @click="document.selection = document.selection.handle(component, bus.isCtrlPressed)"
     )
+
       Icon.expander(
         icon="caret-down"
         :class="{blank: !canExpand || isTop, closed: !expanded}"
@@ -14,30 +16,39 @@
         @dblclick.stop
         fixed-width
       )
-      .box(:class="{hidden: !isVisible, active: component === document.activeComponent, selected: document.selection.has(component)}")
+
+      .box(:class="{ active: component === document.activeComponent, selected: document.selection.has(component) }")
+
         header
+
           Icon.eye(
             v-if="!isTop"
             icon="eye" fixed-width
             @click.stop="component.creator.hidden = !component.creator.hidden"
           )
+
           Icon.component(
             :icon="isAssembly ? 'boxes' : 'box'"
             :style="{'--color': component.creator.color}"
           )
+
           span.name {{ component.creator.title }}
+
           .controls.wide(:class="{'ultra-wide': !isTop}")
+
             Icon(
               icon="check-circle" fixed-width
               title="Activate"
               @click.stop="document.activateComponent(component)"
             )
+
             Icon(
               icon="plus-circle" fixed-width
               title="Create Component"
               @click.stop="document.createComponent(component)"
               @dblclick.stop
             )
+
             Icon.delete(
               v-if="!isTop"
               icon="trash-alt" fixed-width
@@ -47,7 +58,6 @@
 
     ul.widgets(
       v-if="expanded"
-      :class="{hidden: !isVisible}"
     )
       //- Material
       TreeletMaterial(
@@ -119,8 +129,10 @@
 
 
 <style lang="stylus" scoped>
+
   .tree-item
     margin-left: 23px
+
     > header
       display: inline-flex
       align-items: center
@@ -139,6 +151,7 @@
       transform: rotate(-0.25turn)
 
   svg
+
     &.component
       color: var(--color)
     &.blank
@@ -150,20 +163,20 @@
 
   .widgets
     margin-left: 43px
-    transition: opacity 0.2s
     display: flex
     flex-direction: column
     align-items: flex-start
-    &.hidden
-      opacity: 0.5
+
     li
       padding: 1px 0
+
       &:hover
         border-color: $dark1 * 1.85
 
   .list-enter-active
   .list-leave-active
     transition: all 0.3s
+
   .list-enter-from
   .list-leave-to
     opacity: 0
@@ -173,6 +186,17 @@
 </style>
 
 <style lang="stylus">
+
+  .tree-view
+
+    .hidden
+
+      .box
+        background: rgba($dark2 * 1.3, 0.3) !important
+
+        > *
+          opacity: 0.4
+
   .tree-item
 
     .delete
@@ -182,42 +206,52 @@
       background: $dark2
       font-size: 0.75rem
       font-weight: bold
-      border: 1px solid $dark1 * 1.3
+      border: 1px solid $dark1 * 1.4
       border-radius: 3px
       transition: opacity 0.2s
       box-shadow: 0 1px 3px rgba(black, 0.25)
       overflow: hidden
       // pointer-events: auto
       margin-right: 10px // Needed in FF when scrollbars are active
+      transition: background 0.15s
+
       > header
         display: flex
         align-items: center
+
       &:hover
         background: $dark2 * 1.15
         border-color: $dark1 * 1.85
         color: white
+
         .controls
           border-color: $dark1 * 1.85
           transition-delay: 0.1s
+
         .content
           border-color: $dark1 * 1.85
+
+      .blurry &
+        backdrop-filter: blur(16px)
+
       &.active
         border-color: $highlight * 1.2
         box-shadow: 0 0 0px 1px $highlight * 1.2
         color: white
+
       &.selected
         background: $highlight * 0.7 !important
         border-color: $highlight * 1.1
+
         h2
         header svg
           color: white
+
         .controls
           border-color: $highlight * 1.1
-      &.hidden
-        opacity: 0.5
 
     .controls
-      border-left: 1px solid $dark1 * 1.3
+      border-left: 1px solid $dark1 * 1.4
       white-space: nowrap
       overflow: hidden
       width: 0
@@ -244,9 +278,11 @@
     .controls svg
       color: $bright1
       transition: all 0.1s
+
       &:hover
         color: white
         background: $dark1 * 1.85
+
       &:active
         background: $dark1 * 1.5
         transition: none
@@ -254,12 +290,8 @@
     .widgets li
 
       .box
-        background: rgba($dark2 * 1.3, 0.93)
+        background: rgba($dark2 * 1.3, 0.7)
         font-size: 11px
-        transition: background-color 0.15s
-
-        .blurry &
-          backdrop-filter: blur(8px)
 
         &:hover
 
@@ -270,11 +302,12 @@
         margin-right: 8px
 
       .content
-        border-top: 1px solid $dark1 * 1.3
+        border-top: 1px solid $dark1 * 1.4
 
       .form
+
         fieldset + fieldset
-          border-top: 1px solid $dark1 * 1.3
+          border-top: 1px solid $dark1 * 1.4
 
         input[type="checkbox"]
           margin-left: 60px
@@ -282,32 +315,17 @@
 
 
 <script>
-  // import ParameterTreelet from './treelet-parameter.vue'
-  // import MaterialTreelet from './treelet-material.vue'
-  // import SolidTreelet from './treelet-solid.vue'
-  // import SketchTreelet from './treelet-sketch.vue'
-  // import ExportTreelet from './treelet-export.vue'
 
   export default {
     name: 'TreeItem',
 
     inject: ['bus'],
 
-    // components: {
-    //   ParameterTreelet,
-    //   MaterialTreelet,
-    //   SolidTreelet,
-    //   ExportTreelet,
-    //   SketchTreelet,
-    // },
-
     props: {
       isTop: Boolean,
       document: Object,
       component: Object,
-      // activeComponent: Object,
       parentHidden: Boolean,
-      // selection: Object,
     },
 
     data() {

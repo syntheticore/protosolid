@@ -86,9 +86,8 @@
     z-index: 2
 
     .blurry &
-      -webkit-backdrop-filter: blur(16px)
-      backdrop-filter: blur(16px)
-      background: rgba($dark2, 0.9)
+      backdrop-filter: blur(32px)
+      background: rgba($dark2, 0.875)
 
     [data-platform="darwin"] &
       border-radius: 4px 4px 0px 0px

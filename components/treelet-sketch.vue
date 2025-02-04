@@ -1,11 +1,11 @@
 <template lang="pug">
 
   li.treelet-sketch(
-    :class="{hidden: isHidden}"
     @click="document.selection = document.selection.handle(sketch, bus.isCtrlPressed)"
     @dblclick="document.activateSketch(sketch)"
     @mouseenter="$emit('update:highlight', sketch)"
     @mouseleave="$emit('update:highlight', null)"
+    :class="{ hidden: isHidden }"
   )
 
     .box
@@ -15,6 +15,7 @@
         Icon.eye(
           icon="eye"
           @click.stop="toggleVisibility"
+          @dblclick.stop
         )
 
         Icon.icon(icon="edit" fixed-width)
@@ -27,6 +28,7 @@
             icon="check-circle" fixed-width
             title="Activate"
             @click.stop="document.activateSketch(sketch)"
+            @dblclick.stop
           )
 
 </template>
@@ -34,14 +36,9 @@
 
 <style lang="stylus" scoped>
 
-  .treelet-sketch
-
-    &.hidden
-      opacity: 0.5
-
-    .icon
-      padding-left: 3px
-      width: auto
+  .icon
+    padding-left: 3px
+    width: auto
 
 </style>
 

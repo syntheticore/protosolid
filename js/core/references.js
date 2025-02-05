@@ -1,4 +1,5 @@
 import Serialize from './serialize.js'
+import { Wire, Profile } from './geom3d.js'
 
 export class Reference {
   constructor(item) {
@@ -59,6 +60,7 @@ export class FaceReference extends TopoReference {
 }
 Serialize.register(FaceReference, 'FaceReference')
 
+
 export class EdgeReference extends TopoReference {
   update(tree) {
     const comp = tree.findChild(this.componentId)
@@ -77,12 +79,28 @@ export class EdgeReference extends TopoReference {
 }
 Serialize.register(EdgeReference, 'EdgeReference')
 
+
 export class CurveReference extends Reference {
   update(_tree) {
     if(!this.item.projection) return
     this.item = this.item.projection.geometry()
   }
+
+  dump() {
+    return {
+      id: this.item.id,
+      sketchId: this.item.sketch.id,
+    }
+  }
+
+  static undump(dump, context) {
+    const sketch = context.sketches[dump.sketchId]
+    const curve = sketch.elements.find(elem => elem.id == dump.id )
+    return new CurveReference(curve)
+  }
 }
+Serialize.register(CurveReference, 'CurveReference')
+
 
 export class ProfileReference extends Reference {
   update(_tree) {
@@ -113,6 +131,7 @@ export class ProfileReference extends Reference {
   }
 }
 Serialize.register(ProfileReference, 'ProfileReference')
+
 
 export class HelperReference extends Reference {
   constructor(item, componentId, helperId) {

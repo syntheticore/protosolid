@@ -7,7 +7,7 @@ export default class DimensionControls extends THREE.Object3D {
   constructor(constraint, renderer) {
     super()
 
-    this.alcType = 'dimension'
+    this.alcTypes = ['dimension']
     this.alcObject = constraint
 
     const itemL = constraint.items[0]

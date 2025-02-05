@@ -29,8 +29,8 @@ export class PlaneHelper extends ConstructionHelper {
 }
 
 export class AxisHelper extends ConstructionHelper {
-  constructor(componentId, axis) {
-    super(componentId)
+  constructor(componentId, axis, id) {
+    super(componentId, id)
     this.transform = axis
   }
 
@@ -39,6 +39,21 @@ export class AxisHelper extends ConstructionHelper {
   }
 
   getAxis() {
+    return this.transform
+  }
+}
+
+export class PointHelper extends ConstructionHelper {
+  constructor(componentId, point, id) {
+    super(componentId, id)
+    this.transform = point
+  }
+
+  axialReference() {
+    return new PointReference(new HelperReference(this))
+  }
+
+  getPoint() {
     return this.transform
   }
 }

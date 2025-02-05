@@ -5,8 +5,8 @@ import Component from './core/component.js'
 import { SketchElement } from './core/geom2d.js'
 import { Edge, Face, Solid, Profile } from './core/geom3d.js'
 import { Sketch, Dimension } from './core/sketch.js'
-import { ConstructionHelper } from './core/helpers.js'
-import PlaneHelperObject from './three/plane-helper-object.js'
+import { ConstructionHelper, PlaneHelper, AxisHelper, PointHelper } from './core/helpers.js'
+import { PlaneHelperObject, AxisHelperObject, PointHelperObject } from './three/helper-objects.js'
 import DimensionControls from './three/dimension-controls.js'
 
 let vnhs = [];
@@ -93,7 +93,7 @@ export default class Transloader {
             this.getSurfaceMaterial(comp, face),
           )
           face.mesh = () => faceMesh
-          faceMesh.alcType = 'face'
+          faceMesh.alcTypes = ['face', face.getPlane() && 'plane'].filter(Boolean)
           faceMesh.alcObject = face
           faceMesh.alcProjectable = isActive
           faceMesh.castShadow = isActive
@@ -113,7 +113,7 @@ export default class Transloader {
         const edges = solid.edges()
         cache.edges = (cache.edges || []).concat(edges.map(edge => {
           const line = this.renderer.convertLine(edge.tesselate(), this.getWireMaterial(comp, edge))
-          line.alcType = 'edge'
+          line.alcTypes = ['edge', edge.getAxis() && 'axis'].filter(Boolean)
           line.alcObject = edge
           edge.mesh = () => line
           // edge.solid = solid
@@ -148,12 +148,17 @@ export default class Transloader {
 
     if(comp === this.document.activeComponent) {
       // Load Construction Helpers
-      comp.helpers.forEach(plane => {
-        const mesh = new PlaneHelperObject(plane, this.renderer)
-        plane.mesh = () => mesh
-        plane.component = comp
+      comp.helpers.forEach(helper => {
+        const HelperObject = {
+          [PlaneHelper]: PlaneHelperObject,
+          [AxisHelper]: AxisHelperObject,
+          [PointHelper]: PointHelperObject,
+        }[helper.constructor]
+        const mesh = new HelperObject(helper, this.renderer)
+        helper.mesh = () => mesh
+        helper.component = comp
         this.renderer.add(mesh, true)
-        cache.helpers.push(plane)
+        cache.helpers.push(helper)
       })
     }
 
@@ -200,7 +205,7 @@ export default class Transloader {
     if(!vertices) return
     const line = this.renderer.convertLine(vertices, this.renderer.materials.line)
     line.applyMatrix4(elem.sketch.workplane)
-    line.alcType = 'curve'
+    line.alcTypes = ['curve', elem.getAxis && 'axis']
     line.alcObject = elem
     elem.mesh = () => line
     elem.component = comp
@@ -235,7 +240,7 @@ export default class Transloader {
         this.renderer.materials.region
       )
       mesh.applyMatrix4(region.sketch.workplane)
-      mesh.alcType = 'region'
+      mesh.alcTypes = ['region']
       mesh.alcObject = region
       region.mesh = () => mesh
       region.component = comp
@@ -303,11 +308,7 @@ export default class Transloader {
               this.renderer.materials.line,
       region: highlighted ? this.renderer.materials.highlightRegion :
         this.renderer.materials.region,
-      plane: highlighted ? this.renderer.materials.highlightPlane :
-        this.renderer.materials.plane,
-      face: highlighted ? this.renderer.materials.highlightSurface :
-        this.renderer.materials.surface,
-    }[elem.mesh().alcType]
+    }[elem.mesh().alcTypes[0]]
   }
 
   applyMaterials(obj) {
@@ -323,7 +324,9 @@ export default class Transloader {
     cache.faces.forEach(face => face.mesh().material = this.getSurfaceMaterial(comp, face) )
     cache.regions.forEach(region => region.mesh().material = this.getElemMaterial(region) )
     cache.curves.forEach(curve => curve.mesh().material = this.getElemMaterial(curve) )
-    comp.helpers.forEach(helper => { if(helper.mesh) helper.mesh().material = this.getElemMaterial(helper) })
+    comp.helpers.forEach(helper => {
+      helper.mesh().setMaterial(this.renderer, this.isHighlighted(helper), this.isSelected(helper))
+    })
     comp.children.forEach(child => this.applyMaterials(child) )
   }
 

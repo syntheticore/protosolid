@@ -305,6 +305,10 @@ export class Circle extends SketchElement {
     return new AxialReference(this)
   }
 
+  getAxis() {
+    return this.sketch.workplane.clone()
+  }
+
   _clone() {
     return new Circle(this._center, this.radius)
   }

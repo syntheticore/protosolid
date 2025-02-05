@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 import Serialize from './serialize.js'
 import { Compound } from './geom3d.js'
-import { PlaneHelper } from './helpers.js'
+import { PlaneHelper, AxisHelper, PointHelper } from './helpers.js'
 import { rotationFromNormal } from './utils.js'
 
 export default class Component {
@@ -13,6 +13,12 @@ export default class Component {
     this.compound = new Compound(this.id)
     this.sketches = []
     this.helpers = [
+      new PointHelper(this.id, rotationFromNormal(new THREE.Vector3(0.0, 0.0, 1.0)), this.id + '/origin'),
+
+      new AxisHelper(this.id, rotationFromNormal(new THREE.Vector3(1.0, 0.0, 0.0)), this.id + '/X'),
+      new AxisHelper(this.id, rotationFromNormal(new THREE.Vector3(0.0, 1.0, 0.0)), this.id + '/Y'),
+      new AxisHelper(this.id, rotationFromNormal(new THREE.Vector3(0.0, 0.0, 1.0)), this.id + '/Z'),
+
       new PlaneHelper(this.id, rotationFromNormal(new THREE.Vector3(1.0, 0.0, 0.0)), this.id + '/YZ'),
       new PlaneHelper(this.id, rotationFromNormal(new THREE.Vector3(0.0, 1.0, 0.0)), this.id + '/XZ'),
       new PlaneHelper(this.id, rotationFromNormal(new THREE.Vector3(0.0, 0.0, 1.0)), this.id + '/XY'),

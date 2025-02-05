@@ -367,11 +367,12 @@ export default class Renderer {
   objectsAtScreen(coords, types) {
     const intersects = this.hitTest(coords)
     const objects = Array.from(new Set(intersects.map(obj => obj.object)))
-    return objects.filter(obj => !types || types.some(t => obj.alcType == t ) )
+    return objects.filter(obj => !types || types.some(t =>
+      obj.alcTypes && obj.alcTypes.some(ot => ot == t )
+    ))
   }
 
   convertLine(vertices, material) {
-    // console.log(vertices)
     const geometry = new LineGeometry()
     const positions = vertices.flat()
     geometry.setPositions(positions)

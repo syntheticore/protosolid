@@ -183,4 +183,30 @@ export class AxialReference extends Reference {
   clone() {
     return new AxialReference(this.item.clone())
   }
+
+  static undump(dump) {
+    return new AxialReference(dump.item)
+  }
 }
+Serialize.register(AxialReference, 'AxialReference')
+
+
+export class PointReference extends Reference {
+  getItem() {
+    const item = this.item.getItem()
+    return item && item.getPoint()
+  }
+
+  update(tree) {
+    return this.item.update(tree)
+  }
+
+  clone() {
+    return new PointReference(this.item.clone())
+  }
+
+  static undump(dump) {
+    return new PointReference(dump.item)
+  }
+}
+Serialize.register(PointReference, 'PointReference')

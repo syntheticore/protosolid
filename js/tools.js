@@ -97,7 +97,7 @@ class HighlightTool extends Tool {
       let items = this.viewport.renderer
         .objectsAtScreen(coords, this.realSelectors)
         .map(obj =>
-          obj.alcType == 'face' && this.selectors.some(s => s == 'solid' ) ?
+          obj.alcTypes.some(t => t == 'face' ) && this.selectors.some(s => s == 'solid' ) ?
             obj.alcObject.solid
             :
             obj.alcObject
@@ -307,13 +307,13 @@ export class EdgePickTool extends PickTool {
 
 export class AxisPickTool extends PickTool {
   constructor(component, viewport, callback) {
-    super(component, viewport, ['curve', 'edge'], callback)
+    super(component, viewport, ['axis'], callback)
   }
 }
 
 export class PlanePickTool extends PickTool {
   constructor(component, viewport, callback) {
-    super(component, viewport, ['plane', 'face'], callback)
+    super(component, viewport, ['plane'], callback)
   }
 }
 
@@ -500,7 +500,7 @@ export class ConstraintTool extends HighlightTool {
     super(component, viewport, ['curve'])
     this.sketch = sketch
     this.items = []
-    // this.cursor = 'move'
+    this.cursor = 'crosshair'
   }
 
   async mouseDown(vec, coords) {
@@ -567,9 +567,10 @@ export class DimensionTool extends HighlightTool {
   static icon = 'ruler'
 
   constructor(component, viewport, sketch) {
-    super(component, viewport, ['curve'])
+    super(component, viewport, ['curve', 'point'])
     this.sketch = sketch
     this.items = []
+    this.cursor = 'crosshair'
   }
 
   async mouseDown(vec, coords) {

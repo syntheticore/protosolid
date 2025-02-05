@@ -43,7 +43,7 @@
     &.active > svg
       color: $highlight
     &.error > svg
-      color: darken($red, 30%) !important
+      color: lighten($red, 30%) !important
     &.warning > svg
       color: $warn !important
     &:hover

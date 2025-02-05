@@ -89,7 +89,7 @@ export default class Expression {
   parseNumber(expr) {
     const match = /(\d*\.?\d*)\s*(inch\b|mm\b|cm\b|m\b)?/.exec(expr)
     if(!match || match[1] === '') {
-      // Propably a parameter
+      // Probably a parameter
       const param = this.parameters.find(param => param.name == expr.trim() )
       if(!param) throw 'Unknown Parameter "' + expr + '"'
       return this.parsePlus(param.value)

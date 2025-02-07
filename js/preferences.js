@@ -8,6 +8,8 @@ const preferences = {
   antiAlias: true,
   shadowMaps: true,
   blurredOverlays: true,
+  zoomToCursor: true,
+  cacheTesselation: true,
 }
 
 function savePreferences() {

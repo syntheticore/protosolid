@@ -142,6 +142,7 @@ export default class Renderer {
     this.viewControls.panSpeed = 1.0
     this.viewControls.keyPanSpeed = 12
     this.viewControls.zoomSpeed = 2.6
+    this.viewControls.zoomToCursor = true
     this.viewControls.screenSpacePanning = true
     this.viewControls.rotateSpeed = 1.2
     this.viewControls.minPolarAngle = - Math.PI
@@ -280,10 +281,12 @@ export default class Renderer {
     }, 500)
   }
 
-  animate() {
+  animate(timestamp) {
+    const delta = this.lastTimestamp ? timestamp - this.lastTimestamp : 1
+    this.lastTimestamp = timestamp
     if(this.isAnimating || this.viewControlsTarget || this.cameraTarget) requestAnimationFrame(this.animate.bind(this))
     // Update orbit controls dampening
-    this.viewControls.update()
+    this.viewControls.update(delta)
     // Transition to target positions
     this.cameraTarget = this.lerp(this.camera.position, this.cameraTarget)
     this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
@@ -366,7 +369,7 @@ export default class Renderer {
 
   objectsAtScreen(coords, types) {
     const intersects = this.hitTest(coords)
-    const objects = Array.from(new Set(intersects.map(obj => obj.object)))
+    const objects = Array.from(new Set(intersects.map(obj => obj.object )))
     return objects.filter(obj => !types || types.some(t =>
       obj.alcTypes && obj.alcTypes.some(ot => ot == t )
     ))

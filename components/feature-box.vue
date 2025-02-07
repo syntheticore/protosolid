@@ -274,6 +274,7 @@
       this.bus.on('enter-pressed', this.confirm)
       this.bus.on('escape', this.onEscape)
       this.bus.on('resize', this.updatePaths)
+      this.bus.on('keydown', this.onKeydown)
       this.document.on('deactivate-feature', this.deactivateFeature)
       this.startValues = this.activeFeature.getValues()
       this.activateBaseTool()
@@ -296,6 +297,7 @@
       this.bus.off('enter-pressed', this.confirm)
       this.bus.off('escape', this.onEscape)
       this.bus.off('resize', this.updatePaths)
+      this.bus.off('keydown', this.onKeydown)
       this.document.off('deactivate-feature', this.deactivateFeature)
       this.bus.emit('unpreview-feature')
       this.bus.emit('activate-tool', ManipulationTool)
@@ -314,10 +316,11 @@
         }
       },
 
-      pick: function(type, key) {
+      pick: function(type, key, restart) {
         // Toggle picker off if active
         if(this.activePicker) {
           this.onEscape()
+          if(restart) this.pick(type, key)
           return
         }
         const setting = this.activeFeature.settings[key]
@@ -390,6 +393,19 @@
         this.activePicker = null
         this.updatePicker = null
         this.activeFeature.suppressUpdate = false
+      },
+
+      // Activate pickers using number keys
+      onKeydown: function(key) {
+        key = Number(key)
+        if(isNaN(key)) return
+        const entry = Object
+          .entries(this.activeFeature.settings)
+          .filter(([key, _]) => this.activeFeature.needsPicker(key, true) )
+          [key - 1]
+        if(!entry) return
+        const [name, setting] = entry
+        this.pick(setting.type, name, true)
       },
 
       updatePaths: function() {

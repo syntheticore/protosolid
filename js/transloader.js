@@ -325,7 +325,7 @@ export default class Transloader {
     cache.regions.forEach(region => region.mesh().material = this.getElemMaterial(region) )
     cache.curves.forEach(curve => curve.mesh().material = this.getElemMaterial(curve) )
     comp.helpers.forEach(helper => {
-      helper.mesh().setMaterial(this.renderer, this.isHighlighted(helper), this.isSelected(helper))
+      if(helper.mesh) helper.mesh().setMaterial(this.renderer, this.isHighlighted(helper), this.isSelected(helper))
     })
     comp.children.forEach(child => this.applyMaterials(child) )
   }

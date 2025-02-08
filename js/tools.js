@@ -105,6 +105,10 @@ class HighlightTool extends Tool {
         // .map(obj => {console.log(obj); return obj})
         .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
+      const handle = this.viewport.hoveredHandle
+      if(handle && this.realSelectors.includes('point')) {
+        items.unshift(new ElemRef(handle.elem, handle.index))
+      }
       if(items.length > 1 && !any) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({
@@ -185,7 +189,7 @@ export class ProjectTool extends HighlightTool {
   static icon = 'layer-group'
 
   constructor(component, viewport, sketch) {
-    super(component, viewport, ['edge'])
+    super(component, viewport, ['point', 'axis', 'edge'])
     this.sketch = sketch
     this.localSpace = true
     this.cursor = 'copy'
@@ -497,7 +501,8 @@ export class ArcTool extends SketchTool {
 
 export class ConstraintTool extends HighlightTool {
   constructor(component, viewport, sketch) {
-    super(component, viewport, ['curve'])
+    super(component, viewport, [])
+    this.setSelectors(this.constructor.selectors)
     this.sketch = sketch
     this.items = []
     this.cursor = 'crosshair'
@@ -506,61 +511,83 @@ export class ConstraintTool extends HighlightTool {
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
     const curve = await this.getObject(coords)
-    if(!curve || !(curve instanceof Line)) {
+    if(!curve) {
       this.items = []
       return
     }
-    if(curve == this.items.slice(-1)[0]) return
+    console.log(curve)
+    if(this.items.includes(curve)) return
     this.items.push(curve)
-    if(this.items.length == this.constructor.numItems) {
+    const counts = {}
+    this.selectors.forEach(sel => {
+      counts[sel] = this.items.filter(item => (item.mesh ? item.mesh().alcTypes : ['point']).some(t => t == sel ) ).length
+    })
+    console.log(counts, this.isComplete(counts))
+    if(this.isComplete(counts)) {
       const constraint = new this.constructor.constraintType(...this.items)
       this.sketch.addConstraint(constraint)
       this.viewport.updateRegions(true)
       this.items = []
     }
   }
+
+  isComplete(counts) {}
 }
 
 export class HorizontalConstraintTool extends ConstraintTool {
   static constraintType = HorizontalConstraint
-  static numItems = 1
   static icon = 'ruler-horizontal'
+  static selectors = ['point', 'axis']
+
+  isComplete(counts) { return counts.point == 2 || (counts.axis == 1 && !counts.point) }
 }
 
 export class VerticalConstraintTool extends ConstraintTool {
   static constraintType = VerticalConstraint
-  static numItems = 1
   static icon = 'ruler-vertical'
+  static selectors = ['point', 'axis']
+
+  isComplete(counts) { return counts.point == 2 || counts.axis == 1 }
 }
 
 export class FixConstraintTool extends ConstraintTool {
   static constraintType = FixConstraint
-  static numItems = 1
   static icon = 'lock'
+  static selectors = ['point', 'curve']
+
+  isComplete(counts) { return counts.point || counts.curve }
 }
 
 export class PerpendicularConstraintTool extends ConstraintTool {
   static constraintType = PerpendicularConstraint
-  static numItems = 2
   static icon = 'angle-up'
+  static selectors = ['axis']
+
+  isComplete(counts) { return counts.axis == 2 }
 }
 
 export class ParallelConstraintTool extends ConstraintTool {
   static constraintType = ParallelConstraint
-  static numItems = 2
   static icon = 'exchange-alt'
+  static selectors = ['axis']
+
+  isComplete(counts) { return counts.axis == 2 }
 }
 
 export class EqualConstraintTool extends ConstraintTool {
   static constraintType = EqualConstraint
-  static numItems = 2
   static icon = 'equals'
+  static selectors = ['curve']
+
+  isComplete(counts) { return counts.curve == 2 }
 }
 
 export class TangentConstraintTool extends ConstraintTool {
   static constraintType = TangentConstraint
-  static numItems = 2
   static icon = 'bezier-curve'
+  static selectors = ['curve']
+
+  isComplete(counts) { return counts.curve == 2 }
 }
 
 export class DimensionTool extends HighlightTool {

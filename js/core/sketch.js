@@ -3,9 +3,10 @@ import * as THREE from 'three'
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { Line, Circle, Arc, Spline, SketchElement } from './geom2d.js'
-import { Wire, Profile } from './geom3d.js'
+import { Wire, Profile, Edge } from './geom3d.js'
+import { PointHelper, AxisHelper } from './helpers.js'
 import { EPSILON, clockwise, ocAx3FromMatrix, ocPlnFromMatrix } from './utils.js'
-import { CurveReference, EdgeReference } from './references.js'
+import { Reference, CurveReference, EdgeReference, HelperReference } from './references.js'
 
 
 export class Sketch {
@@ -275,11 +276,17 @@ export class Sketch {
 
       // Single curve constraints
       if(c instanceof HorizontalConstraint) {
-        const pointPrims = idMap[c.items[0].curve().id].slice(0, 2)
+        const pointPrims = c.items.length == 1 ?
+          idMap[c.items[0].curve().id].slice(0, 2)
+          :
+          c.items.map(item => idMap[item.curve().id][item.index] )
         return { id: `${id++}`, type: 'horizontal_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof VerticalConstraint) {
-        const pointPrims = idMap[c.items[0].curve().id].slice(0, 2)
+        const pointPrims = c.items.length == 1 ?
+          idMap[c.items[0].curve().id].slice(0, 2)
+          :
+          c.items.map(item => idMap[item.curve().id][item.index] )
         return { id: `${id++}`, type: 'vertical_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof FixConstraint) {
@@ -403,41 +410,65 @@ Serialize.register(Sketch, 'Sketch')
 
 
 export class Projection {
-  constructor(edgeOrRef) {
-    this.edgeRef = edgeOrRef instanceof EdgeReference ? edgeOrRef : new EdgeReference(edgeOrRef)
+  constructor(itemOrRef) {
+    this.itemRef = itemOrRef instanceof Edge ?
+      new EdgeReference(itemOrRef)
+      :
+      (itemOrRef instanceof AxisHelper ?
+        new HelperReference(itemOrRef)
+        :
+        itemOrRef
+      )
   }
 
   update(tree) {
-    this.edgeRef.update(tree)
-    const edge = this.edgeRef.getItem()
-    // BRep_Tool.Curve()
-    const curve = new window.oc.oc.BRepAdaptor_Curve_2(edge.geom())
-    const ax = ocAx3FromMatrix(this.sketch.workplane)
-    const plane = ocPlnFromMatrix(this.sketch.workplane)
+    this.itemRef.update(tree)
+    const item = this.itemRef.getItem()
 
+    let curve
+    if(item instanceof Edge) {
+      // BRep_Tool.Curve()
+      curve = new window.oc.oc.BRepAdaptor_Curve_2(item.geom())
+
+    } else if(item instanceof AxisHelper) {
+      const geom = item.geom()
+      const handle = new window.oc.oc.Handle_Geom_Curve_2(geom)
+      curve = new window.oc.oc.GeomAdaptor_Curve_2(handle)
+    }
+
+    const ax = ocAx3FromMatrix(this.sketch.workplane)
     const project = new window.oc.oc.ProjLib_ProjectOnPlane_2(ax)
     project.Load(curve.ShallowCopy(), EPSILON, true) // ShallowCopy upcasts BRepAdaptor_Curve -> Adaptor3d_Curve
 
     const projected = project.GetResult().get()
     const [u1, u2] = [projected.FirstParameter(), projected.LastParameter()]
 
+    const plane = ocPlnFromMatrix(this.sketch.workplane)
     let curve2d = window.oc.oc.GeomAPI.To2d(projected.Curve(), plane)
     const handle = new window.oc.oc.Handle_Geom2d_Curve_2(curve2d.get())
-
     const trimmed = new window.oc.oc.Geom2d_TrimmedCurve(handle, u1, u2, true, true)
 
-    if(project.GetType() == window.oc.oc.GeomAbs_CurveType.GeomAbs_Line) {
-      const line = Line.fromGeometry(trimmed, edge.id)
-      line.sketch = this.sketch
-      line.projection = this
-      this.output = line
-      return this.output
+    const constructor = {
+      [window.oc.oc.GeomAbs_CurveType.GeomAbs_Line.constructor]: Line,
+      [window.oc.oc.GeomAbs_CurveType.GeomAbs_Circle.constructor]: Circle,
+    }[project.GetType().constructor]
+
+    if(constructor) {
+      const elem = constructor.fromGeometry(trimmed, item.id)
+      elem.sketch = this.sketch
+      elem.projection = this
+      this.output = elem
+
+    } else {
+      console.error(`Could not project ${project.getType().constructor} from ${curve.constructor}`)
     }
+
+    return this.output
   }
 
   geometry() { return this.output }
 
-  static undump(dump) { return new Projection(dump.edgeRef) }
+  static undump(dump) { return new Projection(dump.itemRef) }
 }
 Serialize.register(Projection, 'Projection')
 
@@ -456,7 +487,7 @@ export class ElemRef {
     return this.curveRef.getItem()
   }
 
-  isPoint() { return this.index !== undefined }
+  // isPoint() { return this.index !== undefined }
 
   static undump(dump) { return new ElemRef(dump.curveRef, dump.index) }
 }

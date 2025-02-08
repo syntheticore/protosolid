@@ -1,5 +1,7 @@
+import * as THREE from 'three'
 import { makeID } from './id.js'
 import { PlanarReference, HelperReference, AxialReference } from './references.js'
+import { ocPntFromVec } from './utils.js'
 
 
 export class ConstructionHelper {
@@ -40,6 +42,13 @@ export class AxisHelper extends ConstructionHelper {
 
   getAxis() {
     return this.transform
+  }
+
+  geom() {
+    return new window.oc.oc.GC_MakeSegment_1(
+      ocPntFromVec(new THREE.Vector3(0,0,0).applyMatrix4(this.transform)),
+      ocPntFromVec(new THREE.Vector3(0,0,20).applyMatrix4(this.transform))
+    ).Value().get()
   }
 }
 

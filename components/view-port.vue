@@ -14,7 +14,6 @@
       @pointerdown="mouseDown"
       @mousemove="mouseMove"
     )
-    //- @click="dimensions.forEach(d => d.constraint.active = false )"
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
 
@@ -80,6 +79,7 @@
         @mouseup="mouseUp"
         @mousedown="handleMouseDown($event, handle)"
         @mousemove="handleMouseMove($event, handle)"
+        @mouseleave="handleMouseLeave($event, handle)"
       )
 
       //- Floating UI widgets
@@ -204,8 +204,8 @@
     margin-top: -9px
     border-radius: 99px
     padding: 2px
-    width: 19px
-    height: 19px
+    width: 16px
+    height: 16px
     transition: background 0.1s
     color: #1c2127
     background: $bright1
@@ -562,6 +562,9 @@
       handleMouseMove: function(e, handle) {
         this.hoveredHandle = handle
         this.mouseMove(e)
+      },
+
+      handleMouseLeave: function(e, handle) {
         this.hoveredHandle = null
       },
 
@@ -655,7 +658,7 @@
               handle.pos = this.renderer.toScreen(handle.vec)
             })
           }
-          this.handles = Object.assign({}, this.handles)
+          // this.handles = Object.assign({}, this.handles)
 
           // Update constraints
           this.constraints = this.document.activeSketch.constraints.flatMap(c => {
@@ -766,7 +769,7 @@
 
       onUnloadElement: function(elem) {
         delete this.handles[elem.id]
-        this.handles = Object.assign({}, this.handles)
+        // this.handles = Object.assign({}, this.handles)
       },
 
       onWindowResize: function() {

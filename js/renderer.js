@@ -142,7 +142,7 @@ export default class Renderer {
     this.viewControls.panSpeed = 1.0
     this.viewControls.keyPanSpeed = 12
     this.viewControls.zoomSpeed = 2.6
-    this.viewControls.zoomToCursor = true
+    this.viewControls.zoomToCursor = false
     this.viewControls.screenSpacePanning = true
     this.viewControls.rotateSpeed = 1.2
     this.viewControls.minPolarAngle = - Math.PI
@@ -338,8 +338,8 @@ export default class Renderer {
   getCanvasCoords(mouseCoords) {
     const canvas = this.renderer.domElement
     return new THREE.Vector2(
-      mouseCoords.x / canvas.offsetWidth * 2 - 1,
-      -mouseCoords.y / canvas.offsetHeight * 2 + 1,
+      (mouseCoords.x - 2) / canvas.offsetWidth * 2 - 1,
+      (-mouseCoords.y + 2) / canvas.offsetHeight * 2 + 1,
     )
   }
 

@@ -17,8 +17,7 @@ import {
 import {
   CoincidentConstraint,
   PerpendicularConstraint,
-  HorizontalConstraint,
-  VerticalConstraint,
+  HorVertConstraint,
   ParallelConstraint,
   EqualConstraint,
   TangentConstraint,
@@ -371,7 +370,8 @@ export class LineTool extends SketchTool {
         const ySnapped = old.endpoints()[0].x.almost(vec.x)
         const xSnapped = old.endpoints()[0].y.almost(vec.y)
         if(xSnapped || ySnapped) {
-          const type = (xSnapped ? HorizontalConstraint : VerticalConstraint)
+          // const type = (xSnapped ? HorizontalConstraint : VerticalConstraint)
+          const type = HorVertConstraint
           this.sketch.addConstraint(new type(old))
         }
       }
@@ -534,20 +534,12 @@ export class ConstraintTool extends HighlightTool {
   isComplete(counts) {}
 }
 
-export class HorizontalConstraintTool extends ConstraintTool {
-  static constraintType = HorizontalConstraint
+export class HorVertConstraintTool extends ConstraintTool {
+  static constraintType = HorVertConstraint
   static icon = 'ruler-horizontal'
   static selectors = ['point', 'axis']
 
   isComplete(counts) { return counts.point == 2 || (counts.axis == 1 && !counts.point) }
-}
-
-export class VerticalConstraintTool extends ConstraintTool {
-  static constraintType = VerticalConstraint
-  static icon = 'ruler-vertical'
-  static selectors = ['point', 'axis']
-
-  isComplete(counts) { return counts.point == 2 || counts.axis == 1 }
 }
 
 export class FixConstraintTool extends ConstraintTool {

@@ -274,20 +274,12 @@ export class Sketch {
       // Strictly only necessary for DimensionControls to reference the updated projections.
       // The solver itself works without it.
 
-      // Single curve constraints
-      if(c instanceof HorizontalConstraint) {
+      if(c instanceof HorVertConstraint) {
         const pointPrims = c.items.length == 1 ?
           idMap[c.items[0].curve().id].slice(0, 2)
           :
           c.items.map(item => idMap[item.curve().id][item.index] )
-        return { id: `${id++}`, type: 'horizontal_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
-
-      } else if(c instanceof VerticalConstraint) {
-        const pointPrims = c.items.length == 1 ?
-          idMap[c.items[0].curve().id].slice(0, 2)
-          :
-          c.items.map(item => idMap[item.curve().id][item.index] )
-        return { id: `${id++}`, type: 'vertical_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
+        return { id: `${id++}`, type: c.isVertical ? 'vertical_pp' : 'horizontal_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof FixConstraint) {
         const pointPrims = idMap[c.items[0].curve().id].slice(0, 2)
@@ -298,7 +290,6 @@ export class Sketch {
           { id: `${id++}`, type: 'coordinate_y', p_id: pointPrims[1].id, y: pointPrims[1].y },
         ]
 
-      // Pair constraints
       } else if(c instanceof PerpendicularConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
@@ -309,12 +300,12 @@ export class Sketch {
 
       } else if(c instanceof EqualConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
-        // Equal radius circle/circle
         if(c.items[0].curve() instanceof Circle) {
+          // Equal radius circle/circle
           return { id: `${id++}`, type: 'equal_radius_cc', c1_id: constraintPrims[0].id, c2_id: constraintPrims[1].id, temporary: c.temporary }
 
-        // Equal length line/line
         } else {
+          // Equal length line/line
           return { id: `${id++}`, type: 'equal_length', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
         }
 
@@ -322,15 +313,14 @@ export class Sketch {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'tangent_lc', l_id: constraintPrims[0].id, c_id: constraintPrims[1].id, temporary: c.temporary }
 
-      // Point constraints
       } else if(c instanceof CoincidentConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id][item.index] )
         return { id: `${id++}`, type: 'p2p_coincident', p1_id: constraintPrims[0].id, p2_id: constraintPrims[1].id, temporary: c.temporary }
 
       // Dimension
       } else if(c instanceof Dimension) {
-        // Circle diameter
         if(c.items[0].curve() instanceof Circle) {
+          // Circle diameter
           const circlePrim = idMap[c.items[0].curve().id].slice(-1)[0]
           return { id: `${id++}`, type: 'circle_diameter', c_id: circlePrim.id, diameter: c.distance, temporary: c.temporary }
 
@@ -338,8 +328,8 @@ export class Sketch {
           const arcPrim = idMap[c.items[0].curve().id].slice(-1)[0]
           return { id: `${id++}`, type: 'arc_radius', a_id: arcPrim.id, radius: c.distance, temporary: c.temporary }
 
-        // Line to line distance
         } else {
+          // Line to line distance
           const pointPrim = idMap[c.items[0].curve().id][0]
           const linePrim = idMap[c.items[1].curve().id].slice(-1)[0]
           return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
@@ -506,14 +496,21 @@ export class Constraint {
   static undump(dump) { return new Constraint(...dump.items) }
 }
 
-export class HorizontalConstraint extends Constraint {
+export class HorVertConstraint extends Constraint {
   static icon = 'ruler-horizontal'
-  typename() { return 'Horizontal Constraint' }
-}
 
-export class VerticalConstraint extends Constraint {
-  static icon = 'ruler-vertical'
-  typename() { return 'Vertical Constraint' }
+  constructor(...items) {
+    super(...items)
+    const points = this.items.length == 1 ?
+      this.items[0].curve().endpoints()
+      :
+      this.items.map(item => item.curve().endpoints()[item.index] )
+    const xDiff = Math.abs(points[0].x - points[1].x)
+    const yDiff = Math.abs(points[0].y - points[1].y)
+    this.isVertical = xDiff < yDiff
+  }
+
+  typename() { return (this.isVertical ? 'Vertical' : 'Horizontal') + ' Constraint' }
 }
 
 export class FixConstraint extends Constraint {

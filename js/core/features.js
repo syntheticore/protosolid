@@ -682,9 +682,10 @@ export class OffsetFeature extends Feature {
   constructor(doc) {
     super(doc, false, 'Shell', {
       faces: {
-        title: 'Openings',
+        title: '(Openings)',
         type: 'face',
         multi: true,
+        optional: true,
       },
       thickness: {
         title: 'Thickness',

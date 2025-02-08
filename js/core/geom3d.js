@@ -623,6 +623,7 @@ export class Compound extends Volumetric {
   }
 
   offset(openFaces, distance) {
+    openFaces ||= []
     // Build face list
     const faces = new window.oc.oc.TopTools_ListOfShape_1()
     openFaces.forEach(face => faces.Append_1(face.geom()) )
@@ -636,6 +637,8 @@ export class Compound extends Volumetric {
           distance,
           1.0e-6, // window.oc.oc.Precision.Confusion()
           window.oc.oc.BRepOffset_Mode.BRepOffset_Skin,
+          // window.oc.oc.BRepOffset_Mode.BRepOffset_Pipe,
+          // window.oc.oc.BRepOffset_Mode.BRepOffset_RectoVerso,
           false,
           false,
           window.oc.oc.GeomAbs_JoinType.GeomAbs_Arc,

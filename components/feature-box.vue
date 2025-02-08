@@ -60,7 +60,7 @@
           )
 
       transition(name="fade")
-        .error-msg(v-if="error", :class="errorStyle") {{ error.msg }}
+        .error-msg(v-if="error", :class="errorStyle") {{ error.msg || error }}
 
     .confirmation
 

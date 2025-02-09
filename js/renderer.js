@@ -215,9 +215,10 @@ export default class Renderer {
 
   lookAt(plane) {
     const normal = new THREE.Vector3(0,0,1).applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(plane))
-    const dir = this.camera.position.clone().sub(this.viewControls.target).projectOnVector(normal)
-    const position = this.viewControls.target.clone().add(dir)
-    const target = this.viewControls.target.clone()
+    const controlsTarget = (this.viewControlsTarget || this.viewControls.target)
+    const dir = (this.cameraTarget || this.camera.position).clone().sub(controlsTarget).projectOnVector(normal)
+    const position = controlsTarget.clone().add(dir)
+    const target = controlsTarget.clone()
     this.setView(position, target)
     this.reportViewChange()
   }
@@ -242,7 +243,7 @@ export default class Renderer {
       const hFOV = Math.atan(Math.tan(vFOV * 0.5) * this.camera.aspect) * 2.0
       const fov = this.camera.aspect > 1.0 ? vFOV : hFOV
       const distanceToFit = radius / (Math.sin(fov * 0.5))
-      const dir = this.camera.position.clone().sub(this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.6)
+      const dir = (this.cameraTarget || this.camera.position).clone().sub(this.viewControlsTarget || this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.6)
       const position = target.clone().add(dir)
       this.setView(position, target)
     }

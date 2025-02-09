@@ -497,7 +497,11 @@
           this.reloadSketch(sketch)
         })
         doc.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
-        doc.on('look-at', (plane) => setTimeout(() => this.renderer.lookAt(plane) ) )
+        doc.on('look-at', (plane) => setTimeout(() => {
+          this.renderer.lookAt(plane)
+          const sketch = this.document.activeSketch
+          if(sketch && sketch.elements.length) this.zoomToFit(sketch.elements)
+        }))
       },
 
       getMouseCoords: function(e) {

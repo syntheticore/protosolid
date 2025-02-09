@@ -21,7 +21,13 @@
         Icon(icon="asterisk")
         .hot-key X
 
-        input(type="checkbox" :checked="refChecked" :indeterminate.prop="refIndeterminate" @change="toggleReference")
+        input(
+          type="checkbox"
+          :checked="refChecked"
+          :indeterminate.prop="refIndeterminate"
+          :key="Math.random()"
+          @click.prevent="toggleReference"
+        )
 
       ul.tools
 

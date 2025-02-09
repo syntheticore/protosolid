@@ -37,11 +37,11 @@
 
         label
           input(type="checkbox" v-model="preferences.antiAlias" @change="restartRequired = true")
-          span Anti aliasing
+          span Anti-aliasing
 
         label(:disabled="!isHighDPI")
           input(type="checkbox" v-model="preferences.highDPI")
-          span High DPI rendering
+          span High-DPI rendering
 
         label
           input(type="checkbox" v-model="preferences.shadowMaps" @change="restartRequired = true")

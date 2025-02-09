@@ -39,7 +39,7 @@
 
       .flex
 
-        IconButton(v-if="document.selection.set.size" icon="search-plus" @click="bus.emit('zoom-selection')" title="Fit Selection")
+        IconButton(v-if="document.selection.items.length" icon="search-plus" @click="bus.emit('zoom-selection')" title="Fit Selection")
 
         template(v-else)
 
@@ -207,8 +207,8 @@
       keyDown: function(keyCode) {
         if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection
-          if(!this.document.selection.set.size) return
-          this.document.selection.set.forEach(item => {
+          if(!this.document.selection.items.length) return;
+          [...this.document.selection.items].forEach(item => {
             const type = item.typename()
             if(type == 'Component') {
               this.document.deleteComponent(item)

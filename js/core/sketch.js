@@ -444,7 +444,7 @@ export class Projection {
     }[project.GetType().constructor]
 
     if(constructor) {
-      const elem = constructor.fromGeometry(trimmed, item.id)
+      const elem = constructor.fromGeometry(trimmed, item.id + '/projected')
       elem.sketch = this.sketch
       elem.projection = this
       this.output = elem

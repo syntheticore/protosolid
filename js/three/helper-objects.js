@@ -42,7 +42,7 @@ export class AxisHelperObject extends Line2 {
 
 export class PointHelperObject extends THREE.Mesh {
   constructor(alcObject, renderer) {
-    super(new THREE.SphereGeometry(1.25, 32, 16), renderer.materials.ui)
+    super(new THREE.SphereGeometry(1.05, 32, 16), renderer.materials.ui)
 
     this.alcTypes = ['point']
     this.alcObject = alcObject

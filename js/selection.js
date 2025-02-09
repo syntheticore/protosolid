@@ -1,46 +1,47 @@
 
 export class Selection {
   constructor(items) {
+    this.items = items || []
     this.set = new Set(items)
   }
 
   handle(item, ctrlPressed) {
     if(ctrlPressed) {
-      return this.toggle(item)
+      this.toggle(item)
     } else {
-      return this.only(item)
+      this.only(item)
     }
   }
 
   toggle(item) {
     if(this.has(item)) {
-      return this.delete(item)
+      this.delete(item)
     } else {
-      return this.add(item)
+      this.add(item)
     }
   }
 
   add(item) {
-    const selection = new Selection(this.set)
-    selection.set.add(item)
-    return selection
+    if(!this.has(item)) this.items.push(item)
+    this.set.add(item)
   }
 
   delete(item) {
-    const selection = new Selection(this.set)
-    selection.set.delete(item)
-    return selection
+    this.items = this.items.filter(i => i != item )
+    this.set.delete(item)
   }
 
   has(item) {
-    return this.set.has(item)
+    this.set.has(item)
   }
 
   only(item) {
-    return new Selection([item])
+    this.items = [item]
+    this.set = new Set([item])
   }
 
   clear() {
-    return new Selection()
+    this.items = []
+    this.set = new Set()
   }
 }

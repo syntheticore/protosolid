@@ -6,7 +6,7 @@
       @dblclick="document.activateComponent(component)"
       @mouseenter="$emit('update:highlight', component)"
       @mouseleave="$emit('update:highlight', null)"
-      @click="document.selection = document.selection.handle(component, bus.isCtrlPressed)"
+      @click="document.selection.handle(component, bus.isCtrlPressed)"
     )
 
       Icon.expander(

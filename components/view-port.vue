@@ -40,7 +40,7 @@
         :icon="constraint.constraint.constructor.icon"
         :class="{ selected: document.selection.has(constraint.constraint) }"
         :style="{ top: constraint.coords.y + 'px', left: constraint.coords.x + 'px' }"
-        @click.stop="document.selection = document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
+        @click.stop="document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
       )
 
       //- Sketch dimensions
@@ -48,7 +48,7 @@
         v-for="dimension in dimensions"
         :class="{ selected: document.selection.has(dimension.constraint) }"
         :style="{ top: dimension.coords.y + 'px', left: dimension.coords.x + 'px' }"
-        @click.stop="document.selection = document.selection.handle(dimension.constraint, bus.isCtrlPressed)"
+        @click.stop="document.selection.handle(dimension.constraint, bus.isCtrlPressed)"
         @dblclick="dimension.constraint.active = true"
       )
         .dim-value(
@@ -365,9 +365,12 @@
         this.renderer.render()
       },
 
-      'document.selection': function(selection) {
-        this.transloader.setSelection(selection)
-        this.renderer.render()
+      'document.selection': {
+        handler(selection) {
+          this.transloader.setSelection(selection)
+          this.renderer.render()
+        },
+        deep: true,
       },
 
       highlight: function(highlight) {
@@ -453,7 +456,7 @@
       this.bus.on('activate-tool', this.activateTool)
       this.bus.on('zoom-all', () => this.zoomToFit() )
       this.bus.on('zoom-active', () => this.zoomToFit(this.document.activeComponent.compound.solids()) )
-      this.bus.on('zoom-selection', () => this.zoomToFit([...this.document.selection.set]) )
+      this.bus.on('zoom-selection', () => this.zoomToFit(this.document.selection.items) )
       this.bus.on('render-needed', () => this.renderer.render() )
       this.bus.on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
       this.bus.on('unpreview-feature', this.unpreviewFeature)
@@ -592,8 +595,8 @@
       keyDown: function(key) {
         if(key == 'Delete' || key == 'Backspace') {
           // Delete Selection
-          if(this.document.selection.set.size) {
-            this.document.selection.set.forEach(item => {
+          if(this.document.selection.items.length) {
+            [...this.document.selection.items].forEach(item => {
               const type = item.typename()
               if(type != 'Solid' && type != 'Component') {
                 this.deleteElement(item)
@@ -717,7 +720,7 @@
       deleteElement: function(elem) {
         // this.renderer.removeGizmo()
         elem.sketch.remove(elem)
-        this.document.selection = this.document.selection.delete(elem)
+        this.document.selection.delete(elem)
         this.componentChanged(this.document.activeComponent)
       },
 

@@ -66,7 +66,7 @@ export class DummyTool extends Tool {
   }
 
   async click(vec, coords) {
-    this.viewport.document.selection = this.viewport.document.selection.clear()
+    this.viewport.document.selection.clear()
   }
 }
 
@@ -133,10 +133,10 @@ export class ManipulationTool extends HighlightTool {
   async click(vec, coords) {
     const curve = await this.getObject(coords)
     if(curve) {
-      this.viewport.document.selection = this.viewport.document.selection.handle(curve, this.viewport.bus.isCtrlPressed)
+      this.viewport.document.selection.handle(curve, this.viewport.bus.isCtrlPressed)
     } else {
       if(this.viewport.bus.isCtrlPressed) return this.viewport.renderer.render()
-      this.viewport.document.selection = this.viewport.document.selection.clear()
+      this.viewport.document.selection.clear()
     }
   }
 

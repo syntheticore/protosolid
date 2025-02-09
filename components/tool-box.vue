@@ -1,16 +1,30 @@
 <template lang="pug">
+
   .tool-box.bordered
 
-      ul.tabs
-        template(v-for="(tab, index) in tabs")
-          li(
-            v-if="!!document.activeSketch == !!tab.sketchOnly"
-            :class="{active: index == activeTab}"
-            @click="activateTab(index)"
-          )
-            | {{ tab.title }}
+
+    ul.tabs
+
+      template(v-for="(tab, index) in tabs")
+
+        li(
+          v-if="!!document.activeSketch == !!tab.sketchOnly"
+          :class="{ active: index == activeTab }"
+          @click="activateTab(index)"
+        )
+          | {{ tab.title }}
+
+    .main
+
+      label.reference(v-if="document.activeSketch" title="Reference geometry")
+
+        Icon(icon="asterisk")
+        .hot-key X
+
+        input(type="checkbox" :checked="refChecked" :indeterminate.prop="refIndeterminate" @change="toggleReference")
 
       ul.tools
+
         li(v-for="(tool, index) in tabs[activeTab].tools")
 
           button.button(
@@ -31,6 +45,7 @@
               :active-feature="feature"
               @close="closeFeature"
             )
+
 </template>
 
 
@@ -44,10 +59,28 @@
     min-width: 565px
     // overflow: hidden
 
+  .main
+    display: flex
+
+  .reference
+    position: relative
+    border-right: 1px solid $dark1
+    display: flex
+    flex-direction: column
+    font-size: 0.7rem
+    justify-content: center
+    gap: 0.5rem
+    padding-inline: 0.5rem
+
+    .hot-key
+      top: 6px
+      right: 2px
+
   .tabs
     display: flex
     // box-shadow: 0 0 4px rgba(black, 0.6)
     border-bottom: 1px solid $dark1 * 1.15
+
     li
       flex: 1 1 auto
       padding: 5px 10px
@@ -56,26 +89,34 @@
       text-align: center
       transition: all 0.2s
       min-width: 100px
+
       &:first-child
         border-top-left-radius: 2px
+
       &:last-child
         border-top-right-radius: 2px
+
       & + li
         border-left: 1px solid $dark1 * 1.15
+
       &:hover
         background: $dark2 * 1.3
+
       &:active
+
       &.active
         background: $dark1 * 1.15
 
   .tools
     display: flex
+
     li
       max-width: 86px
       min-width: 65px
       margin: 4px
+
     .button
-      text-align: center
+      // text-align: center
       background: none
       border: none
       box-shadow: none
@@ -88,20 +129,28 @@
       text-shadow: none
       position: relative
       width: 100%
+
       &:hover, &.active
         background: $dark1 * 1.15
+
         .title
           color: $bright1
           transition: none
+
         svg
           transition: none
+
         .hot-key
           border-color: $dark1 * 1.9
+
       &:active
         background: $dark1 * 1.075
+
       &:disabled
         filter: brightness(50%)
+
       &.active
+
         svg
           color: lighten($highlight, 25%)
     svg
@@ -109,6 +158,7 @@
       color: $bright1
       transition: all 0.15s
       filter: none
+
     .title
       color: $bright2
       font-size: 11px
@@ -119,17 +169,21 @@
       overflow: hidden
       text-overflow: ellipsis
       transition: all 0.15s
-    .hot-key
-      position: absolute
-      top: 2px
-      right: 2px
-      font-size: 9px
-      color: $bright2
-      background: $dark1
-      padding: 0
-      width: 12px
-      border-radius: 2px
-      border: 0.5px solid $dark1 * 1.4
+
+  .hot-key
+    position: absolute
+    top: 2px
+    right: 2px
+    font-size: 9px
+    color: $bright2
+    background: $dark1
+    width: 12px
+    height: 12px
+    border-radius: 2px
+    border: 0.5px solid $dark1 * 1.4
+    display: flex
+    align-items: center
+    justify-content: center
 
   .feature-box
     margin-top: 9px
@@ -170,8 +224,7 @@
     ArcTool,
     TrimTool,
     PerpendicularConstraintTool,
-    HorizontalConstraintTool,
-    VerticalConstraintTool,
+    HorVertConstraintTool,
     ParallelConstraintTool,
     EqualConstraintTool,
     TangentConstraintTool,
@@ -193,6 +246,22 @@
     watch: {
       'document.activeSketch': function(sketch) {
         if(!this.feature) this.activeTab = this.document.activeSketch ? 1 : 4
+      },
+    },
+
+    computed: {
+      refChecked: function() {
+        if(this.document.selection.items.length) {
+          return this.document.selection.items.some(sel => sel.isReference )
+        } else {
+          return this.document.referenceMode
+        }
+      },
+
+      refIndeterminate: function() {
+        const first = this.document.selection.items[0]
+        if(!first) return false
+        return this.document.selection.items.some(sel => sel.isReference != first.isReference )
       },
     },
 
@@ -248,8 +317,7 @@
               { title: 'Touch', icon: 'object-group' },
               { title: 'Parallel', tool: ParallelConstraintTool }, //XXX Use also for hor/vert
               { title: 'Perpendicular', tool: PerpendicularConstraintTool },
-              { title: 'Horizontal', tool: HorizontalConstraintTool },
-              { title: 'Vertical', tool: VerticalConstraintTool },
+              { title: 'Hor/Vert', tool: HorVertConstraintTool },
               { title: 'Tangent', tool: TangentConstraintTool },
               { title: 'Equal', tool: EqualConstraintTool },
               { title: 'Fix', tool: FixConstraintTool }, //XXX also ground for assemblies
@@ -382,10 +450,14 @@
       },
 
       toggleReference: function() {
-        [...this.document.selection.set]
-          .filter(item => item instanceof SketchElement )
-          .forEach(elem => elem.isReference = !elem.isReference )
-        this.document.emit('component-changed', this.document.activeComponent)
+        if(!this.document.selection.items.length) {
+          this.document.referenceMode = !this.document.referenceMode
+        } else {
+          this.document.selection.items
+            .filter(item => item instanceof SketchElement )
+            .forEach(elem => elem.isReference = !elem.isReference )
+          this.document.emit('component-changed', this.document.activeComponent)
+        }
       },
 
       splitAll: function() {

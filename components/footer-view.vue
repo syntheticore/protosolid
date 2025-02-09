@@ -9,21 +9,21 @@
     //-   | Bring up actions
 
     transition(name="fade")
-      .selection-info.bordered(v-if="toast || document.selection.set.size")
+      .selection-info.bordered(v-if="toast || document.selection.items.length")
 
         template(v-if="toast")
           div
             span Rejected
             span.warn &nbsp;{{ toast }}
 
-        template(v-else-if="document.selection.set.size")
+        template(v-else-if="document.selection.items.length")
           div
             span {{ description.title }}
 
           div(v-if="description.isMixed")
             span # Total
             span
-              | {{ document.selection.set.size }}
+              | {{ document.selection.items.length }}
 
           div(v-for="prop in description.properties")
             span {{ prop.title }}
@@ -151,7 +151,7 @@
 
     computed: {
       description: function() {
-        const selection = [...this.document.selection.set]
+        const selection = [...this.document.selection.items]
         const uniqueNames = selection.map(item => item.typename() ).filter((value, index, self) => self.indexOf(value) === index )
         const groups = groupBy(selection, 'typename')
         const numGroups = Object.keys(groups).length

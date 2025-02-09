@@ -3,7 +3,7 @@
   li.treelet-solid(
     @mouseenter="$emit('update:highlight', solid)"
     @mouseleave="$emit('update:highlight', null)"
-    @click="document.selection = document.selection.handle(solid, bus.isCtrlPressed)"
+    @click="document.selection.handle(solid, bus.isCtrlPressed)"
   )
     .box(:class="{ selected: document.selection.has(solid) }")
       header

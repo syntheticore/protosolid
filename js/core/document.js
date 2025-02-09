@@ -75,7 +75,7 @@ export default class Document extends Emitter {
   activateComponent(comp) {
     if(comp) comp.creator.hidden = false
     this.activeComponent = comp
-    this.selection = this.selection.clear()
+    this.selection.clear()
     this.activeSketch = null
   }
 
@@ -112,7 +112,7 @@ export default class Document extends Emitter {
       if(newComp) this.emit('component-changed', newComp)
     })
     this.reactivateActiveComponent()
-    this.selection = new Selection()
+    this.selection.clear()
   }
 
   reactivateActiveComponent(comp = this.activeComponent) {
@@ -222,7 +222,7 @@ export default class Document extends Emitter {
 
   // deleteSolid(solid) {
   //   solid.remove()
-  //   this.selection = this.selection.delete(solid)
+  //   this.selection.delete(solid)
   //   this.emit('component-changed', solid.component)
   // }
 

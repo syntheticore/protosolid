@@ -1,7 +1,7 @@
 <template lang="pug">
 
   li.treelet-sketch(
-    @click="document.selection = document.selection.handle(sketch, bus.isCtrlPressed)"
+    @click="document.selection.handle(sketch, bus.isCtrlPressed)"
     @dblclick="document.activateSketch(sketch)"
     @mouseenter="$emit('update:highlight', sketch)"
     @mouseleave="$emit('update:highlight', null)"

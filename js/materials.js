@@ -31,6 +31,13 @@ export default class Materials {
     this.referenceLine.dashScale = 0.5
     this.referenceLine.linewidth = 2
 
+    this.referenceSelectionLine = this.referenceLine.clone()
+    this.referenceSelectionLine.color.set('#0070ff')
+    this.referenceSelectionLine.toneMapped = false
+
+    this.referenceHighlightLine = this.referenceLine.clone()
+    this.referenceHighlightLine.color.set('#2590e1')
+
     this.projectedLine = this.line.clone()
     this.projectedLine.color.set('#51bb89')
 
@@ -44,6 +51,41 @@ export default class Materials {
 
     this.uiWire = this.wire.clone()
     this.uiWire.linewidth = 3
+
+    this.table = {
+      curve: {
+        unselected: {
+          regular: {
+            actual: this.line,
+            reference: this.referenceLine,
+          },
+          projected: {
+            actual: this.projectedLine,
+            reference: this.referenceLine,
+          },
+        },
+        selected: {
+          regular: {
+            actual: this.selectionLine,
+            reference: this.referenceSelectionLine,
+          },
+          projected: {
+            actual: this.selectionLine,
+            reference: this.referenceSelectionLine,
+          },
+        },
+        highlighted: {
+          regular: {
+            actual: this.highlightLine,
+            reference: this.referenceHighlightLine,
+          },
+          projected: {
+            actual: this.highlightLine,
+            reference: this.referenceHighlightLine,
+          },
+        },
+      },
+    }
 
     // Line Materials
     this.lineBasic = new THREE.LineBasicMaterial({

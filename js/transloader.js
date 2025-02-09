@@ -25,7 +25,7 @@ export default class Transloader {
 
   setSelection(selection) {
     const old = this.selection
-    this.selection = [...selection.set]
+    this.selection = [...selection.items]
     this.getComponents(old).forEach(comp => this.applyMaterials(comp) )
     this.getComponents(this.selection).forEach(comp => this.applyMaterials(comp) )
   }
@@ -300,14 +300,21 @@ export default class Transloader {
   getElemMaterial(elem) {
     const selected = this.isSelected(elem)
     const highlighted = this.isHighlighted(elem)
+
     return {
-      curve: selected ? this.renderer.materials.selectionLine :
-        highlighted ? this.renderer.materials.highlightLine :
-          elem.projection ? this.renderer.materials.projectedLine :
-            elem.isReference ? this.renderer.materials.referenceLine :
-              this.renderer.materials.line,
-      region: highlighted ? this.renderer.materials.highlightRegion :
+      curve: this.renderer.materials.table.curve[
+        selected ? 'selected' : (highlighted ? 'highlighted' : 'unselected')
+      ][
+        elem.projection ? 'projected' : 'regular'
+      ][
+        elem.isReference ? 'reference' : 'actual'
+      ],
+
+      region: highlighted ?
+        this.renderer.materials.highlightRegion
+        :
         this.renderer.materials.region,
+
     }[elem.mesh().alcTypes[0]]
   }
 

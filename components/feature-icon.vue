@@ -3,7 +3,7 @@
   .feature(
     :title="featureTitle"
     :class="featureStyle"
-    @click="document.selection = document.selection.handle(feature, bus.isCtrlPressed)"
+    @click="document.selection.handle(feature, bus.isCtrlPressed)"
     @dblclick="openFeature()"
   )
     Icon(:icon="feature.constructor.icon" fixed-width :class="{future: isFuture}")

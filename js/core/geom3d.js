@@ -578,7 +578,12 @@ export class Compound extends Volumetric {
 
   repair() {
     if(!this.geom) return this
-    const out = this.unifyFaces().fixShape()
+    let out
+    try {
+      out = this.unifyFaces().fixShape()
+    } catch(_) {
+      throw { type: 'error', msg: "Geometry could not be repaired" }
+    }
     if(!out.validate()) throw { type: 'error', msg: "Operation produced invalid geometry" }
     return out
   }

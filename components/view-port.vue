@@ -370,7 +370,7 @@
           this.transloader.setSelection(selection)
           this.renderer.render()
         },
-        deep: true,
+        deep: 1,
       },
 
       highlight: function(highlight) {

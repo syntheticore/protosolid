@@ -39,6 +39,7 @@
 
 
 <style lang="stylus" scoped>
+
   .footer-view
     font-size: 13px
     padding: 12px

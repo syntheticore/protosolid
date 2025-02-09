@@ -93,6 +93,11 @@ export default class Document extends Emitter {
     this.regenerate(i)
   }
 
+  reorder(feature, other, after) {
+    this.timeline.reorder(feature, other, after)
+    this.regenerate()
+  }
+
   regenerate(at) {
     const oldTop = this.top()
     if(at !== undefined) {
@@ -205,6 +210,7 @@ export default class Document extends Emitter {
       this.activeFeature = null
       this.activeSketch = null
     }
+    this.selection.clear()
   }
 
   activateSketch(sketch) {

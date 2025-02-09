@@ -32,7 +32,7 @@ export class Selection {
   }
 
   has(item) {
-    this.set.has(item)
+    return this.set.has(item)
   }
 
   only(item) {

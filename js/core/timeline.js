@@ -61,7 +61,7 @@ export class Timeline {
   }
 
   invalidateFeature(feature) {
-    this.last_change_index = this.features.indexOf(feature)
+    this.last_change_index = Math.min(this.features.indexOf(feature), this.last_change_index)
     // console.log('invalidating -> last_change_index', this.last_change_index)
   }
 
@@ -123,6 +123,15 @@ export class Timeline {
       this.last_change_index = j
     }
     // console.log('after regenerate', from, to, this.cache)
+  }
+
+  reorder(feature, other, after) {
+    this.features = this.features.filter(f => f != feature )
+    const otherIndex = this.features.indexOf(other)
+    const targetIndex = otherIndex + (after ? 1 : 0)
+    this.features.splice(targetIndex, 0, feature)
+    this.invalidateFeature(feature)
+    this.invalidateFeature(other)
   }
 
   componentsModified(from, to) {

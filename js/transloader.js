@@ -1,4 +1,4 @@
-// import * as THREE from 'three'
+import * as THREE from 'three'
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js'
 
 import Component from './core/component.js'
@@ -6,6 +6,7 @@ import { SketchElement } from './core/geom2d.js'
 import { Edge, Face, Solid, Profile } from './core/geom3d.js'
 import { Sketch, Dimension } from './core/sketch.js'
 import { ConstructionHelper, PlaneHelper, AxisHelper, PointHelper } from './core/helpers.js'
+import { rotationFromNormal } from './core/utils.js'
 import { PlaneHelperObject, AxisHelperObject, PointHelperObject } from './three/helper-objects.js'
 import DimensionControls from './three/dimension-controls.js'
 
@@ -77,10 +78,23 @@ export default class Transloader {
     vnhs.forEach(vnh => this.renderer.remove(vnh) )
 
     // Load Bodies
+    let solids
+
+    // Slice model using visible section views
+    const sections = comp.creator.sectionViews.filter(sec => !sec.hidden )
+    if(sections.length) {
+      const section = comp.creator.sectionViews[0]
+      const compound = comp.compound.split(section.transform)
+      solids = compound.solids().slice(0, Math.ceil(compound.solids().length / 2))
+
+    } else {
+      solids = comp.compound.solids()
+    }
     const isActive = this.isActive(comp)
     const cache = comp.creator.cache()
-    comp.compound.solids().forEach(solid => {
+    solids.forEach(solid => {
       solid.component = comp
+      if(comp.creator.itemsHidden[solid.id]) return
 
       // Load Faces
       const mode = this.renderer.displayMode

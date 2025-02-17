@@ -1,7 +1,9 @@
 <template lang="pug">
+
   footer.feature-bar.bordered
 
     nav.controls
+
       button(@click="rewindMarker", :disabled="atStart")
         Icon(icon="angle-double-left")
 
@@ -15,14 +17,16 @@
         Icon(icon="angle-double-right")
 
     ul.features(ref="features", @scroll="onScroll", :style="{'--tip': tip + 'px'}")
+
       li.past(
         v-for="(feature, i) in past",
         :ref="feature === document.activeFeature ? 'active' : 'dummy'"
         :style="{'--color': getFeatureColor(feature)}"
       )
         transition(name="fade")
-          FeatureBox.tipped-bottom(ref="box"
+          FeatureBox.tipped-bottom(
             v-if="isActive(feature)"
+            ref="box"
             show-header
             :style="scrollStyle"
             :class="{ bright: tip < 55 }"
@@ -57,6 +61,7 @@
 
 
 <style lang="stylus" scoped>
+
   .feature-bar
     font-size: 13px
     color: $bright2
@@ -155,6 +160,7 @@
   .fade-enter-from, .fade-leave-to
     opacity: 0
     transform: translateY(-10px)
+
 </style>
 
 
@@ -162,25 +168,14 @@
 
   import { inject } from 'vue'
 
-  // import FeatureBox from './feature-box.vue'
-  // import FeatureIcon from './feature-icon.vue'
-
   export default {
     name: 'FeatureBar',
 
     inject: ['bus'],
 
-    // components: {
-    //   FeatureBox,
-    //   FeatureIcon,
-    // },
-
     props: {
       document: Object,
       activeTool: Object,
-      // activeComponent: Object,
-      // activeFeature: Object,
-      // selection: Object,
     },
 
     computed: {

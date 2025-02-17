@@ -5,7 +5,7 @@ import { Sketch } from './sketch.js'
 import { Compound } from './geom3d.js'
 import { Reference } from './references.js'
 import { PlaneHelper } from './helpers.js'
-import { normalFromMatrix } from './utils.js'
+import { normalFromMatrix, ocCatch } from './utils.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
 import { makeID } from './id.js'
@@ -501,7 +501,7 @@ export class RevolveFeature extends Feature {
       side: {
         title: 'Side',
         type: 'bool',
-        icons: ['caret-right', 'caret-left']
+        icons: ['caret-right', 'caret-left'],
       },
     })
 
@@ -532,6 +532,41 @@ export class RevolveFeature extends Feature {
 }
 
 Serialize.register(RevolveFeature, 'RevolveFeature')
+
+
+export class SplitFeature extends Feature {
+  static icon = 'divide'
+  constructor(document) {
+    super(document, true, 'Split', {
+      plane: {
+        title: 'Tool',
+        type: 'plane',
+      },
+      // bodies: {
+      //   title: 'Bodies',
+      //   type: 'solid',
+      //   multi: true,
+      // },
+      side: {
+        title: 'Side',
+        type: 'bool',
+        icons: ['caret-right', 'caret-left'],
+      },
+    })
+
+    this.plane = null
+    this.side = true
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.split(references.plane, this.side, this.id)
+    } catch(err) { this.error = err || this.error }
+  }
+}
+
+Serialize.register(SplitFeature, 'SplitFeature')
 
 
 export class DraftFeature extends Feature {

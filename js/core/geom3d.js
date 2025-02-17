@@ -12,9 +12,13 @@ import {
   arrayFromOcVec,
   ocVecFromVec,
   ocAx1FromMatrix,
+  ocPlnFromMatrix,
   matrixFromOcPln,
   normalFromMatrix,
   vecFromOc,
+  collectShapes,
+  exploreShape,
+  transformGeometry,
 } from './utils.js'
 
 
@@ -172,7 +176,7 @@ export class Profile {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
     const face = this.makeFace()
     const ax = ocAx1FromMatrix(axis)
-    let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
+    let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true) //XXX BRepFeat_MakeRevol
     return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId)
   }
 
@@ -466,14 +470,14 @@ export class Solid extends Volumetric {
   faces() {
     if(this.cachedFaces) return this.cachedFaces
     this.cachedFaces = this.collectShapes('face')
-    this.cachedFaces.forEach((face, i) => face.id = this.id + '/face/' + i )
+    // this.cachedFaces.forEach((face, i) => face.id = this.id + '/face/' + i )
     return this.cachedFaces
   }
 
   edges() {
     if(this.cachedEdges) return this.cachedEdges
     this.cachedEdges = this.collectShapes('edge')
-    this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
+    // this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
     return this.cachedEdges
   }
 
@@ -521,10 +525,17 @@ export class Compound extends Volumetric {
     return clone
   }
 
-  track(algorithm, algoName, other) {
-    const out = this.clone(algorithm.Shape())
-
-    const history = algorithm.Modified ? algorithm : (algorithm.History_1 ? algorithm.History_1().get() : algorithm.Context().get().History().get())
+  track(algorithm, algoName, other, featureId) {
+    const out = this.clone(algorithm.Shape ?
+      algorithm.Shape() : algorithm.Apply(this.geom())
+    )
+    const history = algorithm.Modified ?
+      algorithm
+      :
+      (algorithm.History_1 ?
+        algorithm.History_1().get()
+        :
+        algorithm.Context().get().History().get())
 
     const solids = out.solids()
     const oldSolids = this.solids().concat(other ? other.solids() : [])
@@ -563,6 +574,13 @@ export class Compound extends Volumetric {
       faces.forEach((face, i) => face.id = old.id + '/' + algoName + '/' + i )
     })
 
+    // Find faces that have been generated out of thin air
+    newFaces
+      .filter(face => !face.id )
+      .forEach((face, i) => {
+        face.id = '/' + featureId + '/' + algoName + '/' + i
+      })
+
     // Name all edges in new compound according to their connected faces
     // Enumerate too, since circular faces may connect to the same neighboor twice
     const namesUsed = {}
@@ -598,6 +616,32 @@ export class Compound extends Volumetric {
     const fix = new window.oc.oc.ShapeFix_Shape_2(this.geom())
     fix.Perform(new window.oc.oc.Message_ProgressRange_1())
     return this.track(fix, 'fix')
+  }
+
+  orientFaces() {
+    const explorer = new window.oc.oc.TopExp_Explorer_2(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHELL, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
+    while(explorer.More()) {
+      const shell = new window.oc.oc.TopoDS.Shell_1(explorer.Current())
+      window.oc.oc.BOPTools_AlgoTools.OrientFacesOnShell(shell)
+      explorer.Next()
+    }
+  }
+
+  alignFaceOrientation() {
+    const reshaper = new window.oc.oc.BRepTools_ReShape()
+    reshaper.ModeConsiderOrientation().set(true)
+
+    const explorer = new window.oc.oc.TopExp_Explorer_2(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_Face, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
+    while(explorer.More()) {
+      const face = new window.oc.oc.TopoDS.Face_1(explorer.Current())
+      const orientation = face.Orientation()
+      if(orientation == window.oc.oc.TopAbs_Orientation.TopAbs_REVERSED) {
+        const reversed = face.Complemented()
+        reshaper.Replace(face, reversed, true)
+      }
+      explorer.Next()
+    }
+    this.track(reshaper, 'reorient')
   }
 
   boolean(other, op) {
@@ -661,6 +705,51 @@ export class Compound extends Volumetric {
     }
   }
 
+  split(plane, side, featureId) {
+    if(!this.geom) return this
+    const pln = ocPlnFromMatrix(plane)
+    const face = new window.oc.oc.BRepBuilderAPI_MakeFace_9(pln, -1000, 1000, -1000, 1000).Face()
+    // const algo = new window.oc.oc.BOPAlgo_MakerVolume_1()
+    const algo = new window.oc.oc.BOPAlgo_Splitter_1()
+    // algo.SetAvoidInternalShapes(true)
+    algo.AddArgument(this.geom())
+    // algo.AddArgument(face)
+    algo.AddTool(face)
+    algo.Perform(new window.oc.oc.Message_ProgressRange_1())
+    return this.track(algo, 'split', null, featureId).repair()
+  }
+
+  // split(plane, side) {
+  //   if(!this.geom) return this
+  //   const pln = ocPlnFromMatrix(plane)
+  //   const section = new window.oc.oc.BRepAlgoAPI_Section_5(this.geom(), pln, false) //XXX Use BRepAlgoAPI_Section_6 to split by surface
+
+  //   section.ComputePCurveOn1(true)
+  //   section.Approximation(true)
+  //   section.Build(new window.oc.oc.Message_ProgressRange_1())
+  //   if(!section.IsDone()) throw 'Cannot split'
+
+  //   const split = new window.oc.oc.BRepFeat_SplitShape_2(this.geom())
+  //   exploreShape(section.Shape(), 'edge', edge => {
+  //     exploreShape(this.geom(), 'face', face => {
+  //       if(section.HasAncestorFaceOn1(edge, face)) {
+  //         split.Add_3(edge, face)
+  //       }
+  //     })
+  //   })
+  //   split.Build(new window.oc.oc.Message_ProgressRange_1())
+
+  //   const comp = new window.oc.oc.TopoDS_Compound()
+  //   const builder = new window.oc.oc.BRep_Builder()
+  //   builder.MakeCompound(comp)
+
+  //   arrayFromOcList(split.DirectLeft()).forEach(face => {
+  //     builder.Add(comp, new window.oc.oc.TopoDS.Face_1(face))
+  //   })
+
+  //   return this.clone(comp)
+  // }
+
   tesselate() {
     const tesselations = this.solids().map(solid => solid.tesselate() )
     return {
@@ -679,38 +768,4 @@ function tesselateCurve(geom) {
     1.0e-9, 1.0e-7
   )
   return arrayRange(1, deflection.NbPoints()).map(i => arrayFromOcVec(deflection.Value(i)) )
-}
-
-function transformGeometry(geom, workplane) {
-  const pos = new THREE.Vector3().setFromMatrixPosition(workplane)
-  const rot = new THREE.Quaternion().setFromRotationMatrix(workplane)
-
-  const trans = new window.oc.oc.gp_Trsf_1()
-  const quat = new window.oc.oc.gp_Quaternion_2(rot.x, rot.y, rot.z, rot.w)
-  trans.SetRotationPart(quat)
-  trans.SetTranslationPart(ocVecFromVec(pos))
-
-  return new window.oc.oc.BRepBuilderAPI_Transform_2(geom, trans, true).Shape()
-}
-
-function collectShapes(geom, type) {
-  const enums = {
-    vertex: window.oc.oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
-    edge: window.oc.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
-    face: window.oc.oc.TopAbs_ShapeEnum.TopAbs_FACE,
-    solid: window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID,
-  }
-  const converters = {
-    vertex: window.oc.oc.TopoDS.Vertex_1,
-    edge: window.oc.oc.TopoDS.Edge_1,
-    face: window.oc.oc.TopoDS.Face_1,
-    solid: window.oc.oc.TopoDS.Solid_1,
-  }
-
-  const map = new window.oc.oc.TopTools_IndexedMapOfShape_1()
-  window.oc.oc.TopExp.MapShapes_1(geom, enums[type], map)
-
-  return arrayRange(1, map.Extent())
-    .map(i => map.FindKey(i) )
-    .map(shape => new converters[type](shape) )
 }

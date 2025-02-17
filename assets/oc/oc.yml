@@ -52,6 +52,7 @@ mainBuild:
     - symbol: TopLoc_Location
     - symbol: TopExp_Explorer
     - symbol: TopTools_ListOfShape
+    - symbol: TopTools_SequenceOfShape
     - symbol: TopTools_IndexedMapOfShape
     - symbol: TopTools_IndexedDataMapOfShapeListOfShape
     - symbol: TopAbs_ShapeEnum
@@ -366,11 +367,28 @@ mainBuild:
     - symbol: BRepPrimAPI_MakeTorus
     - symbol: BRepPrimAPI_MakeWedge
 
+    - symbol: BOPAlgo_Algo
+    - symbol: BOPAlgo_Options
+    - symbol: BOPAlgo_ToolsProvider
+    - symbol: BOPAlgo_Builder
+    - symbol: BOPAlgo_BuilderShape
+    # - symbol: BOPAlgo_BuilderSolid
     - symbol: BOPAlgo_RemoveFeatures
-    # - symbol: BOPAlgo_Splitter
-    # - symbol: BOPAlgo_MakerVolume
+    - symbol: BOPAlgo_Splitter
+    - symbol: BOPAlgo_MakerVolume
+    # - symbol: BOPAlgo_BOP // Alternative method for Booleans?
+    # - symbol: BOPAlgo_Operation
 
     - symbol: BOPTools_AlgoTools
+
+    - symbol: BRepFeat_SplitShape
+    # - symbol: BRepFeat_RibSlot
+    # - symbol: BRepFeat_MakeRevol
+    # - symbol: BRepFeat_MakePrism
+    # - symbol: BRepFeat_MakePipe
+    # - symbol: BRepFeat_MakeLinearForm
+    # - symbol: BRepFeat_Gluer
+    # - symbol: BRepFeat_MakeCylindricalHole
 
     - symbol: BRepFilletAPI_MakeFillet
     - symbol: BRepFilletAPI_MakeChamfer

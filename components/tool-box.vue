@@ -207,6 +207,10 @@
 
 <script>
 
+  import * as THREE from 'three'
+  import { makeID } from './../js/core/id.js'
+  import { rotationFromNormal } from './../js/core/utils.js'
+
   import {
     SketchElement,
   } from './../js/core/geom2d.js'
@@ -220,6 +224,7 @@
     RevolveFeature,
     SweepFeature,
     OffsetFeature,
+    SplitFeature,
   } from './../js/core/features.js'
 
   import {
@@ -350,7 +355,7 @@
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
               { title: 'Draft', feature: DraftFeature },
-              { title: 'Split', icon: 'layer-group' },
+              { title: 'Split', feature: SplitFeature },
               { title: 'Align', icon: 'layer-group' }, //XXX also -> Replace Face
               { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 77 },
             ],
@@ -374,7 +379,7 @@
               { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
               { title: 'Curvature', icon: 'route' },
               { title: 'Shading', icon: 'palette' },
-              { title: 'Section View', icon: 'object-group' },
+              { title: 'Section View', icon: 'object-group', action: this.addSectionView },
             ],
           },
           {
@@ -442,6 +447,14 @@
           name: 'width',
           value: '512mm',
         })
+      },
+
+      addSectionView: function() {
+        this.document.activeComponent.creator.sectionViews.push({
+          id: makeID(),
+          transform: rotationFromNormal(new THREE.Vector3(0.0, 0.0, 1.0)),
+        })
+        this.document.emit('component-changed', this.document.activeComponent)
       },
 
       addExportConfig: function() {

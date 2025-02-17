@@ -1,6 +1,6 @@
 <template lang="pug">
 
-  .box.treelet-export(:class="{expanded: expanded}")
+  .box.treelet-export(:class="{ expanded }")
 
     header(@click="expanded = !expanded")
 
@@ -27,7 +27,7 @@
 
     .content.form(v-if="expanded")
 
-      fieldset.physical
+      fieldset
 
         h3 Export Settings
 
@@ -114,8 +114,8 @@
       },
 
       remove: function() {
-        this.component.exportConfigs =
-          this.component.exportConfigs.filter(conf => conf !== this.config )
+        this.component.creator.exportConfigs =
+          this.component.creator.exportConfigs.filter(conf => conf !== this.config )
       },
     },
   }

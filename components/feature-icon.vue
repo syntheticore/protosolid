@@ -12,9 +12,11 @@
     @click="document.selection.handle(feature, bus.isCtrlPressed)"
     @dblclick="openFeature()"
   )
+
     Icon(:icon="feature.constructor.icon" fixed-width :class="{ future: isFuture }")
 
     nav.actions.bordered
+
       button(
         title="Move marker here"
         @click.stop="moveMarker()"
@@ -95,7 +97,7 @@
     transition: all 0.15s
     transform: scale(0.85)
     z-index: 1
-    border-radius: 99px
+    border-radius: 5px
     background: $dark2
 
   button

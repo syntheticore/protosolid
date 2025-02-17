@@ -86,19 +86,22 @@
         TreeletExport(:config="config", :component="component")
 
       //- Section Views
-      li(v-for="view in component.creator.sectionViews")
-        .box
-          header
-            Icon(icon="object-group" fixed-width)
-            h2 Section View 1
-            input(type="checkbox")
+      TreeletSection(
+        v-for="(section, i) in component.creator.sectionViews"
+        v-bind="$attrs"
+        :document="document"
+        :component="component"
+        :section="section"
+        :index="i"
+      )
 
       //- Solids
       TreeletSolid(
         v-for="(solid, i) in component.compound.solids()"
-        :key="'solid' + i"
+        :key="solid.id"
         v-bind="$attrs"
         :document="document"
+        :component="component"
         :solid="solid"
         :index="i"
       )
@@ -106,7 +109,7 @@
       //- Sketches
       TreeletSketch(
         v-for="(sketch, i) in component.sketches"
-        :key="'sketch' + i"
+        :key="sketch.id"
         v-bind="$attrs"
         :document="document"
         :component="component"
@@ -194,7 +197,7 @@
       .box
         background: rgba($dark2 * 1.3, 0.3) !important
 
-        > *
+        > header > *:not(.controls)
           opacity: 0.4
 
   .tree-item
@@ -263,9 +266,11 @@
     .box:hover .controls
     .expanded .controls
       opacity: 1
-      width: 27px
+      width: 25px
+
       &.wide
-        width: 53px
+        width: 49px
+
       &.ultra-wide
         width: 79px
 
@@ -311,6 +316,7 @@
 
         input[type="checkbox"]
           margin-left: 60px
+
 </style>
 
 

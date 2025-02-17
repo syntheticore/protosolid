@@ -4,12 +4,24 @@
     @mouseenter="$emit('update:highlight', solid)"
     @mouseleave="$emit('update:highlight', null)"
     @click="document.selection.handle(solid, bus.isCtrlPressed)"
+    :class="{ hidden: isHidden }"
   )
+
     .box(:class="{ selected: document.selection.has(solid) }")
+
       header
+
+        Icon.eye(
+          icon="eye"
+          @click.stop="toggleVisibility"
+        )
+
         Icon(icon="layer-group" fixed-width)
+
         h2 Solid {{ index + 1 }}
+
         .controls
+
           Icon.delete(
             icon="trash-alt" fixed-width
             title="Delete"
@@ -24,22 +36,17 @@
 </style>
 
 
-<script>
-  export default {
-    name: 'TreeletSolid',
+<script setup>
 
-    inject: ['bus'],
+  const props = defineProps(['document', 'component', 'solid', 'index'])
 
-    props: {
-      document: Object,
-      solid: Object,
-      index: Number,
-      // component: Object,
-      // selection: Object,
-    },
+  const bus = inject('bus')
 
-    data() {
-      return {}
-    },
+  const isHidden = computed(() => props.component.creator.itemsHidden[props.solid.id] )
+
+  function toggleVisibility() {
+    props.component.creator.itemsHidden[props.solid.id] = !isHidden.value
+    props.document.emit('component-changed', props.component)
   }
+
 </script>

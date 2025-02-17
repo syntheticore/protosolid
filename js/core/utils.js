@@ -72,6 +72,54 @@ export function ocPlnFromMatrix(m) {
   return new window.oc.oc.gp_Pln_2(ocAx3FromMatrix(m))
 }
 
+export function transformGeometry(geom, workplane) {
+  const pos = new THREE.Vector3().setFromMatrixPosition(workplane)
+  const rot = new THREE.Quaternion().setFromRotationMatrix(workplane)
+
+  const trans = new window.oc.oc.gp_Trsf_1()
+  const quat = new window.oc.oc.gp_Quaternion_2(rot.x, rot.y, rot.z, rot.w)
+  trans.SetRotationPart(quat)
+  trans.SetTranslationPart(ocVecFromVec(pos))
+
+  return new window.oc.oc.BRepBuilderAPI_Transform_2(geom, trans, true).Shape()
+}
+
+function shapeEnum(type) {
+  return {
+    vertex: window.oc.oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+    edge: window.oc.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+    face: window.oc.oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    solid: window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+  }[type]
+}
+
+function wrapShape(shape, type) {
+  const converters = {
+    vertex: window.oc.oc.TopoDS.Vertex_1,
+    edge: window.oc.oc.TopoDS.Edge_1,
+    face: window.oc.oc.TopoDS.Face_1,
+    solid: window.oc.oc.TopoDS.Solid_1,
+  }
+  return new converters[type](shape)
+}
+
+export function exploreShape(shape, type, cb) {
+  const items = new window.oc.oc.TopExp_Explorer_2(shape, shapeEnum(type), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
+  while(items.More()) {
+    cb(wrapShape(items.Current(), type))
+    items.Next()
+  }
+}
+
+export function collectShapes(geom, type) {
+  const map = new window.oc.oc.TopTools_IndexedMapOfShape_1()
+  window.oc.oc.TopExp.MapShapes_1(geom, shapeEnum(type), map)
+
+  return arrayRange(1, map.Extent())
+    .map(i => map.FindKey(i) )
+    .map(shape => wrapShape(shape, type) )
+}
+
 export function ocCatch(cb) {
   try {
     return cb()

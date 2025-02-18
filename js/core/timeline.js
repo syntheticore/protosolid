@@ -1,32 +1,16 @@
 import Serialize from './serialize.js'
-import Component from './component.js'
+import { Component, ComponentDefinition } from './component.js'
 import { CreateComponentFeature, Feature } from './features.js'
-import { arrayRange } from './utils.js'
+import { arrayRange, makeColor } from './utils.js'
 
 
 export class Timeline {
-  constructor() {
+  constructor(baseCompDef) {
+    this.baseCompDef = baseCompDef || new ComponentDefinition('hsl(47.88, 100%, 59.22%)')
     const baseComp = new Component(null, 'id-0')
-    baseComp.creator = {
-      title: "Main Assembly",
-      sectionViews: [],
-      parameters: [],
-      exportConfigs: [],
-      itemsHidden: {},
-      color: '#ffd52f',
-    }
-    const cache = {
-      faces: [],
-      edges: [],
-      regions: [],
-      curves: [],
-      helpers: [],
-      dimensions: [],
-    }
-    baseComp.creator.cache = () => cache
-
-    this.features = []
+    baseComp.creator = this.baseCompDef
     this.cache = [baseComp]
+    this.features = []
     this.marker = 0
     this.last_change_index = 0
     this.last_eval_index = 0
@@ -178,7 +162,7 @@ export class Timeline {
 
   finalTree() {
     let tree = new Component(null, 'id-0')
-    tree.creator = { color: '#ffd52f' }
+    tree.creator = this.baseCompDef
     this.features.forEach(feature => {
       if(feature instanceof CreateComponentFeature) {
         let parent = tree.findChild(feature.parent)
@@ -190,15 +174,25 @@ export class Timeline {
     return tree
   }
 
+  makeColor() {
+    const existingColors =
+      this.features
+      .filter(feature => feature instanceof CreateComponentFeature )
+      .map(feature => feature.definition.color )
+      .concat([this.baseCompDef.color])
+    return makeColor(existingColors)
+  }
+
   dump() {
     return {
       marker: this.marker,
       features: this.features,
+      baseCompDef: this.baseCompDef,
     }
   }
 
   static undump(dump) {
-    const out = new Timeline()
+    const out = new Timeline(dump.baseCompDef)
     Object.assign(out, dump)
     return out
   }

@@ -1,11 +1,62 @@
 import * as THREE from 'three'
 
+import { makeID } from './../js/core/id.js'
 import Serialize from './serialize.js'
 import { Compound } from './geom3d.js'
+import { CreateComponentFeature } from './features.js'
 import { PlaneHelper, AxisHelper, PointHelper } from './helpers.js'
-import { rotationFromNormal } from './utils.js'
+import { rotationFromNormal, rad } from './utils.js'
 
-export default class Component {
+
+export class ComponentDefinition {
+  constructor(color) {
+    this.title = "New Component"
+    this.hidden = false
+    this.material = null
+    this.cog = false
+    this.sectionViews = []
+    this.parameters = []
+    this.exportConfigs = []
+    this.itemsHidden = {}
+    this.color = color //this.makeColor(allFeatures)
+
+    const cache = {
+      faces: [],
+      edges: [],
+      regions: [],
+      curves: [],
+      helpers: [],
+      dimensions: [],
+    }
+    // Hide cache from Vue
+    this.cache = () => cache
+  }
+
+  static undump(dump) { return Object.assign(new ComponentDefinition(), dump) }
+}
+Serialize.register(ComponentDefinition, 'ComponentDefinition')
+
+
+export class SectionView {
+  constructor(id, orientation) {
+    this.id = id || makeID()
+    this.orientation = orientation || {
+      x: 0,
+      y: 0,
+    }
+  }
+
+  getTransform() {
+    const euler = new THREE.Euler(rad(this.orientation.x), rad(this.orientation.y), 0)
+    return new THREE.Matrix4().makeRotationFromEuler(euler)
+  }
+
+  static undump(dump) { return new SectionView(dump.id, dump.orientation) }
+}
+Serialize.register(SectionView, 'SectionView')
+
+
+export class Component {
   constructor(parent, id) {
     this.parent = parent
     this.id = id

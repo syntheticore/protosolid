@@ -93,3 +93,13 @@ THREE.Matrix4.undump = function(dump) {
 }
 
 Serialize.register(THREE.Matrix4, 'Matrix4')
+
+THREE.Euler.prototype.dump = function() {
+  return { elements: this.toArray() }
+}
+
+THREE.Euler.undump = function(dump) {
+  return new THREE.Euler().fromArray(dump.elements)
+}
+
+Serialize.register(THREE.Euler, 'Euler')

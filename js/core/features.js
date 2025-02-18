@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import Component from './component.js'
+import { Component, ComponentDefinition } from './component.js'
 import { Sketch } from './sketch.js'
 import { Compound } from './geom3d.js'
 import { Reference } from './references.js'
@@ -214,61 +214,15 @@ export class CreateComponentFeature extends Feature {
     this.parent = parentId
     this.title = "New Component"
 
-    this.hidden = false
-    this.material = null
-    this.cog = false
-    this.sectionViews = []
-    this.parameters = []
-    this.exportConfigs = []
-    this.itemsHidden = {}
-    this.color = this.makeColor()
-
-    const cache = {
-      faces: [],
-      edges: [],
-      regions: [],
-      curves: [],
-      helpers: [],
-      dimensions: [],
-    }
-    // Hide cache from Vue
-    this.cache = () => cache
-  }
-
-  makeColor() {
-    const existingColors = this.document.timeline.features
-      .filter(feature => feature instanceof CreateComponentFeature )
-      .map(feature => this.parseHsl(feature.color) )
-    const testColors = [...Array(100)].map(() => {
-      const color = {
-        h: Math.random() * 360,
-        s: 45 + Math.random() * 20,
-        l: 55 + Math.random() * 10,
-      }
-      const diffs = existingColors.map(c => this.colorDiff(c, color) )
-      const worstDiff = Math.min(...diffs)
-      return { color, diff: worstDiff }
-    })
-    testColors.sort((a, b) => Math.sign(b.diff - a.diff) )
-    const color = testColors[0].color
-    return `hsl(${color.h}, ${color.s}%, ${color.l}%)`
-  }
-
-  colorDiff(c1, c2) {
-    let hue = Math.abs(c1.h - c2.h)
-    hue = hue > 180 ? 360 - hue : hue
-    return hue + Math.abs(c1.s - c2.s) + Math.abs(c1.l - c2.l)
-  }
-
-  parseHsl(str) {
-    const match = /hsl\((.+),\s*(.+)%,\s*(.+)%\)/g.exec(str).slice(1,4).map(v => Number(v) )
-    return { h: match[0], s: match[1], l: match[2] }
+    this.definition = new ComponentDefinition(doc.timeline.makeColor())
   }
 
   updateFeature(tree) {
     let parent = tree.findChild(this.parent)
     const comp = new Component(parent, this.id)
-    comp.creator = this
+    this.definition.parent = this.parent
+    this.definition.title = this.title
+    comp.creator = this.definition
     parent.children.push(comp)
   }
 
@@ -279,14 +233,7 @@ export class CreateComponentFeature extends Feature {
   dump() {
     return {
       ...super.dump(),
-      hidden: this.hidden,
-      material: this.material,
-      cog: this.cog,
-      sectionViews: this.sectionViews,
-      parameters: this.parameters,
-      exportConfigs: this.exportConfigs,
-      itemsHidden: this.itemsHidden,
-      color: this.color,
+      definition: this.definition,
     }
   }
 

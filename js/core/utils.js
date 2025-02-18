@@ -216,6 +216,43 @@ export function arrayRange(start, end, step=1) {
   )
 }
 
+export function makeColor(allColors) {
+  const existingColors = allColors.map(color => parseHsl(color) )
+  const testColors = [...Array(100)].map(() => {
+    const color = {
+      h: Math.random() * 360,
+      s: 45 + Math.random() * 20,
+      l: 55 + Math.random() * 10,
+    }
+    const diffs = existingColors.map(c => colorDiff(c, color) )
+    const worstDiff = Math.min(...diffs)
+    return { color, diff: worstDiff }
+  })
+  testColors.sort((a, b) => Math.sign(b.diff - a.diff) )
+  const color = testColors[0].color
+  return `hsl(${color.h}, ${color.s}%, ${color.l}%)`
+}
+
+export function colorDiff(c1, c2) {
+  let hue = Math.abs(c1.h - c2.h)
+  hue = hue > 180 ? 360 - hue : hue
+  return hue + Math.abs(c1.s - c2.s) + Math.abs(c1.l - c2.l)
+}
+
+export function parseHsl(str) {
+  console.log(str)
+  const match = /hsl\((.+),\s*(.+)%,\s*(.+)%\)/g.exec(str).slice(1,4).map(v => Number(v) )
+  return { h: match[0], s: match[1], l: match[2] }
+}
+
+export function rad(degrees) {
+  return degrees * Math.PI / 180.0
+}
+
+export function deg(radians) {
+  return radians / Math.PI * 180.0
+}
+
 Array.prototype.minMaxBy = function(comparator, lambda) {
   var lambdaFn;
   if (typeof(lambda) === "function") {

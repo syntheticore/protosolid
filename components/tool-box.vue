@@ -211,6 +211,8 @@
   import { makeID } from './../js/core/id.js'
   import { rotationFromNormal } from './../js/core/utils.js'
 
+  import { SectionView } from './../js/core/component.js'
+
   import {
     SketchElement,
   } from './../js/core/geom2d.js'
@@ -450,10 +452,7 @@
       },
 
       addSectionView: function() {
-        this.document.activeComponent.creator.sectionViews.push({
-          id: makeID(),
-          transform: rotationFromNormal(new THREE.Vector3(0.0, 0.0, 1.0)),
-        })
+        this.document.activeComponent.creator.sectionViews.push(new SectionView())
         this.document.emit('component-changed', this.document.activeComponent)
       },
 

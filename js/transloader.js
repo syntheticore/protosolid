@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js'
 
-import Component from './core/component.js'
+import { Component } from './core/component.js'
 import { SketchElement } from './core/geom2d.js'
 import { Edge, Face, Solid, Profile } from './core/geom3d.js'
 import { Sketch, Dimension } from './core/sketch.js'
@@ -84,7 +84,7 @@ export default class Transloader {
     const sections = comp.creator.sectionViews.filter(sec => !sec.hidden )
     if(sections.length) {
       const section = comp.creator.sectionViews[0]
-      const compound = comp.compound.split(section.transform)
+      const compound = comp.compound.split(section.getTransform())
       solids = compound.solids().slice(0, Math.ceil(compound.solids().length / 2))
 
     } else {

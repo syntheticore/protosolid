@@ -4,7 +4,7 @@ import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
 import { Feature, CreateComponentFeature, CreateSketchFeature } from './features.js'
 import { Selection } from '../selection.js'
-import Component from './component.js'
+import { Component } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
 

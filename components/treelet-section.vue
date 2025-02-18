@@ -32,8 +32,8 @@
         fieldset
 
           label
-            input(type="number" v-model="orientation.x" min="0.0" step="1.0" max="360.0")
-            input(type="number" v-model="orientation.y" min="0.0" step="1.0" max="360.0")
+            input(type="number" v-model="section.orientation.x" min="0.0" step="1.0" max="360.0")
+            input(type="number" v-model="section.orientation.y" min="0.0" step="1.0" max="360.0")
             span Orientation
 
 </template>
@@ -71,15 +71,8 @@
   const bus = inject('bus')
 
   const expanded = ref(true)
-  const orientation = ref({ x: 0, y: 0, z: 0 })
 
-  function rad(degrees) {
-    return degrees * Math.PI / 180.0
-  }
-
-  watch(orientation, () => {
-    const euler = new THREE.Euler(rad(orientation.value.x), rad(orientation.value.y), 0)
-    props.section.transform = new THREE.Matrix4().makeRotationFromEuler(euler)
+  watch(() => props.section.orientation, () => {
     props.document.emit('component-changed', props.component)
   }, { deep: true })
 

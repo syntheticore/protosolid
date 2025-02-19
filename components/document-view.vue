@@ -37,15 +37,22 @@
         @unhover="document.previewView = document.dirtyView"
       )
 
-      .flex
+      .flex.buttons
 
-        IconButton(v-if="document.selection.items.length" icon="search-plus" @click="bus.emit('zoom-selection')" title="Fit Selection")
-
-        template(v-else)
+        .flex
 
           IconButton(icon="camera" @click="bus.emit('zoom-all')" title="Fit All")
 
           IconButton(icon="crop-alt" @click="bus.emit('zoom-active')" title="Fit Active")
+
+          IconButton(
+            v-if="document.selection.items.length"
+            icon="search-plus"
+            title="Fit Selection"
+            @click="bus.emit('zoom-selection')"
+          )
+
+        IconButton(icon="solar-panel" @click="lookAtPlane" title="Fit Active")
 
       h1 DISPLAY
 
@@ -55,7 +62,6 @@
         @hover="previewDisplayMode = $event"
         @unhover="previewDisplayMode = null"
       )
-      //- Icon(icon="users-viewfinder")
 
     FooterView(
       :document="document"
@@ -88,6 +94,7 @@
     top: 38px
     bottom: 0
     pointer-events: none
+
     h1
       text-align: center
       color: $bright2
@@ -98,25 +105,31 @@
       margin-bottom: 8px
       text-transform: uppercase
       text-shadow: 0 1px 2px rgba(0,0,0, 0.7)
+
     &.left
       left: 0
       overflow: hidden
+
     &.right
       top: (14 + 38)px
       right: 14px
       bottom: 35px
+      width: 100px
       display: flex
       flex-direction: column
+
       h1:not(:first-child)
         margin-top: 1rem
         // flex: 0 0 content
+
       .list-chooser
       .radio-bar
         // flex: 0 1 auto
         margin-bottom: 0.5rem
 
-  .flex
+  .buttons
     pointer-events: auto
+    flex-direction: column
 
   .view-port
     width: 100%
@@ -125,6 +138,7 @@
   .footer-view
     position: absolute
     bottom: 70px
+
     &.top
       bottom: unset
       top: (100 + 38)px
@@ -139,12 +153,15 @@
 
 <script>
 
+  import * as THREE from 'three'
+
   import {
     CreateComponentFeature,
     CreateSketchFeature,
   } from './../js/core/features.js'
 
   import { ManipulationTool } from './../js/tools.js'
+  import { rotationFromNormal } from './../js/core/utils.js'
 
   export default {
     name: 'DocumentView',
@@ -204,6 +221,22 @@
     },
 
     methods: {
+      lookAtPlane: function() {
+        let plane
+        if(this.document.activeSketch) {
+          plane = this.document.activeSketch.workplane
+
+        } else {
+          const forward = window.alcRenderer.camera.getWorldDirection(new THREE.Vector3()).toArray()
+          const abs = forward.map(v => Math.abs(v) )
+          let i = abs.indexOf(Math.max(...abs))
+          const normal = [0,0,0]
+          normal[i] = Math.sign(forward[i])
+          plane = rotationFromNormal(new THREE.Vector3().fromArray(normal))
+        }
+        this.document.emit('look-at', plane)
+      },
+
       keyDown: function(keyCode) {
         if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection

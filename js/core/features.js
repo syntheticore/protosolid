@@ -484,7 +484,7 @@ Serialize.register(RevolveFeature, 'RevolveFeature')
 export class SplitFeature extends Feature {
   static icon = 'divide'
   constructor(document) {
-    super(document, true, 'Split', {
+    super(document, false, 'Split', {
       plane: {
         title: 'Tool',
         type: 'plane',

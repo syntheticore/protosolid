@@ -43,7 +43,12 @@
           @move-marker="document.moveMarker(i + 1)"
         )
 
-      hr(ref="marker")
+      .marker(
+        ref="marker"
+        :draggable="true"
+        @dragstart="dragstart"
+      )
+        Icon(icon="circle")
 
       li.future(
         v-for="(feature, i) in future"
@@ -72,20 +77,25 @@
     border-right: 1px solid $dark1
     flex: 1 0 auto
     position: relative
+
     button
       background: none
       border: none
       color: $bright2
       padding: 20px 15px
       transition: all 0.15s
+
       &:first-child
         border-top-left-radius: 4px
         border-bottom-left-radius: 4px
+
       &:hover
         background: $dark1
         transition: none
+
       &:active
         background: $dark2 * 0.85
+
       &:disabled
         opacity: 0.3
 
@@ -99,16 +109,21 @@
     align-items: center
     scrollbar-color: $dark1 * 1.15 $dark2
     scrollbar-width: thin
+
     &::-webkit-scrollbar
       height: 8px
       background-color: $dark2
       border-bottom-right-radius: 4px
+
     &::-webkit-scrollbar-thumb
       background: $dark1 * 1.15
       // border-radius: 4px
+
       &:hover
         background: $dark1 * 1.3
+
     &::before
+
     &::after
       position: absolute
       content: ''
@@ -118,39 +133,47 @@
       height: 100%
       background: linear-gradient(to right, $dark2 * 0.8, rgba($dark2, 0))
       z-index: 1
+
     &::after
       left: unset
       right: 0
       background: linear-gradient(to left, $dark2, rgba($dark2, 0))
       border-top-right-radius: 4px
       border-bottom-right-radius: 4px
-    > hr
-      border: none
-      width: 5px
-      height: 5px
-      background: $highlight
-      border-radius: 10px
-      margin: 7px
-      flex: 0 0 auto
-      &:first-child
-        margin-left: 14px
-        margin-right: 0px
-      &:last-child
-        margin-left: 0px
-        margin-right: 14px
-      &:only-child
-        margin: 7px
+
     > li
       border-bottom: 1px solid var(--color)
+
       &:first-of-type
-        margin-left: 14px
+        margin-left: 10px
+
       &:last-of-type
-        margin-right: 11px
+        margin-right: 7px
+
+  .marker
+    color: $highlight
+    flex: 0 0 auto
+
+    &:first-child
+      padding-left: 7px
+      padding-right: 0px
+
+    &:last-child
+      padding-left: 0px
+      padding-right: 7px
+
+    &:only-child
+      padding: 7px
+
+    svg
+      width: 6px
+      padding: 12px 7px
 
   .feature-box
     bottom: 0
     margin-bottom: 61px
     position: absolute
+
     &::before
       left: var(--tip)
 
@@ -276,6 +299,10 @@
         return modified.length == 0 || modified.some(compId =>
           this.relevantComponentIds.some(childId => childId === compId )
         )
+      },
+
+      dragstart(e) {
+        e.dataTransfer.setData('text/plain', 'marker')
       },
 
       onScroll: function() {

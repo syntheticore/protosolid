@@ -203,10 +203,15 @@
       },
 
       drop(e) {
-        const dragged = this.getDragged(e)
-        if(this.feature == dragged) return
-        const ratio = e.layerX / e.target.offsetWidth
-        this.document.reorder(dragged, this.feature, ratio > 0.5)
+        if(e.dataTransfer.getData('text/plain') == 'marker') {
+          const i = this.document.timeline.features.indexOf(this.feature) + (this.targetLeft ? 0 : 1)
+          this.document.moveMarker(i)
+
+        } else {
+          const dragged = this.getDragged(e)
+          if(this.feature == dragged) return
+          this.document.reorder(dragged, this.feature, !this.targetLeft)
+        }
         this.isDragTarget = false
       },
 

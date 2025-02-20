@@ -53,11 +53,11 @@
             @update:chosen="update"
           )
 
-          MaterialSelector(
-            v-if="setting.type == 'material'"
-            v-model:chosen="activeFeature[key]"
-            @update:chosen="update"
-          )
+          //- MaterialSelector(
+          //-   v-if="setting.type == 'material'"
+          //-   v-model:chosen="activeFeature[key]"
+          //-   @update:chosen="update"
+          //- )
 
       transition(name="fade")
         .error-msg(v-if="error", :class="errorStyle") {{ error.msg || error }}

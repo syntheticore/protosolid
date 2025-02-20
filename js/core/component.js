@@ -118,7 +118,7 @@ export class Component {
   }
 
   getMaterial() {
-    return this.material || (this.parent && this.parent.getMaterial())
+    return this.creator.material || (this.parent && this.parent.getMaterial())
   }
 
   // Returns zero for empty components,

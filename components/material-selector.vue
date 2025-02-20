@@ -1,16 +1,22 @@
 <template lang="pug">
+
   ul.material-selector
+
     li(
       v-for="material in materials"
-      :class="{chosen: material == chosen}"
+      :class="{ chosen: material == chosen }"
       @click="$emit('update:chosen', material)"
     )
+
       Icon.preview(icon="volleyball-ball")
+
       h1 {{ material.title }}
+
 </template>
 
 
 <style lang="stylus" scoped>
+
   .material-selector
     display: flex
     align-items: start
@@ -35,27 +41,36 @@
     transition: all 0.15s
     border: 2px solid transparent
     margin: 8px
+
     & + li
       // margin-left: 12px
+
     &:nth-child(1) .preview
       background: lighten($blue, 25%)
       color: lighten($blue, 50%)
+
     &:nth-child(2) .preview
       background: darken($purple, 30%)
       color: lighten($purple, 20%)
+
     &:nth-child(3) .preview
       background: $pink
       color: lighten($pink, 50%)
+
     &:nth-child(4) .preview
       background: $red
       color: lighten($red, 50%)
+
     &:nth-child(5) .preview
       background: white
       color: $bright1
+
     &:hover
       background: $dark1
+
     &:active
       background: $dark1 * 0.95
+
     &.chosen
       background: $dark1
       border-color: $highlight
@@ -78,6 +93,7 @@
 
 
 <script>
+
   import {
     Material,
     Aluminum,
@@ -111,4 +127,5 @@
       }
     },
   }
+
 </script>

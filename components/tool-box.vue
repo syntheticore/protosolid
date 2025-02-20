@@ -208,9 +208,9 @@
 <script>
 
   import * as THREE from 'three'
+
   import { makeID } from './../js/core/id.js'
   import { rotationFromNormal } from './../js/core/utils.js'
-
   import { SectionView } from './../js/core/component.js'
 
   import {
@@ -245,6 +245,8 @@
     DimensionTool,
     ProjectTool,
   } from './../js/tools.js'
+
+  import { Aluminum } from './../js/material.js'
 
   export default {
     name: 'ToolBox',
@@ -366,6 +368,7 @@
             title: 'Simulate',
             tools: [
               // { title: 'Material', feature: MaterialFeature },
+              { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
               { title: 'Joint', icon: 'code-branch' },
               { title: 'Group', icon: 'object-group' },
               { title: 'Motion Link', icon: 'link' },
@@ -453,7 +456,7 @@
 
       addSectionView: function() {
         this.document.activeComponent.creator.sectionViews.push(new SectionView())
-        this.document.emit('component-changed', this.document.activeComponent)
+        this.document.emit('component-changed', this.document.activeComponent, true)
       },
 
       addExportConfig: function() {
@@ -465,6 +468,12 @@
           maxAngle: 1.0,
           autoSave: false,
         })
+      },
+
+      addMaterial: function() {
+        this.document.materials[0] ||= new Aluminum()
+        this.document.activeComponent.creator.material = this.document.materials[0]
+        this.document.emit('component-changed', this.document.activeComponent, true)
       },
 
       toggleReference: function() {

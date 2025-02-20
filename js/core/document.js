@@ -14,8 +14,8 @@ export default class Document extends Emitter {
 
     this.filePath = null
     this.timeline = new Timeline()
-
     this.lastId = 1
+    this.materials = []
 
     this.activeComponent = this.top()
     this.activeSketch = null

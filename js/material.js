@@ -5,6 +5,7 @@ export class Material {
     this.title = title
     this.density = 1.0 // g/cm^3
     this.displayMaterial = new THREE.MeshPhysicalMaterial({
+      side: THREE.DoubleSide,
       clearcoatRoughness: 0.05,
     })
   }
@@ -60,6 +61,18 @@ export class Material {
   set translucency(translucency) {
     this.glow = translucency
     this.displayMaterial.emissive = this.displayMaterial.color.clone().multiplyScalar(translucency)
+  }
+
+  clone() {
+    const out = new Material(this.title)
+    out.density = this.density
+    out.color = this.color
+    out.roughness = this.roughness
+    out.metal = this.metal
+    out.clearcoat = this.clearcoat
+    out.transparency = this.transparency
+    out.translucency = this.translucency
+    return out
   }
 
   dispose() {

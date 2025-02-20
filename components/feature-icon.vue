@@ -15,7 +15,7 @@
 
     Icon(:icon="feature.constructor.icon" fixed-width :class="{ future: isFuture }")
 
-    nav.actions.bordered
+    nav.actions.bordered(@dblclick.stop)
 
       button(
         title="Move marker here"

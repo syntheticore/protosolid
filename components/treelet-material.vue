@@ -23,6 +23,19 @@
 
       .content.form(v-if="expanded")
 
+        fieldset.preset
+
+          label
+
+            .flex
+
+              select(v-model="component.creator.material")
+                option(v-for="material in document.materials" :value="material") {{ material.title }}
+
+              IconButton(icon="plus" @click="cloneMaterial")
+
+            span Material
+
         fieldset.physical
 
           h3 Physical Properties
@@ -97,8 +110,11 @@
     },
 
     watch: {
-      material: {
-        handler(material) {
+      material() {
+        this.document.emit('component-changed', this.component, true)
+      },
+      'component.creator.material': {
+        handler() {
           this.bus.emit('render-needed')
         },
         deep: true
@@ -106,11 +122,15 @@
     },
 
     methods: {
+      cloneMaterial: function() {
+        this.component.creator.material = this.material.clone()
+        this.document.materials.push(this.component.creator.material)
+      },
+
       remove: function() {
-        const mat = this.material
-        this.component.material = null
+        this.material.dispose()
+        this.component.creator.material = null
         this.document.emit('component-changed', this.component, true)
-        mat.dispose()
       },
     },
   }

@@ -57,11 +57,16 @@ input, select
   font-size: 11px
   transition: all 0.2s
   color: $dark1
+
   &:focus
     background: white
     border: 2px solid $highlight
+
   &:hover
     background: white
+
+select
+  -webkit-appearance: none
 
 input, select, textarea, label, svg
   &:disabled
@@ -89,7 +94,7 @@ input[type="color"]
 
 .form
 
-  input, select, .button
+  input, select, .button:first-child
     width: 73px
     margin: 0
     margin-right: 8px

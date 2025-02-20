@@ -18,7 +18,7 @@
           @dblclick.stop
         )
 
-        Icon.icon(icon="edit" fixed-width)
+        Icon.icon(icon="solar-panel" fixed-width)
 
         h2 Sketch {{ index + 1 }}
 

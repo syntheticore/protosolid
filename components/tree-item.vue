@@ -222,6 +222,11 @@
         display: flex
         align-items: center
 
+        svg
+          font-size: 13px
+          padding: 4px
+          color: $bright2
+
       &:hover
         background: $dark2 * 1.15
         border-color: $dark1 * 1.85
@@ -273,11 +278,6 @@
 
       &.ultra-wide
         width: 79px
-
-    svg
-      font-size: 13px
-      padding: 4px
-      color: $bright2
 
     svg.eye
     .controls svg

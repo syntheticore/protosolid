@@ -124,17 +124,22 @@ export class Component {
   // Returns zero for empty components,
   // but undefined when weight could not be determined
   getWeight() {
-    if(this.compound.solids().length && !this.material) return
+    if(!this.compound.solids().length) return 0.0
+    if(!this.creator.material) return
     try {
       let weight = this.children.reduce((acc, child) => {
         const childWeight = child.getWeight()
         if(childWeight === undefined) throw 'no weight'
         return acc + childWeight
       }, 0.0)
-      return weight + (this.material ? this.getVolume() * this.material.density : 0.0)
+      return weight + this.compound.volume() * this.creator.material.density
     } catch(e) {
       if(e !== 'no weight') throw e
     }
+  }
+
+  getVolume() {
+    return this.compound.volume() + this.children.reduce((acc, child) => { acc + child.getVolume() }, 0.0)
   }
 
   hasAncestor(parent) {

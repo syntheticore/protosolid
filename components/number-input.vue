@@ -5,7 +5,7 @@
     button.button
       Icon(icon="tape")
 
-    input(
+    input.input(
       type="text"
       ref="input"
       :style="inputStyle"

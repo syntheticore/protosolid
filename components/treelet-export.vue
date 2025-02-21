@@ -32,18 +32,18 @@
         h3 Export Settings
 
         label
-          select(v-model="config.format")
+          select.input(v-model="config.format")
             option STL
             option 3MF
             option STEP
           span Format
 
         label
-          input(type="number" v-model="config.maxDistance" min="0.0" step="0.01" max="10.0")
+          input.input(type="number" v-model="config.maxDistance" min="0.0" step="0.01" max="10.0")
           span Max Deviation
 
         label
-          input(type="number" v-model="config.maxAngle" min="0.0" step="0.1" max="360.0")
+          input.input(type="number" v-model="config.maxAngle" min="0.0" step="0.1" max="360.0")
           span Max Angular Deviation
 
         label
@@ -99,7 +99,7 @@
 
     data() {
       return {
-        expanded: false,
+        expanded: true,
         path: null,
       }
     },

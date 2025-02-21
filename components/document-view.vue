@@ -37,9 +37,9 @@
         @unhover="document.previewView = document.dirtyView"
       )
 
-      .flex.buttons
+      .flex.gap.buttons
 
-        .flex
+        .flex.gap
 
           IconButton(icon="camera" @click="bus.emit('zoom-all')" title="Fit All")
 

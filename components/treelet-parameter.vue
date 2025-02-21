@@ -1,17 +1,25 @@
 <template lang="pug">
 
   .box.treelet-parameter
+
     header
+
       Icon(icon="square-root-alt" fixed-width)
-      input.variable(type="text" v-model.trim="parameter.name" @keydown.stop)
+
+      input.input.variable(type="text" v-model.trim="parameter.name" @keydown.stop)
+
       span =
-      input.value(type="text" v-model.trim="value" @keydown.stop)
+
+      input.input.value(type="text" v-model.trim="value" @keydown.stop)
+
       .controls
+
         Icon.delete(
           icon="trash-alt" fixed-width
           title="Delete"
           @click.stop="remove"
         )
+
 </template>
 
 
@@ -36,10 +44,12 @@
   .value
     max-width: 46px
     margin-right: 2px
+
 </style>
 
 
 <script>
+
   export default {
     name: 'TreeletParameter',
 
@@ -67,4 +77,5 @@
       },
     },
   }
+
 </script>

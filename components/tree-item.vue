@@ -148,17 +148,21 @@
     font-size: 16px
     padding: 0
     transition: color 0.2s, transform 0.2s
+    color: $bright2
+
     &:hover
       color: $bright1
+
     &.closed
       transform: rotate(-0.25turn)
 
-  svg
+  .box header
 
-    &.component
+    .component
       color: var(--color)
-    &.blank
-      visibility: hidden
+
+  .blank
+    visibility: hidden
 
   .name
     margin-right: 6px
@@ -202,9 +206,6 @@
 
   .tree-item
 
-    .delete
-      color: $cancel !important
-
     .box
       background: $dark2
       font-size: 0.75rem
@@ -217,15 +218,6 @@
       // pointer-events: auto
       margin-right: 10px // Needed in FF when scrollbars are active
       transition: background 0.15s
-
-      > header
-        display: flex
-        align-items: center
-
-        svg
-          font-size: 13px
-          padding: 4px
-          color: $bright2
 
       &:hover
         background: $dark2 * 1.15
@@ -258,6 +250,32 @@
         .controls
           border-color: $highlight * 1.1
 
+      > header
+        display: flex
+        align-items: center
+
+        svg
+          font-size: 13px
+          padding: 4px
+          color: $bright2
+
+        svg.eye
+        .controls svg
+          color: $bright1
+          transition: all 0.1s
+
+          &:hover
+            color: white !important
+            background: $dark1 * 1.85
+
+          &:active
+            background: $dark1 * 1.5
+            transition: none
+
+        .controls .delete
+        .controls .delete:hover
+          color: $cancel !important
+
     .controls
       border-left: 1px solid $dark1 * 1.4
       white-space: nowrap
@@ -277,20 +295,7 @@
         width: 49px
 
       &.ultra-wide
-        width: 79px
-
-    svg.eye
-    .controls svg
-      color: $bright1
-      transition: all 0.1s
-
-      &:hover
-        color: white
-        background: $dark1 * 1.85
-
-      &:active
-        background: $dark1 * 1.5
-        transition: none
+        width: 74px
 
     .widgets li
 
@@ -315,7 +320,7 @@
           border-top: 1px solid $dark1 * 1.4
 
         input[type="checkbox"]
-          margin-left: 60px
+          margin-left: 82px
 
 </style>
 

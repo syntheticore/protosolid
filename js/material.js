@@ -82,7 +82,7 @@ export class Material {
 
 export class Aluminum extends Material {
   constructor() {
-    super('Aluminum Smooth')
+    super('Aluminum')
 
     this.density = 2.7
 

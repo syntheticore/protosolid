@@ -32,8 +32,13 @@
         fieldset
 
           label
-            input(type="number" v-model="section.orientation.x" min="0.0" step="1.0" max="360.0")
-            input(type="number" v-model="section.orientation.y" min="0.0" step="1.0" max="360.0")
+
+            .flex.gap
+
+              input.input(type="number" v-model="section.orientation.x" min="0.0" step="1.0" max="360.0")
+
+              input.input(type="number" v-model="section.orientation.y" min="0.0" step="1.0" max="360.0")
+
             span Orientation
 
 </template>
@@ -56,8 +61,12 @@
     .expanded &
       transform: rotate(90deg)
 
-  input[type="number"]
-    width: 3.75rem
+  // input[type="number"]
+  //   width: 3.75rem
+
+  .flex
+    > *
+      width: 0 !important
 
 </style>
 

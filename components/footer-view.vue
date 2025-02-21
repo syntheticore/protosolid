@@ -187,13 +187,13 @@
         const type = item.typename().split(' ')[0]
         if(type == 'Solid') {
           const volume = item.volume()
-          const weight = item.component.material ? volume * item.component.material.density : 'No Material'
+          const weight = item.component.creator.material ? volume * item.component.creator.material.density / 1000 : 'No Material'
           return {
             Weight: {
               title: 'Weight',
-              unit: 'g',
+              unit: 'kg',
               value: weight,
-              warn: !item.component.material,
+              warn: !item.component.creator.material,
             },
             Volume: {
               title: 'Volume',
@@ -207,11 +207,11 @@
             },
           }
         } else if(type == 'Component') {
-          const weight = item.getWeight()
+          const weight = item.getWeight() / 1000
           return {
             Weight: {
               title: 'Weight',
-              unit: 'g',
+              unit: 'kg',
               value: weight ? weight : 'No Material',
               warn: !weight,
             },
@@ -219,6 +219,11 @@
               title: 'Volume',
               unit: 'cm³',
               value: item.compound.volume() / 1000.0,
+            },
+            TotalVolume: {
+              title: 'Total Volume',
+              unit: 'cm³',
+              value: item.getVolume() / 1000.0,
             },
             Area: {
               title: 'Surface Area',

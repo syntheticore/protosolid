@@ -27,21 +27,23 @@
 
           label
 
-            .flex
+            select.input(v-model="component.creator.material")
+              option(v-for="material in document.materials" :value="material") {{ material.title }}
 
-              select(v-model="component.creator.material")
-                option(v-for="material in document.materials" :value="material") {{ material.title }}
-
-              IconButton(icon="plus" @click="cloneMaterial")
-
-            span Material
+            IconButton.clone(icon="plus" @click="cloneMaterial")
 
         fieldset.physical
 
-          h3 Physical Properties
+          h3 Properties
 
           label
-            input(type="number" v-model="material.density" min="0.0" step="0.01" max="10.0")
+
+            input.input(type="text" v-model="material.title")
+
+            span Title
+
+          label
+            input.input(type="number" v-model="material.density" min="0.0" step="0.01" max="10.0")
             span Density
 
         fieldset.visual
@@ -105,7 +107,7 @@
 
     data() {
       return {
-        expanded: false,
+        expanded: true,
       }
     },
 

@@ -42,7 +42,7 @@ class TopoReference extends Reference {
     }
   }
 
-  static undump(dump, context) {
+  static undump(dump) {
     return new this(null, dump.componentId, dump.solidId, dump.topoId)
   }
 }
@@ -78,6 +78,34 @@ export class EdgeReference extends TopoReference {
   }
 }
 Serialize.register(EdgeReference, 'EdgeReference')
+
+
+export class SolidReference extends Reference {
+  constructor(item, componentId, solidId) {
+    super(item)
+    this.componentId = componentId || item.compound.componentId
+    this.solidId = solidId || item.id
+  }
+
+  update(tree) {
+    const comp = tree.findChild(this.componentId)
+    const solid = comp.compound.solids().find(solid => solid.id == this.solidId )
+    if(!solid) return { type: 'error', msg: "Solid reference was lost" }
+    this.item = solid
+  }
+
+  dump() {
+    return {
+      componentId: this.componentId,
+      solidId: this.solidId,
+    }
+  }
+
+  static undump(dump) {
+    return new this(null, dump.componentId, dump.solidId)
+  }
+}
+Serialize.register(SolidReference, 'SolidReference')
 
 
 export class CurveReference extends Reference {

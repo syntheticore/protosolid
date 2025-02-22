@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import earcut from 'earcut'
 
-import { ProfileReference, EdgeReference, FaceReference, PlanarReference, AxialReference } from './references.js'
+import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference } from './references.js'
 import { makeID } from './id.js'
 import { Line } from './geom2d.js'
 import {
@@ -486,7 +486,7 @@ export class Solid extends Volumetric {
   }
 
   toCompound() {
-    const compound new Compound(this.compound.componentId, this.geom())
+    const compound = new Compound(this.compound.componentId, this.geom())
     out.cachedSolids = [this]
     return out
   }
@@ -497,6 +497,10 @@ export class Solid extends Volumetric {
       positions: tesselations.map(tess => tess.positions ).flat(),
       normals: tesselations.map(tess => tess.normals ).flat(),
     }
+  }
+
+  reference() {
+    return new SolidReference(this)
   }
 }
 
@@ -537,9 +541,12 @@ export class Compound extends Volumetric {
     return clone
   }
 
-  removeSolid(solid) {
+  removeSolids(solids) {
     const reshaper = new window.oc.oc.BRepTools_ReShape()
-    reshaper.Remove(solid instanceof Solid ? solid.geom() : solid)
+    solids.forEach(solid => {
+      reshaper.Remove(solid instanceof Solid ? solid.geom() : solid)
+    })
+    reshaper.Shape = () => reshaper.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
     return this.track(reshaper)
   }
 
@@ -550,10 +557,13 @@ export class Compound extends Volumetric {
     const history = algorithm.Modified ?
       algorithm
       :
-      (algorithm.History_1 ?
-        algorithm.History_1().get()
+      algorithm.History ?
+        algorithm.History().get()
         :
-        algorithm.Context().get().History().get())
+        algorithm.History_1 ?
+          algorithm.History_1().get()
+          :
+          algorithm.Context().get().History().get()
 
     const solids = out.solids()
     const oldSolids = this.solids().concat(other ? other.solids() : [])

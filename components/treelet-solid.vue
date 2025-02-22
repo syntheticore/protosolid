@@ -25,7 +25,7 @@
           Icon.delete(
             icon="trash-alt" fixed-width
             title="Delete"
-            @click.stop="document.deleteSolid(solid)"
+            @click.stop="removeSolid"
           )
 
 </template>
@@ -38,6 +38,8 @@
 
 <script setup>
 
+  import { RemoveSolidsFeature } from './../js/core/features.js'
+
   const props = defineProps(['document', 'component', 'solid', 'index'])
 
   const bus = inject('bus')
@@ -47,6 +49,13 @@
   function toggleVisibility() {
     props.component.creator.itemsHidden[props.solid.id] = !isHidden.value
     props.document.emit('component-changed', props.component)
+  }
+
+  function removeSolid() {
+    const feature = new RemoveSolidsFeature(props.document)
+    feature.solids = () => [props.solid.reference()]
+    props.document.addFeature(feature)
+    props.document.regenerate()
   }
 
 </script>

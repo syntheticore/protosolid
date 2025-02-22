@@ -102,7 +102,7 @@ export class Feature {
 
   needsPicker(setting, includeOptionals) {
     setting = this.settings[setting]
-    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge'].some(type =>
+    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid'].some(type =>
       type == setting.type && (!setting.optional || includeOptionals)
     )
   }
@@ -696,6 +696,31 @@ export class OffsetFeature extends Feature {
 }
 
 Serialize.register(OffsetFeature, 'OffsetFeature')
+
+
+export class RemoveSolidsFeature extends Feature {
+  static icon = 'trash'
+  constructor(doc) {
+    super(doc, false, 'Remove', {
+      solids: {
+        title: 'Solids',
+        type: 'solid',
+        multi: true,
+      },
+    })
+
+    this.solids = null
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.removeSolids(references.solids)
+    } catch(err) { this.error = err || this.error }
+  }
+}
+
+Serialize.register(RemoveSolidsFeature, 'RemoveSolidsFeature')
 
 
 // export class MaterialFeature extends Feature {

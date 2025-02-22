@@ -115,7 +115,6 @@
     pointer-events: none
 
   .drawpad
-    z-index: 1
 
     line, path
       fill-opacity: 0

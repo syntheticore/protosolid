@@ -44,6 +44,7 @@ export class SectionView {
       x: 0,
       y: 0,
     }
+    this.side = false
   }
 
   getTransform() {

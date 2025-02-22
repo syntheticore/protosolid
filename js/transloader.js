@@ -77,22 +77,19 @@ export default class Transloader {
     if(comp.creator.hidden) return
     vnhs.forEach(vnh => this.renderer.remove(vnh) )
 
-    // Load Bodies
-    let solids
+    const isActive = this.isActive(comp)
+    const cache = comp.creator.cache()
+    let compound = comp.compound
 
     // Slice model using visible section views
     const sections = comp.creator.sectionViews.filter(sec => !sec.hidden )
     if(sections.length) {
       const section = comp.creator.sectionViews[0]
-      const compound = comp.compound.split(section.getTransform())
-      solids = compound.solids().slice(0, Math.ceil(compound.solids().length / 2))
-
-    } else {
-      solids = comp.compound.solids()
+      compound = comp.compound.halfCut(section.getTransform(), section.side)
     }
-    const isActive = this.isActive(comp)
-    const cache = comp.creator.cache()
-    solids.forEach(solid => {
+
+    // Load Bodies
+    compound.solids().forEach(solid => {
       solid.component = comp
       if(comp.creator.itemsHidden[solid.id]) return
 

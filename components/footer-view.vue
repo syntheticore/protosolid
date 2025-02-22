@@ -191,7 +191,7 @@
           return {
             Weight: {
               title: 'Weight',
-              unit: 'kg',
+              unit: 'g',
               value: weight,
               warn: !item.component.creator.material,
             },
@@ -211,7 +211,7 @@
           return {
             Weight: {
               title: 'Weight',
-              unit: 'kg',
+              unit: 'g',
               value: weight ? weight : 'No Material',
               warn: !weight,
             },

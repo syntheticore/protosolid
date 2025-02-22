@@ -7,6 +7,8 @@ export class Material {
     this.displayMaterial = new THREE.MeshPhysicalMaterial({
       side: THREE.DoubleSide,
       clearcoatRoughness: 0.05,
+      iridescence: 0.25,
+      sheen: 0.25,
     })
   }
 

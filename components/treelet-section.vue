@@ -41,6 +41,12 @@
 
             span Orientation
 
+          label
+
+            input(type="checkbox" v-model="section.side")
+
+            span Side
+
 </template>
 
 
@@ -48,7 +54,6 @@
 
   .icon
     padding-left: 3px
-    width: auto
 
   h2
     margin: 0 !important
@@ -81,7 +86,7 @@
 
   const expanded = ref(true)
 
-  watch(() => props.section.orientation, () => {
+  watch(() => props.section, () => {
     props.document.emit('component-changed', props.component)
   }, { deep: true })
 

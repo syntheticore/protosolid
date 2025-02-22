@@ -13,12 +13,14 @@ import {
   ocVecFromVec,
   ocAx1FromMatrix,
   ocPlnFromMatrix,
+  ocListOfShapeFromArray,
   matrixFromOcPln,
   normalFromMatrix,
   vecFromOc,
   collectShapes,
   exploreShape,
   transformGeometry,
+  EPSILON,
 } from './utils.js'
 
 
@@ -117,7 +119,7 @@ export class Wire {
   }
 
   transformed(workplane) {
-    const shape = transformGeometry(this.geometry(), workplane)
+    const shape = transformGeometry(this.geometry(), workplane).Shape()
     return window.oc.oc.TopoDS.Wire_1(shape)
   }
 }
@@ -263,12 +265,6 @@ export class Shape {
     window.oc.oc.BRepGProp.SurfaceProperties_1(this.geom(), gprops, false, false)
     return vecFromOc(gprops.CentreOfMass())
   }
-
-  // transform(workplane) {
-  //   //XXX Track transformation
-  //   const transformed = transformGeometry(this.geom(), workplane)
-  //   this.geom = () => transformed
-  // }
 
   collectShapes(type) {
     const geom = this.geom()
@@ -489,6 +485,12 @@ export class Solid extends Volumetric {
     return clone
   }
 
+  toCompound() {
+    const compound new Compound(this.compound.componentId, this.geom())
+    out.cachedSolids = [this]
+    return out
+  }
+
   tesselate() {
     const tesselations = this.faces().map(face => face.tesselate() )
     return {
@@ -503,7 +505,17 @@ export class Compound extends Volumetric {
   constructor(componentId, geom) {
     super()
     this.componentId = componentId
-    if(geom) this.geom = () => geom
+    if(geom) {
+      // // Wrap solid in compound
+      // if(geom.ShapeType() == window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID) {
+      //   const compound = new window.oc.oc.TopoDS_Compound()
+      //   const builder = new window.oc.oc.BRep_Builder()
+      //   builder.MakeCompound(compound)
+      //   builder.Add(compound, geom)
+      //   geom = compound
+      // }
+      this.geom = () => geom
+    }
   }
 
   solids() {
@@ -523,6 +535,12 @@ export class Compound extends Volumetric {
     cachedSolids ||= this.solids()
     clone.cachedSolids = cachedSolids.map(solid => solid.cloneCached(clone) )
     return clone
+  }
+
+  removeSolid(solid) {
+    const reshaper = new window.oc.oc.BRepTools_ReShape()
+    reshaper.Remove(solid instanceof Solid ? solid.geom() : solid)
+    return this.track(reshaper)
   }
 
   track(algorithm, algoName, other, featureId) {
@@ -594,6 +612,34 @@ export class Compound extends Volumetric {
     return out
   }
 
+  transform(plane) {
+    const algo = transformGeometry(this.geom(), plane)
+    return this.track(algo, 'transform')
+  }
+
+  merge(other) {
+    const compound = new window.oc.oc.TopoDS_Compound()
+    const builder = new window.oc.oc.BRep_Builder()
+    builder.MakeCompound(compound)
+    builder.Add(compound, this.geom())
+    builder.Add(compound, other.geom())
+
+    const clone = this.clone(compound)
+    const solids = [...this.solids(), ...other.solids()]
+    clone.solids().forEach((cloneSolid, i) => {
+      const originSolid = solids[i]
+      const originFaces = originSolid.faces()
+      const originEdges = originSolid.edges()
+      cloneSolid.faces().forEach((cloneFace, j) => {
+        cloneFace.id = originFaces[j].id
+      })
+      cloneSolid.edges().forEach((cloneEdge, j) => {
+        cloneEdge.id = originEdges[j].id
+      })
+    })
+    return clone
+  }
+
   repair() {
     if(!this.geom) return this
     let out
@@ -619,28 +665,23 @@ export class Compound extends Volumetric {
   }
 
   orientFaces() {
-    const explorer = new window.oc.oc.TopExp_Explorer_2(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHELL, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
-    while(explorer.More()) {
-      const shell = new window.oc.oc.TopoDS.Shell_1(explorer.Current())
+    exploreShape(this.geom(), 'shell', shell => {
       window.oc.oc.BOPTools_AlgoTools.OrientFacesOnShell(shell)
-      explorer.Next()
-    }
+    })
   }
 
   alignFaceOrientation() {
     const reshaper = new window.oc.oc.BRepTools_ReShape()
     reshaper.ModeConsiderOrientation().set(true)
 
-    const explorer = new window.oc.oc.TopExp_Explorer_2(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_Face, window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
-    while(explorer.More()) {
-      const face = new window.oc.oc.TopoDS.Face_1(explorer.Current())
+    exploreShape(this.geom(), 'face', face => {
       const orientation = face.Orientation()
       if(orientation == window.oc.oc.TopAbs_Orientation.TopAbs_REVERSED) {
-        const reversed = face.Complemented()
+        const reversed = face.Complemented() // .Reversed()
         reshaper.Replace(face, reversed, true)
       }
-      explorer.Next()
-    }
+    })
+
     this.track(reshaper, 'reorient')
   }
 
@@ -673,12 +714,11 @@ export class Compound extends Volumetric {
 
   offset(openFaces, distance) {
     openFaces ||= []
-    // Build face list
-    const faces = new window.oc.oc.TopTools_ListOfShape_1()
-    openFaces.forEach(face => faces.Append_1(face.geom()) )
     // Offset each affected solid individually
     try {
       const thickened = this.solids().map(solid => {
+        const solidFaces = openFaces.filter(f => solid.faces().includes(f) )
+        const faces = ocListOfShapeFromArray(solidFaces.map(f => f.geom() ))
         const thicken = new window.oc.oc.BRepOffsetAPI_MakeThickSolid()
         thicken.MakeThickSolidByJoin(
           solid.geom(),
@@ -697,8 +737,8 @@ export class Compound extends Volumetric {
         if(!thicken.IsDone()) throw null
         return this.track(thicken, 'thicken')
       })
-      // Merge resulting solids, in case overlaps occured
-      return thickened.reduce((acc, next) => acc ? acc.boolean(next, 'join') : next )
+      // Merge resulting solids
+      return thickened.reduce((acc, next) => acc ? acc.merge(next) : next )
 
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }
@@ -706,18 +746,41 @@ export class Compound extends Volumetric {
   }
 
   split(plane, side, featureId) {
-    if(!this.geom) return this
-    const pln = ocPlnFromMatrix(plane)
-    const face = new window.oc.oc.BRepBuilderAPI_MakeFace_9(pln, -1000, 1000, -1000, 1000).Face()
-    // const algo = new window.oc.oc.BOPAlgo_MakerVolume_1()
-    const algo = new window.oc.oc.BOPAlgo_Splitter_1()
-    // algo.SetAvoidInternalShapes(true)
-    algo.AddArgument(this.geom())
-    // algo.AddArgument(face)
-    algo.AddTool(face)
-    algo.Perform(new window.oc.oc.Message_ProgressRange_1())
-    return this.track(algo, 'split', null, featureId).repair()
+    const left = this.halfCut(plane, true, featureId)
+    const right = this.halfCut(plane, false, featureId)
+    return left.merge(right)
   }
+
+  halfCut(plane, side, featureId) {
+    if(!this.geom) return this
+    let box = new window.oc.oc.BRepPrimAPI_MakeBox_2(1000, 1000, side ? 1000 : -1000).Shape() //XXX determine bounding box automatically
+    box = transformGeometry(box, new THREE.Matrix4().makeTranslation(-500, -500, 0).premultiply(plane)).Shape()
+    const algo = new window.oc.oc.BRepAlgoAPI_Cut_3(this.geom(), box, new window.oc.oc.Message_ProgressRange_1())
+    return this.track(algo, 'split-' + side ? 'left' : 'right', null, featureId)
+  }
+
+  // split(plane, side, featureId) {
+  //   if(!this.geom) return this
+  //   const pln = ocPlnFromMatrix(plane)
+  //   const face = new window.oc.oc.BRepBuilderAPI_MakeFace_9(pln, -1000, 1000, -1000, 1000).Face()
+  //   // const algo = new window.oc.oc.BOPAlgo_MakerVolume_1()
+  //   const algo = new window.oc.oc.BOPAlgo_Splitter_1()
+  //   // algo.SetAvoidInternalShapes(true)
+  //   algo.AddArgument(this.geom())
+  //   // algo.AddArgument(face)
+  //   algo.AddTool(face)
+  //   algo.Perform(new window.oc.oc.Message_ProgressRange_1())
+  //   return this.track(algo, 'split', null, featureId)
+  // }
+
+  // split(plane, side, featureId) {
+  //   const pln = ocPlnFromMatrix(plane)
+  //   const face = new window.oc.oc.BRepBuilderAPI_MakeFace_9(pln, -1000, 1000, -1000, 1000).Face()
+  //   const algo = new window.oc.oc.BRepAlgoAPI_Splitter_1()
+  //   algo.SetArguments(ocListOfShapeFromArray([this.geom()]))
+  //   algo.SetTools(ocListOfShapeFromArray([face]))
+  //   return this.track(algo, 'split', null, featureId)
+  // }
 
   // split(plane, side) {
   //   if(!this.geom) return this

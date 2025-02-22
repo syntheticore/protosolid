@@ -38,7 +38,6 @@
 
   .icon
     padding-left: 3px
-    width: auto
 
 </style>
 

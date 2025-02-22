@@ -18,6 +18,12 @@ export function arrayFromOcList(list) {
   return out
 }
 
+export function ocListOfShapeFromArray(shapes) {
+  const list = new window.oc.oc.TopTools_ListOfShape_1()
+  shapes.forEach(shape => list.Append_1(shape) )
+  return list
+}
+
 export function ocPnt2dFromVec(vec) {
   return new window.oc.oc.gp_Pnt2d_3(vec.x, vec.y)
 }
@@ -72,16 +78,17 @@ export function ocPlnFromMatrix(m) {
   return new window.oc.oc.gp_Pln_2(ocAx3FromMatrix(m))
 }
 
-export function transformGeometry(geom, workplane) {
-  const pos = new THREE.Vector3().setFromMatrixPosition(workplane)
-  const rot = new THREE.Quaternion().setFromRotationMatrix(workplane)
+export function transformGeometry(geom, plane, inPlace) {
+  const pos = new THREE.Vector3().setFromMatrixPosition(plane)
+  const rot = new THREE.Quaternion().setFromRotationMatrix(plane)
 
+  // gce_MakeTranslation
   const trans = new window.oc.oc.gp_Trsf_1()
   const quat = new window.oc.oc.gp_Quaternion_2(rot.x, rot.y, rot.z, rot.w)
   trans.SetRotationPart(quat)
   trans.SetTranslationPart(ocVecFromVec(pos))
 
-  return new window.oc.oc.BRepBuilderAPI_Transform_2(geom, trans, true).Shape()
+  return new window.oc.oc.BRepBuilderAPI_Transform_2(geom, trans, !inPlace)
 }
 
 function shapeEnum(type) {
@@ -90,6 +97,7 @@ function shapeEnum(type) {
     edge: window.oc.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
     face: window.oc.oc.TopAbs_ShapeEnum.TopAbs_FACE,
     solid: window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+    shell: window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHELL,
   }[type]
 }
 
@@ -99,6 +107,7 @@ function wrapShape(shape, type) {
     edge: window.oc.oc.TopoDS.Edge_1,
     face: window.oc.oc.TopoDS.Face_1,
     solid: window.oc.oc.TopoDS.Solid_1,
+    shell: window.oc.oc.TopoDS.Shell_1,
   }
   return new converters[type](shape)
 }

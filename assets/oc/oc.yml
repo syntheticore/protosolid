@@ -309,6 +309,7 @@ mainBuild:
     - symbol: Handle_BRepTools_History
     - symbol: BRepTools_Quilt
     - symbol: BRepTools_WireExplorer
+    # - symbol: BRepTools_TrsfModification
 
     - symbol: ShapeBuild_ReShape
     - symbol: Handle_ShapeBuild_ReShape
@@ -353,6 +354,7 @@ mainBuild:
     - symbol: BRepAlgoAPI_BuilderAlgo
     - symbol: BRepAlgoAPI_Check
     - symbol: BRepAlgoAPI_Common
+    - symbol: BRepAlgoAPI_Splitter
 
     - symbol: BRepPrimAPI_MakeBox
     - symbol: BRepPrimAPI_MakeSphere
@@ -389,6 +391,14 @@ mainBuild:
     # - symbol: BRepFeat_MakeLinearForm
     # - symbol: BRepFeat_Gluer
     # - symbol: BRepFeat_MakeCylindricalHole
+
+    # - symbol: BRepFill_Filling
+    # - symbol: BRepFill_OffsetWire
+    # - symbol: BRepFill_Pipe
+    # - symbol: BRepFill_Sweep
+
+    # - symbol: BRepSweep_Revol
+    # - symbol: BRepSweep_Rotation
 
     - symbol: BRepFilletAPI_MakeFillet
     - symbol: BRepFilletAPI_MakeChamfer
@@ -480,6 +490,7 @@ mainBuild:
 
     - symbol: BRepOffset_Mode
     - symbol: BRepOffsetAPI_MakeThickSolid
+    # - symbol: BRepOffsetAPI_MakeOffset
     - symbol: BRepOffsetAPI_MakeOffsetShape
     - symbol: BRepOffsetAPI_ThruSections
 

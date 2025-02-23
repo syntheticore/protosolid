@@ -300,6 +300,7 @@
     FacePickTool,
     PlanePickTool,
     AxisPickTool,
+    SolidPickTool,
     LineTool,
     SplineTool,
     CircleTool,
@@ -449,6 +450,7 @@
           edge: EdgePickTool,
           face: FacePickTool,
           plane: PlanePickTool,
+          solid: SolidPickTool,
         }[type])
       })
 
@@ -630,7 +632,7 @@
       handlePick: function(pickerCoords, color, Tool) {
         if(this.activeTool) this.activeTool.dispose()
         this.pickingPath = { target: null, color, origin: pickerCoords }
-        const tool = new Tool(this.document.activeComponent, this, (item, mesh) => {
+        const tool = new Tool(this.document.activeComponent, this, (item) => {
           this.bus.emit('picked', item)
           this.bus.emit('activate-tool', DummyTool)
           this.pickingPath = null

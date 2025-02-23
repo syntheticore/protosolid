@@ -108,6 +108,7 @@
       font-size: 11px
       margin-top: 6px
       font-weight: bold
+      white-space: nowrap
 
   .settings
     margin: 10px
@@ -331,7 +332,7 @@
           this.bus.once('picked', async (item) => {
             // Build reference of requested type from item
             let itemRef;
-            if(type == 'profile') {
+            if(type == 'profile' || type == 'solid') {
               itemRef = item.reference()
             } else if(type == 'face') {
               itemRef = item.faceReference()

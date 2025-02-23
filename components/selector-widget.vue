@@ -78,7 +78,6 @@
     },
 
     mounted() {
-      console.log('MOUNT')
       this.bus.on('close-widgets', this.remove)
       this.$emit('change', this.widget.items[0])
     },

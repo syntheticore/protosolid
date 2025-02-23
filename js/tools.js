@@ -92,7 +92,6 @@ class HighlightTool extends Tool {
 
   getObject(coords, any) {
     return new Promise(resolve => {
-      // console.log('getObject')
       let items = this.viewport.renderer
         .objectsAtScreen(coords, this.realSelectors)
         .map(obj =>
@@ -270,16 +269,11 @@ class PickTool extends HighlightTool {
     this.localSpace = false
   }
 
-  mouseDown(vec, coords) {
+  async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    const mesh = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-    if(!mesh) return
-    const selection = this.select(mesh)
-    this.callback(selection, mesh)
-  }
-
-  select(mesh) {
-    return mesh.alcObject
+    const object = await this.getObject(coords)
+    if(!object) return
+    this.callback(object)
   }
 }
 
@@ -317,6 +311,12 @@ export class AxisPickTool extends PickTool {
 export class PlanePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['plane'], callback)
+  }
+}
+
+export class SolidPickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['solid'], callback)
   }
 }
 

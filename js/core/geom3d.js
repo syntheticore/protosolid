@@ -324,7 +324,7 @@ export class Volumetric extends Shape {
     if(!this.geom) return
     const gprops = new window.oc.oc.GProp_GProps_1()
     window.oc.oc.BRepGProp.VolumeProperties_1(this.geom(), gprops, false, false, false)
-    return gprops.CentreOfMass()
+    return vecFromOc(gprops.CentreOfMass())
   }
 }
 

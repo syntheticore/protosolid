@@ -227,6 +227,7 @@
     SweepFeature,
     OffsetFeature,
     SplitFeature,
+    BooleanFeature,
   } from './../js/core/features.js'
 
   import {
@@ -355,7 +356,7 @@
             title: 'Edit Solid',
             tools: [
               { title: 'Offset', feature: OffsetFeature },
-              { title: 'Boolean', icon: 'boxes' },
+              { title: 'Boolean', feature: BooleanFeature },
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
               { title: 'Draft', feature: DraftFeature },

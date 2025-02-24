@@ -271,7 +271,7 @@ class PickTool extends HighlightTool {
 
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    const object = await this.getObject(coords)
+    const object = await this.getObject(coords, true)
     if(!object) return
     this.callback(object)
   }

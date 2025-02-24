@@ -698,6 +698,36 @@ export class OffsetFeature extends Feature {
 Serialize.register(OffsetFeature, 'OffsetFeature')
 
 
+export class BooleanFeature extends Feature {
+  static icon = 'boxes'
+  constructor(doc) {
+    super(doc, true, 'Boolean', {
+      tools: {
+        title: 'Tools',
+        type: 'solid',
+        multi: true,
+      },
+    })
+
+    this.tools = null
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      const tool = references.tools.reduce(
+        (acc, tool) => acc.boolean(tool.toCompound(), 'join'),
+        new Compound(this.componentId)
+      )
+      comp.compound = comp.compound.removeSolids(references.tools).boolean(tool, this.operation)
+      this.previewBody = tool
+    } catch(err) { this.error = err || this.error }
+  }
+}
+
+Serialize.register(BooleanFeature, 'BooleanFeature')
+
+
 export class RemoveSolidsFeature extends Feature {
   static icon = 'trash'
   constructor(doc) {

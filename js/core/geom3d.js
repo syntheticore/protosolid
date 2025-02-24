@@ -487,8 +487,8 @@ export class Solid extends Volumetric {
 
   toCompound() {
     const compound = new Compound(this.compound.componentId, this.geom())
-    out.cachedSolids = [this]
-    return out
+    compound.cachedSolids = [this]
+    return compound
   }
 
   tesselate() {

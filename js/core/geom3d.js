@@ -627,15 +627,14 @@ export class Compound extends Volumetric {
     return this.track(algo, 'transform')
   }
 
-  merge(other) {
+  merge(others) {
     const compound = new window.oc.oc.TopoDS_Compound()
     const builder = new window.oc.oc.BRep_Builder()
-    builder.MakeCompound(compound)
-    builder.Add(compound, this.geom())
-    builder.Add(compound, other.geom())
+    builder.MakeCompound(compound);
+    [this, ...others].forEach(c => builder.Add(compound, c.geom()) )
 
     const clone = this.clone(compound)
-    const solids = [...this.solids(), ...other.solids()]
+    const solids = [...this.solids(), ...others.flatMap(other => other.solids() )]
     clone.solids().forEach((cloneSolid, i) => {
       const originSolid = solids[i]
       const originFaces = originSolid.faces()
@@ -748,7 +747,7 @@ export class Compound extends Volumetric {
         return this.track(thicken, 'thicken')
       })
       // Merge resulting solids
-      return thickened.reduce((acc, next) => acc ? acc.merge(next) : next )
+      return thickened[0].merge(thickened.slice(1))
 
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }
@@ -758,7 +757,7 @@ export class Compound extends Volumetric {
   split(plane, side, featureId) {
     const left = this.halfCut(plane, true, featureId)
     const right = this.halfCut(plane, false, featureId)
-    return left.merge(right)
+    return left.merge([right])
   }
 
   halfCut(plane, side, featureId) {

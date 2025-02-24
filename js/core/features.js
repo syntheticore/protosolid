@@ -707,19 +707,24 @@ export class BooleanFeature extends Feature {
         type: 'solid',
         multi: true,
       },
+      keepTools: {
+        title: 'Keep tools',
+        type: 'bool',
+        icons: ['hand-paper', 'trash'],
+      },
     })
 
     this.tools = null
+    this.keepTools = false
   }
 
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      const tool = references.tools.reduce(
-        (acc, tool) => acc.boolean(tool.toCompound(), 'join'),
-        new Compound(this.componentId)
-      )
+      const tools = references.tools.map(tool => tool.toCompound() )
+      const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join') )
       comp.compound = comp.compound.removeSolids(references.tools).boolean(tool, this.operation)
+      if(this.keepTools) comp.compound = comp.compound.merge(tools)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
   }

@@ -214,7 +214,7 @@ export class CreateComponentFeature extends Feature {
     this.parent = parentId
     this.title = "New Component"
 
-    this.definition = new ComponentDefinition(doc.timeline.makeColor())
+    this.definition = new ComponentDefinition(this.title, doc.timeline.makeColor())
   }
 
   updateFeature(tree) {
@@ -660,7 +660,7 @@ Serialize.register(FilletFeature, 'FilletFeature')
 
 
 export class OffsetFeature extends Feature {
-  static icon = 'magnet'
+  static icon = 'dot-circle'
   constructor(doc) {
     super(doc, false, 'Shell', {
       faces: {
@@ -723,7 +723,7 @@ export class BooleanFeature extends Feature {
     try {
       const tools = references.tools.map(tool => tool.toCompound() )
       const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join') )
-      comp.compound = comp.compound.removeSolids(references.tools).boolean(tool, this.operation)
+      comp.compound = comp.compound.removeShapes(references.tools).boolean(tool, this.operation)
       if(this.keepTools) comp.compound = comp.compound.merge(tools)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
@@ -750,7 +750,7 @@ export class RemoveSolidsFeature extends Feature {
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      comp.compound = comp.compound.removeSolids(references.solids)
+      comp.compound = comp.compound.removeShapes(references.solids)
     } catch(err) { this.error = err || this.error }
   }
 }
@@ -758,35 +758,59 @@ export class RemoveSolidsFeature extends Feature {
 Serialize.register(RemoveSolidsFeature, 'RemoveSolidsFeature')
 
 
-// export class MaterialFeature extends Feature {
-//   static icon = 'volleyball-ball'
-//   constructor(component) {
-//     super(component, false, {
-//       material: {
-//         title: 'Material Presets',
-//         type: 'material',
-//       },
-//     })
+export class MoveFeature extends Feature {
+  static icon = 'arrows-alt'
+  constructor(doc) {
+    super(doc, false, 'Move', {
+      faces: {
+        title: 'Faces',
+        type: 'face',
+        multi: true,
+      },
+      // transform: {
+      //   title: 'Transform',
+      //   type: 'transform',
+      // },
+    })
 
-//     this.material = null
-//   }
+    this.faces = null
+    this.transform = new THREE.Matrix4().makeTranslation(10, 0, 0)
+  }
 
-//   isComplete() {
-//     return !!this.material
-//   }
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.moveFaces(references.faces, this.transform)
+    } catch(err) { this.error = err || this.error }
+  }
+}
 
-//   preview() {
-//     if(this.oldMaterial === undefined) this.oldMaterial = this.component.material
-//     this.component.material = this.material
-//   }
+Serialize.register(MoveFeature, 'MoveFeature')
 
-//   confirm() {
-//     this.oldMaterial = undefined
-//   }
 
-//   dispose() {
-//     super.dispose()
-//     if(this.oldMaterial === undefined) return
-//     this.component.material = this.oldMaterial
-//   }
-// }
+export class ReplaceFeature extends Feature {
+  static icon = 'exchange-alt'
+  constructor(doc) {
+    super(doc, false, 'Move', {
+      face: {
+        title: 'Replace',
+        type: 'face',
+      },
+      replacement: {
+        title: 'With',
+        type: 'face',
+      },
+    })
+
+    this.face = null
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.replaceShapes([references.face], [references.replacement])
+    } catch(err) { this.error = err || this.error }
+  }
+}
+
+Serialize.register(ReplaceFeature, 'ReplaceFeature')

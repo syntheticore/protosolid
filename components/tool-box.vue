@@ -62,8 +62,7 @@
     border-top-right-radius: 3px
     border-bottom-left-radius: 6px
     border-bottom-right-radius: 6px
-    min-width: 565px
-    // overflow: hidden
+    width: 620px
 
   .main
     display: flex
@@ -115,6 +114,12 @@
 
   .tools
     display: flex
+    overflow-x: auto
+    -ms-overflow-style: none
+    scrollbar-width: none
+
+    &::-webkit-scrollbar
+      display: none
 
     li
       max-width: 86px
@@ -159,6 +164,7 @@
 
         svg
           color: lighten($highlight, 25%)
+
     svg
       font-size: 21px
       color: $bright1
@@ -228,6 +234,8 @@
     OffsetFeature,
     SplitFeature,
     BooleanFeature,
+    MoveFeature,
+    ReplaceFeature,
   } from './../js/core/features.js'
 
   import {
@@ -346,9 +354,9 @@
               { title: 'Revolve', feature: RevolveFeature, hotKey: 'V', keyCode: 86 },
               { title: 'Loft', icon: 'layer-group' },
               { title: 'Sweep', feature: SweepFeature },
-              { title: 'Thicken', icon: 'layer-group' },
-              { title: 'Coil', icon: 'layer-group' },
-              { title: 'Web', icon: 'layer-group' },
+              { title: 'Thicken', icon: 'hotdog' },
+              { title: 'Coil', icon: 'fan' },
+              { title: 'Web', icon: 'spider' },
               { title: 'Pattern', icon: 'th' },
             ],
           },
@@ -357,18 +365,19 @@
             tools: [
               { title: 'Offset', feature: OffsetFeature },
               { title: 'Boolean', feature: BooleanFeature },
+              { title: 'Move', feature: MoveFeature, hotKey: 'M', keyCode: 77 },
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
+              { title: 'Replace', feature: ReplaceFeature },
               { title: 'Draft', feature: DraftFeature },
               { title: 'Split', feature: SplitFeature },
               { title: 'Align', icon: 'layer-group' }, //XXX also -> Replace Face
-              { title: 'Mirror', icon: 'band-aid', hotKey: 'M', keyCode: 77 },
+              { title: 'Mirror', icon: 'band-aid' },
             ],
           },
           {
             title: 'Simulate',
             tools: [
-              // { title: 'Material', feature: MaterialFeature },
               { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
               { title: 'Joint', icon: 'code-branch' },
               { title: 'Group', icon: 'object-group' },

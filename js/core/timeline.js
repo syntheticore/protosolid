@@ -6,7 +6,7 @@ import { arrayRange, makeColor } from './utils.js'
 
 export class Timeline {
   constructor(baseCompDef) {
-    this.baseCompDef = baseCompDef || new ComponentDefinition('hsl(47.88, 100%, 59.22%)')
+    this.baseCompDef = baseCompDef || new ComponentDefinition('Main Assembly', 'hsl(47.88, 100%, 59.22%)')
     const baseComp = new Component(null, 'id-0')
     baseComp.creator = this.baseCompDef
     this.cache = [baseComp]

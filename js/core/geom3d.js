@@ -541,15 +541,6 @@ export class Compound extends Volumetric {
     return clone
   }
 
-  removeSolids(solids) {
-    const reshaper = new window.oc.oc.BRepTools_ReShape()
-    solids.forEach(solid => {
-      reshaper.Remove(solid instanceof Solid ? solid.geom() : solid)
-    })
-    reshaper.Shape = () => reshaper.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
-    return this.track(reshaper)
-  }
-
   track(algorithm, algoName, other, featureId) {
     const out = this.clone(algorithm.Shape ?
       algorithm.Shape() : algorithm.Apply(this.geom())
@@ -752,6 +743,38 @@ export class Compound extends Volumetric {
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }
     }
+  }
+
+  reshape(algoName, cb) {
+    const reshaper = new window.oc.oc.ShapeBuild_ReShape()
+    cb(reshaper)
+    reshaper.Shape = () => reshaper.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
+    return this.track(reshaper, algoName)
+  }
+
+  removeShapes(shapes) {
+    return this.reshape('remove-shapes', reshaper => {
+      shapes.forEach(shape => {
+        // reshaper.Remove(solid instanceof Solid ? solid.geom() : solid)
+        reshaper.Remove(shape.geom())
+      })
+    })
+  }
+
+  replaceShapes(shapes, replacements, algoName) {
+    return this.reshape(algoName || 'replace-shapes', reshaper => {
+      shapes.forEach((shape, i) => {
+        reshaper.Replace(shape.geom(), replacements[i].geom())
+      })
+    })
+  }
+
+  moveFaces(faces, transform) {
+    return this.replaceShapes(
+      faces,
+      faces.map(face => transformGeometry(face.geom(), transform).Shape() ),
+      'move-faces',
+    )
   }
 
   split(plane, side, featureId) {

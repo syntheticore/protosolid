@@ -59,6 +59,14 @@
     ul.widgets(
       v-if="expanded"
     )
+
+      //- Parameters
+      li(v-for="param in component.creator.parameters")
+        TreeletParameter(
+          :parameter="param"
+          :component="component"
+        )
+
       //- Material
       TreeletMaterial(
         v-if="component.creator.material"
@@ -73,13 +81,6 @@
           header
             Icon(icon="atom" fixed-width)
             h2 Center of Mass
-
-      //- Parameters
-      li(v-for="param in component.creator.parameters")
-        TreeletParameter(
-          :parameter="param"
-          :component="component"
-        )
 
       //- Export Configs
       li(v-for="config in component.creator.exportConfigs")

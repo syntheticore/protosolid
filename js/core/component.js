@@ -9,8 +9,8 @@ import { rotationFromNormal, rad } from './utils.js'
 
 
 export class ComponentDefinition {
-  constructor(color) {
-    this.title = "New Component"
+  constructor(title, color) {
+    this.title = title
     this.hidden = false
     this.material = null
     this.cog = false

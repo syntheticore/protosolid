@@ -302,8 +302,9 @@
               { title: 'Plane', feature: PlaneFeature },
               { title: 'Axis', icon: 'grip-lines' },
               { title: 'Point', icon: 'asterisk' },
-              { title: 'Center of Mass', action: this.addCog, icon: 'atom' },
+              { title: 'Centroid', action: this.addCog, icon: 'atom' },
               { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
+              { title: 'Variant', icon: 'calculator' },
             ]
           },
           {
@@ -358,6 +359,7 @@
               { title: 'Coil', icon: 'fan' },
               { title: 'Web', icon: 'spider' },
               { title: 'Pattern', icon: 'th' },
+              { title: 'Mirror', icon: 'band-aid' },
             ],
           },
           {
@@ -372,7 +374,6 @@
               { title: 'Draft', feature: DraftFeature },
               { title: 'Split', feature: SplitFeature },
               { title: 'Align', icon: 'layer-group' }, //XXX also -> Replace Face
-              { title: 'Mirror', icon: 'band-aid' },
             ],
           },
           {
@@ -393,7 +394,8 @@
             tools: [
               { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
               { title: 'Curvature', icon: 'route' },
-              { title: 'Shading', icon: 'palette' },
+              { title: 'Diagnostic Shading', icon: 'palette' },
+              { title: 'Draft Angle', icon: 'remove-format' },
               { title: 'Section View', icon: 'object-group', action: this.addSectionView },
             ],
           },
@@ -401,8 +403,8 @@
             title: 'Tools',
             tools: [
               { title: 'Render', icon: 'lightbulb' },
-              { title: 'Canvas', icon: 'layer-group' },
-              { title: 'Export Configuration', action: this.addExportConfig, icon: 'file-export' },
+              { title: 'Canvas', icon: 'chalkboard' },
+              { title: 'Export', action: this.addExportConfig, icon: 'file-export' },
             ],
           },
         ]

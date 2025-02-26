@@ -27,15 +27,7 @@
 
       h1 View
 
-      ListChooser(
-        :list="document.views"
-        :active="document.activeView"
-        :allow-create="!!document.dirtyView"
-        @update:active="document.activateView($event)"
-        @create="document.createView($event)"
-        @hover="document.previewView = $event"
-        @unhover="document.previewView = document.dirtyView"
-      )
+      ViewChooser(:document="document")
 
       .flex.gap.buttons
 
@@ -52,7 +44,7 @@
             @click="bus.emit('zoom-selection')"
           )
 
-        IconButton(icon="solar-panel" @click="lookAtPlane" title="Fit Active")
+        IconButton(icon="solar-panel" @click="lookAtPlane" title="Look at nearest plane")
 
       h1 DISPLAY
 
@@ -114,7 +106,7 @@
       top: (14 + 38)px
       right: 14px
       bottom: 35px
-      width: 100px
+      width: 110px
       display: flex
       flex-direction: column
 
@@ -122,7 +114,7 @@
         margin-top: 1rem
         // flex: 0 0 content
 
-      .list-chooser
+      .view-chooser
       .radio-bar
         // flex: 0 1 auto
         margin-bottom: 0.5rem

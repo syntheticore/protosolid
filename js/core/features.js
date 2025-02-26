@@ -708,7 +708,7 @@ export class BooleanFeature extends Feature {
         multi: true,
       },
       keepTools: {
-        title: 'Keep tools',
+        title: 'Keep',
         type: 'bool',
         icons: ['hand-paper', 'trash'],
       },

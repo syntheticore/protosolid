@@ -1,7 +1,7 @@
 <template lang="pug">
-  .bordered.list-chooser(
-    @mouseleave="$emit('unhover')"
-  )
+
+  .list-chooser.bordered(@mouseleave="$emit('unhover')")
+
     transition-group(
       name="list"
       tag="ul"
@@ -10,11 +10,12 @@
       li(
         v-for="item in list"
         :key="item.id || item.title",
-        :class="{active: isActive(item)}"
+        :class="{ active: active == item }"
         @click="$emit('update:active', item)"
         @mouseenter="$emit('hover', item)"
       )
         | {{ item.title }}
+
     transition(name="fade" mode="out-in")
       button(
         v-show="allowCreate"
@@ -22,10 +23,12 @@
         @mouseenter="$emit('unhover')"
       )
         Icon(icon="plus")
+
 </template>
 
 
 <style lang="stylus" scoped>
+
   .list-chooser
     pointer-events: auto
     overflow: hidden
@@ -99,23 +102,12 @@
     padding: 0
     margin: 0
     margin-bottom: -12px
+
 </style>
 
 
-<script>
-  export default {
-    name: 'ListChooser',
-    components: {},
-    props: {
-      list: Array,
-      active: Object,
-      allowCreate: Boolean,
-    },
+<script setup>
 
-    methods: {
-      isActive: function(item) {
-        return this.active == item
-      },
-    },
-  }
+  const props = defineProps(['list', 'active', 'allowCreate'])
+
 </script>

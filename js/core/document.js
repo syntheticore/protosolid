@@ -226,22 +226,10 @@ export default class Document extends Emitter {
     }
   }
 
-  // deleteSolid(solid) {
-  //   solid.remove()
-  //   this.selection.delete(solid)
-  //   this.emit('component-changed', solid.component)
-  // }
-
-  createView(title) {
-    const newView = {
-      id: this.lastId++,
-      title: title || 'Custom ' + this.lastId,
-      position: this.dirtyView.position.clone(),
-      target: this.dirtyView.target.clone(),
-    }
-    this.views.push(newView)
+  addView(view) {
+    this.views.push(view)
     this.dirtyView = null
-    this.activateView(newView)
+    this.activateView(view)
   }
 
   // User changed camera from viewport
@@ -254,6 +242,16 @@ export default class Document extends Emitter {
     this.activeView = view
     this.previewView = null
     this.dirtyView = null
+    if(view.marker) this.moveMarker(view.marker)
+    if(view.activeComponentId) this.activateComponent(this.getComponent(view.activeComponentId))
+    if(view.visibilities) {
+      Object.entries(view.visibilities).forEach(([compId, { compHidden, itemsHidden }]) => {
+        const comp = this.getComponent(compId)
+        comp.creator.hidden = compHidden
+        comp.creator.itemsHidden = JSON.parse(JSON.stringify(itemsHidden))
+        this.emit('component-changed', comp)
+      })
+    }
   }
 
   async save(as) {

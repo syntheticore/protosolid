@@ -6,7 +6,7 @@
         legend Standard Units
 
         label
-          select(v-model="preferences.preferredUnit")
+          select.input(v-model="preferences.preferredUnit")
             option mm
             option cm
             option m
@@ -14,13 +14,13 @@
           span Length
 
         label
-          select
+          select.input
             option °
             option Radians
           span Angle
 
         label
-          select
+          select.input
             option g/cm³
             option kg/m³
           span Density
@@ -29,41 +29,41 @@
         legend User Interface
 
         label
-          select
+          select.input
             option Bright
             option Dark
             option System default
           span Theme
 
         label
-          input(type="checkbox" v-model="preferences.antiAlias" @change="restartRequired = true")
+          input.input(type="checkbox" v-model="preferences.antiAlias" @change="restartRequired = true")
           span Anti-aliasing
 
         label(:disabled="!isHighDPI")
-          input(type="checkbox" v-model="preferences.highDPI")
+          input.input(type="checkbox" v-model="preferences.highDPI")
           span High-DPI rendering
 
         label
-          input(type="checkbox" v-model="preferences.shadowMaps" @change="restartRequired = true")
+          input.input(type="checkbox" v-model="preferences.shadowMaps" @change="restartRequired = true")
           span Display shadows
 
         label
-          input(type="checkbox" v-model="preferences.blurredOverlays")
+          input.input(type="checkbox" v-model="preferences.blurredOverlays")
           span Blurred overlays
 
       fieldset
         legend Tolerances
 
         label
-          input(type="numer" value="0.01mm" step="0.01")
+          input.input(type="numer" value="0.01mm" step="0.01")
           span Center of Mass Deviation
 
         label
-          input(type="numer" value="0.0001mm" step="0.0001")
+          input.input(type="numer" value="0.0001mm" step="0.0001")
           span Curve/Surface Tesselation
 
         label
-          input(type="numer" value="0.001mm" step="0.001")
+          input.input(type="numer" value="0.001mm" step="0.001")
           span Curve Fitting Accuracy
 
     transition(name="fade")

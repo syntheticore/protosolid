@@ -118,6 +118,14 @@ export class Component {
     return ids
   }
 
+  getChildren() {
+    let children = [this]
+    for(const child of this.children) {
+      children = children.concat(child.getChildren())
+    }
+    return children
+  }
+
   getMaterial() {
     return this.creator.material || (this.parent && this.parent.getMaterial())
   }

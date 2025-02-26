@@ -190,6 +190,7 @@
       dragenter(e) {
         const dragged = this.getDragged(e)
         this.isDragTarget = (this.feature != dragged)
+        if(this.isDragTarget) e.dataTransfer.dropEffect = 'move'
       },
 
       dragleave() {
@@ -197,7 +198,6 @@
       },
 
       dragover(e) {
-        e.dataTransfer.dropEffect = 'move'
         const ratio = e.layerX / e.target.offsetWidth
         this.targetLeft = ratio < 0.5
       },

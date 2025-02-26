@@ -153,6 +153,7 @@
   .marker
     color: $highlight
     flex: 0 0 auto
+    cursor: grab
 
     &:first-child
       padding-left: 7px
@@ -164,6 +165,9 @@
 
     &:only-child
       padding: 7px
+
+    &:active
+      cursor: grabbing
 
     svg
       width: 6px
@@ -190,6 +194,9 @@
 <script>
 
   import { inject } from 'vue'
+
+  const emptyImg = new Image()
+  emptyImg.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs='
 
   export default {
     name: 'FeatureBar',
@@ -302,7 +309,9 @@
       },
 
       dragstart(e) {
+        e.dataTransfer.setDragImage(emptyImg, 0, 0)
         e.dataTransfer.setData('text/plain', 'marker')
+        e.dataTransfer.effectAllowed = 'move'
       },
 
       onScroll: function() {

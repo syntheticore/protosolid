@@ -349,10 +349,6 @@ export default class Transloader {
     const comp = this.getComponent(obj)
     if(!comp) return
     const cache = comp.creator.cache()
-    // for(const solid of comp.compound.solids()) {
-    //   const edges = cache.edges.filter(e => e.solid.id === solid.id )
-    //   edges.forEach(edge => edge.mesh().material = this.getWireMaterial(comp, edge) )
-    // }
     cache.edges.forEach(edge => edge.mesh().material = this.getWireMaterial(comp, edge) )
     cache.faces.forEach(face => face.mesh().material = this.getSurfaceMaterial(comp, face) )
     cache.regions.forEach(region => region.mesh().material = this.getElemMaterial(region) )

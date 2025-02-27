@@ -494,21 +494,25 @@ export class SplitFeature extends Feature {
       //   type: 'solid',
       //   multi: true,
       // },
-      side: {
-        title: 'Side',
-        type: 'bool',
-        icons: ['caret-right', 'caret-left'],
+      keep: {
+        title: 'Keep',
+        type: 'enum',
+        options: {
+          both: 'Both',
+          left: 'Left',
+          right: 'Right',
+        },
       },
     })
 
     this.plane = null
-    this.side = true
+    this.keep = 'both'
   }
 
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      comp.compound = comp.compound.split(references.plane, this.side, this.id)
+      comp.compound = comp.compound.split(references.plane, this.keep, this.id)
     } catch(err) { this.error = err || this.error }
   }
 }

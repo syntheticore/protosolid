@@ -777,10 +777,12 @@ export class Compound extends Volumetric {
     )
   }
 
-  split(plane, side, featureId) {
+  split(plane, keep, featureId) {
     const left = this.halfCut(plane, true, featureId)
     const right = this.halfCut(plane, false, featureId)
-    return left.merge([right])
+    if(keep == 'both') return left.merge([right])
+    if(keep == 'left') return left
+    return right
   }
 
   halfCut(plane, side, featureId) {

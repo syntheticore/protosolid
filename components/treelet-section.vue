@@ -82,8 +82,6 @@
 
   const props = defineProps(['document', 'component', 'section', 'index'])
 
-  const bus = inject('bus')
-
   const expanded = ref(true)
 
   watch(() => props.section, () => {

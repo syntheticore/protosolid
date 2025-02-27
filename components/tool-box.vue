@@ -217,7 +217,7 @@
 
   import { makeID } from './../js/core/id.js'
   import { rotationFromNormal } from './../js/core/utils.js'
-  import { SectionView } from './../js/core/component.js'
+  import { SectionView, Canvas } from './../js/core/component.js'
 
   import {
     SketchElement,
@@ -403,8 +403,8 @@
             title: 'Tools',
             tools: [
               { title: 'Render', icon: 'lightbulb' },
-              { title: 'Canvas', icon: 'chalkboard' },
-              { title: 'Export', action: this.addExportConfig, icon: 'file-export' },
+              { title: 'Canvas', icon: 'image', action: this.addCanvas },
+              { title: 'Export', action: this.addExportConfig, icon: 'file-download' },
             ],
           },
         ]
@@ -434,7 +434,6 @@
         setTimeout(() => {
           if(tool.feature) {
             this.feature = new tool.feature(this.document)
-            // this.$emit('add-feature', this.feature)
             this.document.addFeature(this.feature)
 
           } else if(tool.action) {
@@ -469,6 +468,10 @@
       addSectionView: function() {
         this.document.activeComponent.creator.sectionViews.push(new SectionView())
         this.document.emit('component-changed', this.document.activeComponent, true)
+      },
+
+      addCanvas: function() {
+        this.document.activeComponent.creator.canvases.push(new Canvas())
       },
 
       addExportConfig: function() {

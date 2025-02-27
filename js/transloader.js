@@ -173,6 +173,16 @@ export default class Transloader {
       })
     }
 
+    // Load canvases
+    comp.creator.canvases.forEach(canvas => {
+      if(canvas.hidden) return
+      const material = new THREE.MeshBasicMaterial({ map: canvas.texture, side: THREE.DoubleSide })
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), material)
+      plane.scale.set(canvas.scale, canvas.height * canvas.scale / canvas.width)
+      this.renderer.add(plane)
+      cache.canvases.push(plane)
+    })
+
     // Recurse
     if(recursive) comp.children.forEach(child => this.loadTree(child, true))
   }
@@ -199,6 +209,11 @@ export default class Transloader {
       delete helper.mesh
     })
     cache.helpers = []
+
+    cache.canvases.forEach(canvas => {
+      this.renderer.remove(canvas)
+    })
+    cache.canvases = []
 
     this.purgeDimensions(comp)
 

@@ -86,6 +86,15 @@
       li(v-for="config in component.creator.exportConfigs")
         TreeletExport(:config="config", :component="component")
 
+      //- Canvases
+      TreeletCanvas(
+        v-for="(canvas, i) in component.creator.canvases"
+        v-bind="$attrs"
+        :document="document"
+        :component="component"
+        :canvas="canvas"
+      )
+
       //- Section Views
       TreeletSection(
         v-for="(section, i) in component.creator.sectionViews"
@@ -200,7 +209,7 @@
     .hidden
 
       .box
-        background: rgba($dark2 * 1.3, 0.3) !important
+        background: rgba($dark2 * 1.3, 0.5) !important
 
         > header > *:not(.controls)
           opacity: 0.4
@@ -301,7 +310,7 @@
     .widgets li
 
       .box
-        background: rgba($dark2 * 1.3, 0.7)
+        background: rgba($dark2 * 1.3, 0.8)
         font-size: 11px
 
         &:hover

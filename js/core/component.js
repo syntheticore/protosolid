@@ -17,6 +17,7 @@ export class ComponentDefinition {
     this.sectionViews = []
     this.parameters = []
     this.exportConfigs = []
+    this.canvases = []
     this.itemsHidden = {}
     this.color = color //this.makeColor(allFeatures)
 
@@ -26,6 +27,7 @@ export class ComponentDefinition {
       regions: [],
       curves: [],
       helpers: [],
+      canvases: [],
       dimensions: [],
     }
     // Hide cache from Vue
@@ -52,9 +54,22 @@ export class SectionView {
     return new THREE.Matrix4().makeRotationFromEuler(euler)
   }
 
-  static undump(dump) { return new SectionView(dump.id, dump.orientation) }
+  static undump(dump) { return new this(dump.id, dump.orientation) }
 }
 Serialize.register(SectionView, 'SectionView')
+
+
+export class Canvas {
+  constructor(id, src, scale, hidden) {
+    this.id = id || makeID()
+    this.src = src
+    this.scale = 1.0
+    this.hidden = hidden
+  }
+
+  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden) }
+}
+Serialize.register(Canvas, 'Canvas')
 
 
 export class Component {

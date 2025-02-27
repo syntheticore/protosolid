@@ -1,11 +1,11 @@
 // import * as THREE from 'three'
 import { isProxy, toRaw } from 'vue'
 
-export async function loadFile(filetype, path) {
+export async function loadFile(filetype, datatype, path) {
   if(window.ipc) {
     return loadFileElectron(filetype, path)
   } else {
-    return loadFileWeb(filetype)
+    return loadFileWeb(filetype, datatype)
   }
 }
 
@@ -33,17 +33,35 @@ async function saveFileElectron(data, filetype, path) {
 }
 
 // Web
-function loadFileWeb(filetype) {
+function loadFileWeb(filetype, datatype) {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.cad'
+    input.accept = filetype
     document.body.appendChild(input)
     input.addEventListener('change', (event) => {
       document.body.removeChild(input)
+      const file = event.target.files[0]
       const reader = new FileReader()
-      reader.onload = (e) => resolve({data: e.target.result})
-      reader.readAsText(event.target.files[0])
+      reader.onload = (e) => {
+        if(datatype == 'dataUrl') {
+          const img = document.createElement('img')
+          img.src = e.target.result
+          resolve({
+            data: e.target.result,
+            path: file.name,
+            width: img.width,
+            height: img.height,
+          })
+        } else {
+          resolve({ data: e.target.result, path: file.name })
+        }
+      }
+      const read = {
+        text: reader.readAsText.bind(reader),
+        dataUrl: reader.readAsDataURL.bind(reader),
+      }[datatype]
+      read(file)
     }, false)
     input.click()
   })

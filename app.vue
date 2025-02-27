@@ -172,9 +172,9 @@
     documents.value.push(activeDocument.value)
   }
 
-  function loadDocument(path) {
+  function loadDocument() {
     const doc = new Document()
-    doc.load(path).then(() => {
+    doc.load().then(() => {
       // Close untouched documents on load
       if(activeDocument.value.isFresh) deleteDocument(activeDocument.value)
       activeDocument.value = doc

@@ -272,7 +272,7 @@ export default class Document extends Emitter {
   async load(path) {
     let file
     try {
-      file = await loadFile('cad', path)
+      file = await loadFile('.cad', 'text', path)
     } catch(error) {
       if(error != 'canceled') alert(error)
       throw error

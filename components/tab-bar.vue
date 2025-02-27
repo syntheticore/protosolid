@@ -87,7 +87,7 @@
 
     .blurry &
       backdrop-filter: blur(32px)
-      background: rgba($dark2, 0.875)
+      background: rgba($dark2, 0.925)
 
     [data-platform="darwin"] &
       border-radius: 4px 4px 0px 0px

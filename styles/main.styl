@@ -217,3 +217,38 @@ input[type="color"]
 
   > *
     flex: 1 1 auto
+
+.handle
+  size = 21px
+  // padding: 7px
+  position: absolute
+  display: block
+  width: size
+  height: size
+  margin-left: -(size / 2)
+  margin-top: -(size / 2)
+  display: flex
+  align-items: center
+  justify-content: center
+  // pointer-events: auto
+  &::before
+    position: absolute
+    display: block
+    content: ''
+    margin: 0
+    padding: 0
+    width:  7px
+    height: 7px
+    border-radius: 99px
+    background: white
+  &::after
+    position: absolute
+    display: block
+    content: ''
+    margin: 0
+    padding: 0
+    width:  calc(100% - 10px)
+    height: calc(100% - 10px)
+    border-radius: 99px
+    border: 2px solid $highlight * 1.6
+    pointer-events: none

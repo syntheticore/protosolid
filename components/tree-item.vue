@@ -356,12 +356,6 @@
       };
     },
 
-    watch: {
-      'component.creator.hidden': function(hidden) {
-        this.document.emit('component-changed', this.component, true)
-      }
-    },
-
     computed: {
       isAssembly: function() {
         return !!this.component.children.length

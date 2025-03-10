@@ -65,7 +65,6 @@
     methods: {
       toggleVisibility: function() {
         this.component.creator.itemsHidden[this.sketch.id] = !this.isHidden
-        this.document.emit('component-changed', this.component)
       },
     },
   }

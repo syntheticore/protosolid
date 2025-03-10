@@ -122,7 +122,6 @@ export class Feature {
       .forEach(([key, _]) =>
         [this[key]()].flat().forEach(elem => comp.creator.itemsHidden[elem.getItem().sketch.id] = true )
       )
-    this.document.emit('component-changed', comp) //XXX should not re-tesselate, only update sketch visibility
   }
 
   updateFeature(tree, references) {}

@@ -83,7 +83,19 @@
   provide('bus', bus)
   window.bus = bus
 
-  const store = useMainStore()
+  provide('highlight', ref(null))
+  provide('frame', ref(1))
+
+  const renderNeeded = ref(false)
+  provide('render-needed', renderNeeded)
+
+  watch(renderNeeded, () => {
+    if(!renderNeeded.value) return
+    window.alcRenderer && window.alcRenderer.render()
+    renderNeeded.value = false
+  })
+
+  // const store = useMainStore()
 
   const fullscreen = ref(false)
   const maximized = ref(false)
@@ -156,11 +168,6 @@
         bus.emit('alt-pressed', false)
       }
     })
-
-    // bus.on('component-changed', () => {
-    //   activeDocument.value.hasChanges = true
-    //   activeDocument.value.isFresh = false
-    // })
 
     if(!window.ipc) return
     setTimeout(() => window.ipc.send('vue-ready'), 200)

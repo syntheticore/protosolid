@@ -84,15 +84,8 @@
   const expanded = ref(true)
   const path = ref(null)
 
-  function update() {
-    props.document.emit('component-changed', props.component)
-  }
-
-  watch(() => props.canvas, update, { deep: true })
-
   function toggleVisibility() {
     props.canvas.hidden = !props.canvas.hidden
-    update()
   }
 
   async function chooseFile() {
@@ -106,15 +99,12 @@
     const textureLoader = new THREE.TextureLoader()
     props.canvas.texture = textureLoader.load(data)
 
-    update()
-
     // Render again, as image takes one frame to load
     setTimeout(() => bus.emit('render-needed') )
   }
 
   function remove() {
     props.component.creator.canvases = props.component.creator.canvases.filter(conf => conf !== props.canvas )
-    update()
   }
 
 </script>

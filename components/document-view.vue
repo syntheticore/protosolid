@@ -158,7 +158,7 @@
   export default {
     name: 'DocumentView',
 
-    inject: ['bus'],
+    inject: ['bus', 'highlight'],
 
     props: {
       document: Object,
@@ -167,7 +167,6 @@
     data() {
       return {
         activeTool: null,
-        highlight: null,
         displayModes: {
           wireShade: {
             title: 'Shaded + Wire',

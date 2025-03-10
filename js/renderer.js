@@ -8,7 +8,7 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
 
-import Materials from './materials.js'
+import materials from './materials.js'
 import SketchPlane from './three/sketch-plane.js'
 import ShadowCatcher from './three/shadow-catcher.js'
 // import ArrowControls from './arrow-controls.js'
@@ -79,9 +79,6 @@ export default class Renderer {
     this.scene.add(this.traceables)
 
     // this.scene.add(new THREE.AxesHelper(10.0))
-
-    // Materials
-    this.materials = new Materials()
 
     // Sketch Plane
     this.sketchPlane = new SketchPlane(this.camera)
@@ -446,11 +443,15 @@ export default class Renderer {
     }
     this.activeCamera.updateProjectionMatrix()
     // Update line materials
-    this.materials.line.resolution.set(width, height)
-    this.materials.selectionLine.resolution.set(width, height)
-    this.materials.highlightLine.resolution.set(width, height)
-    this.materials.wire.resolution.set(width, height)
-    this.materials.ghostWire.resolution.set(width, height)
+    materials.line.resolution.set(width, height)
+    materials.selectionLine.resolution.set(width, height)
+    materials.highlightLine.resolution.set(width, height)
+    materials.referenceLine.resolution.set(width, height)
+    materials.referenceSelectionLine.resolution.set(width, height)
+    materials.referenceHighlightLine.resolution.set(width, height)
+    materials.referenceLine.resolution.set(width, height)
+    materials.wire.resolution.set(width, height)
+    materials.ghostWire.resolution.set(width, height)
     this.render()
   }
 

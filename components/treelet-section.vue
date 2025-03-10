@@ -84,19 +84,13 @@
 
   const expanded = ref(true)
 
-  watch(() => props.section, () => {
-    props.document.emit('component-changed', props.component)
-  }, { deep: true })
-
   function toggleVisibility() {
     props.section.hidden = !props.section.hidden
-    props.document.emit('component-changed', props.component)
   }
 
   function deleteSection() {
     const creator = props.component.creator
     creator.sectionViews = creator.sectionViews.filter(section => section != props.section )
-    props.document.emit('component-changed', props.component)
   }
 
 </script>

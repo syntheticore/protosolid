@@ -48,7 +48,6 @@
 
   function toggleVisibility() {
     props.component.creator.itemsHidden[props.solid.id] = !isHidden.value
-    props.document.emit('component-changed', props.component)
   }
 
   function removeSolid() {

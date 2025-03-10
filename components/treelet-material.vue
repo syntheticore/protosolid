@@ -112,9 +112,6 @@
     },
 
     watch: {
-      material() {
-        this.document.emit('component-changed', this.component, true)
-      },
       'component.creator.material': {
         handler() {
           this.bus.emit('render-needed')
@@ -132,7 +129,6 @@
       remove: function() {
         this.material.dispose()
         this.component.creator.material = null
-        this.document.emit('component-changed', this.component, true)
       },
     },
   }

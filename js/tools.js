@@ -100,8 +100,7 @@ class HighlightTool extends Tool {
             :
             obj.alcObject
         )
-        // .map(obj => {console.log(obj); return obj})
-        .filter(obj => this.viewport.transloader.isActive(obj) )
+        // .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
       const handle = this.viewport.hoveredHandle
       if(handle && this.realSelectors.includes('point')) {
@@ -199,7 +198,6 @@ export class ProjectTool extends HighlightTool {
     const projection = new Projection(edge)
     this.sketch.addProjection(projection)
     this.viewport.updateRegions(true)
-    this.viewport.document.emit('component-changed', this.component)
   }
 }
 
@@ -286,7 +284,7 @@ export class CurvePickTool extends PickTool {
 
 export class ProfilePickTool extends PickTool {
   constructor(component, viewport, callback) {
-    super(component, viewport, ['region'], callback)
+    super(component, viewport, ['profile'], callback)
   }
 }
 
@@ -388,7 +386,6 @@ export class LineTool extends SketchTool {
   dispose() {
     if(!this.curve) return
     this.curve.remove()
-    this.viewport.componentChanged(this.component)
   }
 }
 

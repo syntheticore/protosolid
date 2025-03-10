@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
 import { Circle, Arc } from '../core/geom2d.js'
+import materials from '../materials.js'
 
 
 export default class DimensionControls extends THREE.Object3D {
@@ -34,10 +35,10 @@ export default class DimensionControls extends THREE.Object3D {
       if(isCircle) {
 
         if(isOutside) {
-          const line = renderer.convertLine([constraintPos.toArray(), p2.toArray()], renderer.materials.wire)
+          const line = renderer.convertLine([constraintPos.toArray(), p2.toArray()], materials.wire)
 
           const p3 = constraintPos.clone().add(new THREE.Vector3(left ? 10 : -10, 0, 0))
-          const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], renderer.materials.wire)
+          const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], materials.wire)
 
           this.add(line)
           this.add(dimLine)
@@ -50,7 +51,7 @@ export default class DimensionControls extends THREE.Object3D {
           const p1 = circle.center().clone().add(offset)
           const p2 = circle.center().clone().add(offset.negate())
 
-          const line = renderer.convertLine([p1.toArray(), p2.toArray()], renderer.materials.wire)
+          const line = renderer.convertLine([p1.toArray(), p2.toArray()], materials.wire)
           this.add(line)
 
           this.add(makeArrow(p1, cdir))
@@ -60,9 +61,9 @@ export default class DimensionControls extends THREE.Object3D {
       } else {
 
         if(isOutside) {
-          const line = renderer.convertLine([constraintPos.toArray(), p1.toArray()], renderer.materials.wire)
+          const line = renderer.convertLine([constraintPos.toArray(), p1.toArray()], materials.wire)
           const p3 = constraintPos.clone().add(new THREE.Vector3(left ? 10 : -10, 0, 0))
-          const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], renderer.materials.wire)
+          const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], materials.wire)
 
           this.add(line)
           this.add(dimLine)
@@ -72,7 +73,7 @@ export default class DimensionControls extends THREE.Object3D {
         } else {
 
           const p = circle.center().clone().add(cdir.clone().multiplyScalar(circle.radius))
-          const line = renderer.convertLine([circle.center().toArray(), p.toArray()], renderer.materials.wire)
+          const line = renderer.convertLine([circle.center().toArray(), p.toArray()], materials.wire)
 
           this.add(line)
           this.add(makeArrow(p, cdir))
@@ -95,8 +96,8 @@ export default class DimensionControls extends THREE.Object3D {
       let posLT = posL.clone().add(projL)
       let posRT = posR.clone().add(projR)
 
-      const lineL = renderer.convertLine([posL.toArray(), posLT.clone().add(projL.normalize()).toArray()], renderer.materials.wire)
-      const lineR = renderer.convertLine([posR.toArray(), posRT.clone().add(projR.normalize()).toArray()], renderer.materials.wire)
+      const lineL = renderer.convertLine([posL.toArray(), posLT.clone().add(projL.normalize()).toArray()], materials.wire)
+      const lineR = renderer.convertLine([posR.toArray(), posRT.clone().add(projR.normalize()).toArray()], materials.wire)
 
       const cross = posRT.clone().sub(posLT)
       const contraintRel = constraint.position.clone().sub(posLT)
@@ -120,7 +121,7 @@ export default class DimensionControls extends THREE.Object3D {
       const lineTop = renderer.convertLine([
         posLT.toArray(),
         posRT.toArray(),
-      ], renderer.materials.wire)
+      ], materials.wire)
 
       this.add(lineL)
       this.add(lineR)
@@ -146,6 +147,6 @@ function makeArc(controls, renderer, circle, constraintPos) {
     const arc = new Arc(circle.center().clone(), circle.radius, [closer, u].sort())
     arc.update()
 
-    controls.add(renderer.convertLine(arc.tesselate(), renderer.materials.wire))
+    controls.add(renderer.convertLine(arc.tesselate(), materials.wire))
   }
 }

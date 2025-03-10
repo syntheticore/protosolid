@@ -31,10 +31,6 @@
               | {{ prop.value.toFixed(2) }} {{ prop.unit }}
             span.warn(v-else) {{ prop.value }}
 
-    //- .debug-panel
-    //-   button.button(@click="splitAll") Split all
-    //-   button.button(@click="makeCube") Make Cube
-    //-   button.button(@click="makeCylinder") Make Cylinder
 </template>
 
 
@@ -278,21 +274,6 @@
         } else {
           return {}
         }
-      },
-
-      splitAll: function() {
-        const splits = this.document.activeComponent.real.sketch().get_all_split()
-        this.document.emit('component-changed', this.document.activeComponent)
-      },
-
-      makeCube: function() {
-        this.document.activeComponent.real.make_cube()
-        this.document.emit('component-changed', this.document.activeComponent)
-      },
-
-      makeCylinder: function() {
-        this.document.activeComponent.real.make_cylinder()
-        this.document.emit('component-changed', this.document.activeComponent)
       },
     },
   }

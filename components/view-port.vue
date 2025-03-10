@@ -34,52 +34,25 @@
 
     .floaters
 
-      //- Sketch constraint proxies
-      Icon.constraint(
-        v-for="constraint in nonDimensions"
-        :icon="constraint.constraint.constructor.icon"
-        :class="{ selected: document.selection.has(constraint.constraint) }"
-        :style="{ top: constraint.coords.y + 'px', left: constraint.coords.x + 'px' }"
-        @click.stop="document.selection.handle(constraint.constraint, bus.isCtrlPressed)"
+      ComponentProxy(
+        v-if="isReady"
+        :document="document"
+        :component="document.top()"
+        :display-mode="displayMode"
+        :active-handle="activeHandle"
+        @handleMouseUp="mouseUp"
+        @handleMouseDown="handleMouseDown"
+        @handleMouseMove="handleMouseMove"
+        @handleMouseLeave="handleMouseLeave"
+        @dimensionMouseUp="mouseUp"
+        @dimensionMouseDown="dimensionMouseDown"
+        @dimensionMouseMove="dimensionMouseMove"
       )
-
-      //- Sketch dimensions
-      .dimension(
-        v-for="dimension in dimensions"
-        :class="{ selected: document.selection.has(dimension.constraint) }"
-        :style="{ top: dimension.coords.y + 'px', left: dimension.coords.x + 'px' }"
-        @click.stop="document.selection.handle(dimension.constraint, bus.isCtrlPressed)"
-        @dblclick="dimension.constraint.active = true"
-      )
-        .dim-value(
-          @mouseup="mouseUp"
-          @mousedown="dimensionMouseDown($event, dimension.constraint)"
-          @mousemove="dimensionMouseMove($event, dimension.constraint)"
-        ) {{ dimension.constraint.distance.toFixed(2) }}
-
-        Transition(name="hide-dimension")
-          NumberInput(
-            v-if="dimension.constraint.active"
-            :component="document.top()"
-            v-model:value="dimension.constraint.distance"
-            @enter="dimension.constraint.active = false; updateRegions(true)"
-          )
 
       //- Snap anchor highlights active snap point
       .anchor.handle(
         v-if="snapAnchor"
         :style="{ top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px' }"
-      )
-
-      //- Draggable sketch handles
-      .drag-handle.handle(
-        v-for="handle in allHandles"
-        :key="handle.id"
-        :style="{ top: handle.pos.y + 'px', left: handle.pos.x + 'px' }"
-        @mouseup="mouseUp"
-        @mousedown="handleMouseDown($event, handle)"
-        @mousemove="handleMouseMove($event, handle)"
-        @mouseleave="handleMouseLeave($event, handle)"
       )
 
       //- Floating UI widgets
@@ -127,41 +100,6 @@
       opacity: 0.7
       stroke-dasharray: 4, 7
 
-  .handle
-    size = 21px
-    // padding: 7px
-    position: absolute
-    display: block
-    width: size
-    height: size
-    margin-left: -(size / 2)
-    margin-top: -(size / 2)
-    display: flex
-    align-items: center
-    justify-content: center
-    // pointer-events: auto
-    &::before
-      position: absolute
-      display: block
-      content: ''
-      margin: 0
-      padding: 0
-      width:  7px
-      height: 7px
-      border-radius: 99px
-      background: white
-    &::after
-      position: absolute
-      display: block
-      content: ''
-      margin: 0
-      padding: 0
-      width:  calc(100% - 10px)
-      height: calc(100% - 10px)
-      border-radius: 99px
-      border: 2px solid $highlight * 1.6
-      pointer-events: none
-
   .anchor
     &::after
       transform: scale(1)
@@ -183,74 +121,6 @@
       }
     }
 
-  .drag-handle
-    pointer-events: auto
-    // cursor: grab
-    &:hover
-      &::before
-        width: 5px
-        height: 5px
-    &:active
-      &::before
-        width:  5px
-        height: 5px
-
-    .orbiting &
-      pointer-events: none
-
-  .constraint
-    pointer-events: auto
-    position: absolute
-    margin-left: -9px
-    margin-top: -9px
-    border-radius: 99px
-    padding: 2px
-    width: 16px
-    height: 16px
-    transition: background 0.1s
-    color: #1c2127
-    background: $bright1
-    box-shadow: 0 1px 3px rgba(black, 0.5)
-
-    &:hover
-    &.selected
-      color: white
-
-    &.selected
-      background: $highlight
-
-  .dimension
-    position: absolute
-    transition: color 0.1s
-
-    &.selected .dim-value
-      border-color: $highlight
-      background: lighten($highlight, 73%) !important
-
-    > *
-      position: absolute
-
-    .dim-value
-      margin-top: -12px
-      margin-left: -28px
-      background: $bright2
-      padding: 0.25rem 0.5rem
-      border-radius: 99px
-      font-size: 0.9rem
-      font-weight: bold
-      color: $dark2
-      border: 2px solid $bright1
-      transition: all 0.1s
-      cursor: grab
-      pointer-events: auto
-
-      &:hover
-        background: $bright1
-
-    .number-input
-      margin-top: -14px
-      margin-left: -60px
-
   .selector-widget
     pointer-events: auto
     position: absolute
@@ -270,14 +140,6 @@
     opacity: 0
     transform: translateY(6px)
 
-  .hide-dimension-enter-active
-  .hide-dimension-leave-active
-    transition: all 0.2s
-  .hide-dimension-enter-from
-  .hide-dimension-leave-to
-    opacity: 0
-    transform: scale(90%)
-
 </style>
 
 
@@ -287,7 +149,6 @@
 
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
-  import Transloader from './../js/transloader.js'
   import { SketchElement } from './../js/core/geom2d.js'
   import { Dimension, CoincidentConstraint } from './../js/core/sketch.js'
   import { Solid, Face } from './../js/core/geom3d.js'
@@ -308,11 +169,12 @@
     PerpendicularConstraintTool,
     DimensionTool,
   } from './../js/tools.js'
+  import materials from '../js/materials.js'
 
   export default {
     name: 'ViewPort',
 
-    inject: ['bus'],
+    inject: ['bus', 'frame'],
 
     props: {
       document: Object,
@@ -324,59 +186,30 @@
 
     data() {
       return {
+        isReady: false,
         snapAnchor: null,
-        handles: {},
         paths: [],
         pickingPath: null,
         guides: [],
         widgets: [],
-        constraints: [],
         isOrbiting: false,
+        activeHandle: null,
       }
     },
 
     watch: {
       document: function(document, oldDocument) {
-        this.transloader.unloadTree(oldDocument.top(), true)
         this.registerDocument(this.document, oldDocument)
-        this.transloader.setDocument(document)
-      },
-
-      'document.activeComponent': function(comp) {
-        const tree = this.document.top()
-        this.componentChanged(tree, true)
-        // this.bus.emit('activate-tool', ManipulationTool)
       },
 
       'document.activeSketch': function(sketch) {
-        this.transloader.purgeDimensions(this.document.activeComponent)
         // Show sketch plane
         if(sketch) {
           let plane = sketch.workplane
           this.snapper.planeTransform = plane
           this.renderer.sketchPlane.setPlane(plane)
-          this.transloader.updateDimensions(this.document.activeComponent, sketch)
         }
         this.renderer.sketchPlane.visible = !!sketch
-        // Display grab handles
-        this.handles = {}
-        this.document.activeComponent.creator.cache().curves.forEach(curve => {
-          if(curve.sketch !== sketch) return
-          this.onLoadElement(curve)
-        })
-        this.renderer.render()
-      },
-
-      'document.selection': {
-        handler(selection) {
-          this.transloader.setSelection(selection)
-          this.renderer.render()
-        },
-        deep: 1,
-      },
-
-      highlight: function(highlight) {
-        this.transloader.setHighlight(highlight)
         this.renderer.render()
       },
 
@@ -387,32 +220,14 @@
 
       displayMode: function(mode) {
         this.renderer.setDisplayMode(mode)
-        this.componentChanged(this.document.top(), true)
       },
     },
 
     computed: {
-      allHandles: function() {
-        if(!this.document.activeSketch) return {}
-        const handles = Object.values(this.handles).map(e => Object.values(e) ).flat()
-        const set = {}
-        handles.forEach(handle => set[JSON.stringify(handle.pos)] = handle )
-        return Object.values(set)
-      },
-
       allPaths: function() {
         const paths = [...this.paths]
         if(this.pickingPath && this.pickingPath.target) paths.push(this.pickingPath)
         return paths
-      },
-
-      dimensions: function() {
-        return this.constraints.filter(c => c.constraint instanceof Dimension )
-      },
-
-      nonDimensions: function() {
-        return this.constraints.filter(c => !(c.constraint instanceof Dimension) )
-
       },
     },
 
@@ -420,26 +235,21 @@
       // Renderer
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
       this.renderer.setDisplayMode(this.displayMode)
-      this.renderer.on('render', () => this.updateWidgets() )
+      this.renderer.on('render', () => {
+        this.frame++
+        this.updateWidgets()
+      })
       this.renderer.on('change-view', (position, target) => {
         this.document.viewChanged(position, target)
         this.$emit('update:highlight', null)
       })
+      this.isReady = true
 
       // Snapping
       this.snapper = new Snapper(this, (guides, anchor) => {
         this.guides = guides
         this.snapAnchor = anchor
       })
-
-      // Init tree
-      this.transloader = new Transloader(
-        this.renderer,
-        this.onLoadElement.bind(this),
-        this.onUnloadElement.bind(this),
-      )
-      this.transloader.setDocument(this.document)
-      this.transloader.loadTree(this.document.top(), true)
 
       // Events
       this.bus.on('pick', (type, pickerCoords, color) => {
@@ -461,7 +271,7 @@
       this.bus.on('zoom-active', () => this.zoomToFit(this.document.activeComponent.compound.solids()) )
       this.bus.on('zoom-selection', () => this.zoomToFit(this.document.selection.items) )
       this.bus.on('render-needed', () => this.renderer.render() )
-      this.bus.on('preview-feature', this.transloader.previewFeature.bind(this.transloader))
+      this.bus.on('preview-feature', this.previewFeature)
       this.bus.on('unpreview-feature', this.unpreviewFeature)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
@@ -487,18 +297,9 @@
     methods: {
       registerDocument: function(doc, oldDoc) {
         if(oldDoc) {
-          oldDoc.off('component-changed')
-          oldDoc.off('component-deleted')
-          oldDoc.off('sketch-changed')
           oldDoc.off('force-view')
           oldDoc.off('look-at')
         }
-        doc.on('component-changed', this.componentChanged)
-        doc.on('component-deleted', this.componentDeleted)
-        doc.on('sketch-changed', (sketch) => {
-          this.transloader.updateRegions(doc.activeComponent)
-          this.reloadSketch(sketch)
-        })
         doc.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
         doc.on('look-at', (plane) => setTimeout(() => {
           this.renderer.lookAt(plane)
@@ -528,29 +329,15 @@
       updateRegions: function(force) {
         if(!this.regionsDirty && !force) return
         this.updateSketch()
-        this.transloader.updateRegions(this.document.activeComponent)
-        this.renderer.render()
+        if(this.document.activeSketch) this.document.activeSketch.profileUpdateNeeded = true
         this.regionsDirty = false
       },
 
       updateSketch: async function(temporary) {
         const sketch = this.document.activeSketch
         if(!sketch) return
-        // Solve
-        const handle = this.activeHandle
-        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = true )
-        sketch.solve(this.document.top())
-        if(handle && temporary) handle.elem.constraints().forEach(c => c.temporary = false )
         this.regionsDirty = true
-        this.reloadSketch(sketch)
-      },
-
-      reloadSketch(sketch) {
-        // Update elements
-        sketch.elements.forEach(elem => this.transloader.loadElement(elem, this.document.activeComponent) )
-        // Update dimensions
-        this.transloader.updateDimensions(this.document.activeComponent, sketch)
-        this.renderer.render()
+        sketch.solveNeeded = true
       },
 
       mouseDown: function(e) {
@@ -559,7 +346,6 @@
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, coords)
-        this.lastCoords = coords
       },
 
       handleMouseDown: function(e, handle) {
@@ -658,41 +444,6 @@
         // Update Snap Anchor
         if(this.snapAnchor) this.snapAnchor.pos = this.renderer.toScreen(this.snapAnchor.vec)
 
-        this.constraints = []
-
-        if(this.document.activeSketch) {
-          // Update Handles
-          for(let elemId in this.handles) {
-            const elemHandles = this.handles[elemId]
-            elemHandles.forEach(handle => {
-              handle.pos = this.renderer.toScreen(handle.vec)
-            })
-          }
-          // this.handles = Object.assign({}, this.handles)
-
-          // Update constraints
-          this.constraints = this.document.activeSketch.constraints.flatMap(c => {
-            // if(c instanceof CoincidentConstraint || c instanceof Dimension) return
-            if(c instanceof CoincidentConstraint) return
-            return c.items.map((item, i) => {
-              const curve = item.curve()
-              return {
-                constraint: c,
-                curve,
-                coords: this.renderer.toScreen(
-                  ((c.position && c.position.clone()) || (c.items.length == 1 ?
-                    curve.center()
-                    :
-                    curve.center().clone()
-                      .add(curve.commonHandle(c.items[1 - i].curve()) || c.items[1 - i].curve().center())
-                      .divideScalar(2.0)
-                  )).applyMatrix4(curve.sketch.workplane)
-                ),
-              }
-            })
-          }).filter(Boolean)
-        }
-
         // Update Paths
         this.paths.forEach((path, i) => {
           this.updatePath(path)
@@ -721,65 +472,40 @@
         const tool = new Tool(this.document.activeComponent, this, this.document.activeSketch)
         this.$emit('update:active-tool', tool)
         this.$emit('update:highlight', null)
-        this.renderer.render()
+        // this.renderer.render()
       },
 
       deleteElement: function(elem) {
-        // this.renderer.removeGizmo()
         elem.sketch.remove(elem)
         this.document.selection.delete(elem)
-        this.componentChanged(this.document.activeComponent)
+        this.updateRegions(true)
       },
 
       zoomToFit: function(objects=[]) {
         const solidFaces = objects.filter(sel => sel instanceof Solid ).flatMap(solid => solid.faces() )
         const rest = objects.filter(sel => sel instanceof Face || sel instanceof SketchElement )
-        const meshes = solidFaces.concat(rest).map(obj => obj.mesh() )
+        const meshes = solidFaces.concat(rest).map(obj => obj.mesh && obj.mesh() ).filter(Boolean)
         this.renderer.zoomToFit(meshes.length && meshes)
-      },
-
-      componentChanged: function(comp, recursive) {
-        this.transloader.unloadTree(comp, recursive)
-        this.transloader.loadTree(comp, recursive)
-        this.renderer.updateShadows()
-        this.renderer.render()
-      },
-
-      componentDeleted: function(comp) {
-        this.transloader.unloadTree(comp, true)
-        this.renderer.updateShadows()
-        this.renderer.render()
       },
 
       elementChanged: function(elem, comp) {
         this.regionsDirty = true
-        this.transloader.loadElement(elem, comp)
+      },
+
+      previewFeature: function(compound, subtracting) {
+        this.renderer.remove(this.previewMesh)
+        this.previewMesh = this.renderer.convertMesh(
+          compound.tesselate(),
+          subtracting ? materials.previewSubtractSurface : materials.previewAddSurface,
+        )
+        this.renderer.add(this.previewMesh)
         this.renderer.render()
       },
 
       unpreviewFeature: function() {
         this.clearPaths()
-        this.transloader.unpreviewFeature()
-      },
-
-      onLoadElement: function(elem) {
-        if(elem.projection || elem.sketch !== this.document.activeSketch) return
-        this.handles[elem.id] = elem.handles().map((handle, i) => {
-          handle = handle.clone().applyMatrix4(elem.sketch.workplane)
-          return {
-            type: 'handle',
-            pos: this.renderer.toScreen(handle),
-            vec: handle,
-            id: Math.random(),
-            elem,
-            index: i,
-          }
-        })
-      },
-
-      onUnloadElement: function(elem) {
-        delete this.handles[elem.id]
-        // this.handles = Object.assign({}, this.handles)
+        this.renderer.remove(this.previewMesh)
+        this.renderer.render()
       },
 
       onWindowResize: function() {

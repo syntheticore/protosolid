@@ -511,6 +511,8 @@ export class HorVertConstraint extends Constraint {
   }
 
   typename() { return (this.isVertical ? 'Vertical' : 'Horizontal') + ' Constraint' }
+
+  icon() { return this.isVertical ? 'ruler-vertical' : 'ruler-horizontal' }
 }
 
 export class FixConstraint extends Constraint {

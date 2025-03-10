@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 
-export default class Materials {
+class Materials {
   constructor() {
     // Fat Line Materials
     this.line = new LineMaterial({
@@ -181,3 +181,7 @@ export default class Materials {
     })
   }
 }
+
+const materials = new Materials()
+
+export default materials

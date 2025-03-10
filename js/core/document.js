@@ -55,10 +55,10 @@ export default class Document extends Emitter {
     this.previewView = null
     this.dirtyView = null
 
-    this.on('component-changed', () => {
-      this.hasChanges = true
-      this.isFresh = false
-    })
+    // this.on('component-changed', () => {
+    //   this.hasChanges = true
+    //   this.isFresh = false
+    // })
   }
 
   top(at) {
@@ -109,14 +109,6 @@ export default class Document extends Emitter {
       }
     }
     const compIds = this.timeline.evaluate()
-    const top = this.top()
-    console.log('TOP', top.children.length)
-    compIds.forEach(id => {
-      const oldComp = oldTop.findChild(id)
-      if(oldComp) this.emit('component-deleted', oldComp)
-      const newComp = this.getComponent(id)
-      if(newComp) this.emit('component-changed', newComp)
-    })
     this.reactivateActiveComponent()
     this.selection.clear()
   }
@@ -169,7 +161,6 @@ export default class Document extends Emitter {
       feature.involvedSketches().forEach(sketch => {
         this.oldVisibility[sketch.id] = this.activeComponent.creator.itemsHidden[sketch.id]
         this.activeComponent.creator.itemsHidden[sketch.id] = false
-        this.emit('sketch-changed', sketch)
       })
 
       // Make affected components visible
@@ -194,7 +185,6 @@ export default class Document extends Emitter {
         } else {
           this.activeFeature.involvedSketches().forEach(sketch => {
             this.activeComponent.creator.itemsHidden[sketch.id] = this.oldVisibility[sketch.id]
-            this.emit('sketch-changed', sketch)
           })
         }
 
@@ -220,7 +210,6 @@ export default class Document extends Emitter {
   }
 
   deleteComponent(comp) {
-    this.emit('component-deleted', comp)
     comp.parent.deleteComponent(comp)
     if(this.document.activeComponent.hasAncestor(comp)) {
       this.document.activeComponent = comp.parent
@@ -250,7 +239,6 @@ export default class Document extends Emitter {
         const comp = this.getComponent(compId)
         comp.creator.hidden = compHidden
         comp.creator.itemsHidden = JSON.parse(JSON.stringify(itemsHidden))
-        this.emit('component-changed', comp)
       })
     }
   }

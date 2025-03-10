@@ -467,7 +467,6 @@
 
       addSectionView: function() {
         this.document.activeComponent.creator.sectionViews.push(new SectionView())
-        this.document.emit('component-changed', this.document.activeComponent, true)
       },
 
       addCanvas: function() {
@@ -488,7 +487,6 @@
       addMaterial: function() {
         this.document.materials[0] ||= new Aluminum()
         this.document.activeComponent.creator.material = this.document.materials[0]
-        this.document.emit('component-changed', this.document.activeComponent, true)
       },
 
       toggleReference: function() {
@@ -498,7 +496,6 @@
           this.document.selection.items
             .filter(item => item instanceof SketchElement )
             .forEach(elem => elem.isReference = !elem.isReference )
-          this.document.emit('component-changed', this.document.activeComponent)
         }
       },
 
@@ -509,7 +506,6 @@
         const cutElements = elements.flatMap(elem => elem.split(elements) )
         const removed = this.document.activeSketch.removeDanglingSegments(cutElements)
         removed.forEach(elem => this.document.activeSketch.add(elem) )
-        this.document.emit('component-changed', this.document.activeComponent)
       },
     },
   }

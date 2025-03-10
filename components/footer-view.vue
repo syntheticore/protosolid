@@ -220,11 +220,11 @@
               unit: 'cm³',
               value: item.compound.volume() / 1000.0,
             },
-            TotalVolume: {
+            ...item.children.length && { TotalVolume: {
               title: 'Total Volume',
               unit: 'cm³',
               value: item.getVolume() / 1000.0,
-            },
+            } },
             Area: {
               title: 'Surface Area',
               unit: 'cm²',

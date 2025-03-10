@@ -86,6 +86,7 @@ export default class Document extends Emitter {
   addFeature(feature) {
     this.activateFeature(null, true, false)
     this.timeline.insertFeature(feature)
+    this.reactivateActiveComponent()
   }
 
   moveMarker(i) {

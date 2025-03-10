@@ -330,11 +330,12 @@ export class Volumetric extends Shape {
 
 
 export class Face extends Shape {
-  constructor(solid, geom, id) {
+  constructor(solid, geom, id, tessId) {
     super()
     this.solid = solid
     this.geom = () => geom
     this.id = id
+    this.tessId = tessId || makeID()
   }
 
   planarReference() {
@@ -368,6 +369,25 @@ export class Face extends Shape {
     return vecFromOc(props.Normal())
   }
 
+  connectedFaces() {
+    const edgeFaceMap = new window.oc.oc.TopTools_IndexedDataMapOfShapeListOfShape_1()
+    window.oc.oc.TopExp.MapShapesAndAncestors(
+      this.solid.geom(),
+      window.oc.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      window.oc.oc.TopAbs_ShapeEnum.TopAbs_FACE,
+      edgeFaceMap
+    )
+    const neighboors = []
+    exploreShape(this.geom(), 'edge', edge => {
+      let sharedFaces = arrayFromOcList(edgeFaceMap.ChangeFromKey(edge))
+      neighboors.push(...sharedFaces.filter(sharedFace => !sharedFace.IsSame(this.geom()) ))
+    })
+    const unique = [...new Set(neighboors)]
+    return unique.map(f =>
+      this.solid.faces().find(sf => sf.geom().IsSame(f) )
+    )
+  }
+
   tesselate() {
     if(this.cachedTesselation) return this.cachedTesselation
     const location = new window.oc.oc.TopLoc_Location_1()
@@ -392,11 +412,12 @@ export class Face extends Shape {
 
 
 export class Edge extends Shape {
-  constructor(solid, geom, id) {
+  constructor(solid, geom, id, tessId) {
     super()
     this.solid = solid
     this.geom = () => geom
     this.id = id
+    this.tessId = tessId || makeID()
   }
 
   axialReference() {
@@ -480,8 +501,8 @@ export class Solid extends Volumetric {
   cloneCached(newCompound) {
     const clone = new Solid(newCompound, this.geom())
     clone.id = this.id
-    clone.cachedFaces = this.faces().map(face => new Face(clone, face.geom(), face.id) )
-    clone.cachedEdges = this.edges().map(edge => new Edge(clone, edge.geom(), edge.id) )
+    clone.cachedFaces = this.faces().map(face => new Face(clone, face.geom(), face.id, face.tessId) )
+    clone.cachedEdges = this.edges().map(edge => new Edge(clone, edge.geom(), edge.id, edge.tessId) )
     return clone
   }
 
@@ -566,17 +587,37 @@ export class Compound extends Volumetric {
     const oldEdges = oldSolids.flatMap(solid => solid.edges() )
 
     // Find unchanged faces in new solids & use original IDs
-    newFaces.forEach(face => {
-      const original = oldFaces.find(f => f.geom().IsSame(face.geom()) )
-      // if(original) console.log('original', original)
-      if(original) face.id = original.id
+    const unchangedFaces = newFaces.map(face => {
+      const original = oldFaces.find(f => f.geom().IsSame(face.geom()) ) //XXX IsSame -> surface & location same, IsEqual -> orientation also same
+      if(!original) return
+      face.id = original.id
+      face.tessId = original.tessId
+      face.cachedTesselation = original.cachedTesselation
+      // return [face, original]
+    })//.filter(Boolean)
+
+    // // Unchanged faces are geometrically identical if all of their neighboors are unchanged too
+    // unchangedFaces.filter(([face, original]) => {
+    //   const neighboors = face.connectedFaces()
+    //   return neighboors.every(neighboor => unchangedFaces.find(([f, _]) => f == neighboor ) )
+    // }).forEach(([face, original]) => {
+    //   // Inherit tessId if faces are visually identical
+    //   face.tessId = original.tessId
+    //   face.cachedTesselation = original.cachedTesselation
+    // })
+
+    // Find unchanged edges & inherit tesselation
+    newEdges.forEach(edge => {
+      const original = oldEdges.find(e => e.geom().IsSame(edge.geom()) )
+      if(!original) return
+      edge.tessId = original.tessId
+      edge.cachedTesselation = original.cachedTesselation
     })
 
     // Find modified faces in new solids & use original IDs
     oldFaces.forEach(oldFace => {
       const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => new window.oc.oc.TopoDS.Face_1(m) )
       const faces = modified.map(modFace => newFaces.find(f => f.geom().IsSame(modFace) ) )
-      // if(faces.length) console.log('modified', faces)
       faces.forEach(f => f.id = oldFace.id )
     });
 
@@ -589,7 +630,6 @@ export class Compound extends Volumetric {
         } catch(err) {}
       }).filter(Boolean)
       const faces = generated.map(genFace => newFaces.find(face => face.geom().IsSame(genFace) ) )
-      // if(faces.length) console.log('generated', faces)
       faces.forEach((face, i) => face.id = old.id + '/' + algoName + '/' + i )
     })
 

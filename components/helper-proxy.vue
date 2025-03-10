@@ -16,7 +16,8 @@
 
   let mesh
 
-  onMounted(() => {
+  watch(() => props.helper, () => {
+    window.alcRenderer.remove(mesh)
     const HelperObject = {
       [PlaneHelper]: PlaneHelperObject,
       [AxisHelper]: AxisHelperObject,
@@ -28,7 +29,7 @@
 
     window.alcRenderer.add(mesh, true)
     renderNeeded.value = true
-  })
+  }, { immediate: true })
 
   watch(() => [highlighted.value, selected.value], () => {
     mesh.setMaterial(highlighted.value, selected.value)

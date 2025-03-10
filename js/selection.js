@@ -35,6 +35,10 @@ export class Selection {
     return this.set.has(item)
   }
 
+  hasId(id) {
+    return !!this.items.find(item => item.id == id )
+  }
+
   only(item) {
     this.items = [item]
     this.set = new Set([item])

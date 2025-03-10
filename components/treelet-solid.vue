@@ -7,7 +7,7 @@
     :class="{ hidden: isHidden }"
   )
 
-    .box(:class="{ selected: document.selection.has(solid) }")
+    .box(:class="{ selected: document.selection.hasId(solid.id) }")
 
       header
 

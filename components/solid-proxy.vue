@@ -32,8 +32,8 @@
 
   const highlight = inject('highlight')
 
-  const highlighted = computed(() => props.parentHighlighted || props.solid == highlight.value )
-  const selected = computed(() => props.parentSelected || props.document.selection.has(props.solid) )
+  const highlighted = computed(() => props.parentHighlighted || props.solid.id == (highlight.value && highlight.value.id) )
+  const selected = computed(() => props.parentSelected || props.document.selection.hasId(props.solid.id) )
 
   watch(() => [props.solid, props.component], () => {
     props.solid.component = props.component

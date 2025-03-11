@@ -20,18 +20,6 @@ export class ComponentDefinition {
     this.canvases = []
     this.itemsHidden = {}
     this.color = color //this.makeColor(allFeatures)
-
-    const cache = {
-      faces: [],
-      edges: [],
-      regions: [],
-      curves: [],
-      helpers: [],
-      canvases: [],
-      dimensions: [],
-    }
-    // Hide cache from Vue
-    this.cache = () => cache
   }
 
   static undump(dump) { return Object.assign(new ComponentDefinition(), dump) }

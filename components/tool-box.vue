@@ -495,7 +495,10 @@
         } else {
           this.document.selection.items
             .filter(item => item instanceof SketchElement )
-            .forEach(elem => elem.isReference = !elem.isReference )
+            .forEach(elem => {
+              elem.isReference = !elem.isReference
+              elem.sketch.profileUpdateNeeded = true
+            })
         }
       },
 

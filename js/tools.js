@@ -171,7 +171,7 @@ export class ManipulationTool extends HighlightTool {
       handles[handle.index] = vec//.toArray()
       handle.elem.setHandles(handles, false)
       this.viewport.updateSketch(true)
-      // this.viewport.elementChanged(handle.elem, this.component)
+      // this.viewport.elementChanged()
     } else if(dimension) {
       dimension.position = vec
       this.viewport.updateSketch()
@@ -380,7 +380,7 @@ export class LineTool extends SketchTool {
     if(!this.curve) return
     let p1 = this.curve.endpoints()[0]
     this.curve.setHandles([p1, vec], false)
-    this.viewport.elementChanged(this.curve, this.component)
+    this.viewport.elementChanged()
   }
 
   dispose() {
@@ -411,7 +411,7 @@ export class SplineTool extends SketchTool {
       // this.curve = this.sketch.add_spline([vec.toArray(), vec.toArray()])
       // this.curve.sketch = this.sketch
     }
-    this.viewport.elementChanged(this.curve, this.component)
+    this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
@@ -419,7 +419,7 @@ export class SplineTool extends SketchTool {
     let points = this.curve.handles()
     points[points.length - 1] = vec//.toArray()
     this.curve.setHandles(points)
-    this.viewport.elementChanged(this.curve, this.component)
+    this.viewport.elementChanged()
   }
 
   dispose() {
@@ -427,7 +427,7 @@ export class SplineTool extends SketchTool {
     let points = this.curve.handles()
     points.pop()
     this.curve.setHandles(points)
-    this.viewport.elementChanged(this.curve, this.component)
+    this.viewport.elementChanged()
   }
 }
 
@@ -458,7 +458,7 @@ export class CircleTool extends SketchTool {
     if(!this.center) return
     // this.curve.setHandles([this.center.toArray(), vec.toArray()], false)
     this.curve.setHandles([this.center, vec], false)
-    this.viewport.elementChanged(this.curve, this.component)
+    this.viewport.elementChanged()
   }
 }
 
@@ -491,7 +491,7 @@ export class ArcTool extends SketchTool {
       this.sketch.add(this.curve)
     }
     this.curve.setPoints([this.start, vec, this.end], true)
-    this.viewport.elementChanged(this.curve, this.component)
+    this.viewport.elementChanged()
   }
 }
 

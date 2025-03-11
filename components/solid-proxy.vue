@@ -1,22 +1,23 @@
 <template lang="pug">
 
   FaceProxy(
-    v-if="displayMode == 'shaded' || displayMode == 'wireShade'"
     v-for="face in solid.faces()"
     :key="face.tessId"
     :face="face"
     :component="component"
+    :display-mode="displayMode"
     :parent-active="parentActive"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
   )
 
   EdgeProxy(
-    v-if="displayMode == 'wireframe' || (parentActive && displayMode == 'wireShade')"
+    v-if="parentActive"
     v-for="edge in solid.edges()"
     :key="edge.tessId"
     :edge="edge"
     :component="component"
+    :display-mode="displayMode"
     :parent-active="parentActive"
     :parent-highlighted="highlighted"
     :parent-selected="selected"

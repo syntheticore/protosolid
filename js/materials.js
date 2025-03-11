@@ -52,6 +52,12 @@ class Materials {
     this.uiWire = this.wire.clone()
     this.uiWire.linewidth = 3
 
+    this.invisibleLine = new LineMaterial({
+      linewidth: 3,
+      transparent: true,
+      opacity: 0,
+    })
+
     this.table = {
       curve: {
         unselected: {
@@ -178,6 +184,11 @@ class Materials {
       // depthTest: false,
       polygonOffset: true,
       polygonOffsetFactor: 0.5,
+    })
+
+    this.invisibleSurface = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
     })
   }
 }

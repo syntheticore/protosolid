@@ -488,7 +488,7 @@
         this.renderer.zoomToFit(meshes.length && meshes)
       },
 
-      elementChanged: function(elem, comp) {
+      elementChanged: function() {
         this.regionsDirty = true
       },
 

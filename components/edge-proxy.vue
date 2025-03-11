@@ -29,13 +29,16 @@
   })
 
   function getMaterial() {
-    return highlighted.value || props.parentSelected ?
-      materials.selectionLine
+    return props.edge == highlight.value ?
+      materials.highlightLine
       :
-      props.displayMode == 'shaded' ?
-        materials.invisibleLine
+      props.parentHighlighted || props.parentSelected ?
+        materials.selectionLine
         :
-        props.parentActive ? materials.wire : materials.ghostWire
+        props.displayMode == 'shaded' ?
+          materials.invisibleLine
+          :
+          props.parentActive ? materials.wire : materials.ghostWire
   }
 
   onUnmounted(() => {

@@ -24,6 +24,7 @@ class Materials {
 
     this.highlightLine = this.line.clone()
     this.highlightLine.color.set('#2590e1')
+    this.highlightLine.depthTest = false
 
     this.referenceLine = this.line.clone()
     this.referenceLine.color.set('#8eca53')
@@ -106,6 +107,7 @@ class Materials {
       opacity: 0.1,
       polygonOffset: true,
       polygonOffsetFactor: -1,
+      depthWrite: false,
     })
 
     this.highlightRegion = new THREE.MeshBasicMaterial({
@@ -115,6 +117,7 @@ class Materials {
       opacity: 0.4,
       polygonOffset: true,
       polygonOffsetFactor: -1,
+      depthTest: false,
     })
 
     this.plane = new THREE.MeshBasicMaterial({
@@ -187,8 +190,10 @@ class Materials {
     })
 
     this.invisibleSurface = new THREE.MeshBasicMaterial({
+      side: THREE.DoubleSide,
       transparent: true,
       opacity: 0,
+      depthWrite: false,
     })
   }
 }

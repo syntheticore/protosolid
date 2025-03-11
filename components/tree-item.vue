@@ -230,6 +230,7 @@
       transition: background 0.15s
 
       &:hover
+      &.highlighted
         background: $dark2 * 1.15
         border-color: $dark1 * 1.85
         color: white

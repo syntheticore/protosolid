@@ -7,7 +7,7 @@
     :class="{ hidden: isHidden }"
   )
 
-    .box(:class="{ selected: document.selection.hasId(solid.id) }")
+    .box(:class="{ highlighted: solid.id == (highlight && highlight.id), selected: document.selection.hasId(solid.id) }")
 
       header
 
@@ -43,6 +43,7 @@
   const props = defineProps(['document', 'component', 'solid', 'index'])
 
   const bus = inject('bus')
+  const highlight = inject('highlight')
 
   const isHidden = computed(() => props.component.creator.itemsHidden[props.solid.id] )
 

@@ -187,6 +187,7 @@ class Materials {
       // depthTest: false,
       polygonOffset: true,
       polygonOffsetFactor: 0.5,
+      depthWrite: false,
     })
 
     this.invisibleSurface = new THREE.MeshBasicMaterial({

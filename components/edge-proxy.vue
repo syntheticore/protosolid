@@ -32,11 +32,11 @@
     return props.edge == highlight.value ?
       materials.highlightLine
       :
-      props.parentHighlighted || props.parentSelected ?
-        materials.selectionLine
+      props.displayMode == 'shaded' ?
+        materials.invisibleLine
         :
-        props.displayMode == 'shaded' ?
-          materials.invisibleLine
+        props.parentHighlighted || props.parentSelected ?
+          materials.selectionLine
           :
           props.parentActive ? materials.wire : materials.ghostWire
   }

@@ -1,3 +1,4 @@
+const path = require('path')
 const electron = require('electron')
 
 electron.contextBridge.exposeInMainWorld('platform', require('os').platform())
@@ -22,5 +23,7 @@ electron.contextBridge.exposeInMainWorld('ipc', {
   },
 })
 
-electron.webFrame.setVisualZoomLevelLimits(1, 1)
-electron.webFrame.setLayoutZoomLevelLimits(0, 0)
+electron.contextBridge.exposeInMainWorld('appPath', __dirname)
+
+// electron.webFrame.setVisualZoomLevelLimits(1, 1)
+// electron.webFrame.setLayoutZoomLevelLimits(0, 0)

@@ -50,8 +50,12 @@ export default class Renderer {
     var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
     this.scene.add(atmosphere)
 
+    const basePath = window.ipc
+      ? `file://${window.appPath}/app/cubemap/`
+      : '/cubemap/'
+
     new HDRCubeTextureLoader()
-    .setPath('cubemap/')
+    .setPath(basePath)
     // .setDataType(THREE.HalfFloatType)
     .load(['px.hdr', 'nx.hdr', 'py.hdr', 'ny.hdr', 'pz.hdr', 'nz.hdr'], (texture) => {
       var pmremGenerator = new THREE.PMREMGenerator(this.renderer)

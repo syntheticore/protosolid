@@ -249,7 +249,6 @@ export function colorDiff(c1, c2) {
 }
 
 export function parseHsl(str) {
-  console.log(str)
   const match = /hsl\((.+),\s*(.+)%,\s*(.+)%\)/g.exec(str).slice(1,4).map(v => Number(v) )
   return { h: match[0], s: match[1], l: match[2] }
 }

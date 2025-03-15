@@ -104,12 +104,17 @@
 
   const compound = computed(() => {
     // Slice model using visible section views
-    const sections = props.component.creator.sectionViews.filter(sec => !sec.hidden )
+    const sections = getSections(props.component).filter(sec => !sec.hidden )
     if(!sections.length) return props.component.compound
-    const section = props.component.creator.sectionViews[0]
+    const section = sections[0]
     const cut = props.component.compound.halfCut(section.getTransform(), section.side)
     return cut
   })
+
+  function getSections(comp) {
+    if(!comp) return []
+    return [...comp.creator.sectionViews].concat(getSections(comp.parent))
+  }
 
   const handleMouseUp = (...args) => emit('handleMouseUp', ...args)
   const handleMouseDown = (...args) => emit('handleMouseDown', ...args)

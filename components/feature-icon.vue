@@ -56,7 +56,7 @@
       > svg
         color: $highlight !important
 
-    &.selected
+    &:hover.selected
       padding-top: 0
       padding-bottom: 26px
 

@@ -273,8 +273,8 @@
           }
         } else if(type == 'Sketch') {
           return {
-            NumElems: {
-              title: 'Elements',
+            '# Elements': {
+              title: '# Elements',
               value: (item.sketch || item).elements.length,
             },
           }

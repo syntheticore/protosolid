@@ -1,30 +1,40 @@
 <template lang="pug">
+
   .app-menu(:class="{ open }")
+
     .file-menu
+
       button.button.settings-btn(@click="toggleSettings" title="Preferences")
         Icon(icon="sliders-h")
+
       .about
+
         Icon(icon="atom")
         h1 ProtoSolid
         .version Version 0.11
 
       ul.actions(@click="bus.emit('close-widgets')")
+
         li
           button(@click="$emit('create-document')")
             Icon(icon="file" fixed-width)
             span New Document
+
         li
           button(@click="$emit('open-document')")
             Icon(icon="folder-open" fixed-width)
             span Open...
+
         li
           button(@click="$emit('save-document')")
             Icon(icon="save" fixed-width)
             span Save
+
         li
           button(@click="$emit('save-document-as')")
             Icon(icon="save" fixed-width)
             span Save as...
+
         li
           button(disabled="disabled")
             Icon(icon="file-import" fixed-width)
@@ -92,6 +102,7 @@
     .version
       font-size: 11px
       margin-top: 4px
+      color: $bright2
 
   .actions
     &:hover

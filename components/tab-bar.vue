@@ -11,49 +11,24 @@
 
     ul.tabs
 
-      li(v-for="doc in documents"
+      Tab(
+        v-for="doc in documents"
+        :document="doc"
+        :active-document="activeDocument"
         @click="$emit('update:active-document', doc)"
-        :class="{active: doc == activeDocument}"
+        @delete-document="$emit('delete-document', $event)"
       )
-
-        span.title {{ doc.filePath || 'Untitled Document' }} {{ doc.hasChanges ? '*' : null }}
-
-        button(@click.stop="$emit('delete-document', doc)")
-          Icon(icon="times")
 
     .grab-handle.dynamic
 
     nav
+
       //- MenuButton(title="Tool Settings" icon="cloud")
       //-   IconView
-      //- MenuButton(title="History" icon="code-branch")
-      //-   form
-      //-     label
-      //-       | Transform:
-      //-       select
-      //-         option World
-      //-         option Local
-      //-     fieldset
-      //-       legend Selection
-      //-       label
-      //-         input(type="checkbox" checked)
-      //-         | Select invisible Geometry
-      //-     fieldset
-      //-       legend Snapping
-      //-       label
-      //-         input(type="checkbox" checked)
-      //-         | Snap to Grid
-      //-       label.inset
-      //-         | Increment
-      //-         input(type="number" value="10")
-      //-       label
-      //-         input(type="checkbox" checked)
-      //-         | Snap to Angles
-      //-       label.inset
-      //-         | Increment
-      //-         input(type="number" value="45")
-      //- MenuButton.account(title="Account" icon="user")
-      //-   span.name Björn
+
+      MenuButton.naked.account(title="Björn Breitgoff" icon="user")
+
+        .user-info
 
     .grab-handle.fixed
 
@@ -86,7 +61,7 @@
     z-index: 2
 
     .blurry &
-      backdrop-filter: blur(32px)
+      // backdrop-filter: blur(32px)
       background: rgba($dark2, 0.925)
 
     [data-platform="darwin"] &
@@ -111,9 +86,15 @@
       margin-left: 3px
       margin-right: 4px
 
+    .history-btn
+      margin-right: 3px
+
   .app-menu-btn
     // color: #ff9f90
     color: $highlight * 1.2
+
+    [data-platform="darwin"] &
+      display: none
 
   .tabs
     display: flex
@@ -126,41 +107,6 @@
 
     &::-webkit-scrollbar
       display: none
-
-    li
-      display: flex
-      align-items: center
-      border-left: 1px solid $dark1 * 1.2
-      padding-left: 12px
-      height: 100%
-      font-size: 12px
-      font-weight: bold
-      transition: all 0.2s
-      color: $bright2
-      text-shadow: 0 -1px 0px black
-
-      &:hover
-        background: $dark2 * 1.2
-        svg
-          opacity: 1
-
-      &.active
-        color: $bright1
-        background: $dark1 * 1.2
-
-      button
-        background: none
-        border: none
-        padding: 6px 11px 6px 10px
-
-        &:hover svg
-          color: $bright1
-
-        svg
-          color: $bright2
-          transition: all 0.2s
-          filter: drop-shadow(0 1px 0px rgba(0,0,0, 0.9))
-          opacity: 0
 
   .grab-handle
     -webkit-app-region: drag
@@ -208,15 +154,13 @@
         &:last-child
           background: #b70f0f
 
-  // .account
-  //   font-weight: bold
-  //   flex: 0 0 auto
-  //   .name
-  //     position: relative
-  //     top: -3px
-  //   svg
-  //     font-size: 18px
-  //     margin-left: 6px
+  .account
+    font-weight: bold
+    flex: 0 0 auto
+    white-space: nowrap
+
+  .user-info
+    padding: 1rem
 
   input[type="text"]
   input[type="number"]
@@ -230,18 +174,8 @@
 
 <script>
 
-  // import AppMenu from './app-menu.vue'
-  // import MenuButton from './menu-button.vue'
-  // import IconView from './icon-view.vue'
-
   export default {
     name: 'TabBar',
-
-    // components: {
-    //   AppMenu,
-    //   MenuButton,
-    //   IconView,
-    // },
 
     props: {
       documents: Array,

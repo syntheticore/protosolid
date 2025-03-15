@@ -1,35 +1,72 @@
 <template lang="pug">
+
   .menu-button
-    button.button(:class="{pressed: isOpen}" @click="toggle()")
+
+    button.button(:class="{ pressed: isOpen }" @mousedown="toggle()")
+
       Icon(:icon="icon" fixed-width)
+
       Icon.expander(icon="angle-down")
+
     transition(name="fade" mode="out-in")
+
       .pop-up.bordered.tipped(v-if="isOpen")
+
         .wrapper
+
           h1.header(v-if="title") {{ title }}
+
           slot
+
 </template>
 
 
 <style lang="stylus" scoped>
+
   .menu-button
     position: relative
     display: inline-block
     margin: 4px 5px
+
     .fullscreen .tab-bar &
     .maximized .tab-bar &
     [data-platform="browser"] .tab-bar &
+
       button
         padding: 4px 8px
-      .pop-up
-        top: 22px
+
+      // .pop-up
+      //   top: 22px
+
     &.left
+
       .pop-up
         right: unset
         left: -12px
+
         &::before
           right: unset
           left: 20px
+
+    &.natural
+      position: unset
+
+      .pop-up
+        right: unset
+        left: unset
+        margin-left: 0
+
+    &.naked
+
+      .button
+        border: none
+        background: none
+        box-shadow: none
+
+        &:hover
+        &.pressed
+          background: rgba(white, 12%)
+          color: white
 
   .button
     margin: 0
@@ -39,10 +76,13 @@
     display: flex
     align-items: center
     padding: 5px 8px
+
     &.pressed
     &:active
+
       .expander
         transform: rotate(180deg)
+
     .expander
       margin-left: 8px
       color: $bright2
@@ -58,13 +98,12 @@
     z-index: 2
     transition: all 0.2s
     pointer-events: auto
-    top: 26px
+    top: 23px
     right: -12px
-    // min-width: 195px
-    color: $bright2
     font-size: 12px
     margin: 12px
     text-align: left
+
     &::before
       left: unset
       right: 20px
@@ -83,12 +122,13 @@
     box-shadow: 0 0 8px rgba(black, 0.6)
     // text-shadow: 0 -1px 0px black
     background: $dark2 * 1.1
-    margin-bottom: 14px
-    border-bottom: 1px solid $dark1 * 1.2
+    border-bottom: 1px solid $dark1
+
 </style>
 
 
 <script>
+
   export default {
     name: 'MenuButton',
 
@@ -115,4 +155,5 @@
       this.bus.on('close-widgets', () => this.isOpen = false )
     },
   }
+
 </script>

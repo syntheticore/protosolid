@@ -123,7 +123,6 @@
         background: $dark1 * 1.3
 
     &::before
-
     &::after
       position: absolute
       content: ''

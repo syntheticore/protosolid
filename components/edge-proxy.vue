@@ -10,8 +10,6 @@
   const highlight = inject('highlight')
   const renderNeeded = inject('render-needed')
 
-  const highlighted = computed(() => props.parentHighlighted || props.edge == highlight.value )
-
   const edgeMesh = window.alcRenderer.convertLine(props.edge.tesselate(), getMaterial())
   edgeMesh.alcTypes = ['edge', props.edge.getAxis() && 'axis'].filter(Boolean)
 
@@ -23,7 +21,7 @@
   window.alcRenderer.add(edgeMesh, props.parentActive)
   renderNeeded.value = true
 
-  watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode], () => {
+  watch(() => [highlight.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode], () => {
     edgeMesh.material = getMaterial()
     renderNeeded.value = true
   })

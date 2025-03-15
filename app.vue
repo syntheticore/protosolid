@@ -117,6 +117,12 @@
       maximized.value = value
     })
 
+    window.ipc.on('createFile', createDocument)
+    window.ipc.on('openFile', loadDocument)
+    window.ipc.on('saveFile', saveDocument)
+    window.ipc.on('saveFileAs', saveDocumentAs)
+    window.ipc.on('closeFile', () => closeDocument(activeDocument.value) )
+
     window.ipc.on('dark-mode', (e, darkMode) => {
       if(darkMode) {
         document.body.setAttribute('data-dark-mode', true)

@@ -12,15 +12,119 @@ const {
 
 const isMac = process.platform === 'darwin'
 
+// const template = [
+//   // { role: 'appMenu' }
+//   ...(isMac ? [{
+//     label: app.name,
+//     submenu: [
+//       { role: 'about' },
+//       { type: 'separator' },
+//       { role: 'services' },
+//       { type: 'separator' },
+//       { role: 'hide' },
+//       { role: 'hideothers' },
+//       { role: 'unhide' },
+//       { type: 'separator' },
+//       { role: 'quit' }
+//     ]
+//   }] : []),
+//   // { role: 'fileMenu' }
+//   {
+//     label: 'File',
+//     submenu: [
+//       isMac ? { role: 'close' } : { role: 'quit' }
+//     ]
+//   },
+//   // { role: 'editMenu' }
+//   {
+//     label: 'Edit',
+//     submenu: [
+//       { role: 'undo' },
+//       { role: 'redo' },
+//       { type: 'separator' },
+//       { role: 'cut' },
+//       { role: 'copy' },
+//       { role: 'paste' },
+//       ...(isMac ? [
+//         { role: 'pasteAndMatchStyle' },
+//         { role: 'delete' },
+//         { role: 'selectAll' },
+//         { type: 'separator' },
+//         {
+//           label: 'Speech',
+//           submenu: [
+//             { role: 'startspeaking' },
+//             { role: 'stopspeaking' }
+//           ]
+//         }
+//       ] : [
+//         { role: 'delete' },
+//         { type: 'separator' },
+//         { role: 'selectAll' }
+//       ])
+//     ]
+//   },
+//   // { role: 'viewMenu' }
+//   {
+//     label: 'View',
+//     submenu: [
+//       { role: 'reload' },
+//       { role: 'forcereload' },
+//       { role: 'toggledevtools' },
+//       { type: 'separator' },
+//       { role: 'resetzoom' },
+//       { role: 'zoomin' },
+//       { role: 'zoomout' },
+//       { type: 'separator' },
+//       { role: 'togglefullscreen' }
+//     ]
+//   },
+//   // { role: 'windowMenu' }
+//   {
+//     label: 'Window',
+//     submenu: [
+//       { role: 'minimize' },
+//       { role: 'zoom' },
+//       ...(isMac ? [
+//         { type: 'separator' },
+//         { role: 'front' },
+//         { type: 'separator' },
+//         { role: 'window' }
+//       ] : [
+//         { role: 'close' }
+//       ])
+//     ]
+//   },
+//   {
+//     role: 'help',
+//     submenu: [
+//       {
+//         label: 'Learn More',
+//         click: async () => {
+//           const { shell } = require('electron')
+//           await shell.openExternal('https://protosolid.org')
+//         }
+//       }
+//     ]
+//   }
+// ]
+
 const template = [
-  // { role: 'appMenu' }
   ...(isMac ? [{
     label: app.name,
     submenu: [
       { role: 'about' },
       { type: 'separator' },
-      { role: 'services' },
+      {
+        label: "Settings...",
+        accelerator: "CmdOrCtrl+,",
+        click: async () => {
+          mainWindow.webContents.send('openPreferences')
+        },
+      },
       { type: 'separator' },
+      // { role: 'services' },
+      // { type: 'separator' },
       { role: 'hide' },
       { role: 'hideothers' },
       { role: 'unhide' },
@@ -28,14 +132,81 @@ const template = [
       { role: 'quit' }
     ]
   }] : []),
-  // { role: 'fileMenu' }
   {
     label: 'File',
     submenu: [
-      isMac ? { role: 'close' } : { role: 'quit' }
+      {
+        label: "New Document",
+        accelerator: "CmdOrCtrl+N",
+        click: async () => {
+          mainWindow.webContents.send('createFile')
+        },
+      },
+      {
+        label: "Open...",
+        accelerator: "CmdOrCtrl+O",
+        click: async () => {
+          mainWindow.webContents.send('openFile')
+        },
+      },
+      {
+        label: "Connect...",
+        click: async () => {
+          mainWindow.webContents.send('connectRepo')
+        },
+      },
+      {
+        label: "Import...",
+        accelerator: "CmdOrCtrl+I",
+        click: async () => {
+          mainWindow.webContents.send('importFile')
+        },
+      },
+      { type: 'separator' },
+      {
+        label: "Save",
+        accelerator: "CmdOrCtrl+S",
+        click: async () => {
+          mainWindow.webContents.send('saveFile')
+        },
+      },
+      {
+        label: "Save As...",
+        accelerator: "CmdOrCtrl+SHIFT+S",
+        click: async () => {
+          mainWindow.webContents.send('saveFileAs')
+        },
+      },
+      {
+        label: "Save All",
+        accelerator: "CmdOrCtrl+ALT+S",
+        click: async () => {
+          mainWindow.webContents.send('saveAll')
+        },
+      },
+      {
+        label: "Publish...",
+        click: async () => {
+          mainWindow.webContents.send('publishRepo')
+        },
+      },
+      { type: 'separator' },
+      {
+        label: "Close File",
+        accelerator: "CmdOrCtrl+W",
+        click: async () => {
+          mainWindow.webContents.send('closeFile')
+        },
+      },
+      {
+        label: "Close All Files",
+        click: async () => {
+          mainWindow.webContents.send('closeFiles')
+        },
+      },
+      ...!isMac ? [{ role: 'quit' }] : [],
     ]
   },
-  // { role: 'editMenu' }
   {
     label: 'Edit',
     submenu: [
@@ -45,56 +216,19 @@ const template = [
       { role: 'cut' },
       { role: 'copy' },
       { role: 'paste' },
-      ...(isMac ? [
-        { role: 'pasteAndMatchStyle' },
-        { role: 'delete' },
-        { role: 'selectAll' },
-        { type: 'separator' },
-        {
-          label: 'Speech',
-          submenu: [
-            { role: 'startspeaking' },
-            { role: 'stopspeaking' }
-          ]
-        }
-      ] : [
-        { role: 'delete' },
-        { type: 'separator' },
-        { role: 'selectAll' }
-      ])
+      { role: 'delete' },
+      // { type: 'separator' },
+      // { role: 'selectAll' },
     ]
   },
-  // { role: 'viewMenu' }
   {
     label: 'View',
     submenu: [
-      { role: 'reload' },
-      { role: 'forcereload' },
       { role: 'toggledevtools' },
-      { type: 'separator' },
-      { role: 'resetzoom' },
-      { role: 'zoomin' },
-      { role: 'zoomout' },
-      { type: 'separator' },
-      { role: 'togglefullscreen' }
+      { role: 'togglefullscreen' },
     ]
   },
-  // { role: 'windowMenu' }
-  {
-    label: 'Window',
-    submenu: [
-      { role: 'minimize' },
-      { role: 'zoom' },
-      ...(isMac ? [
-        { type: 'separator' },
-        { role: 'front' },
-        { type: 'separator' },
-        { role: 'window' }
-      ] : [
-        { role: 'close' }
-      ])
-    ]
-  },
+  { role: 'windowMenu' },
   {
     role: 'help',
     submenu: [
@@ -261,7 +395,7 @@ ipcMain.handle('get-save-path', (e, format) => {
 ipcMain.handle('get-load-path', (e, format) => {
   const name = (format == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
   return dialog.showOpenDialog({
-    properties: [],
+    properties: ['openFile'],
     filters: [
       { name, extensions: [format.toLowerCase()] },
       { name: 'All Files', extensions: ['*'] },

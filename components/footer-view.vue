@@ -28,7 +28,7 @@
           div(v-for="prop in description.properties")
             span {{ prop.title }}
             span(v-if="!prop.warn")
-              | {{ prop.value.toFixed(2) }} {{ prop.unit }}
+              | {{ prop.unit ? prop.value.toFixed(2) : prop.value }} {{ prop.unit }}
             span.warn(v-else) {{ prop.value }}
 
 </template>
@@ -269,6 +269,13 @@
               title: 'Length',
               unit: 'mm',
               value: item.length()
+            },
+          }
+        } else if(type == 'Sketch') {
+          return {
+            NumElems: {
+              title: 'Elements',
+              value: (item.sketch || item).elements.length,
             },
           }
         } else {

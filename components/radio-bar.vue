@@ -1,5 +1,7 @@
 <template lang="pug">
+
   .radio-bar(@mouseleave="$emit('unhover', chosen)")
+
     button.button(
       v-for="(item, key) in items"
       :title="item.title"
@@ -7,11 +9,14 @@
       @click.prevent="$emit('update:chosen', key)"
       @mouseenter="$emit('hover', key)"
     )
+
       Icon(:icon="item.icon")
+
 </template>
 
 
 <style lang="stylus" scoped>
+
   .radio-bar
     pointer-events: auto
     display: flex
@@ -21,16 +26,21 @@
     border-radius: 0
     flex: 1 1 auto
     text-shadow: none
+
     & + .button
       border-left: none
+
     .button + &
       border-right: none
+
     &:first-child
       border-top-left-radius: 4px
       border-bottom-left-radius: 4px
+
     &:last-child
       border-top-right-radius: 4px
       border-bottom-right-radius: 4px
+
     &.pressed
       background: $highlight
       border-color: lighten($highlight, 0%)
@@ -40,6 +50,7 @@
 
 
 <script>
+
   export default {
     name: 'RadioBar',
     props: {
@@ -47,4 +58,5 @@
       chosen: String,
     },
   }
+
 </script>

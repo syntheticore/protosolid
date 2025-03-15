@@ -4,7 +4,7 @@
 
   import materials from '../js/materials.js'
 
-  const props = defineProps(['component', 'face', 'displayMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -30,26 +30,25 @@
 
   renderNeeded.value = true
 
-  watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.component.creator.material], () => {
+  watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.creator.material], () => {
     faceMesh.material = getMaterial()
     renderNeeded.value = true
   })
 
-  function getMaterial() {
+  function getSurfaceMaterial() {
+    if(props.colorMode == 'component') return props.component.creator.compMaterial
     const material = props.component.getMaterial()
+    return material ? material.displayMaterial : materials.surface
+  }
 
-    const surfaceMaterial = material ?
-      material.displayMaterial
-      :
-      materials.surface
-
+  function getMaterial() {
     return highlighted.value || props.parentSelected ?
       materials.highlightSurface
       :
       props.displayMode == 'wireframe' ?
         materials.invisibleSurface
         :
-        props.parentActive ? surfaceMaterial : materials.ghostSurface
+        props.parentActive ? getSurfaceMaterial() : materials.ghostSurface
   }
 
   onUnmounted(() => {

@@ -6,6 +6,7 @@
     :face="face"
     :component="component"
     :display-mode="displayMode"
+    :color-mode="colorMode"
     :parent-active="parentActive"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
@@ -18,6 +19,7 @@
     :edge="edge"
     :component="component"
     :display-mode="displayMode"
+    :color-mode="colorMode"
     :parent-active="parentActive"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
@@ -28,7 +30,7 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')

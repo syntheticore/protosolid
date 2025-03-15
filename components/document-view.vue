@@ -5,7 +5,8 @@
     ViewPort(
       :document="document"
       :active-view="document.previewView || document.activeView"
-      :display-mode="previewDisplayMode || currentDisplayMode"
+      :display-mode="previewDisplayMode || displayMode"
+      :color-mode="previewColorMode || colorMode"
       v-model:active-tool="activeTool"
       v-model:highlight="highlight"
     )
@@ -50,10 +51,25 @@
 
       RadioBar(
         :items="displayModes"
-        v-model:chosen="currentDisplayMode"
+        v-model:chosen="displayMode"
         @hover="previewDisplayMode = $event"
         @unhover="previewDisplayMode = null"
       )
+
+      RadioBar(
+        :items="colorModes"
+        v-model:chosen="colorMode"
+        @hover="previewColorMode = $event"
+        @unhover="previewColorMode = null"
+      )
+
+      h1 POSE
+
+      .pose-buttons
+
+        IconButton(icon="check-circle") Keep
+
+        IconButton(icon="undo") Reset
 
     FooterView(
       :document="document"
@@ -123,6 +139,11 @@
     pointer-events: auto
     flex-direction: column
 
+  .pose-buttons > *
+    pointer-events: auto
+    width: 100%
+    margin-bottom: 0.5rem
+
   .view-port
     width: 100%
     height: 100%
@@ -170,19 +191,35 @@
         displayModes: {
           wireShade: {
             title: 'Shaded + Wire',
-            icon: 'magnet',
+            icon: 'wine-bottle',
           },
           wireframe: {
             title: 'Wireframe',
-            icon: 'clone',
+            icon: 'atlas',
           },
           shaded: {
             title: 'Shaded',
-            icon: 'box',
+            icon: 'umbrella-beach',
           },
         },
-        currentDisplayMode: null,
+        colorModes: {
+          component: {
+            title: 'Component Colors',
+            icon: 'box',
+          },
+          // random: {
+          //   title: 'Random Colors',
+          //   icon: 'dice',
+          // },
+          material: {
+            title: 'Materials',
+            icon: 'volleyball-ball',
+          },
+        },
+        displayMode: 'wireShade',
         previewDisplayMode: null,
+        colorMode: 'material',
+        previewColorMode: null,
       }
     },
 
@@ -206,7 +243,6 @@
     },
 
     mounted() {
-      this.currentDisplayMode = 'wireShade'
       this.bus.on('keydown', this.keyDown)
       this.bus.emit('activate-tool', ManipulationTool)
     },

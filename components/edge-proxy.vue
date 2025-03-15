@@ -4,7 +4,7 @@
 
   import materials from '../js/materials.js'
 
-  const props = defineProps(['component', 'edge', 'displayMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['component', 'edge', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -21,7 +21,7 @@
   window.alcRenderer.add(edgeMesh, props.parentActive)
   renderNeeded.value = true
 
-  watch(() => [highlight.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode], () => {
+  watch(() => [highlight.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
     edgeMesh.material = getMaterial()
     renderNeeded.value = true
   })
@@ -36,7 +36,10 @@
         props.parentHighlighted || props.parentSelected ?
           materials.selectionLine
           :
-          props.parentActive ? materials.wire : materials.ghostWire
+          props.parentActive ?
+            props.colorMode == 'component' ? props.component.creator.compLineMaterial : materials.wire
+            :
+            materials.ghostWire
   }
 
   onUnmounted(() => {

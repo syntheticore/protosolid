@@ -137,6 +137,7 @@
       // margin-right: 0
       margin: 0
       margin-bottom: 0
+      border-radius: 2px
       text-shadow: none
       position: relative
       width: 100%

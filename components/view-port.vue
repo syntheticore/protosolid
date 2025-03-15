@@ -39,6 +39,7 @@
         :document="document"
         :component="document.top()"
         :display-mode="displayMode"
+        :color-mode="colorMode"
         :active-handle="activeHandle"
         @handleMouseUp="mouseUp"
         @handleMouseDown="handleMouseDown"
@@ -182,6 +183,7 @@
       highlight: Object,
       activeView: Object,
       displayMode: String,
+      colorMode: String,
     },
 
     data() {

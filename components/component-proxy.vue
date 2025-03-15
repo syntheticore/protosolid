@@ -11,6 +11,7 @@
       :document="document"
       :component="component"
       :display-mode="displayMode"
+      :color-mode="colorMode"
       :parent-active="active"
       :parent-highlighted="highlighted"
       :parent-selected="selected"
@@ -73,6 +74,7 @@
       :document="document"
       :component="child"
       :display-mode="displayMode"
+      :color-mode="colorMode"
       :parent-active="active"
       :parent-highlighted="highlighted"
       :parent-selected="selected"
@@ -90,7 +92,7 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'displayMode', 'activeHandle', 'parentActive', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'parentActive', 'parentHighlighted', 'parentSelected'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 

@@ -6,6 +6,7 @@ import { Compound } from './geom3d.js'
 import { CreateComponentFeature } from './features.js'
 import { PlaneHelper, AxisHelper, PointHelper } from './helpers.js'
 import { rotationFromNormal, rad } from './utils.js'
+import materials from '../materials.js'
 
 
 export class ComponentDefinition {
@@ -19,10 +20,26 @@ export class ComponentDefinition {
     this.exportConfigs = []
     this.canvases = []
     this.itemsHidden = {}
-    this.color = color //this.makeColor(allFeatures)
+    this.color = color
+    this.compMaterial = materials.surface.clone()
+    this.compLineMaterial = materials.wire.clone()
+    this.updateMaterials()
   }
 
-  static undump(dump) { return Object.assign(new ComponentDefinition(), dump) }
+  updateMaterials() {
+    this.compMaterial.color.set(this.color)
+    this.compLineMaterial.color.set(this.color)
+  }
+
+  dump() {
+    return Object.assign({}, this, { compMaterial: undefined, compLineMaterial: undefined })
+  }
+
+  static undump(dump) {
+    const def = Object.assign(new ComponentDefinition(), dump)
+    def.updateMaterials()
+    return def
+  }
 }
 Serialize.register(ComponentDefinition, 'ComponentDefinition')
 

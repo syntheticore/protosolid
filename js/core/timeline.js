@@ -167,7 +167,7 @@ export class Timeline {
       if(feature instanceof CreateComponentFeature) {
         let parent = tree.findChild(feature.parent)
         const child = new Component(parent, feature.id)
-        child.creator = feature
+        child.creator = feature.definition
         parent.children.push(child)
       }
     })

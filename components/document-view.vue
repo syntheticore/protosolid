@@ -65,11 +65,7 @@
 
       h1 POSE
 
-      .pose-buttons
-
-        IconButton(icon="check-circle") Keep
-
-        IconButton(icon="undo") Reset
+      Acceptor
 
     FooterView(
       :document="document"
@@ -138,11 +134,6 @@
   .buttons
     pointer-events: auto
     flex-direction: column
-
-  .pose-buttons > *
-    pointer-events: auto
-    width: 100%
-    margin-bottom: 0.5rem
 
   .view-port
     width: 100%

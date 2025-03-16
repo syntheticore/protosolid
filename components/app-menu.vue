@@ -80,6 +80,7 @@
     font-size: 16px
     padding: 3px 6px
     padding-bottom: 2px
+    border-radius: 2px
     z-index: 1
     &:not(:hover)
       background: none

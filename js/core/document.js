@@ -7,6 +7,7 @@ import { Selection } from '../selection.js'
 import { Component } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
+import { makeID, lastId, setLastId } from './id.js'
 
 export default class Document extends Emitter {
   constructor() {
@@ -14,7 +15,6 @@ export default class Document extends Emitter {
 
     this.filePath = null
     this.timeline = new Timeline()
-    this.lastId = 1
     this.materials = []
 
     this.activeComponent = this.top()
@@ -27,28 +27,32 @@ export default class Document extends Emitter {
 
     this.views = [
       {
-        id: this.lastId++,
+        id: makeID(),
         title: 'Top',
         position: new THREE.Vector3(0.0, 0.0, 90.0),
         target: new THREE.Vector3(),
+        system: true,
       },
       {
-        id: this.lastId++,
+        id: makeID(),
         title: 'Front',
         position: new THREE.Vector3(0.0, 90.0, 0.0),
         target: new THREE.Vector3(),
+        system: true,
       },
       {
-        id: this.lastId++,
+        id: makeID(),
         title: 'Side',
         position: new THREE.Vector3(90.0, 0.0, 0.0),
         target: new THREE.Vector3(),
+        system: true,
       },
       {
-        id: this.lastId++,
+        id: makeID(),
         title: 'Home',
         position: new THREE.Vector3(90.0, 90.0, 90.0),
         target: new THREE.Vector3(),
+        system: true,
       },
     ]
     this.activeView = null
@@ -245,7 +249,7 @@ export default class Document extends Emitter {
 
   async save(as) {
     const dump = {
-      lastId: this.lastId,
+      lastId,
       timeline: this.timeline,
     }
     const json = Serialize.stringify(dump)
@@ -269,7 +273,8 @@ export default class Document extends Emitter {
     this.filePath = file.path
     this.isFresh = false
     const dump = Serialize.parse(file.data, { document: this, sketches: {} })
-    Object.assign(this, dump)
+    setLastId(Math.max(dump.lastId, lastId))
+    this.timeline = dump.timeline
     this.timeline.evaluate()
     this.activeComponent = this.top()
   }

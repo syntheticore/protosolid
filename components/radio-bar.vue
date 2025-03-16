@@ -10,7 +10,7 @@
       @mouseenter="$emit('hover', key)"
     )
 
-      Icon(:icon="item.icon")
+      Icon(:icon="item.icon" fixed-width)
 
 </template>
 

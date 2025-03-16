@@ -62,7 +62,7 @@
     border-top-right-radius: 3px
     border-bottom-left-radius: 6px
     border-bottom-right-radius: 6px
-    width: 620px
+    width: 630px
 
   .main
     display: flex
@@ -76,6 +76,9 @@
     justify-content: center
     gap: 0.5rem
     padding-inline: 0.5rem
+
+    svg
+      padding-inline: 8px
 
     .hot-key
       top: 6px

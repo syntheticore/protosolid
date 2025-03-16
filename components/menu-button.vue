@@ -24,7 +24,7 @@
 <style lang="stylus" scoped>
 
   .menu-button
-    position: relative
+    // position: relative
     display: inline-block
     margin: 4px 5px
 
@@ -35,14 +35,14 @@
       button
         padding: 4px 8px
 
-      // .pop-up
-      //   top: 22px
+      .pop-up
+        top: 23px
 
     &.left
 
       .pop-up
         right: unset
-        left: -12px
+        left: -9px
 
         &::before
           right: unset
@@ -98,8 +98,8 @@
     z-index: 2
     transition: all 0.2s
     pointer-events: auto
-    top: 23px
-    right: -12px
+    top: 28px
+    right: -7px
     font-size: 12px
     margin: 12px
     text-align: left

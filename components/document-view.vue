@@ -121,7 +121,7 @@
     &.right
       top: (14 + 38)px
       right: 14px
-      bottom: 35px
+      bottom: 5px
       width: 110px
       display: flex
       flex-direction: column

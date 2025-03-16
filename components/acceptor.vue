@@ -2,13 +2,13 @@
 
   .acceptor
 
-    button.button.accept
+    button.button.accept(@click="$emit('accept')")
 
       Icon(icon="check-circle" fixed-width)
 
       | Keep
 
-    button.button.reject
+    button.button.reject(@click="$emit('reject')")
 
       Icon(icon="undo" fixed-width)
 

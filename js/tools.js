@@ -1,4 +1,4 @@
-// import * as THREE from 'three'
+import * as THREE from 'three'
 
 // import {
 //   vecToThree,
@@ -13,6 +13,10 @@ import {
   Arc,
   Spline,
 } from './core/geom2d.js'
+
+import {
+  Solid,
+} from './core/geom3d.js'
 
 import {
   CoincidentConstraint,
@@ -140,6 +144,14 @@ export class ManipulationTool extends HighlightTool {
 
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
+    // const sel = this.viewport.document.selection.items[0]
+    const object = await this.getObject(coords)
+    if(object instanceof Solid) {
+      this.object = object
+      this.startCoords = coords
+      this.startTransform = this.object.component.transform || new THREE.Matrix4()
+    }
+    console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
     this.snapToPoints = true
     this.cursor = 'grabbing'
@@ -150,8 +162,10 @@ export class ManipulationTool extends HighlightTool {
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'
+    delete this.object
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
+    // Auto-constrain snapped points
     if(sketch && handle) {
       sketch.elements.forEach(elem => {
         if(elem == handle.elem) return
@@ -166,15 +180,34 @@ export class ManipulationTool extends HighlightTool {
   mouseMove(vec, coords) {
     const handle = this.viewport.activeHandle
     const dimension = this.viewport.activeDimension
+
+    // Drag Handles
     if(handle) {
       let handles = handle.elem.handles()
       handles[handle.index] = vec//.toArray()
       handle.elem.setHandles(handles, false)
       this.viewport.updateSketch(true)
-      // this.viewport.elementChanged()
+
+    // Drag Dimensions
     } else if(dimension) {
       dimension.position = vec
       this.viewport.updateSketch()
+
+    // Drag Solids
+    } else if(this.object) {
+      const cameraMatrix = this.viewport.renderer.camera.matrixWorld
+      const right = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 0)
+      const up = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 1)
+
+      const scale = 0.5
+      const diffX = coords.x - this.startCoords.x
+      const diffY = coords.y - this.startCoords.y
+      const transX = new THREE.Matrix4().makeTranslation(right.multiplyScalar(diffX * scale))
+      const transY = new THREE.Matrix4().makeTranslation(up.multiplyScalar(-diffY * scale))
+
+      const comp = this.object.component
+      comp.transform = this.startTransform.clone().multiply(transX).multiply(transY)
+
     } else {
       super.mouseMove(vec, coords)
     }

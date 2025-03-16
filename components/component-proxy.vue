@@ -15,6 +15,7 @@
       :parent-active="active"
       :parent-highlighted="highlighted"
       :parent-selected="selected"
+      :parent-transform="transform"
     )
 
   //- Sketches
@@ -78,6 +79,7 @@
       :parent-active="active"
       :parent-highlighted="highlighted"
       :parent-selected="selected"
+      :parent-transform="transform"
       @handleMouseUp="handleMouseUp"
       @handleMouseDown="handleMouseDown"
       @handleMouseMove="handleMouseMove"
@@ -92,7 +94,9 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'parentActive', 'parentHighlighted', 'parentSelected'])
+  import * as THREE from 'three'
+
+  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
@@ -101,6 +105,12 @@
   const active = computed(() => props.parentActive || props.component == props.document.activeComponent )
   const highlighted = computed(() => props.parentHighlighted || props.component == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.component) )
+
+  const transform = computed(() => {
+    return (props.parentTransform || new THREE.Matrix4())
+      .clone()
+      .multiply(props.component.transform || new THREE.Matrix4())
+  })
 
   const compound = computed(() => {
     // Slice model using visible section views

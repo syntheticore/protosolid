@@ -193,7 +193,9 @@ export default class Document extends Emitter {
         }
 
         // Restore component visiblities
-        this.activeFeature.modifiedComponents().forEach(id => this.getComponent(id).creator.hidden = this.oldVisibility[id] )
+        this.activeFeature.modifiedComponents().forEach(id =>
+          this.getComponent(id).creator.hidden = this.oldVisibility[id]
+        )
 
         // Restore marker
         if(resetMarker && this.previousMarker != this.timeline.marker) this.regenerate(this.previousMarker)
@@ -273,9 +275,11 @@ export default class Document extends Emitter {
     this.filePath = file.path
     this.isFresh = false
     const dump = Serialize.parse(file.data, { document: this, sketches: {} })
-    setLastId(Math.max(dump.lastId, lastId))
+    setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
     this.timeline = dump.timeline
     this.timeline.evaluate()
     this.activeComponent = this.top()
   }
 }
+
+const bigIntMax = (...args) => args.reduce((m, e) => e > m ? e : m)

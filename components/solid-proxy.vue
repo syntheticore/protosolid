@@ -10,6 +10,7 @@
     :parent-active="parentActive"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
+    :parent-transform="parentTransform"
   )
 
   EdgeProxy(
@@ -23,6 +24,7 @@
     :parent-active="parentActive"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
+    :parent-transform="parentTransform"
   )
 
 </template>
@@ -30,7 +32,7 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')

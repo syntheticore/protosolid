@@ -81,7 +81,7 @@ export class Component {
   constructor(parent, id) {
     this.parent = parent
     this.id = id
-    this.transform = new THREE.Matrix4()
+    this.transform = null
     this.compound = new Compound(this.id)
     this.sketches = []
     this.helpers = [
@@ -103,7 +103,7 @@ export class Component {
   deepClone(parent) {
     const clone = new Component(parent, this.id)
     Object.assign(clone, {
-      transform: this.transform.clone(),
+      transform: this.transform && this.transform.clone(),
       compound: this.compound.cloneCached(),
       sketches: [...this.sketches],
       helpers: [...this.helpers],
@@ -184,6 +184,15 @@ export class Component {
       if(index == -1) params.push(other)
     })
     return params
+  }
+
+  hasPoseChange() {
+    return !!this.transform || this.children.some(child => child.hasPoseChange() )
+  }
+
+  resetPose() {
+    this.transform = null
+    this.children.forEach(child => child.resetPose() )
   }
 
   // Terminate component during serialization to avoid cyclic references

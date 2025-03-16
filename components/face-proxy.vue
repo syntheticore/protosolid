@@ -4,7 +4,7 @@
 
   import materials from '../js/materials.js'
 
-  const props = defineProps(['component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -26,6 +26,12 @@
     faceMesh.receiveShadow = props.parentActive
     window.alcRenderer.remove(faceMesh)
     window.alcRenderer.add(faceMesh, props.parentActive)
+  }, { immediate: true })
+
+  watch(() => props.parentTransform, () => {
+    faceMesh.matrix.copy(props.parentTransform)
+    faceMesh.matrix.decompose(faceMesh.position, faceMesh.quaternion, faceMesh.scale)
+    renderNeeded.value = true
   }, { immediate: true })
 
   renderNeeded.value = true

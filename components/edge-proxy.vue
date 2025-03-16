@@ -4,7 +4,7 @@
 
   import materials from '../js/materials.js'
 
-  const props = defineProps(['component', 'edge', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['component', 'edge', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -16,6 +16,12 @@
   watch(() => props.edge, () => {
     props.edge.mesh = () => edgeMesh
     edgeMesh.alcObject = props.edge
+  }, { immediate: true })
+
+  watch(() => props.parentTransform, () => {
+    edgeMesh.matrix.copy(props.parentTransform)
+    edgeMesh.matrix.decompose(edgeMesh.position, edgeMesh.quaternion, edgeMesh.scale)
+    renderNeeded.value = true
   }, { immediate: true })
 
   window.alcRenderer.add(edgeMesh, props.parentActive)

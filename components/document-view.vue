@@ -47,6 +47,7 @@
 
         IconButton(icon="solar-panel" @click="lookAtPlane" title="Look at nearest plane")
 
+
       h1 DISPLAY
 
       RadioBar(
@@ -63,9 +64,11 @@
         @unhover="previewColorMode = null"
       )
 
-      h1 POSE
+      .pose(:class="{ hidden: !document.top().hasPoseChange() }")
 
-      Acceptor
+        h1 POSE
+
+        Acceptor(@reject="document.top().resetPose()")
 
     FooterView(
       :document="document"
@@ -95,7 +98,6 @@
 
   .side-bar
     position: absolute
-    top: 38px
     bottom: 0
     pointer-events: none
 
@@ -111,25 +113,38 @@
       text-shadow: 0 1px 2px rgba(0,0,0, 0.7)
 
     &.left
+      top: 38px
       left: 0
       overflow: hidden
 
     &.right
-      top: (14 + 38)px
-      right: 14px
-      bottom: 5px
+      // top: (14 + 38)px
+      top: 34px
+      right: 12px
+      bottom: 0.25rem
       width: 110px
       display: flex
       flex-direction: column
 
-      h1:not(:first-child)
+      h1
         margin-top: 1rem
-        // flex: 0 0 content
 
       .view-chooser
       .radio-bar
-        // flex: 0 1 auto
         margin-bottom: 0.5rem
+
+    .pose
+      transition: all 0.25s
+      height: 85px
+      flex: 0 0 auto
+
+      &.hidden
+        opacity: 0
+        height: 0
+        transform: translateY(10px)
+
+      h1
+        margin-top: 0.5rem
 
   .buttons
     pointer-events: auto

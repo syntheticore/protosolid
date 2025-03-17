@@ -11,6 +11,7 @@ export default class Serialize {
     // Arrays
     if(Array.isArray(obj)) return obj.map(value => this.serialize(value) )
 
+    // BigInts
     if(typeof obj === 'bigint') return obj.toString() + 'n'
 
     // Base Types
@@ -42,6 +43,7 @@ export default class Serialize {
     // Arrays
     if(Array.isArray(dump)) return dump.map(value => this.deserialize(value, context) )
 
+    // BigInts
     if(typeof dump == 'string' && /^\d+n$/.test(dump)) return BigInt(dump.slice(0, -1))
 
     // Base Types

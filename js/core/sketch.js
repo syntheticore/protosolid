@@ -493,7 +493,7 @@ export class Constraint {
     this.items.forEach(item => item.update(tree) )
   }
 
-  static undump(dump) { return new Constraint(...dump.items) }
+  static undump(dump) { return new this(...dump.items) }
 }
 
 export class HorVertConstraint extends Constraint {

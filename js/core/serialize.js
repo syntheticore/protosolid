@@ -11,6 +11,8 @@ export default class Serialize {
     // Arrays
     if(Array.isArray(obj)) return obj.map(value => this.serialize(value) )
 
+    if(typeof obj === 'bigint') return obj.toString() + 'n'
+
     // Base Types
     if(!isObject(obj)) return obj
 
@@ -39,6 +41,8 @@ export default class Serialize {
   static deserialize(dump, context) {
     // Arrays
     if(Array.isArray(dump)) return dump.map(value => this.deserialize(value, context) )
+
+    if(typeof dump == 'string' && /^\d+n$/.test(dump)) return BigInt(dump.slice(0, -1))
 
     // Base Types
     if(!isObject(dump)) return dump

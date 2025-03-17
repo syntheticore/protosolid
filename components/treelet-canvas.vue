@@ -15,7 +15,7 @@
 
         Icon.icon(icon="image" fixed-width)
 
-        h2 {{ canvas.src || 'Canvas' }}
+        h2(:title="canvas.src") {{ canvas.src || 'Canvas' }}
 
         Icon.expand(icon="angle-right")
 

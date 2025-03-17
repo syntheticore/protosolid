@@ -92,7 +92,7 @@
   watch(renderNeeded, () => {
     if(!renderNeeded.value) return
     window.alcRenderer && window.alcRenderer.render()
-    nextTick().then(() => renderNeeded.value = false )
+    renderNeeded.value = false
   })
 
   // const store = useMainStore()

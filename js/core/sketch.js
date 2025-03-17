@@ -493,6 +493,12 @@ export class Constraint {
     this.items.forEach(item => item.update(tree) )
   }
 
+  dump() {
+    return {
+      items: this.items,
+    }
+  }
+
   static undump(dump) { return new this(...dump.items) }
 }
 

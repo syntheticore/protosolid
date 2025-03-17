@@ -29,7 +29,7 @@
 
   watch(() => [highlight.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
     edgeMesh.material = getMaterial()
-    renderNeeded.value = true
+    nextTick().then(() => renderNeeded.value = true )
   })
 
   function getMaterial() {

@@ -109,22 +109,32 @@ Serialize.register(SolidReference, 'SolidReference')
 
 
 export class CurveReference extends Reference {
-  update(_tree) {
-    if(!this.item.projection) return
-    this.item = this.item.projection.geometry()
+  constructor(item, componentId, sketchId, isProjection, itemId) {
+    super(item)
+    this.componentId = componentId || item.sketch.component.id
+    this.sketchId = sketchId || item.sketch.id
+    this.isProjection = isProjection !== undefined ? isProjection : !!item.projection
+    this.itemId = itemId || (this.isProjection ? item.projection.id : item.id)
+  }
+
+  update(tree) {
+    const comp = tree.findChild(this.componentId)
+    const sketch = comp.sketches.find(sketch => sketch.id == this.sketchId )
+    const item = (this.isProjection ? sketch.projections : sketch.elements).find(item => item.id == this.itemId )
+    this.item = this.isProjection ? item.geometry() : item
   }
 
   dump() {
     return {
-      id: this.item.id,
-      sketchId: this.item.sketch.id,
+      componentId: this.componentId,
+      sketchId: this.sketchId,
+      isProjection: this.isProjection,
+      itemId: this.itemId,
     }
   }
 
   static undump(dump, context) {
-    const sketch = context.sketches[dump.sketchId]
-    const curve = sketch.elements.find(elem => elem.id == dump.id )
-    return new CurveReference(curve)
+    return new this(null, dump.componentId, dump.sketchId, dump.isProjection, dump.itemId)
   }
 }
 Serialize.register(CurveReference, 'CurveReference')

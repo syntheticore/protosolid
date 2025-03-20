@@ -401,6 +401,7 @@ Serialize.register(Sketch, 'Sketch')
 
 export class Projection {
   constructor(itemOrRef) {
+    this.id = makeID()
     this.itemRef = itemOrRef instanceof Edge ?
       new EdgeReference(itemOrRef)
       :

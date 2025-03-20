@@ -94,14 +94,17 @@
       fill-opacity: 0
       stroke-width: 2
       stroke-linecap: round
+
     line
       stroke: white
       stroke-dasharray: 3, 7
+
     path
       opacity: 0.7
       stroke-dasharray: 4, 7
 
   .anchor
+
     &::after
       transform: scale(1)
       opacity: 1
@@ -110,17 +113,15 @@
       border: 2px solid $highlight * 1.6
       animation-duration: 0.15s
       animation-name: focus
-    @keyframes focus {
-      from {
+
+    @keyframes focus
+      from
         opacity: 0
         transform: scale(1.7)
-      }
 
-      to {
+      to
         transform: scale(1)
         opacity: 1
-      }
-    }
 
   .selector-widget
     pointer-events: auto

@@ -139,11 +139,26 @@ export class Profile {
 
   tesselate() {
     let polyRings = this.rings.map(wire => wire.tesselate() )
-    const flatVertices = polyRings[0].map(p => [p[0], p[1]] ).flat()
-    var vertices = earcut(flatVertices, [], 2).map(v => polyRings[0][v] )
+
+    const outerRing = polyRings[0].flatMap(p => [p[0], p[1]] )
+    let holeRings = polyRings.slice(1).map(ring => ring.flatMap(p => [p[0], p[1]]) )
+
+    let holeIndices = []
+    let indexOffset = outerRing.length / 2 // Each point has 2 coordinates (x, y)
+    for(let hole of holeRings) {
+      holeIndices.push(indexOffset)
+      indexOffset += hole.length / 2
+    }
+
+    let indices = earcut([...outerRing, ...holeRings.flat()], holeIndices, 2)
+
+    // Map back to original positions
+    const vertices = polyRings.flat()
+    let triangulatedVertices = indices.map(i => vertices[i] )
+
     return {
-      positions: vertices.flat(),
-      normals: vertices.flatMap(v => [0.0, 0.0, 1.0] ),
+      positions: triangulatedVertices.flat(),
+      normals: triangulatedVertices.flatMap(v => [0.0, 0.0, 1.0]),
     }
   }
 
@@ -160,6 +175,40 @@ export class Profile {
 
   normal() {
     return normalFromMatrix(this.sketch.workplane)
+  }
+
+  getBaseId(curve) {
+    return curve.id.split('/')[0]
+  }
+
+  makeFace() {
+    const wires = this.rings.map(ring => ring.transformed(this.sketch.workplane) )
+    const face = new window.oc.oc.BRepBuilderAPI_MakeFace_15(wires[0], true)
+    wires.slice(1).forEach(wire => face.Add(wire) )
+    return face.Face()
+  }
+
+  makeCompound(componentId, shape, featureId) {
+    const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
+
+    const originals = this.rings.flatMap(ring => ring.segments )
+    const solid = compound.solids()[0]
+
+    // Name faces
+    const faces = solid.faces()
+    originals.forEach((seg, i) => {
+      faces[i].id = '/' + featureId + '/swept/' + this.getBaseId(seg)
+    })
+    faces[faces.length - 2].id = '/' + featureId + '/bottom'
+    faces[faces.length - 1].id = '/' + featureId + '/top'
+
+    // Name all edges in new solid according to their connected faces
+    solid.edges().forEach(edge => {
+      const faces = edge.connectedFaces()
+      edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
+    })
+
+    return compound
   }
 
   extrude(componentId, height, featureId) {
@@ -180,38 +229,6 @@ export class Profile {
     const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true) //XXX BRepFeat_MakeRevol
     return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId)
-  }
-
-  makeFace() {
-    const wire = this.rings[0].transformed(this.sketch.workplane)
-    return new window.oc.oc.BRepBuilderAPI_MakeFace_15(wire, true).Face()
-  }
-
-  makeCompound(componentId, shape, featureId) {
-    const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
-
-    const originals = [...this.rings[0].segments]
-    const solid = compound.solids()[0]
-
-    // Name faces
-    const faces = solid.faces()
-    originals.forEach((seg, i) => {
-      faces[i].id = '/' + featureId + '/swept/' + this.getBaseId(seg)
-    })
-    faces[faces.length - 2].id = '/' + featureId + '/bottom'
-    faces[faces.length - 1].id = '/' + featureId + '/top'
-
-    // Name all edges in new solid according to their connected faces
-    solid.edges().forEach(edge => {
-      const faces = edge.connectedFaces()
-      edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
-    })
-
-    return compound
-  }
-
-  getBaseId(curve) {
-    return curve.id.split('/')[0]
   }
 
   update() {

@@ -290,6 +290,12 @@ export class Sketch {
           { id: `${id++}`, type: 'coordinate_y', p_id: pointPrims[1].id, y: pointPrims[1].y },
         ]
 
+      } else if(c instanceof TouchConstraint) {
+        const pointRef = c.items.find(item => item.index !== undefined )
+        const pointPrim = idMap[pointRef.curve().id][pointRef.index]
+        const linePrim = idMap[c.items.find(item => item.index === undefined ).curve().id].slice(-1)[0]
+        return { id: `${id++}`, type: 'point_on_line_pl', p_id: pointPrim.id, l_id: linePrim.id, temporary: c.temporary }
+
       } else if(c instanceof PerpendicularConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
@@ -532,6 +538,11 @@ export class CoincidentConstraint extends Constraint {
   typename() { return 'Coincident Constraint' }
 }
 Serialize.register(CoincidentConstraint, 'CoincidentConstraint')
+
+export class TouchConstraint extends Constraint {
+  static icon = 'asterisk'
+  typename() { return 'Touch Constraint' }
+}
 
 export class PerpendicularConstraint extends Constraint {
   static icon = 'angle-up'

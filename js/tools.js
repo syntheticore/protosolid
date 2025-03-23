@@ -20,6 +20,7 @@ import {
 
 import {
   CoincidentConstraint,
+  TouchConstraint,
   PerpendicularConstraint,
   HorVertConstraint,
   ParallelConstraint,
@@ -562,6 +563,14 @@ export class ConstraintTool extends HighlightTool {
   }
 
   isComplete(counts) {}
+}
+
+export class TouchConstraintTool extends ConstraintTool {
+  static constraintType = TouchConstraint
+  static icon = 'asterisk'
+  static selectors = ['point', 'axis']
+
+  isComplete(counts) { return counts.point == 1 && counts.axis == 1 }
 }
 
 export class HorVertConstraintTool extends ConstraintTool {

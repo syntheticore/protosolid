@@ -249,6 +249,7 @@
     CircleTool,
     ArcTool,
     TrimTool,
+    TouchConstraintTool,
     PerpendicularConstraintTool,
     HorVertConstraintTool,
     ParallelConstraintTool,
@@ -329,7 +330,6 @@
             title: 'Edit Sketch',
             sketchOnly: true,
             tools: [
-              { title: 'Reference', action: this.toggleReference, icon: 'asterisk' },
               { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
               { title: 'Break', icon: 'layer-group' },
               { title: 'Extend', icon: 'layer-group' },
@@ -343,7 +343,7 @@
             sketchOnly: true,
             tools: [
               { title: 'Dimension', tool: DimensionTool, hotKey: 'D', keyCode: 68 },
-              { title: 'Touch', icon: 'object-group' },
+              { title: 'Touch', tool: TouchConstraintTool },
               { title: 'Parallel', tool: ParallelConstraintTool }, //XXX Use also for hor/vert
               { title: 'Perpendicular', tool: PerpendicularConstraintTool },
               { title: 'Hor/Vert', tool: HorVertConstraintTool },

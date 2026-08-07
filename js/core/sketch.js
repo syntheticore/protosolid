@@ -398,6 +398,8 @@ export class Sketch {
     const sketch = new Sketch()
     Object.assign(sketch, dump)
     sketch.elements.forEach(elem => elem.sketch = sketch )
+    sketch.constraints.forEach(constraint => constraint.sketch = sketch )
+    sketch.projections.forEach(projection => projection.sketch = sketch )
     context.sketches[sketch.id] = sketch
     return sketch
   }
@@ -506,7 +508,12 @@ export class Constraint {
     }
   }
 
-  static undump(dump) { return new this(...dump.items) }
+  static undump(dump) {
+    const constraint = Object.create(this.prototype)
+    Object.assign(constraint, dump)
+    delete constraint.$class
+    return constraint
+  }
 }
 
 export class HorVertConstraint extends Constraint {
@@ -526,12 +533,21 @@ export class HorVertConstraint extends Constraint {
   typename() { return (this.isVertical ? 'Vertical' : 'Horizontal') + ' Constraint' }
 
   icon() { return this.isVertical ? 'ruler-vertical' : 'ruler-horizontal' }
+
+  dump() {
+    return {
+      ...super.dump(),
+      isVertical: this.isVertical,
+    }
+  }
 }
+Serialize.register(HorVertConstraint, 'HorVertConstraint')
 
 export class FixConstraint extends Constraint {
   static icon = 'lock'
   typename() { return 'Fix Constraint' }
 }
+Serialize.register(FixConstraint, 'FixConstraint')
 
 export class CoincidentConstraint extends Constraint {
   static icon = 'bullseye'
@@ -543,26 +559,31 @@ export class TouchConstraint extends Constraint {
   static icon = 'asterisk'
   typename() { return 'Touch Constraint' }
 }
+Serialize.register(TouchConstraint, 'TouchConstraint')
 
 export class PerpendicularConstraint extends Constraint {
   static icon = 'angle-up'
   typename() { return 'Perpendicular Constraint' }
 }
+Serialize.register(PerpendicularConstraint, 'PerpendicularConstraint')
 
 export class ParallelConstraint extends Constraint {
   static icon = 'exchange-alt'
   typename() { return 'Parallel Constraint' }
 }
+Serialize.register(ParallelConstraint, 'ParallelConstraint')
 
 export class EqualConstraint extends Constraint {
   static icon = 'equals'
   typename() { return 'Equal Constraint' }
 }
+Serialize.register(EqualConstraint, 'EqualConstraint')
 
 export class TangentConstraint extends Constraint {
   static icon = 'bezier-curve'
   typename() { return 'Tangent Constraint' }
 }
+Serialize.register(TangentConstraint, 'TangentConstraint')
 
 export class Dimension extends Constraint {
   static icon = 'ruler'
@@ -584,4 +605,13 @@ export class Dimension extends Constraint {
       this.distance = aPoint.clone().projectOnVector(dir).distanceTo(aPoint)
     }
   }
+
+  dump() {
+    return {
+      ...super.dump(),
+      position: this.position,
+      distance: this.distance,
+    }
+  }
 }
+Serialize.register(Dimension, 'Dimension')

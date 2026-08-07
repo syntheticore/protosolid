@@ -159,8 +159,14 @@ export class ProfileReference extends Reference {
 
   static undump(dump, context) {
     const sketch = context.sketches[dump.sketchId]
+    // Profile rings refer to the segments produced after intersecting sketch
+    // elements (for example, `circle-id/0`), not necessarily to the original
+    // elements stored on the sketch. Recreate those segments before resolving
+    // the saved ring IDs.
+    const elements = sketch.removeEmpties(sketch.elements)
+    const segments = elements.flatMap(elem => elem.split(elements))
     const rings = dump.rings.map(ring => {
-      const region = ring.map(segId => sketch.elements.find(elem => elem.id == segId ) )
+      const region = ring.map(segId => segments.find(elem => elem.id == segId))
       return new Wire(region)
     })
     const profile = new Profile(sketch, rings)

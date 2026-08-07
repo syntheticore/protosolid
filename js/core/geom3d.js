@@ -765,11 +765,18 @@ export class Compound extends Volumetric {
 
   boolean(other, op) {
     if(!other.geom) throw { type: 'error', msg: "Tool body has no volume" }
+
+    if(op == 'create') {
+      if(!this.geom) return this.cloneCached(other.geom(), other.solids())
+      return this.merge([other])
+    }
+
     if(!this.geom) return this.cloneCached(other.geom(), other.solids())
 
     const ops = {
       join: window.oc.oc.BRepAlgoAPI_Fuse_3,
       cut: window.oc.oc.BRepAlgoAPI_Cut_3,
+      intersect: window.oc.oc.BRepAlgoAPI_Common_3,
     }
     const algo = new ops[op](this.geom(), other.geom(), new window.oc.oc.Message_ProgressRange_1())
     return this.track(algo, op, other)

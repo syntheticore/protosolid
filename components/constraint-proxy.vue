@@ -23,7 +23,7 @@
       @mouseup="$emit('dimensionMouseUp', $event, constraint)"
       @mousedown="$emit('dimensionMouseDown', $event, constraint)"
       @mousemove="$emit('dimensionMouseMove', $event, constraint)"
-    ) {{ constraint.distance.toFixed(2) }}
+    ) {{ constraint.distance.toFixed(2) }}{{ constraint.isAngular() ? '°' : '' }}
 
     Transition(name="hide-dimension")
 

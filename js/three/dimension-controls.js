@@ -16,6 +16,8 @@ export default class DimensionControls extends THREE.Object3D {
 
     const isCircle = itemL.curve() instanceof Circle
     const isArc = itemL.curve() instanceof Arc
+    const isPointDistance = constraint.isPointDistance()
+    const isAngular = constraint.isAngular()
 
     // Circle/Arc diameter/radius
     if(isCircle || isArc) {
@@ -81,30 +83,19 @@ export default class DimensionControls extends THREE.Object3D {
         }
       }
 
+    // Point to point distance
+    } else if(isPointDistance) {
+      const points = constraint.items.map(item => item.curve().handles()[item.index].clone())
+      makeLinearDimension(this, renderer, points[0], points[1], constraint.position)
+
+    // Line to line angle
+    } else if(isAngular) {
+      makeAngularDimension(this, renderer, constraint)
+
     // Line length
     } else if(!itemR) {
       const [start, end] = itemL.curve().endpoints().map(point => point.clone())
-      const direction = end.clone().sub(start).normalize()
-      const normal = new THREE.Vector3(-direction.y, direction.x, 0)
-      const offset = constraint.position.clone().sub(start).dot(normal)
-      const offsetDirection = normal.clone().multiplyScalar(Math.sign(offset) || 1)
-
-      const dimStart = start.clone().add(normal.clone().multiplyScalar(offset))
-      const dimEnd = end.clone().add(normal.clone().multiplyScalar(offset))
-      const extension = offsetDirection.multiplyScalar(1)
-
-      const lineStart = dimStart.clone()
-      const lineEnd = dimEnd.clone()
-      const labelOffset = constraint.position.clone().sub(dimStart).dot(direction)
-      const lineLength = start.distanceTo(end)
-      if(labelOffset < 0) lineStart.copy(constraint.position)
-      if(labelOffset > lineLength) lineEnd.copy(constraint.position)
-
-      this.add(renderer.convertLine([start.toArray(), dimStart.clone().add(extension).toArray()], materials.wire))
-      this.add(renderer.convertLine([end.toArray(), dimEnd.clone().add(extension).toArray()], materials.wire))
-      this.add(renderer.convertLine([lineStart.toArray(), lineEnd.toArray()], materials.wire))
-      this.add(makeArrow(dimStart, direction))
-      this.add(makeArrow(dimEnd, direction.clone().negate()))
+      makeLinearDimension(this, renderer, start, end, constraint.position)
 
     // Line/line distance
     } else {
@@ -159,6 +150,73 @@ export default class DimensionControls extends THREE.Object3D {
 
 function makeArrow(pos, dir) {
   return new THREE.ArrowHelper(dir, pos, 0.0, 'darkgray', 1.5, 0.75)
+}
+
+function makeLinearDimension(controls, renderer, start, end, position) {
+  const direction = end.clone().sub(start).normalize()
+  const normal = new THREE.Vector3(-direction.y, direction.x, 0)
+  const offset = position.clone().sub(start).dot(normal)
+  const offsetDirection = normal.clone().multiplyScalar(Math.sign(offset) || 1)
+
+  const dimStart = start.clone().add(normal.clone().multiplyScalar(offset))
+  const dimEnd = end.clone().add(normal.clone().multiplyScalar(offset))
+  const extension = offsetDirection.multiplyScalar(1)
+
+  const lineStart = dimStart.clone()
+  const lineEnd = dimEnd.clone()
+  const labelOffset = position.clone().sub(dimStart).dot(direction)
+  const lineLength = start.distanceTo(end)
+  if(labelOffset < 0) lineStart.copy(position)
+  if(labelOffset > lineLength) lineEnd.copy(position)
+
+  controls.add(renderer.convertLine([start.toArray(), dimStart.clone().add(extension).toArray()], materials.wire))
+  controls.add(renderer.convertLine([end.toArray(), dimEnd.clone().add(extension).toArray()], materials.wire))
+  controls.add(renderer.convertLine([lineStart.toArray(), lineEnd.toArray()], materials.wire))
+  controls.add(makeArrow(dimStart, direction))
+  controls.add(makeArrow(dimEnd, direction.clone().negate()))
+}
+
+function makeAngularDimension(controls, renderer, constraint) {
+  const curves = constraint.items.map(item => item.curve())
+  const center = lineIntersection(curves[0], curves[1])
+  if(!center) return
+
+  const directions = curves.map(curve => curve.direction().normalize())
+  const towardPosition = constraint.position.clone().sub(center)
+  directions.forEach(direction => {
+    if(direction.dot(towardPosition) < 0) direction.negate()
+  })
+
+  const radius = Math.max(towardPosition.length(), 1)
+  const startAngle = Math.atan2(directions[0].y, directions[0].x)
+  const delta = Math.atan2(
+    directions[0].x * directions[1].y - directions[0].y * directions[1].x,
+    directions[0].dot(directions[1]),
+  )
+  const arc = Array.from({ length: 33 }, (_value, index) => {
+    const angle = startAngle + delta * index / 32
+    return [center.x + Math.cos(angle) * radius, center.y + Math.sin(angle) * radius, center.z]
+  })
+
+  const ray1 = center.clone().add(directions[0].clone().multiplyScalar(radius + 1))
+  const ray2 = center.clone().add(directions[1].clone().multiplyScalar(radius + 1))
+  controls.add(renderer.convertLine([center.toArray(), ray1.toArray()], materials.wire))
+  controls.add(renderer.convertLine([center.toArray(), ray2.toArray()], materials.wire))
+  controls.add(renderer.convertLine(arc, materials.wire))
+  controls.add(makeArrow(new THREE.Vector3().fromArray(arc[0]), directions[0].clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(delta) * Math.PI / 2)))
+  controls.add(makeArrow(new THREE.Vector3().fromArray(arc.at(-1)), directions[1].clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), -Math.sign(delta) * Math.PI / 2)))
+}
+
+function lineIntersection(left, right) {
+  const originL = left.handles()[0]
+  const originR = right.handles()[0]
+  const dirL = left.direction()
+  const dirR = right.direction()
+  const cross = dirL.x * dirR.y - dirL.y * dirR.x
+  if(Math.abs(cross) < 1e-8) return
+  const diff = originR.clone().sub(originL)
+  const t = (diff.x * dirR.y - diff.y * dirR.x) / cross
+  return originL.clone().add(dirL.multiplyScalar(t))
 }
 
 function makeArc(controls, renderer, circle, constraintPos) {

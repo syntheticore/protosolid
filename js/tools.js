@@ -686,7 +686,7 @@ export class DimensionTool extends HighlightTool {
 
     } else if(this.items.length == 1 && this.items[0] instanceof Line) {
       const curve = await this.getObject(coords)
-      if(this.isParallelLine(curve)) {
+      if(curve instanceof Line && curve != this.items[0]) {
         this.items.push(curve)
         this.updatePreview(vec)
       } else {
@@ -711,13 +711,6 @@ export class DimensionTool extends HighlightTool {
       this.items[0] instanceof Circle ||
       this.items[0] instanceof Arc
     )
-  }
-
-  isParallelLine(curve) {
-    if(!(curve instanceof Line) || curve == this.items[0]) return false
-    const left = this.items[0].direction().normalize()
-    const right = curve.direction().normalize()
-    return left.cross(right).lengthSq() < 1e-8
   }
 
   placeDimension(position) {

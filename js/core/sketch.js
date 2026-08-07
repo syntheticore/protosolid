@@ -370,6 +370,16 @@ export class Sketch {
           const [p1, p2] = idMap[c.items[0].curve().id]
           return { id: `${id++}`, type: 'p2p_distance', p1_id: p1.id, p2_id: p2.id, distance: c.distance, temporary: c.temporary }
 
+        } else if(c.isPointDistance()) {
+          // Point to point distance
+          const [p1, p2] = c.items.map(item => idMap[item.curve().id][item.index])
+          return { id: `${id++}`, type: 'p2p_distance', p1_id: p1.id, p2_id: p2.id, distance: c.distance, temporary: c.temporary }
+
+        } else if(c.isAngular()) {
+          // Line to line angle
+          const [l1, l2] = c.items.map(item => idMap[item.curve().id].slice(-1)[0])
+          return { id: `${id++}`, type: 'l2l_angle_ll', l1_id: l1.id, l2_id: l2.id, angle: c.solverAngle(), temporary: c.temporary }
+
         } else {
           // Line to line distance
           const pointPrim = idMap[c.items[0].curve().id][0]
@@ -647,6 +657,19 @@ export class Dimension extends Constraint {
     } else if(items.length == 1) {
       this.distance = items[0].length()
 
+    } else if(this.isPointDistance()) {
+      const [a, b] = this.items.map(item => item.curve().handles()[item.index])
+      this.distance = a.distanceTo(b)
+
+    } else if(this.isAngular()) {
+      const rawAngle = signedLineAngle(items[0], items[1])
+      const displayAngle = orientedLineAngle(items[0], items[1], pos)
+      this.distance = Math.abs(THREE.MathUtils.radToDeg(displayAngle))
+      this.angleSign = Math.sign(displayAngle) || 1
+      this.angleOffset = normalizeDegrees(
+        THREE.MathUtils.radToDeg(rawAngle) - this.angleSign * this.distance
+      )
+
     } else {
       const [a, b] = items
       const aPoint = a.handles()[0].clone().sub(b.handles()[0])
@@ -655,12 +678,67 @@ export class Dimension extends Constraint {
     }
   }
 
+  isPointDistance() {
+    return this.items.length == 2 && this.items.every(item => item.index !== undefined)
+  }
+
+  isAngular() {
+    if(this.items.length != 2 || this.isPointDistance()) return false
+    const curves = this.items.map(item => item.curve())
+    if(!curves.every(curve => curve instanceof Line)) return false
+    return curves[0].direction().normalize().cross(curves[1].direction().normalize()).lengthSq() >= 1e-8
+  }
+
+  solverAngle() {
+    const degrees = (this.angleSign ?? 1) * this.distance + (this.angleOffset ?? 0)
+    return THREE.MathUtils.degToRad(normalizeDegrees(degrees))
+  }
+
   dump() {
     return {
       ...super.dump(),
       position: this.position,
       distance: this.distance,
+      angleSign: this.angleSign,
+      angleOffset: this.angleOffset,
     }
   }
 }
 Serialize.register(Dimension, 'Dimension')
+
+function orientedLineAngle(left, right, position) {
+  const curves = [left, right]
+  const directions = curves.map(curve => curve.direction().normalize())
+  const intersection = lineIntersection(curves[0], curves[1])
+  if(intersection) {
+    const towardPosition = position.clone().sub(intersection)
+    directions.forEach(direction => {
+      if(direction.dot(towardPosition) < 0) direction.negate()
+    })
+  }
+  return signedDirectionsAngle(directions[0], directions[1])
+}
+
+function signedLineAngle(left, right) {
+  return signedDirectionsAngle(left.direction().normalize(), right.direction().normalize())
+}
+
+function signedDirectionsAngle(left, right) {
+  return Math.atan2(left.x * right.y - left.y * right.x, left.dot(right))
+}
+
+function normalizeDegrees(degrees) {
+  return THREE.MathUtils.euclideanModulo(degrees + 180, 360) - 180
+}
+
+function lineIntersection(left, right) {
+  const originL = left.handles()[0]
+  const originR = right.handles()[0]
+  const dirL = left.direction()
+  const dirR = right.direction()
+  const cross = dirL.x * dirR.y - dirL.y * dirR.x
+  if(Math.abs(cross) < 1e-8) return
+  const diff = originR.clone().sub(originL)
+  const t = (diff.x * dirR.y - diff.y * dirR.x) / cross
+  return originL.clone().add(dirL.multiplyScalar(t))
+}

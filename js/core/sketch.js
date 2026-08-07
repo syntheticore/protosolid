@@ -27,8 +27,19 @@ export class Sketch {
   }
 
   addConstraint(constraint) {
+    if(constraint instanceof CoincidentConstraint) {
+      const sameRef = (left, right) => left.index === right.index && left.curve() === right.curve()
+      const existing = this.constraints.find(other =>
+        other instanceof CoincidentConstraint &&
+        other.items.length == 2 &&
+        ((sameRef(other.items[0], constraint.items[0]) && sameRef(other.items[1], constraint.items[1])) ||
+         (sameRef(other.items[0], constraint.items[1]) && sameRef(other.items[1], constraint.items[0])))
+      )
+      if(existing) return existing
+    }
     constraint.sketch = this
     this.constraints.push(constraint)
+    return constraint
   }
 
   addProjection(projection) {

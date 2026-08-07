@@ -365,6 +365,11 @@ export class Sketch {
           const arcPrim = idMap[c.items[0].curve().id].slice(-1)[0]
           return { id: `${id++}`, type: 'arc_radius', a_id: arcPrim.id, radius: c.distance, temporary: c.temporary }
 
+        } else if(c.items.length == 1) {
+          // Line length
+          const [p1, p2] = idMap[c.items[0].curve().id]
+          return { id: `${id++}`, type: 'p2p_distance', p1_id: p1.id, p2_id: p2.id, distance: c.distance, temporary: c.temporary }
+
         } else {
           // Line to line distance
           const pointPrim = idMap[c.items[0].curve().id][0]
@@ -638,6 +643,9 @@ export class Dimension extends Constraint {
 
     } else if(items[0] instanceof Arc) {
       this.distance = items[0].radius
+
+    } else if(items.length == 1) {
+      this.distance = items[0].length()
 
     } else {
       const [a, b] = items

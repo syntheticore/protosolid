@@ -674,13 +674,7 @@ export class DimensionTool extends HighlightTool {
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
 
-    const done = (
-      this.items.length == 2 ||
-      this.items[0] instanceof Circle ||
-      this.items[0] instanceof Arc
-    )
-
-    if(!done) {
+    if(!this.isReadyToPlace()) {
       const curve = await this.getObject(coords)
       // if(!curve || !(curve instanceof Line)) {
       //   this.items = []
@@ -689,28 +683,50 @@ export class DimensionTool extends HighlightTool {
       if(!curve) return
       this.items.push(curve)
       if(this.isReadyToPlace()) this.updatePreview(vec)
+
+    } else if(this.items.length == 1 && this.items[0] instanceof Line) {
+      const curve = await this.getObject(coords)
+      if(this.isParallelLine(curve)) {
+        this.items.push(curve)
+        this.updatePreview(vec)
+      } else {
+        this.placeDimension(vec)
+      }
+
     } else {
-      const toSketch = this.sketch.workplane.clone().invert()
-      const position = this.viewport.renderer.fromScreen(coords).applyMatrix4(toSketch)
-      const constraint = new Dimension(this.items, position)
-      this.sketch.addConstraint(constraint)
-      this.viewport.updateRegions(true)
-      this.items = []
-      this.clearPreview()
+      this.placeDimension(vec)
     }
   }
 
   async mouseMove(vec, coords) {
     if(!this.isReadyToPlace()) return super.mouseMove(vec, coords)
+    if(this.items.length == 1 && this.items[0] instanceof Line) await super.mouseMove(vec, coords)
     this.updatePreview(vec)
   }
 
   isReadyToPlace() {
     return (
       this.items.length == 2 ||
+      this.items[0] instanceof Line ||
       this.items[0] instanceof Circle ||
       this.items[0] instanceof Arc
     )
+  }
+
+  isParallelLine(curve) {
+    if(!(curve instanceof Line) || curve == this.items[0]) return false
+    const left = this.items[0].direction().normalize()
+    const right = curve.direction().normalize()
+    return left.cross(right).lengthSq() < 1e-8
+  }
+
+  placeDimension(position) {
+    const toSketch = this.sketch.workplane.clone().invert()
+    const constraint = new Dimension(this.items, position.clone().applyMatrix4(toSketch))
+    this.sketch.addConstraint(constraint)
+    this.viewport.updateRegions(true)
+    this.items = []
+    this.clearPreview()
   }
 
   updatePreview(position) {

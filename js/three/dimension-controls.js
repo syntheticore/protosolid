@@ -81,6 +81,31 @@ export default class DimensionControls extends THREE.Object3D {
         }
       }
 
+    // Line length
+    } else if(!itemR) {
+      const [start, end] = itemL.curve().endpoints().map(point => point.clone())
+      const direction = end.clone().sub(start).normalize()
+      const normal = new THREE.Vector3(-direction.y, direction.x, 0)
+      const offset = constraint.position.clone().sub(start).dot(normal)
+      const offsetDirection = normal.clone().multiplyScalar(Math.sign(offset) || 1)
+
+      const dimStart = start.clone().add(normal.clone().multiplyScalar(offset))
+      const dimEnd = end.clone().add(normal.clone().multiplyScalar(offset))
+      const extension = offsetDirection.multiplyScalar(1)
+
+      const lineStart = dimStart.clone()
+      const lineEnd = dimEnd.clone()
+      const labelOffset = constraint.position.clone().sub(dimStart).dot(direction)
+      const lineLength = start.distanceTo(end)
+      if(labelOffset < 0) lineStart.copy(constraint.position)
+      if(labelOffset > lineLength) lineEnd.copy(constraint.position)
+
+      this.add(renderer.convertLine([start.toArray(), dimStart.clone().add(extension).toArray()], materials.wire))
+      this.add(renderer.convertLine([end.toArray(), dimEnd.clone().add(extension).toArray()], materials.wire))
+      this.add(renderer.convertLine([lineStart.toArray(), lineEnd.toArray()], materials.wire))
+      this.add(makeArrow(dimStart, direction))
+      this.add(makeArrow(dimEnd, direction.clone().negate()))
+
     // Line/line distance
     } else {
       const [posL, posR] = constraint.items.map(item =>

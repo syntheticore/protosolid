@@ -231,6 +231,25 @@ export class Profile {
     return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId)
   }
 
+  loft(componentId, others, untwist) {
+    const profiles = [this, ...others]
+    if(profiles.some(profile => profile.rings.length != 1)) {
+      throw { type: 'error', msg: 'Loft profiles with holes are not supported' }
+    }
+
+    const wires = profiles.map(profile =>
+      profile.rings[0].transformed(profile.sketch.workplane)
+    )
+    const loft = new window.oc.oc.BRepOffsetAPI_ThruSections(true, false, 1.0e-06)
+    wires.forEach(wire => loft.AddWire(wire) )
+    loft.CheckCompatibility(untwist)
+    loft.Build(new window.oc.oc.Message_ProgressRange_1())
+    if(!loft.IsDone()) throw { type: 'error', msg: 'Loft could not be built' }
+
+    const shape = loft.Shape()
+    return new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
+  }
+
   update() {
     const cutElements = this.sketch.elements.flatMap(elem => elem.split(this.sketch.elements) )
     const newWires = this.sketch.getWires(cutElements, false)
@@ -409,16 +428,18 @@ export class Face extends Shape {
     if(this.cachedTesselation) return this.cachedTesselation
     const location = new window.oc.oc.TopLoc_Location_1()
     const triangulation = window.oc.oc.BRep_Tool.Triangulation(this.geom(), location, 0).get()
-    triangulation.ComputeNormals()
     let positions = []
     let normals = []
-    arrayRange(1, triangulation.NbTriangles()).forEach(i => {
-      const triangle = triangulation.Triangle(i)
-      const pos = arrayRange(1, 3).flatMap(j => arrayFromOcVec(triangulation.Node(triangle.Value(j))) )
-      const norm = arrayRange(1, 3).flatMap(j => arrayFromOcVec(triangulation.Normal_1(triangle.Value(j))) )
-      positions = positions.concat(pos)
-      normals = normals.concat(norm)
-    })
+    if(triangulation) {
+      triangulation.ComputeNormals()
+      arrayRange(1, triangulation.NbTriangles()).forEach(i => {
+        const triangle = triangulation.Triangle(i)
+        const pos = arrayRange(1, 3).flatMap(j => arrayFromOcVec(triangulation.Node(triangle.Value(j))) )
+        const norm = arrayRange(1, 3).flatMap(j => arrayFromOcVec(triangulation.Normal_1(triangle.Value(j))) )
+        positions = positions.concat(pos)
+        normals = normals.concat(norm)
+      })
+    }
     this.cachedTesselation = {
       positions,
       normals,
@@ -504,14 +525,14 @@ export class Solid extends Volumetric {
   faces() {
     if(this.cachedFaces) return this.cachedFaces
     this.cachedFaces = this.collectShapes('face')
-    // this.cachedFaces.forEach((face, i) => face.id = this.id + '/face/' + i )
+    this.cachedFaces.forEach((face, i) => face.id = this.id + '/face/' + i )
     return this.cachedFaces
   }
 
   edges() {
     if(this.cachedEdges) return this.cachedEdges
     this.cachedEdges = this.collectShapes('edge')
-    // this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
+    this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
     return this.cachedEdges
   }
 

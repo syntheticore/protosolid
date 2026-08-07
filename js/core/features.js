@@ -480,6 +480,53 @@ export class RevolveFeature extends Feature {
 Serialize.register(RevolveFeature, 'RevolveFeature')
 
 
+export class LoftFeature extends Feature {
+  static icon = 'layer-group'
+  constructor(doc) {
+    super(doc, true, 'Loft', {
+      profiles: {
+        title: 'Profiles',
+        type: 'profile',
+        multi: true,
+      },
+      untwist: {
+        title: 'Untwist',
+        type: 'bool',
+        icons: ['caret-up', 'caret-down']
+      },
+    })
+
+    this.profiles = null
+    this.untwist = true
+  }
+
+  isComplete() {
+    return super.isComplete() && this.profiles().length >= 2
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      const first = references.profiles[0]
+      const tool = first.loft(this.componentId, references.profiles.slice(1), this.untwist)
+      comp.compound = comp.compound.boolean(tool, this.operation)
+      this.previewBody = tool
+    } catch(err) { this.error = err || this.error }
+  }
+
+  repair() {
+    const newProfiles = this.profiles().filter(profileRef => {
+      const error = profileRef.update(this.document.top())
+      return !error || error.type == 'warning'
+    })
+    this.profiles = () => newProfiles
+    this.error = null
+  }
+}
+
+Serialize.register(LoftFeature, 'LoftFeature')
+
+
 export class SplitFeature extends Feature {
   static icon = 'divide'
   constructor(document) {

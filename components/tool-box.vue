@@ -240,6 +240,7 @@
     BooleanFeature,
     MoveFeature,
     ReplaceFeature,
+    LoftFeature,
   } from './../js/core/features.js'
 
   import {
@@ -357,7 +358,7 @@
             tools: [
               { title: 'Extrude', feature: ExtrudeFeature, hotKey: 'E', keyCode: 69 },
               { title: 'Revolve', feature: RevolveFeature, hotKey: 'V', keyCode: 86 },
-              { title: 'Loft', icon: 'layer-group' },
+              { title: 'Loft', feature: LoftFeature, icon: 'layer-group' },
               { title: 'Sweep', feature: SweepFeature },
               { title: 'Thicken', icon: 'hotdog' },
               { title: 'Coil', icon: 'fan' },

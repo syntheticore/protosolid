@@ -771,7 +771,10 @@ export class Compound extends Volumetric {
       return this.merge([other])
     }
 
-    if(!this.geom) return this.cloneCached(other.geom(), other.solids())
+    if(!this.geom) {
+      if(op == 'cut' || op == 'intersect') return this
+      return this.cloneCached(other.geom(), other.solids())
+    }
 
     const ops = {
       join: window.oc.oc.BRepAlgoAPI_Fuse_3,

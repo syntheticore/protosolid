@@ -13,7 +13,7 @@
   //- Sketch dimension
   .dimension(
     v-else
-    :class="{ selected }"
+    :class="{ selected, preview }"
     :style="{ top: projectedProxies[0].coords.y + 'px', left: projectedProxies[0].coords.x + 'px' }"
     @click.stop="select"
     @dblclick="constraint.active = true"
@@ -64,6 +64,12 @@
     position: absolute
     transition: color 0.1s
 
+    &.preview
+      pointer-events: none
+
+      .dim-value
+        pointer-events: none
+
     &.selected .dim-value
       border-color: $highlight
       background: lighten($highlight, 73%) !important
@@ -109,7 +115,11 @@
   import { Dimension, CoincidentConstraint } from '../js/core/sketch.js'
   import DimensionControls from '../js/three/dimension-controls.js'
 
-  const props = defineProps(['document', 'constraint'])
+  const props = defineProps({
+    document: Object,
+    constraint: Object,
+    preview: Boolean,
+  })
   const emit = defineEmits(['dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
 
   const bus = inject('bus')

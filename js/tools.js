@@ -654,6 +654,7 @@ export class DimensionTool extends HighlightTool {
       // }
       if(!curve) return
       this.items.push(curve)
+      if(this.isReadyToPlace()) this.updatePreview(vec)
     } else {
       const toSketch = this.sketch.workplane.clone().invert()
       const position = this.viewport.renderer.fromScreen(coords).applyMatrix4(toSketch)
@@ -661,6 +662,38 @@ export class DimensionTool extends HighlightTool {
       this.sketch.addConstraint(constraint)
       this.viewport.updateRegions(true)
       this.items = []
+      this.clearPreview()
     }
+  }
+
+  async mouseMove(vec, coords) {
+    if(!this.isReadyToPlace()) return super.mouseMove(vec, coords)
+    this.updatePreview(vec)
+  }
+
+  isReadyToPlace() {
+    return (
+      this.items.length == 2 ||
+      this.items[0] instanceof Circle ||
+      this.items[0] instanceof Arc
+    )
+  }
+
+  updatePreview(position) {
+    const toSketch = this.sketch.workplane.clone().invert()
+    const constraint = new Dimension(this.items, position.clone().applyMatrix4(toSketch))
+    constraint.sketch = this.sketch
+    this.viewport.dimensionPreview = constraint
+    this.viewport.renderer.render()
+  }
+
+  clearPreview() {
+    this.viewport.dimensionPreview = null
+    this.viewport.renderer.render()
+  }
+
+  dispose() {
+    this.items = []
+    this.clearPreview()
   }
 }

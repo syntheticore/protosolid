@@ -4,7 +4,7 @@
 
   import materials from '../js/materials.js'
 
-  const props = defineProps(['document', 'component', 'element', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['document', 'component', 'element', 'activeTool', 'parentHighlighted', 'parentSelected'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -12,6 +12,9 @@
 
   const highlighted = computed(() => props.parentHighlighted || props.element == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.element) )
+  const toolSelected = computed(() => props.activeTool && props.activeTool.items && props.activeTool.items.some(item =>
+    (item.curve ? item.curve() : item) == props.element
+  ))
 
   let mesh
 
@@ -36,14 +39,14 @@
     renderNeeded.value = true
   }, { immediate: true, deep: 1 })
 
-  watch(() => [highlighted.value, selected.value], () => {
+  watch(() => [highlighted.value, selected.value, toolSelected.value], () => {
     mesh.material = getMaterial()
     renderNeeded.value = true
   })
 
   function getMaterial() {
     return materials.table.curve[
-      selected.value ? 'selected' : (highlighted.value ? 'highlighted' : 'unselected')
+      (selected.value || toolSelected.value) ? 'selected' : (highlighted.value ? 'highlighted' : 'unselected')
     ][
       props.element.projection ? 'projected' : 'regular'
     ][

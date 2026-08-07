@@ -6,6 +6,7 @@
     :document="document"
     :component="component"
     :element="elem"
+    :active-tool="activeTool"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
   )
@@ -70,7 +71,7 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 

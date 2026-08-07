@@ -29,6 +29,7 @@
       :component="component"
       :sketch="sketch"
       :active-handle="activeHandle"
+      :active-tool="activeTool"
       :parent-highlighted="highlighted"
       :parent-selected="selected"
       @handleMouseUp="handleMouseUp"
@@ -80,6 +81,7 @@
       :parent-highlighted="highlighted"
       :parent-selected="selected"
       :parent-transform="transform"
+      :active-tool="activeTool"
       @handleMouseUp="handleMouseUp"
       @handleMouseDown="handleMouseDown"
       @handleMouseMove="handleMouseMove"
@@ -96,7 +98,7 @@
 
   import * as THREE from 'three'
 
-  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 

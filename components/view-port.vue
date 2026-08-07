@@ -34,6 +34,13 @@
 
     .floaters
 
+      ConstraintProxy(
+        v-if="dimensionPreview"
+        :document="document"
+        :constraint="dimensionPreview"
+        :preview="true"
+      )
+
       ComponentProxy(
         v-if="isReady"
         :document="document"
@@ -41,6 +48,7 @@
         :display-mode="displayMode"
         :color-mode="colorMode"
         :active-handle="activeHandle"
+        :active-tool="activeTool"
         @handleMouseUp="mouseUp"
         @handleMouseDown="handleMouseDown"
         @handleMouseMove="handleMouseMove"
@@ -197,6 +205,7 @@
         widgets: [],
         isOrbiting: false,
         activeHandle: null,
+        dimensionPreview: null,
       }
     },
 

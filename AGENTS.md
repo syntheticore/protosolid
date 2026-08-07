@@ -1,5 +1,10 @@
 # ProtoSolid development notes
 
+## Behaviour
+
+Do not build or run the application unrequested.
+Only user browser debugging when you actually need it to debug a problem, not for routine inspection.
+
 ## Browser debugging
 
 - Use the `S` shortcut to activate the sketch tool and `C` to activate the circle tool when reproducing sketch-based workflows.

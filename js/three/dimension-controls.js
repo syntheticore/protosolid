@@ -172,8 +172,8 @@ function makeLinearDimension(controls, renderer, start, end, position) {
   controls.add(renderer.convertLine([start.toArray(), dimStart.clone().add(extension).toArray()], materials.wire))
   controls.add(renderer.convertLine([end.toArray(), dimEnd.clone().add(extension).toArray()], materials.wire))
   controls.add(renderer.convertLine([lineStart.toArray(), lineEnd.toArray()], materials.wire))
-  controls.add(makeArrow(dimStart, direction))
-  controls.add(makeArrow(dimEnd, direction.clone().negate()))
+  controls.add(makeArrow(dimStart, direction.clone().negate()))
+  controls.add(makeArrow(dimEnd, direction))
 }
 
 function makeAngularDimension(controls, renderer, constraint) {

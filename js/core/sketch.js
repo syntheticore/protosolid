@@ -5,7 +5,7 @@ import { makeID } from './id.js'
 import { Line, Circle, Arc, Spline, SketchElement } from './geom2d.js'
 import { Wire, Profile, Edge } from './geom3d.js'
 import { PointHelper, AxisHelper } from './helpers.js'
-import { EPSILON, clockwise, ocAx3FromMatrix, ocPlnFromMatrix } from './utils.js'
+import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix } from './utils.js'
 import { Reference, CurveReference, EdgeReference, HelperReference } from './references.js'
 
 
@@ -118,15 +118,16 @@ export class Sketch {
     island.forEach(startElem => {
       startElem.endpoints().forEach(point => {
         const path = []
-        this.buildLoop(
+        const closed = this.buildLoop(
           point,
           startElem,
           path,
           island,
           usedForward,
           usedBackward,
+          point,
         )
-        if(path.length >= 2) wires.push(new Wire(path))
+        if(closed && path.length >= 2) wires.push(new Wire(path, point))
       })
     })
     if(!includeOuter) { wires = this.removeOuterLoop(wires) }
@@ -166,21 +167,22 @@ export class Sketch {
     allElements,
     usedForward,
     usedBackward,
+    loopStartPoint,
   ) {
     // Traverse edges only once in every direction
     let startElemId = startElem.id
     if(startPoint.almost(startElem.endpoints()[0])) {
-      if(usedForward.has(startElemId)) return
+      if(usedForward.has(startElemId)) return false
       usedForward.add(startElemId)
     } else {
-      if(usedBackward.has(startElemId)) return
+      if(usedBackward.has(startElemId)) return false
       usedBackward.add(startElemId)
     }
     // Add startElem to path
     path.push(startElem)
     // Terminate loop
     let endPoint = startElem.otherBound(startPoint)
-    if(path[0] != startElem && path[0].endpoints().some(p => p.almost(endPoint) )) return
+    if(path.length > 1 && endPoint.almost(loopStartPoint)) return true
     // Find connected segments
     let connectedElems = allElements.filter(otherElem => {
       let [otherStart, otherEnd] = otherElem.endpoints()
@@ -188,25 +190,35 @@ export class Sketch {
         otherElem.id != startElemId
     })
     if(connectedElems.length) {
-      // Sort connected segments in clockwise order
+      const startEndpoints = startElem.endpoints()
+      const incomingSampleParam = endPoint.almost(startEndpoints[1]) ? 1.0 - EPSILON : EPSILON
+      const incoming = endPoint.clone().sub(startElem.sample(incomingSampleParam)).normalize()
+      // Keep the face on the left by following the outgoing segment with the
+      // largest signed turn from the incoming direction. Sampling close to the
+      // shared endpoint is important for arcs: their midpoint can lie on the
+      // opposite side of the incoming tangent and produce a non-planar walk.
       connectedElems.sort((a, b) => {
-        let finalPointA = a.sample(0.5)
-        let finalPointB = b.sample(0.5)
-        return clockwise(startPoint, endPoint, finalPointA) - clockwise(startPoint, endPoint, finalPointB)
+        const turn = elem => {
+          const endpoints = elem.endpoints()
+          const sampleParam = endPoint.almost(endpoints[0]) ? EPSILON : 1.0 - EPSILON
+          const outgoing = elem.sample(sampleParam).sub(endPoint).normalize()
+          return Math.atan2(cross2d(incoming, outgoing), incoming.dot(outgoing))
+        }
+        return turn(b) - turn(a)
       })
       // Follow the leftmost segment to complete loop in anti-clockwise order
       let nextElem = connectedElems[0]
-      if(path[0].id != nextElem.id) {
-        this.buildLoop(
-          endPoint,
-          nextElem,
-          path,
-          allElements,
-          usedForward,
-          usedBackward,
-        )
-      }
+      return this.buildLoop(
+        endPoint,
+        nextElem,
+        path,
+        allElements,
+        usedForward,
+        usedBackward,
+        loopStartPoint,
+      )
     }
+    return false
   }
 
   buildIslands(elements) {

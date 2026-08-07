@@ -102,25 +102,26 @@ export class SketchElement {
     const isCircle = (this.constructor == Circle)
 
     if(isCircle) {
-      const intersections = [...new Set(
-        this.intersect(others)
+      const period = end - start
+      const intersections = this.intersect(others)
         .map(p => this.unsample(p) )
-        .filter(u => !start.almost(u) && !end.almost(u) && !(u < start) && !(u > end) )
-        // .filter(u => !start.almost(u) && !end.almost(u) )
-      )].sort()
+        // A circle is periodic, so its start and end parameters describe the
+        // same point. Keep intersections at that seam and normalize them to
+        // the start instead of discarding them.
+        .map(u => start + (((u - start) % period) + period) % period )
+        .map(u => u.almost(start) || (end - u).almost(0.0) ? start : u )
+        .reduce((unique, u) => {
+          if(!unique.some(other => other.almost(u) )) unique.push(u)
+          return unique
+        }, [])
+        .sort((a, b) => a - b)
       if(!intersections.length) return [this]
-      const constructor = isCircle ? Arc : this.constructor
-      let params
-      // if(isCircle) {
-        if(intersections.length < 2) return [this]
-        params = [...intersections, intersections[0]]
-      // } else {
-      //   params = [start, ...intersections, end]
-      // }
+      if(intersections.length < 2) return [this]
+      const params = [...intersections, intersections[0]]
       const curves = ocCatch(() => params.slice(0, -1).map((param, i) =>
         new window.oc.oc.Geom2d_TrimmedCurve(geom, param, params[i + 1], true, true)
       ))
-      return curves.map((curve, i) => constructor.fromGeometry(curve, this.id + '/' + i) )
+      return curves.map((curve, i) => Arc.fromGeometry(curve, this.id + '/' + i) )
 
     } else {
       const [p, u] = this

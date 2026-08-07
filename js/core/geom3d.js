@@ -25,14 +25,15 @@ import {
 
 
 export class Wire {
-  constructor(region) {
+  constructor(region, startPoint) {
     region = region.map(seg => seg.clone() )
     if(region.length == 0) throw "Wires may not be empty"
     else if(region.length >= 2) {
       // Find starting point from element order
       let bounds = region[0].endpoints()
       let next_bounds = region[1].endpoints()
-      let point = (bounds[0].almost(next_bounds[0]) || bounds[0].almost(next_bounds[1])) ? bounds[1] : bounds[0]
+      let point = startPoint ||
+        ((bounds[0].almost(next_bounds[0]) || bounds[0].almost(next_bounds[1])) ? bounds[1] : bounds[0])
 
       // Flip curves to flow consistently along element order
       region.forEach(tcurve => {
@@ -92,7 +93,14 @@ export class Wire {
   }
 
   encloses(other) {
-    return other.segments.every(elem => this.containsPoint(elem.endpoints()[0]) )
+    // Adjacent sketch regions share split edges, but neither is a hole in the
+    // other. Testing their shared endpoints makes them look enclosed because
+    // those points lie exactly on both wire boundaries.
+    const sharesSegment = this.segments.some(elem =>
+      other.segments.some(otherElem => elem.id == otherElem.id)
+    )
+    if(sharesSegment) return false
+    return other.segments.every(elem => this.containsPoint(elem.sample(0.5)) )
   }
 
   tesselate() {
@@ -256,18 +264,27 @@ export class Profile {
     let wasRepairNeeded = false
     let error
     this.rings = this.rings.map(wire => {
+      const segmentIds = new Set(wire.segments.map(seg => seg.id))
       const wireIds = new Set(wire.segments.map(seg => this.getBaseId(seg) ))
       const replacementWire = newWires.map(newWire => {
+        const newSegmentIds = new Set(newWire.segments.map(tcurve => tcurve.id))
         const newWireIds = new Set(newWire.segments.map(tcurve => this.getBaseId(tcurve) ))
-        const matched = wireIds.intersection(newWireIds).size
-        if(matched > 0) return [matched, newWireIds.size, newWire]
-      }).filter(Boolean).minMaxBy(Math.max, pair => pair[0] )
+        const exactMatched = segmentIds.intersection(newSegmentIds).size
+        const baseMatched = wireIds.intersection(newWireIds).size
+        if(baseMatched > 0) {
+          return [exactMatched, baseMatched, newSegmentIds.size, newWire]
+        }
+      }).filter(Boolean).sort((a, b) =>
+        b[0] - a[0] ||
+        b[1] - a[1] ||
+        Math.abs(segmentIds.size - a[2]) - Math.abs(segmentIds.size - b[2])
+      )[0]
       if(!replacementWire) {
         error = { type: 'error', msg: "Profile was lost" }
         return wire
       }
-      const [matched, newSize, newWire] = replacementWire
-      if(matched != wireIds.size || matched != newSize) wasRepairNeeded = true
+      const [exactMatched, , newSize, newWire] = replacementWire
+      if(exactMatched != segmentIds.size || exactMatched != newSize) wasRepairNeeded = true
       return newWire
     })
     if(error) return error

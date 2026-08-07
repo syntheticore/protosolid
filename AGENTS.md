@@ -15,5 +15,3 @@ Most browser-testing sequences start with one circular profile:
 3. Click once to set the circle center.
 4. Click a second time to set a point on the circle and define its radius.
 5. Confirm the sketch.
-
-When entering numeric values for most tools, accept the entered value using an enter press before accepting the dialog.

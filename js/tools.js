@@ -61,6 +61,8 @@ class Tool {
 
   mouseMove(vec, coords) {}
 
+  guideSnapPoints() { return [] }
+
   dispose() {}
 }
 
@@ -415,6 +417,10 @@ export class LineTool extends SketchTool {
     let p1 = this.curve.endpoints()[0]
     this.curve.setHandles([p1, vec], false)
     this.viewport.elementChanged()
+  }
+
+  guideSnapPoints() {
+    return this.curve ? [this.curve.endpoints()[0]] : []
   }
 
   dispose() {

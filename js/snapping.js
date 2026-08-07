@@ -67,6 +67,13 @@ export default class Snapper {
     }
   }
 
+  getGuideSnapPoints() {
+    const activePoints = this.viewport.activeTool.guideSnapPoints()
+    return [...activePoints, ...this.lastSnaps].filter((point, index, points) =>
+      points.findIndex(other => other.equals(point)) === index
+    )
+  }
+
   snapToGuides(vec, snapToGuides, snapToPoints) {
     if(!vec) return
 
@@ -76,7 +83,8 @@ export default class Snapper {
     if(!(snapToGuides || snapToPoints)) return localVec
 
     const screenVec = this.viewport.renderer.toScreen(vec)
-    let snapX = this.lastSnaps.find(snap => {
+    const guideSnapPoints = this.getGuideSnapPoints()
+    let snapX = guideSnapPoints.find(snap => {
       // Compare plane space X axis..
       const testSnap = snap.clone()//.applyMatrix4(localTransform)
       testSnap.setY(localVec.y)
@@ -86,7 +94,7 @@ export default class Snapper {
       // .. in screen space
       return screenVec.distanceTo(screenSnap) < snapDistance
     })
-    let snapY = this.lastSnaps.find(snap => {
+    let snapY = guideSnapPoints.find(snap => {
       const testSnap = snap.clone()//.applyMatrix4(localTransform)
       testSnap.setX(localVec.x)
       testSnap.setZ(localVec.z)

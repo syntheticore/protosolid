@@ -113,6 +113,8 @@
 <script setup>
 
   import { Dimension, CoincidentConstraint } from '../js/core/sketch.js'
+  import { PointHelper } from '../js/core/helpers.js'
+  import { Line } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
 
   const props = defineProps({
@@ -140,27 +142,55 @@
   })
 
   const proxies = computed(() => {
-    if(props.constraint instanceof CoincidentConstraint) return []
+    const sketch = props.constraint.sketch
+    const point = (item, referenced=false) => {
+      const curve = item.curve()
+      if(curve instanceof PointHelper) return curve.center().applyMatrix4(sketch.workplane.clone().invert())
+      if(referenced && item.index !== undefined && curve.handles) return curve.handles()[item.index]
+      return curve.center()
+    }
+
+    if(props.constraint instanceof CoincidentConstraint) {
+      // Connected line segments read as a single polyline, so a constraint icon
+      // at every join would add noise rather than useful information.
+      if(props.constraint.items.every(item => item.curve() instanceof Line)) return []
+      return [{
+        constraint: props.constraint,
+        curve: props.constraint.items[0].curve(),
+        pos: point(props.constraint.items[0], true).clone().applyMatrix4(sketch.workplane),
+        offset: { x: 11, y: -11 },
+      }]
+    }
 
     return props.constraint.items.map((item, i) => {
       const curve = item.curve()
+      const other = props.constraint.items[1 - i]
+      const otherCurve = other && other.curve()
+      const common = otherCurve && otherCurve.handles && curve.commonHandle && curve.commonHandle(otherCurve)
       return {
         constraint: props.constraint,
         curve,
         pos: ((props.constraint.position && props.constraint.position.clone()) || (props.constraint.items.length == 1 ?
-          curve.center()
+          point(item)
           :
-          curve.center().clone()
-            .add(curve.commonHandle(props.constraint.items[1 - i].curve()) || props.constraint.items[1 - i].curve().center())
+          point(item).clone()
+            .add(common || point(other))
             .divideScalar(2.0)
-        )).applyMatrix4(curve.sketch.workplane),
+        )).applyMatrix4(sketch.workplane),
       }
     })
   })
 
   const projectedProxies = computed(() => {
     frame.value
-    return proxies.value.map(proxy => ({ ...proxy, coords: window.alcRenderer.toScreen(proxy.pos) }))
+    return proxies.value.map(proxy => {
+      const coords = window.alcRenderer.toScreen(proxy.pos)
+      if(proxy.offset) {
+        coords.x += proxy.offset.x
+        coords.y += proxy.offset.y
+      }
+      return { ...proxy, coords }
+    })
   })
 
   function select() {

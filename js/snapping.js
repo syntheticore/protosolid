@@ -17,11 +17,13 @@ export default class Snapper {
     this.guides = []
     this.snapAnchor = null
     this.lastSnaps = []
+    this.snapped = {}
     this.updateView([], null)
   }
 
   snap(vec, coords, snapToGuides, snapToPoints, localSpace) {
     this.guides = []
+    this.snapped = {}
     if(localSpace) {
       if((snapToGuides || snapToPoints) && this.viewport.document.activeSketch) this.catchSnapPoints(coords)
       vec = this.snapToGuides(vec, snapToGuides, snapToPoints)
@@ -36,17 +38,21 @@ export default class Snapper {
     // Filter out sketch element actively being drawn
     const tool = this.viewport.activeTool
     if(tool.curve) sketchElements.pop()
-    return sketchElements.flatMap(elem => {
+    const points = sketchElements.flatMap(elem => {
       let points = elem.snapPoints()
       // Filter out handle actively being dragged & connected neighboors
       if(this.viewport.activeHandle) {
         const handlePoint = this.viewport.activeHandle.elem.handles()[this.viewport.activeHandle.index]
-        const constrainedPoints = this.viewport.activeHandle.elem.constraints().flatMap(constraint => constraint.items.flatMap(item => item.curve().handles() ) )
+        const constrainedPoints = this.viewport.activeHandle.elem.constraints().flatMap(constraint =>
+          constraint.items.flatMap(item => item.curve().handles ? item.curve().handles() : [])
+        )
         const omit = [handlePoint, ...constrainedPoints]
         points = points.filter(p => !omit.some(hp => p.almost(hp) ) )
       }
       return points
     })
+    const origin = this.viewport.document.activeSketch.originPoint()
+    return origin ? [origin, ...points] : points
   }
 
   catchSnapPoints(coords) {
@@ -69,7 +75,8 @@ export default class Snapper {
 
   getGuideSnapPoints() {
     const activePoints = this.viewport.activeTool.guideSnapPoints()
-    return [...activePoints, ...this.lastSnaps].filter((point, index, points) =>
+    const origin = this.viewport.document.activeSketch.originPoint()
+    return [...activePoints, ...(origin ? [origin] : []), ...this.lastSnaps].filter((point, index, points) =>
       points.findIndex(other => other.equals(point)) === index
     )
   }
@@ -102,6 +109,7 @@ export default class Snapper {
       const screenSnap = this.viewport.renderer.toScreen(testSnap)
       return screenVec.distanceTo(screenSnap) < snapDistance
     })
+    this.snapped = { x: snapX, y: snapY }
     // const snapVec = new THREE.Vector3(
     //   snapX ? snapX.clone().applyMatrix4(localTransform).x : localVec.x,
     //   snapY ? snapY.clone().applyMatrix4(localTransform).y : localVec.y,

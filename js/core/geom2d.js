@@ -68,6 +68,7 @@ export class SketchElement {
   }
 
   commonHandle(other) {
+    if(!other.handles) return
     return this.handles().find(p => other.handles().some(op => p.almost(op) ) )
   }
 

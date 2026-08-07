@@ -36,6 +36,16 @@ export class Sketch {
     this.projections.push(projection)
   }
 
+  origin() {
+    return this.component && this.component.helpers.find(helper => helper instanceof PointHelper)
+  }
+
+  originPoint() {
+    const origin = this.origin()
+    if(!origin) return
+    return origin.center().applyMatrix4(this.workplane.clone().invert())
+  }
+
   remove(elem) {
     if(elem instanceof SketchElement) {
       this.elements = this.elements.filter(e => e != elem )
@@ -268,12 +278,22 @@ export class Sketch {
       return primitives
     }).filter(Boolean)
 
+    // Refresh references before collecting helper-backed solver primitives.
+    // This is also needed by DimensionControls after feature-tree updates.
+    this.constraints.forEach(constraint => constraint.update(tree))
+
+    const pointHelpers = this.constraints
+      .flatMap(constraint => constraint.items.map(item => item.curve()))
+      .filter((item, index, items) => item instanceof PointHelper && items.indexOf(item) == index)
+
+    pointHelpers.forEach(helper => {
+      const point = helper.center().applyMatrix4(this.workplane.clone().invert())
+      const primitive = { id: `${id++}`, type: 'point', x: point.x, y: point.y, fixed: true }
+      idMap[helper.id] = [primitive]
+      primitives.push(primitive)
+    })
+
     const constraints = this.constraints.flatMap(c => {
-
-      c.update(tree)
-      // Strictly only necessary for DimensionControls to reference the updated projections.
-      // The solver itself works without it.
-
       if(c instanceof HorVertConstraint) {
         const pointPrims = c.items.length == 1 ?
           idMap[c.items[0].curve().id].slice(0, 2)
@@ -474,8 +494,11 @@ Serialize.register(Projection, 'Projection')
 
 export class ElemRef {
   constructor(curveOrRef, index) {
-    this.curveRef = curveOrRef instanceof CurveReference ? curveOrRef : new CurveReference(curveOrRef)
-    this.index = index
+    this.curveRef = curveOrRef instanceof CurveReference || curveOrRef instanceof HelperReference ?
+      curveOrRef
+      :
+      (curveOrRef instanceof PointHelper ? new HelperReference(curveOrRef) : new CurveReference(curveOrRef))
+    this.index = index === undefined && this.curve() instanceof PointHelper ? 0 : index
   }
 
   update(tree) {
@@ -521,10 +544,17 @@ export class HorVertConstraint extends Constraint {
 
   constructor(...items) {
     super(...items)
+    const sketch = this.items.map(item => item.curve().sketch).find(Boolean)
     const points = this.items.length == 1 ?
       this.items[0].curve().endpoints()
       :
-      this.items.map(item => item.curve().endpoints()[item.index] )
+      this.items.map(item => {
+        const curve = item.curve()
+        return curve instanceof PointHelper ?
+          curve.center().applyMatrix4(sketch.workplane.clone().invert())
+          :
+          curve.endpoints()[item.index]
+      })
     const xDiff = Math.abs(points[0].x - points[1].x)
     const yDiff = Math.abs(points[0].y - points[1].y)
     this.isVertical = xDiff < yDiff
@@ -550,7 +580,7 @@ export class FixConstraint extends Constraint {
 Serialize.register(FixConstraint, 'FixConstraint')
 
 export class CoincidentConstraint extends Constraint {
-  static icon = 'bullseye'
+  static icon = 'compress'
   typename() { return 'Coincident Constraint' }
 }
 Serialize.register(CoincidentConstraint, 'CoincidentConstraint')

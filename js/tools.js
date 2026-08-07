@@ -177,6 +177,11 @@ export class ManipulationTool extends HighlightTool {
           new CoincidentConstraint(new ElemRef(handle.elem, handle.index), new ElemRef(elem, idx))
         )
       })
+      const origin = sketch.origin()
+      const originPoint = sketch.originPoint()
+      if(origin && originPoint && vec.almost(originPoint)) sketch.addConstraint(
+        new CoincidentConstraint(new ElemRef(handle.elem, handle.index), new ElemRef(origin))
+      )
     }
   }
 
@@ -364,6 +369,30 @@ export class SketchTool extends Tool {
     this.snapToPoints = true
     this.cursor = 'crosshair'
   }
+
+  originSnapConstraint(elem, index) {
+    const origin = this.sketch.origin()
+    const originPoint = this.sketch.originPoint()
+    if(!origin || !originPoint) return
+    const { x, y } = this.viewport.snapper.snapped || {}
+    const snapX = x && x.almost(originPoint)
+    const snapY = y && y.almost(originPoint)
+    if(!snapX && !snapY) return
+    const ref = new ElemRef(elem, index)
+    const originRef = new ElemRef(origin)
+    const constraint = snapX && snapY ?
+      new CoincidentConstraint(ref, originRef)
+      :
+      new HorVertConstraint(ref, originRef)
+    this.sketch.addConstraint(constraint)
+    return constraint
+  }
+
+  snappedDirectlyToOrigin() {
+    const origin = this.sketch.originPoint()
+    const { x, y } = this.viewport.snapper.snapped || {}
+    return origin && x && y && x.almost(origin) && y.almost(origin)
+  }
 }
 
 
@@ -378,6 +407,7 @@ export class LineTool extends SketchTool {
     super.mouseDown(vec, coords)
     this.mouseMove(vec)
 
+    const old = this.curve
     const elems = [...this.sketch.elements]
     if(this.curve) elems.pop()
     const touchesExisting = elems.find(elem => elem.endpoints().some(p => p.equals(vec) ) )
@@ -385,14 +415,14 @@ export class LineTool extends SketchTool {
     const index = touchesExisting && endpoints.indexOf(endpoints.find(sp => sp.equals(vec) ))
 
     // Restart tool when we hit an existing point
-    if(touchesExisting && this.curve) {
+    if((touchesExisting || this.snappedDirectlyToOrigin()) && this.curve) {
       this.sketch.add(this.curve)
-      if(index != -1) this.sketch.addConstraint(
+      if(touchesExisting && index != -1) this.sketch.addConstraint(
         new CoincidentConstraint(new ElemRef(this.curve, 1), new ElemRef(touchesExisting, index))
       )
+      this.originSnapConstraint(this.curve, 1)
       this.curve = null
     } else {
-      const old = this.curve
       this.curve = new Line(vec, vec)
       this.sketch.add(this.curve)
       const other = touchesExisting || old
@@ -401,6 +431,7 @@ export class LineTool extends SketchTool {
         new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(other, otherIndex))
       )
       if(old) {
+        this.originSnapConstraint(old, 1)
         const ySnapped = old.endpoints()[0].x.almost(vec.x)
         const xSnapped = old.endpoints()[0].y.almost(vec.y)
         if(xSnapped || ySnapped) {
@@ -408,6 +439,8 @@ export class LineTool extends SketchTool {
           const type = HorVertConstraint
           this.sketch.addConstraint(new type(old))
         }
+      } else {
+        this.originSnapConstraint(this.curve, 0)
       }
     }
   }
@@ -490,6 +523,7 @@ export class CircleTool extends SketchTool {
       // this.curve = this.sketch.add_circle(vec, 1)
       this.curve = new Circle(vec, 1.0)
       this.sketch.add(this.curve)
+      this.originSnapConstraint(this.curve, 0)
       // this.curve.sketch = this.sketch
     }
   }

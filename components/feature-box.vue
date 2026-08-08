@@ -437,7 +437,7 @@
           this.bus.componentPickerActive = type == 'componentRef' || type == 'patternInput'
           this.updatePicker = () => {
             const { pickerPos, color } = this.getPickerInfo(key)
-            this.bus.emit('pick', type, pickerPos, color)
+            this.bus.emit('pick', type, pickerPos, color, item => this.activeFeature.acceptsInput(item))
           }
           this.updatePicker()
         })

@@ -189,9 +189,11 @@ class HighlightTool extends Tool {
           if(mapped.length) return mapped
           return obj.alcObject
         })
-        .filter(item => !this.viewport.document.activeFeature?.acceptsInput ||
-          this.viewport.document.activeFeature.acceptsInput(item)
-        )
+        .filter(item => {
+          const acceptsInput = this.acceptsInput ||
+            this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
+          return !acceptsInput || acceptsInput(item)
+        })
         // .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
       const handle = this.viewport.hoveredHandle

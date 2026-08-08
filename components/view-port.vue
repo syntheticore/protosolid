@@ -270,7 +270,7 @@
       })
 
       // Events
-      this.bus.on('pick', (type, pickerCoords, color) => {
+      this.bus.on('pick', (type, pickerCoords, color, acceptsInput) => {
         this.handlePick(pickerCoords, color, {
           profile: ProfilePickTool,
           curve: CurvePickTool,
@@ -282,7 +282,7 @@
           patternInput: PatternInputPickTool,
           point: PointPickTool,
           componentRef: ComponentPickTool,
-        }[type])
+        }[type], acceptsInput)
       })
 
       this.bus.on('show-picker', this.addPath)
@@ -451,7 +451,7 @@
         return [this.snapper.snap(vec, coords, this.activeTool.snapToGuides, this.activeTool.snapToPoints, this.activeTool.localSpace ), coords]
       },
 
-      handlePick: function(pickerCoords, color, Tool) {
+      handlePick: function(pickerCoords, color, Tool, acceptsInput) {
         if(this.activeTool) this.activeTool.dispose()
         this.resetProxyInteraction()
         this.pickingPath = { target: null, color, origin: pickerCoords }
@@ -460,6 +460,7 @@
           this.bus.emit('activate-tool', DummyTool)
           this.pickingPath = null
         })
+        tool.acceptsInput = acceptsInput
         this.$emit('update:active-tool', tool)
       },
 

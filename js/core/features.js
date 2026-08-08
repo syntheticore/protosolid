@@ -168,6 +168,11 @@ export class Feature {
 
   modifiedComponents() { return [this.componentId] }
 
+  acceptsInput(item) {
+    const componentId = inputComponentId(item)
+    return !componentId || componentId == this.componentId
+  }
+
   repair() {}
 
   involvedSketches() {
@@ -303,6 +308,8 @@ export class PatternFeature extends Feature {
       Math.max(0, Math.floor(this.radialCount) - 1) :
       Math.max(0, Math.floor(this.uCount) * Math.floor(this.vCount) - 1)
   }
+
+  acceptsInput() { return true }
 
   updateFeature(tree, references) {
     const ownIndex = this.document.timeline.features.indexOf(this)
@@ -564,6 +571,17 @@ export class JointFeature extends Feature {
   }
 }
 Serialize.register(JointFeature, 'JointFeature')
+
+
+function inputComponentId(item) {
+  if(!item) return
+  if(item.componentId) return item.componentId
+  if(item.compound?.componentId) return item.compound.componentId
+  if(item.solid?.compound?.componentId) return item.solid.compound.componentId
+
+  const component = item.sketch?.component || item.component
+  return component?.sourceId?.() || component?.id
+}
 
 
 export class CreateComponentFeature extends Feature {

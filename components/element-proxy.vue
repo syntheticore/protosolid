@@ -2,9 +2,10 @@
 
 <script setup>
 
+  import * as THREE from 'three'
   import materials from '../js/materials.js'
 
-  const props = defineProps(['document', 'component', 'element', 'activeTool', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['document', 'component', 'element', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -47,6 +48,13 @@
     mesh.material = getMaterial()
     renderNeeded.value = true
   })
+
+  watch(() => props.parentTransform, () => {
+    if(!mesh) return
+    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(props.element.sketch.workplane)
+    mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
+    renderNeeded.value = true
+  }, { immediate: true })
 
   function getMaterial() {
     return materials.table.curve[

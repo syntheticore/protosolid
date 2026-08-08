@@ -9,6 +9,7 @@
     :active-tool="activeTool"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
+    :parent-transform="parentTransform"
   )
 
   ProfileProxy(
@@ -18,6 +19,7 @@
     :profile="profile"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
+    :parent-transform="parentTransform"
   )
 
   template(v-if="active")
@@ -71,7 +73,7 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
@@ -93,6 +95,7 @@
       if(elem.projection) return []
       return elem.handles().map((p, i) => {
         p = p.clone().applyMatrix4(elem.sketch.workplane)
+        if(props.parentTransform) p.applyMatrix4(props.parentTransform)
         return {
           type: 'handle',
           pos: window.alcRenderer.toScreen(p),

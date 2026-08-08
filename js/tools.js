@@ -31,6 +31,7 @@ import {
   Projection,
   ElemRef,
 } from './core/sketch.js'
+import { solveAssembly, worldTransform } from './core/assembly.js'
 
 
 class Tool {
@@ -86,7 +87,7 @@ class HighlightTool extends Tool {
 
   setSelectors(selectors) {
     this.selectors = selectors
-    this.realSelectors = selectors.map(selector => selector == 'solid' ? 'face' : selector )
+    this.realSelectors = selectors.map(selector => ['solid', 'component'].includes(selector) ? 'face' : selector )
   }
 
   async mouseMove(vec, coords) {
@@ -101,11 +102,14 @@ class HighlightTool extends Tool {
     return new Promise(resolve => {
       let items = this.viewport.renderer
         .objectsAtScreen(coords, this.realSelectors)
-        .map(obj =>
-          obj.alcTypes.some(t => t == 'face' ) && this.selectors.some(s => s == 'solid' ) ?
-            obj.alcObject.solid
-            :
-            obj.alcObject
+        .map(obj => {
+          if(!obj.alcTypes.some(type => type == 'face')) return obj.alcObject
+          if(this.selectors.includes('component')) return obj.alcObject.solid.component
+          if(this.selectors.includes('solid')) return obj.alcObject.solid
+          return obj.alcObject
+        })
+        .filter(item => !this.viewport.document.activeFeature?.acceptsInput ||
+          this.viewport.document.activeFeature.acceptsInput(item)
         )
         // .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
@@ -152,7 +156,13 @@ export class ManipulationTool extends HighlightTool {
     if(object instanceof Solid) {
       this.object = object
       this.startCoords = coords
-      this.startTransform = this.object.component.transform || new THREE.Matrix4()
+      this.startWorld = worldTransform(this.object.component)
+      this.startPoses = new Map(
+        this.viewport.document.top().getChildren().map(component => [
+          component.id,
+          component.transform && component.transform.clone(),
+        ])
+      )
     }
     console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
@@ -210,11 +220,16 @@ export class ManipulationTool extends HighlightTool {
       const scale = 0.5
       const diffX = coords.x - this.startCoords.x
       const diffY = coords.y - this.startCoords.y
-      const transX = new THREE.Matrix4().makeTranslation(right.multiplyScalar(diffX * scale))
-      const transY = new THREE.Matrix4().makeTranslation(up.multiplyScalar(-diffY * scale))
+      const translation = right.multiplyScalar(diffX * scale)
+        .add(up.multiplyScalar(-diffY * scale))
+      const desiredWorld = new THREE.Matrix4().makeTranslation(translation).multiply(this.startWorld)
 
       const comp = this.object.component
-      comp.transform = this.startTransform.clone().multiply(transX).multiply(transY)
+      this.viewport.document.top().getChildren().forEach(component => {
+        const pose = this.startPoses.get(component.id)
+        component.transform = pose && pose.clone()
+      })
+      solveAssembly(this.viewport.document.top(), comp, desiredWorld)
 
     } else {
       super.mouseMove(vec, coords)
@@ -363,6 +378,12 @@ export class SolidPickTool extends PickTool {
 export class PointPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['point'], callback)
+  }
+}
+
+export class ComponentPickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['component'], callback)
   }
 }
 

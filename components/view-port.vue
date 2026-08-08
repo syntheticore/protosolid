@@ -173,6 +173,7 @@
     AxisPickTool,
     SolidPickTool,
     PointPickTool,
+    ComponentPickTool,
     LineTool,
     SplineTool,
     CircleTool,
@@ -279,6 +280,7 @@
           solid: SolidPickTool,
           patternInput: SolidPickTool,
           point: PointPickTool,
+          componentRef: ComponentPickTool,
         }[type])
       })
 

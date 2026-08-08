@@ -4,6 +4,7 @@
   "type": "module",
   "version": "0.1.0",
   "scripts": {
+    "test": "node --test tests/*.test.js",
     "dev": "nuxt dev",
     "dev-electron": "electron ./electron",
     "build": "npm run build-oc && npm run build-app",

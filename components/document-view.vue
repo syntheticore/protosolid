@@ -68,7 +68,10 @@
 
         h1 POSE
 
-        Acceptor(@reject="document.top().resetPose()")
+        Acceptor(
+          @accept="document.keepPose()"
+          @reject="document.top().resetPose()"
+        )
 
     FooterView(
       :document="document"

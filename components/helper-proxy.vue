@@ -2,10 +2,11 @@
 
 <script setup>
 
+  import * as THREE from 'three'
   import { PlaneHelper, AxisHelper, PointHelper } from '../js/core/helpers.js'
   import { PlaneHelperObject, AxisHelperObject, PointHelperObject } from '../js/three/helper-objects.js'
 
-  const props = defineProps(['document', 'component', 'helper', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['document', 'component', 'helper', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -35,6 +36,14 @@
     mesh.setMaterial(highlighted.value, selected.value)
     renderNeeded.value = true
   })
+
+  watch(() => props.parentTransform, () => {
+    if(!mesh) return
+    const local = props.helper.transform
+    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(local)
+    mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
+    renderNeeded.value = true
+  }, { immediate: true })
 
   onUnmounted(() => {
     window.alcRenderer.remove(mesh)

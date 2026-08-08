@@ -13,7 +13,12 @@
   const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value )
 
   const faceMesh = window.alcRenderer.convertMesh(props.face.tesselate(), getMaterial())
-  faceMesh.alcTypes = ['face', props.face.getPlane() && 'plane'].filter(Boolean)
+  faceMesh.alcTypes = [
+    'face',
+    props.face.getPlane() && 'plane',
+    props.face.getAxis() && 'axis',
+    props.face.getPoint() && 'point',
+  ].filter(Boolean)
 
   watch(() => props.face, () => {
     props.face.mesh = () => faceMesh

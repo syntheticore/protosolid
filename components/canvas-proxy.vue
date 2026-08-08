@@ -5,7 +5,7 @@
   import * as THREE from 'three'
   import materials from '../js/materials.js'
 
-  const props = defineProps(['canvas', 'parentHighlighted', 'parentSelected'])
+  const props = defineProps(['canvas', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -30,6 +30,13 @@
     mesh.material = getMaterial()
     renderNeeded.value = true
   })
+
+  watch(() => props.parentTransform, () => {
+    if(!mesh) return
+    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4())
+    mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
+    renderNeeded.value = true
+  }, { immediate: true })
 
   function getMaterial() {
     return new THREE.MeshBasicMaterial({

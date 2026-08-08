@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
-import { Feature, CreateComponentFeature, CreateSketchFeature } from './features.js'
+import { Feature, CreateComponentFeature, CreateSketchFeature, PoseFeature } from './features.js'
 import { Selection } from '../selection.js'
 import { Component } from './component.js'
 import Emitter from '../emitter.js'
@@ -76,6 +76,14 @@ export default class Document extends Emitter {
     this.activateComponent(newComp)
   }
 
+  keepPose() {
+    if(!this.top().hasPoseChange()) return
+    const feature = new PoseFeature(this)
+    // The cache entry before this feature must retain the old design pose.
+    this.top().resetPose()
+    this.addFeature(feature)
+  }
+
   activateComponent(comp) {
     if(comp) comp.creator.hidden = false
     this.activeComponent = comp
@@ -89,6 +97,7 @@ export default class Document extends Emitter {
 
   addFeature(feature) {
     this.activateFeature(null, true, false)
+    if(!(feature instanceof PoseFeature)) this.top().resetPose()
     this.timeline.insertFeature(feature)
     this.reactivateActiveComponent()
   }
@@ -104,6 +113,9 @@ export default class Document extends Emitter {
   }
 
   regenerate(at) {
+    // Runtime poses never belong to cached timeline states. A pose only
+    // crosses a marker after keepPose() has turned it into a PoseFeature.
+    this.top().resetPose()
     const oldTop = this.top()
     if(at !== undefined) {
       if(at instanceof Feature) {

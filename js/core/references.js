@@ -17,6 +17,24 @@ export class Reference {
   }
 }
 
+export class ComponentReference extends Reference {
+  constructor(item, componentId) {
+    super(item)
+    this.componentId = componentId || item.id
+  }
+
+  update(tree) {
+    const component = tree.findChild(this.componentId)
+    if(!component) return { type: 'error', msg: 'Component reference was lost' }
+    this.item = component
+  }
+
+  clone() { return new ComponentReference(this.item, this.componentId) }
+  dump() { return { componentId: this.componentId } }
+  static undump(dump) { return new ComponentReference(null, dump.componentId) }
+}
+Serialize.register(ComponentReference, 'ComponentReference')
+
 class TopoReference extends Reference {
   constructor(item, componentId, solidId, topoId) {
     super(item)

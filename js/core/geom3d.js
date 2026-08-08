@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import earcut from 'earcut'
 
-import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference } from './references.js'
+import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference, PointReference } from './references.js'
 import { makeID } from './id.js'
 import { Line } from './geom2d.js'
 import {
@@ -396,6 +396,16 @@ export class Face extends Shape {
     return new PlanarReference(new FaceReference(this))
   }
 
+  axialReference() {
+    if(!this.getAxis()) throw "Cannot provide axis from non-cylindrical face"
+    return new AxialReference(new FaceReference(this))
+  }
+
+  pointReference() {
+    if(!this.getPoint()) throw "Cannot provide point from non-spherical face"
+    return new PointReference(new FaceReference(this))
+  }
+
   faceReference() {
     return new FaceReference(this)
   }
@@ -406,6 +416,26 @@ export class Face extends Shape {
     if(!isPlanar.IsPlanar()) return
     const plane = isPlanar.Plan()
     return matrixFromOcPln(plane)
+  }
+
+  getAxis() {
+    const surface = new window.oc.oc.BRepAdaptor_Surface_2(this.geom(), true)
+    try {
+      // OpenCascade raises Standard_NoSuchObject when the adapted surface is
+      // not cylindrical. GeomAbs_SurfaceType is not part of our WASM export.
+      const axis = surface.Cylinder().Axis()
+      const direction = vecFromOc(axis.Direction()).normalize()
+      const location = vecFromOc(axis.Location())
+      return rotationFromNormal(direction).setPosition(location)
+    } catch(_) {}
+  }
+
+  getPoint() {
+    const surface = new window.oc.oc.BRepAdaptor_Surface_2(this.geom(), true)
+    try {
+      const location = vecFromOc(surface.Sphere().Location())
+      return new THREE.Matrix4().setPosition(location)
+    } catch(_) {}
   }
 
   normal(u, v, useCurvature) { //XXX use BOPTools_AlgoTools3D::GetNormalToSurface or BOPTools_AlgoTools3D::GetNormalToFaceOnEdge

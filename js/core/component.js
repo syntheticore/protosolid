@@ -1,12 +1,14 @@
 import * as THREE from 'three'
 
-import { makeID } from './../js/core/id.js'
+import { makeID } from './id.js'
 import Serialize from './serialize.js'
 import { Compound } from './geom3d.js'
 import { CreateComponentFeature } from './features.js'
 import { PlaneHelper, AxisHelper, PointHelper } from './helpers.js'
 import { rotationFromNormal, rad } from './utils.js'
 import materials from '../materials.js'
+import { localTransform } from './assembly.js'
+import { ComponentReference } from './references.js'
 
 
 export class ComponentDefinition {
@@ -81,6 +83,9 @@ export class Component {
   constructor(parent, id) {
     this.parent = parent
     this.id = id
+    // designTransform is timeline-owned. transform is a transient pose delta
+    // produced by assembly manipulation and is intentionally not serialized.
+    this.designTransform = null
     this.transform = null
     this.compound = new Compound(this.id)
     this.sketches = []
@@ -96,19 +101,33 @@ export class Component {
       new PlaneHelper(this.id, rotationFromNormal(new THREE.Vector3(0.0, 0.0, 1.0)), this.id + '/XY'),
     ]
     this.children = []
+    this.assemblyJoints = []
   }
 
   typename() { return 'Component' }
 
+  componentReference() { return new ComponentReference(this) }
+
+  center() {
+    return this.compound.center() || new THREE.Vector3()
+  }
+
   deepClone(parent) {
     const clone = new Component(parent, this.id)
     Object.assign(clone, {
-      transform: this.transform && this.transform.clone(),
+      designTransform: this.designTransform && this.designTransform.clone(),
+      transform: null,
       compound: this.compound.cloneCached(),
       sketches: [...this.sketches],
       helpers: [...this.helpers],
       children: this.children.map(child => child.deepClone(clone) ),
       creator: this.creator,
+      assemblyJoints: this.assemblyJoints && this.assemblyJoints.map(joint => ({
+        ...joint,
+        frameA: joint.frameA && joint.frameA.clone(),
+        frameB: joint.frameB && joint.frameB.clone(),
+        fixedWorld: joint.fixedWorld && joint.fixedWorld.clone(),
+      })),
     })
     return clone
   }
@@ -193,6 +212,10 @@ export class Component {
   resetPose() {
     this.transform = null
     this.children.forEach(child => child.resetPose() )
+  }
+
+  localTransform() {
+    return localTransform(this)
   }
 
   // Terminate component during serialization to avoid cyclic references

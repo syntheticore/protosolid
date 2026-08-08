@@ -271,6 +271,7 @@
   import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
   import { PatternInputReference } from './../js/core/references.js'
+  import { referenceComponentId, worldTransform } from './../js/core/assembly.js'
 
   export default {
     name: 'FeatureBox',
@@ -385,6 +386,8 @@
                 PatternInputReference.fromFeature(item) : PatternInputReference.fromSolid(item)
             } else if(type == 'point') {
               itemRef = item.pointReference()
+            } else if(type == 'componentRef') {
+              itemRef = item.componentReference()
             } else if(type == 'face') {
               itemRef = item.faceReference()
             } else if(type == 'edge') {
@@ -432,6 +435,7 @@
           // Generate picker curve
           this.activePicker = key
           this.bus.featurePickerActive = type == 'patternInput'
+          this.bus.componentPickerActive = type == 'componentRef'
           this.updatePicker = () => {
             const { pickerPos, color } = this.getPickerInfo(key)
             this.bus.emit('pick', type, pickerPos, color)
@@ -446,6 +450,7 @@
         this.updatePicker = null
         this.activeFeature.suppressUpdate = false
         this.bus.featurePickerActive = false
+        this.bus.componentPickerActive = false
       },
 
       // Activate pickers using number keys
@@ -472,7 +477,7 @@
               const refs = Array.isArray(data()) ? data() : [data()]
               refs.forEach(ref => {
                 const item = ref.getItem()
-                this.bus.emit('show-picker', pickerPos, this.getCenter(item), color)
+                this.bus.emit('show-picker', pickerPos, this.getCenter(item, ref), color)
                 // item.free()
               })
             }
@@ -481,12 +486,16 @@
         })
       },
 
-      getCenter(item) {
+      getCenter(item, reference) {
+        let center
         if(item instanceof THREE.Matrix4) {
-          return new THREE.Vector3().setFromMatrixPosition(item)
+          center = new THREE.Vector3().setFromMatrixPosition(item)
         } else {
-          return item.center()
+          center = item.center()
         }
+        const componentId = referenceComponentId(reference)
+        const component = componentId && this.document.top().findChild(componentId)
+        return component ? center.applyMatrix4(worldTransform(component)) : center
       },
 
       getPickerInfo: function(key) {

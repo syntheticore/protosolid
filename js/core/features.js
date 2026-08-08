@@ -9,6 +9,13 @@ import { normalFromMatrix, ocCatch, rad } from './utils.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
 import { makeID } from './id.js'
+import {
+  alignJointWorld,
+  baselineWorldTransform,
+  jointFrame,
+  referenceComponentId,
+  setBaselineWorldTransform,
+} from './assembly.js'
 
 
 export class Feature {
@@ -106,13 +113,13 @@ export class Feature {
 
   needsPicker(setting, includeOptionals) {
     setting = this.settings[setting]
-    return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'patternInput'].some(type =>
+    return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput'].some(type =>
       type == setting.type && (!setting.optional || includeOptionals)
     )
   }
 
   isPickerSetting(setting) {
-    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'patternInput'].includes(setting.type)
+    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput'].includes(setting.type)
   }
 
   isSettingVisible(setting) {
@@ -369,6 +376,162 @@ export class PatternFeature extends Feature {
 }
 
 Serialize.register(PatternFeature, 'PatternFeature')
+
+
+export class PoseFeature extends Feature {
+  static icon = 'street-view'
+
+  constructor(doc, transforms) {
+    super(doc, false, 'Position', {})
+    this.transforms = transforms || doc.top().getChildren()
+      .filter(component => component.parent && component.transform)
+      .map(component => ({ id: component.id, transform: component.localTransform() }))
+  }
+
+  execute(tree) {
+    this.error = null
+    for(const entry of this.transforms) {
+      const component = tree.findChild(entry.id)
+      if(!component) {
+        this.error = { type: 'error', msg: 'Positioned component was lost' }
+        return
+      }
+      component.designTransform = entry.transform.clone()
+      component.transform = null
+    }
+  }
+
+  modifiedComponents() { return this.transforms.map(entry => entry.id) }
+  isComplete() { return this.transforms.length > 0 }
+  dump() { return { ...super.dump(), transforms: this.transforms } }
+
+  static undump(dump, context) {
+    const feature = new PoseFeature(context.document, dump.transforms)
+    feature.id = dump.id
+    feature.componentId = dump.componentId
+    return feature
+  }
+}
+Serialize.register(PoseFeature, 'PoseFeature')
+
+
+export class JointFeature extends Feature {
+  static icon = 'code-branch'
+
+  constructor(doc) {
+    const is = type => feature => feature.jointType == type
+    super(doc, false, 'Joint', {
+      jointType: {
+        title: 'Type',
+        type: 'enum',
+        options: {
+          axis: 'Axis',
+          coplanar: 'Coplanar',
+          ball: 'Ball',
+          fix: 'Fix',
+        },
+      },
+      axisA: { title: '1', type: 'face', when: is('axis') },
+      axisB: { title: '2', type: 'face', when: is('axis') },
+      planeA: { title: '1', type: 'face', when: is('coplanar') },
+      planeB: { title: '2', type: 'face', when: is('coplanar') },
+      pointA: { title: '1', type: 'point', when: is('ball') },
+      pointB: { title: '2', type: 'point', when: is('ball') },
+      fixedComponent: { title: 'Component', type: 'componentRef', when: is('fix') },
+    })
+    this.jointType = 'axis'
+  }
+
+  inputKeys() {
+    return {
+      axis: ['axisA', 'axisB'],
+      coplanar: ['planeA', 'planeB'],
+      ball: ['pointA', 'pointB'],
+      fix: ['fixedComponent'],
+    }[this.jointType]
+  }
+
+  execute(tree) {
+    if(this.suppressUpdate || !this.isComplete()) return
+    this.error = null
+    const references = this.updateReferences(tree)
+    if(this.error && this.error.type == 'error') return
+    this.updateFeature(tree, references)
+  }
+
+  updateFeature(tree, references) {
+    const keys = this.inputKeys()
+    const refs = keys.map(key => this[key]())
+    const componentIds = refs.map(referenceComponentId)
+    if(componentIds.some(id => !id || !tree.findChild(id))) {
+      this.error = { type: 'error', msg: 'Joint input component was lost' }
+      return
+    }
+    if(componentIds.length == 2 && componentIds[0] == componentIds[1]) {
+      this.error = { type: 'error', msg: 'Joint inputs must belong to different components' }
+      return
+    }
+    const owner = tree.findChild(this.componentId)
+    const components = componentIds.map(id => tree.findChild(id))
+    if(!owner || components.some(component => component == owner || !component.hasAncestor(owner))) {
+      this.error = { type: 'error', msg: 'Joint inputs must be strict descendants of the joint component' }
+      return
+    }
+
+    const frameA = jointFrame(this.jointType, references[keys[0]])
+    const frameB = keys[1] && jointFrame(this.jointType, references[keys[1]])
+    if(!frameA || (keys[1] && !frameB)) {
+      this.error = {
+        type: 'error',
+        msg: this.jointType == 'axis' ? 'Axis joints require cylindrical faces' :
+          this.jointType == 'coplanar' ? 'Coplanar joints require planar faces' :
+          'This joint requires points',
+      }
+      return
+    }
+
+    const componentA = tree.findChild(componentIds[0])
+    if(this.jointType == 'fix') {
+      tree.assemblyJoints.push({
+        id: this.id,
+        type: 'fix',
+        componentA: componentA.id,
+        frameA: frameA.clone(),
+        fixedWorld: baselineWorldTransform(componentA),
+      })
+      return
+    }
+
+    const componentB = tree.findChild(componentIds[1])
+    const worldA = baselineWorldTransform(componentA)
+    const worldB = baselineWorldTransform(componentB)
+    const alignedB = alignJointWorld(this.jointType, worldA, frameA, worldB, frameB)
+    setBaselineWorldTransform(componentB, alignedB)
+    tree.assemblyJoints.push({
+      id: this.id,
+      type: this.jointType,
+      componentA: componentA.id,
+      componentB: componentB.id,
+      frameA: frameA.clone(),
+      frameB: frameB.clone(),
+    })
+  }
+
+  modifiedComponents() {
+    return (this.inputKeys() || []).map(key => this[key] && referenceComponentId(this[key]()))
+      .filter(Boolean)
+  }
+
+  acceptsInput(item) {
+    const component = item && (
+      item.typename && item.typename() == 'Component' ? item :
+      item.component || item.solid?.component || item.compound?.component
+    )
+    const owner = this.document.top().findChild(this.componentId)
+    return !!component && !!owner && component != owner && component.hasAncestor(owner)
+  }
+}
+Serialize.register(JointFeature, 'JointFeature')
 
 
 export class CreateComponentFeature extends Feature {

@@ -242,6 +242,7 @@
     ReplaceFeature,
     LoftFeature,
     PatternFeature,
+    JointFeature,
   } from './../js/core/features.js'
 
   import {
@@ -386,7 +387,7 @@
             title: 'Simulate',
             tools: [
               { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
-              { title: 'Joint', icon: 'code-branch' },
+              { title: 'Joint', feature: JointFeature },
               { title: 'Group', icon: 'object-group' },
               { title: 'Motion Link', icon: 'link' },
               { title: 'Animation', icon: 'feather' }, //icon: 'clapperboard'

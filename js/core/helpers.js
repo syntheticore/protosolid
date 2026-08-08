@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { makeID } from './id.js'
-import { PlanarReference, HelperReference, AxialReference } from './references.js'
+import { PlanarReference, HelperReference, AxialReference, PointReference } from './references.js'
 import { ocPntFromVec } from './utils.js'
 
 
@@ -58,7 +58,7 @@ export class PointHelper extends ConstructionHelper {
     this.transform = point
   }
 
-  axialReference() {
+  pointReference() {
     return new PointReference(new HelperReference(this))
   }
 

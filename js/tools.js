@@ -359,6 +359,12 @@ export class SolidPickTool extends PickTool {
   }
 }
 
+export class PointPickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['point'], callback)
+  }
+}
+
 
 export class SketchTool extends Tool {
   constructor(component, viewport, sketch) {

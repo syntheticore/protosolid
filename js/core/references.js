@@ -108,6 +108,71 @@ export class SolidReference extends Reference {
 Serialize.register(SolidReference, 'SolidReference')
 
 
+// Pattern inputs may point either at a body in the model or at a feature in
+// the timeline. Keeping this as a reference (instead of storing geometry)
+// makes saved patterns regenerate against the latest upstream result.
+export class PatternInputReference extends Reference {
+  constructor(item, document, featureId, solidReference) {
+    super(item)
+    this.document = document
+    this.featureId = featureId
+    this.solidReference = solidReference
+  }
+
+  static fromSolid(solid) {
+    return new PatternInputReference(solid, null, null, solid.reference())
+  }
+
+  static fromFeature(feature) {
+    return new PatternInputReference(feature.previewBody, feature.document, feature.id)
+  }
+
+  update(tree) {
+    if(this.solidReference) {
+      const error = this.solidReference.update(tree)
+      this.item = this.solidReference.getItem()
+      return error
+    }
+
+    const feature = this.document.timeline.features.find(feature => feature.id == this.featureId)
+    if(!feature) return { type: 'error', msg: 'Pattern input feature was lost' }
+
+    // Additive features expose their tool body. For modifying features, use
+    // the affected component's current result so every timeline feature is a
+    // valid pattern input.
+    this.item = feature.previewBody || tree.findChild(feature.componentId)?.compound
+    if(!this.item || !this.item.geom) {
+      return { type: 'error', msg: 'Pattern input feature has no solid result' }
+    }
+  }
+
+  clone() {
+    return new PatternInputReference(
+      this.item,
+      this.document,
+      this.featureId,
+      this.solidReference && this.solidReference.clone(),
+    )
+  }
+
+  matches(item) {
+    return this.featureId ? this.featureId == item.id : this.solidReference?.solidId == item.id
+  }
+
+  dump() {
+    return {
+      featureId: this.featureId,
+      solidReference: this.solidReference,
+    }
+  }
+
+  static undump(dump, context) {
+    return new PatternInputReference(null, context.document, dump.featureId, dump.solidReference)
+  }
+}
+Serialize.register(PatternInputReference, 'PatternInputReference')
+
+
 export class CurveReference extends Reference {
   constructor(item, componentId, sketchId, isProjection, itemId) {
     super(item)

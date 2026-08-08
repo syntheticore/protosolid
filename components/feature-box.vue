@@ -12,7 +12,10 @@
 
       .settings
 
-        .setting(v-for="(setting, key) in activeFeature.settings")
+        .setting(
+          v-for="(setting, key) in orderedSettings"
+          v-show="activeFeature.isSettingVisible(setting)"
+        )
 
           span {{ setting.title }}
 
@@ -27,7 +30,26 @@
             v-if="setting.type == 'length' || setting.type == 'angle'"
             :component="document.top()"
             v-model:value="activeFeature[key]"
-            :auto-focus="true"
+            :auto-focus="setting.autoFocus !== false && activeFeature.isSettingVisible(setting)"
+            @update:value="update"
+            @error="error = $event"
+          )
+
+          IntegerInput(
+            v-if="setting.type == 'integer'"
+            v-model:value="activeFeature[key]"
+            :min="setting.min"
+            :max="setting.max"
+            @update:value="update"
+            @error="error = $event"
+          )
+
+          ScalarInput(
+            v-if="setting.type == 'number'"
+            v-model:value="activeFeature[key]"
+            :min="setting.min"
+            :max="setting.max"
+            :step="setting.step || 1"
             @update:value="update"
             @error="error = $event"
           )
@@ -46,7 +68,7 @@
             @update:active="update"
           )
 
-          select.input(
+          select.input.enum-input(
             v-if="setting.type == 'enum'"
             v-model="activeFeature[key]"
             @change="update"
@@ -158,6 +180,13 @@
     .icon-toggle
       flex: 1 1 auto
 
+    .enum-input
+      appearance: auto
+      border-radius: 3px
+      height: 28px
+      -webkit-appearance: menulist
+      min-width: 68px
+
   .picker
     width: 24px
     height: 24px
@@ -241,6 +270,7 @@
   import { DummyTool, ManipulationTool } from './../js/tools.js'
   import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
+  import { PatternInputReference } from './../js/core/references.js'
 
   export default {
     name: 'FeatureBox',
@@ -263,6 +293,14 @@
     },
 
     computed: {
+      orderedSettings: function() {
+        return Object.fromEntries(
+          Object.entries(this.activeFeature.settings).sort(([, left], [, right]) =>
+            Number(this.activeFeature.isPickerSetting(right)) - Number(this.activeFeature.isPickerSetting(left))
+          )
+        )
+      },
+
       canConfirm: function() {
         return this.activeFeature.isComplete() && !(this.error && this.error.type == 'error')
       },
@@ -297,6 +335,7 @@
     },
 
     beforeUnmount: function() {
+      this.cancelPick()
       // Remove temporary feature when feature creation was not completed
       if(this.status !== 'confirmed' && !this.showHeader) {
         this.document.removeFeature(this.activeFeature)
@@ -341,6 +380,11 @@
             let itemRef;
             if(type == 'profile' || type == 'solid') {
               itemRef = item.reference()
+            } else if(type == 'patternInput') {
+              itemRef = item.patternReference ?
+                PatternInputReference.fromFeature(item) : PatternInputReference.fromSolid(item)
+            } else if(type == 'point') {
+              itemRef = item.pointReference()
             } else if(type == 'face') {
               itemRef = item.faceReference()
             } else if(type == 'edge') {
@@ -357,7 +401,7 @@
               const currentItems = (this.activeFeature[key] && [...this.activeFeature[key]()]) || []
               this.activeFeature[key] = () => currentItems
               const oldItem = currentItems.find(otherRef => {
-                return otherRef.item.id == item.id
+                return otherRef.matches ? otherRef.matches(item) : otherRef.item.id == item.id
               })
               if(oldItem) {
                 currentItems.splice(currentItems.indexOf(oldItem), 1)
@@ -388,6 +432,7 @@
 
           // Generate picker curve
           this.activePicker = key
+          this.bus.featurePickerActive = type == 'patternInput'
           this.updatePicker = () => {
             const { pickerPos, color } = this.getPickerInfo(key)
             this.bus.emit('pick', type, pickerPos, color)
@@ -401,6 +446,7 @@
         this.activePicker = null
         this.updatePicker = null
         this.activeFeature.suppressUpdate = false
+        this.bus.featurePickerActive = false
       },
 
       // Activate pickers using number keys

@@ -241,6 +241,7 @@
     MoveFeature,
     ReplaceFeature,
     LoftFeature,
+    PatternFeature,
   } from './../js/core/features.js'
 
   import {
@@ -363,7 +364,7 @@
               { title: 'Thicken', icon: 'hotdog' },
               { title: 'Coil', icon: 'fan' },
               { title: 'Web', icon: 'spider' },
-              { title: 'Pattern', icon: 'th' },
+              { title: 'Pattern', feature: PatternFeature },
               { title: 'Mirror', icon: 'band-aid' },
             ],
           },

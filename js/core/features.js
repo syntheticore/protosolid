@@ -3,9 +3,9 @@ import * as THREE from 'three'
 import { Component, ComponentDefinition } from './component.js'
 import { Sketch } from './sketch.js'
 import { Compound } from './geom3d.js'
-import { Reference } from './references.js'
+import { Reference, PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
-import { normalFromMatrix, ocCatch } from './utils.js'
+import { normalFromMatrix, ocCatch, rad } from './utils.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
 import { makeID } from './id.js'
@@ -48,6 +48,10 @@ export class Feature {
 
   typename() {
     return this.title
+  }
+
+  patternReference() {
+    return PatternInputReference.fromFeature(this)
   }
 
   execute(tree) {
@@ -102,9 +106,17 @@ export class Feature {
 
   needsPicker(setting, includeOptionals) {
     setting = this.settings[setting]
-    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid'].some(type =>
+    return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'patternInput'].some(type =>
       type == setting.type && (!setting.optional || includeOptionals)
     )
+  }
+
+  isPickerSetting(setting) {
+    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'patternInput'].includes(setting.type)
+  }
+
+  isSettingVisible(setting) {
+    return !setting.when || setting.when(this)
   }
 
   isComplete() {
@@ -161,7 +173,7 @@ export class Feature {
   getValues() {
     const values = {}
     Object.keys(this.settings).forEach(key => {
-      values[key] = (this[key] && this.needsPicker(key, true) ? this[key]() : this[key])
+      values[key] = (this[key] && this.isPickerSetting(this.settings[key]) ? this[key]() : this[key])
     })
     return values
   }
@@ -169,7 +181,7 @@ export class Feature {
   setValues(values) {
     Object.keys(values).forEach(key => {
       const value = values[key]
-      this[key] = (value && this.needsPicker(key, true) ? () => value : value)
+      this[key] = (value && this.isPickerSetting(this.settings[key]) ? () => value : value)
     })
   }
 
@@ -194,6 +206,169 @@ export class Feature {
     return feature
   }
 }
+
+
+export class PatternFeature extends Feature {
+  static icon = 'th'
+
+  constructor(doc) {
+    super(doc, true, 'Pattern', {
+      inputs: {
+        title: 'Features',
+        type: 'patternInput',
+        multi: true,
+      },
+      patternType: {
+        title: 'Type',
+        type: 'enum',
+        options: {
+          grid: 'Grid',
+          radial: 'Radial',
+        },
+      },
+      center: {
+        title: 'Center',
+        type: 'point',
+        when: feature => feature.patternType == 'radial',
+      },
+      uCount: {
+        title: 'U Count',
+        type: 'integer',
+        min: 1,
+        when: feature => feature.patternType == 'grid',
+      },
+      vCount: {
+        title: 'V Count',
+        type: 'integer',
+        min: 1,
+        when: feature => feature.patternType == 'grid',
+      },
+      uOffset: {
+        title: 'U Step',
+        type: 'length',
+        autoFocus: false,
+        when: feature => feature.patternType == 'grid',
+      },
+      vOffset: {
+        title: 'V Step',
+        type: 'length',
+        autoFocus: false,
+        when: feature => feature.patternType == 'grid',
+      },
+      radialCount: {
+        title: 'Count',
+        type: 'integer',
+        min: 1,
+        when: feature => feature.patternType == 'radial',
+      },
+      radialStep: {
+        title: 'Angle Step',
+        type: 'number',
+        step: 1,
+        when: feature => feature.patternType == 'radial',
+      },
+    })
+
+    this.patternType = 'grid'
+    this.center = null
+    this.uOffset = 10
+    this.uCount = 2
+    this.vOffset = 10
+    this.vCount = 1
+    this.radialStep = 45
+    this.radialCount = 8
+
+    const selected = doc.selection.items
+      .map(item => item instanceof Feature ? PatternInputReference.fromFeature(item) :
+        (item && item.typename && item.typename() == 'Solid' ? PatternInputReference.fromSolid(item) : null))
+      .filter(Boolean)
+    this.inputs = selected.length ? () => selected : null
+  }
+
+  isComplete() {
+    if(!super.isComplete()) return false
+    if(this.patternType == 'radial') {
+      return this.radialCount >= 1 && Number.isFinite(this.radialStep)
+    }
+    return this.uCount >= 1 && this.vCount >= 1 &&
+      Number.isFinite(this.uOffset) && Number.isFinite(this.vOffset)
+  }
+
+  updateFeature(tree, references) {
+    const ownIndex = this.document.timeline.features.indexOf(this)
+    const hasFutureInput = this.inputs().some(input => input.featureId &&
+      this.document.timeline.features.findIndex(feature => feature.id == input.featureId) >= ownIndex
+    )
+    if(hasFutureInput) {
+      this.error = { type: 'error', msg: 'Pattern inputs must precede the pattern feature' }
+      return
+    }
+
+    const comp = tree.findChild(this.componentId)
+    const sources = references.inputs.map(input => input.toCompound ? input.toCompound() : input)
+    const transforms = this.patternType == 'radial' ?
+      this.radialTransforms(references.center) : this.gridTransforms()
+
+    try {
+      const copies = transforms.flatMap((transform, transformIndex) =>
+        sources.map((source, sourceIndex) => {
+          const copy = source.transform(transform)
+          this.identifyCopy(copy, transformIndex, sourceIndex)
+          return copy
+        })
+      )
+      if(!copies.length) {
+        this.previewBody = null
+        return
+      }
+      const tool = copies.slice(1).reduce(
+        (combined, copy) => combined.boolean(copy, 'join'),
+        copies[0],
+      )
+      comp.compound = comp.compound.boolean(tool, this.operation)
+      this.previewBody = tool
+    } catch(err) { this.error = err || this.error }
+  }
+
+  gridTransforms() {
+    const transforms = []
+    for(let u = 0; u < Math.floor(this.uCount); u++) {
+      for(let v = 0; v < Math.floor(this.vCount); v++) {
+        if(u == 0 && v == 0) continue
+        transforms.push(new THREE.Matrix4().makeTranslation(u * this.uOffset, v * this.vOffset, 0))
+      }
+    }
+    return transforms
+  }
+
+  radialTransforms(centerItem) {
+    const center = centerItem instanceof THREE.Matrix4 ?
+      new THREE.Vector3().setFromMatrixPosition(centerItem) : centerItem
+    const transforms = []
+    for(let i = 1; i < Math.floor(this.radialCount); i++) {
+      const angle = rad(this.radialStep * i)
+      transforms.push(
+        new THREE.Matrix4().makeTranslation(center.clone().negate())
+          .premultiply(new THREE.Matrix4().makeRotationZ(angle))
+          .premultiply(new THREE.Matrix4().makeTranslation(center))
+      )
+    }
+    return transforms
+  }
+
+  identifyCopy(compound, transformIndex, sourceIndex) {
+    compound.solids().forEach((solid, solidIndex) => {
+      solid.faces().forEach((face, faceIndex) => {
+        face.id = `/${this.id}/pattern/${transformIndex}/${sourceIndex}/${solidIndex}/face/${faceIndex}`
+      })
+      solid.edges().forEach((edge, edgeIndex) => {
+        edge.id = `/${this.id}/pattern/${transformIndex}/${sourceIndex}/${solidIndex}/edge/${edgeIndex}`
+      })
+    })
+  }
+}
+
+Serialize.register(PatternFeature, 'PatternFeature')
 
 
 export class CreateComponentFeature extends Feature {

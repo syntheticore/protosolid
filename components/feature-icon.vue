@@ -9,7 +9,7 @@
     @dragleave="dragleave"
     @dragover.prevent="dragover"
     @drop.prevent="drop"
-    @click="document.selection.handle(feature, bus.isCtrlPressed)"
+    @click="handleClick"
     @dblclick="openFeature()"
   )
 
@@ -170,6 +170,18 @@
     mounted() {},
 
     methods: {
+      handleClick() {
+        if(this.bus.featurePickerActive) {
+          if(this.feature === this.document.activeFeature) return
+          const featureIndex = this.document.timeline.features.indexOf(this.feature)
+          const activeIndex = this.document.timeline.features.indexOf(this.document.activeFeature)
+          if(featureIndex >= activeIndex) return
+          this.bus.emit('picked', this.feature)
+        } else {
+          this.document.selection.handle(this.feature, this.bus.isCtrlPressed)
+        }
+      },
+
       openFeature() {
         this.bus.emit('close-feature')
         setTimeout(() => this.document.activateFeature(this.feature) )

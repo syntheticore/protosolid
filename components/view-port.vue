@@ -172,6 +172,7 @@
     PlanePickTool,
     AxisPickTool,
     SolidPickTool,
+    PointPickTool,
     LineTool,
     SplineTool,
     CircleTool,
@@ -273,6 +274,8 @@
           face: FacePickTool,
           plane: PlanePickTool,
           solid: SolidPickTool,
+          patternInput: SolidPickTool,
+          point: PointPickTool,
         }[type])
       })
 

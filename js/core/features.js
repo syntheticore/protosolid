@@ -455,6 +455,12 @@ export class JointFeature extends Feature {
       },
       axisA: { title: '1', type: 'face', when: is('axis') },
       axisB: { title: '2', type: 'face', when: is('axis') },
+      lockSlide: {
+        title: 'Lock Slide',
+        type: 'bool',
+        icons: ['lock', 'lock-open'],
+        when: is('axis'),
+      },
       planeA: { title: '1', type: 'face', when: is('coplanar') },
       planeB: { title: '2', type: 'face', when: is('coplanar') },
       pointA: { title: '1', type: 'point', when: is('ball') },
@@ -464,6 +470,7 @@ export class JointFeature extends Feature {
     // Assembly joints belong to an occurrence, not to its shared definition.
     this.componentId = doc.activeComponent.id
     this.jointType = 'axis'
+    this.lockSlide = false
   }
 
   inputKeys() {
@@ -529,7 +536,7 @@ export class JointFeature extends Feature {
     const componentB = tree.findChild(componentIds[1])
     const worldA = baselineWorldTransform(componentA)
     const worldB = baselineWorldTransform(componentB)
-    const alignedB = alignJointWorld(this.jointType, worldA, frameA, worldB, frameB)
+    const alignedB = alignJointWorld(this.jointType, worldA, frameA, worldB, frameB, this.lockSlide)
     setBaselineWorldTransform(componentB, alignedB)
     tree.assemblyJoints.push({
       id: this.id,
@@ -538,6 +545,7 @@ export class JointFeature extends Feature {
       componentB: componentB.id,
       frameA: frameA.clone(),
       frameB: frameB.clone(),
+      lockSlide: this.jointType == 'axis' && this.lockSlide,
     })
   }
 

@@ -3,6 +3,7 @@ import * as THREE from 'three'
 
 const IDENTITY = () => new THREE.Matrix4()
 const EPSILON = 1e-8
+const SOLVER_TOLERANCE = 1e-4
 const RELAXATION = 0.55
 
 export function localTransform(component) {
@@ -54,7 +55,7 @@ export function jointFrame(type, item) {
 
 // Places component B on the constraint while retaining every unconstrained
 // degree of freedom (axis slide/spin, plane slide/spin, and ball rotation).
-export function alignJointWorld(type, worldA, frameA, worldB, frameB) {
+export function alignJointWorld(type, worldA, frameA, worldB, frameB, lockSlide = false) {
   const attachmentA = worldA.clone().multiply(frameA)
   let result = worldB.clone()
   let attachmentB = result.clone().multiply(frameB)
@@ -69,7 +70,7 @@ export function alignJointWorld(type, worldA, frameA, worldB, frameB) {
   const a = framePosition(attachmentA)
   const b = framePosition(attachmentB)
   let delta = a.clone().sub(b)
-  if(type == 'axis') {
+  if(type == 'axis' && !lockSlide) {
     const axis = frameDirection(attachmentA)
     delta.sub(axis.multiplyScalar(delta.dot(axis)))
   } else if(type == 'coplanar') {
@@ -89,23 +90,27 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
   const fixed = new Set(
     joints.filter(joint => joint.type == 'fix').map(joint => joint.componentA)
   )
-  const pinned = movedComponent.id
-  if(fixed.has(pinned)) {
-    const anchor = joints.find(joint => joint.type == 'fix' && joint.componentA == pinned)
+  if(fixed.has(movedComponent.id)) {
+    const anchor = joints.find(joint => joint.type == 'fix' && joint.componentA == movedComponent.id)
     if(anchor) setWorldTransform(movedComponent, anchor.fixedWorld)
     return
   }
+  let pathSolved
   const mobility = component => {
-    if(!component || !component.parent || fixed.has(component.id) || component.id == pinned) return 0
-    return 1
+    if(!component || !component.parent || fixed.has(component.id)) return 0
+    return !pathSolved && component.id == movedComponent.id ? 0 : 1
   }
 
-  setWorldTransform(movedComponent, desiredWorld)
-  for(let i = 0; i < iterations; i++) {
+  pathSolved = solveKinematicPath(tree, movedComponent, framePosition(desiredWorld), joints, fixed, iterations)
+  if(!pathSolved) {
+    setWorldTransform(movedComponent, desiredWorld)
+  }
+
+  const projectJoints = () => {
     for(const joint of joints) {
       if(joint.type == 'fix') {
         const component = tree.findChild(joint.componentA)
-        if(component && component.id != pinned) setWorldTransform(component, joint.fixedWorld)
+        if(component) setWorldTransform(component, joint.fixedWorld)
         continue
       }
 
@@ -114,9 +119,119 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
       if(!a || !b) continue
       solvePair(joint, a, b, mobility(a), mobility(b))
     }
-    // Drag intent and anchors are hard constraints.
-    if(!fixed.has(pinned)) setWorldTransform(movedComponent, desiredWorld)
   }
+
+  for(let i = 0; i < iterations; i++) {
+    projectJoints()
+    if(!pathSolved) setWorldTransform(movedComponent, desiredWorld)
+    if(assemblyError(tree, joints) < SOLVER_TOLERANCE) return
+  }
+}
+
+function solveKinematicPath(tree, movedComponent, target, joints, fixed, iterations) {
+  const adjacency = new Map()
+  joints.filter(joint => joint.type != 'fix').forEach(joint => {
+    const add = (from, to) => {
+      if(!adjacency.has(from)) adjacency.set(from, [])
+      adjacency.get(from).push({ joint, componentId: to })
+    }
+    add(joint.componentA, joint.componentB)
+    add(joint.componentB, joint.componentA)
+  })
+
+  const queue = [movedComponent.id]
+  const previous = new Map([[movedComponent.id, null]])
+  let anchorId
+  while(queue.length && !anchorId) {
+    const componentId = queue.shift()
+    if(fixed.has(componentId)) {
+      anchorId = componentId
+      break
+    }
+    for(const edge of adjacency.get(componentId) || []) {
+      if(previous.has(edge.componentId)) continue
+      previous.set(edge.componentId, { componentId, joint: edge.joint })
+      queue.push(edge.componentId)
+    }
+  }
+  if(!anchorId) return false
+
+  const components = []
+  const pathJoints = []
+  let componentId = anchorId
+  while(componentId != movedComponent.id) {
+    const step = previous.get(componentId)
+    components.unshift(tree.findChild(step.componentId))
+    pathJoints.unshift(step.joint)
+    componentId = step.componentId
+  }
+  if(pathJoints.some(joint => joint.type != 'axis')) return false
+
+  for(let iteration = 0; iteration < iterations; iteration++) {
+    for(let index = 0; index < pathJoints.length; index++) {
+      const joint = pathJoints[index]
+      const moving = components[index]
+      const anchor = tree.findChild(
+        joint.componentA == moving.id ? joint.componentB : joint.componentA
+      )
+      const anchorFrame = joint.componentA == anchor.id ? joint.frameA : joint.frameB
+      const attachment = worldTransform(anchor).multiply(anchorFrame)
+      const pivot = framePosition(attachment)
+      const movingGroup = components.slice(0, index + 1)
+      let from = framePosition(worldTransform(movedComponent)).sub(pivot)
+      const to = target.clone().sub(pivot)
+      const axis = frameDirection(attachment)
+
+      if(!joint.lockSlide) {
+        const distance = to.dot(axis) - from.dot(axis)
+        translateWorldGroup(movingGroup, axis.clone().multiplyScalar(distance))
+        from = framePosition(worldTransform(movedComponent)).sub(pivot)
+      }
+
+      from.sub(axis.clone().multiplyScalar(from.dot(axis)))
+      to.sub(axis.clone().multiplyScalar(to.dot(axis)))
+      if(from.lengthSq() < EPSILON || to.lengthSq() < EPSILON) continue
+      from.normalize()
+      to.normalize()
+      const angle = Math.atan2(axis.dot(from.clone().cross(to)), from.dot(to))
+      const rotation = new THREE.Quaternion().setFromAxisAngle(axis, angle)
+
+      rotateWorldGroup(movingGroup, pivot, rotation)
+    }
+    if(framePosition(worldTransform(movedComponent)).distanceTo(target) < SOLVER_TOLERANCE) break
+  }
+  return true
+}
+
+function rotateWorldGroup(components, pivot, rotation) {
+  const transform = new THREE.Matrix4().makeTranslation(pivot)
+    .multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation))
+    .multiply(new THREE.Matrix4().makeTranslation(pivot.clone().negate()))
+  const worlds = new Map(components.map(component => [
+    component,
+    transform.clone().multiply(worldTransform(component)),
+  ]))
+  components.slice().sort((a, b) => componentDepth(a) - componentDepth(b))
+    .forEach(component => setWorldTransform(component, worlds.get(component)))
+}
+
+function translateWorldGroup(components, translation) {
+  const transform = new THREE.Matrix4().makeTranslation(translation)
+  const worlds = new Map(components.map(component => [
+    component,
+    transform.clone().multiply(worldTransform(component)),
+  ]))
+  components.slice().sort((a, b) => componentDepth(a) - componentDepth(b))
+    .forEach(component => setWorldTransform(component, worlds.get(component)))
+}
+
+function componentDepth(component) {
+  let depth = 0
+  while(component.parent) {
+    depth++
+    component = component.parent
+  }
+  return depth
 }
 
 function solvePair(joint, componentA, componentB, mobilityA, mobilityB) {
@@ -130,13 +245,24 @@ function solvePair(joint, componentA, componentB, mobilityA, mobilityB) {
   let attachmentA = worldA.clone().multiply(joint.frameA)
   let attachmentB = worldB.clone().multiply(joint.frameB)
 
-  if(joint.type == 'ball') {
+  if(joint.type == 'ball' || joint.type == 'axis') {
+    let targetA = framePosition(attachmentB)
+    let targetB = framePosition(attachmentA)
+    if(joint.type == 'axis') {
+      const radialError = framePosition(attachmentA).sub(framePosition(attachmentB))
+      if(!joint.lockSlide) {
+        const axis = frameDirection(attachmentA)
+        radialError.sub(axis.multiplyScalar(radialError.dot(axis)))
+      }
+      targetA = framePosition(attachmentA).sub(radialError)
+      targetB = framePosition(attachmentB).add(radialError)
+    }
     if(mobilityA) {
-      worldA = rotateAttachmentToward(worldA, framePosition(attachmentA), framePosition(attachmentB), weightA * RELAXATION)
+      worldA = rotateAttachmentToward(worldA, framePosition(attachmentA), targetA, weightA * RELAXATION)
       setWorldTransform(componentA, worldA)
     }
     if(mobilityB) {
-      worldB = rotateAttachmentToward(worldB, framePosition(attachmentB), framePosition(attachmentA), weightB * RELAXATION)
+      worldB = rotateAttachmentToward(worldB, framePosition(attachmentB), targetB, weightB * RELAXATION)
       setWorldTransform(componentB, worldB)
     }
     attachmentA = worldTransform(componentA).multiply(joint.frameA)
@@ -161,7 +287,7 @@ function solvePair(joint, componentA, componentB, mobilityA, mobilityB) {
   const pointA = framePosition(attachmentA)
   const pointB = framePosition(attachmentB)
   let error = pointA.clone().sub(pointB)
-  if(joint.type == 'axis') {
+  if(joint.type == 'axis' && !joint.lockSlide) {
     const axis = frameDirection(attachmentA)
     error.sub(axis.multiplyScalar(error.dot(axis)))
   } else if(joint.type == 'coplanar') {
@@ -194,6 +320,28 @@ function rotateAttachmentToward(world, attachment, target, weight) {
 
 function translateWorld(world, delta) {
   return new THREE.Matrix4().makeTranslation(delta).multiply(world)
+}
+
+function assemblyError(tree, joints) {
+  return joints.reduce((largest, joint) => {
+    if(joint.type == 'fix') return largest
+    const componentA = tree.findChild(joint.componentA)
+    const componentB = tree.findChild(joint.componentB)
+    if(!componentA || !componentB) return largest
+    const attachmentA = worldTransform(componentA).multiply(joint.frameA)
+    const attachmentB = worldTransform(componentB).multiply(joint.frameB)
+    const directionA = frameDirection(attachmentA)
+    const directionB = frameDirection(attachmentB)
+    if(directionA.dot(directionB) < 0) directionB.negate()
+    let positional = framePosition(attachmentA).sub(framePosition(attachmentB))
+    if(joint.type == 'axis' && !joint.lockSlide) {
+      positional.sub(directionA.clone().multiplyScalar(positional.dot(directionA)))
+    } else if(joint.type == 'coplanar') {
+      positional = directionA.clone().multiplyScalar(positional.dot(directionA))
+    }
+    const angular = joint.type == 'ball' ? 0 : directionA.cross(directionB).length()
+    return Math.max(largest, positional.length(), angular)
+  }, 0)
 }
 
 function framePosition(frame) {

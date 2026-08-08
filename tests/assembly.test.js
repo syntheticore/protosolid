@@ -49,6 +49,32 @@ class TestComponent {
 const at = (x, y = 0, z = 0) => new THREE.Matrix4().makeTranslation(x, y, z)
 const point = (component, frame = new THREE.Matrix4()) =>
   new THREE.Vector3().setFromMatrixPosition(worldTransform(component).multiply(frame))
+const direction = (component, frame = new THREE.Matrix4()) =>
+  new THREE.Vector3().setFromMatrixColumn(worldTransform(component).multiply(frame), 2).normalize()
+const axisSeparation = (componentA, frameA, componentB, frameB) => {
+  const axis = direction(componentA, frameA)
+  const offset = point(componentA, frameA).sub(point(componentB, frameB))
+  return offset.sub(axis.multiplyScalar(offset.dot(axis))).length()
+}
+
+function axialChain(length, lockSlide = false) {
+  const root = new TestComponent('root')
+  const links = Array.from({ length }, (_, index) =>
+    new TestComponent(`link-${index}`, root, new THREE.Vector3(index, 0, 0))
+  )
+  root.assemblyJoints = [
+    { type: 'fix', componentA: links[0].id, fixedWorld: new THREE.Matrix4() },
+    ...links.slice(1).map((link, index) => ({
+      type: 'axis',
+      componentA: links[index].id,
+      componentB: link.id,
+      frameA: at(0.5),
+      frameB: at(-0.5),
+      lockSlide,
+    })),
+  ]
+  return { root, links }
+}
 
 test('axis alignment removes radial offset while preserving axial slide', () => {
   const frameB = at(2, 0, 7)
@@ -56,6 +82,13 @@ test('axis alignment removes radial offset while preserving axial slide', () => 
   const attachment = new THREE.Vector3().setFromMatrixPosition(aligned.multiply(frameB))
   assert.ok(Math.hypot(attachment.x, attachment.y) < 1e-8)
   assert.ok(Math.abs(attachment.z - 7) < 1e-8)
+})
+
+test('locked axis alignment also removes axial offset', () => {
+  const frameB = at(2, 0, 7)
+  const aligned = alignJointWorld('axis', new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4(), frameB, true)
+  const attachment = new THREE.Vector3().setFromMatrixPosition(aligned.multiply(frameB))
+  assert.ok(attachment.length() < 1e-8)
 })
 
 test('coplanar alignment removes normal offset while preserving planar position', () => {
@@ -179,6 +212,51 @@ test('component pattern inputs create component instances instead of fused bodie
   assert.ok(instance)
   assert.equal(instance.id, `${pattern.id}/instance/0/0`)
   assert.equal(instance.compound.componentId, instance.id)
+})
+
+test('dragging an axial chain rotates its links while keeping every joint axis coincident', () => {
+  const { root, links } = axialChain(5)
+  const target = new THREE.Vector3(3, 2, 0)
+  solveAssembly(root, links.at(-1), at(...target.toArray()))
+
+  root.assemblyJoints.slice(1).forEach((joint, index) => {
+    assert.ok(point(links[index], joint.frameA).distanceTo(point(links[index + 1], joint.frameB)) < 1e-6)
+    assert.ok(Math.abs(direction(links[index], joint.frameA).dot(direction(links[index + 1], joint.frameB))) > 1 - 1e-8)
+  })
+  assert.ok(point(links.at(-1)).distanceTo(target) < 1e-2)
+  assert.ok(links.slice(1).some(link => Math.abs(new THREE.Vector3().setFromMatrixColumn(worldTransform(link), 0).y) > 0.1))
+})
+
+test('axial chain joints remain coincident when the drag target is unreachable', () => {
+  for(const target of [new THREE.Vector3(8, 0, 0), new THREE.Vector3(0.75, 0.1, 0)]) {
+    const { root, links } = axialChain(3)
+    solveAssembly(root, links.at(-1), at(...target.toArray()))
+
+    root.assemblyJoints.slice(1).forEach((joint, index) => {
+      assert.ok(point(links[index], joint.frameA).distanceTo(point(links[index + 1], joint.frameB)) < 1e-6)
+      assert.ok(Math.abs(direction(links[index], joint.frameA).dot(direction(links[index + 1], joint.frameB))) > 1 - 1e-8)
+    })
+    const anchor = point(links[0], at(0.5))
+    const end = point(links.at(-1))
+    assert.ok(end.distanceTo(anchor) >= 0.5 - 1e-6)
+    assert.ok(end.distanceTo(anchor) <= 1.5 + 1e-6)
+  }
+})
+
+test('axis joints slide freely unless axial movement is locked', () => {
+  const sliding = axialChain(3)
+  solveAssembly(sliding.root, sliding.links.at(-1), at(2, 0, 3))
+  assert.ok(Math.abs(point(sliding.links.at(-1)).z - 3) < 1e-6)
+  sliding.root.assemblyJoints.slice(1).forEach((joint, index) => {
+    assert.ok(axisSeparation(sliding.links[index], joint.frameA, sliding.links[index + 1], joint.frameB) < 1e-6)
+  })
+
+  const locked = axialChain(3, true)
+  solveAssembly(locked.root, locked.links.at(-1), at(2, 0, 3))
+  assert.ok(Math.abs(point(locked.links.at(-1)).z) < 1e-6)
+  locked.root.assemblyJoints.slice(1).forEach((joint, index) => {
+    assert.ok(point(locked.links[index], joint.frameA).distanceTo(point(locked.links[index + 1], joint.frameB)) < 1e-6)
+  })
 })
 
 test('dragging the end of a ball-jointed chain moves its link and keeps joints coincident', () => {

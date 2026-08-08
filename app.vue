@@ -80,6 +80,9 @@
   window.oc = oc
 
   const bus = new Emitter()
+  bus.isShiftPressed = false
+  bus.isCtrlPressed = false
+  bus.isAltPressed = false
   provide('bus', bus)
   window.bus = bus
 
@@ -134,46 +137,49 @@
   }
 
   onMounted(() => {
+    const setModifier = (property, event, pressed) => {
+      if(bus[property] === pressed) return
+      bus[property] = pressed
+      bus.emit(event, pressed)
+    }
+
+    const syncModifiers = (e) => {
+      setModifier('isShiftPressed', 'shift-pressed', e.shiftKey)
+      setModifier('isCtrlPressed', 'ctrl-pressed', e.ctrlKey || e.metaKey)
+      setModifier('isAltPressed', 'alt-pressed', e.altKey)
+    }
+
+    const releaseModifiers = () => {
+      setModifier('isShiftPressed', 'shift-pressed', false)
+      setModifier('isCtrlPressed', 'ctrl-pressed', false)
+      setModifier('isAltPressed', 'alt-pressed', false)
+    }
+
     window.addEventListener('keydown', (e) => {
       // console.log(e.keyCode, e.key)
+      syncModifiers(e)
+      const isModifierKey = ['Shift', 'Control', 'Meta', 'Alt'].includes(e.key)
+      if(!isModifierKey && (e.ctrlKey || e.metaKey || e.altKey)) return
+
       if(e.key === 'Escape') {
         bus.emit('escape')
 
       } else if(e.key === 'Enter') {
         bus.emit('enter-pressed')
 
-      } else if(e.key === 'Shift') {
-        bus.isShiftPressed = true
-        bus.emit('shift-pressed', true)
-
-      } else if(e.key === 'Control' || e.key === 'Meta') {
-        bus.isCtrlPressed = true
-        bus.emit('ctrl-pressed', true)
-
-      } else if(e.key === 'Alt') {
-        bus.isAltPressed = true
-        bus.emit('alt-pressed', true)
-
-      } else {
+      } else if(!isModifierKey) {
         bus.emit('keydown', e.key)
       }
     })
 
     window.addEventListener('keyup', (e) => {
       bus.emit('keyup', e.key)
-      if(e.key === 'Shift') {
-        bus.isShiftPressed = false
-        bus.emit('shift-pressed', false)
-
-      } else if(e.key === 'Control' || e.key === 'Meta') {
-        bus.isCtrlPressed = false
-        bus.emit('ctrl-pressed', false)
-
-      } else if(e.key === 'Alt') {
-        bus.isAltPressed = false
-        bus.emit('alt-pressed', false)
-      }
+      syncModifiers(e)
     })
+
+    // Native dialogs and application switches can swallow modifier keyup events.
+    window.addEventListener('blur', releaseModifiers)
+    window.addEventListener('pointerdown', syncModifiers, true)
 
     if(!window.ipc) return
     setTimeout(() => window.ipc.send('vue-ready'), 200)

@@ -419,9 +419,12 @@
 
     mounted: function() {
       this.bus.on('keydown', (key) => {
+        const inSketch = !!this.document.activeSketch
         const tool = this.tabs
-          .filter(tab => !!this.document.activeSketch == !!tab.sketchOnly)
-          .flatMap(tab => tab.tools)
+          .flatMap(tab => tab.tools.filter(tool =>
+            (inSketch == !!tab.sketchOnly)
+            || (inSketch && tool.feature && tool.feature !== CreateSketchFeature)
+          ))
           .find(
             tool => tool.hotKey && tool.hotKey.toLowerCase() == key
           )

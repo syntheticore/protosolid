@@ -426,6 +426,12 @@ export class Arc extends SketchElement {
     this.update(new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
   }
 
+  setEndpoint(index, point) {
+    const endpoints = this.endpoints()
+    endpoints[index - 1] = point
+    return this.setPoints([endpoints[0], this.sample(0.5), endpoints[1]])
+  }
+
   setPoints(points) {
     const arc = Arc.fromPoints(points)
     if(!arc) return false

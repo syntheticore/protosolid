@@ -233,9 +233,13 @@ export class ManipulationTool extends HighlightTool {
 
     // Drag Handles
     if(handle) {
-      let handles = handle.elem.handles()
-      handles[handle.index] = vec//.toArray()
-      handle.elem.setHandles(handles, false)
+      if(handle.elem instanceof Arc && handle.index > 0) {
+        handle.elem.setEndpoint(handle.index, vec)
+      } else {
+        let handles = handle.elem.handles()
+        handles[handle.index] = vec//.toArray()
+        handle.elem.setHandles(handles, false)
+      }
       this.viewport.updateSketch(true)
 
     // Drag Dimensions

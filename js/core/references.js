@@ -105,6 +105,10 @@ export class SolidReference extends Reference {
     this.solidId = solidId || item.id
   }
 
+  clone() {
+    return new SolidReference(this.item, this.componentId, this.solidId)
+  }
+
   update(tree) {
     const comp = tree.findChild(this.componentId)
     const solid = comp.compound.solids().find(solid => solid.id == this.solidId )

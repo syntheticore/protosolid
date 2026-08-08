@@ -71,7 +71,7 @@
           select.input.enum-input(
             v-if="setting.type == 'enum'"
             v-model="activeFeature[key]"
-            @change="update"
+            @change="updateSetting"
           )
             option(v-for="(name, option) in setting.options" :value="option") {{ name }}
 
@@ -515,6 +515,15 @@
         this.activeFeature.updateGizmos()
         this.error = this.activeFeature.error
         this.previewFeature()
+      },
+
+      updateSetting: function() {
+        if(this.activePicker && !this.activeFeature.needsPicker(this.activePicker, true)) {
+          this.cancelPick()
+          this.activateBaseTool()
+        }
+        this.update()
+        if(!this.activePicker) this.$nextTick(() => this.pickAll())
       },
 
       previewFeature: function() {

@@ -6,6 +6,7 @@ import { AxialReference, CurveReference } from './references.js'
 import {
   EPSILON,
   arrayRange,
+  cross2d,
   rotationFromNormal,
   arrayFromOcVec,
   ocPnt2dFromVec,
@@ -390,15 +391,27 @@ export class Arc extends SketchElement {
   }
 
   setHandles(handles) {
+    // The three-point constructor used while drawing can create an arc in
+    // either direction. Preserve that direction when the solver writes the
+    // center and endpoints back; otherwise forcing `Sense` to true chooses
+    // the opposite side for counter-clockwise arcs.
+    const startRadius = this.sample(0.0).sub(this._center)
+    const nextRadius = this.sample(1.0e-4).sub(this._center)
+    const clockwise = cross2d(startRadius, nextRadius) < 0.0
+
     this._center = handles[0]
     const circ = ocCirc2dFromVec(this._center, this.radius)
-    const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(handles[1]), ocPnt2dFromVec(handles[2]), true)
+    // Keep the stored curve on the canonical clockwise circle used by
+    // geometry(), cloning and serialization. Counter-clockwise arcs use the
+    // same curve with reversed endpoints and logical sampling direction.
+    const endpoints = clockwise ? handles.slice(1) : handles.slice(1).reverse()
+    const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(endpoints[0]), ocPnt2dFromVec(endpoints[1]), true)
     if(!arc.IsDone()) return
     const trimmed = arc.Value().get()
     const circle = trimmed.BasisCurve().get()
     this.radius = circle.Radius()
     this.bounds = [trimmed.FirstParameter(), trimmed.LastParameter()]
-    this.forward = true
+    this.forward = clockwise
     this.update(new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
   }
 

@@ -37,6 +37,8 @@ import {
 } from './core/sketch.js'
 import { solveAssembly, worldTransform } from './core/assembly.js'
 
+const dragThreshold = 2
+
 
 class Tool {
   static icon = 'bullseye'
@@ -58,8 +60,7 @@ class Tool {
 
   mouseUp(vec, coords) {
     if(!this.lastCoords ||
-      coords.x != this.lastCoords.x ||
-      coords.y != this.lastCoords.y) return this.viewport.renderer.render()
+      coords.distanceTo(this.lastCoords) > dragThreshold) return this.viewport.renderer.render()
     this.click(vec, coords)
     // window.gc && window.gc()
   }
@@ -253,6 +254,7 @@ export class ManipulationTool extends HighlightTool {
 
     // Drag Solids
     } else if(this.object) {
+      if(coords.distanceTo(this.startCoords) <= dragThreshold) return
       const cameraMatrix = this.viewport.renderer.camera.matrixWorld
       const right = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 0)
       const up = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 1)

@@ -419,9 +419,12 @@
 
     mounted: function() {
       this.bus.on('keydown', (key) => {
-        const tool = this.tabs.flatMap(tab => tab.tools ).find(
-          tool => tool.hotKey && tool.hotKey.toLowerCase() == key
-        )
+        const tool = this.tabs
+          .filter(tab => !!this.document.activeSketch == !!tab.sketchOnly)
+          .flatMap(tab => tab.tools)
+          .find(
+            tool => tool.hotKey && tool.hotKey.toLowerCase() == key
+          )
         if(tool) this.activateTool(tool)
       })
       this.bus.on('close-feature', this.closeFeature)

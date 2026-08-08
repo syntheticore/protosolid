@@ -69,6 +69,11 @@ export class SketchElement {
     return [this.sample(0.0), this.sample(1.0)]
   }
 
+  endpointHandleIndex(endpointIndex) {
+    const endpoint = this.endpoints()[endpointIndex]
+    return this.handles().findIndex(handle => handle.almost(endpoint))
+  }
+
   otherBound(bound) {
     const points = this.endpoints()
     return bound.almost(points[0]) ? points[1] : points[0]

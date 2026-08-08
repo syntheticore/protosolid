@@ -322,6 +322,7 @@ export class Sketch {
       } else if(elem instanceof Arc) {
         const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projection }
         const endpoints = elem.endpoints()
+        const bounds = [elem.geom().get().FirstParameter(), elem.geom().get().LastParameter()]
         const start =  { id: `${id++}`, type: 'point', x: endpoints[0].x, y: endpoints[0].y, fixed: elem.projection }
         const end =    { id: `${id++}`, type: 'point', x: endpoints[1].x, y: endpoints[1].y, fixed: elem.projection }
         const arc = {
@@ -329,12 +330,13 @@ export class Sketch {
           type: 'arc',
           c_id: center.id,
           radius: elem.radius,
-          start_angle: elem.geom().get().FirstParameter(),
-          end_angle: elem.geom().get().LastParameter(),
+          // OpenCascade's sketch circles use an indirect (clockwise)
+          // parameterization, while PlaneGCS angles are counter-clockwise.
+          start_angle: -(elem.forward ? bounds[0] : bounds[1]),
+          end_angle: -(elem.forward ? bounds[1] : bounds[0]),
           start_id: start.id,
           end_id: end.id,
         }
-        // const rules = { id: `${id++}`, type: 'arc_rules', a_id: arc.id  }
         primitives = [start, end, center, arc]
 
       } else if(elem instanceof Spline) {
@@ -362,12 +364,36 @@ export class Sketch {
       primitives.push(primitive)
     })
 
-    const constraints = this.constraints.flatMap(c => {
+    const pointPrimitive = item => {
+      const curve = item.curve()
+      const curvePrimitives = idMap[curve.id]
+      if(curve instanceof Arc) return curvePrimitives[[2, 0, 1][item.index]]
+      if(curve instanceof Spline) {
+        if(item.index == 0) return curvePrimitives[0]
+        if(item.index == curve.handles().length - 1) return curvePrimitives[1]
+        return
+      }
+      return curvePrimitives[item.index]
+    }
+
+    // An arc has independently stored center, endpoint, angle, and radius
+    // parameters in PlaneGCS. Arc rules are the internal equations that keep
+    // those parameters describing one coherent piece of geometry.
+    const arcRules = this.elements.concat(projections)
+      .filter(elem => elem instanceof Arc)
+      .map(elem => ({
+        id: `${id++}`,
+        type: 'arc_rules',
+        a_id: idMap[elem.id].slice(-1)[0].id,
+        temporary: true,
+      }))
+
+    const constraints = arcRules.concat(this.constraints.flatMap(c => {
       if(c instanceof HorVertConstraint) {
         const pointPrims = c.items.length == 1 ?
           idMap[c.items[0].curve().id].slice(0, 2)
           :
-          c.items.map(item => idMap[item.curve().id][item.index] )
+          c.items.map(pointPrimitive)
         return { id: `${id++}`, type: c.isVertical ? 'vertical_pp' : 'horizontal_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof FixConstraint) {
@@ -382,20 +408,8 @@ export class Sketch {
       } else if(c instanceof TouchConstraint) {
         const pointRef = c.items.find(item => item.index !== undefined )
         const curveRef = c.items.find(item => item.index === undefined )
-        const pointCurve = pointRef.curve()
         const curve = curveRef.curve()
-        let pointPrim
-
-        if(pointCurve instanceof Arc) {
-          // Arc handles are [center, start, end], while its solver points are
-          // stored as [start, end, center].
-          pointPrim = idMap[pointCurve.id][[2, 0, 1][pointRef.index]]
-        } else if(pointCurve instanceof Spline) {
-          // Only spline endpoints are solver primitives.
-          pointPrim = idMap[pointCurve.id][pointRef.index == 0 ? 0 : 1]
-        } else {
-          pointPrim = idMap[pointCurve.id][pointRef.index]
-        }
+        const pointPrim = pointPrimitive(pointRef)
 
         const curvePrim = idMap[curve.id].slice(-1)[0]
         const target = curve instanceof Line ? ['point_on_line_pl', 'l_id'] :
@@ -435,7 +449,7 @@ export class Sketch {
           { id: `${id++}`, type: 'tangent_la', l_id: linePrim.id, a_id: curvePrim.id, temporary: c.temporary }
 
       } else if(c instanceof CoincidentConstraint) {
-        const constraintPrims = c.items.map(item => idMap[item.curve().id][item.index] )
+        const constraintPrims = c.items.map(pointPrimitive)
         return { id: `${id++}`, type: 'p2p_coincident', p1_id: constraintPrims[0].id, p2_id: constraintPrims[1].id, temporary: c.temporary }
 
       // Dimension
@@ -456,7 +470,7 @@ export class Sketch {
 
         } else if(c.isPointDistance()) {
           // Point to point distance
-          const [p1, p2] = c.items.map(item => idMap[item.curve().id][item.index])
+          const [p1, p2] = c.items.map(pointPrimitive)
           return { id: `${id++}`, type: 'p2p_distance', p1_id: p1.id, p2_id: p2.id, distance: c.distance, temporary: c.temporary }
 
         } else if(c.isAngular()) {
@@ -471,7 +485,7 @@ export class Sketch {
           return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrim.id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
         }
       }
-    })
+    }))
 
     // Solve
     const { results, conflicting, _dof } = window.oc.solveSystem([...primitives, ...constraints])
@@ -502,7 +516,8 @@ export class Sketch {
         elem.setHandles([vecFromPrim(center)])
 
       } else if(elem instanceof Arc) {
-        const [start, end, center, _arc, _rules] = idMap[elem.id]
+        const [start, end, center, arc] = idMap[elem.id]
+        elem.radius = updatePrim(arc).radius
         elem.setHandles([vecFromPrim(center), vecFromPrim(start), vecFromPrim(end)])
 
       } else if(elem instanceof Spline) {

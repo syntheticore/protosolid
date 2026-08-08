@@ -195,9 +195,12 @@ export class ManipulationTool extends HighlightTool {
     if(sketch && handle) {
       sketch.elements.forEach(elem => {
         if(elem == handle.elem) return
-        const idx = elem.endpoints().findIndex(p => p.almost(vec) )
-        if(idx != -1) sketch.addConstraint(
-          new CoincidentConstraint(new ElemRef(handle.elem, handle.index), new ElemRef(elem, idx))
+        const endpointIndex = elem.endpoints().findIndex(p => p.almost(vec) )
+        if(endpointIndex != -1) sketch.addConstraint(
+          new CoincidentConstraint(
+            new ElemRef(handle.elem, handle.index),
+            new ElemRef(elem, elem.endpointHandleIndex(endpointIndex)),
+          )
         )
       })
       const origin = sketch.origin()
@@ -480,7 +483,8 @@ export class LineTool extends SketchTool {
     if(this.curve) elems.pop()
     const touchesExisting = elems.find(elem => elem.endpoints().some(p => p.equals(vec) ) )
     const endpoints = touchesExisting && touchesExisting.endpoints()
-    const index = touchesExisting && endpoints.indexOf(endpoints.find(sp => sp.equals(vec) ))
+    const endpointIndex = touchesExisting && endpoints.indexOf(endpoints.find(sp => sp.equals(vec) ))
+    const index = touchesExisting && touchesExisting.endpointHandleIndex(endpointIndex)
 
     // Restart tool when we hit an existing point
     if((touchesExisting || this.snappedDirectlyToOrigin()) && this.curve) {

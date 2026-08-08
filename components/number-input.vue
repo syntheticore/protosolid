@@ -5,6 +5,7 @@
     icon="tape"
     :value="inner.expression"
     :auto-focus="autoFocus"
+    :focus-on-mount="focusOnMount"
     :problem="problem"
     @commit="commit"
     @increase="increase"
@@ -28,6 +29,7 @@
       component: Object,
       value: Number,
       autoFocus: Boolean,
+      focusOnMount: Boolean,
     },
 
     emits: ['update:value', 'enter', 'error'],

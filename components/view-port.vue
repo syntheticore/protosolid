@@ -206,6 +206,9 @@
         widgets: [],
         isOrbiting: false,
         activeHandle: null,
+        hoveredHandle: null,
+        activeDimension: null,
+        hoveredDimension: null,
         dimensionPreview: null,
       }
     },
@@ -432,6 +435,7 @@
 
       handlePick: function(pickerCoords, color, Tool) {
         if(this.activeTool) this.activeTool.dispose()
+        this.resetProxyInteraction()
         this.pickingPath = { target: null, color, origin: pickerCoords }
         const tool = new Tool(this.document.activeComponent, this, (item, repick) => {
           this.bus.emit('picked', item, repick)
@@ -481,6 +485,7 @@
 
       activateTool: function(Tool) {
         if(this.activeTool) this.activeTool.dispose()
+        this.resetProxyInteraction()
         this.pickingPath = null
         this.snapper.reset()
         if(!Tool) return
@@ -488,6 +493,16 @@
         this.$emit('update:active-tool', tool)
         this.$emit('update:highlight', null)
         // this.renderer.render()
+      },
+
+      resetProxyInteraction: function() {
+        // A proxy can disappear without receiving mouseleave (for example the
+        // line tool's zero-length next segment). Never carry its handles or
+        // dimensions into the next tool's picking state.
+        this.activeHandle = null
+        this.hoveredHandle = null
+        this.activeDimension = null
+        this.hoveredDimension = null
       },
 
       deleteElement: function(elem) {

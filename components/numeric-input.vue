@@ -86,6 +86,7 @@
     props: {
       value: [String, Number],
       autoFocus: Boolean,
+      focusOnMount: Boolean,
       problem: Boolean,
       icon: {
         type: String,
@@ -110,7 +111,7 @@
     },
 
     mounted() {
-      if(this.autoFocus) {
+      if(this.autoFocus || this.focusOnMount) {
         this.focusInput(() => this.allowBlur = true)
       } else {
         this.allowBlur = true

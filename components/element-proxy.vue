@@ -22,6 +22,7 @@
 
   watch(() => props.element, () => {
     window.alcRenderer.remove(mesh)
+    mesh = null
 
     const vertices = props.element.tesselate()
     if(!vertices) return
@@ -39,7 +40,10 @@
     renderNeeded.value = true
   }, { immediate: true, deep: 1 })
 
-  watch(() => [highlighted.value, selected.value, toolSelected.value], () => {
+  watch([highlighted, selected, toolSelected], () => {
+    // Zero-length drawing elements have no mesh, but their reactive selection
+    // state can still change before Vue unmounts their proxy.
+    if(!mesh) return
     mesh.material = getMaterial()
     renderNeeded.value = true
   })

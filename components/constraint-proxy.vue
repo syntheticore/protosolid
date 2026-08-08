@@ -31,6 +31,7 @@
         v-if="constraint.active"
         :component="document.top()"
         v-model:value="constraint.distance"
+        :focus-on-mount="true"
         @enter="constraint.active = false; constraint.sketch.profileUpdateNeeded = true"
       )
 
@@ -97,6 +98,7 @@
     .number-input
       margin-top: -14px
       margin-left: -60px
+      pointer-events: auto
 
   .hide-dimension-enter-active
   .hide-dimension-leave-active

@@ -19,6 +19,10 @@ import {
 } from './core/geom3d.js'
 
 import {
+  PointHelper,
+} from './core/helpers.js'
+
+import {
   CoincidentConstraint,
   TouchConstraint,
   PerpendicularConstraint,
@@ -301,26 +305,45 @@ export class ProjectTool extends HighlightTool {
 export class TrimTool extends Tool {
   static icon = 'route'
 
-  click(vec, coords) {
-    const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
-    if(curve) return this.viewport.renderer.render()
+  constructor(component, viewport, sketch) {
+    super(component, viewport)
+    this.sketch = sketch
+    this.localSpace = true
+  }
 
+  curveAt(coords) {
+    const object = this.viewport.renderer.objectsAtScreen(coords, ['curve'])[0]
+    const curve = object && object.alcObject
+    return curve && curve.sketch == this.sketch && !curve.projection ? curve : null
+  }
+
+  click(vec, coords) {
+    const curve = this.curveAt(coords)
+    if(!curve) return this.viewport.renderer.render()
+
+    const pieces = curve.split(this.sketch.elements)
+    if(pieces.length < 2) {
+      window.bus.emit('toast', 'Curve has no intersection to trim to')
+      return this.viewport.renderer.render()
+    }
+
+    const removed = pieces.minMaxBy(Math.min, piece => piece.distanceTo(vec))
+    const replacements = pieces.filter(piece => piece != removed)
+    this.sketch.replaceElement(curve, replacements)
+    removed.clear()
+    this.viewport.document.selection.delete(curve)
+    this.viewport.$emit('update:highlight', null)
+    this.viewport.updateRegions(true)
     this.viewport.renderer.render()
   }
 
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
-    if(!curve) return this.viewport.renderer.render()
-
-    this.viewport.renderer.render()
   }
 
   mouseMove(vec, coords) {
-    const curve = this.viewport.renderer.objectsAtScreen(coords, 'curve')[0]
-    if(!curve) return this.viewport.renderer.render()
-
-    this.viewport.renderer.render()
+    const curve = this.curveAt(coords)
+    this.viewport.$emit('update:highlight', curve)
   }
 }
 
@@ -631,6 +654,10 @@ export class ConstraintTool extends HighlightTool {
       this.items = []
       return
     }
+    if(!this.acceptsItem(curve)) {
+      window.bus.emit('toast', 'Unsupported geometry for this constraint')
+      return
+    }
     console.log(curve)
     if(this.items.includes(curve)) return
     this.items.push(curve)
@@ -640,6 +667,11 @@ export class ConstraintTool extends HighlightTool {
     })
     console.log(counts, this.isComplete(counts))
     if(this.isComplete(counts)) {
+      if(!this.canConstrain(this.items)) {
+        window.bus.emit('toast', 'Invalid geometry combination for this constraint')
+        this.items = []
+        return
+      }
       const constraint = new this.constructor.constraintType(...this.items)
       this.sketch.addConstraint(constraint)
       this.viewport.updateRegions(true)
@@ -648,14 +680,36 @@ export class ConstraintTool extends HighlightTool {
   }
 
   isComplete(counts) {}
+
+  acceptsItem(item) { return true }
+
+  canConstrain(items) { return true }
 }
 
 export class TouchConstraintTool extends ConstraintTool {
   static constraintType = TouchConstraint
   static icon = 'asterisk'
-  static selectors = ['point', 'axis']
+  static selectors = ['point', 'curve']
 
-  isComplete(counts) { return counts.point == 1 && counts.axis == 1 }
+  isComplete(counts) { return counts.point == 1 && counts.curve == 1 }
+
+  acceptsItem(item) {
+    if(item instanceof PointHelper) return true
+    if(item instanceof ElemRef) {
+      const curve = item.curve()
+      if(curve instanceof Line) return item.index == 0 || item.index == 1
+      if(curve instanceof Arc) return item.index == 1 || item.index == 2
+      if(curve instanceof Spline) return item.index == 0 || item.index == curve.handles().length - 1
+      return false
+    }
+    return item instanceof Line || item instanceof Circle || item instanceof Arc
+  }
+
+  canConstrain(items) {
+    const point = items.find(item => item instanceof ElemRef || item instanceof PointHelper)
+    const curve = items.find(item => !(item instanceof ElemRef) && !(item instanceof PointHelper))
+    return point && curve && (!(point instanceof ElemRef) || point.curve() != curve)
+  }
 }
 
 export class HorVertConstraintTool extends ConstraintTool {
@@ -704,6 +758,13 @@ export class TangentConstraintTool extends ConstraintTool {
   static selectors = ['curve']
 
   isComplete(counts) { return counts.curve == 2 }
+
+  acceptsItem(item) { return item instanceof Line || item instanceof Circle || item instanceof Arc }
+
+  canConstrain(items) {
+    return items.filter(item => item instanceof Line).length == 1 &&
+      items.filter(item => item instanceof Circle || item instanceof Arc).length == 1
+  }
 }
 
 export class DimensionTool extends HighlightTool {

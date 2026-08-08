@@ -431,6 +431,7 @@ export default class Renderer {
   }
 
   objectsAtScreen(coords, types) {
+    if(types && !Array.isArray(types)) types = [types]
     const intersects = this.hitTest(coords)
     const objects = Array.from(new Set(intersects.map(obj => obj.object )))
     return objects.filter(obj => !types || types.some(t =>

@@ -114,7 +114,7 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, TouchConstraint } from '../js/core/sketch.js'
   import { PointHelper } from '../js/core/helpers.js'
   import { Line } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
@@ -160,6 +160,16 @@
         constraint: props.constraint,
         curve: props.constraint.items[0].curve(),
         pos: point(props.constraint.items[0], true).clone().applyMatrix4(sketch.workplane),
+        offset: { x: 11, y: -11 },
+      }]
+    }
+
+    if(props.constraint instanceof TouchConstraint) {
+      const item = props.constraint.items.find(item => item.index !== undefined)
+      return [{
+        constraint: props.constraint,
+        curve: item.curve(),
+        pos: point(item, true).clone().applyMatrix4(sketch.workplane),
         offset: { x: 11, y: -11 },
       }]
     }

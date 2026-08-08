@@ -59,6 +59,12 @@ export class SketchElement {
     return projection.LowerDistanceParameter()
   }
 
+  distanceTo(p) {
+    if(p instanceof THREE.Vector3) p = ocPnt2dFromVec(p)
+    const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, this.geom())
+    return projection.NbPoints() ? projection.LowerDistance() : Infinity
+  }
+
   endpoints() {
     return [this.sample(0.0), this.sample(1.0)]
   }

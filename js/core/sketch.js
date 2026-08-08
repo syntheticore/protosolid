@@ -68,6 +68,52 @@ export class Sketch {
     }
   }
 
+  replaceElement(elem, replacements) {
+    const elementIndex = this.elements.indexOf(elem)
+    if(elementIndex == -1 || !replacements.length) return []
+
+    const oldHandles = elem.handles ? elem.handles().map(point => point.clone()) : []
+    replacements.forEach(replacement => replacement.sketch = this)
+
+    // Keep the original ID on the replacement that preserves the most old
+    // handles. Besides making downstream curve references more stable, this
+    // picks the intuitive survivor when trimming an end off a curve.
+    const primary = replacements.minMaxBy(Math.max, replacement =>
+      replacement.handles().filter(point => oldHandles.some(old => old.almost(point))).length
+    )
+    primary.id = elem.id
+    replacements.filter(replacement => replacement != primary).forEach(replacement => replacement.id = makeID())
+
+    const lostConstraints = new Set()
+    this.constraints.forEach(constraint => constraint.items.forEach(item => {
+      if(item.curve() != elem) return
+
+      let replacement = primary
+      let replacementIndex = item.index
+      if(item.index !== undefined) {
+        const oldPoint = oldHandles[item.index]
+        const match = replacements
+          .map(curve => ({ curve, index: curve.handles().findIndex(point => point.almost(oldPoint)) }))
+          .find(candidate => candidate.index != -1)
+        if(!match) {
+          lostConstraints.add(constraint)
+          return
+        }
+        replacement = match.curve
+        replacementIndex = match.index
+      }
+
+      item.curveRef.item = replacement
+      item.curveRef.itemId = replacement.id
+      item.index = replacementIndex
+    }))
+
+    this.constraints = this.constraints.filter(constraint => !lostConstraints.has(constraint))
+    this.elements.splice(elementIndex, 1, ...replacements)
+    elem.clear()
+    return replacements
+  }
+
   profiles(comp, includeOuter) {
     const elements = this.removeEmpties(this.elements)
     const cutElements = elements.flatMap(elem => elem.split(elements) )
@@ -335,9 +381,28 @@ export class Sketch {
 
       } else if(c instanceof TouchConstraint) {
         const pointRef = c.items.find(item => item.index !== undefined )
-        const pointPrim = idMap[pointRef.curve().id][pointRef.index]
-        const linePrim = idMap[c.items.find(item => item.index === undefined ).curve().id].slice(-1)[0]
-        return { id: `${id++}`, type: 'point_on_line_pl', p_id: pointPrim.id, l_id: linePrim.id, temporary: c.temporary }
+        const curveRef = c.items.find(item => item.index === undefined )
+        const pointCurve = pointRef.curve()
+        const curve = curveRef.curve()
+        let pointPrim
+
+        if(pointCurve instanceof Arc) {
+          // Arc handles are [center, start, end], while its solver points are
+          // stored as [start, end, center].
+          pointPrim = idMap[pointCurve.id][[2, 0, 1][pointRef.index]]
+        } else if(pointCurve instanceof Spline) {
+          // Only spline endpoints are solver primitives.
+          pointPrim = idMap[pointCurve.id][pointRef.index == 0 ? 0 : 1]
+        } else {
+          pointPrim = idMap[pointCurve.id][pointRef.index]
+        }
+
+        const curvePrim = idMap[curve.id].slice(-1)[0]
+        const target = curve instanceof Line ? ['point_on_line_pl', 'l_id'] :
+          curve instanceof Circle ? ['point_on_circle', 'c_id'] :
+          curve instanceof Arc ? ['point_on_arc', 'a_id'] : null
+        if(!pointPrim || !target) throw new Error('Unsupported Touch constraint geometry')
+        return { id: `${id++}`, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary: c.temporary }
 
       } else if(c instanceof PerpendicularConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
@@ -359,8 +424,15 @@ export class Sketch {
         }
 
       } else if(c instanceof TangentConstraint) {
-        const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
-        return { id: `${id++}`, type: 'tangent_lc', l_id: constraintPrims[0].id, c_id: constraintPrims[1].id, temporary: c.temporary }
+        const line = c.items.find(item => item.curve() instanceof Line)
+        const curve = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc)
+        if(!line || !curve) throw new Error('Unsupported Tangent constraint geometry')
+        const linePrim = idMap[line.curve().id].slice(-1)[0]
+        const curvePrim = idMap[curve.curve().id].slice(-1)[0]
+        return curve.curve() instanceof Circle ?
+          { id: `${id++}`, type: 'tangent_lc', l_id: linePrim.id, c_id: curvePrim.id, temporary: c.temporary }
+          :
+          { id: `${id++}`, type: 'tangent_la', l_id: linePrim.id, a_id: curvePrim.id, temporary: c.temporary }
 
       } else if(c instanceof CoincidentConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id][item.index] )

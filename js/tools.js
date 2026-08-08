@@ -652,8 +652,9 @@ export class ArcTool extends SketchTool {
       this.curve = Arc.fromPoints([this.start, vec, this.end])
       if(!this.curve) return
       this.sketch.add(this.curve)
+    } else if(!this.curve.setPoints([this.start, vec, this.end])) {
+      return
     }
-    this.curve.setPoints([this.start, vec, this.end], true)
     this.viewport.elementChanged()
   }
 }
@@ -771,6 +772,13 @@ export class EqualConstraintTool extends ConstraintTool {
   static selectors = ['curve']
 
   isComplete(counts) { return counts.curve == 2 }
+
+  acceptsItem(item) { return item instanceof Line || item instanceof Circle || item instanceof Arc }
+
+  canConstrain(items) {
+    return items.every(item => item instanceof Line) ||
+      items.every(item => item instanceof Circle || item instanceof Arc)
+  }
 }
 
 export class TangentConstraintTool extends ConstraintTool {

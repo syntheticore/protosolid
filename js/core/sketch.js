@@ -427,15 +427,26 @@ export class Sketch {
         return { id: `${id++}`, type: 'parallel', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof EqualConstraint) {
-        const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
-        if(c.items[0].curve() instanceof Circle) {
-          // Equal radius circle/circle
-          return { id: `${id++}`, type: 'equal_radius_cc', c1_id: constraintPrims[0].id, c2_id: constraintPrims[1].id, temporary: c.temporary }
-
-        } else {
-          // Equal length line/line
-          return { id: `${id++}`, type: 'equal_length', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+        const items = c.items.map(item => ({
+          curve: item.curve(),
+          primitive: idMap[item.curve().id].slice(-1)[0],
+        }))
+        if(items.every(item => item.curve instanceof Line)) {
+          return { id: `${id++}`, type: 'equal_length', l1_id: items[0].primitive.id, l2_id: items[1].primitive.id, temporary: c.temporary }
         }
+        if(items.every(item => item.curve instanceof Circle)) {
+          return { id: `${id++}`, type: 'equal_radius_cc', c1_id: items[0].primitive.id, c2_id: items[1].primitive.id, temporary: c.temporary }
+        }
+        if(items.every(item => item.curve instanceof Arc)) {
+          return { id: `${id++}`, type: 'equal_radius_aa', a1_id: items[0].primitive.id, a2_id: items[1].primitive.id, temporary: c.temporary }
+        }
+
+        const circle = items.find(item => item.curve instanceof Circle)
+        const arc = items.find(item => item.curve instanceof Arc)
+        if(circle && arc) {
+          return { id: `${id++}`, type: 'equal_radius_ca', c1_id: circle.primitive.id, a2_id: arc.primitive.id, temporary: c.temporary }
+        }
+        throw new Error('Unsupported Equal constraint geometry')
 
       } else if(c instanceof TangentConstraint) {
         const line = c.items.find(item => item.curve() instanceof Line)

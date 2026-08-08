@@ -428,11 +428,15 @@ export class Arc extends SketchElement {
 
   setPoints(points) {
     const arc = Arc.fromPoints(points)
+    if(!arc) return false
+    this.clear()
     this._center = arc._center
     this.radius = arc.radius
     this.bounds = arc.bounds
     this.forward = arc.forward
     this.geom = arc.geom
+    arc.geom = null
+    return true
   }
 
   geometry() {

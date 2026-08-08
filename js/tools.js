@@ -71,6 +71,21 @@ class Tool {
   dispose() {}
 }
 
+function addSnappedCenterConstraint(sketch, snapper, elem, index) {
+  const { x, y } = snapper.snapped || {}
+  if(!x || x !== y) return
+
+  const target = sketch.elements.find(candidate =>
+    candidate != elem &&
+    (candidate instanceof Circle || candidate instanceof Arc) &&
+    candidate.handles()[0].almost(x)
+  )
+  if(!target) return
+  return sketch.addConstraint(
+    new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(target, 0))
+  )
+}
+
 
 export class DummyTool extends Tool {
   mouseMove(vec, coords) {
@@ -203,6 +218,7 @@ export class ManipulationTool extends HighlightTool {
           )
         )
       })
+      addSnappedCenterConstraint(sketch, this.viewport.snapper, handle.elem, handle.index)
       const origin = sketch.origin()
       const originPoint = sketch.originPoint()
       if(origin && originPoint && vec.almost(originPoint)) sketch.addConstraint(
@@ -595,6 +611,7 @@ export class CircleTool extends SketchTool {
       // this.curve = this.sketch.add_circle(vec, 1)
       this.curve = new Circle(vec, 1.0)
       this.sketch.add(this.curve)
+      addSnappedCenterConstraint(this.sketch, this.viewport.snapper, this.curve, 0)
       this.originSnapConstraint(this.curve, 0)
       // this.curve.sketch = this.sketch
     }

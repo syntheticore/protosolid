@@ -7,8 +7,14 @@ import {
   solveAssembly,
   worldTransform,
 } from '../js/core/assembly.js'
-import { JointFeature } from '../js/core/features.js'
+import { JointFeature, PatternFeature } from '../js/core/features.js'
 import { Face } from '../js/core/geom3d.js'
+import {
+  Component,
+  ComponentDefinition,
+  createComponentInstance,
+  syncComponentInstances,
+} from '../js/core/component.js'
 
 
 class TestComponent {
@@ -104,6 +110,75 @@ test('joint picking only accepts strict descendants of the owning component', ()
   assert.equal(accepts(child), true)
   assert.equal(accepts(grandchild), true)
   assert.equal(accepts(sibling), false)
+})
+
+test('component instances share definition content but retain occurrence state', () => {
+  const root = new Component(null, 'root')
+  root.creator = new ComponentDefinition('Root', '#fff')
+  const source = new Component(root, 'source')
+  source.creator = new ComponentDefinition('Link', '#f00')
+  source.compound = {
+    revision: 1,
+    cloneForComponent: componentId => ({
+      componentId,
+      revision: source.compound.revision,
+      cloneForComponent: source.compound.cloneForComponent,
+    }),
+  }
+  root.children.push(source)
+
+  const instance = createComponentInstance(root, source, 'instance')
+  instance.creator.hidden = true
+  source.creator.title = 'Renamed Link'
+  source.compound.revision = 2
+  const sourceChild = new Component(source, 'source-child')
+  sourceChild.creator = new ComponentDefinition('Pin', '#00f')
+  sourceChild.compound = {
+    cloneForComponent: componentId => ({ componentId, cloneForComponent: sourceChild.compound.cloneForComponent }),
+  }
+  source.children.push(sourceChild)
+  syncComponentInstances(root)
+
+  assert.equal(instance.instanceOf, source.id)
+  assert.equal(instance.creator.title, 'Renamed Link')
+  assert.equal(instance.creator.hidden, true)
+  assert.equal(source.creator.hidden, false)
+  assert.equal(instance.compound.componentId, instance.id)
+  assert.equal(instance.compound.revision, 2)
+  assert.ok(instance.children.some(child => child.sourceOccurrence == sourceChild.id))
+  source.creator.itemsHidden[source.id + '/solid/0'] = true
+  assert.equal(instance.isItemHidden(instance.id + '/solid/0'), true)
+})
+
+test('component pattern inputs create component instances instead of fused bodies', () => {
+  const root = new Component(null, 'root')
+  root.creator = new ComponentDefinition('Root', '#fff')
+  const owner = new Component(root, 'owner')
+  owner.creator = new ComponentDefinition('Assembly', '#0f0')
+  root.children.push(owner)
+  const source = new Component(owner, 'source')
+  source.creator = new ComponentDefinition('Link', '#f00')
+  source.compound = {
+    cloneForComponent: componentId => ({ componentId, cloneForComponent: source.compound.cloneForComponent }),
+  }
+  owner.children.push(source)
+  const document = {
+    activeComponent: owner,
+    selection: { items: [] },
+    timeline: { features: [] },
+  }
+  const pattern = new PatternFeature(document)
+  document.timeline.features.push(pattern)
+  pattern.inputs = () => [{ featureId: null }]
+  pattern.uCount = 2
+  pattern.vCount = 1
+
+  pattern.updateFeature(root, { inputs: [source] })
+
+  const instance = owner.children.find(component => component.instanceOf == source.id)
+  assert.ok(instance)
+  assert.equal(instance.id, `${pattern.id}/instance/0/0`)
+  assert.equal(instance.compound.componentId, instance.id)
 })
 
 test('dragging the end of a ball-jointed chain moves its link and keeps joints coincident', () => {

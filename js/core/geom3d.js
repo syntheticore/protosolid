@@ -647,6 +647,15 @@ export class Compound extends Volumetric {
     return clone
   }
 
+  cloneForComponent(componentId) {
+    const clone = this.cloneCached()
+    clone.componentId = componentId
+    clone.cachedSolids.forEach((solid, index) => {
+      solid.id = componentId + '/solid/' + index
+    })
+    return clone
+  }
+
   track(algorithm, algoName, other, featureId) {
     const out = this.clone(algorithm.Shape ?
       algorithm.Shape() : algorithm.Apply(this.geom())

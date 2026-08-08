@@ -174,6 +174,7 @@
     SolidPickTool,
     PointPickTool,
     ComponentPickTool,
+    PatternInputPickTool,
     LineTool,
     SplineTool,
     CircleTool,
@@ -278,7 +279,7 @@
           face: FacePickTool,
           plane: PlanePickTool,
           solid: SolidPickTool,
-          patternInput: SolidPickTool,
+          patternInput: PatternInputPickTool,
           point: PointPickTool,
           componentRef: ComponentPickTool,
         }[type])

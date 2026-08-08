@@ -5,7 +5,7 @@
   template(v-for="solid in compound.solids()")
 
     SolidProxy(
-      v-if="!component.creator.itemsHidden[solid.id]"
+      v-if="!component.isItemHidden(solid.id)"
       :solid="solid"
       :key="solid.id"
       :document="document"

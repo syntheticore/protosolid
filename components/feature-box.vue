@@ -382,8 +382,7 @@
             if(type == 'profile' || type == 'solid') {
               itemRef = item.reference()
             } else if(type == 'patternInput') {
-              itemRef = item.patternReference ?
-                PatternInputReference.fromFeature(item) : PatternInputReference.fromSolid(item)
+              itemRef = PatternInputReference.fromItem(item)
             } else if(type == 'point') {
               itemRef = item.pointReference()
             } else if(type == 'componentRef') {
@@ -435,7 +434,7 @@
           // Generate picker curve
           this.activePicker = key
           this.bus.featurePickerActive = type == 'patternInput'
-          this.bus.componentPickerActive = type == 'componentRef'
+          this.bus.componentPickerActive = type == 'componentRef' || type == 'patternInput'
           this.updatePicker = () => {
             const { pickerPos, color } = this.getPickerInfo(key)
             this.bus.emit('pick', type, pickerPos, color)

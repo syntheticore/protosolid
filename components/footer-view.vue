@@ -202,7 +202,7 @@
               value: item.area() / 100.0,
             },
           }
-        } else if(type == 'Component') {
+        } else if(item.typename() == 'Component') {
           const weight = item.getWeight() / 1000
           return {
             Weight: {

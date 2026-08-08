@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import { Component, ComponentDefinition } from './component.js'
+import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
 import { Compound } from './geom3d.js'
 import { Reference, PatternInputReference } from './references.js'
@@ -24,7 +24,7 @@ export class Feature {
     this.title = title
     this.settings = settings
     this.error = null
-    this.componentId = this.document.activeComponent.id
+    this.componentId = this.document.activeComponent.sourceId()
     this.id = makeID()
 
     if(!booleanOutput) return
@@ -285,10 +285,7 @@ export class PatternFeature extends Feature {
     this.radialStep = 45
     this.radialCount = 8
 
-    const selected = doc.selection.items
-      .map(item => item instanceof Feature ? PatternInputReference.fromFeature(item) :
-        (item && item.typename && item.typename() == 'Solid' ? PatternInputReference.fromSolid(item) : null))
-      .filter(Boolean)
+    const selected = doc.selection.items.map(item => PatternInputReference.fromItem(item)).filter(Boolean)
     this.inputs = selected.length ? () => selected : null
   }
 
@@ -299,6 +296,12 @@ export class PatternFeature extends Feature {
     }
     return this.uCount >= 1 && this.vCount >= 1 &&
       Number.isFinite(this.uOffset) && Number.isFinite(this.vOffset)
+  }
+
+  instanceCount() {
+    return this.patternType == 'radial' ?
+      Math.max(0, Math.floor(this.radialCount) - 1) :
+      Math.max(0, Math.floor(this.uCount) * Math.floor(this.vCount) - 1)
   }
 
   updateFeature(tree, references) {
@@ -312,9 +315,28 @@ export class PatternFeature extends Feature {
     }
 
     const comp = tree.findChild(this.componentId)
-    const sources = references.inputs.map(input => input.toCompound ? input.toCompound() : input)
     const transforms = this.patternType == 'radial' ?
       this.radialTransforms(references.center) : this.gridTransforms()
+
+    const componentSources = references.inputs.filter(input => input?.typename?.() == 'Component')
+    componentSources.forEach((source, sourceIndex) => {
+      const canonical = tree.findChild(source.sourceId())
+      const ownerWorld = baselineWorldTransform(comp)
+      const sourceInOwner = ownerWorld.clone().invert().multiply(baselineWorldTransform(source))
+      transforms.forEach((transform, transformIndex) => {
+        const id = `${this.id}/instance/${transformIndex}/${sourceIndex}`
+        const placement = transform.clone().multiply(sourceInOwner)
+        createComponentInstance(comp, canonical, id, placement)
+      })
+    })
+
+    const sources = references.inputs
+      .filter(input => input?.typename?.() != 'Component')
+      .map(input => input.toCompound ? input.toCompound() : input)
+    if(!sources.length) {
+      this.previewBody = null
+      return
+    }
 
     try {
       const copies = transforms.flatMap((transform, transformIndex) =>
@@ -382,7 +404,7 @@ export class PoseFeature extends Feature {
   static icon = 'street-view'
 
   constructor(doc, transforms) {
-    super(doc, false, 'Position', {})
+    super(doc, false, 'Pose', {})
     this.transforms = transforms || doc.top().getChildren()
       .filter(component => component.parent && component.transform)
       .map(component => ({ id: component.id, transform: component.localTransform() }))
@@ -439,6 +461,8 @@ export class JointFeature extends Feature {
       pointB: { title: '2', type: 'point', when: is('ball') },
       fixedComponent: { title: 'Component', type: 'componentRef', when: is('fix') },
     })
+    // Assembly joints belong to an occurrence, not to its shared definition.
+    this.componentId = doc.activeComponent.id
     this.jointType = 'axis'
   }
 
@@ -536,6 +560,7 @@ Serialize.register(JointFeature, 'JointFeature')
 
 export class CreateComponentFeature extends Feature {
   static icon = 'box'
+  static editable = false
   constructor(doc, parentId) {
     super(doc, false, 'New Component', {
       parent: {
@@ -583,6 +608,40 @@ export class CreateComponentFeature extends Feature {
 }
 
 Serialize.register(CreateComponentFeature, 'CreateComponentFeature')
+
+
+export class CreateComponentInstanceFeature extends Feature {
+  static icon = 'clone'
+  static editable = false
+
+  constructor(doc, sourceId, parentId) {
+    super(doc, false, 'Component Instance', {})
+    this.sourceId = sourceId
+    this.parentId = parentId
+  }
+
+  updateFeature(tree) {
+    const parent = tree.findChild(this.parentId)
+    const source = tree.findChild(this.sourceId)
+    if(!source || !parent) {
+      this.error = { type: 'error', msg: 'Instance source or parent was lost' }
+      return
+    }
+    createComponentInstance(parent, source, this.id)
+  }
+
+  modifiedComponents() { return [this.parentId, this.sourceId].filter(Boolean) }
+  isComplete() { return !!this.sourceId && !!this.parentId }
+  dump() { return { ...super.dump(), sourceId: this.sourceId, parentId: this.parentId } }
+
+  static undump(dump, context) {
+    const feature = new CreateComponentInstanceFeature(context.document, dump.sourceId, dump.parentId)
+    feature.id = dump.id
+    feature.componentId = dump.componentId
+    return feature
+  }
+}
+Serialize.register(CreateComponentInstanceFeature, 'CreateComponentInstanceFeature')
 
 
 export class CreateSketchFeature extends Feature {

@@ -130,11 +130,12 @@ Serialize.register(SolidReference, 'SolidReference')
 // the timeline. Keeping this as a reference (instead of storing geometry)
 // makes saved patterns regenerate against the latest upstream result.
 export class PatternInputReference extends Reference {
-  constructor(item, document, featureId, solidReference) {
+  constructor(item, document, featureId, solidReference, componentReference) {
     super(item)
     this.document = document
     this.featureId = featureId
     this.solidReference = solidReference
+    this.componentReference = componentReference
   }
 
   static fromSolid(solid) {
@@ -145,7 +146,23 @@ export class PatternInputReference extends Reference {
     return new PatternInputReference(feature.previewBody, feature.document, feature.id)
   }
 
+  static fromComponent(component) {
+    return new PatternInputReference(component, null, null, null, component.componentReference())
+  }
+
+  static fromItem(item) {
+    const type = item?.typename?.()
+    if(type == 'Component') return PatternInputReference.fromComponent(item)
+    if(type == 'Solid') return PatternInputReference.fromSolid(item)
+    if(item?.patternReference) return item.patternReference()
+  }
+
   update(tree) {
+    if(this.componentReference) {
+      const error = this.componentReference.update(tree)
+      this.item = this.componentReference.getItem()
+      return error
+    }
     if(this.solidReference) {
       const error = this.solidReference.update(tree)
       this.item = this.solidReference.getItem()
@@ -170,22 +187,26 @@ export class PatternInputReference extends Reference {
       this.document,
       this.featureId,
       this.solidReference && this.solidReference.clone(),
+      this.componentReference && this.componentReference.clone(),
     )
   }
 
   matches(item) {
-    return this.featureId ? this.featureId == item.id : this.solidReference?.solidId == item.id
+    return this.featureId ? this.featureId == item.id :
+      this.componentReference ? this.componentReference.componentId == item.id :
+      this.solidReference?.solidId == item.id
   }
 
   dump() {
     return {
       featureId: this.featureId,
       solidReference: this.solidReference,
+      componentReference: this.componentReference,
     }
   }
 
   static undump(dump, context) {
-    return new PatternInputReference(null, context.document, dump.featureId, dump.solidReference)
+    return new PatternInputReference(null, context.document, dump.featureId, dump.solidReference, dump.componentReference)
   }
 }
 Serialize.register(PatternInputReference, 'PatternInputReference')

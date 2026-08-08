@@ -24,6 +24,7 @@
         Icon(icon="directions" fixed-width)
 
       button(
+        v-if="canEdit"
         title="Edit"
         @click.stop="openFeature()"
       )
@@ -147,6 +148,10 @@
     },
 
     computed: {
+      canEdit() {
+        return this.feature.constructor.editable !== false
+      },
+
       featureTitle() {
         let title = this.feature.title
         const error = this.feature.error
@@ -183,6 +188,7 @@
       },
 
       openFeature() {
+        if(!this.canEdit) return
         this.bus.emit('close-feature')
         setTimeout(() => this.document.activateFeature(this.feature) )
       },

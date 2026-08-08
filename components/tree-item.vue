@@ -3,7 +3,7 @@
   li.tree-item(:class="{ hidden: !isVisible }")
 
     header(
-      @dblclick="document.activateComponent(component)"
+      @dblclick="activateComponent"
       @mouseenter="$emit('update:highlight', component)"
       @mouseleave="$emit('update:highlight', null)"
       @click="selectComponent"
@@ -32,32 +32,34 @@
             :style="{'--color': component.creator.color}"
           )
 
-          span.name {{ component.creator.title }}
+          span.name {{ component.creator.title }}{{ isInstance ? ' <Inst>' : '' }}
 
-          .controls.wide(:class="{'ultra-wide': !isTop}")
+          .controls.wide(:class="{ 'ultra-wide': !isTop && !isInstance }")
 
             Icon(
               icon="check-circle" fixed-width
               title="Activate"
-              @click.stop="document.activateComponent(component)"
+              @click.stop="activateComponent"
             )
 
             Icon(
+              v-if="!isInstance"
               icon="plus-circle" fixed-width
               title="Create Component"
               @click.stop="document.createComponent(component)"
               @dblclick.stop
             )
 
-            Icon.delete(
+            Icon(
               v-if="!isTop"
-              icon="trash-alt" fixed-width
-              title="Delete Component"
-              @click.stop="document.deleteComponent(component)"
+              icon="clone" fixed-width
+              title="Create Sibling Instance"
+              @click.stop="document.createComponentInstance(component)"
+              @dblclick.stop
             )
 
     ul.widgets(
-      v-if="expanded"
+      v-if="expanded && !isInstance"
     )
 
       //- Parameters
@@ -128,7 +130,7 @@
       )
 
     //- Children
-    transition-group(name="list" tag="ul" v-if="isAssembly && expanded")
+    transition-group(name="list" tag="ul" v-if="isAssembly && expanded && !isInstance")
       TreeItem(
         v-for="child in component.children"
         :key="child.id"
@@ -358,11 +360,16 @@
     },
 
     computed: {
+      isInstance: function() {
+        return !!this.component.instanceOf
+      },
+
       isAssembly: function() {
         return !!this.component.children.length
       },
 
       canExpand: function() {
+        if(this.isInstance) return false
         return this.component.children.length ||
           this.component.compound.solids().length ||
           this.component.sketches.length ||
@@ -379,6 +386,11 @@
     },
 
     methods: {
+      activateComponent: function() {
+        const source = this.document.getComponent(this.component.sourceId())
+        this.document.activateComponent(source || this.component)
+      },
+
       selectComponent: function() {
         if(this.bus.componentPickerActive) {
           if(!this.document.activeFeature?.acceptsInput || this.document.activeFeature.acceptsInput(this.component)) {

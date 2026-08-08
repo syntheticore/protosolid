@@ -279,9 +279,7 @@
           if(!this.document.selection.items.length) return;
           [...this.document.selection.items].forEach(item => {
             const type = item.typename()
-            if(type == 'Component') {
-              this.document.deleteComponent(item)
-            } else if(type == 'Solid') {
+            if(type == 'Solid') {
               this.document.deleteSolid(item)
             }
           })

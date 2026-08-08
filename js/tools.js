@@ -102,10 +102,12 @@ class HighlightTool extends Tool {
     return new Promise(resolve => {
       let items = this.viewport.renderer
         .objectsAtScreen(coords, this.realSelectors)
-        .map(obj => {
+        .flatMap(obj => {
           if(!obj.alcTypes.some(type => type == 'face')) return obj.alcObject
-          if(this.selectors.includes('component')) return obj.alcObject.solid.component
-          if(this.selectors.includes('solid')) return obj.alcObject.solid
+          const mapped = []
+          if(this.selectors.includes('solid')) mapped.push(obj.alcObject.solid)
+          if(this.selectors.includes('component')) mapped.push(obj.alcObject.solid.component)
+          if(mapped.length) return mapped
           return obj.alcObject
         })
         .filter(item => !this.viewport.document.activeFeature?.acceptsInput ||
@@ -321,12 +323,13 @@ class PickTool extends HighlightTool {
     super(component, viewport, selectors)
     this.callback = callback
     this.localSpace = false
+    this.chooseAmongItems = false
   }
 
   async mouseDown(vec, coords, event) {
     super.mouseDown(vec, coords)
     const repick = event.ctrlKey || event.metaKey
-    const object = await this.getObject(coords, true)
+    const object = await this.getObject(coords, !this.chooseAmongItems)
     if(!object) return
     this.callback(object, repick)
   }
@@ -384,6 +387,13 @@ export class PointPickTool extends PickTool {
 export class ComponentPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['component'], callback)
+  }
+}
+
+export class PatternInputPickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['solid', 'component'], callback)
+    this.chooseAmongItems = true
   }
 }
 

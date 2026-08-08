@@ -122,6 +122,8 @@ export class Component {
       helpers: [...this.helpers],
       children: this.children.map(child => child.deepClone(clone) ),
       creator: this.creator,
+      instanceOf: this.instanceOf,
+      sourceOccurrence: this.sourceOccurrence,
       assemblyJoints: this.assemblyJoints && this.assemblyJoints.map(joint => ({
         ...joint,
         frameA: joint.frameA && joint.frameA.clone(),
@@ -218,8 +220,60 @@ export class Component {
     return localTransform(this)
   }
 
+  sourceId() { return this.instanceOf || this.id }
+
+  sourceItemId(itemId) {
+    if(!this.instanceOf || !itemId.startsWith(this.id + '/')) return itemId
+    return this.instanceOf + itemId.slice(this.id.length)
+  }
+
+  isItemHidden(itemId) {
+    return !!this.creator.itemsHidden[this.sourceItemId(itemId)]
+  }
+
   // Terminate component during serialization to avoid cyclic references
   dump() { return {} }
   static undump() { return null }
 }
 Serialize.register(Component, 'Component')
+
+
+export function createComponentInstance(parent, source, id, designTransform) {
+  const component = new Component(parent, id)
+  component.instanceOf = source.sourceId()
+  component.sourceOccurrence = source.id
+  component.creator = occurrenceDefinition(source.creator)
+  component.designTransform = designTransform ? designTransform.clone() : source.localTransform()
+  component.compound = source.compound.cloneForComponent(component.id)
+  parent.children.push(component)
+
+  source.children.forEach(child => {
+    createComponentInstance(component, child, `${id}/${child.id}`, child.localTransform())
+  })
+  return component
+}
+
+export function syncComponentInstances(tree) {
+  tree.getChildren().filter(component => component.instanceOf).forEach(component => {
+    const source = tree.findChild(component.instanceOf)
+    const sourceOccurrence = tree.findChild(component.sourceOccurrence) || source
+    if(!source || !sourceOccurrence || source == component) return
+    component.compound = source.compound.cloneForComponent(component.id)
+    syncInstanceChildren(component, sourceOccurrence)
+  })
+}
+
+function syncInstanceChildren(instance, source) {
+  source.children.forEach(sourceChild => {
+    const existing = instance.children.find(child => child.sourceOccurrence == sourceChild.id)
+    if(!existing) {
+      createComponentInstance(instance, sourceChild, `${instance.id}/${sourceChild.id}`, sourceChild.localTransform())
+    }
+  })
+}
+
+function occurrenceDefinition(definition) {
+  const occurrence = Object.create(definition)
+  occurrence.hidden = false
+  return occurrence
+}

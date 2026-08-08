@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
-import { Feature, CreateComponentFeature, CreateSketchFeature, PoseFeature } from './features.js'
+import { Feature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature } from './features.js'
 import { Selection } from '../selection.js'
 import { Component } from './component.js'
 import Emitter from '../emitter.js'
@@ -70,10 +70,16 @@ export default class Document extends Emitter {
   }
 
   createComponent(parent) {
-    const feature = new CreateComponentFeature(this, parent.id)
+    const feature = new CreateComponentFeature(this, parent.sourceId())
     this.addFeature(feature)
     const newComp = this.top().findChild(feature.id)
     this.activateComponent(newComp)
+  }
+
+  createComponentInstance(component) {
+    if(!component.parent) return
+    const feature = new CreateComponentInstanceFeature(this, component.sourceId(), component.parent.id)
+    this.addFeature(feature)
   }
 
   keepPose() {
@@ -225,13 +231,6 @@ export default class Document extends Emitter {
   activateSketch(sketch) {
     const feature = this.timeline.features.find(f => f.sketch == sketch )
     this.activateFeature(feature)
-  }
-
-  deleteComponent(comp) {
-    comp.parent.deleteComponent(comp)
-    if(this.document.activeComponent.hasAncestor(comp)) {
-      this.document.activeComponent = comp.parent
-    }
   }
 
   addView(view) {

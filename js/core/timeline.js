@@ -1,6 +1,6 @@
 import Serialize from './serialize.js'
-import { Component, ComponentDefinition } from './component.js'
-import { CreateComponentFeature, Feature } from './features.js'
+import { Component, ComponentDefinition, syncComponentInstances } from './component.js'
+import { CreateComponentFeature, CreateComponentInstanceFeature, PatternFeature, Feature } from './features.js'
 import { arrayRange, makeColor } from './utils.js'
 
 
@@ -90,6 +90,7 @@ export class Timeline {
       // console.log('updating cache at with', j, newComp)
       this.cache[j] = newComp
       feature.execute(newComp)
+      syncComponentInstances(newComp)
       if(feature.error && feature.error.type == 'error') {
         this.cache[j] = this.cache[i].deepClone()
       } else {
@@ -169,6 +170,22 @@ export class Timeline {
         const child = new Component(parent, feature.id)
         child.creator = feature.definition
         parent.children.push(child)
+      } else if(feature instanceof CreateComponentInstanceFeature) {
+        const source = tree.findChild(feature.sourceId)
+        const parent = tree.findChild(feature.parentId)
+        if(source && parent) createStructuralInstance(parent, source, feature.id)
+      } else if(feature instanceof PatternFeature && feature.inputs) {
+        const parent = tree.findChild(feature.componentId)
+        const componentRefs = feature.inputs()
+          .filter(reference => reference.componentReference)
+        const count = feature.instanceCount()
+        componentRefs.forEach((reference, sourceIndex) => {
+          const source = tree.findChild(reference.componentReference.componentId)
+          if(!source || !parent) return
+          for(let transformIndex = 0; transformIndex < count; transformIndex++) {
+            createStructuralInstance(parent, source, `${feature.id}/instance/${transformIndex}/${sourceIndex}`)
+          }
+        })
       }
     })
     return tree
@@ -196,6 +213,17 @@ export class Timeline {
     Object.assign(out, dump)
     return out
   }
+}
+
+function createStructuralInstance(parent, source, id) {
+  const child = new Component(parent, id)
+  child.creator = source.creator
+  child.instanceOf = source.sourceId()
+  child.sourceOccurrence = source.id
+  parent.children.push(child)
+  source.children.forEach(sourceChild =>
+    createStructuralInstance(child, sourceChild, `${id}/${sourceChild.id}`)
+  )
 }
 Serialize.register(Timeline, 'Timeline')
 

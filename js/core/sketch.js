@@ -525,7 +525,18 @@ export class Projection {
 
   geometry() { return this.output }
 
-  static undump(dump) { return new Projection(dump.itemRef) }
+  dump() {
+    return {
+      id: this.id,
+      itemRef: this.itemRef,
+    }
+  }
+
+  static undump(dump) {
+    const projection = new Projection(dump.itemRef)
+    projection.id = dump.id || projection.id
+    return projection
+  }
 }
 Serialize.register(Projection, 'Projection')
 

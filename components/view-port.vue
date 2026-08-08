@@ -360,7 +360,7 @@
         if(e.button != 0) return
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
-        if(vec) this.activeTool.mouseDown(vec, coords)
+        if(vec) this.activeTool.mouseDown(vec, coords, e)
       },
 
       handleMouseDown: function(e, handle) {
@@ -433,8 +433,8 @@
       handlePick: function(pickerCoords, color, Tool) {
         if(this.activeTool) this.activeTool.dispose()
         this.pickingPath = { target: null, color, origin: pickerCoords }
-        const tool = new Tool(this.document.activeComponent, this, (item) => {
-          this.bus.emit('picked', item)
+        const tool = new Tool(this.document.activeComponent, this, (item, repick) => {
+          this.bus.emit('picked', item, repick)
           this.bus.emit('activate-tool', DummyTool)
           this.pickingPath = null
         })

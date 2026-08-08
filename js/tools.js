@@ -308,11 +308,12 @@ class PickTool extends HighlightTool {
     this.localSpace = false
   }
 
-  async mouseDown(vec, coords) {
+  async mouseDown(vec, coords, event) {
     super.mouseDown(vec, coords)
+    const repick = event.ctrlKey || event.metaKey
     const object = await this.getObject(coords, true)
     if(!object) return
-    this.callback(object)
+    this.callback(object, repick)
   }
 }
 

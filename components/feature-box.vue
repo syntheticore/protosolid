@@ -375,7 +375,7 @@
         return new Promise((resolve) => {
           this.bus.off('picked')
 
-          this.bus.once('picked', async (item) => {
+          this.bus.once('picked', async (item, repick) => {
             // Build reference of requested type from item
             let itemRef;
             if(type == 'profile' || type == 'solid') {
@@ -415,7 +415,6 @@
 
             this.cancelPick()
             // Regenerate feature once unsuppressed
-            const repick = this.bus.isCtrlPressed
             if(!repick) this.update()
             this.updatePaths()
 

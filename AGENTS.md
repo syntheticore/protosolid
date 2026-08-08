@@ -5,6 +5,7 @@
 Do not build or run the application unrequested.
 Only user browser debugging when you actually need it to debug a problem, not for routine inspection.
 Do not write tests unasked if you don't need them for debugging yourself.
+Ignore shapex and solvo, which are currently unused in this branch.
 
 ## Browser debugging
 

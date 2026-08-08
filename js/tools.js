@@ -38,6 +38,7 @@ import {
 import { solveAssembly, worldTransform } from './core/assembly.js'
 
 const dragThreshold = 2
+const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
 
 
 class Tool {
@@ -72,23 +73,77 @@ class Tool {
   dispose() {}
 }
 
-function addSnappedCenterConstraint(sketch, snapper, elem, index) {
-  const { x, y } = snapper.snapped || {}
-  if(!x || x !== y) return
+function captureSnap(snapper) {
+  const { curve, pointTarget } = snapper.snapped || {}
+  if(curve) return { curve }
+  return pointTarget
+}
 
+function isConstrainablePoint(elem, index) {
+  if(elem instanceof PointHelper) return index == 0
+  if(elem instanceof Line) return index == 0 || index == 1
+  if(elem instanceof Circle) return index == 0
+  if(elem instanceof Arc) return index >= 0 && index <= 2
+  if(elem instanceof Spline) return index == 0 || index == elem.handles().length - 1
+  return false
+}
+
+function isTouchPoint(elem, index) {
+  return isConstrainablePoint(elem, index) && !(elem instanceof Arc && index == 0)
+}
+
+function addCapturedSnapConstraint(sketch, snap, elem, index) {
+  if(!snap || !isConstrainablePoint(elem, index)) return
+  if(snap.curve && snap.curve != elem) {
+    if(!isTouchPoint(elem, index)) return
+    const existing = sketch.constraints.find(constraint =>
+      constraint.items.some(item => item.curve() == elem && item.index == index) &&
+      constraint.items.some(item => item.curve() == snap.curve)
+    )
+    return existing || sketch.addConstraint(
+      new TouchConstraint(new ElemRef(elem, index), snap.curve)
+    )
+  }
+  if(snap.elem && snap.elem != elem && snap.index != -1) return sketch.addConstraint(
+    new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(snap.elem, snap.index))
+  )
+
+  const origin = snap.origin && sketch.origin()
+  if(origin) return sketch.addConstraint(
+    new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(origin))
+  )
+}
+
+function addCoincidentAtPosition(sketch, elem, index, position) {
   const candidates = [
     ...sketch.elements,
     ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
   ]
-  const target = candidates.find(candidate =>
-    candidate != elem &&
-    (candidate instanceof Circle || candidate instanceof Arc) &&
-    candidate.handles()[0].almost(x)
+  for(const target of candidates) {
+    if(target == elem || !target.handles) continue
+    const targetIndex = target.handles().findIndex(handle => handle.almost(position))
+    if(isConstrainablePoint(target, targetIndex)) return sketch.addConstraint(
+      new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(target, targetIndex))
+    )
+  }
+}
+
+function addInferredTangentConstraint(sketch, line, snap, endpointIndex=1) {
+  const target = snap && (snap.curve || (snap.elem instanceof Arc && snap.index > 0 && snap.elem))
+  if(!(target instanceof Circle || target instanceof Arc)) return
+  const direction = line.direction()
+  if(direction.lengthSq().almost(0.0)) return
+  const endpoint = line.endpoints()[endpointIndex]
+  const radial = endpoint.clone().sub(target.center())
+  const radialAlignment = Math.abs(direction.normalize().dot(radial.normalize()))
+  if(radialAlignment > Math.sin(tangentSnapAngle)) return
+
+  const exists = sketch.constraints.some(constraint =>
+    constraint instanceof TangentConstraint &&
+    constraint.items.some(item => item.curve() == line) &&
+    constraint.items.some(item => item.curve() == target)
   )
-  if(!target) return
-  return sketch.addConstraint(
-    new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(target, 0))
-  )
+  if(!exists) sketch.addConstraint(new TangentConstraint(line, target))
 }
 
 
@@ -211,24 +266,8 @@ export class ManipulationTool extends HighlightTool {
     delete this.object
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
-    // Auto-constrain snapped points
     if(sketch && handle) {
-      sketch.elements.forEach(elem => {
-        if(elem == handle.elem) return
-        const endpointIndex = elem.endpoints().findIndex(p => p.almost(vec) )
-        if(endpointIndex != -1) sketch.addConstraint(
-          new CoincidentConstraint(
-            new ElemRef(handle.elem, handle.index),
-            new ElemRef(elem, elem.endpointHandleIndex(endpointIndex)),
-          )
-        )
-      })
-      addSnappedCenterConstraint(sketch, this.viewport.snapper, handle.elem, handle.index)
-      const origin = sketch.origin()
-      const originPoint = sketch.originPoint()
-      if(origin && originPoint && vec.almost(originPoint)) sketch.addConstraint(
-        new CoincidentConstraint(new ElemRef(handle.elem, handle.index), new ElemRef(origin))
-      )
+      addCapturedSnapConstraint(sketch, captureSnap(this.viewport.snapper), handle.elem, handle.index)
     }
   }
 
@@ -500,9 +539,17 @@ export class LineTool extends SketchTool {
     super(component, viewport, sketch)
   }
 
+  constrainCompletedLine(line, endSnap) {
+    addCapturedSnapConstraint(this.sketch, endSnap, line, 1)
+    addInferredTangentConstraint(this.sketch, line, endSnap)
+    addInferredTangentConstraint(this.sketch, line, this.startSnap, 0)
+    this.originSnapConstraint(line, 1)
+  }
+
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
     this.mouseMove(vec)
+    const snap = captureSnap(this.viewport.snapper)
 
     const old = this.curve
     const elems = [...this.sketch.elements]
@@ -512,15 +559,12 @@ export class LineTool extends SketchTool {
     const endpointIndex = touchesExisting && endpoints.indexOf(endpoints.find(sp => sp.equals(vec) ))
     const index = touchesExisting && touchesExisting.endpointHandleIndex(endpointIndex)
 
-    // Restart tool when we hit an existing point
-    if((touchesExisting || this.snappedDirectlyToOrigin()) && this.curve) {
+    // Restart the tool when the segment ends on existing geometry.
+    if((touchesExisting || this.snappedDirectlyToOrigin() || (snap && (snap.curve || snap.elem))) && this.curve) {
       this.sketch.add(this.curve)
-      if(touchesExisting && index != -1) this.sketch.addConstraint(
-        new CoincidentConstraint(new ElemRef(this.curve, 1), new ElemRef(touchesExisting, index))
-      )
-      addSnappedCenterConstraint(this.sketch, this.viewport.snapper, this.curve, 1)
-      this.originSnapConstraint(this.curve, 1)
+      this.constrainCompletedLine(this.curve, snap)
       this.curve = null
+      this.startSnap = null
     } else {
       this.curve = new Line(vec, vec)
       this.sketch.add(this.curve)
@@ -530,8 +574,7 @@ export class LineTool extends SketchTool {
         new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(other, otherIndex))
       )
       if(old) {
-        addSnappedCenterConstraint(this.sketch, this.viewport.snapper, old, 1)
-        this.originSnapConstraint(old, 1)
+        this.constrainCompletedLine(old, snap)
         const ySnapped = old.endpoints()[0].x.almost(vec.x)
         const xSnapped = old.endpoints()[0].y.almost(vec.y)
         if(xSnapped || ySnapped) {
@@ -540,9 +583,10 @@ export class LineTool extends SketchTool {
           this.sketch.addConstraint(new type(old))
         }
       } else {
-        addSnappedCenterConstraint(this.sketch, this.viewport.snapper, this.curve, 0)
+        addCapturedSnapConstraint(this.sketch, snap, this.curve, 0)
         this.originSnapConstraint(this.curve, 0)
       }
+      this.startSnap = snap
     }
   }
 
@@ -573,15 +617,19 @@ export class SplineTool extends SketchTool {
 
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
     if(this.curve) {
       let points = this.curve.handles()
       points[points.length - 1] = vec//.toArray()
       // points.push(vec.toArray())
       points.push(vec)
       this.curve.setHandles(points)
+      this.endSnap = snap
     } else {
       this.curve = new Spline([vec, vec])
       this.sketch.add(this.curve)
+      addCapturedSnapConstraint(this.sketch, snap, this.curve, 0)
+      this.originSnapConstraint(this.curve, 0)
       // this.curve = this.sketch.add_spline([vec.toArray(), vec.toArray()])
       // this.curve.sketch = this.sketch
     }
@@ -601,6 +649,7 @@ export class SplineTool extends SketchTool {
     let points = this.curve.handles()
     points.pop()
     this.curve.setHandles(points)
+    addCapturedSnapConstraint(this.sketch, this.endSnap, this.curve, points.length - 1)
     this.viewport.elementChanged()
   }
 }
@@ -624,7 +673,8 @@ export class CircleTool extends SketchTool {
       // this.curve = this.sketch.add_circle(vec, 1)
       this.curve = new Circle(vec, 1.0)
       this.sketch.add(this.curve)
-      addSnappedCenterConstraint(this.sketch, this.viewport.snapper, this.curve, 0)
+      addCapturedSnapConstraint(this.sketch, captureSnap(this.viewport.snapper), this.curve, 0) ||
+        addCoincidentAtPosition(this.sketch, this.curve, 0, vec)
       this.originSnapConstraint(this.curve, 0)
       // this.curve.sketch = this.sketch
     }
@@ -648,14 +698,23 @@ export class ArcTool extends SketchTool {
 
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
     if(this.start && this.end) {
+      if(this.curve) {
+        addCapturedSnapConstraint(this.sketch, this.startSnap, this.curve, 1)
+        addCapturedSnapConstraint(this.sketch, this.endSnap, this.curve, 2)
+      }
       this.start = null
       this.end = null
       this.curve = null
+      this.startSnap = null
+      this.endSnap = null
     } else if(this.start) {
       this.end = vec
+      this.endSnap = snap
     } else {
       this.start = vec
+      this.startSnap = snap
     }
   }
 
@@ -731,12 +790,7 @@ export class TouchConstraintTool extends ConstraintTool {
   acceptsItem(item) {
     if(item instanceof PointHelper) return true
     if(item instanceof ElemRef) {
-      const curve = item.curve()
-      if(curve instanceof Line) return item.index == 0 || item.index == 1
-      if(curve instanceof Circle) return item.index == 0
-      if(curve instanceof Arc) return item.index == 1 || item.index == 2
-      if(curve instanceof Spline) return item.index == 0 || item.index == curve.handles().length - 1
-      return false
+      return isTouchPoint(item.curve(), item.index)
     }
     return item instanceof Line || item instanceof Circle || item instanceof Arc
   }

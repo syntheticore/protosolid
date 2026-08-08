@@ -142,13 +142,7 @@ export class ManipulationTool extends HighlightTool {
   }
 
   async click(vec, coords) {
-    const pendingPick = this.pendingObjectPick
-    const curve = pendingPick &&
-      pendingPick.coords.x == coords.x &&
-      pendingPick.coords.y == coords.y
-      ? await pendingPick.promise
-      : await this.getObject(coords)
-    if(this.pendingObjectPick == pendingPick) this.pendingObjectPick = null
+    const curve = await this.getObject(coords)
     if(curve) {
       this.viewport.document.selection.handle(curve, this.viewport.bus.isCtrlPressed)
     } else {
@@ -161,13 +155,12 @@ export class ManipulationTool extends HighlightTool {
     super.mouseDown(vec, coords)
     this.pointerDown = true
     // const sel = this.viewport.document.selection.items[0]
-    const pendingPick = {
-      coords: { x: coords.x, y: coords.y },
-      promise: this.getObject(coords),
-    }
-    this.pendingObjectPick = pendingPick
-    const object = await pendingPick.promise
-    if(this.pendingObjectPick != pendingPick || !this.pointerDown) return
+    // A drag must start from the front-most hit immediately. Opening the
+    // overlap picker here leaves mouseDown pending and prevents mouseMove
+    // from ever receiving a solid to manipulate. Click selection opens the
+    // picker once from click() after mouseUp instead.
+    const object = await this.getObject(coords, true)
+    if(!this.pointerDown) return
     if(object instanceof Solid) {
       this.object = object
       this.startCoords = coords
@@ -187,12 +180,8 @@ export class ManipulationTool extends HighlightTool {
 
   mouseUp(vec, coords) {
     this.pointerDown = false
-    const clicked = this.lastCoords &&
-      coords.x == this.lastCoords.x &&
-      coords.y == this.lastCoords.y
     // this.mouseMove(vec, coords)
     super.mouseUp(vec, coords)
-    if(!clicked) this.pendingObjectPick = null
     this.snapToPoints = false
     this.cursor = 'auto'
     delete this.object

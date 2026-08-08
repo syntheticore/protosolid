@@ -20,7 +20,13 @@
 
         h2 Solid {{ index + 1 }}
 
-        .controls
+        .controls.wide
+
+          Icon(
+            icon="box" fixed-width
+            title="Convert to Component"
+            @click.stop="convertToComponent"
+          )
 
           Icon.delete(
             icon="trash-alt" fixed-width
@@ -56,6 +62,10 @@
     feature.solids = () => [props.solid.reference()]
     props.document.addFeature(feature)
     props.document.regenerate()
+  }
+
+  function convertToComponent() {
+    props.document.convertBodyToComponent(props.component, props.solid)
   }
 
 </script>

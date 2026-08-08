@@ -618,6 +618,58 @@ export class CreateComponentFeature extends Feature {
 Serialize.register(CreateComponentFeature, 'CreateComponentFeature')
 
 
+export class ConvertBodyToComponentFeature extends Feature {
+  static icon = 'box'
+  static editable = false
+
+  constructor(doc) {
+    super(doc, false, 'Body to Component', {
+      body: {
+        title: 'Body',
+        type: 'solid',
+      },
+    })
+
+    this.body = null
+    this.definition = new ComponentDefinition('New Component', doc.timeline.makeColor())
+  }
+
+  updateFeature(tree, references) {
+    const parent = tree.findChild(this.componentId)
+    if(!parent || !references.body) {
+      this.error = { type: 'error', msg: 'Body or parent component was lost' }
+      return
+    }
+
+    try {
+      const component = new Component(parent, this.id)
+      this.definition.parent = this.componentId
+      component.creator = this.definition
+      component.compound = references.body.toCompound().cloneForComponent(component.id)
+
+      const remaining = parent.compound.removeShapes([references.body])
+      parent.compound = remaining.solids().length ? remaining : new Compound(parent.id)
+      parent.children.push(component)
+    } catch(err) { this.error = err || this.error }
+  }
+
+  dump() {
+    return {
+      ...super.dump(),
+      definition: this.definition,
+    }
+  }
+
+  static undump(dump, context) {
+    const feature = super.undump(dump, context)
+    feature.definition = dump.definition
+    return feature
+  }
+}
+
+Serialize.register(ConvertBodyToComponentFeature, 'ConvertBodyToComponentFeature')
+
+
 export class CreateComponentInstanceFeature extends Feature {
   static icon = 'clone'
   static editable = false

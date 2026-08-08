@@ -1,6 +1,6 @@
 import Serialize from './serialize.js'
 import { Component, ComponentDefinition, syncComponentInstances } from './component.js'
-import { CreateComponentFeature, CreateComponentInstanceFeature, PatternFeature, Feature } from './features.js'
+import { ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, PatternFeature, Feature } from './features.js'
 import { arrayRange, makeColor } from './utils.js'
 
 
@@ -167,6 +167,12 @@ export class Timeline {
     this.features.forEach(feature => {
       if(feature instanceof CreateComponentFeature) {
         let parent = tree.findChild(feature.parent)
+        const child = new Component(parent, feature.id)
+        child.creator = feature.definition
+        parent.children.push(child)
+      } else if(feature instanceof ConvertBodyToComponentFeature) {
+        const parent = tree.findChild(feature.componentId)
+        if(!parent) return
         const child = new Component(parent, feature.id)
         child.creator = feature.definition
         parent.children.push(child)

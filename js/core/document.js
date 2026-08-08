@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
-import { Feature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature } from './features.js'
+import { Feature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature } from './features.js'
 import { Selection } from '../selection.js'
 import { Component } from './component.js'
 import Emitter from '../emitter.js'
@@ -79,6 +79,13 @@ export default class Document extends Emitter {
   createComponentInstance(component) {
     if(!component.parent) return
     const feature = new CreateComponentInstanceFeature(this, component.sourceId(), component.parent.id)
+    this.addFeature(feature)
+  }
+
+  convertBodyToComponent(component, body) {
+    const feature = new ConvertBodyToComponentFeature(this)
+    feature.componentId = component.sourceId()
+    feature.body = () => body.reference()
     this.addFeature(feature)
   }
 

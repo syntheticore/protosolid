@@ -158,6 +158,8 @@ export default class Renderer {
       this.gizmos.forEach(gizmo => gizmo.enabled = false)
       this.cameraTarget = null
       this.viewControlsTarget = null
+      this.cameraTransitionUp = null
+      this.cameraUpTarget = null
       this.reportViewChange()
       this.startAnimation()
     })
@@ -252,10 +254,46 @@ export default class Renderer {
   }
 
   setView(position, target) {
-    this.cameraTarget = position
+    const polePosition = this.poleSafePosition(position, target)
+    this.cameraTarget = polePosition || position
     this.viewControlsTarget = target
+    if(polePosition) {
+      this.camera.updateMatrixWorld()
+      this.cameraTransitionUp = new THREE.Vector3()
+        .setFromMatrixColumn(this.camera.matrixWorld, 1)
+        .normalize()
+      const rotation = new THREE.Matrix4().lookAt(this.cameraTarget, target, this.camera.up)
+      this.cameraUpTarget = new THREE.Vector3()
+        .setFromMatrixColumn(rotation, 1)
+        .normalize()
+    } else {
+      this.cameraTransitionUp = null
+      this.cameraUpTarget = null
+    }
     this.startAnimation()
     this.endAnimation()
+  }
+
+  poleSafePosition(position, target) {
+    const offset = position.clone().sub(target)
+    const distance = offset.length()
+    if(!distance) return null
+
+    // OrbitControls cannot preserve the camera roll when its view direction is
+    // exactly parallel to the world-up axis. Keep an imperceptible offset toward
+    // +Z so the top/bottom view has a stable orientation throughout the lerp.
+    const worldUp = THREE.Object3D.DEFAULT_UP
+    const isAtPole = Math.abs(offset.dot(worldUp)) > distance * (1 - 1e-10)
+    if(!isAtPole) return null
+
+    const poleAxis = Math.abs(worldUp.z) < 0.9
+      ? new THREE.Vector3(0, 0, 1)
+      : new THREE.Vector3(1, 0, 0)
+    const poleOffset = poleAxis
+      .projectOnPlane(worldUp)
+      .normalize()
+      .multiplyScalar(distance * 1e-5)
+    return position.clone().add(poleOffset)
   }
 
   setDisplayMode(mode) {
@@ -286,12 +324,30 @@ export default class Renderer {
   animate(timestamp) {
     const delta = this.lastTimestamp ? timestamp - this.lastTimestamp : 1
     this.lastTimestamp = timestamp
-    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget) requestAnimationFrame(this.animate.bind(this))
+    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget) requestAnimationFrame(this.animate.bind(this))
     // Update orbit controls dampening
-    this.viewControls.update(delta)
+    if(!this.cameraUpTarget) this.viewControls.update(delta)
     // Transition to target positions
     this.cameraTarget = this.lerp(this.camera.position, this.cameraTarget)
     this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
+    if(this.cameraUpTarget) {
+      // Interpolate only the roll; rebuilding the look-at rotation keeps the
+      // moving target fixed in the center of the screen throughout the move.
+      this.slerpDirection(this.cameraTransitionUp, this.cameraUpTarget)
+      const transitionDone = !this.cameraTarget &&
+        !this.viewControlsTarget &&
+        this.cameraTransitionUp.angleTo(this.cameraUpTarget) < 1e-3
+      if(transitionDone) this.cameraTransitionUp.copy(this.cameraUpTarget)
+      const viewDirection = this.viewControls.target.clone().sub(this.camera.position).normalize()
+      const viewUp = this.cameraTransitionUp.clone().projectOnPlane(viewDirection).normalize()
+      const rotation = new THREE.Matrix4().lookAt(this.camera.position, this.viewControls.target, viewUp)
+      this.camera.quaternion.setFromRotationMatrix(rotation)
+      if(transitionDone) {
+        this.cameraTransitionUp = null
+        this.cameraUpTarget = null
+      }
+      this.render()
+    }
   }
 
   lerp(vec, target) {
@@ -304,6 +360,11 @@ export default class Renderer {
       return null
     }
     return target
+  }
+
+  slerpDirection(direction, target) {
+    const rotation = new THREE.Quaternion().setFromUnitVectors(direction, target)
+    direction.applyQuaternion(new THREE.Quaternion().slerp(rotation, 0.15)).normalize()
   }
 
   updateShadows() {

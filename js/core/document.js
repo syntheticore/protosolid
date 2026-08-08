@@ -29,14 +29,14 @@ export default class Document extends Emitter {
       {
         id: makeID(),
         title: 'Top',
-        position: new THREE.Vector3(0.0, 0.0, 90.0),
+        position: new THREE.Vector3(0.0, 90.0, 0.0),
         target: new THREE.Vector3(),
         system: true,
       },
       {
         id: makeID(),
         title: 'Front',
-        position: new THREE.Vector3(0.0, 90.0, 0.0),
+        position: new THREE.Vector3(0.0, 0.0, 90.0),
         target: new THREE.Vector3(),
         system: true,
       },

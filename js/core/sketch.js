@@ -299,7 +299,7 @@ export class Sketch {
     })
   }
 
-  solve(tree) {
+  solve(tree, draggedHandle) {
     let id = 1
     const idMap = {}
 
@@ -388,7 +388,23 @@ export class Sketch {
         temporary: true,
       }))
 
-    const constraints = arcRules.concat(this.constraints.flatMap(c => {
+    // Projected point coordinates are fixed above, but PlaneGCS stores a
+    // circle's radius as a separate free parameter. Lock that radius as
+    // well; otherwise tangency can be "solved" by changing an invisible
+    // working radius that is reset when the projection is regenerated.
+    const projectionRadiusRules = projections
+      .filter(elem => elem instanceof Circle)
+      .map(elem => {
+        const primitive = idMap[elem.id].slice(-1)[0]
+        return {
+          id: `${id++}`,
+          type: 'circle_radius',
+          c_id: primitive.id,
+          radius: elem.radius,
+        }
+      })
+
+    const constraints = [...arcRules, ...projectionRadiusRules].concat(this.constraints.flatMap(c => {
       if(c instanceof HorVertConstraint) {
         const pointPrims = c.items.length == 1 ?
           idMap[c.items[0].curve().id].slice(0, 2)
@@ -498,13 +514,29 @@ export class Sketch {
       }
     }))
 
+    // Treat the pointer position as a temporary driving target. Without
+    // these constraints the dragged coordinates are only the solver's
+    // initial guess, so it is free to move the endpoint while satisfying a
+    // tangent (or any other) constraint, which makes the handle swim.
+    if(draggedHandle) {
+      const dragPrim = pointPrimitive({
+        curve: () => draggedHandle.elem,
+        index: draggedHandle.index,
+      })
+      const target = draggedHandle.elem.handles()[draggedHandle.index]
+      if(dragPrim && target) constraints.push(
+        { id: `${id++}`, type: 'coordinate_x', p_id: dragPrim.id, x: target.x, temporary: true },
+        { id: `${id++}`, type: 'coordinate_y', p_id: dragPrim.id, y: target.y, temporary: true },
+      )
+    }
+
     // Solve
     const { results, conflicting, _dof } = window.oc.solveSystem([...primitives, ...constraints])
 
     if(conflicting) {
       window.bus.emit('toast', 'Sketch was over-constrained')
       this.constraints.pop()
-      this.solve(tree)
+      this.solve(tree, draggedHandle)
       return
     }
 

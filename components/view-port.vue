@@ -340,17 +340,24 @@
 
       mouseUp: function(e) {
         const [vec, coords] = this.snap(e)
+        const draggedHandle = this.activeHandle
         if(vec) this.activeTool.mouseUp(vec, coords)
         this.activeHandle = null
         this.activeDimension = null
         this.snapper.reset()
-        this.updateRegions()
+        this.updateRegions(false, draggedHandle)
       },
 
-      updateRegions: function(force) {
+      updateRegions: function(force, solveHandle) {
         if(!this.regionsDirty && !force) return
         this.updateSketch()
-        if(this.document.activeSketch) this.document.activeSketch.profileUpdateNeeded = true
+        if(this.document.activeSketch) {
+          // Vue processes the final solve after activeHandle is cleared. Keep
+          // the just-dragged handle available so releasing the pointer does
+          // not let under-constrained geometry drift to a different solution.
+          this.document.activeSketch.solveHandle = solveHandle
+          this.document.activeSketch.profileUpdateNeeded = true
+        }
         this.regionsDirty = false
       },
 
@@ -358,7 +365,15 @@
         const sketch = this.document.activeSketch
         if(!sketch) return
         this.regionsDirty = true
-        sketch.solveNeeded = true
+        if(temporary) {
+          // Keep constraints visually satisfied during a drag. Deferring this
+          // through Vue lets pointer events outrun the solver and leaves the
+          // geometry showing stale, invalid intermediate positions.
+          sketch.solve(this.document.top(), this.activeHandle)
+          sketch.solveNeeded = false
+        } else {
+          sketch.solveNeeded = true
+        }
       },
 
       mouseDown: function(e) {
@@ -371,7 +386,7 @@
 
       handleMouseDown: function(e, handle) {
         if(e.button != 0) return
-        this.activeHandle = handle
+        this.activeHandle = handle.readonly ? null : handle
         this.mouseDown(e)
         this.snapper.reset()
       },

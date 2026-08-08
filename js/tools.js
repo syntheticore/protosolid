@@ -75,7 +75,11 @@ function addSnappedCenterConstraint(sketch, snapper, elem, index) {
   const { x, y } = snapper.snapped || {}
   if(!x || x !== y) return
 
-  const target = sketch.elements.find(candidate =>
+  const candidates = [
+    ...sketch.elements,
+    ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+  ]
+  const target = candidates.find(candidate =>
     candidate != elem &&
     (candidate instanceof Circle || candidate instanceof Arc) &&
     candidate.handles()[0].almost(x)
@@ -512,6 +516,7 @@ export class LineTool extends SketchTool {
       if(touchesExisting && index != -1) this.sketch.addConstraint(
         new CoincidentConstraint(new ElemRef(this.curve, 1), new ElemRef(touchesExisting, index))
       )
+      addSnappedCenterConstraint(this.sketch, this.viewport.snapper, this.curve, 1)
       this.originSnapConstraint(this.curve, 1)
       this.curve = null
     } else {
@@ -523,6 +528,7 @@ export class LineTool extends SketchTool {
         new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(other, otherIndex))
       )
       if(old) {
+        addSnappedCenterConstraint(this.sketch, this.viewport.snapper, old, 1)
         this.originSnapConstraint(old, 1)
         const ySnapped = old.endpoints()[0].x.almost(vec.x)
         const xSnapped = old.endpoints()[0].y.almost(vec.y)
@@ -532,6 +538,7 @@ export class LineTool extends SketchTool {
           this.sketch.addConstraint(new type(old))
         }
       } else {
+        addSnappedCenterConstraint(this.sketch, this.viewport.snapper, this.curve, 0)
         this.originSnapConstraint(this.curve, 0)
       }
     }
@@ -724,6 +731,7 @@ export class TouchConstraintTool extends ConstraintTool {
     if(item instanceof ElemRef) {
       const curve = item.curve()
       if(curve instanceof Line) return item.index == 0 || item.index == 1
+      if(curve instanceof Circle) return item.index == 0
       if(curve instanceof Arc) return item.index == 1 || item.index == 2
       if(curve instanceof Spline) return item.index == 0 || item.index == curve.handles().length - 1
       return false

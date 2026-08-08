@@ -73,6 +73,8 @@
 
 <script setup>
 
+  import { Circle } from '../js/core/geom2d.js'
+
   const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
@@ -91,9 +93,12 @@
   const allHandles = computed(() => {
     if(!active.value) return []
 
-    const handles = props.sketch.elements.flatMap(elem => {
-      if(elem.projection) return []
-      return elem.handles().map((p, i) => {
+    const projectedElements = props.sketch.projections
+      .map(projection => projection.geometry())
+      .filter(elem => elem instanceof Circle)
+    const handles = [...props.sketch.elements, ...projectedElements].flatMap(elem => {
+      const elemHandles = elem.projection ? elem.handles().slice(0, 1) : elem.handles()
+      return elemHandles.map((p, i) => {
         p = p.clone().applyMatrix4(elem.sketch.workplane)
         if(props.parentTransform) p.applyMatrix4(props.parentTransform)
         return {
@@ -103,6 +108,7 @@
           id: elem.id + i,
           elem,
           index: i,
+          readonly: !!elem.projection,
         }
       })
     })
@@ -118,10 +124,8 @@
   })
 
   function solve() {
-    const handle = props.activeHandle
-    if(handle) handle.elem.constraints().forEach(c => c.temporary = true ) //XXX make only handle-relevant constraints temporary
-    props.sketch.solve(props.document.top())
-    if(handle) handle.elem.constraints().forEach(c => c.temporary = false )
+    const handle = props.activeHandle || props.sketch.solveHandle
+    props.sketch.solve(props.document.top(), handle)
   }
 
   watch(() => props.sketch.solveNeeded, () => {
@@ -138,6 +142,7 @@
     solve()
     profiles.value = props.sketch.profiles(props.component)
     props.sketch.profileUpdateNeeded = false
+    props.sketch.solveHandle = null
     fresh = false
   }, { immediate: true })
 

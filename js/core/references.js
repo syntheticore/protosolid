@@ -221,6 +221,12 @@ export class CurveReference extends Reference {
     this.itemId = itemId || (this.isProjection ? item.projection.id : item.id)
   }
 
+  clone() {
+    // Deserialized references are intentionally unresolved until update().
+    // Preserve their stable IDs instead of asking a null item for its sketch.
+    return new CurveReference(this.item, this.componentId, this.sketchId, this.isProjection, this.itemId)
+  }
+
   update(tree) {
     const comp = tree.findChild(this.componentId)
     const sketch = comp.sketches.find(sketch => sketch.id == this.sketchId )

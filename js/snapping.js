@@ -34,10 +34,12 @@ export default class Snapper {
   }
 
   getSnapPoints() {
-    let sketchElements = [...this.viewport.document.activeSketch.elements]
+    const sketch = this.viewport.document.activeSketch
+    let sketchElements = [...sketch.elements]
     // Filter out sketch element actively being drawn
     const tool = this.viewport.activeTool
     if(tool.curve) sketchElements.pop()
+    sketchElements.push(...sketch.projections.map(projection => projection.geometry()).filter(Boolean))
     const points = sketchElements.flatMap(elem => {
       let points = elem.snapPoints()
       // Filter out handle actively being dragged & connected neighboors

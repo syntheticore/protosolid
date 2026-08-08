@@ -259,7 +259,7 @@
       })
       this.renderer.on('change-view', (position, target) => {
         this.document.viewChanged(position, target)
-        this.$emit('update:highlight', null)
+        if(!this.widgets.length) this.$emit('update:highlight', null)
       })
       this.isReady = true
 

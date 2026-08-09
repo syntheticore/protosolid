@@ -12,11 +12,31 @@ pub enum ChangeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
-    Created,
+    Created {
+        role: Option<CreationRole>,
+    },
     Derived {
         sources: Vec<PersistentId>,
         role: String,
     },
+}
+
+/// Stable semantic role of topology created directly by a high-level operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreationRole {
+    ExtrusionStart,
+    ExtrusionEnd,
+    ExtrusionSide {
+        boundary: ProfileBoundary,
+        segment: usize,
+        part: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileBoundary {
+    Outer,
+    Hole(usize),
 }
 
 /// Complete provenance emitted by every topology-changing operation.
@@ -52,7 +72,12 @@ impl OperationHistory {
     }
 
     pub(crate) fn created(&mut self, output: PersistentId) {
-        self.origins.insert(output, Origin::Created);
+        self.origins.insert(output, Origin::Created { role: None });
+    }
+
+    pub(crate) fn created_as(&mut self, output: PersistentId, role: CreationRole) {
+        self.origins
+            .insert(output, Origin::Created { role: Some(role) });
     }
 
     pub(crate) fn derived(
@@ -106,5 +131,10 @@ impl OperationHistory {
                 }
             }
         }
+    }
+
+    pub(crate) fn absorb(&mut self, other: Self) {
+        self.changes.extend(other.changes);
+        self.origins.extend(other.origins);
     }
 }

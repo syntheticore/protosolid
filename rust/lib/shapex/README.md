@@ -34,6 +34,8 @@ let profile = Profile::new(outer, [hole], tolerance)?;
 let extrusion = profile.extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 5.0))?;
 println!("volume: {}", extrusion.volume());
 let mesh = extrusion.tessellate(TessellationOptions::default())?;
+let first_face = extrusion.faces().next().unwrap();
+let face_mesh = first_face.tessellate(TessellationOptions::default())?;
 # Ok::<(), shapex::KernelError>(())
 ```
 
@@ -41,21 +43,30 @@ let mesh = extrusion.tessellate(TessellationOptions::default())?;
 no second polygon-profile abstraction. Lines, circular arcs, full circles, and
 NURBS curves are represented as exact trimmed curve uses.
 
-Entity identities are generated and retained by Shapex. A returned `Solid` or
-`Compound` carries the operation history needed to resolve an entity across a
-later modeling result:
+Entity identities are generated and retained by Shapex. Returned `Solid` and
+`Compound` values carry compact transitive lineage, not previous BREP
+versions. An entity from any ancestor result can therefore be resolved after
+several later operations:
 
 ```rust,ignore
 let face = solid.faces().next().unwrap().clone();
-let rounded = solid.fillet(&edges, 2.0)?;
-match rounded.resolve(&face) {
+let first_cut = solid.difference(&first_tool)?;
+let second_cut = first_cut.difference(&second_tool)?;
+match second_cut.resolve(&face) {
     Resolution::Preserved(face) => { /* same semantic entity and revision */ }
     Resolution::Modified(face) => { /* same semantic entity, new revision */ }
     Resolution::Split(faces) => { /* one source has several descendants */ }
     Resolution::Merged(face) => { /* several sources contributed */ }
     Resolution::Deleted => {}
+    Resolution::Unrelated => { /* the face never belonged to this lineage */ }
 }
 ```
+
+The latest operation also exposes typed semantic creation roles and cross-type
+generation queries. For example, an extrusion reports its start, end, and swept
+side faces, while a future fillet can report faces generated from its input edges.
+Applications may associate those roles with their own document references without
+assigning names inside Shapex.
 
 The example is the intended history contract; operations are added only when their
 geometric algorithm and publication certifier are complete. Shapex does not own

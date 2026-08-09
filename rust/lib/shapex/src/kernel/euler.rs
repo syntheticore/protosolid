@@ -675,10 +675,10 @@ impl<'kernel> EulerTransaction<'kernel> {
 
     fn kev_unchecked(&mut self, edge: EdgeId, vertex: VertexId) -> KernelResult<KevResult> {
         let edge_value = self.working.edge(edge)?;
-        if edge_value.vertices[1] != vertex || edge_value.coedges.len() != 2 {
+        if !edge_value.vertices.contains(&vertex) || edge_value.coedges.len() != 2 {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
-                "KEV requires the terminal vertex and two coedges created by MEV",
+                "KEV requires an endpoint and two coedges forming an Euler spike",
             ));
         }
         let incident = self
@@ -722,24 +722,28 @@ impl<'kernel> EulerTransaction<'kernel> {
                     "edge has no reverse coedge",
                 )
             })?;
-        let forward_value = self.working.coedge(forward)?;
-        let reverse_value = self.working.coedge(reverse)?;
-        if forward_value.loop_id != reverse_value.loop_id || forward_value.next != reverse {
+        let (first_use, second_use, surviving_vertex) = if edge_value.vertices[1] == vertex {
+            (forward, reverse, edge_value.vertices[0])
+        } else {
+            (reverse, forward, edge_value.vertices[1])
+        };
+        let first_value = self.working.coedge(first_use)?;
+        let second_value = self.working.coedge(second_use)?;
+        if first_value.loop_id != second_value.loop_id || first_value.next != second_use {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
                 "KEV edge uses do not form a removable Euler spike",
             ));
         }
-        let loop_id = forward_value.loop_id;
-        let previous = forward_value.previous;
-        let next = reverse_value.next;
-        let only_spike = previous == reverse && next == forward;
-        let surviving_vertex = edge_value.vertices[0];
+        let loop_id = first_value.loop_id;
+        let previous = first_value.previous;
+        let next = second_value.next;
+        let only_spike = previous == second_use && next == first_use;
         let removed_names = [
             edge_value.name,
             self.working.vertex(vertex)?.name,
-            forward_value.name,
-            reverse_value.name,
+            first_value.name,
+            second_value.name,
         ];
 
         if only_spike {
@@ -747,7 +751,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         } else {
             self.working.coedges.get_mut(previous)?.next = next;
             self.working.coedges.get_mut(next)?.previous = previous;
-            if matches!(self.working.loop_(loop_id)?.first, Some(id) if id == forward || id == reverse)
+            if matches!(self.working.loop_(loop_id)?.first, Some(id) if id == first_use || id == second_use)
             {
                 self.working.loops.get_mut(loop_id)?.first = Some(next);
             }
@@ -1780,6 +1784,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                     self.names.pop_scope()?;
                     self.merge_shell_into_body_unchecked(body, cavity_body)?;
                 }
+                self.merge_coplanar_boolean_faces_unchecked(body)?;
                 self.names.pop_scope()?;
                 bodies.push(body);
             }
@@ -1801,6 +1806,169 @@ impl<'kernel> EulerTransaction<'kernel> {
             self.touched_bodies = touched_snapshot;
         }
         result
+    }
+
+    /// Remove triangulation edges introduced solely by the Boolean boundary
+    /// reconstruction. The Boolean classifier already groups coplanar fragments;
+    /// KEF turns each resulting triangle fan back into meaningful planar BREP
+    /// faces while preserving the union of their source provenance.
+    fn merge_coplanar_boolean_faces_unchecked(&mut self, body: BodyId) -> KernelResult<()> {
+        loop {
+            let mut candidate = None;
+            let shell_ids = self.working.body(body)?.shells().to_vec();
+            'search: for shell in shell_ids {
+                let face_ids = self.working.shell(shell)?.faces().to_vec();
+                for face in face_ids {
+                    for edge in self.working.face_edges(face)? {
+                        let adjacent = self.working.edge_faces(edge)?;
+                        if adjacent.len() != 2 {
+                            continue;
+                        }
+                        let other = if adjacent[0] == face {
+                            adjacent[1]
+                        } else {
+                            adjacent[0]
+                        };
+                        if self.coplanar_faces(face, other)? {
+                            candidate = Some((edge, other));
+                            break 'search;
+                        }
+                    }
+                }
+            }
+            let Some((edge, remove_face)) = candidate else {
+                self.remove_boolean_triangulation_spikes_unchecked(body)?;
+                return Ok(());
+            };
+
+            let adjacent = self.working.edge_faces(edge)?;
+            let keep_face = *adjacent
+                .iter()
+                .find(|face| **face != remove_face)
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "coplanar merge edge lost its surviving face",
+                    )
+                })?;
+            let mut sources = std::collections::BTreeSet::new();
+            for face in [keep_face, remove_face] {
+                let name = self.working.face(face)?.name;
+                if let Some(super::Origin::Derived {
+                    sources: face_sources,
+                    ..
+                }) = self.history.origin(name)
+                {
+                    sources.extend(face_sources.iter().copied());
+                }
+            }
+            let merged = self.kef_unchecked(edge, remove_face)?;
+            self.reparameterize_planar_face(merged.surviving_face)?;
+            if !sources.is_empty() {
+                let name = self.working.face(merged.surviving_face)?.name;
+                self.history.derived(name, sources, "boolean.face");
+            }
+        }
+    }
+
+    fn remove_boolean_triangulation_spikes_unchecked(&mut self, body: BodyId) -> KernelResult<()> {
+        loop {
+            let mut candidate = None;
+            let shell_ids = self.working.body(body)?.shells().to_vec();
+            'search: for shell in shell_ids {
+                for face in self.working.shell(shell)?.faces() {
+                    for edge in self.working.face_edges(*face)? {
+                        if self.working.edge_faces(edge)?.len() != 1 {
+                            continue;
+                        }
+                        let edge_value = self.working.edge(edge)?;
+                        let forward = edge_value.coedges().iter().find(|coedge| {
+                            self.working
+                                .coedge(**coedge)
+                                .map(|value| value.is_forward())
+                                .unwrap_or(false)
+                        });
+                        let reverse = edge_value.coedges().iter().find(|coedge| {
+                            self.working
+                                .coedge(**coedge)
+                                .map(|value| !value.is_forward())
+                                .unwrap_or(false)
+                        });
+                        if let (Some(forward), Some(reverse)) = (forward, reverse) {
+                            for vertex in edge_value.vertices() {
+                                let ordered = if vertex == edge_value.vertices()[1] {
+                                    self.working.coedge(*forward)?.next() == *reverse
+                                } else {
+                                    self.working.coedge(*reverse)?.next() == *forward
+                                };
+                                if ordered && self.working.vertex_edges(vertex)?.len() == 1 {
+                                    candidate = Some((edge, vertex, *face));
+                                    break 'search;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let Some((edge, vertex, face)) = candidate else {
+                return Ok(());
+            };
+            self.kev_unchecked(edge, vertex)?;
+            self.reparameterize_planar_face(face)?;
+        }
+    }
+
+    fn reparameterize_planar_face(&mut self, face: FaceId) -> KernelResult<()> {
+        let Surface3::Plane(plane) = self.working.face(face)?.surface().clone() else {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "coplanar face merge produced a non-planar survivor",
+            ));
+        };
+        let loops = self.working.face(face)?.loops().to_vec();
+        for loop_id in loops {
+            for coedge_id in self.collect_loop(loop_id)? {
+                let edge_id = self.working.coedge(coedge_id)?.edge();
+                let vertices = self.working.edge(edge_id)?.vertices();
+                let start = plane
+                    .project(self.working.vertex(vertices[0])?.point())?
+                    .parameters;
+                let end = plane
+                    .project(self.working.vertex(vertices[1])?.point())?
+                    .parameters;
+                self.working.coedges.get_mut(coedge_id)?.pcurve = Line2::new(
+                    Point2::new(start.0, start.1),
+                    Point2::new(end.0, end.1) - Point2::new(start.0, start.1),
+                )?
+                .into();
+            }
+        }
+        Ok(())
+    }
+
+    fn coplanar_faces(&self, first: FaceId, second: FaceId) -> KernelResult<bool> {
+        let first = self.working.face(first)?;
+        let second = self.working.face(second)?;
+        let (Surface3::Plane(first_plane), Surface3::Plane(second_plane)) =
+            (first.surface(), second.surface())
+        else {
+            return Ok(false);
+        };
+        let first_normal = first_plane.normal();
+        let second_normal = second_plane.normal();
+        let same_orientation = first.orientation() == second.orientation();
+        let parallel =
+            first_normal.cross(second_normal).magnitude() <= self.kernel.tolerance.angular;
+        let separation = (second_plane.origin() - first_plane.origin())
+            .dot(first_normal)
+            .abs();
+        Ok(same_orientation
+            && parallel
+            && separation
+                <= self
+                    .kernel
+                    .tolerance
+                    .linear_at_scale(second_plane.origin().to_vec().magnitude()))
     }
 
     fn polyhedron_unchecked(&mut self, mesh: &PolyhedralMesh) -> KernelResult<BodyId> {
@@ -3093,7 +3261,28 @@ impl<'kernel> EulerTransaction<'kernel> {
             } else {
                 format!("hole{}_sweep", index - 1)
             })?;
-            self.sweep_curve_loop_unchecked(loop_id, vector)?;
+            let side_faces = self.sweep_curve_loop_unchecked(loop_id, vector)?;
+            let boundary = if index == 0 {
+                super::ProfileBoundary::Outer
+            } else {
+                super::ProfileBoundary::Hole(index - 1)
+            };
+            let source_parts = prepared_wire_segment_sources(if index == 0 {
+                profile.outer()
+            } else {
+                &profile.holes()[index - 1]
+            });
+            for (face, (segment, part)) in side_faces.into_iter().zip(source_parts) {
+                let name = self.working.face(face)?.name;
+                self.history.created_as(
+                    name,
+                    super::CreationRole::ExtrusionSide {
+                        boundary,
+                        segment,
+                        part,
+                    },
+                );
+            }
             self.names.pop_scope()?;
         }
         self.names.push_scope("caps")?;
@@ -3101,6 +3290,10 @@ impl<'kernel> EulerTransaction<'kernel> {
         let end_face_name = self.names.named("face", "end")?;
         self.rename_face(opposite_face, start_face_name)?;
         self.rename_face(sweep_face, end_face_name)?;
+        self.history
+            .created_as(start_face_name, super::CreationRole::ExtrusionStart);
+        self.history
+            .created_as(end_face_name, super::CreationRole::ExtrusionEnd);
         let start_loops = self.working.face(opposite_face)?.loops.clone();
         let end_loops = self.working.face(sweep_face)?.loops.clone();
         for (index, loop_id) in start_loops.into_iter().enumerate() {
@@ -3246,7 +3439,11 @@ impl<'kernel> EulerTransaction<'kernel> {
         Ok(())
     }
 
-    fn sweep_curve_loop_unchecked(&mut self, sweep_loop: LoopId, vector: Vec3) -> KernelResult<()> {
+    fn sweep_curve_loop_unchecked(
+        &mut self,
+        sweep_loop: LoopId,
+        vector: Vec3,
+    ) -> KernelResult<Vec<FaceId>> {
         let unit = ParameterRange::new(0.0, 1.0)?;
         let boundary = self.collect_loop(sweep_loop)?;
         let side_orientation = match self.working.loop_(sweep_loop)?.kind {
@@ -3304,6 +3501,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             down.push(made.reverse);
         }
         let mut anchor = None;
+        let mut side_faces = Vec::with_capacity(boundary.len());
         for index in 0..boundary.len() {
             let next = (index + 1) % boundary.len();
             let first = if index + 1 == boundary.len() {
@@ -3339,6 +3537,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 &format!("top-{}", boundary_keys[index]),
                 Some(&format!("side-{}", boundary_keys[index])),
             )?;
+            side_faces.push(side.face);
             self.working.coedges.get_mut(boundary[index])?.pcurve =
                 Line2::new(Point2::new(0.0, 0.0), Vec2::new(1.0, 0.0))?.into();
             self.working.coedges.get_mut(boundary[index])?.range = range;
@@ -3350,7 +3549,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 anchor = Some(side.reverse);
             }
         }
-        Ok(())
+        Ok(side_faces)
     }
 
     fn curve2_point_on_plane(
@@ -3480,6 +3679,18 @@ fn prepared_wire_segments(wire: &Wire2) -> KernelResult<Vec<TrimmedCurve2>> {
             ParameterRange::new(middle, segment.range().end)?,
         )?,
     ])
+}
+
+fn prepared_wire_segment_sources(wire: &Wire2) -> Vec<(usize, usize)> {
+    if wire.segments().len() == 1 {
+        vec![(0, 0), (0, 1)]
+    } else {
+        wire.segments()
+            .iter()
+            .enumerate()
+            .map(|(segment, _)| (segment, 0))
+            .collect()
+    }
 }
 
 fn translate_curve(

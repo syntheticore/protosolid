@@ -58,6 +58,21 @@ pub(crate) struct EdgePolyline {
     points: Vec<Point3>,
 }
 
+/// A geometry value that can produce a display approximation under an explicit
+/// error policy. Faces, edges, solids, and compounds all implement this trait.
+pub trait Tessellate {
+    type Output;
+
+    fn tessellate(&self, options: TessellationOptions) -> KernelResult<Self::Output>;
+}
+
+/// Ordered samples of an exact curve segment.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Polyline {
+    pub parameters: Vec<f64>,
+    pub points: Vec<Point3>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TriangleMesh {
     pub positions: Vec<Point3>,
@@ -94,6 +109,19 @@ struct BoundaryVertex {
 }
 
 impl Kernel {
+    pub fn tessellate_edge(
+        &self,
+        edge: EdgeId,
+        options: TessellationOptions,
+    ) -> KernelResult<Polyline> {
+        options.validate_against(self.tolerance())?;
+        let sampled = sample_edge(self.topology().edge(edge)?, options)?;
+        Ok(Polyline {
+            parameters: sampled.parameters,
+            points: sampled.points,
+        })
+    }
+
     pub fn tessellate_body(
         &self,
         body: BodyId,
@@ -214,6 +242,17 @@ impl Kernel {
             let mut triangle = [values[0], values[1], values[2]];
             let geometric_normal = (positions[triangle[1]] - positions[triangle[0]])
                 .cross(positions[triangle[2]] - positions[triangle[0]]);
+            if geometric_normal.magnitude()
+                <= self
+                    .tolerance()
+                    .linear_at_scale(positions[triangle[0]].to_vec().magnitude())
+                    .powi(2)
+            {
+                // Earcut may emit zero-area ears at exact collinear BREP
+                // vertices. They cover no surface and must not enter either
+                // display meshes or physical certification.
+                continue;
+            }
             let desired_normal = normals[triangle[0]] + normals[triangle[1]] + normals[triangle[2]];
             if geometric_normal.dot(desired_normal) < 0.0 {
                 triangle.swap(1, 2);

@@ -8,9 +8,7 @@ use super::{DiagnosticKind, KernelError, KernelResult};
 ///
 /// The kernel generates the namespace and assigns deterministic local values
 /// according to Euler-operation roles and ordinals.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PersistentId {
     pub namespace: Uuid,
     pub local: u64,

@@ -33,6 +33,11 @@ return immutable `Solid` and `Compound` snapshots with lightweight entity values
 No topology entity owns another through `Rc`, and no public API exposes interior
 mutability.
 
+Owned operations import their operands into an isolated internal topology, remap
+all arena handles, and preserve exact geometry and persistent names. A result
+retains a structurally shared lineage graph containing identities and operation
+deltas only; it never retains earlier BREP bodies merely to resolve references.
+
 The topological hierarchy is:
 
 ```text
@@ -71,9 +76,11 @@ is never reported as an empty intersection. General NURBS subdivision and interv
 certification remain deliberately outside the supported set until they can provide
 the same completeness guarantee.
 
+Faces, edges, solids, and compounds all implement entity-level tessellation.
 Surface tessellation begins from one shared adaptive polyline per topological edge,
 then performs conforming, local refinement in face parameter space. Exact boundary
-samples are reused by adjacent faces, preventing face-by-face cracks.
+samples are reused by adjacent faces, preventing face-by-face cracks. Whole-body
+meshes compose the same face tessellations rather than using a second meshing path.
 
 ## Certified publication set
 
@@ -87,7 +94,7 @@ The current publisher certifies:
   kernel's Euler compositions;
 - normal extrusions of profiles bounded by exact lines and circular arcs,
   including multiple holes;
-- rigid transforms and archive restoration of those bodies.
+- rigid transforms of those bodies.
 
 Planar bodies receive intersection/contact checks and mass properties from their
 exact boundary triangulation. Recognized analytic bodies receive closed-form volume,
@@ -103,6 +110,12 @@ topology provenance, stable output ordering, and diagnostics that identify affec
 entities. Applications retain their own feature identity and associate it with
 kernel results. Entity resolution uses provenance, never array position or a
 geometrical `IsSame` guess.
+
+Resolution is transitive across arbitrary descendant operations and distinguishes
+preserved, modified, split, merged, deleted, and unrelated entities. Cross-type
+generation remains available separately, such as faces generated from an edge.
+Semantic creation roles identify extrusion caps and the profile segment behind
+each swept face without requiring caller-supplied kernel names.
 
 ## Legacy code
 

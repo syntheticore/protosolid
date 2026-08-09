@@ -1,6 +1,6 @@
 use crate::Point3;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::arena::Arena;
 use super::{Curve2, Curve3, Handle, KernelResult, ParameterRange, PersistentId, Surface3};
@@ -295,6 +295,175 @@ impl Topology {
     }
     pub fn bodies(&self) -> impl Iterator<Item = (BodyId, &Body)> {
         self.bodies.iter()
+    }
+
+    /// Copy one complete body from another immutable topology into this one.
+    ///
+    /// Persistent names and exact geometry are preserved, while every arena
+    /// handle is remapped. This is the internal composition primitive used by
+    /// owned high-level modeling operations; callers never need to coordinate
+    /// kernel-local [`BodyId`] values.
+    pub(crate) fn import_body(
+        &mut self,
+        source: &Topology,
+        source_body: BodyId,
+    ) -> KernelResult<BodyId> {
+        let source_body_value = source.body(source_body)?;
+        let mut source_shells = Vec::new();
+        let mut source_faces = Vec::new();
+        let mut source_loops = Vec::new();
+        let mut source_coedges = Vec::new();
+        let mut source_edges = BTreeSet::new();
+        let mut source_vertices = BTreeSet::new();
+
+        for shell in source_body_value.shells() {
+            source_shells.push(*shell);
+            for face in source.shell(*shell)?.faces() {
+                source_faces.push(*face);
+                for loop_id in source.face(*face)?.loops() {
+                    source_loops.push(*loop_id);
+                    for coedge in source.loop_coedges(*loop_id)? {
+                        source_coedges.push(coedge);
+                        let edge = source.coedge(coedge)?.edge();
+                        source_edges.insert(edge);
+                        source_vertices.extend(source.edge(edge)?.vertices());
+                    }
+                }
+            }
+        }
+
+        let mut vertices = BTreeMap::new();
+        for old in source_vertices {
+            let value = source.vertex(old)?;
+            let new = self.vertices.insert(Vertex {
+                name: value.name,
+                point: value.point,
+                tolerance: value.tolerance,
+                outgoing: None,
+            });
+            vertices.insert(old, new);
+        }
+
+        let mut edges = BTreeMap::new();
+        for old in source_edges {
+            let value = source.edge(old)?;
+            let new = self.edges.insert(Edge {
+                name: value.name,
+                vertices: [vertices[&value.vertices[0]], vertices[&value.vertices[1]]],
+                curve: value.curve.clone(),
+                range: value.range,
+                tolerance: value.tolerance,
+                coedges: Vec::new(),
+            });
+            edges.insert(old, new);
+        }
+
+        let body = self.bodies.insert(Body {
+            name: source_body_value.name,
+            shells: Vec::new(),
+        });
+        let mut shells = BTreeMap::new();
+        for old in source_shells {
+            let value = source.shell(old)?;
+            let new = self.shells.insert(Shell {
+                name: value.name,
+                body,
+                kind: value.kind,
+                faces: Vec::new(),
+            });
+            shells.insert(old, new);
+        }
+
+        let mut faces = BTreeMap::new();
+        for old in source_faces {
+            let value = source.face(old)?;
+            let new = self.faces.insert(Face {
+                name: value.name,
+                shell: shells[&value.shell],
+                surface: value.surface.clone(),
+                orientation: value.orientation,
+                tolerance: value.tolerance,
+                loops: Vec::new(),
+            });
+            faces.insert(old, new);
+        }
+
+        let mut loops = BTreeMap::new();
+        for old in source_loops {
+            let value = source.loop_(old)?;
+            let new = self.loops.insert(Loop {
+                name: value.name,
+                face: faces[&value.face],
+                kind: value.kind,
+                first: None,
+            });
+            loops.insert(old, new);
+        }
+
+        let mut coedges = BTreeMap::new();
+        for old in source_coedges.iter().copied() {
+            let value = source.coedge(old)?;
+            let edge = edges[&value.edge];
+            let loop_id = loops[&value.loop_id];
+            let new = self.coedges.insert_with(|placeholder| Coedge {
+                name: value.name,
+                edge,
+                loop_id,
+                forward: value.forward,
+                pcurve: value.pcurve.clone(),
+                range: value.range,
+                next: placeholder,
+                previous: placeholder,
+            });
+            coedges.insert(old, new);
+        }
+
+        for (old, new) in &coedges {
+            let source_value = source.coedge(*old)?;
+            let value = self.coedges.get_mut(*new)?;
+            value.next = coedges[&source_value.next];
+            value.previous = coedges[&source_value.previous];
+        }
+        for (old, new) in &loops {
+            self.loops.get_mut(*new)?.first =
+                source.loop_(*old)?.first.map(|first| coedges[&first]);
+        }
+        for (old, new) in &edges {
+            self.edges.get_mut(*new)?.coedges = source
+                .edge(*old)?
+                .coedges
+                .iter()
+                .map(|coedge| coedges[coedge])
+                .collect();
+        }
+        for (old, new) in &vertices {
+            self.vertices.get_mut(*new)?.outgoing = source
+                .vertex(*old)?
+                .outgoing
+                .and_then(|coedge| coedges.get(&coedge).copied());
+        }
+        for (old, new) in &faces {
+            self.faces.get_mut(*new)?.loops = source
+                .face(*old)?
+                .loops
+                .iter()
+                .map(|loop_id| loops[loop_id])
+                .collect();
+        }
+        for (old, new) in &shells {
+            self.shells.get_mut(*new)?.faces = source
+                .shell(*old)?
+                .faces
+                .iter()
+                .map(|face| faces[face])
+                .collect();
+        }
+        self.bodies.get_mut(body)?.shells = source_body_value
+            .shells
+            .iter()
+            .map(|shell| shells[shell])
+            .collect();
+        Ok(body)
     }
 
     /// Resolve a persistent parametric name to the current generational handle.

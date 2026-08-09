@@ -37,6 +37,26 @@ fn cuboid(kernel: &mut Kernel, minimum: Point3, maximum: Point3) -> BodyId {
     body
 }
 
+fn owned_cuboid(minimum: Point3, maximum: Point3) -> super::Compound {
+    let tolerance = ModelTolerance::default();
+    let size = maximum - minimum;
+    let wire = Wire2::polygon(
+        [
+            Point2::new(0.0, 0.0),
+            Point2::new(size.x, 0.0),
+            Point2::new(size.x, size.y),
+            Point2::new(0.0, size.y),
+        ],
+        tolerance,
+    )
+    .expect("cuboid wire");
+    let profile = Profile::new(wire, [], tolerance).expect("cuboid profile");
+    let plane = Plane3::new(minimum, Vec3::unit_x(), Vec3::unit_y(), tolerance).expect("plane");
+    profile
+        .extrude(plane, Vec3::new(0.0, 0.0, size.z))
+        .expect("owned cuboid")
+}
+
 fn boolean(
     kernel: &mut Kernel,
     first: BodyId,
@@ -71,7 +91,7 @@ fn exact_cylinder_is_published_and_certified() {
 }
 
 #[test]
-fn exact_sphere_is_published_and_round_trips() {
+fn exact_sphere_is_published_and_certified() {
     let mut kernel = Kernel::new(ModelTolerance::default()).expect("valid tolerance");
     let mut transaction = kernel.begin_operation();
     let body = transaction
@@ -86,11 +106,6 @@ fn exact_sphere_is_published_and_round_trips() {
     assert!(kernel.validate().is_valid());
     let properties = certified_properties(&kernel, body);
     assert!((properties.volume - 36.0 * std::f64::consts::PI).abs() < 1.0e-10);
-
-    let encoded = kernel.to_ron().expect("archive should encode");
-    let restored = Kernel::from_ron(&encoded).expect("archive should restore");
-    assert!(restored.validate().is_valid());
-    assert_eq!(restored.topology().bodies().count(), 1);
 }
 
 #[test]
@@ -513,4 +528,67 @@ fn high_level_profile_extrusion_owns_results_and_supports_curved_holes() {
         .tessellate(TessellationOptions::default())
         .expect("mesh");
     assert!(!mesh.is_empty());
+}
+
+#[test]
+fn owned_operations_resolve_entities_transitively_and_tessellate_them() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(4.0, 4.0, 1.0));
+    let top = cube
+        .faces()
+        .find(|face| match face.surface() {
+            Surface3::Plane(plane) => (plane.origin().z - 1.0).abs() < 1.0e-10,
+            _ => false,
+        })
+        .expect("top face")
+        .clone();
+    let first_tool = owned_cuboid(Point3::new(-0.5, -0.5, -1.0), Point3::new(1.0, 1.0, 2.0));
+    let second_tool = owned_cuboid(Point3::new(3.0, 3.0, -1.0), Point3::new(4.5, 4.5, 2.0));
+
+    let first_cut = cube.difference(&first_tool).expect("first cut");
+    let second_cut = first_cut.difference(&second_tool).expect("second cut");
+    let current_top = match second_cut.resolve(&top) {
+        Resolution::Modified(face) => face,
+        other => panic!("expected a transitively modified top face, got {other:?}"),
+    };
+    assert!(!current_top
+        .tessellate(TessellationOptions::default())
+        .expect("face mesh")
+        .is_empty());
+    let edge = second_cut.edges().next().expect("edge");
+    assert!(
+        edge.tessellate(TessellationOptions::default())
+            .expect("edge polyline")
+            .points
+            .len()
+            >= 2
+    );
+
+    let unrelated = owned_cuboid(Point3::new(10.0, 10.0, 10.0), Point3::new(11.0, 11.0, 11.0));
+    let unrelated_face = unrelated.faces().next().expect("unrelated face");
+    assert!(matches!(
+        second_cut.resolve(unrelated_face),
+        Resolution::Unrelated
+    ));
+}
+
+#[test]
+fn extrusion_exposes_semantic_creation_provenance() {
+    let extrusion = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 3.0, 4.0));
+    let roles = extrusion
+        .faces()
+        .filter_map(|face| extrusion.origin(face))
+        .filter_map(|origin| match origin {
+            super::Origin::Created { role } => role.as_ref(),
+            super::Origin::Derived { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(roles.contains(&&super::CreationRole::ExtrusionStart));
+    assert!(roles.contains(&&super::CreationRole::ExtrusionEnd));
+    assert_eq!(
+        roles
+            .iter()
+            .filter(|role| matches!(role, super::CreationRole::ExtrusionSide { .. }))
+            .count(),
+        4
+    );
 }

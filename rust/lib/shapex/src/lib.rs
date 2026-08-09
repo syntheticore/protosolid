@@ -1,8 +1,8 @@
 //! Shapex is an invariant-preserving boundary-representation CAD kernel for Rust.
 //!
 //! The core crate owns exact geometry, manifold topology, Euler operators,
-//! persistent entity identity, operation provenance, tessellation, mass properties,
-//! native archives, and physical-volume certification. It contains no
+//! persistent entity identity, transitive operation provenance, tessellation,
+//! mass properties, and physical-volume certification. It contains no
 //! UI, document model, JavaScript, WebAssembly, or platform binding code.
 //!
 //! Finished bodies enter a [`Kernel`] only through a transaction that passes both
@@ -19,9 +19,9 @@ mod math;
 
 #[cfg(not(feature = "legacy"))]
 pub use kernel::{
-    Circle2, Compound, Curve2, EdgeHandle, FaceHandle, Frame3, Line2, MassProperties, Plane3,
-    Profile, Resolution, Solid, TessellationOptions, TriangleMesh, TrimmedCurve2, VertexHandle,
-    Wire2,
+    Circle2, Compound, CreationRole, Curve2, EdgeHandle, FaceHandle, Frame3, Line2, MassProperties,
+    Plane3, Polyline, Profile, ProfileBoundary, Resolution, Solid, Tessellate, TessellationOptions,
+    TriangleMesh, TrimmedCurve2, VertexHandle, Wire2,
 };
 pub use kernel::{Kernel, KernelError, KernelResult, ModelTolerance};
 #[cfg(not(feature = "legacy"))]

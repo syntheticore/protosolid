@@ -6,10 +6,10 @@ authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-serde = { version = "1.0.123", features = ["derive"] }
-ron = "0.7.1"
-cgmath = { version = "0.17.0", features = ["serde"] }
-uuid = { version = "1.1.2", features = ["serde"] }
+serde = { version = "1.0.123", features = ["derive"], optional = true }
+ron = { version = "0.7.1", optional = true }
+cgmath = "0.17.0"
+uuid = "1.1.2"
 earcutr = { git = "https://github.com/donbright/earcutr" }
 itertools = { version = "0.10.2", optional = true }
 
@@ -17,5 +17,12 @@ rayon = { version = "1.5.3", optional = true }
 
 [features]
 default = []
-legacy = ["dep:itertools", "uuid/v4"]
+legacy = [
+    "dep:itertools",
+    "dep:ron",
+    "dep:serde",
+    "cgmath/serde",
+    "uuid/serde",
+    "uuid/v4",
+]
 rayon = ["dep:rayon", "legacy"]

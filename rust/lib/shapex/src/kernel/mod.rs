@@ -5,7 +5,6 @@
 //! transactionally through Euler operators and become visible only after complete
 //! topological and physical validation.
 
-mod archive;
 mod arena;
 mod boolean;
 mod domain;
@@ -31,11 +30,6 @@ mod wire;
 #[cfg(test)]
 mod tests;
 
-pub use archive::{
-    ArchiveBody, ArchiveCoedge, ArchiveCurve2, ArchiveCurve3, ArchiveEdge, ArchiveFace,
-    ArchiveFaceOrientation, ArchiveLoop, ArchiveLoopKind, ArchiveShell, ArchiveShellKind,
-    ArchiveSurface3, ArchiveVertex, KernelArchive,
-};
 pub use arena::Handle;
 pub use boolean::BooleanKind;
 pub use domain::{DomainBounds, ParameterDomain, ParameterRange};
@@ -49,7 +43,7 @@ pub use geometry::{
     Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3, Plane3, Projection1,
     Projection2, Sphere3, Surface3, SurfaceCurvature, SurfaceEvaluation, Torus3,
 };
-pub use history::{ChangeKind, OperationHistory, Origin};
+pub use history::{ChangeKind, CreationRole, OperationHistory, Origin, ProfileBoundary};
 pub use intersection::{
     CurveCurveHit, CurveSurfaceHit, IntersectionKind, IntersectionSet, SurfaceSurfaceCurve,
 };
@@ -60,7 +54,7 @@ pub use modeling::{
 pub use naming::PersistentId;
 pub use polyhedron::PolyhedralMesh;
 pub use profile::Profile;
-pub use tessellation::{TessellationOptions, TriangleMesh};
+pub use tessellation::{Polyline, Tessellate, TessellationOptions, TriangleMesh};
 pub use tolerance::ModelTolerance;
 pub use topology::{
     Body, BodyId, Coedge, CoedgeId, Edge, EdgeId, EntityId, Face, FaceId, FaceOrientation, Loop,

@@ -1,0 +1,112 @@
+# Shapex kernel architecture
+
+Shapex is a standalone Rust boundary-representation modeling kernel. It does not
+contain an application document/feature graph, UI, JavaScript, WebAssembly, or
+platform integration code. Those systems consume the kernel through ordinary
+Rust APIs. The kernel does own automatic entity identity, immutable result
+revisions, and operation provenance because those are part of modeling integrity.
+It does not own application feature keys, parameters, expressions, or dependencies.
+
+## Non-negotiable invariants
+
+1. Safe public APIs never publish invalid topology or a physically invalid body.
+2. Connectivity changes are expressed as Euler operators with explicit inverses.
+3. An Euler operation is atomic. Failure restores topology, names, and provenance.
+4. Construction topology is validated after every Euler operation.
+5. A construction transaction becomes visible only after closed-volume geometric
+   validation succeeds.
+6. Every edge use on a face owns an oriented 2D p-curve. A 3D curve alone is not
+   a valid trimmed-surface boundary.
+7. Every geometric assertion has an achieved tolerance governed by the model's
+   scale-aware tolerance policy.
+8. Every topology-changing operation emits complete generated, modified, split,
+   merged, and deleted provenance.
+9. Entity identity is assigned when topology is created and is never reconstructed
+   later through geometric coincidence.
+10. Unsupported geometry returns a structured error. It is never interpreted as
+    an empty intersection or successful no-op.
+
+## Ownership
+
+The advanced `Kernel` API owns generational arenas. Ordinary modeling operations
+return immutable `Solid` and `Compound` snapshots with lightweight entity values.
+No topology entity owns another through `Rc`, and no public API exposes interior
+mutability.
+
+The topological hierarchy is:
+
+```text
+Body -> Shell -> Face -> Loop -> Coedge -> Edge -> Vertex
+```
+
+An edge stores its exact 3D curve and parameter range. Every coedge stores its own
+orientation, exact UV p-curve, and parameter range on one face. This represents
+periodic seams and differing parameterizations without special cases.
+
+## Editing and publication
+
+`Kernel::begin_operation` clones a lightweight kernel state into an isolated Euler
+transaction. Operators validate construction invariants before returning. Dropping
+the transaction rolls it back. Committing runs published-body validation and swaps
+the state into the kernel only on success.
+
+Bulk algorithms such as booleans may compose many Euler operators inside one
+transaction. Their intermediate open shells are valid cell-complex construction
+states but are never observable as finished bodies.
+
+Disconnected boundary shells use reversible body/shell Euler operators. This is
+how a Boolean cavity becomes a negatively oriented closed shell of its containing
+material body without a direct topology rewrite.
+
+## Geometry
+
+Basis geometry retains natural parameter domains, periodicity, and analytic types.
+Trimming and orientation belong to topology uses. General curves and surfaces use
+rational B-splines with validated knots, degrees, control nets, and weights.
+
+Intersections use analytic solvers where a solver is certified. Results carry 3D
+geometry, p-curves on both operands, parameters, tangency multiplicity, and achieved
+error bounds. A pair without a certified solver returns `UnsupportedGeometry`; it
+is never reported as an empty intersection. General NURBS subdivision and interval
+certification remain deliberately outside the supported set until they can provide
+the same completeness guarantee.
+
+Surface tessellation begins from one shared adaptive polyline per topological edge,
+then performs conforming, local refinement in face parameter space. Exact boundary
+samples are reused by adjacent faces, preventing face-by-face cracks.
+
+## Certified publication set
+
+The current publisher certifies:
+
+- arbitrary closed planar, linear-edge manifold shells, including cavities and
+  genus introduced by through-holes;
+- planar Boolean union, intersection, and difference, including disconnected
+  material bodies and fully enclosed cavity shells;
+- exact right cylinders, cones, spheres, and regular ring tori constructed by the
+  kernel's Euler compositions;
+- normal extrusions of profiles bounded by exact lines and circular arcs,
+  including multiple holes;
+- rigid transforms and archive restoration of those bodies.
+
+Planar bodies receive intersection/contact checks and mass properties from their
+exact boundary triangulation. Recognized analytic bodies receive closed-form volume,
+area, centroid, and inertia checks. Other curved combinations are rejected at the
+publication boundary until a conservative curved-shell certifier supports them.
+
+## Parametric systems
+
+The kernel is not an application-level dependency graph, expression evaluator, or
+constraint solver. It provides the lower-level facilities such a system needs:
+automatic persistent entity identity, immutable result revisions, complete
+topology provenance, stable output ordering, and diagnostics that identify affected
+entities. Applications retain their own feature identity and associate it with
+kernel results. Entity resolution uses provenance, never array position or a
+geometrical `IsSame` guess.
+
+## Legacy code
+
+The pre-v2 curve, surface, and solid modules remain temporarily available while
+their sound mathematical portions are migrated. New modeling algorithms target
+`kernel` topology only. Once feature parity is reached, legacy topology and its
+`Rc<RefCell<_>>` graph will be removed rather than maintained as a second kernel.

@@ -1,12 +1,8 @@
 use crate::Solid;
 
-pub fn export(
-  _solid: &Solid,
-  name: &str,
-  description: &str,
-  _geom_only: bool
-) -> String {
-  let file = format!(r###"
+pub fn export(_solid: &Solid, name: &str, description: &str, _geom_only: bool) -> String {
+    let file = format!(
+        r###"
     ISO-10303-21;
     HEADER;
     FILE_DESCRIPTION(
@@ -263,6 +259,8 @@ pub fn export(
     #205=COLOUR_RGB('Steel - Satin',0.627450980392157,0.627450980392157,0.627450980392157);
     ENDSEC;
     END-ISO-10303-21;
-  "###, description, name);
-  file
+  "###,
+        description, name
+    );
+    file
 }

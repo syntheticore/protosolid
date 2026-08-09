@@ -254,6 +254,38 @@ export class CurveReference extends Reference {
 Serialize.register(CurveReference, 'CurveReference')
 
 
+export class SketchOriginReference extends Reference {
+  constructor(item, componentId, sketchId) {
+    super(item)
+    this.componentId = componentId || item.sketch.component?.id || item.sketch.creator.componentId
+    this.sketchId = sketchId || item.sketch.id
+  }
+
+  update(tree) {
+    const comp = tree.findChild(this.componentId)
+    const sketch = comp && comp.sketches.find(sketch => sketch.id == this.sketchId)
+    if(!sketch) return { type: 'error', msg: 'Sketch origin reference was lost' }
+    this.item = sketch.origin()
+  }
+
+  clone() {
+    return new SketchOriginReference(this.item, this.componentId, this.sketchId)
+  }
+
+  dump() {
+    return {
+      componentId: this.componentId,
+      sketchId: this.sketchId,
+    }
+  }
+
+  static undump(dump) {
+    return new SketchOriginReference(null, dump.componentId, dump.sketchId)
+  }
+}
+Serialize.register(SketchOriginReference, 'SketchOriginReference')
+
+
 export class ProfileReference extends Reference {
   update(_tree) {
     return this.item.update()

@@ -19,10 +19,6 @@ import {
 } from './core/geom3d.js'
 
 import {
-  PointHelper,
-} from './core/helpers.js'
-
-import {
   CoincidentConstraint,
   TouchConstraint,
   PerpendicularConstraint,
@@ -80,7 +76,6 @@ function captureSnap(snapper) {
 }
 
 function isConstrainablePoint(elem, index) {
-  if(elem instanceof PointHelper) return index == 0
   if(elem instanceof Line) return index == 0 || index == 1
   if(elem instanceof Circle) return index == 0
   if(elem instanceof Arc) return index >= 0 && index <= 2
@@ -790,7 +785,6 @@ export class TouchConstraintTool extends ConstraintTool {
   isComplete(counts) { return counts.point == 1 && counts.curve == 1 }
 
   acceptsItem(item) {
-    if(item instanceof PointHelper) return true
     if(item instanceof ElemRef) {
       return isTouchPoint(item.curve(), item.index)
     }
@@ -798,8 +792,8 @@ export class TouchConstraintTool extends ConstraintTool {
   }
 
   canConstrain(items) {
-    const point = items.find(item => item instanceof ElemRef || item instanceof PointHelper)
-    const curve = items.find(item => !(item instanceof ElemRef) && !(item instanceof PointHelper))
+    const point = items.find(item => item instanceof ElemRef)
+    const curve = items.find(item => !(item instanceof ElemRef))
     return point && curve && (!(point instanceof ElemRef) || point.curve() != curve)
   }
 }

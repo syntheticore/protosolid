@@ -115,7 +115,6 @@
 <script setup>
 
   import { Dimension, CoincidentConstraint, TouchConstraint } from '../js/core/sketch.js'
-  import { PointHelper } from '../js/core/helpers.js'
   import { Line } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
 
@@ -147,7 +146,6 @@
     const sketch = props.constraint.sketch
     const point = (item, referenced=false) => {
       const curve = item.curve()
-      if(curve instanceof PointHelper) return curve.center().applyMatrix4(sketch.workplane.clone().invert())
       if(referenced && item.index !== undefined && curve.handles) return curve.handles()[item.index]
       return curve.center()
     }

@@ -4,9 +4,22 @@ import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { Line, Circle, Arc, Spline, SketchElement } from './geom2d.js'
 import { Wire, Profile, Edge } from './geom3d.js'
-import { PointHelper, AxisHelper } from './helpers.js'
+import { AxisHelper } from './helpers.js'
 import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix } from './utils.js'
-import { Reference, CurveReference, EdgeReference, HelperReference } from './references.js'
+import { Reference, CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
+
+
+export class SketchOrigin {
+  constructor(sketch) {
+    this.sketch = sketch
+    this.id = sketch.id + '/origin'
+  }
+
+  typename() { return 'Sketch Origin' }
+  center() { return new THREE.Vector3() }
+  handles() { return [this.center()] }
+  endpoints() { return this.handles() }
+}
 
 
 export class Sketch {
@@ -48,13 +61,12 @@ export class Sketch {
   }
 
   origin() {
-    return this.component && this.component.helpers.find(helper => helper instanceof PointHelper)
+    if(!this._origin) this._origin = new SketchOrigin(this)
+    return this._origin
   }
 
   originPoint() {
-    const origin = this.origin()
-    if(!origin) return
-    return origin.center().applyMatrix4(this.workplane.clone().invert())
+    return this.origin().center()
   }
 
   remove(elem) {
@@ -349,18 +361,18 @@ export class Sketch {
       return primitives
     }).filter(Boolean)
 
-    // Refresh references before collecting helper-backed solver primitives.
+    // Refresh references before collecting fixed solver primitives.
     // This is also needed by DimensionControls after feature-tree updates.
     this.constraints.forEach(constraint => constraint.update(tree))
 
-    const pointHelpers = this.constraints
+    const fixedPoints = this.constraints
       .flatMap(constraint => constraint.items.map(item => item.curve()))
-      .filter((item, index, items) => item instanceof PointHelper && items.indexOf(item) == index)
+      .filter((item, index, items) => item instanceof SketchOrigin && items.indexOf(item) == index)
 
-    pointHelpers.forEach(helper => {
-      const point = helper.center().applyMatrix4(this.workplane.clone().invert())
+    fixedPoints.forEach(item => {
+      const point = item.center()
       const primitive = { id: `${id++}`, type: 'point', x: point.x, y: point.y, fixed: true }
-      idMap[helper.id] = [primitive]
+      idMap[item.id] = [primitive]
       primitives.push(primitive)
     })
 
@@ -673,11 +685,13 @@ Serialize.register(Projection, 'Projection')
 
 export class ElemRef {
   constructor(curveOrRef, index) {
-    this.curveRef = curveOrRef instanceof CurveReference || curveOrRef instanceof HelperReference ?
+    const isReference = curveOrRef instanceof CurveReference ||
+      curveOrRef instanceof SketchOriginReference
+    this.curveRef = isReference ?
       curveOrRef
       :
-      (curveOrRef instanceof PointHelper ? new HelperReference(curveOrRef) : new CurveReference(curveOrRef))
-    this.index = index === undefined && this.curve() instanceof PointHelper ? 0 : index
+      (curveOrRef instanceof SketchOrigin ? new SketchOriginReference(curveOrRef) : new CurveReference(curveOrRef))
+    this.index = index === undefined && this.curve() instanceof SketchOrigin ? 0 : index
   }
 
   update(tree) {
@@ -723,17 +737,10 @@ export class HorVertConstraint extends Constraint {
 
   constructor(...items) {
     super(...items)
-    const sketch = this.items.map(item => item.curve().sketch).find(Boolean)
     const points = this.items.length == 1 ?
       this.items[0].curve().endpoints()
       :
-      this.items.map(item => {
-        const curve = item.curve()
-        return curve instanceof PointHelper ?
-          curve.center().applyMatrix4(sketch.workplane.clone().invert())
-          :
-          curve.endpoints()[item.index]
-      })
+      this.items.map(item => item.curve().endpoints()[item.index])
     const xDiff = Math.abs(points[0].x - points[1].x)
     const yDiff = Math.abs(points[0].y - points[1].y)
     this.isVertical = xDiff < yDiff

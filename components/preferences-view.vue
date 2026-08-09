@@ -3,6 +3,15 @@
     h2 Preferences
     .panes.form
       fieldset
+        legend Modeling
+
+        label
+          select.input(v-model="preferences.modelingKernel" @change="restartRequired = true")
+            option(value="occ") OpenCascade
+            option(value="shapex") Shapex
+          span Geometry Kernel
+
+      fieldset
         legend Standard Units
 
         label

@@ -76,8 +76,11 @@
 
   document.body.setAttribute('data-platform', window.platform || 'browser')
 
-  const oc = await useOC()
-  window.oc = oc
+  const kernel = await useKernel()
+  window.kernel = kernel
+  // Temporary compatibility name for 2D sketch geometry and PlaneGCS. New 3D
+  // code must use window.kernel.modeling rather than this alias.
+  window.oc = kernel
 
   const bus = new Emitter()
   bus.isShiftPressed = false

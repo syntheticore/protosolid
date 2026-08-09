@@ -5,13 +5,14 @@
   "version": "0.1.0",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "dev": "nuxt dev",
-    "dev-electron": "electron ./electron",
-    "build": "npm run build-oc && npm run build-app",
+    "dev": "npm run build-shapex && nuxt dev",
+    "dev-electron": "npm run build-shapex && electron ./electron",
+    "build": "npm run build-oc && npm run build-shapex && npm run build-app",
     "pack": "npm run build-app && cd electron && electron-builder",
 
     "build-oc": "cd assets/oc && docker run --rm -it -v \"$(pwd):/src\" -u \"$(id -u):$(id -g)\" donalffons/opencascade.js oc.yml",
     "build-oc-win": "cd assets/oc && docker run --rm -it -v \".\\:/src\" donalffons/opencascade.js oc.yml",
+    "build-shapex": "wasm-pack build rust/lib/shapex-wasm --target web --out-dir ../../../public/kernels/shapex",
     "build-app": "npm run clean && npm run generate && mv -v .output/public/* electron/app",
     "generate": "nuxt generate",
     "clean": "rm -rf .output electron/app/*",

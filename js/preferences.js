@@ -4,6 +4,7 @@ const emitter = createNanoEvents()
 
 const preferences = {
   preferredUnit: 'mm',
+  modelingKernel: 'shapex',
   highDPI: true,
   antiAlias: true,
   shadowMaps: true,
@@ -19,9 +20,9 @@ function savePreferences() {
 }
 
 function loadPreferences() {
-  const prefs = JSON.parse(window.localStorage.getItem('preferences'))
+  const prefs = JSON.parse(window.localStorage.getItem('preferences') || '{}')
   for(const pref in prefs) {
-    if(preferences[pref]) preferences[pref] = prefs[pref]
+    if(pref in preferences) preferences[pref] = prefs[pref]
   }
   console.log(preferences)
 }

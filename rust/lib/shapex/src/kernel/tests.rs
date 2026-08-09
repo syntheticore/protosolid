@@ -531,6 +531,35 @@ fn high_level_profile_extrusion_owns_results_and_supports_curved_holes() {
 }
 
 #[test]
+fn high_level_profile_extrudes_a_circular_outer_wire() {
+    let tolerance = ModelTolerance::default();
+    let outer = Wire2::new(
+        [
+            TrimmedCurve2::circle(Point2::new(-7.196977129201897, 0.0), 17.553807290465304)
+                .expect("circle"),
+        ],
+        tolerance,
+    )
+    .expect("outer wire");
+    let profile = Profile::new(outer, [], tolerance).expect("profile");
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(2.220446049250313e-16, 0.0, -1.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        tolerance,
+    )
+    .expect("rotated plane");
+    let extrusion = profile
+        .extrude(plane, Vec3::new(3.0, 0.0, 3.0 * 2.220446049250313e-16))
+        .expect("circular profile extrusion");
+
+    assert!(
+        (extrusion.volume() - std::f64::consts::PI * 17.553807290465304_f64.powi(2) * 3.0).abs()
+            < 1.0e-7
+    );
+}
+
+#[test]
 fn owned_operations_resolve_entities_transitively_and_tessellate_them() {
     let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(4.0, 4.0, 1.0));
     let top = cube

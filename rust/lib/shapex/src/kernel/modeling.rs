@@ -156,6 +156,7 @@ fn direct_descendants(
 #[derive(Debug, Clone)]
 pub struct FaceHandle {
     state: Arc<Kernel>,
+    revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
     face: FaceId,
     name: PersistentId,
     revision: uuid::Uuid,
@@ -168,6 +169,16 @@ impl FaceHandle {
     }
     pub fn surface(&self) -> &super::Surface3 {
         &self.surface
+    }
+    pub fn boundary_edges(&self) -> KernelResult<Vec<EdgeHandle>> {
+        self.state
+            .topology()
+            .face_edges(self.face)?
+            .into_iter()
+            .map(|edge| {
+                build_edge_handle(Arc::clone(&self.state), edge, Arc::clone(&self.revisions))
+            })
+            .collect()
     }
     pub fn tessellate(&self, options: TessellationOptions) -> KernelResult<TriangleMesh> {
         <Self as Tessellate>::tessellate(self, options)
@@ -193,6 +204,7 @@ impl Tessellate for FaceHandle {
 #[derive(Debug, Clone)]
 pub struct EdgeHandle {
     state: Arc<Kernel>,
+    revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
     edge: EdgeId,
     name: PersistentId,
     revision: uuid::Uuid,
@@ -205,6 +217,24 @@ impl EdgeHandle {
     }
     pub fn curve(&self) -> &super::Curve3 {
         &self.curve
+    }
+    pub fn endpoints(&self) -> KernelResult<[Point3; 2]> {
+        let topology = self.state.topology();
+        let vertices = topology.edge(self.edge)?.vertices();
+        Ok([
+            topology.vertex(vertices[0])?.point(),
+            topology.vertex(vertices[1])?.point(),
+        ])
+    }
+    pub fn connected_faces(&self) -> KernelResult<Vec<FaceHandle>> {
+        self.state
+            .topology()
+            .edge_faces(self.edge)?
+            .into_iter()
+            .map(|face| {
+                build_face_handle(Arc::clone(&self.state), face, Arc::clone(&self.revisions))
+            })
+            .collect()
     }
     pub fn tessellate(&self, options: TessellationOptions) -> KernelResult<super::Polyline> {
         <Self as Tessellate>::tessellate(self, options)
@@ -702,29 +732,11 @@ fn build_solid(
     }
     let faces = face_ids
         .into_iter()
-        .map(|face| {
-            let name = topology.face(face)?.name();
-            Ok(FaceHandle {
-                state: Arc::clone(&state),
-                face,
-                name,
-                revision: revisions[&name],
-                surface: topology.face(face)?.surface().clone(),
-            })
-        })
+        .map(|face| build_face_handle(Arc::clone(&state), face, Arc::clone(&revisions)))
         .collect::<KernelResult<Vec<_>>>()?;
     let edges = edge_ids
         .into_iter()
-        .map(|edge| {
-            let name = topology.edge(edge)?.name();
-            Ok(EdgeHandle {
-                state: Arc::clone(&state),
-                edge,
-                name,
-                revision: revisions[&name],
-                curve: topology.edge(edge)?.curve().clone(),
-            })
-        })
+        .map(|edge| build_edge_handle(Arc::clone(&state), edge, Arc::clone(&revisions)))
         .collect::<KernelResult<Vec<_>>>()?;
     let vertices = vertex_ids
         .into_iter()
@@ -747,6 +759,46 @@ fn build_solid(
         history,
         lineage,
         revisions,
+    })
+}
+
+fn build_face_handle(
+    state: Arc<Kernel>,
+    face: FaceId,
+    revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
+) -> KernelResult<FaceHandle> {
+    let topology = state.topology();
+    let entity = topology.face(face)?;
+    let name = entity.name();
+    let surface = entity.surface().clone();
+    let revision = revisions[&name];
+    Ok(FaceHandle {
+        state,
+        revisions,
+        face,
+        name,
+        revision,
+        surface,
+    })
+}
+
+fn build_edge_handle(
+    state: Arc<Kernel>,
+    edge: EdgeId,
+    revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
+) -> KernelResult<EdgeHandle> {
+    let topology = state.topology();
+    let entity = topology.edge(edge)?;
+    let name = entity.name();
+    let curve = entity.curve().clone();
+    let revision = revisions[&name];
+    Ok(EdgeHandle {
+        state,
+        revisions,
+        edge,
+        name,
+        revision,
+        curve,
     })
 }
 

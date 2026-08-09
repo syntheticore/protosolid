@@ -4,13 +4,13 @@ import earcut from 'earcut'
 import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference, PointReference } from './references.js'
 import { makeID } from './id.js'
 import { Line } from './geom2d.js'
+import { ShapexGeometry } from '../kernels/shapex.js'
 import {
   arrayRange,
   rotationFromNormal,
   isClockwise,
   arrayFromOcList,
   arrayFromOcVec,
-  ocVecFromVec,
   ocAx1FromMatrix,
   ocPlnFromMatrix,
   ocListOfShapeFromArray,
@@ -221,18 +221,18 @@ export class Profile {
 
   extrude(componentId, height, featureId) {
     if(!height) throw { type: 'error', msg: 'Extrusion has no volume' }
-    const face = this.makeFace()
-    const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
-    const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyQuaternion(rot))
-    let prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
-    // const args = new window.oc.oc.TopTools_ListOfShape_1()
-    // args.Append_1(face)
-    // const history = new window.oc.oc.BRepTools_History_2(args, prism)
-    return this.makeCompound(componentId, prism.Shape(), 'extrude-' + featureId)
+    const geometry = window.kernel.modeling.extrude(this, height)
+    if(geometry instanceof ShapexGeometry) {
+      const compound = new Compound(componentId, geometry)
+      compound.nameShapexExtrusion(this, featureId)
+      return compound
+    }
+    return this.makeCompound(componentId, geometry, 'extrude-' + featureId)
   }
 
   revolve(componentId, axis, angle, featureId) {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
+    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('revolve')
     const face = this.makeFace()
     const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true) //XXX BRepFeat_MakeRevol
@@ -240,6 +240,7 @@ export class Profile {
   }
 
   loft(componentId, others, untwist) {
+    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('loft')
     const profiles = [this, ...others]
     if(profiles.some(profile => profile.rings.length != 1)) {
       throw { type: 'error', msg: 'Loft profiles with holes are not supported' }
@@ -308,12 +309,14 @@ export class Shape {
 
   area() {
     if(!this.geom) return 0
+    if(this.solid?.compound?.isShapex) return meshAreaAndCenter(this.tesselate()).area
     const gprops = new window.oc.oc.GProp_GProps_1()
     window.oc.oc.BRepGProp.SurfaceProperties_1(this.geom(), gprops, false, false)
     return gprops.Mass() // Mass really corresponds to surface area here
   }
 
   center() {
+    if(this.solid?.compound?.isShapex) return meshAreaAndCenter(this.tesselate()).center
     const gprops = new window.oc.oc.GProp_GProps_1()
     window.oc.oc.BRepGProp.SurfaceProperties_1(this.geom(), gprops, false, false)
     return vecFromOc(gprops.CentreOfMass())
@@ -362,12 +365,14 @@ export class Volumetric extends Shape {
   // }
 
   validate() {
+    if(this.isShapex || this.compound?.isShapex) return true
     const analyzer = new window.oc.oc.BRepCheck_Analyzer(this.geom(), true, false)
     return analyzer.IsValid_2()
   }
 
   volume() {
     if(!this.geom) return 0
+    if(this.isShapex || this.compound?.isShapex) return this.geom().volume()
     const gprops = new window.oc.oc.GProp_GProps_1() //XXX use GProp_GProps_2 to supply point close to center for better accuracy
     window.oc.oc.BRepGProp.VolumeProperties_1(this.geom(), gprops, false, false, false)
     return gprops.Mass()
@@ -375,6 +380,9 @@ export class Volumetric extends Shape {
 
   center() {
     if(!this.geom) return
+    if(this.isShapex || this.compound?.isShapex) {
+      return new THREE.Vector3().fromArray(Array.from(this.geom().center()))
+    }
     const gprops = new window.oc.oc.GProp_GProps_1()
     window.oc.oc.BRepGProp.VolumeProperties_1(this.geom(), gprops, false, false, false)
     return vecFromOc(gprops.CentreOfMass())
@@ -388,6 +396,7 @@ export class Face extends Shape {
     this.solid = solid
     this.geom = () => geom
     this.id = id
+    if(solid.compound.isShapex) this.kernelId = geom.id
     this.tessId = tessId || makeID()
   }
 
@@ -411,6 +420,17 @@ export class Face extends Shape {
   }
 
   getPlane() {
+    if(this.solid.compound.isShapex) {
+      const frame = Array.from(this.geom().planeFrame())
+      if(!frame.length) return
+      return new THREE.Matrix4()
+        .makeBasis(
+          new THREE.Vector3(...frame.slice(3, 6)),
+          new THREE.Vector3(...frame.slice(6, 9)),
+          new THREE.Vector3(...frame.slice(3, 6)).cross(new THREE.Vector3(...frame.slice(6, 9))).normalize(),
+        )
+        .setPosition(new THREE.Vector3(...frame.slice(0, 3)))
+    }
     const surface = window.oc.oc.BRep_Tool.Surface_2(this.geom())
     const isPlanar = new window.oc.oc.GeomLib_IsPlanarSurface(surface, 1.0e-7) //XXX Surface->IsKind(STANDARD_TYPE(Geom_Plane)) could be faster
     if(!isPlanar.IsPlanar()) return
@@ -419,6 +439,13 @@ export class Face extends Shape {
   }
 
   getAxis() {
+    if(this.solid.compound.isShapex) {
+      const axis = Array.from(this.geom().axisFrame())
+      if(!axis.length) return
+      const location = new THREE.Vector3(...axis.slice(0, 3))
+      const direction = new THREE.Vector3(...axis.slice(3, 6)).normalize()
+      return rotationFromNormal(direction).setPosition(location)
+    }
     const surface = new window.oc.oc.BRepAdaptor_Surface_2(this.geom(), true)
     try {
       // OpenCascade raises Standard_NoSuchObject when the adapted surface is
@@ -431,6 +458,11 @@ export class Face extends Shape {
   }
 
   getPoint() {
+    if(this.solid.compound.isShapex) {
+      const point = Array.from(this.geom().centerPoint())
+      if(!point.length) return
+      return new THREE.Matrix4().setPosition(new THREE.Vector3(...point))
+    }
     const surface = new window.oc.oc.BRepAdaptor_Surface_2(this.geom(), true)
     try {
       const location = vecFromOc(surface.Sphere().Location())
@@ -439,6 +471,12 @@ export class Face extends Shape {
   }
 
   normal(u, v, useCurvature) { //XXX use BOPTools_AlgoTools3D::GetNormalToSurface or BOPTools_AlgoTools3D::GetNormalToFaceOnEdge
+    if(this.solid.compound.isShapex) {
+      const plane = this.getPlane()
+      if(plane) return normalFromMatrix(plane)
+      const normals = this.tesselate().normals
+      return normals.length ? new THREE.Vector3(...normals.slice(0, 3)).normalize() : undefined
+    }
     const geom = this.geom()
     const uMin = { current: 0 }
     const uMax = { current: 0 }
@@ -453,6 +491,13 @@ export class Face extends Shape {
   }
 
   connectedFaces() {
+    if(this.solid.compound.isShapex) {
+      const edgeIds = new Set(Array.from(this.geom().boundaryEdgeIds()))
+      return this.solid.edges()
+        .filter(edge => edgeIds.has(edge.kernelId))
+        .flatMap(edge => edge.connectedFaces())
+        .filter((face, index, faces) => face && face != this && faces.indexOf(face) == index)
+    }
     const edgeFaceMap = new window.oc.oc.TopTools_IndexedDataMapOfShapeListOfShape_1()
     window.oc.oc.TopExp.MapShapesAndAncestors(
       this.solid.geom(),
@@ -473,6 +518,10 @@ export class Face extends Shape {
 
   tesselate() {
     if(this.cachedTesselation) return this.cachedTesselation
+    if(this.solid.compound.isShapex) {
+      this.cachedTesselation = window.kernel.modeling.mesh(this.geom())
+      return this.cachedTesselation
+    }
     const location = new window.oc.oc.TopLoc_Location_1()
     const triangulation = window.oc.oc.BRep_Tool.Triangulation(this.geom(), location, 0).get()
     let positions = []
@@ -502,6 +551,7 @@ export class Edge extends Shape {
     this.solid = solid
     this.geom = () => geom
     this.id = id
+    if(solid.compound.isShapex) this.kernelId = geom.id
     this.tessId = tessId || makeID()
   }
 
@@ -515,6 +565,13 @@ export class Edge extends Shape {
   }
 
   getAxis() {
+    if(this.solid.compound.isShapex) {
+      const axis = Array.from(this.geom().lineAxis())
+      if(!axis.length) return
+      const location = new THREE.Vector3(...axis.slice(0, 3))
+      const direction = new THREE.Vector3(...axis.slice(3, 6)).normalize()
+      return rotationFromNormal(direction).setPosition(location)
+    }
     // BRep_Tool.Curve()
     const curve = new window.oc.oc.BRepAdaptor_Curve_2(this.geom())
     if(curve.GetType() != window.oc.oc.GeomAbs_CurveType.GeomAbs_Line) return
@@ -525,6 +582,10 @@ export class Edge extends Shape {
   }
 
   connectedFaces() {
+    if(this.solid.compound.isShapex) {
+      const ids = Array.from(this.geom().connectedFaceIds())
+      return ids.map(id => this.solid.faces().find(face => face.kernelId == id)).filter(Boolean)
+    }
     const edgeFaceMap = new window.oc.oc.TopTools_IndexedDataMapOfShapeListOfShape_1()
     window.oc.oc.TopExp.MapShapesAndAncestors(
       this.solid.geom(),
@@ -539,17 +600,33 @@ export class Edge extends Shape {
   }
 
   center() {
+    if(this.solid.compound.isShapex) {
+      const points = this.tesselate()
+      if(!points.length) return new THREE.Vector3()
+      const middle = (points.length - 1) / 2
+      const lower = points[Math.floor(middle)]
+      const upper = points[Math.ceil(middle)]
+      return lower.clone().add(upper).multiplyScalar(0.5)
+    }
     const curve = new window.oc.oc.BRepAdaptor_Curve_2(this.geom())
     const middle = (curve.FirstParameter() + curve.LastParameter()) / 2.0
     return vecFromOc(curve.Value(middle))
   }
 
   vertices() {
+    if(this.solid.compound.isShapex) {
+      const values = Array.from(this.geom().endpoints())
+      return [new THREE.Vector3(...values.slice(0, 3)), new THREE.Vector3(...values.slice(3, 6))]
+    }
     return collectShapes(this.geom(), 'vertex').map(vertex => vecFromOc(window.oc.oc.BRep_Tool.Pnt(vertex)) )
   }
 
   tesselate() {
     if(this.cachedTesselation) return this.cachedTesselation
+    if(this.solid.compound.isShapex) {
+      this.cachedTesselation = window.kernel.modeling.edgePolyline(this.geom())
+      return this.cachedTesselation
+    }
     // const location = new window.oc.oc.TopLoc_Location_1()
     // const poly = window.oc.oc.BRep_Tool.Polygon3D(this.geom(), location).get()
     // const nodes = poly.Nodes()
@@ -571,6 +648,12 @@ export class Solid extends Volumetric {
 
   faces() {
     if(this.cachedFaces) return this.cachedFaces
+    if(this.compound.isShapex) {
+      this.cachedFaces = arrayRange(0, this.geom().faceCount - 1)
+        .map(index => new Face(this, this.geom().face(index)))
+      this.cachedFaces.forEach(face => face.id = face.kernelId)
+      return this.cachedFaces
+    }
     this.cachedFaces = this.collectShapes('face')
     this.cachedFaces.forEach((face, i) => face.id = this.id + '/face/' + i )
     return this.cachedFaces
@@ -578,6 +661,12 @@ export class Solid extends Volumetric {
 
   edges() {
     if(this.cachedEdges) return this.cachedEdges
+    if(this.compound.isShapex) {
+      this.cachedEdges = arrayRange(0, this.geom().edgeCount - 1)
+        .map(index => new Edge(this, this.geom().edge(index)))
+      this.cachedEdges.forEach(edge => edge.id = edge.kernelId)
+      return this.cachedEdges
+    }
     this.cachedEdges = this.collectShapes('edge')
     this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
     return this.cachedEdges
@@ -592,6 +681,11 @@ export class Solid extends Volumetric {
   }
 
   toCompound() {
+    if(this.compound.isShapex) {
+      const compound = new Compound(this.compound.componentId, new ShapexGeometry(this.geom().toCompound()))
+      compound.cachedSolids = [this]
+      return compound
+    }
     const compound = new Compound(this.compound.componentId, this.geom())
     compound.cachedSolids = [this]
     return compound
@@ -615,7 +709,11 @@ export class Compound extends Volumetric {
   constructor(componentId, geom) {
     super()
     this.componentId = componentId
-    if(geom) {
+    if(geom instanceof ShapexGeometry) {
+      this.isShapex = true
+      this.kernelGeometry = geom
+      this.geom = () => geom.raw
+    } else if(geom) {
       // // Wrap solid in compound
       // if(geom.ShapeType() == window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID) {
       //   const compound = new window.oc.oc.TopoDS_Compound()
@@ -625,18 +723,31 @@ export class Compound extends Volumetric {
       //   geom = compound
       // }
       this.geom = () => geom
+    } else if(globalThis.window?.kernel?.modeling?.id == 'shapex') {
+      this.isShapex = true
     }
   }
 
   solids() {
     if(!this.geom) return []
     if(this.cachedSolids) return this.cachedSolids
+    if(this.isShapex) {
+      this.cachedSolids = arrayRange(0, this.geom().solidCount - 1)
+        .map(index => new Solid(this, this.geom().solid(index)))
+      this.cachedSolids.forEach((solid, i) => solid.id = this.componentId + '/solid/' + i)
+      return this.cachedSolids
+    }
     this.cachedSolids = this.collectShapes('solid')
     this.cachedSolids.forEach((solid, i) => solid.id = this.componentId + '/solid/' + i )
     return this.cachedSolids
   }
 
   clone(geom) {
+    if(this.isShapex) {
+      const raw = geom?.raw || geom || (this.geom && this.geom())
+      if(!raw) return new Compound(this.componentId)
+      return new Compound(this.componentId, new ShapexGeometry(raw))
+    }
     return new Compound(this.componentId, geom || (this.geom && this.geom()))
   }
 
@@ -654,6 +765,67 @@ export class Compound extends Volumetric {
       solid.id = componentId + '/solid/' + index
     })
     return clone
+  }
+
+  nameShapexExtrusion(profile, featureId) {
+    if(!this.isShapex) return this
+    const faces = this.faces()
+    faces.forEach(face => {
+      const role = this.geom().creationRole(face.geom())
+      if(role?.kind == 'extrusion-start') {
+        face.id = `/extrude-${featureId}/bottom`
+      } else if(role?.kind == 'extrusion-end') {
+        face.id = `/extrude-${featureId}/top`
+      } else if(role?.kind == 'extrusion-side') {
+        const ringIndex = role.boundary == 'outer' ? 0 : role.holeIndex + 1
+        const segmentIndex = role.segment
+        const segment = profile.rings[ringIndex]?.segments[segmentIndex]
+        const suffix = role.part ? `/part/${role.part}` : ''
+        const sourceId = segment ? profile.getBaseId(segment) : `${role.boundary}/${segmentIndex}`
+        face.id = `/extrude-${featureId}/swept/${sourceId}${suffix}`
+      }
+    })
+    this.nameShapexEdges()
+    return this
+  }
+
+  inheritShapexTopology(parents, operation, featureId) {
+    if(!this.isShapex) return this
+    const outputFaces = this.faces()
+    const assigned = new Set()
+    parents.flatMap(parent => parent.faces()).forEach(oldFace => {
+      const resolution = this.geom().resolveFace(oldFace.geom())
+      for(let index = 0; index < resolution.count; index++) {
+        const resolved = resolution.face(index)
+        const face = outputFaces.find(candidate => candidate.kernelId == resolved.id)
+        if(!face || assigned.has(face)) continue
+        face.id = resolution.kind == 'split' ? `${oldFace.id}/split/${index}` : oldFace.id
+        assigned.add(face)
+      }
+    })
+    outputFaces.filter(face => !assigned.has(face)).forEach((face, index) => {
+      face.id = `/${featureId || 'kernel'}/${operation}/generated/${index}`
+    })
+    this.nameShapexEdges()
+    return this
+  }
+
+  nameShapexEdges() {
+    const namesUsed = {}
+    this.edges().forEach(edge => {
+      const faces = edge.connectedFaces()
+      const base = `(${faces.map(face => face.id).join('|')})`
+      namesUsed[base] = (namesUsed[base] || 0) + 1
+      edge.id = `${base}/${namesUsed[base]}`
+    })
+  }
+
+  faces() {
+    return this.solids().flatMap(solid => solid.faces())
+  }
+
+  edges() {
+    return this.solids().flatMap(solid => solid.edges())
   }
 
   track(algorithm, algoName, other, featureId) {
@@ -748,11 +920,18 @@ export class Compound extends Volumetric {
   }
 
   transform(plane) {
-    const algo = transformGeometry(this.geom(), plane)
+    const input = this.isShapex ? this.kernelGeometry : this.geom()
+    const algo = window.kernel.modeling.transform(input, plane)
+    if(algo instanceof ShapexGeometry) {
+      return new Compound(this.componentId, algo).inheritShapexTopology([this], 'transform')
+    }
     return this.track(algo, 'transform')
   }
 
   merge(others) {
+    if(this.isShapex || others.some(other => other.isShapex)) {
+      window.kernel.modeling.unsupported('disconnected compound merge')
+    }
     const compound = new window.oc.oc.TopoDS_Compound()
     const builder = new window.oc.oc.BRep_Builder()
     builder.MakeCompound(compound);
@@ -776,6 +955,7 @@ export class Compound extends Volumetric {
 
   repair() {
     if(!this.geom) return this
+    if(this.isShapex) return this
     let out
     try {
       out = this.unifyFaces().fixShape()
@@ -819,7 +999,7 @@ export class Compound extends Volumetric {
     this.track(reshaper, 'reorient')
   }
 
-  boolean(other, op) {
+  boolean(other, op, featureId) {
     if(!other.geom) throw { type: 'error', msg: "Tool body has no volume" }
 
     if(op == 'create') {
@@ -832,16 +1012,21 @@ export class Compound extends Volumetric {
       return this.cloneCached(other.geom(), other.solids())
     }
 
-    const ops = {
-      join: window.oc.oc.BRepAlgoAPI_Fuse_3,
-      cut: window.oc.oc.BRepAlgoAPI_Cut_3,
-      intersect: window.oc.oc.BRepAlgoAPI_Common_3,
+    if(this.isShapex || other.isShapex) {
+      if(!this.isShapex || !other.isShapex) {
+        throw { type: 'error', msg: 'Cannot mix Shapex and OpenCascade bodies' }
+      }
+      return new Compound(
+        this.componentId,
+        window.kernel.modeling.boolean(this.kernelGeometry, other.kernelGeometry, op),
+      ).inheritShapexTopology([this, other], op, featureId)
     }
-    const algo = new ops[op](this.geom(), other.geom(), new window.oc.oc.Message_ProgressRange_1())
+    const algo = window.kernel.modeling.boolean(this.geom(), other.geom(), op)
     return this.track(algo, op, other)
   }
 
   fillet(edges, radius) {
+    if(this.isShapex) window.kernel.modeling.unsupported('fillet')
     const fillet = new window.oc.oc.BRepFilletAPI_MakeFillet(this.geom(), window.oc.oc.ChFi3d_FilletShape.ChFi3d_Rational)
     edges.forEach(edge => {
       fillet.Add_2(radius, edge.geom())
@@ -857,6 +1042,7 @@ export class Compound extends Volumetric {
   }
 
   offset(openFaces, distance) {
+    if(this.isShapex) window.kernel.modeling.unsupported('offset')
     openFaces ||= []
     // Offset each affected solid individually
     try {
@@ -890,6 +1076,7 @@ export class Compound extends Volumetric {
   }
 
   reshape(algoName, cb) {
+    if(this.isShapex) window.kernel.modeling.unsupported(algoName)
     const reshaper = new window.oc.oc.ShapeBuild_ReShape()
     cb(reshaper)
     reshaper.Shape = () => reshaper.Apply(this.geom(), window.oc.oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
@@ -922,6 +1109,7 @@ export class Compound extends Volumetric {
   }
 
   split(plane, keep, featureId) {
+    if(this.isShapex) window.kernel.modeling.unsupported('split')
     const left = this.halfCut(plane, true, featureId)
     const right = this.halfCut(plane, false, featureId)
     if(keep == 'both') return left.merge([right])
@@ -992,12 +1180,29 @@ export class Compound extends Volumetric {
   // }
 
   tesselate() {
+    if(!this.geom) return { positions: [], normals: [] }
+    if(this.isShapex) return window.kernel.modeling.mesh(this.geom())
     const tesselations = this.solids().map(solid => solid.tesselate() )
     return {
       positions: tesselations.map(tess => tess.positions ).flat(),
       normals: tesselations.map(tess => tess.normals ).flat(),
     }
   }
+}
+
+function meshAreaAndCenter(mesh) {
+  let area = 0
+  const center = new THREE.Vector3()
+  for(let index = 0; index < mesh.positions.length; index += 9) {
+    const a = new THREE.Vector3(...mesh.positions.slice(index, index + 3))
+    const b = new THREE.Vector3(...mesh.positions.slice(index + 3, index + 6))
+    const c = new THREE.Vector3(...mesh.positions.slice(index + 6, index + 9))
+    const triangleArea = b.clone().sub(a).cross(c.clone().sub(a)).length() * 0.5
+    area += triangleArea
+    center.add(a.add(b).add(c).multiplyScalar(triangleArea / 3.0))
+  }
+  if(area) center.divideScalar(area)
+  return { area, center }
 }
 
 

@@ -358,10 +358,10 @@ export class PatternFeature extends Feature {
         return
       }
       const tool = copies.slice(1).reduce(
-        (combined, copy) => combined.boolean(copy, 'join'),
+        (combined, copy) => combined.boolean(copy, 'join', this.id),
         copies[0],
       )
-      comp.compound = comp.compound.boolean(tool, this.operation)
+      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
   }
@@ -863,12 +863,12 @@ export class ExtrudeFeature extends Feature {
     references.profiles.forEach(profile => {
       try {
         const extrusion = profile.extrude(this.componentId, distance, this.id)
-        tool = tool.boolean(extrusion, 'join')
+        tool = tool.boolean(extrusion, 'join', this.id)
       } catch(err) { this.error = err || this.error }
     })
     try {
-      comp.compound = comp.compound.boolean(tool, this.operation)
-    } catch(err) { this.error = err || this.error }
+      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
+    } catch(err) { this.error = this.error || err }
 
     this.previewBody = tool
   }
@@ -939,13 +939,13 @@ export class RevolveFeature extends Feature {
     references.profiles.forEach(profile => {
       try {
         const revolution = profile.revolve(this.componentId, references.axis, angle, this.id)
-        tool = tool.boolean(revolution, 'join')
+        tool = tool.boolean(revolution, 'join', this.id)
       } catch(err) { this.error = err || this.error }
     })
 
     const comp = tree.findChild(this.componentId)
     try {
-      comp.compound = comp.compound.boolean(tool, this.operation)
+      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
     } catch(err) { this.error = err || this.error }
 
     this.previewBody = tool
@@ -984,7 +984,7 @@ export class LoftFeature extends Feature {
     try {
       const first = references.profiles[0]
       const tool = first.loft(this.componentId, references.profiles.slice(1), this.untwist)
-      comp.compound = comp.compound.boolean(tool, this.operation)
+      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
   }
@@ -1247,8 +1247,8 @@ export class BooleanFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       const tools = references.tools.map(tool => tool.toCompound() )
-      const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join') )
-      comp.compound = comp.compound.removeShapes(references.tools).boolean(tool, this.operation)
+      const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join', this.id) )
+      comp.compound = comp.compound.removeShapes(references.tools).boolean(tool, this.operation, this.id)
       if(this.keepTools) comp.compound = comp.compound.merge(tools)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }

@@ -107,6 +107,17 @@ export class SketchElement {
     })
   }
 
+  splitIntersections(others) {
+    const intersections = this.intersect(others)
+    // Endpoint-on-curve constraints define topology even when OC's
+    // intersection routine drops the contact near its tolerance boundary.
+    const endpointContacts = others.flatMap(other => {
+      if(!other.geom || other == this) return []
+      return other.endpoints().filter(point => this.distanceTo(point).almost(0.0) )
+    })
+    return [...intersections, ...endpointContacts]
+  }
+
   split(others) {
     const geom = this.geom()
     const start = geom.get().FirstParameter()
@@ -115,7 +126,7 @@ export class SketchElement {
 
     if(isCircle) {
       const period = end - start
-      const intersections = this.intersect(others)
+      const intersections = this.splitIntersections(others)
         .map(p => this.unsample(p) )
         // A circle is periodic, so its start and end parameters describe the
         // same point. Keep intersections at that seam and normalize them to
@@ -137,7 +148,7 @@ export class SketchElement {
 
     } else {
       const [p, u] = this
-        .intersect(others)
+        .splitIntersections(others)
         .map(p => [p, this.unsample(p)] )
         .find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
       if(!p) return [this]

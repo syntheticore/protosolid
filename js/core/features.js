@@ -15,6 +15,7 @@ import {
   jointFrame,
   referenceComponentId,
   setBaselineWorldTransform,
+  worldTransform,
 } from './assembly.js'
 
 
@@ -733,6 +734,7 @@ export class CreateSketchFeature extends Feature {
       },
     })
 
+    this.componentOccurrenceId = doc.activeComponent.id
     this.plane = null
 
     this.sketch = new Sketch()
@@ -744,7 +746,14 @@ export class CreateSketchFeature extends Feature {
   acceptsInput() { return true }
 
   updateFeature(tree, references) {
-    const plane = references.plane
+    let plane = references.plane
+    const sourceId = referenceComponentId(this.plane())
+    const source = sourceId && tree.findChild(sourceId)
+    const target = tree.findChild(this.componentOccurrenceId) || tree.findChild(this.componentId)
+    if(source && target && source != target) {
+      const relative = worldTransform(target).invert().multiply(worldTransform(source))
+      plane = relative.multiply(plane)
+    }
     this.sketch.workplane = plane
     tree.findChild(this.componentId).sketches.push(this.sketch)
     this.sketch.solve(tree)
@@ -762,13 +771,15 @@ export class CreateSketchFeature extends Feature {
     return {
       ...super.dump(),
       sketch: this.sketch,
+      componentOccurrenceId: this.componentOccurrenceId,
     }
   }
 
   static undump(dump, context) {
     const feature = super.undump(dump, context)
     feature.sketch = dump.sketch
-    feature.sketch.creator = this
+    feature.sketch.creator = feature
+    feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     return feature
   }
 }

@@ -46,7 +46,7 @@
   //- Helpers
 
   HelperProxy(
-    v-if="component === document.activeComponent || document.activeFeature instanceof JointFeature"
+    v-if="component === document.activeComponent || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper)"
     v-for="helper in component.helpers"
     :key="helper.id"
     :document="document"
@@ -102,6 +102,7 @@
 
   import * as THREE from 'three'
   import { JointFeature } from '../js/core/features.js'
+  import { PointHelper } from '../js/core/helpers.js'
   import { ProjectTool } from '../js/tools.js'
 
   const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])

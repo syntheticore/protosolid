@@ -15,8 +15,10 @@ import {
 } from './core/geom2d.js'
 
 import {
+  Edge,
   Solid,
 } from './core/geom3d.js'
+import { PointHelper } from './core/helpers.js'
 
 import {
   CoincidentConstraint,
@@ -320,10 +322,12 @@ export class ProjectTool extends HighlightTool {
   static icon = 'layer-group'
 
   constructor(component, viewport, sketch) {
-    super(component, viewport, ['point', 'axis', 'edge'])
+    super(component, viewport, ['point', 'edge'])
     this.sketch = sketch
     this.localSpace = true
     this.includeInactive = true
+    this.acceptsInput = item =>
+      item instanceof Edge || item instanceof PointHelper || item instanceof ElemRef
     this.cursor = 'copy'
   }
 

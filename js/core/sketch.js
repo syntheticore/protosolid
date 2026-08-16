@@ -4,9 +4,10 @@ import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { Line, Circle, Arc, Spline, SketchElement } from './geom2d.js'
 import { Wire, Profile, Edge } from './geom3d.js'
-import { AxisHelper } from './helpers.js'
-import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix } from './utils.js'
+import { AxisHelper, PointHelper } from './helpers.js'
+import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix, ocPntFromVec, transformGeometry } from './utils.js'
 import { Reference, CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
+import { worldTransform } from './assembly.js'
 
 
 export class SketchOrigin {
@@ -355,6 +356,9 @@ export class Sketch {
         const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: elem.projection }
         const p2 = { id: `${id++}`, type: 'point', x: elem.points.slice(-1)[0].x, y: elem.points.slice(-1)[0].y, fixed: elem.projection }
         primitives = [p1, p2]
+
+      } else if(elem instanceof ProjectedPoint) {
+        primitives = [{ id: `${id++}`, type: 'point', x: elem.point.x, y: elem.point.y, fixed: true }]
       }
 
       idMap[elem.id] = primitives
@@ -607,13 +611,25 @@ export class Sketch {
 Serialize.register(Sketch, 'Sketch')
 
 
+export class ProjectedPoint {
+  constructor(point, id) {
+    this.point = point
+    this.id = id
+  }
+
+  typename() { return 'Point Projection' }
+  center() { return this.point }
+  handles() { return [this.point] }
+}
+
+
 export class Projection {
   constructor(itemOrRef) {
     this.id = makeID()
     this.itemRef = itemOrRef instanceof Edge ?
       new EdgeReference(itemOrRef)
       :
-      (itemOrRef instanceof AxisHelper ?
+      (itemOrRef instanceof AxisHelper || itemOrRef instanceof PointHelper ?
         new HelperReference(itemOrRef)
         :
         itemOrRef
@@ -622,15 +638,36 @@ export class Projection {
 
   update(tree) {
     this.itemRef.update(tree)
-    const item = this.itemRef.getItem()
+    const isElementPoint = this.itemRef instanceof ElemRef
+    const item = isElementPoint ? this.itemRef.curve() : this.itemRef.getItem()
+    const relative = this.relativeTransform(tree)
+
+    if(isElementPoint || item instanceof PointHelper) {
+      let point = isElementPoint ?
+        item.handles()[this.itemRef.index].clone().applyMatrix4(item.sketch.workplane) :
+        new THREE.Vector3().setFromMatrixPosition(item.getPoint())
+      point.applyMatrix4(relative).applyMatrix4(this.sketch.workplane.clone().invert())
+      point.z = 0
+      const suffix = isElementPoint ? `/${this.itemRef.index}` : ''
+      const elem = new ProjectedPoint(point, item.id + suffix + '/projected')
+      elem.sketch = this.sketch
+      elem.projection = this
+      this.output = elem
+      return elem
+    }
 
     let curve
     if(item instanceof Edge) {
       // BRep_Tool.Curve()
-      curve = new window.oc.oc.BRepAdaptor_Curve_2(item.geom())
+      const shape = transformGeometry(item.geom(), relative).Shape()
+      curve = new window.oc.oc.BRepAdaptor_Curve_2(window.oc.oc.TopoDS.Edge_1(shape))
 
     } else if(item instanceof AxisHelper) {
-      const geom = item.geom()
+      const axis = relative.clone().multiply(item.transform)
+      const geom = new window.oc.oc.GC_MakeSegment_1(
+        ocPntFromVec(new THREE.Vector3().applyMatrix4(axis)),
+        ocPntFromVec(new THREE.Vector3(0, 0, 20).applyMatrix4(axis)),
+      ).Value().get()
       const handle = new window.oc.oc.Handle_Geom_Curve_2(geom)
       curve = new window.oc.oc.GeomAdaptor_Curve_2(handle)
     }
@@ -663,6 +700,16 @@ export class Projection {
     }
 
     return this.output
+  }
+
+  relativeTransform(tree) {
+    const sourceId = this.itemRef instanceof ElemRef ?
+      this.itemRef.curveRef.componentId : this.itemRef.componentId
+    const targetId = this.sketch.component?.id || this.sketch.creator.componentId
+    const source = tree.findChild(sourceId)
+    const target = tree.findChild(targetId)
+    if(!source || !target) return new THREE.Matrix4()
+    return worldTransform(target).invert().multiply(worldTransform(source))
   }
 
   geometry() { return this.output }

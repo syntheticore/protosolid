@@ -74,6 +74,7 @@
 <script setup>
 
   import { Circle } from '../js/core/geom2d.js'
+  import { ProjectedPoint } from '../js/core/sketch.js'
 
   const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
@@ -87,7 +88,8 @@
   const active = computed(() => props.sketch == props.document.activeSketch )
 
   const elements = computed(() =>
-    [...props.sketch.elements, ...props.sketch.projections.map(proj => proj.geometry() )].filter(Boolean)
+    [...props.sketch.elements, ...props.sketch.projections.map(proj => proj.geometry() )]
+      .filter(elem => elem && !(elem instanceof ProjectedPoint))
   )
 
   const allHandles = computed(() => {
@@ -95,7 +97,7 @@
 
     const projectedElements = props.sketch.projections
       .map(projection => projection.geometry())
-      .filter(elem => elem instanceof Circle)
+      .filter(elem => elem instanceof Circle || elem instanceof ProjectedPoint)
     const handles = [...props.sketch.elements, ...projectedElements].flatMap(elem => {
       const elemHandles = elem.projection ? elem.handles().slice(0, 1) : elem.handles()
       return elemHandles.map((p, i) => {

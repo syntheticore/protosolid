@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { Line, Circle, Arc } from './core/geom2d.js'
+import { Line, Circle, Arc, supportsPointOnCurveConstraint } from './core/geom2d.js'
+import { vecFromOc } from './core/utils.js'
 import { CoincidentConstraint } from './core/sketch.js'
 
 const snapDistance = 14 // px
@@ -165,6 +166,7 @@ export default class Snapper {
     const elements = this.getSnapElements(connectedElements)
     let pointDist = Infinity
     let pointTarget
+    let midpointTarget
     let guidePointDist = Infinity
     let guidePointTarget
     this.getSnapPointTargets(elements, connectedElements).forEach(target => {
@@ -173,30 +175,57 @@ export default class Snapper {
         guidePointDist = dist
         guidePointTarget = target
       }
-      if((target.origin || target.index != -1 || target.midpoint) && dist < snapDistance && dist < pointDist) {
+      if((target.origin || target.index != -1) && dist < snapDistance && dist < pointDist) {
         pointDist = dist
         pointTarget = target
+      }
+      if(target.midpoint && dist < snapDistance && (!midpointTarget || dist < midpointTarget.distance)) {
+        midpointTarget = { ...target, distance: dist }
       }
     })
 
     // Handles and the sketch origin always take precedence over curves.
     if(pointTarget) return this.rememberSnapPoint(pointTarget)
 
-    let curveDist = Infinity
-    let curveTarget
-    elements
-      .filter(elem => elem instanceof Line || elem instanceof Circle || elem instanceof Arc)
-      .forEach(elem => {
-        const projected = closestPointOnCurve(elem, localVec)
-        if(!projected) return
-        const dist = this.viewport.renderer.toScreen(projected.clone().applyMatrix4(this.planeTransform)).distanceTo(coords)
-        if(dist < snapDistance && dist < curveDist) {
-          curveDist = dist
-          curveTarget = { elem, point: projected }
-        }
+    // An intersection near the pointer must be near both participating
+    // curves. Reject the rest before invoking OpenCascade's substantially
+    // more expensive curve/curve intersection routine.
+    const nearbyCurves = elements
+      .filter(supportsPointOnCurveConstraint)
+      .map(elem => {
+        const point = closestPointOnCurve(elem, localVec)
+        if(!point) return
+        const distance = this.viewport.renderer
+          .toScreen(point.clone().applyMatrix4(this.planeTransform))
+          .distanceTo(coords)
+        return { elem, point, distance }
       })
+      .filter(target => target && target.distance < snapDistance)
 
-    if(curveTarget) return curveTarget
+    let intersectionTarget
+    nearbyCurves.forEach((target, index, curves) =>
+      curves.slice(index + 1).forEach(otherTarget => {
+        target.elem.intersect([otherTarget.elem]).forEach(ocPoint => {
+          const point = vecFromOc(ocPoint)
+          const dist = this.viewport.renderer.toScreen(point.clone().applyMatrix4(this.planeTransform)).distanceTo(coords)
+          if(dist < snapDistance && (!intersectionTarget || dist < intersectionTarget.distance)) {
+            intersectionTarget = { curves: [target.elem, otherTarget.elem], point, distance: dist }
+          }
+        })
+      })
+    )
+    if(intersectionTarget) {
+      this.rememberSnapPoint({ point: intersectionTarget.point })
+      return intersectionTarget
+    }
+
+    if(midpointTarget) return this.rememberSnapPoint(midpointTarget)
+
+    const curveTarget = nearbyCurves.reduce((closest, target) =>
+      !closest || target.distance < closest.distance ? target : closest
+    , null)
+
+    if(curveTarget) return { elem: curveTarget.elem, point: curveTarget.point }
 
     if(guidePointTarget) return this.rememberSnapPoint(guidePointTarget)
   }
@@ -244,6 +273,19 @@ export default class Snapper {
 
     const screenVec = this.viewport.renderer.toScreen(vec)
     const guideSnapPoints = this.getGuideSnapPoints()
+
+    if(snapTarget && snapTarget.curves) {
+      const snapVec = snapTarget.point
+      const worldSnapVec = snapVec.clone().applyMatrix4(this.planeTransform)
+      this.snapped = { intersection: snapTarget.curves, point: snapVec }
+      this.snapAnchor = {
+        type: 'snap',
+        pos: this.viewport.renderer.toScreen(worldSnapVec),
+        vec: worldSnapVec,
+        id: 'intersection-' + snapTarget.curves.map(curve => curve.id).join('-'),
+      }
+      return snapVec
+    }
 
     if(snapTarget && snapTarget.elem) {
       const guideSnap = snapToGuides && this.curveGuideSnap(snapTarget.elem, guideSnapPoints, screenVec)

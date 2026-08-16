@@ -4,6 +4,8 @@
 
   import * as THREE from 'three'
   import materials from '../js/materials.js'
+  import { SketchPoint } from '../js/core/geom2d.js'
+  import { ScreenPointObject } from '../js/three/helper-objects.js'
 
   const props = defineProps(['document', 'component', 'element', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
@@ -25,12 +27,18 @@
     window.alcRenderer.remove(mesh)
     mesh = null
 
-    const vertices = props.element.tesselate()
-    if(!vertices) return
-
-    mesh = window.alcRenderer.convertLine(vertices, materials.line)
+    if(props.element instanceof SketchPoint) {
+      mesh = new ScreenPointObject(22)
+    } else {
+      const vertices = props.element.tesselate()
+      if(!vertices) return
+      mesh = window.alcRenderer.convertLine(vertices, materials.line)
+    }
     updateTransform()
-    mesh.alcTypes = ['curve', props.element.getAxis && 'axis']
+    mesh.alcTypes = props.element instanceof SketchPoint ?
+      ['point']
+      :
+      ['curve', props.element.getAxis && 'axis']
     mesh.material = getMaterial()
     mesh.alcObject = props.element
 
@@ -57,10 +65,20 @@
 
   function updateTransform() {
     mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(props.element.sketch.workplane)
+    if(props.element instanceof SketchPoint) {
+      mesh.matrix.multiply(new THREE.Matrix4().makeTranslation(
+        props.element.point.x,
+        props.element.point.y,
+        props.element.point.z,
+      ))
+    }
     mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
   }
 
   function getMaterial() {
+    if(props.element instanceof SketchPoint) {
+      return (selected.value || toolSelected.value || highlighted.value) ? materials.highlightUiPoint : materials.uiPoint
+    }
     return materials.table.curve[
       (selected.value || toolSelected.value) ? 'selected' : (highlighted.value ? 'highlighted' : 'unselected')
     ][

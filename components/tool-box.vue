@@ -247,6 +247,7 @@
 
   import {
     ManipulationTool,
+    PointTool,
     LineTool,
     SplineTool,
     CircleTool,
@@ -319,6 +320,7 @@
             title: 'Sketch',
             sketchOnly: true,
             tools: [
+              { title: 'Point', tool: PointTool },
               { title: 'Line', tool: LineTool, hotKey: 'L', keyCode: 76 },
               { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
               { title: 'Arc', tool: ArcTool, hotKey: 'A', keyCode: 65 },

@@ -69,11 +69,6 @@ export class SketchElement {
     return [this.sample(0.0), this.sample(1.0)]
   }
 
-  endpointHandleIndex(endpointIndex) {
-    const endpoint = this.endpoints()[endpointIndex]
-    return this.handles().findIndex(handle => handle.almost(endpoint))
-  }
-
   otherBound(bound) {
     const points = this.endpoints()
     return bound.almost(points[0]) ? points[1] : points[0]
@@ -180,6 +175,37 @@ export class SketchElement {
   //   return line
   // }
 }
+
+
+export class SketchPoint extends SketchElement {
+  typename() { return 'Point' }
+
+  constructor(point) {
+    super()
+    this.point = point
+  }
+
+  center() { return this.point }
+  endpoints() { return [this.point] }
+  snapPoints() { return [this.point] }
+  handles() { return [this.point] }
+  setHandles(handles) { this.point = handles[0] }
+  _clone() { return new SketchPoint(this.point.clone()) }
+
+  dump() {
+    return {
+      id: this.id,
+      point: this.point,
+    }
+  }
+
+  static undump(dump) {
+    const point = new SketchPoint(dump.point)
+    point.id = dump.id
+    return point
+  }
+}
+Serialize.register(SketchPoint, 'SketchPoint')
 
 
 export class Line extends SketchElement {
@@ -504,6 +530,13 @@ export class Arc extends SketchElement {
 Serialize.register(Arc, 'Arc')
 
 
+// PlaneGCS currently exposes point-on-curve constraints for these analytic
+// curve primitives. Keep snapping and solver support on this same boundary.
+export function supportsPointOnCurveConstraint(elem) {
+  return elem instanceof Line || elem instanceof Circle || elem instanceof Arc
+}
+
+
 export class Spline extends SketchElement {
   typename() { return super.typename('Spline') }
 
@@ -511,6 +544,18 @@ export class Spline extends SketchElement {
     super()
     this.points = points
     this.update(geom)
+  }
+
+  static fromGeometry(geom, id) {
+    const spline = new Spline(
+      [vecFromOc(geom.StartPoint()), vecFromOc(geom.EndPoint())],
+      new window.oc.oc.Handle_Geom2d_Curve_2(geom),
+    )
+    // Split/profile splines retain an exact trimmed OC curve. Rebuilding one
+    // from the two stored boundary points would turn it into a straight line.
+    spline.preserveGeometry = true
+    spline.id = id
+    return spline
   }
 
   static clampedKnots(n, degree) {
@@ -566,10 +611,24 @@ export class Spline extends SketchElement {
 
   flip() {
     this.points.reverse()
+    if(this.preserveGeometry) {
+      this.geom().get().Reverse()
+      return
+    }
     this.update()
   }
 
   _clone() {
+    if(this.preserveGeometry) {
+      const geom = this.geom().get()
+      return Spline.fromGeometry(new window.oc.oc.Geom2d_TrimmedCurve(
+        this.geom(),
+        geom.FirstParameter(),
+        geom.LastParameter(),
+        true,
+        true,
+      ))
+    }
     return new Spline([...this.points])
   }
 

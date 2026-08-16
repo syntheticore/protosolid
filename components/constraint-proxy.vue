@@ -114,7 +114,7 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint } from '../js/core/sketch.js'
   import { Line } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
 
@@ -163,7 +163,9 @@
       }]
     }
 
-    if(props.constraint instanceof TouchConstraint || props.constraint instanceof MidpointConstraint) {
+    if(props.constraint instanceof TouchConstraint ||
+      props.constraint instanceof MidpointConstraint ||
+      props.constraint instanceof IntersectionConstraint) {
       const item = props.constraint.items.find(item => item.index !== undefined)
       return [{
         constraint: props.constraint,

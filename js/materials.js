@@ -146,6 +146,17 @@ class Materials {
       color: new THREE.Color('#0070ff'),
     })
 
+    this.uiPoint = new THREE.MeshBasicMaterial({
+      color: new THREE.Color('darkgray'),
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    })
+
+    this.highlightUiPoint = this.uiPoint.clone()
+    this.highlightUiPoint.color.set('#0070ff')
+
     // Surface Materials
     this.surface = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,

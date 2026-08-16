@@ -2,12 +2,45 @@ import * as THREE from 'three'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
-import { Line, Circle, Arc, Spline, SketchElement } from './geom2d.js'
+import { Line, Circle, Arc, Spline, SketchElement, SketchPoint, supportsPointOnCurveConstraint } from './geom2d.js'
 import { Wire, Profile, Edge } from './geom3d.js'
 import { AxisHelper, PointHelper } from './helpers.js'
 import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix, ocPntFromVec, transformGeometry } from './utils.js'
 import { Reference, CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
 import { relativeComponentTransform } from './assembly.js'
+
+function sameCurve(left, right) {
+  if(left === right) return true
+  if(!left || !right) return false
+  if(left.projection || right.projection) return left.projection?.id === right.projection?.id
+  return left.id === right.id
+}
+
+function sameElemRef(left, right) {
+  const leftRef = left.curveRef
+  const rightRef = right.curveRef
+  return left.index === right.index && (
+    sameCurve(left.curve(), right.curve()) ||
+    (leftRef.constructor === rightRef.constructor &&
+      leftRef.componentId === rightRef.componentId &&
+      leftRef.sketchId === rightRef.sketchId &&
+      leftRef.isProjection === rightRef.isProjection &&
+      leftRef.itemId === rightRef.itemId)
+  )
+}
+
+function sameConstraint(left, right) {
+  if(left instanceof Dimension || right instanceof Dimension) return false
+  if(left.constructor !== right.constructor || left.items.length != right.items.length) return false
+  if(left instanceof HorVertConstraint && left.isVertical != right.isVertical) return false
+  const unmatched = [...right.items]
+  return left.items.every(item => {
+    const index = unmatched.findIndex(other => sameElemRef(item, other))
+    if(index == -1) return false
+    unmatched.splice(index, 1)
+    return true
+  })
+}
 
 
 export class SketchOrigin {
@@ -41,16 +74,8 @@ export class Sketch {
   }
 
   addConstraint(constraint) {
-    if(constraint instanceof CoincidentConstraint) {
-      const sameRef = (left, right) => left.index === right.index && left.curve() === right.curve()
-      const existing = this.constraints.find(other =>
-        other instanceof CoincidentConstraint &&
-        other.items.length == 2 &&
-        ((sameRef(other.items[0], constraint.items[0]) && sameRef(other.items[1], constraint.items[1])) ||
-         (sameRef(other.items[0], constraint.items[1]) && sameRef(other.items[1], constraint.items[0])))
-      )
-      if(existing) return existing
-    }
+    const existing = this.constraints.find(other => sameConstraint(other, constraint))
+    if(existing) return existing
     constraint.sketch = this
     this.constraints.push(constraint)
     return constraint
@@ -79,6 +104,52 @@ export class Sketch {
     } else if(elem instanceof Constraint) {
       this.constraints = this.constraints.filter(c => c != elem )
     }
+  }
+
+  findOrCreateIntersectionPoint(curves, position, point) {
+    const sameCurves = constraint => {
+      if(!(constraint instanceof IntersectionConstraint)) return false
+      const pointItem = constraint.items.find(item => item.index !== undefined)
+      const curveItems = constraint.items.filter(item => item.index === undefined)
+      const constrainedPoint = pointItem && pointItem.curve()
+      return curveItems.length == curves.length && constrainedPoint &&
+        curves.every(curve => curveItems.some(item => sameCurve(item.curve(), curve))) &&
+        constrainedPoint.center().almost(position)
+    }
+    const existingConstraint = this.constraints.find(sameCurves)
+    if(existingConstraint) return existingConstraint.items.find(item => item.index !== undefined).curve()
+
+    point = point || new SketchPoint(position.clone())
+    if(!this.elements.includes(point)) this.add(point)
+    this.addConstraint(new IntersectionConstraint(
+      new ElemRef(point, 0),
+      ...curves,
+    ))
+    return point
+  }
+
+  dissolvePoint(point, elem, index) {
+    if(point.constraints().some(constraint => constraint instanceof IntersectionConstraint)) return false
+    const replacement = new ElemRef(elem, index)
+    point.constraints().forEach(constraint => {
+      constraint.items.forEach(item => {
+        if(item.curve() != point) return
+        item.curveRef = replacement.curveRef.clone()
+        item.index = replacement.index
+      })
+    })
+    this.constraints = this.constraints.filter(constraint => {
+      if(!(constraint instanceof CoincidentConstraint)) return true
+      return !(constraint.items.length == 2 &&
+        constraint.items[0].curve() == constraint.items[1].curve() &&
+        constraint.items[0].index == constraint.items[1].index)
+    })
+    this.constraints = this.constraints.filter((constraint, index, constraints) =>
+      constraint instanceof Dimension || constraints.findIndex(other => sameConstraint(other, constraint)) == index
+    )
+    point.dissolvedTo = { elem, index }
+    this.remove(point)
+    return true
   }
 
   replaceElement(elem, replacements) {
@@ -328,7 +399,10 @@ export class Sketch {
     const primitives = this.elements.concat(projections).flatMap(elem => {
       let primitives
 
-      if(elem instanceof Line) {
+      if(elem instanceof SketchPoint) {
+        primitives = [{ id: `${id++}`, type: 'point', x: elem.point.x, y: elem.point.y }]
+
+      } else if(elem instanceof Line) {
         const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: elem.projection }
         const p2 = { id: `${id++}`, type: 'point', x: elem.points[1].x, y: elem.points[1].y, fixed: elem.projection }
         const line = { id: `${id++}`, type: 'line', p1_id: p1.id, p2_id: p2.id }
@@ -436,13 +510,16 @@ export class Sketch {
         return { id: `${id++}`, type: c.isVertical ? 'vertical_pp' : 'horizontal_pp', p1_id: pointPrims[0].id, p2_id: pointPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof FixConstraint) {
-        const pointPrims = idMap[c.items[0].curve().id].slice(0, 2)
-        return [
-          { id: `${id++}`, type: 'coordinate_x', p_id: pointPrims[0].id, x: pointPrims[0].x },
-          { id: `${id++}`, type: 'coordinate_y', p_id: pointPrims[0].id, y: pointPrims[0].y },
-          { id: `${id++}`, type: 'coordinate_x', p_id: pointPrims[1].id, x: pointPrims[1].x },
-          { id: `${id++}`, type: 'coordinate_y', p_id: pointPrims[1].id, y: pointPrims[1].y },
-        ]
+        const item = c.items[0]
+        const curve = c.items[0].curve()
+        const pointPrims = item.index !== undefined ?
+          [pointPrimitive(item)]
+          :
+          idMap[curve.id].slice(0, 2)
+        return pointPrims.flatMap(point => [
+          { id: `${id++}`, type: 'coordinate_x', p_id: point.id, x: point.x },
+          { id: `${id++}`, type: 'coordinate_y', p_id: point.id, y: point.y },
+        ])
 
       } else if(c instanceof TouchConstraint) {
         const pointRef = c.items.find(item => item.index !== undefined )
@@ -451,10 +528,10 @@ export class Sketch {
         const pointPrim = pointPrimitive(pointRef)
 
         const curvePrim = idMap[curve.id].slice(-1)[0]
+        if(!pointPrim || !supportsPointOnCurveConstraint(curve)) throw new Error('Unsupported Touch constraint geometry')
         const target = curve instanceof Line ? ['point_on_line_pl', 'l_id'] :
           curve instanceof Circle ? ['point_on_circle', 'c_id'] :
-          curve instanceof Arc ? ['point_on_arc', 'a_id'] : null
-        if(!pointPrim || !target) throw new Error('Unsupported Touch constraint geometry')
+          ['point_on_arc', 'a_id']
         return { id: `${id++}`, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary: c.temporary }
 
       } else if(c instanceof MidpointConstraint) {
@@ -466,6 +543,19 @@ export class Sketch {
           { id: `${id++}`, type: 'point_on_line_pl', p_id: pointPrim.id, l_id: linePrim.id, temporary: c.temporary },
           { id: `${id++}`, type: 'point_on_perp_bisector_pl', p_id: pointPrim.id, l_id: linePrim.id, temporary: c.temporary },
         ]
+
+      } else if(c instanceof IntersectionConstraint) {
+        const pointRef = c.items.find(item => item.index !== undefined)
+        const pointPrim = pointPrimitive(pointRef)
+        return c.items.filter(item => item.index === undefined).map(item => {
+          const curve = item.curve()
+          const curvePrim = idMap[curve.id].slice(-1)[0]
+          if(!supportsPointOnCurveConstraint(curve)) throw new Error('Unsupported Intersection constraint geometry')
+          const target = curve instanceof Line ? ['point_on_line_pl', 'l_id'] :
+            curve instanceof Circle ? ['point_on_circle', 'c_id'] :
+            ['point_on_arc', 'a_id']
+          return { id: `${id++}`, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary: c.temporary }
+        })
 
       } else if(c instanceof PerpendicularConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
@@ -582,7 +672,10 @@ export class Sketch {
     }
 
     this.elements.forEach(elem => {
-      if(elem instanceof Line) {
+      if(elem instanceof SketchPoint) {
+        elem.setHandles([vecFromPrim(idMap[elem.id][0])])
+
+      } else if(elem instanceof Line) {
         const [p1, p2] = idMap[elem.id]
         elem.setHandles([vecFromPrim(p1), vecFromPrim(p2)])
 
@@ -636,6 +729,7 @@ export class ProjectedPoint {
 
   typename() { return 'Point Projection' }
   center() { return this.point }
+  snapPoints() { return [this.point] }
   handles() { return [this.point] }
 }
 
@@ -862,6 +956,12 @@ export class MidpointConstraint extends Constraint {
   typename() { return 'Midpoint Constraint' }
 }
 Serialize.register(MidpointConstraint, 'MidpointConstraint')
+
+export class IntersectionConstraint extends Constraint {
+  static icon = 'crosshairs'
+  typename() { return 'Intersection Constraint' }
+}
+Serialize.register(IntersectionConstraint, 'IntersectionConstraint')
 
 export class PerpendicularConstraint extends Constraint {
   static icon = 'angle-up'

@@ -478,6 +478,9 @@ export class PlanePickTool extends PickTool {
 export class SolidPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['solid'], callback)
+    // Feature-level input predicates still decide whether an inactive solid is
+    // valid. Boolean features use this to accept tools from other components.
+    this.includeInactive = true
   }
 }
 

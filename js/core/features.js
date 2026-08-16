@@ -1256,17 +1256,51 @@ export class BooleanFeature extends Feature {
 
     this.tools = null
     this.keepTools = false
+    this.componentOccurrenceId = doc.activeComponent.id
+  }
+
+  acceptsInput(item) {
+    return item?.typename?.() == 'Solid' || super.acceptsInput(item)
   }
 
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      const tools = references.tools.map(tool => tool.toCompound() )
+      const target = tree.findChild(this.componentOccurrenceId) || comp
+      const inputs = references.tools.map(tool => {
+        const source = tree.findChild(inputComponentId(tool))
+        const external = !!source && source != target
+        let compound = tool.toCompound()
+        if(external) {
+          const relative = worldTransform(target).invert().multiply(worldTransform(source))
+          compound = compound.transform(relative)
+        }
+        return { tool, compound, external }
+      })
+      const tools = inputs.map(input => input.compound)
       const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join') )
-      comp.compound = comp.compound.removeShapes(references.tools).boolean(tool, this.operation)
-      if(this.keepTools) comp.compound = comp.compound.merge(tools)
+      const localTools = inputs.filter(input => !input.external)
+      comp.compound = comp.compound
+        .removeShapes(localTools.map(input => input.tool))
+        .boolean(tool, this.operation)
+      if(this.keepTools && localTools.length) {
+        comp.compound = comp.compound.merge(localTools.map(input => input.compound))
+      }
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
+  }
+
+  dump() {
+    return {
+      ...super.dump(),
+      componentOccurrenceId: this.componentOccurrenceId,
+    }
+  }
+
+  static undump(dump, context) {
+    const feature = super.undump(dump, context)
+    feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
+    return feature
   }
 }
 

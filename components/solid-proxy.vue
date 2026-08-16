@@ -14,7 +14,7 @@
   )
 
   EdgeProxy(
-    v-if="parentActive"
+    v-if="parentActive || projectInactive"
     v-for="edge in solid.edges()"
     :key="edge.tessId"
     :edge="edge"
@@ -32,7 +32,7 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'projectInactive'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')

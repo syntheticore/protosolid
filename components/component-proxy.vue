@@ -16,6 +16,7 @@
       :parent-highlighted="highlighted"
       :parent-selected="selected"
       :parent-transform="transform"
+      :project-inactive="projecting"
     )
 
   //- Sketches
@@ -101,6 +102,7 @@
 
   import * as THREE from 'three'
   import { JointFeature } from '../js/core/features.js'
+  import { ProjectTool } from '../js/tools.js'
 
   const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
@@ -111,6 +113,7 @@
   const active = computed(() => props.parentActive || props.component == props.document.activeComponent || props.document.activeFeature instanceof JointFeature )
   const highlighted = computed(() => props.parentHighlighted || props.component == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.component) )
+  const projecting = computed(() => props.activeTool instanceof ProjectTool )
 
   const transform = computed(() => {
     return (props.parentTransform || new THREE.Matrix4())

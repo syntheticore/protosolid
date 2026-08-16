@@ -323,6 +323,7 @@ export class ProjectTool extends HighlightTool {
     super(component, viewport, ['point', 'axis', 'edge'])
     this.sketch = sketch
     this.localSpace = true
+    this.includeInactive = true
     this.cursor = 'copy'
   }
 

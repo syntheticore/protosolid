@@ -207,6 +207,7 @@
         guides: [],
         widgets: [],
         isOrbiting: false,
+        isPanning: false,
         activeHandle: null,
         hoveredHandle: null,
         activeDimension: null,
@@ -339,6 +340,13 @@
       },
 
       mouseUp: function(e) {
+        if(this.isPanning) {
+          this.isPanning = false
+          this.activeHandle = null
+          this.activeDimension = null
+          this.snapper.reset()
+          return
+        }
         const [vec, coords] = this.snap(e)
         const draggedHandle = this.activeHandle
         if(vec) this.activeTool.mouseUp(vec, coords)
@@ -379,6 +387,15 @@
       mouseDown: function(e) {
         document.activeElement.blur() // Necessary since THREE R123
         if(e.button != 0) return
+        this.isPanning = e.shiftKey
+        if(this.isPanning) {
+          // Shift gives the complete pointer gesture to OrbitControls. This
+          // also clears proxy state when the pan starts over a sketch handle.
+          this.activeHandle = null
+          this.activeDimension = null
+          this.snapper.reset()
+          return
+        }
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, coords, e)
@@ -414,6 +431,7 @@
 
       mouseMove: function(e) {
         if(e.button != 0) return
+        if(this.isPanning) return
         if(this.isOrbiting) return
         if(e.altKey) return
         const [vec, coords] = this.snap(e)

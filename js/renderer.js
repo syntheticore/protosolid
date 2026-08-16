@@ -216,17 +216,17 @@ export default class Renderer {
     this.setView(cameraTarget, vec)
   }
 
-  lookAt(plane) {
+  lookAt(plane, report=true) {
     const normal = new THREE.Vector3(0,0,1).applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(plane))
     const controlsTarget = (this.viewControlsTarget || this.viewControls.target)
     const dir = (this.cameraTarget || this.camera.position).clone().sub(controlsTarget).projectOnVector(normal)
     const position = controlsTarget.clone().add(dir)
     const target = controlsTarget.clone()
     this.setView(position, target)
-    this.reportViewChange()
+    if(report) this.reportViewChange()
   }
 
-  zoomToFit(objects) {
+  zoomToFit(objects, report=true) {
     objects ||= [this.world]
     const box = new THREE.Box3()
     objects.forEach(obj => box.expandByObject(obj) )
@@ -250,7 +250,7 @@ export default class Renderer {
       const position = target.clone().add(dir)
       this.setView(position, target)
     }
-    this.reportViewChange()
+    if(report) this.reportViewChange()
   }
 
   setView(position, target) {

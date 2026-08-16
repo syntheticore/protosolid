@@ -215,11 +215,13 @@
         activeDimension: null,
         hoveredDimension: null,
         dimensionPreview: null,
+        cameraPreview: null,
       }
     },
 
     watch: {
       document: function(document, oldDocument) {
+        this.cameraPreview = null
         this.registerDocument(this.document, oldDocument)
       },
 
@@ -295,9 +297,32 @@
       this.bus.on('show-picker', this.addPath)
       this.bus.on('clear-pickers', this.clearPaths)
       this.bus.on('activate-tool', this.activateTool)
-      this.bus.on('zoom-all', () => this.zoomToFit() )
-      this.bus.on('zoom-active', () => this.zoomToFit(this.document.activeComponent.compound.solids()) )
-      this.bus.on('zoom-selection', () => this.zoomToFit(this.document.selection.items) )
+      this.bus.on('zoom-all', () => {
+        this.commitCameraPreview()
+        this.zoomToFit()
+      })
+      this.bus.on('zoom-active', () => {
+        this.commitCameraPreview()
+        this.zoomToFit(this.document.activeComponent.compound.solids())
+      })
+      this.bus.on('zoom-selection', () => {
+        this.commitCameraPreview()
+        this.zoomToFit(this.document.selection.items)
+      })
+      this.bus.on('preview-zoom-all', () => this.previewCamera(() => this.zoomToFit([], true)) )
+      this.bus.on('preview-zoom-active', () => this.previewCamera(() =>
+        this.zoomToFit(this.document.activeComponent.compound.solids(), true)
+      ))
+      this.bus.on('preview-zoom-selection', () => this.previewCamera(() =>
+        this.zoomToFit(this.document.selection.items, true)
+      ))
+      this.bus.on('preview-look-at', plane => this.previewCamera(() => {
+        this.renderer.lookAt(plane, false)
+        const sketch = this.document.activeSketch
+        if(sketch && sketch.elements.length) this.zoomToFit(sketch.elements, true)
+      }))
+      this.bus.on('commit-camera-preview', this.commitCameraPreview)
+      this.bus.on('unpreview-camera', this.unpreviewCamera)
       this.bus.on('render-needed', () => this.renderer.render() )
       this.bus.on('preview-feature', this.previewFeature)
       this.bus.on('unpreview-feature', this.unpreviewFeature)
@@ -554,11 +579,32 @@
         this.updateRegions(true)
       },
 
-      zoomToFit: function(objects=[]) {
+      previewCamera: function(action) {
+        if(!this.cameraPreview) {
+          this.cameraPreview = {
+            position: (this.renderer.cameraTarget || this.renderer.camera.position).clone(),
+            target: (this.renderer.viewControlsTarget || this.renderer.viewControls.target).clone(),
+          }
+        }
+        action()
+      },
+
+      commitCameraPreview: function() {
+        this.cameraPreview = null
+      },
+
+      unpreviewCamera: function() {
+        if(!this.cameraPreview) return
+        const view = this.cameraPreview
+        this.cameraPreview = null
+        this.renderer.setView(view.position, view.target)
+      },
+
+      zoomToFit: function(objects=[], preview=false) {
         const solidFaces = objects.filter(sel => sel instanceof Solid ).flatMap(solid => solid.faces() )
         const rest = objects.filter(sel => sel instanceof Face || sel instanceof SketchElement )
         const meshes = solidFaces.concat(rest).map(obj => obj.mesh && obj.mesh() ).filter(Boolean)
-        this.renderer.zoomToFit(meshes.length && meshes)
+        this.renderer.zoomToFit(meshes.length && meshes, !preview)
       },
 
       elementChanged: function() {

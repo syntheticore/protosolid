@@ -34,18 +34,38 @@
 
         .flex.gap
 
-          IconButton(icon="camera" @click="bus.emit('zoom-all')" title="Fit All")
+          IconButton(
+            icon="camera"
+            title="Fit All"
+            @mouseenter="bus.emit('preview-zoom-all')"
+            @mouseleave="bus.emit('unpreview-camera')"
+            @click="bus.emit('zoom-all')"
+          )
 
-          IconButton(icon="crop-alt" @click="bus.emit('zoom-active')" title="Fit Active")
+          IconButton(
+            icon="crop-alt"
+            title="Fit Active"
+            @mouseenter="bus.emit('preview-zoom-active')"
+            @mouseleave="bus.emit('unpreview-camera')"
+            @click="bus.emit('zoom-active')"
+          )
 
           IconButton(
             v-if="document.selection.items.length"
             icon="search-plus"
             title="Fit Selection"
+            @mouseenter="bus.emit('preview-zoom-selection')"
+            @mouseleave="bus.emit('unpreview-camera')"
             @click="bus.emit('zoom-selection')"
           )
 
-        IconButton(icon="solar-panel" @click="lookAtPlane" title="Look at nearest plane")
+        IconButton(
+          icon="solar-panel"
+          title="Look at nearest plane"
+          @mouseenter="lookAtPlane(true)"
+          @mouseleave="bus.emit('unpreview-camera')"
+          @click="lookAtPlane()"
+        )
 
 
       h1 DISPLAY
@@ -257,7 +277,7 @@
     },
 
     methods: {
-      lookAtPlane: function() {
+      lookAtPlane: function(preview=false) {
         let plane
         if(this.document.activeSketch) {
           plane = this.document.activeSketch.workplane
@@ -270,7 +290,12 @@
           normal[i] = Math.sign(forward[i])
           plane = rotationFromNormal(new THREE.Vector3().fromArray(normal))
         }
-        this.document.emit('look-at', plane)
+        if(preview) {
+          this.bus.emit('preview-look-at', plane)
+        } else {
+          this.bus.emit('commit-camera-preview')
+          this.document.emit('look-at', plane)
+        }
       },
 
       keyDown: function(keyCode) {

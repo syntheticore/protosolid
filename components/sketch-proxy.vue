@@ -140,8 +140,8 @@
   const profiles = ref([])
   let fresh = true
 
-  watch(() => props.sketch.profileUpdateNeeded, () => {
-    if(!props.sketch.profileUpdateNeeded && !fresh) return
+  watch([() => props.sketch, () => props.sketch.profileUpdateNeeded], ([sketch, updateNeeded], [oldSketch] = []) => {
+    if(!updateNeeded && sketch == oldSketch && !fresh) return
     solve()
     profiles.value = props.sketch.profiles(props.component)
     props.sketch.profileUpdateNeeded = false

@@ -457,6 +457,16 @@ export class Sketch {
         if(!pointPrim || !target) throw new Error('Unsupported Touch constraint geometry')
         return { id: `${id++}`, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary: c.temporary }
 
+      } else if(c instanceof MidpointConstraint) {
+        const pointRef = c.items.find(item => item.index !== undefined)
+        const lineRef = c.items.find(item => item.index === undefined)
+        const pointPrim = pointPrimitive(pointRef)
+        const linePrim = idMap[lineRef.curve().id].slice(-1)[0]
+        return [
+          { id: `${id++}`, type: 'point_on_line_pl', p_id: pointPrim.id, l_id: linePrim.id, temporary: c.temporary },
+          { id: `${id++}`, type: 'point_on_perp_bisector_pl', p_id: pointPrim.id, l_id: linePrim.id, temporary: c.temporary },
+        ]
+
       } else if(c instanceof PerpendicularConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
@@ -846,6 +856,12 @@ export class TouchConstraint extends Constraint {
   typename() { return 'Touch Constraint' }
 }
 Serialize.register(TouchConstraint, 'TouchConstraint')
+
+export class MidpointConstraint extends Constraint {
+  static icon = 'compress'
+  typename() { return 'Midpoint Constraint' }
+}
+Serialize.register(MidpointConstraint, 'MidpointConstraint')
 
 export class PerpendicularConstraint extends Constraint {
   static icon = 'angle-up'

@@ -23,6 +23,7 @@ import { PointHelper } from './core/helpers.js'
 import {
   CoincidentConstraint,
   TouchConstraint,
+  MidpointConstraint,
   PerpendicularConstraint,
   HorVertConstraint,
   ParallelConstraint,
@@ -72,9 +73,9 @@ class Tool {
 }
 
 function captureSnap(snapper) {
-  const { curve, pointTarget } = snapper.snapped || {}
-  if(curve) return { curve }
-  return pointTarget
+  const { curve, pointTarget, x, y } = snapper.snapped || {}
+  if(!(curve || pointTarget || x || y)) return
+  return { ...pointTarget, curve, x, y }
 }
 
 function isConstrainablePoint(elem, index) {
@@ -91,15 +92,21 @@ function isTouchPoint(elem, index) {
 
 function addCapturedSnapConstraint(sketch, snap, elem, index) {
   if(!snap || !isConstrainablePoint(elem, index)) return
+  if(snap.midpoint && snap.elem instanceof Line && snap.elem != elem) return sketch.addConstraint(
+    new MidpointConstraint(new ElemRef(elem, index), snap.elem)
+  )
   if(snap.curve && snap.curve != elem) {
     if(!isTouchPoint(elem, index)) return
     const existing = sketch.constraints.find(constraint =>
+      constraint instanceof TouchConstraint &&
       constraint.items.some(item => item.curve() == elem && item.index == index) &&
       constraint.items.some(item => item.curve() == snap.curve)
     )
-    return existing || sketch.addConstraint(
+    const touch = existing || sketch.addConstraint(
       new TouchConstraint(new ElemRef(elem, index), snap.curve)
     )
+    addCapturedGuideConstraints(sketch, snap, elem, index)
+    return touch
   }
   if(snap.elem && snap.elem != elem && snap.index != -1) return sketch.addConstraint(
     new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(snap.elem, snap.index))
@@ -109,6 +116,36 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
   if(origin) return sketch.addConstraint(
     new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(origin))
   )
+}
+
+function addCapturedGuideConstraints(sketch, snap, elem, index) {
+  ;[['x', snap.x], ['y', snap.y]].forEach(([axis, guidePoint]) => {
+    if(!guidePoint) return
+    const ref = new ElemRef(elem, index)
+    let target
+    if(guidePoint.almost(sketch.originPoint())) {
+      target = new ElemRef(sketch.origin())
+    } else {
+      const candidates = [
+        ...sketch.elements,
+        ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+      ]
+      for(const candidate of candidates) {
+        const targetIndex = candidate.handles().findIndex(handle => handle.almost(guidePoint))
+        if(targetIndex == -1) continue
+        if(candidate == elem) {
+          if(elem instanceof Line && targetIndex != index) target = elem
+        } else if(isConstrainablePoint(candidate, targetIndex)) {
+          target = new ElemRef(candidate, targetIndex)
+        }
+        if(target) break
+      }
+    }
+    if(!target) return
+    const constraint = new HorVertConstraint(ref, ...(target instanceof ElemRef ? [target] : []))
+    constraint.isVertical = axis == 'x'
+    sketch.addConstraint(constraint)
+  })
 }
 
 function addCoincidentAtPosition(sketch, elem, index, position) {

@@ -46,6 +46,34 @@ function closestPointOnCurve(elem, point) {
   }
 }
 
+function curveGuideIntersections(elem, guidePoint, axis) {
+  if(elem instanceof Line) {
+    const [start, end] = elem.endpoints()
+    const delta = end.clone().sub(start)
+    const denominator = axis == 'x' ? delta.x : delta.y
+    if(denominator.almost(0.0)) return []
+    const value = axis == 'x' ? guidePoint.x : guidePoint.y
+    const parameter = (value - (axis == 'x' ? start.x : start.y)) / denominator
+    if(parameter < 0.0 || parameter > 1.0) return []
+    return [start.clone().addScaledVector(delta, parameter)]
+  }
+
+  const center = elem.center()
+  const value = axis == 'x' ? guidePoint.x : guidePoint.y
+  const offset = value - (axis == 'x' ? center.x : center.y)
+  const remainder = elem.radius * elem.radius - offset * offset
+  if(remainder < 0.0) return []
+  const span = Math.sqrt(Math.max(0.0, remainder))
+  const points = [-span, span].map(other => axis == 'x' ?
+    new THREE.Vector3(value, center.y + other, center.z)
+    :
+    new THREE.Vector3(center.x + other, value, center.z)
+  )
+  const unique = points.filter((point, index) => !index || !point.almost(points[0]))
+  if(elem instanceof Circle) return unique
+  return unique.filter(point => closestPointOnCurve(elem, point).almost(point))
+}
+
 export default class Snapper {
   constructor(viewport, updateView) {
     this.viewport = viewport
@@ -123,6 +151,7 @@ export default class Snapper {
         point,
         elem,
         index: elem.handles().findIndex(handle => handle.almost(point)),
+        midpoint: elem instanceof Line && point.almost(elem.midpoint()),
       }))
     )
     const origin = sketch.originPoint()
@@ -144,7 +173,7 @@ export default class Snapper {
         guidePointDist = dist
         guidePointTarget = target
       }
-      if((target.origin || target.index != -1) && dist < snapDistance && dist < pointDist) {
+      if((target.origin || target.index != -1 || target.midpoint) && dist < snapDistance && dist < pointDist) {
         pointDist = dist
         pointTarget = target
       }
@@ -189,6 +218,19 @@ export default class Snapper {
     )
   }
 
+  curveGuideSnap(curve, guideSnapPoints, coords) {
+    let closest
+    guideSnapPoints.forEach(guidePoint => ['x', 'y'].forEach(axis => {
+      curveGuideIntersections(curve, guidePoint, axis).forEach(point => {
+        const worldPoint = point.clone().applyMatrix4(this.planeTransform)
+        const distance = this.viewport.renderer.toScreen(worldPoint).distanceTo(coords)
+        if(distance >= snapDistance || (closest && distance >= closest.distance)) return
+        closest = { point, distance, [axis]: guidePoint }
+      })
+    }))
+    return closest
+  }
+
   snapToGuides(vec, snapToGuides, snapToPoints) {
     if(!vec) return
 
@@ -200,21 +242,34 @@ export default class Snapper {
     const snapTarget = snapToPoints &&
       this.catchSnapTargets(localVec, this.viewport.renderer.toScreen(vec))
 
+    const screenVec = this.viewport.renderer.toScreen(vec)
+    const guideSnapPoints = this.getGuideSnapPoints()
+
     if(snapTarget && snapTarget.elem) {
-      const snapVec = snapTarget.point
+      const guideSnap = snapToGuides && this.curveGuideSnap(snapTarget.elem, guideSnapPoints, screenVec)
+      const snapVec = guideSnap ? guideSnap.point : snapTarget.point
       const worldSnapVec = snapVec.clone().applyMatrix4(this.planeTransform)
-      this.snapped = { curve: snapTarget.elem }
+      this.snapped = { curve: snapTarget.elem, ...guideSnap }
+      delete this.snapped.point
+      delete this.snapped.distance
       this.snapAnchor = {
         type: 'snap',
         pos: this.viewport.renderer.toScreen(worldSnapVec),
         vec: worldSnapVec,
         id: 'curve-' + snapTarget.elem.id,
       }
+      if(guideSnap) {
+        const guidePoint = guideSnap.x || guideSnap.y
+        const start = this.viewport.renderer.toScreen(guidePoint.clone().applyMatrix4(this.planeTransform))
+        this.guides.push({
+          id: (guideSnap.x ? 'v' : 'h') + start.x + start.y,
+          start,
+          end: this.viewport.renderer.toScreen(worldSnapVec),
+        })
+      }
       return snapVec
     }
 
-    const screenVec = this.viewport.renderer.toScreen(vec)
-    const guideSnapPoints = this.getGuideSnapPoints()
     let snapX = guideSnapPoints.find(snap => {
       // Compare plane space X axis..
       const testSnap = snap.clone()//.applyMatrix4(localTransform)

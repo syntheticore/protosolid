@@ -114,7 +114,7 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint, TouchConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint } from '../js/core/sketch.js'
   import { Line } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
 
@@ -163,7 +163,7 @@
       }]
     }
 
-    if(props.constraint instanceof TouchConstraint) {
+    if(props.constraint instanceof TouchConstraint || props.constraint instanceof MidpointConstraint) {
       const item = props.constraint.items.find(item => item.index !== undefined)
       return [{
         constraint: props.constraint,
@@ -181,7 +181,11 @@
       return {
         constraint: props.constraint,
         curve,
-        pos: transformPosition((props.constraint.position && props.constraint.position.clone()) || (props.constraint.items.length == 1 ?
+        offset: item.index !== undefined ? { x: 11, y: -11 } : undefined,
+        pos: transformPosition((props.constraint.position && props.constraint.position.clone()) || (item.index !== undefined ?
+          point(item, true)
+          :
+          props.constraint.items.length == 1 ?
           point(item)
           :
           point(item).clone()

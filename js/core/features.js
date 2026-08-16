@@ -14,6 +14,7 @@ import {
   baselineWorldTransform,
   jointFrame,
   referenceComponentId,
+  relativeComponentTransform,
   setBaselineWorldTransform,
   worldTransform,
 } from './assembly.js'
@@ -26,6 +27,7 @@ export class Feature {
     this.settings = settings
     this.error = null
     this.componentId = this.document.activeComponent.sourceId()
+    this.componentOccurrenceId = this.document.activeComponent.id
     this.id = makeID()
 
     if(!booleanOutput) return
@@ -207,6 +209,7 @@ export class Feature {
     return {
       id: this.id,
       componentId: this.componentId,
+      componentOccurrenceId: this.componentOccurrenceId,
       values: this.getValues(),
     }
   }
@@ -215,6 +218,7 @@ export class Feature {
     const feature = new this(context.document)
     feature.id = dump.id
     feature.componentId = dump.componentId
+    feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     feature.setValues(dump.values)
     return feature
   }
@@ -439,6 +443,7 @@ export class PoseFeature extends Feature {
     const feature = new PoseFeature(context.document, dump.transforms)
     feature.id = dump.id
     feature.componentId = dump.componentId
+    feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     return feature
   }
 }
@@ -714,9 +719,9 @@ export class CreateComponentInstanceFeature extends Feature {
   dump() { return { ...super.dump(), sourceId: this.sourceId, parentId: this.parentId } }
 
   static undump(dump, context) {
-    const feature = new CreateComponentInstanceFeature(context.document, dump.sourceId, dump.parentId)
-    feature.id = dump.id
-    feature.componentId = dump.componentId
+    const feature = super.undump(dump, context)
+    feature.sourceId = dump.sourceId
+    feature.parentId = dump.parentId
     return feature
   }
 }
@@ -734,7 +739,6 @@ export class CreateSketchFeature extends Feature {
       },
     })
 
-    this.componentOccurrenceId = doc.activeComponent.id
     this.plane = null
 
     this.sketch = new Sketch()
@@ -751,8 +755,7 @@ export class CreateSketchFeature extends Feature {
     const source = sourceId && tree.findChild(sourceId)
     const target = tree.findChild(this.componentOccurrenceId) || tree.findChild(this.componentId)
     if(source && target && source != target) {
-      const relative = worldTransform(target).invert().multiply(worldTransform(source))
-      plane = relative.multiply(plane)
+      plane = relativeComponentTransform(source, target).multiply(plane)
     }
     this.sketch.workplane = plane
     tree.findChild(this.componentId).sketches.push(this.sketch)
@@ -771,7 +774,6 @@ export class CreateSketchFeature extends Feature {
     return {
       ...super.dump(),
       sketch: this.sketch,
-      componentOccurrenceId: this.componentOccurrenceId,
     }
   }
 
@@ -779,7 +781,6 @@ export class CreateSketchFeature extends Feature {
     const feature = super.undump(dump, context)
     feature.sketch = dump.sketch
     feature.sketch.creator = feature
-    feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     return feature
   }
 }
@@ -1256,7 +1257,6 @@ export class BooleanFeature extends Feature {
 
     this.tools = null
     this.keepTools = false
-    this.componentOccurrenceId = doc.activeComponent.id
   }
 
   acceptsInput(item) {
@@ -1272,8 +1272,7 @@ export class BooleanFeature extends Feature {
         const external = !!source && source != target
         let compound = tool.toCompound()
         if(external) {
-          const relative = worldTransform(target).invert().multiply(worldTransform(source))
-          compound = compound.transform(relative)
+          compound = compound.transform(relativeComponentTransform(source, target))
         }
         return { tool, compound, external }
       })
@@ -1290,18 +1289,6 @@ export class BooleanFeature extends Feature {
     } catch(err) { this.error = err || this.error }
   }
 
-  dump() {
-    return {
-      ...super.dump(),
-      componentOccurrenceId: this.componentOccurrenceId,
-    }
-  }
-
-  static undump(dump, context) {
-    const feature = super.undump(dump, context)
-    feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
-    return feature
-  }
 }
 
 Serialize.register(BooleanFeature, 'BooleanFeature')

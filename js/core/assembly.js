@@ -16,6 +16,14 @@ export function worldTransform(component) {
   return component.parent ? worldTransform(component.parent).multiply(local) : local
 }
 
+// Transform geometry expressed in source-local coordinates into target-local
+// coordinates. Callers remain responsible for transforming their geometry
+// type (BRep shape, point, plane, and so on).
+export function relativeComponentTransform(source, target) {
+  if(source == target) return IDENTITY()
+  return worldTransform(target).invert().multiply(worldTransform(source))
+}
+
 export function baselineWorldTransform(component) {
   const local = (component.designTransform || IDENTITY()).clone()
   return component.parent ? baselineWorldTransform(component.parent).multiply(local) : local

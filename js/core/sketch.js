@@ -7,7 +7,7 @@ import { Wire, Profile, Edge } from './geom3d.js'
 import { AxisHelper, PointHelper } from './helpers.js'
 import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix, ocPntFromVec, transformGeometry } from './utils.js'
 import { Reference, CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
-import { worldTransform } from './assembly.js'
+import { relativeComponentTransform } from './assembly.js'
 
 
 export class SketchOrigin {
@@ -705,11 +705,12 @@ export class Projection {
   relativeTransform(tree) {
     const sourceId = this.itemRef instanceof ElemRef ?
       this.itemRef.curveRef.componentId : this.itemRef.componentId
-    const targetId = this.sketch.component?.id || this.sketch.creator.componentId
+    const targetId = this.sketch.creator.componentOccurrenceId ||
+      this.sketch.component?.id || this.sketch.creator.componentId
     const source = tree.findChild(sourceId)
     const target = tree.findChild(targetId)
     if(!source || !target) return new THREE.Matrix4()
-    return worldTransform(target).invert().multiply(worldTransform(source))
+    return relativeComponentTransform(source, target)
   }
 
   geometry() { return this.output }

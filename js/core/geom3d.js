@@ -259,8 +259,21 @@ export class Profile {
   }
 
   update() {
-    const cutElements = this.sketch.elements.flatMap(elem => elem.split(this.sketch.elements) )
+    const elements = this.sketch.profileElements()
+    const cutElements = elements.flatMap(elem => elem.split(elements) )
     const newWires = this.sketch.getWires(cutElements, false)
+
+    if(this.serializedRingIds) {
+      const rings = this.serializedRingIds.map(ring =>
+        ring.map(segId => cutElements.find(elem => elem.id == segId))
+      )
+      if(rings.some(ring => ring.some(seg => !seg))) {
+        return { type: 'error', msg: "Profile was lost" }
+      }
+      this.rings = rings.map(ring => new Wire(ring))
+      this.serializedRingIds = null
+    }
+
     let wasRepairNeeded = false
     let error
     this.rings = this.rings.map(wire => {
@@ -294,6 +307,7 @@ export class Profile {
   clone() {
     const clone = new Profile(this.sketch, [...this.rings])
     clone.id = this.id
+    clone.serializedRingIds = this.serializedRingIds
     return clone
   }
 }

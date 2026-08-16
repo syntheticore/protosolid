@@ -128,12 +128,19 @@ export class Sketch {
   }
 
   profiles(comp, includeOuter) {
-    const elements = this.removeEmpties(this.elements)
+    const elements = this.profileElements()
     const cutElements = elements.flatMap(elem => elem.split(elements) )
     const wires = this.getWires(cutElements, includeOuter)
     const profiles = this.buildProfiles(comp, wires)
 
     return profiles
+  }
+
+  profileElements() {
+    const projections = this.projections
+      .map(projection => projection.geometry())
+      .filter(elem => elem instanceof SketchElement)
+    return this.removeEmpties([...this.elements, ...projections])
   }
 
   removeEmpties(elements) {
@@ -626,6 +633,7 @@ export class ProjectedPoint {
 export class Projection {
   constructor(itemOrRef) {
     this.id = makeID()
+    this.isReference = false
     this.itemRef = itemOrRef instanceof Edge ?
       new EdgeReference(itemOrRef)
       :
@@ -650,10 +658,7 @@ export class Projection {
       point.z = 0
       const suffix = isElementPoint ? `/${this.itemRef.index}` : ''
       const elem = new ProjectedPoint(point, item.id + suffix + '/projected')
-      elem.sketch = this.sketch
-      elem.projection = this
-      this.output = elem
-      return elem
+      return this.updateOutput(elem)
     }
 
     let curve
@@ -691,15 +696,30 @@ export class Projection {
 
     if(constructor) {
       const elem = constructor.fromGeometry(trimmed, item.id + '/projected')
-      elem.sketch = this.sketch
-      elem.projection = this
-      this.output = elem
+      return this.updateOutput(elem)
 
     } else {
       console.error(`Could not project ${project.getType().constructor} from ${curve.constructor}`)
     }
 
     return this.output
+  }
+
+  updateOutput(elem) {
+    const existing = this.output
+    if(existing && existing.constructor == elem.constructor) {
+      if(existing instanceof SketchElement) existing.clear()
+      Object.assign(existing, elem)
+      elem = existing
+    } else if(existing instanceof SketchElement) {
+      existing.clear()
+    }
+
+    elem.sketch = this.sketch
+    elem.projection = this
+    if(elem instanceof SketchElement) elem.isReference = this.isReference
+    this.output = elem
+    return elem
   }
 
   relativeTransform(tree) {
@@ -719,12 +739,14 @@ export class Projection {
     return {
       id: this.id,
       itemRef: this.itemRef,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const projection = new Projection(dump.itemRef)
     projection.id = dump.id || projection.id
+    projection.isReference = dump.isReference || false
     return projection
   }
 }

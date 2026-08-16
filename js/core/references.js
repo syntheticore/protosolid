@@ -299,7 +299,8 @@ export class ProfileReference extends Reference {
     return {
       id: this.item.id,
       sketchId: this.item.sketch.id,
-      rings: this.item.rings.map(wire => wire.segments.map(seg => seg.id) )
+      rings: this.item.serializedRingIds ||
+        this.item.rings.map(wire => wire.segments.map(seg => seg.id) )
     }
   }
 
@@ -309,13 +310,15 @@ export class ProfileReference extends Reference {
     // elements (for example, `circle-id/0`), not necessarily to the original
     // elements stored on the sketch. Recreate those segments before resolving
     // the saved ring IDs.
-    const elements = sketch.removeEmpties(sketch.elements)
+    const elements = sketch.profileElements()
     const segments = elements.flatMap(elem => elem.split(elements))
-    const rings = dump.rings.map(ring => {
-      const region = ring.map(segId => segments.find(elem => elem.id == segId))
-      return new Wire(region)
-    })
+    const regions = dump.rings.map(ring =>
+      ring.map(segId => segments.find(elem => elem.id == segId))
+    )
+    const resolved = !regions.some(region => region.some(seg => !seg))
+    const rings = resolved ? regions.map(region => new Wire(region)) : []
     const profile = new Profile(sketch, rings)
+    if(!resolved) profile.serializedRingIds = dump.rings
     profile.id = dump.id
     return new ProfileReference(profile)
   }

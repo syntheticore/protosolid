@@ -510,6 +510,7 @@
             .filter(item => item instanceof SketchElement )
             .forEach(elem => {
               elem.isReference = !elem.isReference
+              if(elem.projection) elem.projection.isReference = elem.isReference
               elem.sketch.profileUpdateNeeded = true
             })
         }

@@ -29,6 +29,7 @@
           NumberInput(
             v-if="setting.type == 'length' || setting.type == 'angle'"
             :component="document.top()"
+            :dimension="setting.type"
             v-model:value="activeFeature[key]"
             :auto-focus="setting.autoFocus !== false && activeFeature.isSettingVisible(setting)"
             @update:value="update"

@@ -27,6 +27,10 @@
 
     props: {
       component: Object,
+      dimension: {
+        type: String,
+        default: 'length',
+      },
       value: Number,
       autoFocus: Boolean,
       focusOnMount: Boolean,
@@ -36,7 +40,7 @@
 
     data() {
       return {
-        inner: new Expression(this.value, this.component.getParameters()),
+        inner: new Expression(this.value, this.component.getParameters(), this.dimension),
         problem: false,
       }
     },

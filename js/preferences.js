@@ -4,6 +4,7 @@ const emitter = createNanoEvents()
 
 const preferences = {
   preferredUnit: 'mm',
+  preferredAngleUnit: 'deg',
   modelingKernel: 'shapex',
   highDPI: true,
   antiAlias: true,

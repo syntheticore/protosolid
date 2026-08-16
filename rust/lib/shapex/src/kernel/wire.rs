@@ -319,33 +319,63 @@ fn validate_no_self_intersection(
         .iter()
         .map(|segment| segment.polyline(tolerance))
         .collect::<KernelResult<Vec<_>>>()?;
-    for first_segment in 0..polylines.len() {
-        for second_segment in first_segment..polylines.len() {
-            let adjacent = second_segment == first_segment
-                || second_segment == first_segment + 1
-                || (first_segment == 0 && second_segment + 1 == polylines.len());
-            for first in polylines[first_segment].windows(2) {
-                for second in polylines[second_segment].windows(2) {
-                    if adjacent
-                        && (first[0].distance(second[0]) <= tolerance.linear
-                            || first[0].distance(second[1]) <= tolerance.linear
-                            || first[1].distance(second[0]) <= tolerance.linear
-                            || first[1].distance(second[1]) <= tolerance.linear)
-                    {
-                        continue;
-                    }
-                    if segments_intersect(
-                        first[0],
-                        first[1],
-                        second[0],
-                        second[1],
-                        tolerance.linear,
-                    ) {
-                        return Err(invalid("wire must not self-intersect"));
-                    }
-                }
+    #[derive(Clone, Copy)]
+    struct PolylineEdge {
+        start: Point2,
+        end: Point2,
+        min_x: f64,
+        max_x: f64,
+        min_y: f64,
+        max_y: f64,
+    }
+
+    let mut edges = Vec::new();
+    for polyline in &polylines {
+        edges.extend(polyline.windows(2).map(|edge| PolylineEdge {
+            start: edge[0],
+            end: edge[1],
+            min_x: edge[0].x.min(edge[1].x),
+            max_x: edge[0].x.max(edge[1].x),
+            min_y: edge[0].y.min(edge[1].y),
+            max_y: edge[0].y.max(edge[1].y),
+        }));
+    }
+
+    // A quadratic all-pairs scan becomes pathological for exact circles at a
+    // tight model tolerance. Sweep along X and retain only edges whose bounding
+    // boxes can still overlap. This preserves the same geometric test while a
+    // normal curved profile now validates in approximately linear time.
+    let mut order = (0..edges.len()).collect::<Vec<_>>();
+    order.sort_by(|first, second| edges[*first].min_x.total_cmp(&edges[*second].min_x));
+    let mut active = Vec::<usize>::new();
+    for current_index in order {
+        let current = edges[current_index];
+        active.retain(|candidate| edges[*candidate].max_x + tolerance.linear >= current.min_x);
+        for candidate_index in &active {
+            let candidate = edges[*candidate_index];
+            if candidate.max_y + tolerance.linear < current.min_y
+                || current.max_y + tolerance.linear < candidate.min_y
+            {
+                continue;
+            }
+            let shares_endpoint = candidate.start.distance(current.start) <= tolerance.linear
+                || candidate.start.distance(current.end) <= tolerance.linear
+                || candidate.end.distance(current.start) <= tolerance.linear
+                || candidate.end.distance(current.end) <= tolerance.linear;
+            if shares_endpoint {
+                continue;
+            }
+            if segments_intersect(
+                candidate.start,
+                candidate.end,
+                current.start,
+                current.end,
+                tolerance.linear,
+            ) {
+                return Err(invalid("wire must not self-intersect"));
             }
         }
+        active.push(current_index);
     }
     Ok(())
 }

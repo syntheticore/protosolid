@@ -23,9 +23,9 @@
           span Length
 
         label
-          select.input
-            option °
-            option Radians
+          select.input(v-model="preferences.preferredAngleUnit")
+            option(value="deg") °
+            option(value="rad") Radians
           span Angle
 
         label

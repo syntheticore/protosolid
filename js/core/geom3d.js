@@ -232,18 +232,24 @@ export class Profile {
 
   revolve(componentId, axis, angle, featureId) {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
-    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('revolve')
+    if(window.kernel.modeling.id == 'shapex') {
+      const geometry = window.kernel.modeling.revolve(this, axis, angle)
+      return new Compound(componentId, geometry).inheritShapexTopology([], 'revolve', featureId)
+    }
     const face = this.makeFace()
     const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true) //XXX BRepFeat_MakeRevol
     return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId)
   }
 
-  loft(componentId, others, untwist) {
-    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('loft')
+  loft(componentId, others, untwist, featureId) {
     const profiles = [this, ...others]
     if(profiles.some(profile => profile.rings.length != 1)) {
       throw { type: 'error', msg: 'Loft profiles with holes are not supported' }
+    }
+    if(window.kernel.modeling.id == 'shapex') {
+      const geometry = window.kernel.modeling.loft(profiles, untwist)
+      return new Compound(componentId, geometry).inheritShapexTopology([], 'loft', featureId)
     }
 
     const wires = profiles.map(profile =>
@@ -519,7 +525,7 @@ export class Face extends Shape {
   tesselate() {
     if(this.cachedTesselation) return this.cachedTesselation
     if(this.solid.compound.isShapex) {
-      this.cachedTesselation = window.kernel.modeling.mesh(this.geom())
+      this.cachedTesselation = this.solid.shapexFaceTessellation(this)
       return this.cachedTesselation
     }
     const location = new window.oc.oc.TopLoc_Location_1()
@@ -562,6 +568,11 @@ export class Edge extends Shape {
 
   edgeReference() {
     return new EdgeReference(this)
+  }
+
+  isSemantic() {
+    return !this.solid.compound.isShapex
+      || this.solid.compound.geom().isSemanticEdge(this.geom())
   }
 
   getAxis() {
@@ -670,6 +681,62 @@ export class Solid extends Volumetric {
     this.cachedEdges = this.collectShapes('edge')
     this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
     return this.cachedEdges
+  }
+
+  shapexFaceTessellation(face) {
+    if(!this.cachedShapexFaceTessellations) {
+      const faces = this.faces()
+      const parent = new Map(faces.map(candidate => [candidate.kernelId, candidate.kernelId]))
+      const find = id => {
+        let root = id
+        while(parent.get(root) != root) root = parent.get(root)
+        while(parent.get(id) != id) {
+          const next = parent.get(id)
+          parent.set(id, root)
+          id = next
+        }
+        return root
+      }
+      const join = (first, second) => {
+        const a = find(first)
+        const b = find(second)
+        if(a != b) parent.set(b, a)
+      }
+      this.edges().filter(edge => !edge.isSemantic()).forEach(edge => {
+        const connected = edge.connectedFaces()
+        if(connected.length == 2) join(connected[0].kernelId, connected[1].kernelId)
+      })
+
+      const meshes = new Map(faces.map(candidate => [
+        candidate.kernelId,
+        window.kernel.modeling.mesh(candidate.geom()),
+      ]))
+      const sums = new Map()
+      const vertexKey = (candidate, position) => [
+        find(candidate.kernelId),
+        position[0].toFixed(7),
+        position[1].toFixed(7),
+        position[2].toFixed(7),
+      ].join('/')
+      faces.forEach(candidate => {
+        const mesh = meshes.get(candidate.kernelId)
+        for(let index = 0; index < mesh.positions.length; index += 3) {
+          const key = vertexKey(candidate, mesh.positions.slice(index, index + 3))
+          const normal = new THREE.Vector3(...mesh.normals.slice(index, index + 3))
+          sums.set(key, (sums.get(key) || new THREE.Vector3()).add(normal))
+        }
+      })
+      this.cachedShapexFaceTessellations = new Map(faces.map(candidate => {
+        const mesh = meshes.get(candidate.kernelId)
+        const normals = []
+        for(let index = 0; index < mesh.positions.length; index += 3) {
+          const key = vertexKey(candidate, mesh.positions.slice(index, index + 3))
+          normals.push(...sums.get(key).clone().normalize().toArray())
+        }
+        return [candidate.kernelId, { positions: mesh.positions, normals }]
+      }))
+    }
+    return this.cachedShapexFaceTessellations.get(face.kernelId)
   }
 
   cloneCached(newCompound) {
@@ -930,7 +997,15 @@ export class Compound extends Volumetric {
 
   merge(others) {
     if(this.isShapex || others.some(other => other.isShapex)) {
-      window.kernel.modeling.unsupported('disconnected compound merge')
+      if(!this.isShapex || others.some(other => !other.isShapex)) {
+        throw { type: 'error', msg: 'Cannot mix Shapex and OpenCascade bodies' }
+      }
+      const geometry = window.kernel.modeling.combine(
+        this.kernelGeometry,
+        others.map(other => other.kernelGeometry),
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this, ...others], 'combine')
     }
     const compound = new window.oc.oc.TopoDS_Compound()
     const builder = new window.oc.oc.BRep_Builder()
@@ -1026,7 +1101,15 @@ export class Compound extends Volumetric {
   }
 
   fillet(edges, radius) {
-    if(this.isShapex) window.kernel.modeling.unsupported('fillet')
+    if(this.isShapex) {
+      const geometry = window.kernel.modeling.fillet(
+        this.kernelGeometry,
+        edges.map(edge => edge.geom()),
+        radius,
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], 'fillet')
+    }
     const fillet = new window.oc.oc.BRepFilletAPI_MakeFillet(this.geom(), window.oc.oc.ChFi3d_FilletShape.ChFi3d_Rational)
     edges.forEach(edge => {
       fillet.Add_2(radius, edge.geom())
@@ -1042,8 +1125,16 @@ export class Compound extends Volumetric {
   }
 
   offset(openFaces, distance) {
-    if(this.isShapex) window.kernel.modeling.unsupported('offset')
     openFaces ||= []
+    if(this.isShapex) {
+      const geometry = window.kernel.modeling.shell(
+        this.kernelGeometry,
+        openFaces.map(face => face.geom()),
+        distance,
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], 'shell')
+    }
     // Offset each affected solid individually
     try {
       const thickened = this.solids().map(solid => {
@@ -1084,6 +1175,17 @@ export class Compound extends Volumetric {
   }
 
   removeShapes(shapes) {
+    if(this.isShapex) {
+      if(shapes.some(shape => !(shape instanceof Solid))) {
+        window.kernel.modeling.unsupported('removing non-solid shapes')
+      }
+      const geometry = window.kernel.modeling.removeSolids(
+        this.kernelGeometry,
+        shapes.map(shape => shape.geom()),
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], 'remove-solids')
+    }
     return this.reshape('remove-shapes', reshaper => {
       shapes.forEach(shape => {
         // reshaper.Remove(solid instanceof Solid ? solid.geom() : solid)
@@ -1093,6 +1195,19 @@ export class Compound extends Volumetric {
   }
 
   replaceShapes(shapes, replacements, algoName) {
+    if(this.isShapex) {
+      if(shapes.length != 1 || replacements.length != 1
+        || !(shapes[0] instanceof Face) || !(replacements[0] instanceof Face)) {
+        window.kernel.modeling.unsupported('this face replacement')
+      }
+      const geometry = window.kernel.modeling.replaceFace(
+        this.kernelGeometry,
+        shapes[0].geom(),
+        replacements[0].geom(),
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], algoName || 'replace-face')
+    }
     return this.reshape(algoName || 'replace-shapes', reshaper => {
       shapes.forEach((shape, i) => {
         reshaper.Replace(shape.geom(), replacements[i].geom())
@@ -1101,6 +1216,15 @@ export class Compound extends Volumetric {
   }
 
   moveFaces(faces, transform) {
+    if(this.isShapex) {
+      const geometry = window.kernel.modeling.moveFaces(
+        this.kernelGeometry,
+        faces.map(face => face.geom()),
+        transform,
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], 'move-faces')
+    }
     return this.replaceShapes(
       faces,
       faces.map(face => transformGeometry(face.geom(), transform).Shape() ),
@@ -1109,7 +1233,11 @@ export class Compound extends Volumetric {
   }
 
   split(plane, keep, featureId) {
-    if(this.isShapex) window.kernel.modeling.unsupported('split')
+    if(this.isShapex) {
+      const geometry = window.kernel.modeling.split(this.kernelGeometry, plane, keep)
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], 'split', featureId)
+    }
     const left = this.halfCut(plane, true, featureId)
     const right = this.halfCut(plane, false, featureId)
     if(keep == 'both') return left.merge([right])

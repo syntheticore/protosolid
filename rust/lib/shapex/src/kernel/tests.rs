@@ -3,7 +3,7 @@ use cgmath::prelude::*;
 use crate::{Matrix3, Point2, Point3, Vec3};
 
 use super::{
-    BodyId, BooleanKind, Circle3, Curve3, IntersectionSet, Kernel, Line3, MassProperties,
+    Axis3, BodyId, BooleanKind, Circle3, Curve3, IntersectionSet, Kernel, Line3, MassProperties,
     ModelTolerance, NurbsCurve3, NurbsSurface3, Plane3, PolyhedralMesh, Profile, Resolution,
     RigidTransform3, Sphere3, Surface3, TessellationOptions, TrimmedCurve2, Wire2,
 };
@@ -162,6 +162,147 @@ fn profile_with_hole_extrudes_to_the_expected_volume() {
         .extrude(plane, Vec3::new(0.0, 0.0, 2.5))
         .expect("profile should publish");
     assert!((extrusion.volume() - 50.0).abs() < 1.0e-9);
+}
+
+#[test]
+fn semicircular_profile_extrudes_without_pathological_work() {
+    let tolerance = ModelTolerance::default();
+    let radius = 5.0;
+    let outer = Wire2::new(
+        [
+            TrimmedCurve2::arc_through(
+                Point2::new(-radius, 0.0),
+                Point2::new(0.0, -radius),
+                Point2::new(radius, 0.0),
+            )
+            .expect("semicircular arc"),
+            TrimmedCurve2::line(Point2::new(radius, 0.0), Point2::new(-radius, 0.0))
+                .expect("diameter"),
+        ],
+        tolerance,
+    )
+    .expect("semicircular wire");
+    let profile = Profile::new(outer, [], tolerance).expect("semicircular profile");
+    let extrusion = profile
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
+        .expect("semicircular extrusion");
+
+    let expected = 0.5 * std::f64::consts::PI * radius * radius * 10.0;
+    assert!((extrusion.volume() - expected).abs() < 1.0e-8);
+}
+
+#[test]
+fn two_arc_lobe_profile_extrudes() {
+    let tolerance = ModelTolerance::default();
+    let intersection_y = 18.75_f64.sqrt();
+    let top = Point2::new(0.0, intersection_y);
+    let bottom = Point2::new(0.0, -intersection_y);
+    let outer = Wire2::new(
+        [
+            TrimmedCurve2::arc_through(top, Point2::new(-7.5, 0.0), bottom)
+                .expect("outer circular arc"),
+            TrimmedCurve2::arc_through(bottom, Point2::new(-2.5, 0.0), top)
+                .expect("inner circular arc"),
+        ],
+        tolerance,
+    )
+    .expect("two-arc lobe wire");
+    let profile = Profile::new(outer, [], tolerance).expect("two-arc lobe profile");
+    let extrusion = profile
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
+        .expect("two-arc lobe extrusion");
+    assert!(extrusion.volume() > 0.0);
+}
+
+#[test]
+fn adjacent_curved_extrusions_union_across_their_shared_seam() {
+    let tolerance = ModelTolerance::default();
+    let intersection_y = 18.75_f64.sqrt();
+    let top = Point2::new(0.0, intersection_y);
+    let bottom = Point2::new(0.0, -intersection_y);
+    let profile = |first_middle, second_middle| {
+        let wire = Wire2::new(
+            [
+                TrimmedCurve2::arc_through(top, first_middle, bottom).expect("first arc"),
+                TrimmedCurve2::arc_through(bottom, second_middle, top).expect("second arc"),
+            ],
+            tolerance,
+        )
+        .expect("two-arc wire");
+        Profile::new(wire, [], tolerance).expect("two-arc profile")
+    };
+    let lobe = profile(Point2::new(-7.5, 0.0), Point2::new(-2.5, 0.0))
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("left lobe");
+    let lens = profile(Point2::new(2.5, 0.0), Point2::new(-2.5, 0.0))
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("center lens");
+    let joined = lobe.union(&lens).expect("adjacent curved union");
+    assert!(
+        (joined.volume() - std::f64::consts::PI * 25.0 * 20.0).abs() < 1.0e-6,
+        "joined volume was {}",
+        joined.volume()
+    );
+    assert_eq!(joined.faces().count(), 3);
+    assert_eq!(
+        joined
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+            .count(),
+        1
+    );
+    assert!(!joined
+        .tessellate(TessellationOptions::default())
+        .expect("joined cylinder tessellation")
+        .is_empty());
+}
+
+#[test]
+fn curved_extrusion_cuts_a_prismatic_body() {
+    let tolerance = ModelTolerance::default();
+    let block = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(0.0, 0.0),
+                Point2::new(10.0, 0.0),
+                Point2::new(10.0, 10.0),
+                Point2::new(0.0, 10.0),
+            ],
+            tolerance,
+        )
+        .expect("block wire"),
+        [],
+        tolerance,
+    )
+    .expect("block profile")
+    .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
+    .expect("block");
+    let cutter = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(5.0, 5.0), 2.0).expect("circle")],
+            tolerance,
+        )
+        .expect("circle wire"),
+        [],
+        tolerance,
+    )
+    .expect("circle profile")
+    .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
+    .expect("cutter");
+    let cut = block.difference(&cutter).expect("curved cut");
+    assert!(cut.volume() > 0.0);
+    assert!(!cut
+        .tessellate(TessellationOptions::default())
+        .expect("mesh")
+        .is_empty());
+    let intersection = block.intersection(&cutter).expect("curved intersection");
+    assert!(intersection.volume() > 0.0);
+    assert!(!intersection
+        .tessellate(TessellationOptions::default())
+        .expect("intersection mesh")
+        .is_empty());
+    let union = block.union(&cutter).expect("curved contained union");
+    assert!((union.volume() - block.volume()).abs() < 1.0e-3);
 }
 
 #[test]
@@ -557,6 +698,403 @@ fn high_level_profile_extrudes_a_circular_outer_wire() {
         (extrusion.volume() - std::f64::consts::PI * 17.553807290465304_f64.powi(2) * 3.0).abs()
             < 1.0e-7
     );
+}
+
+#[test]
+fn high_level_profile_revolution_is_euler_built_and_certified() {
+    let tolerance = ModelTolerance::default();
+    let wire = Wire2::polygon(
+        [
+            Point2::new(0.0, 0.0),
+            Point2::new(2.0, 0.0),
+            Point2::new(2.0, 3.0),
+            Point2::new(0.0, 3.0),
+        ],
+        tolerance,
+    )
+    .expect("revolution profile");
+    let profile = Profile::new(wire, [], tolerance).expect("profile");
+    let axis = Axis3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_y()).expect("axis");
+    let revolution = profile
+        .revolve(Plane3::xy(), axis, std::f64::consts::TAU)
+        .expect("revolution");
+
+    assert!((revolution.volume() - 12.0 * std::f64::consts::PI).abs() < 0.1);
+    assert!(!revolution
+        .tessellate(TessellationOptions::default())
+        .expect("mesh")
+        .is_empty());
+}
+
+#[test]
+fn full_off_axis_revolutions_publish_exact_genus_one_solids() {
+    let tolerance = ModelTolerance::default();
+    let axis = Axis3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_y()).expect("axis");
+    let rectangle = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(2.0, 0.0),
+                Point2::new(4.0, 0.0),
+                Point2::new(4.0, 3.0),
+                Point2::new(2.0, 3.0),
+            ],
+            tolerance,
+        )
+        .expect("rectangular section"),
+        [],
+        tolerance,
+    )
+    .expect("rectangular profile");
+    let washer = rectangle
+        .revolve(Plane3::xy(), axis, std::f64::consts::TAU)
+        .expect("annular revolution");
+    assert!((washer.volume() - 36.0 * std::f64::consts::PI).abs() < 1.0e-8);
+
+    let circle = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(5.0, 0.0), 1.0).expect("circle")],
+            tolerance,
+        )
+        .expect("circle wire"),
+        [],
+        tolerance,
+    )
+    .expect("circle profile");
+    let torus = circle
+        .revolve(Plane3::xy(), axis, std::f64::consts::TAU)
+        .expect("toroidal revolution");
+    assert!((torus.volume() - 10.0 * std::f64::consts::PI.powi(2)).abs() < 1.0e-8);
+}
+
+#[test]
+fn high_level_profile_loft_is_euler_built_and_certified() {
+    let tolerance = ModelTolerance::default();
+    let lower = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(-1.0, -1.0),
+                Point2::new(1.0, -1.0),
+                Point2::new(1.0, 1.0),
+                Point2::new(-1.0, 1.0),
+            ],
+            tolerance,
+        )
+        .expect("lower wire"),
+        [],
+        tolerance,
+    )
+    .expect("lower profile");
+    let upper = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(-0.5, -0.5),
+                Point2::new(0.5, -0.5),
+                Point2::new(0.5, 0.5),
+                Point2::new(-0.5, 0.5),
+            ],
+            tolerance,
+        )
+        .expect("upper wire"),
+        [],
+        tolerance,
+    )
+    .expect("upper profile");
+    let upper_plane = Plane3::new(
+        Point3::new(0.0, 0.0, 3.0),
+        Vec3::unit_x(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("upper plane");
+    let loft = lower
+        .loft(Plane3::xy(), [(upper_plane, &upper)])
+        .expect("loft");
+
+    assert!(loft.volume() > 3.0 && loft.volume() < 12.0);
+}
+
+#[test]
+fn circular_loft_uses_bounded_construction_sampling() {
+    let tolerance = ModelTolerance::default();
+    let circle_profile = |radius| {
+        Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(Point2::new(0.0, 0.0), radius).expect("circle")],
+                tolerance,
+            )
+            .expect("circle wire"),
+            [],
+            tolerance,
+        )
+        .expect("circle profile")
+    };
+    let lower = circle_profile(8.0);
+    let upper = circle_profile(5.0);
+    let upper_plane = Plane3::new(
+        Point3::new(0.0, 0.0, 30.0),
+        Vec3::unit_x(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("upper plane");
+    let loft = lower
+        .loft(Plane3::xy(), [(upper_plane, &upper)])
+        .expect("circular loft");
+    let analytic = 10.0 * std::f64::consts::PI * (64.0 + 40.0 + 25.0);
+    assert!((loft.volume() - analytic).abs() / analytic < 0.01);
+
+    for (u, v, offset) in [
+        (Vec3::unit_z(), Vec3::unit_y(), Vec3::new(-30.0, 0.0, 0.0)),
+        (Vec3::unit_z(), -Vec3::unit_y(), Vec3::new(30.0, 0.0, 0.0)),
+        (-Vec3::unit_z(), Vec3::unit_y(), Vec3::new(30.0, 0.0, 0.0)),
+        (Vec3::unit_x(), -Vec3::unit_z(), Vec3::new(0.0, 30.0, 0.0)),
+    ] {
+        let first_plane =
+            Plane3::new(Point3::new(0.0, 0.0, 0.0), u, v, tolerance).expect("oriented first plane");
+        let second_plane =
+            Plane3::new(Point3::from_vec(offset), u, v, tolerance).expect("oriented second plane");
+        lower
+            .loft(first_plane, [(second_plane, &upper)])
+            .expect("orientation-independent circular loft");
+    }
+    let first_plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_z(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("first plane");
+    let reversed_plane = Plane3::new(
+        Point3::new(-30.0, 0.0, 0.0),
+        -Vec3::unit_z(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("oppositely oriented plane");
+    lower
+        .loft(first_plane, [(reversed_plane, &upper)])
+        .expect("loft across oppositely oriented section frames");
+
+    let browser_lower = circle_profile(13.867620046437446);
+    let browser_upper = circle_profile(5.734290145784257);
+    let browser_first = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        -Vec3::unit_z(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("browser first plane");
+    let browser_second = Plane3::new(
+        Point3::new(30.0, 0.0, 0.0),
+        -Vec3::unit_z(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("browser second plane");
+    browser_lower
+        .loft(browser_first, [(browser_second, &browser_upper)])
+        .expect("browser circular loft fixture");
+}
+
+#[test]
+fn shell_with_opening_is_euler_built_and_certified() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let top = cube
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z > 9.9))
+        .expect("top face")
+        .clone();
+    let shell = cube.shell(&[top], -0.5).expect("open shell");
+
+    assert!((shell.volume() - 230.5).abs() < 1.0e-6);
+}
+
+#[test]
+fn closed_shell_is_a_certified_body_with_a_cavity() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let shell = cube.shell(&[], -1.0).expect("closed shell");
+
+    assert_eq!(shell.solids().len(), 1);
+    assert!((shell.volume() - 488.0).abs() < 1.0e-6);
+}
+
+#[test]
+fn closed_cylindrical_shell_is_certified() {
+    let tolerance = ModelTolerance::default();
+    let circle = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 5.0).expect("circle")],
+        tolerance,
+    )
+    .expect("circle wire");
+    let cylinder = Profile::new(circle, [], tolerance)
+        .expect("circle profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
+        .expect("cylinder");
+    let shell = cylinder.shell(&[], -0.5).expect("closed cylinder shell");
+
+    assert!(shell.volume() > 0.0 && shell.volume() < cylinder.volume());
+}
+
+#[test]
+fn straight_edge_fillet_is_euler_built_and_certified() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let edge = cube.edges().next().expect("edge").clone();
+    let fillet = cube.fillet(&[edge.clone()], 1.0).expect("fillet");
+
+    assert!(fillet.volume() > 0.0);
+    assert!(fillet.volume() < cube.volume());
+    assert!(!matches!(
+        fillet.resolve(&edge),
+        Resolution::Deleted | Resolution::Unrelated
+    ));
+}
+
+#[test]
+fn circular_edge_fillet_is_euler_built_and_certified() {
+    let tolerance = ModelTolerance::default();
+    let circle = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 12.112225576938657).expect("circle")],
+        tolerance,
+    )
+    .expect("circle wire");
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tolerance,
+    )
+    .expect("browser xz plane");
+    let cylinder = Profile::new(circle, [], tolerance)
+        .expect("circle profile")
+        .extrude(plane, Vec3::new(0.0, 20.0, 0.0))
+        .expect("cylinder");
+    let edge = cylinder
+        .edges()
+        .find(|edge| matches!(edge.curve(), Curve3::Circle(_)))
+        .expect("circular edge")
+        .clone();
+    let fillet = cylinder
+        .fillet(&[edge], 1.0)
+        .expect("one Euler half-edge fillets the complete circular support");
+    assert!(fillet.volume() > 0.0 && fillet.volume() < cylinder.volume());
+    assert!(fillet.centroid().x.abs() < 1.0e-6);
+    assert!(fillet.centroid().z.abs() < 1.0e-6);
+    let edge_count = fillet.edges().count();
+    let semantic_count = fillet
+        .edges()
+        .filter(|edge| fillet.is_semantic_edge(edge))
+        .count();
+    assert!(semantic_count > 0 && semantic_count < edge_count);
+}
+
+#[test]
+fn planar_split_publishes_both_certified_halves() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let plane = Plane3::new(
+        Point3::new(5.0, 0.0, 0.0),
+        Vec3::unit_y(),
+        Vec3::unit_z(),
+        ModelTolerance::default(),
+    )
+    .expect("split plane");
+    let split = cube.split(plane, "both").expect("split");
+
+    assert_eq!(split.solids().len(), 2);
+    assert!((split.volume() - cube.volume()).abs() < 1.0e-6);
+}
+
+#[test]
+fn moving_a_face_rebuilds_and_certifies_the_changed_solid() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let top = cube
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z > 9.9))
+        .expect("top face")
+        .clone();
+    let transform = RigidTransform3::new(
+        Matrix3::identity(),
+        Vec3::new(0.0, 0.0, 2.0),
+        ModelTolerance::default(),
+    )
+    .expect("translation");
+    let edge = cube.edges().next().expect("cube edge").clone();
+    let moved = cube
+        .move_faces(&[top.clone()], transform)
+        .expect("move top face");
+
+    assert!((moved.volume() - 1_200.0).abs() < 1.0e-6);
+    assert!(matches!(moved.resolve(&top), Resolution::Modified(_)));
+    assert!(!matches!(
+        moved.resolve(&edge),
+        Resolution::Deleted | Resolution::Unrelated
+    ));
+}
+
+#[test]
+fn curved_boolean_operands_are_faceted_and_certified() {
+    let tolerance = ModelTolerance::default();
+    let circle = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 3.0).expect("circle")],
+        tolerance,
+    )
+    .expect("circle wire");
+    let cylinder = Profile::new(circle, [], tolerance)
+        .expect("circle profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
+        .expect("cylinder");
+    let tool = owned_cuboid(Point3::new(0.0, -4.0, -1.0), Point3::new(4.0, 4.0, 11.0));
+    let cut = cylinder.difference(&tool).expect("curved difference");
+
+    assert!(cut.volume() > 0.0);
+    assert!(cut.volume() < cylinder.volume());
+}
+
+#[test]
+fn circular_prism_can_join_partially_across_a_planar_face() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 20.0));
+    let circle = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(10.0, 10.0), 4.0).expect("circle")],
+        tolerance,
+    )
+    .expect("circle wire");
+    let boss = Profile::new(circle, [], tolerance)
+        .expect("circle profile")
+        .extrude(
+            Plane3::new(
+                Point3::new(0.0, 0.0, 20.0),
+                Vec3::unit_x(),
+                Vec3::unit_y(),
+                tolerance,
+            )
+            .expect("top plane"),
+            Vec3::new(0.0, 0.0, 1.0),
+        )
+        .expect("boss");
+
+    let joined = block.union(&boss).expect("partial-height curved union");
+    assert_eq!(joined.solids().len(), 1);
+    assert!(
+        (joined.volume() - (8000.0 + 16.0 * std::f64::consts::PI)).abs() < 0.1,
+        "unexpected joined volume {}",
+        joined.volume()
+    );
+}
+
+#[test]
+fn multi_solid_booleans_use_set_semantics() {
+    let left = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
+    let right = owned_cuboid(Point3::new(4.0, 0.0, 0.0), Point3::new(6.0, 2.0, 2.0));
+    let pair = left.combined(&[right]).expect("disconnected compound");
+    let bridge = owned_cuboid(Point3::new(1.0, 0.0, 0.0), Point3::new(5.0, 2.0, 2.0));
+    let united = pair.union(&bridge).expect("multi-solid union");
+    assert_eq!(united.solids().len(), 1);
+    assert!((united.volume() - 24.0).abs() < 1.0e-6);
+
+    let cutter = owned_cuboid(Point3::new(0.5, -1.0, -1.0), Point3::new(5.5, 3.0, 3.0));
+    let cut = pair.difference(&cutter).expect("multi-solid difference");
+    assert_eq!(cut.solids().len(), 2);
+    assert!((cut.volume() - 4.0).abs() < 1.0e-6);
 }
 
 #[test]

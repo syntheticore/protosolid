@@ -85,17 +85,61 @@ impl Profile {
 }
 
 fn boundaries_intersect(first: &[Point2], second: &[Point2], tolerance: f64) -> bool {
-    (0..first.len()).any(|first_index| {
-        (0..second.len()).any(|second_index| {
-            super::wire::segments_intersect(
-                first[first_index],
-                first[(first_index + 1) % first.len()],
-                second[second_index],
-                second[(second_index + 1) % second.len()],
+    #[derive(Clone, Copy)]
+    struct Edge {
+        start: Point2,
+        end: Point2,
+        boundary: bool,
+        min_x: f64,
+        max_x: f64,
+        min_y: f64,
+        max_y: f64,
+    }
+
+    let edges_for = |points: &[Point2], boundary| {
+        (0..points.len())
+            .map(|index| {
+                let start = points[index];
+                let end = points[(index + 1) % points.len()];
+                Edge {
+                    start,
+                    end,
+                    boundary,
+                    min_x: start.x.min(end.x),
+                    max_x: start.x.max(end.x),
+                    min_y: start.y.min(end.y),
+                    max_y: start.y.max(end.y),
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut edges = edges_for(first, false);
+    edges.extend(edges_for(second, true));
+    edges.sort_by(|first, second| first.min_x.total_cmp(&second.min_x));
+
+    let mut active = Vec::<Edge>::new();
+    for current in edges {
+        active.retain(|candidate| candidate.max_x + tolerance >= current.min_x);
+        for candidate in &active {
+            if candidate.boundary == current.boundary
+                || candidate.max_y + tolerance < current.min_y
+                || current.max_y + tolerance < candidate.min_y
+            {
+                continue;
+            }
+            if super::wire::segments_intersect(
+                candidate.start,
+                candidate.end,
+                current.start,
+                current.end,
                 tolerance,
-            )
-        })
-    })
+            ) {
+                return true;
+            }
+        }
+        active.push(current);
+    }
+    false
 }
 
 fn point_inside_polygon(point: Point2, polygon: &[Point2], tolerance: f64) -> bool {

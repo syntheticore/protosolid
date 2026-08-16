@@ -9,8 +9,8 @@ use super::euler::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
     BodyId, BooleanKind, ChangeKind, DiagnosticKind, EdgeId, FaceId, Kernel, KernelError,
-    KernelResult, MassProperties, OperationHistory, Origin, PersistentId, Plane3, Profile,
-    RigidTransform3, Tessellate, TessellationOptions, TriangleMesh,
+    KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin, PersistentId, Plane3,
+    Profile, RigidTransform3, Surface3, Tessellate, TessellationOptions, TriangleMesh,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -104,6 +104,58 @@ fn generated_index(history: &OperationHistory) -> BTreeMap<PersistentId, BTreeSe
     generated
 }
 
+fn semantic_roots(
+    history: &OperationHistory,
+    entity: PersistentId,
+    visiting: &mut BTreeSet<PersistentId>,
+) -> BTreeSet<PersistentId> {
+    if !visiting.insert(entity) {
+        return BTreeSet::from([entity]);
+    }
+    let roots = match history.origin(entity) {
+        Some(Origin::Derived { sources, .. }) if !sources.is_empty() => sources
+            .iter()
+            .flat_map(|source| semantic_roots(history, *source, visiting))
+            .collect(),
+        _ => BTreeSet::from([entity]),
+    };
+    visiting.remove(&entity);
+    roots
+}
+
+fn semantic_edge(history: &OperationHistory, edge: &EdgeHandle) -> bool {
+    let Ok(faces) = edge.connected_faces() else {
+        return true;
+    };
+    if faces.len() != 2 {
+        return true;
+    }
+    let first = semantic_roots(history, faces[0].persistent_id(), &mut BTreeSet::new());
+    let second = semantic_roots(history, faces[1].persistent_id(), &mut BTreeSet::new());
+    first.is_disjoint(&second)
+}
+
+fn same_curve_support(
+    first: &super::Curve3,
+    second: &super::Curve3,
+    tolerance: ModelTolerance,
+) -> bool {
+    match (first, second) {
+        (super::Curve3::Circle(first), super::Curve3::Circle(second)) => {
+            first.center().distance(second.center()) <= tolerance.linear
+                && (first.radius() - second.radius()).abs() <= tolerance.linear
+                && first
+                    .normal()
+                    .dot(second.normal())
+                    .abs()
+                    .clamp(-1.0, 1.0)
+                    .acos()
+                    <= tolerance.angular
+        }
+        _ => first == second,
+    }
+}
+
 fn direct_descendants(
     kind: EntityKind,
     source: PersistentId,
@@ -182,6 +234,20 @@ impl FaceHandle {
     }
     pub fn tessellate(&self, options: TessellationOptions) -> KernelResult<TriangleMesh> {
         <Self as Tessellate>::tessellate(self, options)
+    }
+    pub(crate) fn normal_at(
+        &self,
+        point: Point3,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<crate::Vec3> {
+        let projection = self.surface.project(point, tolerance)?;
+        let normal = self
+            .surface
+            .normal(projection.parameters.0, projection.parameters.1)?;
+        Ok(match self.state.topology().face(self.face)?.orientation() {
+            super::FaceOrientation::Forward => normal,
+            super::FaceOrientation::Reversed => -normal,
+        })
     }
 }
 
@@ -397,6 +463,14 @@ impl Solid {
     pub fn origin<T: ResolvableEntity>(&self, entity: &T) -> Option<&Origin> {
         self.history.origin(entity.persistent_name())
     }
+
+    /// Whether an edge separates semantic faces rather than merely subdividing
+    /// a faceted construction surface.
+    pub fn is_semantic_edge(&self, edge: &EdgeHandle) -> bool {
+        self.edges()
+            .any(|candidate| candidate.persistent_id() == edge.persistent_id())
+            && semantic_edge(&self.history, edge)
+    }
     pub fn faces_generated_from<T: ResolvableEntity>(&self, source: &T) -> Vec<FaceHandle> {
         generated_names(&self.history, source.persistent_name())
             .filter_map(|name| self.faces.iter().find(|face| face.name == name).cloned())
@@ -527,6 +601,12 @@ impl Compound {
     pub fn solids(&self) -> impl ExactSizeIterator<Item = &Solid> {
         self.solids.iter()
     }
+    pub(crate) fn tolerance(&self) -> ModelTolerance {
+        self.state.tolerance()
+    }
+    pub(crate) fn face_name(&self, face: FaceId) -> KernelResult<PersistentId> {
+        Ok(self.state.topology().face(face)?.name())
+    }
     pub fn volume(&self) -> f64 {
         self.properties.volume
     }
@@ -561,6 +641,14 @@ impl Compound {
 
     pub fn origin<T: ResolvableEntity>(&self, entity: &T) -> Option<&Origin> {
         self.history.origin(entity.persistent_name())
+    }
+
+    /// Whether an edge separates semantic faces rather than merely subdividing
+    /// a faceted construction surface.
+    pub fn is_semantic_edge(&self, edge: &EdgeHandle) -> bool {
+        self.edges()
+            .any(|candidate| candidate.persistent_id() == edge.persistent_id())
+            && semantic_edge(&self.history, edge)
     }
 
     pub fn faces_generated_from<T: ResolvableEntity>(&self, source: &T) -> Vec<FaceHandle> {
@@ -601,18 +689,88 @@ impl Compound {
         )
     }
 
-    /// Compute a certified Boolean between two single-solid operands.
-    ///
-    /// Multi-solid set operations will be added on top of this exact primitive;
-    /// rejecting them here avoids silently choosing pairwise semantics.
     pub fn boolean(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
-        if self.solids.len() != 1 || other.solids.len() != 1 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "high-level Boolean operands must currently contain exactly one solid",
-            ));
-        }
         ensure_compatible_tolerances(self.state.tolerance(), other.state.tolerance())?;
+        if self.solids.len() == 1 && other.solids.len() == 1 {
+            return self.boolean_single(other, kind);
+        }
+        match kind {
+            BooleanKind::Union => {
+                let mut components = Vec::<Self>::new();
+                for solid in self.solids.iter().chain(&other.solids) {
+                    let mut candidate = solid.to_compound();
+                    let mut index = 0;
+                    while index < components.len() {
+                        let united =
+                            components[index].boolean_single(&candidate, BooleanKind::Union)?;
+                        if united.solids.len() == 1 {
+                            candidate = united;
+                            components.remove(index);
+                            index = 0;
+                        } else {
+                            index += 1;
+                        }
+                    }
+                    components.push(candidate);
+                }
+                combine_compounds(components, self.state.tolerance())
+            }
+            BooleanKind::Intersection => {
+                let mut results = Vec::new();
+                for first in &self.solids {
+                    for second in &other.solids {
+                        let result = first
+                            .to_compound()
+                            .boolean_single(&second.to_compound(), BooleanKind::Intersection)?;
+                        if !result.solids.is_empty() {
+                            results.push(result);
+                        }
+                    }
+                }
+                combine_compounds(results, self.state.tolerance())
+            }
+            BooleanKind::Difference => {
+                let mut results = Vec::new();
+                for first in &self.solids {
+                    let mut pieces = vec![first.to_compound()];
+                    for tool in &other.solids {
+                        let mut next = Vec::new();
+                        for piece in pieces {
+                            for piece_solid in &piece.solids {
+                                let result = piece_solid
+                                    .to_compound()
+                                    .boolean_single(&tool.to_compound(), BooleanKind::Difference)?;
+                                if !result.solids.is_empty() {
+                                    next.push(result);
+                                }
+                            }
+                        }
+                        pieces = next;
+                    }
+                    results.extend(pieces);
+                }
+                combine_compounds(results, self.state.tolerance())
+            }
+        }
+    }
+
+    fn boolean_single(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
+        debug_assert_eq!(self.solids.len(), 1);
+        debug_assert_eq!(other.solids.len(), 1);
+        let curved = self
+            .faces()
+            .chain(other.faces())
+            .any(|face| !matches!(face.surface(), Surface3::Plane(_)));
+        if curved {
+            if kind == BooleanKind::Union {
+                if let Some(result) = self.union_adjacent_exact(other)? {
+                    return Ok(result);
+                }
+            }
+            let first = super::features::facet(self)?;
+            let second = super::features::facet(other)?;
+            return first.boolean_faceted_single(&second, kind);
+        }
         let mut kernel = Kernel::new(self.state.tolerance())?;
         let first = kernel
             .topology
@@ -626,6 +784,77 @@ impl Compound {
         Self::from_operation(kernel, committed, [self, other])
     }
 
+    fn boolean_faceted_single(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
+        debug_assert_eq!(self.solids.len(), 1);
+        debug_assert_eq!(other.solids.len(), 1);
+        let mut kernel = Kernel::new(self.state.tolerance())?;
+        let first = kernel
+            .topology
+            .import_body(self.state.topology(), self.solids[0].body)?;
+        let second = kernel
+            .topology
+            .import_body(other.state.topology(), other.solids[0].body)?;
+        let mut transaction = kernel.begin_operation();
+        transaction.boolean_from_facets(first, second, kind)?;
+        let committed = transaction.finish()?;
+        Self::from_operation(kernel, committed, [self, other])
+    }
+
+    fn union_adjacent_exact(&self, other: &Self) -> KernelResult<Option<Self>> {
+        let equal_faces = super::features::coincident_opposite_face_names(self, other)?;
+        let patch_faces = if equal_faces.is_none() {
+            super::features::coincident_opposite_face_patch_names(self, other)?
+        } else {
+            None
+        };
+        let Some((target_is_first, target_name, source_name, whole_face)) = equal_faces
+            .map(|(first, second)| (true, first, second, true))
+            .or_else(|| patch_faces.map(|(first, target, source)| (first, target, source, false)))
+        else {
+            return Ok(None);
+        };
+        let mut kernel = Kernel::new(self.state.tolerance())?;
+        let first = kernel
+            .topology
+            .import_body(self.state.topology(), self.solids[0].body)?;
+        let second = kernel
+            .topology
+            .import_body(other.state.topology(), other.solids[0].body)?;
+        let target_face = kernel
+            .topology
+            .faces()
+            .find_map(|(id, face)| (face.name() == target_name).then_some(id))
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::MissingEntity,
+                    "imported adjacent union lost its target face",
+                )
+            })?;
+        let source_face = kernel
+            .topology
+            .faces()
+            .find_map(|(id, face)| (face.name() == source_name).then_some(id))
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::MissingEntity,
+                    "imported adjacent union lost its source face",
+                )
+            })?;
+        let (target, source) = if target_is_first {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        let mut transaction = kernel.begin_operation();
+        if whole_face {
+            transaction.sew_bodies_across_faces(target, source, target_face, source_face)?;
+        } else {
+            transaction.sew_body_across_face_patch(target, source, target_face, source_face)?;
+        }
+        let committed = transaction.finish()?;
+        Self::from_operation(kernel, committed, [self, other]).map(Some)
+    }
+
     pub fn union(&self, other: &Self) -> KernelResult<Self> {
         self.boolean(other, BooleanKind::Union)
     }
@@ -634,6 +863,216 @@ impl Compound {
     }
     pub fn intersection(&self, other: &Self) -> KernelResult<Self> {
         self.boolean(other, BooleanKind::Intersection)
+    }
+
+    pub fn shell(&self, openings: &[FaceHandle], distance: f64) -> KernelResult<Self> {
+        if self.solids.len() > 1 {
+            let selected = openings
+                .iter()
+                .map(FaceHandle::persistent_id)
+                .collect::<BTreeSet<_>>();
+            let mut results = Vec::new();
+            for solid in &self.solids {
+                let names = solid
+                    .faces()
+                    .map(FaceHandle::persistent_id)
+                    .collect::<BTreeSet<_>>();
+                let local = openings
+                    .iter()
+                    .filter(|face| names.contains(&face.persistent_id()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                debug_assert!(local
+                    .iter()
+                    .all(|face| selected.contains(&face.persistent_id())));
+                results.push(solid.to_compound().shell(&local, distance)?);
+            }
+            return combine_compounds(results, self.state.tolerance());
+        }
+        super::features::shell(self, openings, distance)
+    }
+
+    pub fn fillet(&self, edges: &[EdgeHandle], radius: f64) -> KernelResult<Self> {
+        if self.solids.len() > 1 {
+            let mut results = Vec::new();
+            for solid in &self.solids {
+                let names = solid
+                    .edges()
+                    .map(EdgeHandle::persistent_id)
+                    .collect::<BTreeSet<_>>();
+                let local = edges
+                    .iter()
+                    .filter(|edge| names.contains(&edge.persistent_id()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if local.is_empty() {
+                    results.push(solid.to_compound());
+                } else {
+                    results.push(solid.to_compound().fillet(&local, radius)?);
+                }
+            }
+            return combine_compounds(results, self.state.tolerance());
+        }
+        let selected_supports = edges
+            .iter()
+            .map(|edge| {
+                edge.connected_faces().map(|faces| {
+                    (
+                        edge.curve().clone(),
+                        faces
+                            .into_iter()
+                            .map(|face| face.persistent_id())
+                            .collect::<BTreeSet<_>>(),
+                    )
+                })
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        let expanded = self
+            .edges()
+            .filter_map(|candidate| {
+                let faces = candidate
+                    .connected_faces()
+                    .ok()?
+                    .into_iter()
+                    .map(|face| face.persistent_id())
+                    .collect::<BTreeSet<_>>();
+                selected_supports
+                    .iter()
+                    .any(|(curve, selected_faces)| {
+                        same_curve_support(candidate.curve(), curve, self.state.tolerance())
+                            && (matches!(
+                                (candidate.curve(), curve),
+                                (super::Curve3::Circle(_), super::Curve3::Circle(_))
+                            ) || &faces == selected_faces)
+                    })
+                    .then(|| candidate.clone())
+            })
+            .collect::<Vec<_>>();
+        super::features::fillet(self, &expanded, radius)
+    }
+
+    pub fn combined(&self, others: &[Self]) -> KernelResult<Self> {
+        let parents = std::iter::once(self)
+            .chain(others.iter())
+            .collect::<Vec<_>>();
+        let mut kernel = Kernel::new(self.state.tolerance())?;
+        let mut bodies = Vec::new();
+        for parent in &parents {
+            ensure_compatible_tolerances(self.state.tolerance(), parent.state.tolerance())?;
+            for solid in &parent.solids {
+                bodies.push(
+                    kernel
+                        .topology
+                        .import_body(solid.state.topology(), solid.body)?,
+                );
+            }
+        }
+        let certificates = certify_bodies(&kernel, &bodies)?;
+        Self::from_parts(
+            kernel,
+            super::identity::fresh_uuid(),
+            bodies,
+            OperationHistory::default(),
+            certificates,
+            parents,
+        )
+    }
+
+    pub fn split(&self, plane: Plane3, keep: &str) -> KernelResult<Self> {
+        if self.solids.len() > 1 {
+            let results = self
+                .solids
+                .iter()
+                .map(|solid| solid.to_compound().split(plane, keep))
+                .collect::<KernelResult<Vec<_>>>()?;
+            return combine_compounds(results, self.state.tolerance());
+        }
+        super::features::split(self, plane, keep)
+    }
+
+    pub fn without_solids(&self, removed: &[Solid]) -> KernelResult<Self> {
+        let removed = removed
+            .iter()
+            .map(|solid| solid.body)
+            .collect::<BTreeSet<_>>();
+        let mut kernel = Kernel::new(self.state.tolerance())?;
+        let mut bodies = Vec::new();
+        for solid in &self.solids {
+            if !removed.contains(&solid.body) {
+                bodies.push(
+                    kernel
+                        .topology
+                        .import_body(solid.state.topology(), solid.body)?,
+                );
+            }
+        }
+        let certificates = certify_bodies(&kernel, &bodies)?;
+        Self::from_parts(
+            kernel,
+            super::identity::fresh_uuid(),
+            bodies,
+            OperationHistory::default(),
+            certificates,
+            [self],
+        )
+    }
+
+    pub fn move_faces(
+        &self,
+        faces: &[FaceHandle],
+        transform: RigidTransform3,
+    ) -> KernelResult<Self> {
+        if self.solids.len() > 1 {
+            let mut results = Vec::new();
+            for solid in &self.solids {
+                let names = solid
+                    .faces()
+                    .map(FaceHandle::persistent_id)
+                    .collect::<BTreeSet<_>>();
+                let local = faces
+                    .iter()
+                    .filter(|face| names.contains(&face.persistent_id()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if local.is_empty() {
+                    results.push(solid.to_compound());
+                } else {
+                    results.push(solid.to_compound().move_faces(&local, transform)?);
+                }
+            }
+            return combine_compounds(results, self.state.tolerance());
+        }
+        super::features::move_faces(self, faces, transform)
+    }
+
+    pub fn replace_face(
+        &self,
+        target: &FaceHandle,
+        replacement: &FaceHandle,
+    ) -> KernelResult<Self> {
+        if self.solids.len() > 1 {
+            let mut found = false;
+            let mut results = Vec::new();
+            for solid in &self.solids {
+                let contains = solid
+                    .faces()
+                    .any(|face| face.persistent_id() == target.persistent_id());
+                if contains {
+                    found = true;
+                    results.push(solid.to_compound().replace_face(target, replacement)?);
+                } else {
+                    results.push(solid.to_compound());
+                }
+            }
+            if !found {
+                return Err(KernelError::new(
+                    DiagnosticKind::InvalidInput,
+                    "replacement target face does not belong to the compound",
+                ));
+            }
+            return combine_compounds(results, self.state.tolerance());
+        }
+        super::features::replace_face(self, target, replacement)
     }
 }
 
@@ -647,6 +1086,24 @@ impl Tessellate for Compound {
         }
         Ok(mesh)
     }
+}
+
+fn combine_compounds(
+    mut compounds: Vec<Compound>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Compound> {
+    if compounds.is_empty() {
+        return Compound::from_parts(
+            Kernel::new(tolerance)?,
+            super::identity::fresh_uuid(),
+            Vec::new(),
+            OperationHistory::default(),
+            BTreeMap::new(),
+            [],
+        );
+    }
+    let first = compounds.remove(0);
+    first.combined(&compounds)
 }
 
 fn resolve_entity_from<T: Clone>(

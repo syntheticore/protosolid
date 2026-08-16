@@ -4,7 +4,7 @@
 //! values at the boundary and exposes only Shapex's owned, high-level API.
 
 use js_sys::Float64Array;
-use shapex::kernel::{BooleanKind, Curve3, Origin, RigidTransform3, Surface3};
+use shapex::kernel::{Axis3, BooleanKind, Curve3, Origin, RigidTransform3, Surface3};
 use shapex::{
     Compound, CreationRole, EdgeHandle, FaceHandle, Matrix3, ModelTolerance, Plane3, Point2,
     Profile, ProfileBoundary, Resolution, Solid, TessellationOptions, TriangleMesh, TrimmedCurve2,
@@ -103,6 +103,19 @@ pub struct WasmProfile2 {
 
 #[wasm_bindgen(js_class = Profile)]
 impl WasmProfile2 {
+    fn take_profile(&mut self, tolerance: ModelTolerance) -> Result<Profile, JsValue> {
+        let outer = self
+            .outer
+            .take()
+            .ok_or_else(|| JsValue::from_str("a bridge profile can only be consumed once"))?
+            .build(tolerance)?;
+        let holes = std::mem::take(&mut self.holes)
+            .into_iter()
+            .map(|wire| wire.build(tolerance))
+            .collect::<Result<Vec<_>, _>>()?;
+        Profile::new(outer, holes, tolerance).map_err(js_error)
+    }
+
     #[wasm_bindgen(constructor)]
     pub fn new(outer: WasmWire2) -> Self {
         Self {
@@ -134,16 +147,7 @@ impl WasmProfile2 {
         vector_z: f64,
     ) -> Result<WasmCompound, JsValue> {
         let tolerance = ModelTolerance::default();
-        let outer = self
-            .outer
-            .take()
-            .ok_or_else(|| JsValue::from_str("a bridge profile can only be extruded once"))?
-            .build(tolerance)?;
-        let holes = std::mem::take(&mut self.holes)
-            .into_iter()
-            .map(|wire| wire.build(tolerance))
-            .collect::<Result<Vec<_>, _>>()?;
-        let profile = Profile::new(outer, holes, tolerance).map_err(js_error)?;
+        let profile = self.take_profile(tolerance)?;
         let plane = Plane3::new(
             shapex::Point3::new(origin_x, origin_y, origin_z),
             Vec3::new(u_x, u_y, u_z),
@@ -155,6 +159,112 @@ impl WasmProfile2 {
             .extrude(plane, Vec3::new(vector_x, vector_y, vector_z))
             .map_err(js_error)?;
         Ok(WasmCompound { inner: compound })
+    }
+
+    #[wasm_bindgen(js_name = revolve)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn revolve(
+        &mut self,
+        origin_x: f64,
+        origin_y: f64,
+        origin_z: f64,
+        u_x: f64,
+        u_y: f64,
+        u_z: f64,
+        v_x: f64,
+        v_y: f64,
+        v_z: f64,
+        axis_x: f64,
+        axis_y: f64,
+        axis_z: f64,
+        direction_x: f64,
+        direction_y: f64,
+        direction_z: f64,
+        angle: f64,
+    ) -> Result<WasmCompound, JsValue> {
+        let tolerance = ModelTolerance::default();
+        let profile = self.take_profile(tolerance)?;
+        let plane = Plane3::new(
+            shapex::Point3::new(origin_x, origin_y, origin_z),
+            Vec3::new(u_x, u_y, u_z),
+            Vec3::new(v_x, v_y, v_z),
+            tolerance,
+        )
+        .map_err(js_error)?;
+        let axis = Axis3::new(
+            shapex::Point3::new(axis_x, axis_y, axis_z),
+            Vec3::new(direction_x, direction_y, direction_z),
+        )
+        .map_err(js_error)?;
+        let compound = profile.revolve(plane, axis, angle).map_err(js_error)?;
+        Ok(WasmCompound { inner: compound })
+    }
+}
+
+#[wasm_bindgen(js_name = Loft)]
+pub struct WasmLoft {
+    sections: Vec<(Plane3, Profile)>,
+}
+
+#[wasm_bindgen(js_class = Loft)]
+impl WasmLoft {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            sections: Vec::new(),
+        }
+    }
+
+    #[wasm_bindgen(js_name = addProfile)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_profile(
+        &mut self,
+        mut profile: WasmProfile2,
+        origin_x: f64,
+        origin_y: f64,
+        origin_z: f64,
+        u_x: f64,
+        u_y: f64,
+        u_z: f64,
+        v_x: f64,
+        v_y: f64,
+        v_z: f64,
+    ) -> Result<(), JsValue> {
+        let tolerance = ModelTolerance::default();
+        let profile = profile.take_profile(tolerance)?;
+        let plane = Plane3::new(
+            shapex::Point3::new(origin_x, origin_y, origin_z),
+            Vec3::new(u_x, u_y, u_z),
+            Vec3::new(v_x, v_y, v_z),
+            tolerance,
+        )
+        .map_err(js_error)?;
+        self.sections.push((plane, profile));
+        Ok(())
+    }
+
+    pub fn build(&mut self, align_sections: bool) -> Result<WasmCompound, JsValue> {
+        let sections = std::mem::take(&mut self.sections);
+        let Some((plane, first)) = sections.first() else {
+            return Err(JsValue::from_str("a loft needs at least two profiles"));
+        };
+        if sections.len() < 2 {
+            return Err(JsValue::from_str("a loft needs at least two profiles"));
+        }
+        let compound = first
+            .loft_with_alignment(
+                *plane,
+                sections.iter().skip(1).map(|(plane, profile)| (*plane, profile)),
+                align_sections,
+            )
+            .map_err(js_error)?;
+        Ok(WasmCompound { inner: compound })
+    }
+}
+
+impl Default for WasmLoft {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -194,6 +304,29 @@ impl WasmMesh {
 #[wasm_bindgen(js_name = Face)]
 pub struct WasmFace {
     inner: FaceHandle,
+}
+
+#[wasm_bindgen(js_name = FaceList)]
+pub struct WasmFaceList {
+    faces: Vec<FaceHandle>,
+}
+
+#[wasm_bindgen(js_class = FaceList)]
+impl WasmFaceList {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { faces: Vec::new() }
+    }
+
+    pub fn add(&mut self, face: &WasmFace) {
+        self.faces.push(face.inner.clone());
+    }
+}
+
+impl Default for WasmFaceList {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen(js_name = FaceResolution)]
@@ -297,6 +430,29 @@ pub struct WasmEdge {
     inner: EdgeHandle,
 }
 
+#[wasm_bindgen(js_name = EdgeList)]
+pub struct WasmEdgeList {
+    edges: Vec<EdgeHandle>,
+}
+
+#[wasm_bindgen(js_class = EdgeList)]
+impl WasmEdgeList {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { edges: Vec::new() }
+    }
+
+    pub fn add(&mut self, edge: &WasmEdge) {
+        self.edges.push(edge.inner.clone());
+    }
+}
+
+impl Default for WasmEdgeList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen(js_class = Edge)]
 impl WasmEdge {
     #[wasm_bindgen(getter)]
@@ -360,6 +516,29 @@ impl WasmEdge {
 #[wasm_bindgen(js_name = Solid)]
 pub struct WasmSolid {
     inner: Solid,
+}
+
+#[wasm_bindgen(js_name = SolidList)]
+pub struct WasmSolidList {
+    solids: Vec<Solid>,
+}
+
+#[wasm_bindgen(js_class = SolidList)]
+impl WasmSolidList {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { solids: Vec::new() }
+    }
+
+    pub fn add(&mut self, solid: &WasmSolid) {
+        self.solids.push(solid.inner.clone());
+    }
+}
+
+impl Default for WasmSolidList {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen(js_class = Solid)]
@@ -498,6 +677,93 @@ impl WasmCompound {
             .map_err(js_error)
     }
 
+    pub fn combined(&self, other: &WasmCompound) -> Result<Self, JsValue> {
+        self.inner
+            .combined(std::slice::from_ref(&other.inner))
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+
+    pub fn shell(&self, openings: &WasmFaceList, distance: f64) -> Result<Self, JsValue> {
+        self.inner
+            .shell(&openings.faces, distance)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+
+    pub fn fillet(&self, edges: &WasmEdgeList, radius: f64) -> Result<Self, JsValue> {
+        self.inner
+            .fillet(&edges.edges, radius)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn split(
+        &self,
+        origin_x: f64,
+        origin_y: f64,
+        origin_z: f64,
+        u_x: f64,
+        u_y: f64,
+        u_z: f64,
+        v_x: f64,
+        v_y: f64,
+        v_z: f64,
+        keep: &str,
+    ) -> Result<Self, JsValue> {
+        let plane = Plane3::new(
+            shapex::Point3::new(origin_x, origin_y, origin_z),
+            Vec3::new(u_x, u_y, u_z),
+            Vec3::new(v_x, v_y, v_z),
+            ModelTolerance::default(),
+        ).map_err(js_error)?;
+        self.inner.split(plane, keep).map(|inner| Self { inner }).map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = withoutSolids)]
+    pub fn without_solids(&self, removed: &WasmSolidList) -> Result<Self, JsValue> {
+        self.inner
+            .without_solids(&removed.solids)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = moveFaces)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn move_faces(
+        &self,
+        faces: &WasmFaceList,
+        x_x: f64, x_y: f64, x_z: f64,
+        y_x: f64, y_y: f64, y_z: f64,
+        z_x: f64, z_y: f64, z_z: f64,
+        t_x: f64, t_y: f64, t_z: f64,
+    ) -> Result<Self, JsValue> {
+        let transform = RigidTransform3::new(
+            Matrix3::from_cols(
+                Vec3::new(x_x, x_y, x_z),
+                Vec3::new(y_x, y_y, y_z),
+                Vec3::new(z_x, z_y, z_z),
+            ),
+            Vec3::new(t_x, t_y, t_z),
+            ModelTolerance::default(),
+        ).map_err(js_error)?;
+        self.inner.move_faces(&faces.faces, transform)
+            .map(|inner| Self { inner }).map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = replaceFace)]
+    pub fn replace_face(
+        &self,
+        target: &WasmFace,
+        replacement: &WasmFace,
+    ) -> Result<Self, JsValue> {
+        self.inner
+            .replace_face(&target.inner, &replacement.inner)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = resolveFace)]
     pub fn resolve_face(&self, face: &WasmFace) -> WasmFaceResolution {
         let (kind, faces) = match self.inner.resolve(&face.inner) {
@@ -545,6 +811,11 @@ impl WasmCompound {
             .transformed(transform)
             .map(|inner| Self { inner })
             .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = isSemanticEdge)]
+    pub fn is_semantic_edge(&self, edge: &WasmEdge) -> bool {
+        self.inner.is_semantic_edge(&edge.inner)
     }
 
     #[wasm_bindgen(js_name = creationRole)]

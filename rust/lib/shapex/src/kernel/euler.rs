@@ -6,7 +6,7 @@ use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::history::ChangeKind;
 use super::naming::NameSource;
-use super::polyhedron::PolyhedralTriangle;
+use super::polyhedron::{PolyhedralShellOrientation, PolyhedralTriangle};
 use super::topology::{Body, Coedge, Edge, Face, Loop, Shell, Vertex};
 use super::validation::{validate, ValidationMode};
 use super::{
@@ -131,6 +131,7 @@ pub struct EulerTransaction<'kernel> {
     history: OperationHistory,
     touched_bodies: Vec<BodyId>,
     namespace: Uuid,
+    composes_imported_topology: bool,
 }
 
 impl<'kernel> EulerTransaction<'kernel> {
@@ -142,6 +143,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             history: OperationHistory::default(),
             touched_bodies: Vec::new(),
             namespace,
+            composes_imported_topology: false,
         }
     }
 
@@ -1641,6 +1643,411 @@ impl<'kernel> EulerTransaction<'kernel> {
         Ok(shell)
     }
 
+    /// Sew two closed bodies across a geometrically coincident face pair.
+    ///
+    /// This is the high-level Euler composition used by an adjacent union: the
+    /// two material-opposed faces are removed, their duplicate boundary graph
+    /// is welded, and the remaining shells become one closed shell atomically.
+    pub fn sew_bodies_across_faces(
+        &mut self,
+        target: BodyId,
+        source: BodyId,
+        target_face: FaceId,
+        source_face: FaceId,
+    ) -> KernelResult<BodyId> {
+        let snapshot = self.working.clone();
+        let history_snapshot = self.history.clone();
+        let touched_snapshot = self.touched_bodies.clone();
+        let composition_snapshot = self.composes_imported_topology;
+        let result = self
+            .sew_bodies_across_faces_unchecked(target, source, target_face, source_face)
+            .and_then(|body| {
+                validate(
+                    &self.working,
+                    self.kernel.tolerance,
+                    ValidationMode::Construction,
+                )
+                .into_result()
+                .map(|_| body)
+            });
+        if result.is_err() {
+            self.working = snapshot;
+            self.history = history_snapshot;
+            self.touched_bodies = touched_snapshot;
+            self.composes_imported_topology = composition_snapshot;
+        }
+        result
+    }
+
+    fn sew_bodies_across_faces_unchecked(
+        &mut self,
+        target: BodyId,
+        source: BodyId,
+        target_face: FaceId,
+        source_face: FaceId,
+    ) -> KernelResult<BodyId> {
+        if target == source {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "face sewing requires two distinct bodies",
+            ));
+        }
+        let target_shells = self.working.body(target)?.shells.clone();
+        let source_shells = self.working.body(source)?.shells.clone();
+        if target_shells.len() != 1 || source_shells.len() != 1 {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "adjacent face sewing currently requires one shell per body",
+            ));
+        }
+        let target_shell = target_shells[0];
+        let source_shell = source_shells[0];
+        if self.working.face(target_face)?.shell != target_shell
+            || self.working.face(source_face)?.shell != source_shell
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "sewn faces must belong to their specified bodies",
+            ));
+        }
+        let target_loops = self.working.face(target_face)?.loops.clone();
+        let source_loops = self.working.face(source_face)?.loops.clone();
+        if target_loops.len() != 1 || source_loops.len() != 1 {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "adjacent face sewing currently requires simply connected faces",
+            ));
+        }
+        let target_loop = target_loops[0];
+        let source_loop = source_loops[0];
+        let target_boundary = self.collect_loop(target_loop)?;
+        let source_boundary = self.collect_loop(source_loop)?;
+        if target_boundary.len() != source_boundary.len() {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "coincident sewn faces have different boundary sizes",
+            ));
+        }
+
+        let linear = self.kernel.tolerance.linear;
+        let mut used_target_edges = std::collections::BTreeSet::new();
+        let mut vertex_welds = std::collections::BTreeMap::<VertexId, VertexId>::new();
+        let mut edge_welds = Vec::new();
+        for source_use in &source_boundary {
+            let source_edge = self.working.coedge(*source_use)?.edge;
+            let source_vertices = self.working.edge(source_edge)?.vertices;
+            let source_points = [
+                self.working.vertex(source_vertices[0])?.point,
+                self.working.vertex(source_vertices[1])?.point,
+            ];
+            let target_use = target_boundary
+                .iter()
+                .copied()
+                .find(|candidate| {
+                    let Ok(edge) = self.working.coedge(*candidate).map(|coedge| coedge.edge) else {
+                        return false;
+                    };
+                    if used_target_edges.contains(&edge) {
+                        return false;
+                    }
+                    let Ok(vertices) = self.working.edge(edge).map(|edge| edge.vertices) else {
+                        return false;
+                    };
+                    let Ok(first) = self.working.vertex(vertices[0]).map(|vertex| vertex.point)
+                    else {
+                        return false;
+                    };
+                    let Ok(second) = self.working.vertex(vertices[1]).map(|vertex| vertex.point)
+                    else {
+                        return false;
+                    };
+                    (first.distance(source_points[0]) <= linear
+                        && second.distance(source_points[1]) <= linear)
+                        || (first.distance(source_points[1]) <= linear
+                            && second.distance(source_points[0]) <= linear)
+                })
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::InvalidInput,
+                        "coincident sewn faces do not have matching boundary edges",
+                    )
+                })?;
+            let target_edge = self.working.coedge(target_use)?.edge;
+            used_target_edges.insert(target_edge);
+            let target_vertices = self.working.edge(target_edge)?.vertices;
+            for source_vertex in source_vertices {
+                let point = self.working.vertex(source_vertex)?.point;
+                let target_vertex = target_vertices
+                    .iter()
+                    .copied()
+                    .find(|candidate| {
+                        self.working
+                            .vertex(*candidate)
+                            .map(|vertex| vertex.point.distance(point) <= linear)
+                            .unwrap_or(false)
+                    })
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::InvalidInput,
+                            "coincident boundary vertices do not match",
+                        )
+                    })?;
+                vertex_welds.insert(source_vertex, target_vertex);
+            }
+            let target_mate = self
+                .working
+                .edge(target_edge)?
+                .coedges
+                .iter()
+                .copied()
+                .find(|coedge| *coedge != target_use)
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "target sewn edge has no mate",
+                    )
+                })?;
+            let source_mate = self
+                .working
+                .edge(source_edge)?
+                .coedges
+                .iter()
+                .copied()
+                .find(|coedge| *coedge != *source_use)
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "source sewn edge has no mate",
+                    )
+                })?;
+            edge_welds.push((target_edge, target_mate, source_edge, source_mate));
+        }
+
+        let all_edges = self.working.edges().map(|(id, _)| id).collect::<Vec<_>>();
+        for edge in all_edges {
+            let vertices = self.working.edge(edge)?.vertices;
+            self.working.edges.get_mut(edge)?.vertices = [
+                vertex_welds
+                    .get(&vertices[0])
+                    .copied()
+                    .unwrap_or(vertices[0]),
+                vertex_welds
+                    .get(&vertices[1])
+                    .copied()
+                    .unwrap_or(vertices[1]),
+            ];
+        }
+        for (target_edge, target_mate, source_edge, source_mate) in &edge_welds {
+            let target_vertices = self.working.edge(*target_edge)?.vertices;
+            let source_start = {
+                let coedge = self.working.coedge(*source_mate)?;
+                let vertices = self.working.edge(*source_edge)?.vertices;
+                if coedge.forward {
+                    vertices[0]
+                } else {
+                    vertices[1]
+                }
+            };
+            let forward = source_start == target_vertices[0];
+            let source_name = self.working.edge(*source_edge)?.name;
+            self.working.coedges.get_mut(*source_mate)?.edge = *target_edge;
+            self.working.coedges.get_mut(*source_mate)?.forward = forward;
+            self.working.edges.get_mut(*target_edge)?.coedges = vec![*target_mate, *source_mate];
+            self.working.edges.remove(*source_edge)?;
+            self.history.changed(
+                source_name,
+                ChangeKind::Merged,
+                [self.working.edge(*target_edge)?.name],
+            );
+        }
+
+        let removed_coedges = target_boundary
+            .iter()
+            .chain(&source_boundary)
+            .copied()
+            .collect::<Vec<_>>();
+        let removed_names = removed_coedges
+            .iter()
+            .map(|coedge| self.working.coedge(*coedge).map(|value| value.name))
+            .collect::<KernelResult<Vec<_>>>()?;
+        for coedge in removed_coedges {
+            self.working.coedges.remove(coedge)?;
+        }
+        let target_loop_name = self.working.loop_(target_loop)?.name;
+        let source_loop_name = self.working.loop_(source_loop)?.name;
+        let target_face_name = self.working.face(target_face)?.name;
+        let source_face_name = self.working.face(source_face)?.name;
+        self.working.loops.remove(target_loop)?;
+        self.working.loops.remove(source_loop)?;
+        self.working.faces.remove(target_face)?;
+        self.working.faces.remove(source_face)?;
+
+        self.working
+            .shells
+            .get_mut(target_shell)?
+            .faces
+            .retain(|face| *face != target_face);
+        let source_faces = self.working.shell(source_shell)?.faces.clone();
+        for face in source_faces.into_iter().filter(|face| *face != source_face) {
+            self.working.faces.get_mut(face)?.shell = target_shell;
+            self.working.shells.get_mut(target_shell)?.faces.push(face);
+        }
+        let source_shell_name = self.working.shell(source_shell)?.name;
+        let source_body_name = self.working.body(source)?.name;
+        self.working.shells.remove(source_shell)?;
+        self.working.bodies.remove(source)?;
+
+        for (edge, _, _, source_mate) in &edge_welds {
+            let source_loop = self.working.coedge(*source_mate)?.loop_id;
+            let source_face = self.working.loop_(source_loop)?.face;
+            let adjacent = self.working.edge(*edge)?.coedges.clone();
+            if adjacent.len() != 2 {
+                continue;
+            }
+            let first_face = self
+                .working
+                .loop_(self.working.coedge(adjacent[0])?.loop_id)?
+                .face;
+            let second_face = self
+                .working
+                .loop_(self.working.coedge(adjacent[1])?.loop_id)?
+                .face;
+            if first_face == second_face {
+                continue;
+            }
+            let same_surface = {
+                let first = self.working.face(first_face)?;
+                let second = self.working.face(second_face)?;
+                first.surface == second.surface && first.orientation == second.orientation
+            };
+            if same_surface {
+                self.kef_unchecked(*edge, source_face)?;
+            }
+        }
+
+        for (source_vertex, target_vertex) in vertex_welds {
+            let source_name = self.working.vertex(source_vertex)?.name;
+            let target_name = self.working.vertex(target_vertex)?.name;
+            self.working.vertices.remove(source_vertex)?;
+            self.repair_outgoing(target_vertex)?;
+            self.history
+                .changed(source_name, ChangeKind::Merged, [target_name]);
+        }
+        for name in removed_names.into_iter().chain([
+            target_loop_name,
+            source_loop_name,
+            target_face_name,
+            source_face_name,
+            source_shell_name,
+            source_body_name,
+        ]) {
+            self.history
+                .changed(name, ChangeKind::Deleted, std::iter::empty());
+        }
+        let target_body_name = self.working.body(target)?.name;
+        let target_shell_name = self.working.shell(target_shell)?.name;
+        self.history
+            .changed(target_body_name, ChangeKind::Modified, [target_body_name]);
+        self.history
+            .changed(target_shell_name, ChangeKind::Modified, [target_shell_name]);
+        self.touched_bodies.retain(|body| *body != source);
+        if !self.touched_bodies.contains(&target) {
+            self.touched_bodies.push(target);
+        }
+        self.composes_imported_topology = true;
+        Ok(target)
+    }
+
+    pub(crate) fn sew_body_across_face_patch(
+        &mut self,
+        target: BodyId,
+        source: BodyId,
+        target_face: FaceId,
+        source_face: FaceId,
+    ) -> KernelResult<BodyId> {
+        let snapshot = self.working.clone();
+        let history_snapshot = self.history.clone();
+        let touched_snapshot = self.touched_bodies.clone();
+        let composition_snapshot = self.composes_imported_topology;
+        let result = self
+            .sew_body_across_face_patch_unchecked(target, source, target_face, source_face)
+            .and_then(|body| {
+                validate(
+                    &self.working,
+                    self.kernel.tolerance,
+                    ValidationMode::Construction,
+                )
+                .into_result()
+                .map(|_| body)
+            });
+        if result.is_err() {
+            self.working = snapshot;
+            self.history = history_snapshot;
+            self.touched_bodies = touched_snapshot;
+            self.composes_imported_topology = composition_snapshot;
+        }
+        result
+    }
+
+    fn sew_body_across_face_patch_unchecked(
+        &mut self,
+        target: BodyId,
+        source: BodyId,
+        target_face: FaceId,
+        source_face: FaceId,
+    ) -> KernelResult<BodyId> {
+        if target == source {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "face-patch sewing requires two distinct bodies",
+            ));
+        }
+        let target_shells = self.working.body(target)?.shells.clone();
+        let source_shells = self.working.body(source)?.shells.clone();
+        if target_shells.len() != 1 || source_shells.len() != 1 {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "face-patch sewing requires one shell per body",
+            ));
+        }
+        let target_shell = target_shells[0];
+        let source_shell = source_shells[0];
+        if self.working.face(target_face)?.shell != target_shell
+            || self.working.face(source_face)?.shell != source_shell
+            || self.working.face(source_face)?.loops.len() != 1
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "the sewn patch must be a simply connected face on the source body",
+            ));
+        }
+
+        let source_faces = self.working.shell(source_shell)?.faces.clone();
+        for face in source_faces {
+            self.working.faces.get_mut(face)?.shell = target_shell;
+            self.working.shells.get_mut(target_shell)?.faces.push(face);
+        }
+        let source_shell_name = self.working.shell(source_shell)?.name;
+        let source_body_name = self.working.body(source)?.name;
+        self.working.shells.remove(source_shell)?;
+        self.working.bodies.remove(source)?;
+
+        self.kfmrh_unchecked(target_face, source_face)?;
+        self.history
+            .changed(source_shell_name, ChangeKind::Deleted, std::iter::empty());
+        self.history
+            .changed(source_body_name, ChangeKind::Deleted, std::iter::empty());
+        let target_name = self.working.body(target)?.name;
+        self.history
+            .changed(target_name, ChangeKind::Modified, [target_name]);
+        self.touched_bodies.retain(|body| *body != source);
+        if !self.touched_bodies.contains(&target) {
+            self.touched_bodies.push(target);
+        }
+        self.composes_imported_topology = true;
+        Ok(target)
+    }
+
     /// Move one shell into a newly created body, the inverse body/shell Euler
     /// operator of [`Self::merge_shell_into_body`].
     pub fn split_shell_from_body(&mut self, shell: ShellId) -> KernelResult<BodyId> {
@@ -1753,6 +2160,65 @@ impl<'kernel> EulerTransaction<'kernel> {
         result
     }
 
+    pub(crate) fn merged_polyhedron(&mut self, mesh: &PolyhedralMesh) -> KernelResult<BodyId> {
+        let topology_snapshot = self.working.clone();
+        let history_snapshot = self.history.clone();
+        let names_snapshot = self.names.clone();
+        let touched_snapshot = self.touched_bodies.clone();
+        let result = self.polyhedron_unchecked(mesh).and_then(|body| {
+            self.merge_coplanar_boolean_faces_unchecked(body)?;
+            validate(
+                &self.working,
+                self.kernel.tolerance,
+                ValidationMode::Construction,
+            )
+            .into_result()
+            .map(|_| body)
+        });
+        if result.is_err() {
+            self.working = topology_snapshot;
+            self.history = history_snapshot;
+            self.names = names_snapshot;
+            self.touched_bodies = touched_snapshot;
+        }
+        result
+    }
+
+    pub(crate) fn hollow_polyhedron(
+        &mut self,
+        outer: &PolyhedralMesh,
+        cavities: &[PolyhedralMesh],
+    ) -> KernelResult<BodyId> {
+        let topology_snapshot = self.working.clone();
+        let history_snapshot = self.history.clone();
+        let names_snapshot = self.names.clone();
+        let touched_snapshot = self.touched_bodies.clone();
+        let result = self.polyhedron_unchecked(outer).and_then(|body| {
+            self.merge_coplanar_boolean_faces_unchecked(body)?;
+            for (index, cavity) in cavities.iter().enumerate() {
+                self.names.push_scope(format!("cavity{index}"))?;
+                let cavity_body = self.polyhedron_unchecked(cavity)?;
+                self.merge_coplanar_boolean_faces_unchecked(cavity_body)?;
+                self.names.pop_scope()?;
+                self.merge_shell_into_body_unchecked(body, cavity_body)?;
+            }
+            validate(
+                &self.working,
+                self.kernel.tolerance,
+                ValidationMode::Construction,
+            )
+            .into_result()
+            .map(|_| body)
+        });
+        if result.is_err() {
+            self.working = topology_snapshot;
+            self.history = history_snapshot;
+            self.names = names_snapshot;
+            self.touched_bodies = touched_snapshot;
+        }
+        result
+    }
+
     /// Compute a planar BREP Boolean and rebuild its boundary through Euler
     /// operators. Curved operands and non-genus-zero outputs are rejected until
     /// their exact reconstruction paths are certified.
@@ -1762,10 +2228,30 @@ impl<'kernel> EulerTransaction<'kernel> {
         second: BodyId,
         kind: super::BooleanKind,
     ) -> KernelResult<Vec<BodyId>> {
+        self.boolean_rebuilding(first, second, kind, true)
+    }
+
+    pub(crate) fn boolean_from_facets(
+        &mut self,
+        first: BodyId,
+        second: BodyId,
+        kind: super::BooleanKind,
+    ) -> KernelResult<Vec<BodyId>> {
+        self.boolean_rebuilding(first, second, kind, false)
+    }
+
+    fn boolean_rebuilding(
+        &mut self,
+        first: BodyId,
+        second: BodyId,
+        kind: super::BooleanKind,
+        merge_planar_faces: bool,
+    ) -> KernelResult<Vec<BodyId>> {
         let topology_snapshot = self.working.clone();
         let history_snapshot = self.history.clone();
         let names_snapshot = self.names.clone();
         let touched_snapshot = self.touched_bodies.clone();
+        let prism_axis = self.boolean_prism_axis(first, second)?;
         let result = super::boolean::boolean_polyhedron(
             &self.working,
             self.kernel.tolerance,
@@ -1777,14 +2263,25 @@ impl<'kernel> EulerTransaction<'kernel> {
             let mut bodies = Vec::with_capacity(meshes.len());
             for (index, mesh) in meshes.iter().enumerate() {
                 self.names.push_scope(format!("boolean.component{index}"))?;
-                let body = self.polyhedron_unchecked(&mesh.outer)?;
+                let reconstructed = if mesh.outer.genus() > 0 {
+                    self.prismatic_polyhedron_unchecked(&mesh.outer, prism_axis)?
+                } else {
+                    None
+                };
+                let (body, merge_faces) = if let Some(body) = reconstructed {
+                    (body, false)
+                } else {
+                    (self.polyhedron_unchecked(&mesh.outer)?, merge_planar_faces)
+                };
                 for (cavity_index, cavity) in mesh.cavities.iter().enumerate() {
                     self.names.push_scope(format!("cavity{cavity_index}"))?;
                     let cavity_body = self.polyhedron_unchecked(cavity)?;
                     self.names.pop_scope()?;
                     self.merge_shell_into_body_unchecked(body, cavity_body)?;
                 }
-                self.merge_coplanar_boolean_faces_unchecked(body)?;
+                if merge_faces {
+                    self.merge_coplanar_boolean_faces_unchecked(body)?;
+                }
                 self.names.pop_scope()?;
                 bodies.push(body);
             }
@@ -1806,6 +2303,240 @@ impl<'kernel> EulerTransaction<'kernel> {
             self.touched_bodies = touched_snapshot;
         }
         result
+    }
+
+    fn boolean_prism_axis(&self, first: BodyId, second: BodyId) -> KernelResult<Option<Vec3>> {
+        let mut candidate = None;
+        for body in [first, second] {
+            for shell in self.working.body(body)?.shells() {
+                for face in self.working.shell(*shell)?.faces() {
+                    let face_value = self.working.face(*face)?;
+                    let (priority, axis) = match face_value.surface {
+                        Surface3::Cylinder(cylinder) => (usize::MAX, cylinder.axis().normalize()),
+                        Surface3::Plane(plane) => {
+                            (self.working.face_edges(*face)?.len(), plane.normal())
+                        }
+                        _ => continue,
+                    };
+                    if candidate
+                        .map(|(current, _)| priority > current)
+                        .unwrap_or(true)
+                    {
+                        candidate = Some((priority, axis));
+                    }
+                }
+            }
+        }
+        Ok(candidate.map(|(_, axis)| axis))
+    }
+
+    fn prismatic_polyhedron_unchecked(
+        &mut self,
+        mesh: &PolyhedralMesh,
+        preferred_axis: Option<Vec3>,
+    ) -> KernelResult<Option<BodyId>> {
+        if mesh.orientation() != PolyhedralShellOrientation::Outer {
+            return Ok(None);
+        }
+        let vertices = mesh.vertices();
+        let allowed = self.kernel.tolerance.linear * 64.0;
+        let mut candidate = preferred_axis.map(|axis| {
+            let axis = axis.normalize();
+            let projections = vertices
+                .iter()
+                .map(|vertex| axis.dot(vertex.point.to_vec()))
+                .collect::<Vec<_>>();
+            let minimum = projections.iter().copied().fold(f64::INFINITY, f64::min);
+            let maximum = projections
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max);
+            (axis, projections, minimum, maximum)
+        });
+        for triangle in mesh.triangles() {
+            if preferred_axis.is_some() {
+                break;
+            }
+            let [a, b, c] = triangle.vertices;
+            let normal = (vertices[b].point - vertices[a].point)
+                .cross(vertices[c].point - vertices[a].point);
+            if normal.magnitude2() <= allowed.powi(4) {
+                continue;
+            }
+            let axis = normal.normalize();
+            let projections = vertices
+                .iter()
+                .map(|vertex| axis.dot(vertex.point.to_vec()))
+                .collect::<Vec<_>>();
+            let minimum = projections.iter().copied().fold(f64::INFINITY, f64::min);
+            let maximum = projections
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max);
+            if maximum - minimum <= allowed
+                || projections.iter().any(|value| {
+                    (*value - minimum).abs() > allowed && (*value - maximum).abs() > allowed
+                })
+            {
+                continue;
+            }
+            if candidate
+                .as_ref()
+                .map(|(_, _, current_minimum, current_maximum)| {
+                    maximum - minimum > *current_maximum - *current_minimum
+                })
+                .unwrap_or(true)
+            {
+                candidate = Some((axis, projections, minimum, maximum));
+            }
+        }
+        let Some((axis, projections, minimum, maximum)) = candidate else {
+            return Ok(None);
+        };
+
+        let cap_boundary = |level: f64| {
+            let mut cap_edges = std::collections::BTreeMap::<(usize, usize), usize>::new();
+            for triangle in mesh.triangles() {
+                if !triangle
+                    .vertices
+                    .iter()
+                    .all(|index| (projections[*index] - level).abs() <= allowed)
+                {
+                    continue;
+                }
+                let [a, b, c] = triangle.vertices;
+                for (first, second) in [(a, b), (b, c), (c, a)] {
+                    *cap_edges
+                        .entry(super::polyhedron::ordered(first, second))
+                        .or_default() += 1;
+                }
+            }
+            cap_edges
+                .into_iter()
+                .filter_map(|(edge, uses)| (uses == 1).then_some(edge))
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let mut boundary = cap_boundary(minimum);
+        if boundary.is_empty() {
+            return Ok(None);
+        }
+        let mut adjacency = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+        for (first, second) in &boundary {
+            adjacency.entry(*first).or_default().push(*second);
+            adjacency.entry(*second).or_default().push(*first);
+        }
+        if adjacency.values().any(|neighbors| neighbors.len() != 2) {
+            return Ok(None);
+        }
+        let origin_index = boundary.iter().next().expect("nonempty cap boundary").0;
+        let origin = vertices[origin_index].point;
+        let first_neighbor = adjacency[&origin_index][0];
+        let u = (vertices[first_neighbor].point - origin).normalize();
+        let v = axis.cross(u).normalize();
+        let cap_points = |edges: &std::collections::BTreeSet<(usize, usize)>| {
+            edges
+                .iter()
+                .flat_map(|edge| [edge.0, edge.1])
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .map(|index| {
+                    let relative = vertices[index].point - origin;
+                    Point2::new(relative.dot(u), relative.dot(v))
+                })
+                .collect::<Vec<_>>()
+        };
+        let lower_points = cap_points(&boundary);
+        let upper_points = cap_points(&cap_boundary(maximum));
+        if lower_points.len() != upper_points.len()
+            || lower_points.iter().any(|point| {
+                upper_points
+                    .iter()
+                    .all(|candidate| candidate.distance(*point) > allowed * 16.0)
+            })
+        {
+            return Ok(None);
+        }
+        let plane = Plane3::new(origin, u, v, self.kernel.tolerance)?;
+        let mut rings = Vec::<(f64, Vec<Point2>)>::new();
+        while let Some((start, next)) = boundary.iter().next().copied() {
+            let mut indices = vec![start, next];
+            boundary.remove(&super::polyhedron::ordered(start, next));
+            let mut previous = start;
+            let mut current = next;
+            while current != start {
+                let following = adjacency[&current]
+                    .iter()
+                    .copied()
+                    .find(|value| {
+                        *value != previous
+                            && boundary.contains(&super::polyhedron::ordered(current, *value))
+                    })
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::GeometryInvariant,
+                            "prismatic Boolean cap boundary does not close",
+                        )
+                    })?;
+                boundary.remove(&super::polyhedron::ordered(current, following));
+                previous = current;
+                current = following;
+                if current != start {
+                    indices.push(current);
+                }
+            }
+            let mut points = indices
+                .iter()
+                .map(|index| {
+                    let relative = vertices[*index].point - origin;
+                    Point2::new(relative.dot(u), relative.dot(v))
+                })
+                .collect::<Vec<_>>();
+            loop {
+                let removable = (0..points.len()).find(|index| {
+                    let previous = points[(*index + points.len() - 1) % points.len()];
+                    let current = points[*index];
+                    let next = points[(*index + 1) % points.len()];
+                    let first = current - previous;
+                    let second = next - current;
+                    first.magnitude() <= allowed
+                        || second.magnitude() <= allowed
+                        || (first.x * second.y - first.y * second.x).abs()
+                            <= allowed * (first.magnitude() + second.magnitude()).max(1.0)
+                });
+                if points.len() <= 3 || removable.is_none() {
+                    break;
+                }
+                points.remove(removable.expect("checked removable profile point"));
+            }
+            let area = (0..points.len())
+                .map(|index| {
+                    let first = points[index];
+                    let second = points[(index + 1) % points.len()];
+                    first.x * second.y - second.x * first.y
+                })
+                .sum::<f64>()
+                * 0.5;
+            rings.push((area, points));
+        }
+        let outer_index = rings
+            .iter()
+            .enumerate()
+            .max_by(|(_, first), (_, second)| first.0.abs().total_cmp(&second.0.abs()))
+            .map(|(index, _)| index)
+            .ok_or_else(|| {
+                KernelError::new(DiagnosticKind::GeometryInvariant, "prism has no cap ring")
+            })?;
+        let outer = Wire2::polygon(rings[outer_index].1.clone(), self.kernel.tolerance)?;
+        let holes = rings
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, (_, points))| (index != outer_index).then_some(points))
+            .map(|points| Wire2::polygon(points, self.kernel.tolerance))
+            .collect::<KernelResult<Vec<_>>>()?;
+        let profile = Profile::new(outer, holes, self.kernel.tolerance)?;
+        let body =
+            self.extrude_curve_profile_unchecked(plane, &profile, axis * (maximum - minimum))?;
+        Ok(Some(body))
     }
 
     /// Remove triangulation edges introduced solely by the Boolean boundary
@@ -2016,6 +2747,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             &vertices[b].key,
             &polyhedral_edge_key(mesh, a, b),
         )?;
+        self.derive_polyhedral_edge(first_edge.edge, mesh, a, b)?;
         if !vertices[b].sources.is_empty() {
             let name = self.working.vertex(first_edge.vertex)?.name;
             self.history.derived(
@@ -2040,6 +2772,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             &vertices[c].key,
             &polyhedral_edge_key(mesh, b, c),
         )?;
+        self.derive_polyhedral_edge(second_edge.edge, mesh, b, c)?;
         if !vertices[c].sources.is_empty() {
             let name = self.working.vertex(second_edge.vertex)?.name;
             self.history.derived(
@@ -2064,6 +2797,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             &polyhedral_edge_key(mesh, a, c),
             Some("construction"),
         )?;
+        self.derive_polyhedral_edge(lamina.edge, mesh, a, c)?;
         self.assign_triangle_face(seed.face, seed_triangle, mesh)?;
         let seed_face_name = self.names.named("face", &seed_triangle.key)?;
         let seed_loop_name = self.names.named("loop.outer", &seed_triangle.key)?;
@@ -2210,6 +2944,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                         &vertices[third].key,
                         &polyhedral_edge_key(mesh, end_input, third),
                     )?;
+                    self.derive_polyhedral_edge(spike.edge, mesh, end_input, third)?;
                     if !vertices[third].sources.is_empty() {
                         let name = self.working.vertex(spike.vertex)?.name;
                         self.history.derived(
@@ -2236,6 +2971,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                         &polyhedral_edge_key(mesh, third, start_input),
                         Some(&triangle.key),
                     )?;
+                    self.derive_polyhedral_edge(made.edge, mesh, third, start_input)?;
                     self.assign_triangle_face(made.face, triangle, mesh)?;
                     if !triangle.sources.is_empty() {
                         let name = self.working.face(made.face)?.name;
@@ -2294,6 +3030,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                         &polyhedral_edge_key(mesh, start_input, end_input),
                         Some(&triangle.key),
                     )?;
+                    self.derive_polyhedral_edge(made.edge, mesh, start_input, end_input)?;
                     self.assign_triangle_face(made.face, triangle, mesh)?;
                     if !triangle.sources.is_empty() {
                         let name = self.working.face(made.face)?.name;
@@ -2338,6 +3075,22 @@ impl<'kernel> EulerTransaction<'kernel> {
             mesh.vertices()[c].point - mesh.vertices()[a].point,
             self.kernel.tolerance,
         )
+    }
+
+    fn derive_polyhedral_edge(
+        &mut self,
+        edge: EdgeId,
+        mesh: &PolyhedralMesh,
+        first: usize,
+        second: usize,
+    ) -> KernelResult<()> {
+        let sources = mesh.edge_sources(first, second);
+        if !sources.is_empty() {
+            let name = self.working.edge(edge)?.name;
+            self.history
+                .derived(name, sources.iter().copied(), "polyhedron.edge");
+        }
+        Ok(())
     }
 
     fn assign_triangle_face(
@@ -3446,7 +4199,8 @@ impl<'kernel> EulerTransaction<'kernel> {
     ) -> KernelResult<Vec<FaceId>> {
         let unit = ParameterRange::new(0.0, 1.0)?;
         let boundary = self.collect_loop(sweep_loop)?;
-        let side_orientation = match self.working.loop_(sweep_loop)?.kind {
+        let loop_kind = self.working.loop_(sweep_loop)?.kind;
+        let side_orientation = match loop_kind {
             LoopKind::Outer => FaceOrientation::Forward,
             LoopKind::Inner => FaceOrientation::Reversed,
         };
@@ -3519,6 +4273,14 @@ impl<'kernel> EulerTransaction<'kernel> {
             let range = boundary_ranges[index];
             let top_curve = translate_curve(curve, vector, self.kernel.tolerance)?;
             let surface = extrusion_surface(curve, vector, self.kernel.tolerance)?;
+            let face_orientation = match curve {
+                Curve3::Circle(_) if loop_kind == LoopKind::Outer && range.span() < 0.0 => {
+                    side_orientation.reversed()
+                }
+                Curve3::Circle(_) => side_orientation,
+                _ if range.span() < 0.0 => FaceOrientation::Reversed,
+                _ => FaceOrientation::Forward,
+            };
             let side_top: Curve2 = Line2::new(Point2::new(0.0, 1.0), Vec2::new(1.0, 0.0))?.into();
             let cap_pcurve = self.working.coedge(boundary[index])?.pcurve.clone();
             let side = self.mef_unchecked(
@@ -3527,7 +4289,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 top_curve,
                 range.reversed(),
                 surface,
-                side_orientation,
+                face_orientation,
                 side_top,
                 cap_pcurve,
                 range.reversed(),
@@ -3644,9 +4406,10 @@ impl<'kernel> EulerTransaction<'kernel> {
         for body in &self.touched_bodies {
             current_names.extend(self.working.body_entity_names(*body)?);
         }
-        if current_names
-            .iter()
-            .any(|name| name.namespace != self.namespace)
+        if !self.composes_imported_topology
+            && current_names
+                .iter()
+                .any(|name| name.namespace != self.namespace)
         {
             return Err(KernelError::new(
                 DiagnosticKind::TopologyInvariant,

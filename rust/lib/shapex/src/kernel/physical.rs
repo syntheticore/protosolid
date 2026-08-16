@@ -125,6 +125,11 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
     {
         return Ok(certificate);
     }
+    if let Some(certificate) =
+        try_certify_prism_with_cylindrical_bosses(topology, body_id, &face_ids, physical_tolerance)?
+    {
+        return Ok(certificate);
+    }
     for edge_id in &edge_ids {
         let edge = topology.edge(*edge_id)?;
         if !matches!(edge.curve(), Curve3::Line(_)) {
@@ -264,7 +269,7 @@ fn try_certify_right_prism(
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<PhysicalCertificate>> {
     let body = topology.body(body_id)?;
-    if body.shells().len() != 1 || face_ids.len() < 4 {
+    if body.shells().len() != 1 || face_ids.len() < 3 {
         return Ok(None);
     }
     validate_shell_connected(topology, body.shells()[0])?;
@@ -300,7 +305,8 @@ fn try_certify_right_prism(
                 continue;
             };
             if first_section.edge_count != second_section.edge_count
-                || face_ids.len() != first_section.edge_count + 2
+                || face_ids.len() < 3
+                || face_ids.len() > first_section.edge_count + 2
             {
                 continue;
             }
@@ -575,6 +581,8 @@ fn validate_prism_side_incidence(
     first_edges: &BTreeSet<super::EdgeId>,
     second_edges: &BTreeSet<super::EdgeId>,
 ) -> KernelResult<bool> {
+    let mut first_incidence = 0usize;
+    let mut second_incidence = 0usize;
     for face_id in face_ids {
         if *face_id == first_cap || *face_id == second_cap {
             continue;
@@ -586,13 +594,212 @@ fn validate_prism_side_incidence(
             return Ok(false);
         }
         let edges = face_edges(topology, *face_id)?;
-        if edges.intersection(first_edges).count() != 1
-            || edges.intersection(second_edges).count() != 1
-        {
+        let on_first = edges.intersection(first_edges).count();
+        let on_second = edges.intersection(second_edges).count();
+        if on_first == 0 || on_second == 0 {
             return Ok(false);
         }
+        first_incidence += on_first;
+        second_incidence += on_second;
     }
-    Ok(true)
+    Ok(first_incidence == first_edges.len() && second_incidence == second_edges.len())
+}
+
+fn try_certify_prism_with_cylindrical_bosses(
+    topology: &Topology,
+    body_id: BodyId,
+    face_ids: &BTreeSet<FaceId>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<PhysicalCertificate>> {
+    let body = topology.body(body_id)?;
+    if body.shells().len() != 1 {
+        return Ok(None);
+    }
+    let shell_id = body.shells()[0];
+    for target_face in face_ids {
+        let target = topology.face(*target_face)?;
+        if !matches!(target.surface(), Surface3::Plane(_)) || target.loops().len() < 2 {
+            continue;
+        }
+        let inner_loops = target
+            .loops()
+            .iter()
+            .copied()
+            .filter(|loop_id| {
+                topology
+                    .loop_(*loop_id)
+                    .map(|loop_value| loop_value.kind() == super::LoopKind::Inner)
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        if inner_loops.is_empty() {
+            continue;
+        }
+
+        let mut boss_components = Vec::new();
+        let mut boss_faces = BTreeSet::new();
+        let mut failed = false;
+        for inner_loop in &inner_loops {
+            let component = faces_across_loop(topology, *target_face, *inner_loop)?;
+            if component.is_empty() || component.iter().any(|face| boss_faces.contains(face)) {
+                failed = true;
+                break;
+            }
+            boss_faces.extend(component.iter().copied());
+            boss_components.push((*inner_loop, component));
+        }
+        if failed || boss_faces.iter().any(|face| !face_ids.contains(face)) {
+            continue;
+        }
+
+        let mut base_topology = topology.clone();
+        base_topology
+            .shells
+            .get_mut(shell_id)?
+            .faces
+            .retain(|face| !boss_faces.contains(face));
+        base_topology
+            .faces
+            .get_mut(*target_face)?
+            .loops
+            .retain(|loop_id| !inner_loops.contains(loop_id));
+        let base_faces = face_ids
+            .iter()
+            .copied()
+            .filter(|face| !boss_faces.contains(face))
+            .collect::<BTreeSet<_>>();
+        let Some(base_certificate) =
+            try_certify_right_prism(&base_topology, body_id, &base_faces, tolerance)?
+        else {
+            continue;
+        };
+
+        let mut components = vec![base_certificate.properties];
+        let mut shared_area = 0.0;
+        for (inner_loop, component_faces) in boss_components {
+            let mut boss_topology = topology.clone();
+            let mut base_face = boss_topology.face(*target_face)?.clone();
+            base_face.orientation = match base_face.orientation {
+                super::FaceOrientation::Forward => super::FaceOrientation::Reversed,
+                super::FaceOrientation::Reversed => super::FaceOrientation::Forward,
+            };
+            base_face.loops = vec![inner_loop];
+            let base_face_id = boss_topology.faces.insert(base_face);
+            {
+                let loop_value = boss_topology.loops.get_mut(inner_loop)?;
+                loop_value.face = base_face_id;
+                loop_value.kind = super::LoopKind::Outer;
+            }
+            let mut component_face_ids = component_faces.clone();
+            component_face_ids.insert(base_face_id);
+            boss_topology.shells.get_mut(shell_id)?.faces =
+                component_face_ids.iter().copied().collect();
+            let Some(certificate) =
+                try_certify_right_prism(&boss_topology, body_id, &component_face_ids, tolerance)?
+            else {
+                failed = true;
+                break;
+            };
+            shared_area += std::f64::consts::PI
+                * component_face_ids
+                    .iter()
+                    .find_map(|face| match boss_topology.face(*face).ok()?.surface() {
+                        Surface3::Cylinder(cylinder) => Some(cylinder.radius().powi(2)),
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::GeometryInvariant,
+                            "certified cylindrical boss has no cylindrical wall",
+                        )
+                    })?;
+            components.push(certificate.properties);
+        }
+        if failed {
+            continue;
+        }
+        return Ok(Some(PhysicalCertificate {
+            properties: combine_disjoint_properties(&components, shared_area * 2.0),
+        }));
+    }
+    Ok(None)
+}
+
+fn faces_across_loop(
+    topology: &Topology,
+    excluded_face: FaceId,
+    loop_id: super::LoopId,
+) -> KernelResult<BTreeSet<FaceId>> {
+    let mut queue = VecDeque::new();
+    for coedge_id in topology.loop_coedges(loop_id)? {
+        let edge = topology.edge(topology.coedge(coedge_id)?.edge())?;
+        for mate in edge.coedges() {
+            let face = topology.loop_(topology.coedge(*mate)?.loop_id())?.face();
+            if face != excluded_face {
+                queue.push_back(face);
+            }
+        }
+    }
+    let mut faces = BTreeSet::new();
+    while let Some(face) = queue.pop_front() {
+        if face == excluded_face || !faces.insert(face) {
+            continue;
+        }
+        for loop_id in topology.face(face)?.loops() {
+            for coedge_id in topology.loop_coedges(*loop_id)? {
+                let edge = topology.edge(topology.coedge(coedge_id)?.edge())?;
+                for mate in edge.coedges() {
+                    let adjacent = topology.loop_(topology.coedge(*mate)?.loop_id())?.face();
+                    if adjacent != excluded_face && !faces.contains(&adjacent) {
+                        queue.push_back(adjacent);
+                    }
+                }
+            }
+        }
+    }
+    Ok(faces)
+}
+
+fn combine_disjoint_properties(
+    components: &[MassProperties],
+    removed_surface_area: f64,
+) -> MassProperties {
+    let volume = components
+        .iter()
+        .map(|properties| properties.volume)
+        .sum::<f64>();
+    let centroid = Point3::from_vec(
+        components
+            .iter()
+            .fold(Vec3::new(0.0, 0.0, 0.0), |sum, properties| {
+                sum + properties.centroid.to_vec() * properties.volume
+            })
+            / volume,
+    );
+    let mut inertia = [[0.0; 3]; 3];
+    for properties in components {
+        let offset = properties.centroid - centroid;
+        let distance2 = offset.magnitude2();
+        for row in 0..3 {
+            for column in 0..3 {
+                inertia[row][column] += properties.inertia[row][column]
+                    + properties.volume
+                        * (if row == column { distance2 } else { 0.0 }
+                            - offset[row] * offset[column]);
+            }
+        }
+    }
+    MassProperties {
+        volume,
+        signed_volume: volume,
+        surface_area: components
+            .iter()
+            .map(|properties| properties.surface_area)
+            .sum::<f64>()
+            - removed_surface_area,
+        centroid,
+        inertia,
+    }
 }
 
 fn try_certify_torus(
@@ -1492,43 +1699,115 @@ fn validate_triangle_pairs(
     tolerance: ModelTolerance,
     same_mesh: bool,
 ) -> KernelResult<()> {
-    for (first_index, first_triangle) in first.triangles.iter().enumerate() {
-        let start = if same_mesh { first_index + 1 } else { 0 };
-        for second_index in start..second.triangles.len() {
-            if same_mesh && first.triangle_faces[first_index] == second.triangle_faces[second_index]
-            {
-                continue;
-            }
-            let a = triangle_points(first, *first_triangle);
-            let b = triangle_points(second, second.triangles[second_index]);
-            if !aabb_overlap(a, b, tolerance.linear) {
-                continue;
-            }
-            match triangle_intersection(a, b, tolerance)? {
-                TriangleIntersection::None => {}
-                TriangleIntersection::CoplanarArea => {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "distinct BREP faces overlap over a coplanar area",
-                    ))
+    let faces = first
+        .triangle_faces
+        .iter()
+        .chain(&second.triangle_faces)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let face_edges = faces
+        .iter()
+        .map(|face| {
+            topology
+                .face_edges(*face)
+                .map(|edges| (*face, edges.into_iter().collect::<BTreeSet<_>>()))
+        })
+        .collect::<KernelResult<BTreeMap<_, _>>>()?;
+    let face_vertices = faces
+        .iter()
+        .map(|face| (*face, face_vertices(topology, *face)))
+        .collect::<BTreeMap<_, _>>();
+    let bounds = |mesh: &TriangleMesh| {
+        mesh.triangles
+            .iter()
+            .map(|triangle| triangle_bounds(triangle_points(mesh, *triangle)))
+            .collect::<Vec<_>>()
+    };
+    let first_bounds = bounds(first);
+    let second_bounds = bounds(second);
+    let mut second_order = (0..second.triangles.len()).collect::<Vec<_>>();
+    second_order.sort_by(|first, second| {
+        second_bounds[*first].0[0].total_cmp(&second_bounds[*second].0[0])
+    });
+    let mut pairs = Vec::new();
+    if same_mesh {
+        for (position, first_index) in second_order.iter().copied().enumerate() {
+            let maximum = first_bounds[first_index].1[0] + tolerance.linear;
+            for second_index in second_order.iter().copied().skip(position + 1) {
+                if second_bounds[second_index].0[0] > maximum {
+                    break;
                 }
-                TriangleIntersection::Boundary(points) => {
-                    let first_face = first.triangle_faces[first_index];
-                    let second_face = second.triangle_faces[second_index];
-                    if points.iter().any(|point| {
-                        !allowed_face_contact(
-                            topology,
-                            first_face,
-                            second_face,
-                            *point,
-                            tolerance.linear,
-                        )
-                    }) {
-                        return Err(KernelError::new(
+                pairs.push((first_index, second_index));
+            }
+        }
+    } else {
+        let mut first_order = (0..first.triangles.len()).collect::<Vec<_>>();
+        first_order.sort_by(|a, b| first_bounds[*a].0[0].total_cmp(&first_bounds[*b].0[0]));
+        let mut lower = 0usize;
+        for first_index in first_order {
+            let minimum = first_bounds[first_index].0[0] - tolerance.linear;
+            let maximum = first_bounds[first_index].1[0] + tolerance.linear;
+            while lower < second_order.len() && second_bounds[second_order[lower]].1[0] < minimum {
+                lower += 1;
+            }
+            for second_index in second_order.iter().copied().skip(lower) {
+                if second_bounds[second_index].0[0] > maximum {
+                    break;
+                }
+                pairs.push((first_index, second_index));
+            }
+        }
+    }
+    for (first_index, second_index) in pairs {
+        let first_triangle = &first.triangles[first_index];
+        if same_mesh && first.triangle_faces[first_index] == second.triangle_faces[second_index] {
+            continue;
+        }
+        if !bounds_overlap(
+            first_bounds[first_index],
+            second_bounds[second_index],
+            tolerance.linear,
+        ) {
+            continue;
+        }
+        let a = triangle_points(first, *first_triangle);
+        let b = triangle_points(second, second.triangles[second_index]);
+        match triangle_intersection(a, b, tolerance)? {
+            TriangleIntersection::None => {}
+            TriangleIntersection::CoplanarArea => {
+                let first_face = first.triangle_faces[first_index];
+                let second_face = second.triangle_faces[second_index];
+                if face_edges[&second_face]
+                    .iter()
+                    .any(|edge| face_edges[&first_face].contains(edge))
+                {
+                    continue;
+                }
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "distinct BREP faces overlap over a coplanar area",
+                ));
+            }
+            TriangleIntersection::Boundary(points) => {
+                let first_face = first.triangle_faces[first_index];
+                let second_face = second.triangle_faces[second_index];
+                if let Some(point) = points.iter().find(|point| {
+                    !allowed_face_contact(
+                        topology,
+                        &face_edges[&first_face],
+                        &face_edges[&second_face],
+                        &face_vertices[&first_face],
+                        &face_vertices[&second_face],
+                        **point,
+                        tolerance.linear,
+                    )
+                }) {
+                    return Err(KernelError::new(
                             DiagnosticKind::GeometryInvariant,
-                            "shell faces intersect away from shared topology",
+                            format!(
+                                "shell faces {first_face:?} and {second_face:?} intersect away from shared topology near {point:?}",
+                            ),
                         ));
-                    }
                 }
             }
         }
@@ -1544,30 +1823,25 @@ fn triangle_points(mesh: &TriangleMesh, triangle: [usize; 3]) -> [Point3; 3] {
     ]
 }
 
-fn aabb_overlap(first: [Point3; 3], second: [Point3; 3], tolerance: f64) -> bool {
+fn triangle_bounds(triangle: [Point3; 3]) -> ([f64; 3], [f64; 3]) {
+    let mut minimum = [f64::INFINITY; 3];
+    let mut maximum = [f64::NEG_INFINITY; 3];
+    for point in triangle {
+        for (axis, value) in [point.x, point.y, point.z].into_iter().enumerate() {
+            minimum[axis] = minimum[axis].min(value);
+            maximum[axis] = maximum[axis].max(value);
+        }
+    }
+    (minimum, maximum)
+}
+
+fn bounds_overlap(
+    first: ([f64; 3], [f64; 3]),
+    second: ([f64; 3], [f64; 3]),
+    tolerance: f64,
+) -> bool {
     (0..3).all(|axis| {
-        let coordinate = |point: Point3| match axis {
-            0 => point.x,
-            1 => point.y,
-            _ => point.z,
-        };
-        let first_min = first
-            .iter()
-            .map(|point| coordinate(*point))
-            .fold(f64::INFINITY, f64::min);
-        let first_max = first
-            .iter()
-            .map(|point| coordinate(*point))
-            .fold(f64::NEG_INFINITY, f64::max);
-        let second_min = second
-            .iter()
-            .map(|point| coordinate(*point))
-            .fold(f64::INFINITY, f64::min);
-        let second_max = second
-            .iter()
-            .map(|point| coordinate(*point))
-            .fold(f64::NEG_INFINITY, f64::max);
-        first_min <= second_max + tolerance && second_min <= first_max + tolerance
+        first.0[axis] <= second.1[axis] + tolerance && second.0[axis] <= first.1[axis] + tolerance
     })
 }
 
@@ -1695,32 +1969,21 @@ fn coplanar_triangle_intersection(
     };
     let a = first.map(project);
     let b = second.map(project);
-    let centroid = |triangle: [[f64; 2]; 3]| {
-        [
-            (triangle[0][0] + triangle[1][0] + triangle[2][0]) / 3.0,
-            (triangle[0][1] + triangle[1][1] + triangle[2][1]) / 3.0,
-        ]
-    };
-    if a.iter()
-        .any(|point| point_in_triangle2_strict(*point, b, tolerance))
-        || b.iter()
-            .any(|point| point_in_triangle2_strict(*point, a, tolerance))
-        || point_in_triangle2_strict(centroid(a), b, tolerance)
-        || point_in_triangle2_strict(centroid(b), a, tolerance)
-    {
-        return Ok(TriangleIntersection::CoplanarArea);
-    }
-    for edge_a in [[0, 1], [1, 2], [2, 0]] {
-        for edge_b in [[0, 1], [1, 2], [2, 0]] {
-            if segments_cross_strict(
-                a[edge_a[0]],
-                a[edge_a[1]],
-                b[edge_b[0]],
-                b[edge_b[1]],
-                tolerance,
-            ) {
-                return Ok(TriangleIntersection::CoplanarArea);
-            }
+    let overlap = clip_convex_polygon(a.to_vec(), b);
+    if overlap.len() >= 3 {
+        let twice_area = overlap
+            .iter()
+            .zip(overlap.iter().cycle().skip(1))
+            .map(|(first, second)| first[0] * second[1] - first[1] * second[0])
+            .sum::<f64>()
+            .abs();
+        let scale = a
+            .iter()
+            .chain(&b)
+            .map(|point| point[0].abs().max(point[1].abs()))
+            .fold(1.0_f64, f64::max);
+        if twice_area > 2.0 * tolerance * scale {
+            return Ok(TriangleIntersection::CoplanarArea);
         }
     }
     let mut boundary = Vec::new();
@@ -1746,15 +2009,41 @@ fn orient2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
     (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 }
 
-fn point_in_triangle2_strict(point: [f64; 2], triangle: [[f64; 2]; 3], tolerance: f64) -> bool {
-    let values = [
-        orient2(triangle[0], triangle[1], point),
-        orient2(triangle[1], triangle[2], point),
-        orient2(triangle[2], triangle[0], point),
-    ];
-    let area_tolerance = tolerance * tolerance;
-    values.iter().all(|value| *value > area_tolerance)
-        || values.iter().all(|value| *value < -area_tolerance)
+fn clip_convex_polygon(mut subject: Vec<[f64; 2]>, clip: [[f64; 2]; 3]) -> Vec<[f64; 2]> {
+    let clip_orientation = orient2(clip[0], clip[1], clip[2]).signum();
+    for index in 0..3 {
+        let start = clip[index];
+        let end = clip[(index + 1) % 3];
+        let input = std::mem::take(&mut subject);
+        if input.is_empty() {
+            break;
+        }
+        let inside = |point| orient2(start, end, point) * clip_orientation >= 0.0;
+        let mut previous = *input.last().expect("nonempty clipped polygon");
+        let mut previous_inside = inside(previous);
+        for current in input {
+            let current_inside = inside(current);
+            if current_inside != previous_inside {
+                let direction = [current[0] - previous[0], current[1] - previous[1]];
+                let edge = [end[0] - start[0], end[1] - start[1]];
+                let denominator = direction[0] * edge[1] - direction[1] * edge[0];
+                if denominator.abs() > f64::EPSILON {
+                    let relative = [start[0] - previous[0], start[1] - previous[1]];
+                    let parameter = (relative[0] * edge[1] - relative[1] * edge[0]) / denominator;
+                    subject.push([
+                        previous[0] + direction[0] * parameter,
+                        previous[1] + direction[1] * parameter,
+                    ]);
+                }
+            }
+            if current_inside {
+                subject.push(current);
+            }
+            previous = current;
+            previous_inside = current_inside;
+        }
+    }
+    subject
 }
 
 fn point_in_triangle2_inclusive(point: [f64; 2], triangle: [[f64; 2]; 3], tolerance: f64) -> bool {
@@ -1766,21 +2055,6 @@ fn point_in_triangle2_inclusive(point: [f64; 2], triangle: [[f64; 2]; 3], tolera
     let area_tolerance = tolerance * tolerance;
     values.iter().all(|value| *value >= -area_tolerance)
         || values.iter().all(|value| *value <= area_tolerance)
-}
-
-fn segments_cross_strict(
-    a: [f64; 2],
-    b: [f64; 2],
-    c: [f64; 2],
-    d: [f64; 2],
-    tolerance: f64,
-) -> bool {
-    let ab_c = orient2(a, b, c);
-    let ab_d = orient2(a, b, d);
-    let cd_a = orient2(c, d, a);
-    let cd_b = orient2(c, d, b);
-    let area_tolerance = tolerance * tolerance;
-    ab_c * ab_d < -area_tolerance * area_tolerance && cd_a * cd_b < -area_tolerance * area_tolerance
 }
 
 fn deduplicate_points(points: &mut Vec<Point3>, tolerance: f64) {
@@ -1798,18 +2072,14 @@ fn deduplicate_points(points: &mut Vec<Point3>, tolerance: f64) {
 
 fn allowed_face_contact(
     topology: &Topology,
-    first_face: FaceId,
-    second_face: FaceId,
+    first_edges: &BTreeSet<super::EdgeId>,
+    second_edges: &BTreeSet<super::EdgeId>,
+    first_vertices: &BTreeSet<super::VertexId>,
+    second_vertices: &BTreeSet<super::VertexId>,
     point: Point3,
     tolerance: f64,
 ) -> bool {
-    let mut common_vertices = BTreeSet::new();
-    let first_vertices = face_vertices(topology, first_face);
-    let second_vertices = face_vertices(topology, second_face);
-    for vertex in first_vertices.intersection(&second_vertices) {
-        common_vertices.insert(*vertex);
-    }
-    if common_vertices.iter().any(|vertex| {
+    if first_vertices.intersection(second_vertices).any(|vertex| {
         topology
             .vertex(*vertex)
             .map(|value| value.point().distance(point) <= tolerance)
@@ -1817,19 +2087,8 @@ fn allowed_face_contact(
     }) {
         return true;
     }
-    for (_, edge) in topology.edges() {
-        let incident: BTreeSet<_> = edge
-            .coedges()
-            .iter()
-            .filter_map(|coedge_id| {
-                topology
-                    .coedge(*coedge_id)
-                    .ok()
-                    .and_then(|coedge| topology.loop_(coedge.loop_id()).ok())
-                    .map(|loop_| loop_.face())
-            })
-            .collect();
-        if incident.contains(&first_face) && incident.contains(&second_face) {
+    for edge_id in first_edges.intersection(second_edges) {
+        if let Ok(edge) = topology.edge(*edge_id) {
             let vertices = edge.vertices();
             if let (Ok(start), Ok(end)) =
                 (topology.vertex(vertices[0]), topology.vertex(vertices[1]))

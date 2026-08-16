@@ -15,7 +15,7 @@
 
   EdgeProxy(
     v-if="parentActive"
-    v-for="edge in solid.edges()"
+    v-for="edge in solid.edges().filter(edge => edge.isSemantic())"
     :key="edge.tessId"
     :edge="edge"
     :component="component"

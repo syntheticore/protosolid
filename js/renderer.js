@@ -441,7 +441,7 @@ export default class Renderer {
 
   convertLine(vertices, material) {
     const geometry = new LineGeometry()
-    const positions = vertices.flat()
+    const positions = vertices.flatMap(vertex => vertex?.isVector3 ? vertex.toArray() : vertex)
     geometry.setPositions(positions)
     // geometry.setColors(positions.map((pos, i) => i / positions.length ))
     geometry.setColors(Array(positions.length).fill(1))

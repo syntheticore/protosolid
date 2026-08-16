@@ -10,6 +10,7 @@ mod boolean;
 mod domain;
 mod error;
 mod euler;
+mod features;
 mod geometry;
 mod history;
 mod identity;

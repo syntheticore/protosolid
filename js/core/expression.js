@@ -1,10 +1,14 @@
 import preferences from '../preferences.js'
 
-const conversions = {
-  mm: 1.0,
-  cm: 10.0,
-  m: 1000.0,
-  inch: 25.4,
+const dimensions = {
+  length: {
+    conversions: { mm: 1.0, cm: 10.0, m: 1000.0, inch: 25.4 },
+    preferred: () => preferences.preferredUnit,
+  },
+  angle: {
+    conversions: { rad: 1.0, deg: Math.PI / 180.0, '°': Math.PI / 180.0 },
+    preferred: () => preferences.preferredAngleUnit,
+  },
 }
 
 function fixDecimals(number) {
@@ -12,39 +16,48 @@ function fixDecimals(number) {
 }
 
 export default class Expression {
-  constructor(input, parameters) {
+  constructor(input, parameters, dimension = 'length') {
     this.parameters = parameters || []
+    this.dimension = dimensions[dimension]
+    if(!this.dimension) throw new Error(`Unknown expression dimension: ${dimension}`)
     this.set(input)
+  }
+
+  preferredUnit() {
+    return this.dimension.preferred()
   }
 
   // Set in any unit
   set(input) {
     if(typeof input == 'number') {
       // Assume preferred unit for raw input
-      this.expression = fixDecimals(input) + preferences.preferredUnit
+      this.expression = fixDecimals(
+        input / this.dimension.conversions[this.preferredUnit()]
+      ) + this.preferredUnit()
     } else {
       // Allways leave a unit for display purposes
       input = input.replace(/,/g, '.')
       const number = this.parsePlus(input)
-      if(!number.unit && number.value == input) input += preferences.preferredUnit
+      if(!number.unit && number.value == input) input += this.preferredUnit()
       this.expression = input
     }
   }
 
   getBase() {
     const number = this.parse()
-    return number.value * conversions[number.unit]
+    return number.value * this.dimension.conversions[number.unit]
   }
 
   setBase(mmValue) {
     const unit = this.parse().unit
     // Keep current unit
-    const value = mmValue / conversions[unit]
+    const value = mmValue / this.dimension.conversions[unit]
     this.set(fixDecimals(value) + unit)
   }
 
   as(unit) {
-    return this.getBase() / conversions[unit]
+    if(!(unit in this.dimension.conversions)) throw new Error(`Invalid unit: ${unit}`)
+    return this.getBase() / this.dimension.conversions[unit]
   }
 
   format(unit) {
@@ -54,7 +67,10 @@ export default class Expression {
   parse() {
     const number = this.parsePlus(this.expression)
     // Assume preferred unit if no unit could be determined by now
-    number.unit = number.unit || preferences.preferredUnit
+    number.unit = number.unit || this.preferredUnit()
+    if(!(number.unit in this.dimension.conversions)) {
+      throw new Error(`Invalid unit for this value: ${number.unit}`)
+    }
     return number
   }
 
@@ -87,7 +103,7 @@ export default class Expression {
   }
 
   parseNumber(expr) {
-    const match = /(\d*\.?\d*)\s*(inch\b|mm\b|cm\b|m\b)?/.exec(expr)
+    const match = /(\d*\.?\d*)\s*(inch\b|mm\b|cm\b|m\b|deg\b|rad\b|°)?/.exec(expr)
     if(!match || match[1] === '') {
       // Probably a parameter
       const param = this.parameters.find(param => param.name == expr.trim() )
@@ -118,20 +134,21 @@ export default class Expression {
 
   operation(left, right, op, convertBoth) {
     const unit = this.decideUnit(left, right)
-    const leftUnit = (convertBoth ? left.unit || right.unit : left.unit) || 'mm'
-    const rightUnit = (convertBoth ? right.unit || left.unit : right.unit) || 'mm'
+    const fallback = this.preferredUnit()
+    const leftUnit = (convertBoth ? left.unit || right.unit : left.unit) || fallback
+    const rightUnit = (convertBoth ? right.unit || left.unit : right.unit) || fallback
     return {
       value: op(
-        left.value * conversions[leftUnit],
-        right.value * conversions[rightUnit],
-      ) / (unit ? conversions[unit] : 1.0),
+        left.value * this.dimension.conversions[leftUnit],
+        right.value * this.dimension.conversions[rightUnit],
+      ) / (unit ? this.dimension.conversions[unit] : 1.0),
       unit,
     }
   }
 
   decideUnit(left, right) {
     return left.unit && right.unit ?
-      left.unit == right.unit ? left.unit : preferences.preferredUnit :
+      left.unit == right.unit ? left.unit : this.preferredUnit() :
       left.unit || right.unit
   }
 
@@ -163,7 +180,3 @@ export default class Expression {
     return result
   }
 }
-
-
-const unit = new Expression('2inch + 1mm')
-console.log('RESULT', unit.getBase(), unit.parse().value, unit.parse().unit)

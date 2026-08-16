@@ -37,7 +37,7 @@ struct CsgPolygon {
     source: PersistentId,
 }
 
-type CoplanarGroup = (CsgPlane, Vec<(PersistentId, Vec<CsgVertex>)>);
+type CoplanarGroup = (CsgPlane, Vec<(PersistentId, CsgPlane, Vec<CsgVertex>)>);
 
 #[derive(Debug, Clone, Default)]
 struct BspNode {
@@ -65,25 +65,161 @@ pub(crate) fn boolean_polyhedron(
             "a Boolean operation requires two distinct input bodies",
         ));
     }
-    let mut first_polygons = body_polygons(topology, tolerance, first)?;
+    let first_polygons = body_polygons(topology, tolerance, first)?;
     let mut second_polygons = body_polygons(topology, tolerance, second)?;
     let linear = body_scale(&first_polygons, &second_polygons)
         .map(|scale| tolerance.linear_at_scale(scale))
         .unwrap_or(tolerance.linear);
+    let attempt = boolean_polygon_set(
+        first_polygons.clone(),
+        second_polygons.clone(),
+        kind,
+        linear,
+    )
+    .and_then(|polygons| publish_boolean_polygons(polygons, tolerance));
+    if attempt.is_ok() {
+        return attempt;
+    }
+    separate_coincident_operand(&mut second_polygons, linear * 8.0)?;
+    boolean_polygon_set(first_polygons, second_polygons, kind, linear)
+        .and_then(|polygons| publish_boolean_polygons(polygons, tolerance))
+}
+
+fn boolean_polygon_set(
+    mut first: Vec<CsgPolygon>,
+    mut second: Vec<CsgPolygon>,
+    kind: BooleanKind,
+    tolerance: f64,
+) -> KernelResult<Vec<CsgPolygon>> {
+    let first_boundary = first.clone();
+    let second_boundary = second.clone();
     let polygons = match kind {
-        BooleanKind::Union => bsp_union(&mut first_polygons, &mut second_polygons, linear)?,
-        BooleanKind::Intersection => {
-            bsp_intersection(&mut first_polygons, &mut second_polygons, linear)?
-        }
-        BooleanKind::Difference => {
-            bsp_difference(&mut first_polygons, &mut second_polygons, linear)?
-        }
+        BooleanKind::Union => bsp_union(&mut first, &mut second, tolerance)?,
+        BooleanKind::Intersection => bsp_intersection(&mut first, &mut second, tolerance)?,
+        BooleanKind::Difference => bsp_difference(&mut first, &mut second, tolerance)?,
     };
+    Ok(classify_material_boundary(
+        polygons,
+        &first_boundary,
+        &second_boundary,
+        kind,
+        tolerance,
+    ))
+}
+
+fn publish_boolean_polygons(
+    polygons: Vec<CsgPolygon>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Vec<BooleanBodyMesh>> {
     if polygons.is_empty() {
         Ok(Vec::new())
     } else {
         group_material_bodies(polygons_to_mesh(polygons, tolerance)?, tolerance)
     }
+}
+
+fn separate_coincident_operand(polygons: &mut [CsgPolygon], distance: f64) -> KernelResult<()> {
+    let points = polygons
+        .iter()
+        .flat_map(|polygon| polygon.vertices.iter().map(|vertex| vertex.point))
+        .collect::<Vec<_>>();
+    if points.is_empty() {
+        return Ok(());
+    }
+    let center = Point3::from_vec(
+        points
+            .iter()
+            .fold(Vec3::new(0.0, 0.0, 0.0), |sum, point| sum + point.to_vec())
+            / points.len() as f64,
+    );
+    let radius = points
+        .iter()
+        .map(|point| point.distance(center))
+        .fold(0.0_f64, f64::max);
+    if radius <= distance {
+        return Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "Boolean operand is too small to separate coincident faces",
+        ));
+    }
+    let factor = 1.0 + distance / radius;
+    for polygon in polygons {
+        for vertex in &mut polygon.vertices {
+            vertex.point = center + (vertex.point - center) * factor;
+        }
+        let rebuilt = CsgPolygon::new(
+            polygon.vertices.clone(),
+            polygon.source,
+            ModelTolerance::default(),
+        )?;
+        polygon.plane = rebuilt.plane;
+    }
+    Ok(())
+}
+
+fn classify_material_boundary(
+    polygons: Vec<CsgPolygon>,
+    first: &[CsgPolygon],
+    second: &[CsgPolygon],
+    kind: BooleanKind,
+    tolerance: f64,
+) -> Vec<CsgPolygon> {
+    let occupied = |point| {
+        let in_first = point_in_csg_boundary(point, first);
+        let in_second = point_in_csg_boundary(point, second);
+        match kind {
+            BooleanKind::Union => in_first || in_second,
+            BooleanKind::Intersection => in_first && in_second,
+            BooleanKind::Difference => in_first && !in_second,
+        }
+    };
+    polygons
+        .into_iter()
+        .filter_map(|polygon| {
+            let centroid = polygon
+                .vertices
+                .iter()
+                .fold(Vec3::new(0.0, 0.0, 0.0), |sum, vertex| {
+                    sum + vertex.point.to_vec()
+                })
+                / polygon.vertices.len() as f64;
+            let scale = polygon
+                .vertices
+                .iter()
+                .map(|vertex| (vertex.point.to_vec() - centroid).magnitude())
+                .fold(0.0_f64, f64::max);
+            let offset = (tolerance * 16.0).max(scale * 1.0e-6);
+            let outside = Point3::from_vec(centroid + polygon.plane.normal * offset);
+            let inside = Point3::from_vec(centroid - polygon.plane.normal * offset);
+            match (occupied(inside), occupied(outside)) {
+                (true, false) => Some(polygon),
+                (false, true) => Some(polygon.flipped()),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn point_in_csg_boundary(point: Point3, polygons: &[CsgPolygon]) -> bool {
+    let mut solid_angle = 0.0;
+    for polygon in polygons {
+        if polygon.vertices.len() < 3 {
+            continue;
+        }
+        let origin = polygon.vertices[0].point - point;
+        for index in 1..polygon.vertices.len() - 1 {
+            let first = polygon.vertices[index].point - point;
+            let second = polygon.vertices[index + 1].point - point;
+            let lengths = [origin.magnitude(), first.magnitude(), second.magnitude()];
+            let numerator = origin.dot(first.cross(second));
+            let denominator = lengths[0] * lengths[1] * lengths[2]
+                + origin.dot(first) * lengths[2]
+                + first.dot(second) * lengths[0]
+                + second.dot(origin) * lengths[1];
+            solid_angle += 2.0 * numerator.atan2(denominator);
+        }
+    }
+    solid_angle.abs() > std::f64::consts::TAU
 }
 
 fn group_material_bodies(
@@ -485,18 +621,18 @@ impl CsgPlane {
                     }
                 }
                 if front_vertices.len() >= 3 {
-                    front.push(CsgPolygon::new(
-                        front_vertices,
-                        polygon.source,
-                        ModelTolerance::new(tolerance, f64::EPSILON, 1.0e-10, 1.0e-12),
-                    )?);
+                    front.push(CsgPolygon {
+                        vertices: front_vertices,
+                        plane: polygon.plane.clone(),
+                        source: polygon.source,
+                    });
                 }
                 if back_vertices.len() >= 3 {
-                    back.push(CsgPolygon::new(
-                        back_vertices,
-                        polygon.source,
-                        ModelTolerance::new(tolerance, f64::EPSILON, 1.0e-10, 1.0e-12),
-                    )?);
+                    back.push(CsgPolygon {
+                        vertices: back_vertices,
+                        plane: polygon.plane,
+                        source: polygon.source,
+                    });
                 }
             }
         }
@@ -559,17 +695,18 @@ fn polygons_to_mesh(
     polygons: Vec<CsgPolygon>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<PolyhedralMesh>> {
+    let weld = tolerance.linear * 32.0;
     let mut cleaned_polygons = Vec::new();
     let mut global_vertices = Vec::<CsgVertex>::new();
     for polygon in polygons {
-        let cleaned = clean_polygon(polygon.vertices, tolerance.linear);
+        let cleaned = clean_polygon(polygon.vertices, weld);
         if cleaned.len() < 3 {
             continue;
         }
         for vertex in &cleaned {
             if let Some(existing) = global_vertices
                 .iter_mut()
-                .find(|candidate| candidate.point.distance(vertex.point) <= tolerance.linear)
+                .find(|candidate| candidate.point.distance(vertex.point) <= weld)
             {
                 existing.sources.extend(vertex.sources.iter().copied());
             } else {
@@ -585,16 +722,12 @@ fn polygons_to_mesh(
             (
                 source,
                 plane,
-                split_polygon_edges(polygon, &global_vertices, tolerance.linear),
+                split_polygon_edges(polygon, &global_vertices, weld),
             )
         })
-        .collect();
-    let cleaned_polygons = merge_coplanar_polygons(
-        split_polygons,
-        &global_vertices,
-        tolerance.linear,
-        tolerance.angular,
-    )?;
+        .collect::<Vec<_>>();
+    let cleaned_polygons =
+        merge_coplanar_polygons(split_polygons, &global_vertices, weld, tolerance.angular)?;
 
     let mut vertices = Vec::<PolyhedralVertex>::new();
     let mut vertex_sources = Vec::<BTreeSet<PersistentId>>::new();
@@ -610,7 +743,7 @@ fn polygons_to_mesh(
         for vertex in polygon {
             let existing = vertices
                 .iter()
-                .position(|candidate| candidate.point.distance(vertex.point) <= tolerance.linear);
+                .position(|candidate| candidate.point.distance(vertex.point) <= weld);
             let index = if let Some(index) = existing {
                 vertex_sources[index].extend(vertex.sources);
                 index
@@ -626,32 +759,75 @@ fn polygons_to_mesh(
             };
             indices.push(index);
         }
-        let center_point = Point3::from_vec(
-            indices
-                .iter()
-                .map(|index| vertices[*index].point.to_vec())
-                .fold(Vec3::new(0.0, 0.0, 0.0), |sum, point| sum + point)
-                / indices.len() as f64,
-        );
-        let mut center_sources = BTreeSet::from([source]);
-        for index in &indices {
-            center_sources.extend(vertex_sources[*index].iter().copied());
+        indices.dedup();
+        if indices.len() > 1 && indices.first() == indices.last() {
+            indices.pop();
         }
-        let center = vertices.len();
-        vertex_sources.push(center_sources);
-        vertices.push(PolyhedralVertex {
-            key: String::new(),
-            point: center_point,
-            sources: Vec::new(),
-        });
-        for edge in 0..indices.len() {
+        loop {
+            let removable = (0..indices.len()).find(|index| {
+                let previous =
+                    vertices[indices[(*index + indices.len() - 1) % indices.len()]].point;
+                let current = vertices[indices[*index]].point;
+                let next = vertices[indices[(*index + 1) % indices.len()]].point;
+                (current - previous).cross(next - current).magnitude2() <= weld.powi(4)
+            });
+            if indices.len() <= 3 || removable.is_none() {
+                break;
+            }
+            indices.remove(removable.expect("checked removable vertex"));
+        }
+        if indices.len() < 3 {
+            continue;
+        }
+        let origin = vertices[indices[0]].point;
+        let Some(polygon_normal) = (1..indices.len() - 1).find_map(|index| {
+            let value = (vertices[indices[index]].point - origin)
+                .cross(vertices[indices[index + 1]].point - origin);
+            (value.magnitude2() > weld.powi(4)).then_some(value.normalize())
+        }) else {
+            continue;
+        };
+        let u = (vertices[indices[1]].point - origin).normalize();
+        let v = polygon_normal.cross(u);
+        let mut flat = Vec::with_capacity(indices.len() * 2);
+        for index in &indices {
+            let relative = vertices[*index].point - origin;
+            flat.extend([relative.dot(u), relative.dot(v)]);
+        }
+        let triangulation = earcutr::earcut(&flat, &Vec::new(), 2);
+        if triangulation.len() < 3 {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "a merged Boolean polygon could not be triangulated",
+            ));
+        }
+        for (triangle_index, triangle) in triangulation.chunks_exact(3).enumerate() {
+            let mut triangle_vertices = [
+                indices[triangle[0]],
+                indices[triangle[1]],
+                indices[triangle[2]],
+            ];
+            let normal = (vertices[triangle_vertices[1]].point
+                - vertices[triangle_vertices[0]].point)
+                .cross(vertices[triangle_vertices[2]].point - vertices[triangle_vertices[0]].point);
+            let scale = triangle_vertices
+                .iter()
+                .map(|index| vertices[*index].point.to_vec().magnitude())
+                .fold(1.0_f64, f64::max);
+            let area_tolerance = tolerance.linear_at_scale(scale).powi(2);
+            if normal.magnitude2() <= area_tolerance.powi(2) {
+                continue;
+            }
+            if normal.dot(polygon_normal) < 0.0 {
+                triangle_vertices.swap(1, 2);
+            }
             triangles.push(PolyhedralTriangle {
                 key: format!(
-                    "fragment.{}.{:016x}.{polygon_index}.{edge}",
+                    "fragment.{}.{:016x}.{polygon_index}.{triangle_index}",
                     source.namespace.as_u128(),
                     source.local,
                 ),
-                vertices: [indices[edge], indices[(edge + 1) % indices.len()], center],
+                vertices: triangle_vertices,
                 sources: face_sources.iter().copied().collect(),
             });
         }
@@ -774,88 +950,328 @@ fn merge_coplanar_polygons(
     linear: f64,
     angular: f64,
 ) -> KernelResult<Vec<(BTreeSet<PersistentId>, Vec<CsgVertex>)>> {
+    let all_polygons = polygons.clone();
     let mut groups: Vec<CoplanarGroup> = Vec::new();
     for (source, plane, vertices) in polygons {
         if let Some((_, members)) = groups.iter_mut().find(|(candidate, _)| {
-            candidate.normal.dot(plane.normal) >= 1.0 - angular
-                && (candidate.offset - plane.offset).abs() <= linear
+            let alignment = candidate.normal.dot(plane.normal);
+            alignment.abs() >= 1.0 - angular
+                && if alignment >= 0.0 {
+                    (candidate.offset - plane.offset).abs() <= linear
+                } else {
+                    (candidate.offset + plane.offset).abs() <= linear
+                }
         }) {
-            members.push((source, vertices));
+            members.push((source, plane, vertices));
         } else {
-            groups.push((plane, vec![(source, vertices)]));
+            groups.push((plane.clone(), vec![(source, plane, vertices)]));
         }
     }
 
-    let mut merged = Vec::new();
-    for (_, members) in groups {
-        let mut unique_polygons = BTreeSet::new();
-        let mut edges = BTreeSet::<(usize, usize)>::new();
+    let mut output = Vec::new();
+    for (plane, members) in groups {
+        let mut indexed = Vec::<(i32, Vec<usize>)>::new();
+        let mut segments = BTreeSet::<(usize, usize)>::new();
+        let mut forced_edges = BTreeSet::<(usize, usize)>::new();
         let mut sources = BTreeSet::new();
-        for (source, polygon) in members {
+        let mut unique = BTreeSet::new();
+        for (source, member_plane, polygon) in members {
             let indices = polygon
                 .iter()
                 .map(|vertex| global_vertex_index(global, vertex.point, linear))
                 .collect::<KernelResult<Vec<_>>>()?;
+            let sign = if plane.normal.dot(member_plane.normal) >= 0.0 {
+                1
+            } else {
+                -1
+            };
             let mut signature = indices.clone();
             signature.sort_unstable();
-            if !unique_polygons.insert(signature) {
+            if !unique.insert((sign, signature)) {
                 continue;
             }
             sources.insert(source);
             for index in 0..indices.len() {
-                let edge = (indices[index], indices[(index + 1) % indices.len()]);
-                if !edges.remove(&(edge.1, edge.0)) {
-                    edges.insert(edge);
+                for pair in split_coplanar_edge(
+                    global,
+                    indices[index],
+                    indices[(index + 1) % indices.len()],
+                    linear,
+                )
+                .windows(2)
+                {
+                    segments.insert((pair[0].min(pair[1]), pair[0].max(pair[1])));
+                }
+            }
+            indexed.push((sign, indices));
+        }
+        for (_, support_plane, polygon) in &all_polygons {
+            if plane.normal.dot(support_plane.normal).abs() >= 1.0 - angular {
+                continue;
+            }
+            for index in 0..polygon.len() {
+                let first = polygon[index].point;
+                let second = polygon[(index + 1) % polygon.len()].point;
+                if (plane.normal.dot(first.to_vec()) - plane.offset).abs() > linear * 16.0
+                    || (plane.normal.dot(second.to_vec()) - plane.offset).abs() > linear * 16.0
+                {
+                    continue;
+                }
+                let first = global_vertex_index(global, first, linear * 16.0)?;
+                let second = global_vertex_index(global, second, linear * 16.0)?;
+                for pair in split_coplanar_edge(global, first, second, linear * 16.0).windows(2) {
+                    segments.insert((pair[0].min(pair[1]), pair[0].max(pair[1])));
+                    forced_edges.insert((pair[1], pair[0]));
                 }
             }
         }
+
+        let occupied = |point| {
+            indexed
+                .iter()
+                .filter(|(_, polygon)| {
+                    point_in_coplanar_polygon(point, polygon, global, plane.normal)
+                })
+                .map(|(sign, _)| *sign)
+                .sum::<i32>()
+                != 0
+        };
+        let mut edges = BTreeSet::<(usize, usize)>::new();
+        for (first, second) in segments {
+            let start = global[first].point;
+            let end = global[second].point;
+            let direction = end - start;
+            if direction.magnitude2() <= linear.powi(2) {
+                continue;
+            }
+            let midpoint = start + direction * 0.5;
+            let left = plane.normal.cross(direction).normalize();
+            let probe = linear.max(direction.magnitude() * 1.0e-7) * 4.0;
+            match (
+                occupied(midpoint + left * probe),
+                occupied(midpoint - left * probe),
+            ) {
+                (true, false) => {
+                    edges.insert((first, second));
+                }
+                (false, true) => {
+                    edges.insert((second, first));
+                }
+                _ => {
+                    let forward = forced_edges.contains(&(first, second));
+                    let reverse = forced_edges.contains(&(second, first));
+                    if forward != reverse {
+                        edges.insert(if forward {
+                            (first, second)
+                        } else {
+                            (second, first)
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut loops = Vec::<(f64, Vec<usize>)>::new();
         while let Some(start_edge) = edges.iter().next().copied() {
             edges.remove(&start_edge);
-            let mut loop_indices = vec![start_edge.0, start_edge.1];
+            let mut ring = vec![start_edge.0, start_edge.1];
             let mut current = start_edge.1;
             while current != start_edge.0 {
-                let candidates: Vec<_> = edges
+                let previous = ring[ring.len() - 2];
+                let incoming = global[current].point - global[previous].point;
+                let next = edges
                     .iter()
                     .copied()
-                    .filter(|edge| edge.0 == current)
-                    .collect();
-                if candidates.len() != 1 {
-                    return Err(KernelError::new(
+                    .filter(|edge| {
+                        edge.0 == current
+                            || global[edge.0].point.distance(global[current].point) <= linear * 16.0
+                    })
+                    .min_by(|first, second| {
+                        let turn = |edge: &(usize, usize)| {
+                            let outgoing = global[edge.1].point - global[current].point;
+                            plane.normal.dot(incoming.cross(outgoing)).atan2(incoming.dot(outgoing))
+                        };
+                        turn(first).total_cmp(&turn(second))
+                    })
+                    .ok_or_else(|| KernelError::new(
                         DiagnosticKind::UnsupportedGeometry,
-                        "coplanar Boolean fragments do not form unambiguous boundary loops",
-                    ));
-                }
-                let next = candidates[0];
+                        format!(
+                            "coplanar Boolean fragments do not form a closed boundary loop at {:?} on plane {:?}",
+                            global[current].point,
+                            plane.normal,
+                        ),
+                    ))?;
                 edges.remove(&next);
                 current = next.1;
-                if current != start_edge.0 {
-                    loop_indices.push(current);
+                if global[current].point.distance(global[start_edge.0].point) <= linear * 16.0 {
+                    current = start_edge.0;
                 }
-                if loop_indices.len() > global.len() + 1 {
+                if current != start_edge.0 {
+                    ring.push(current);
+                }
+                if ring.len() > global.len() + 1 {
                     return Err(KernelError::new(
                         DiagnosticKind::NumericalFailure,
-                        "coplanar Boolean boundary loop does not close",
+                        "coplanar Boolean boundary loop exceeded its vertex limit",
                     ));
                 }
             }
-            if loop_indices.len() >= 3 {
-                if sources.is_empty() {
-                    return Err(KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "merged Boolean face has no source provenance",
-                    ));
+            loop {
+                let removable = (0..ring.len()).find(|index| {
+                    let previous = global[ring[(*index + ring.len() - 1) % ring.len()]].point;
+                    let current = global[ring[*index]].point;
+                    let next = global[ring[(*index + 1) % ring.len()]].point;
+                    let first = current - previous;
+                    let second = next - current;
+                    first.cross(second).magnitude()
+                        <= linear * 16.0 * (first.magnitude() + second.magnitude()).max(1.0)
+                });
+                if ring.len() <= 3 || removable.is_none() {
+                    break;
                 }
-                merged.push((
+                ring.remove(removable.expect("checked removable loop vertex"));
+            }
+            let area = (0..ring.len())
+                .fold(Vec3::new(0.0, 0.0, 0.0), |sum, index| {
+                    sum + global[ring[index]]
+                        .point
+                        .to_vec()
+                        .cross(global[ring[(index + 1) % ring.len()]].point.to_vec())
+                })
+                .dot(plane.normal)
+                * 0.5;
+            if area.abs() > linear.powi(2) {
+                loops.push((area, ring));
+            }
+        }
+
+        if !loops.is_empty() && loops.iter().all(|(area, _)| *area < 0.0) {
+            for (area, ring) in &mut loops {
+                *area = -*area;
+                ring.reverse();
+            }
+        }
+        let outer_indices = loops
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (area, _))| (*area > 0.0).then_some(index))
+            .collect::<Vec<_>>();
+        let mut hole_owner = vec![None; loops.len()];
+        for (hole_index, (area, hole)) in loops.iter().enumerate() {
+            if *area >= 0.0 {
+                continue;
+            }
+            hole_owner[hole_index] = outer_indices
+                .iter()
+                .copied()
+                .filter(|outer| {
+                    point_in_coplanar_polygon(
+                        global[hole[0]].point,
+                        &loops[*outer].1,
+                        global,
+                        plane.normal,
+                    )
+                })
+                .min_by(|first, second| loops[*first].0.total_cmp(&loops[*second].0));
+        }
+        for outer_index in outer_indices {
+            let rings = std::iter::once(&loops[outer_index].1)
+                .chain(loops.iter().enumerate().filter_map(|(index, (_, ring))| {
+                    (hole_owner[index] == Some(outer_index)).then_some(ring)
+                }))
+                .collect::<Vec<_>>();
+            let origin = global[rings[0][0]].point;
+            let u = (global[rings[0][1]].point - origin).normalize();
+            let v = plane.normal.cross(u);
+            let mut flat = Vec::new();
+            let mut vertices = Vec::new();
+            let mut holes = Vec::new();
+            for (ring_index, ring) in rings.iter().enumerate() {
+                if ring_index > 0 {
+                    holes.push(vertices.len());
+                }
+                for index in *ring {
+                    let relative = global[*index].point - origin;
+                    flat.extend([relative.dot(u), relative.dot(v)]);
+                    vertices.push(global[*index].clone());
+                }
+            }
+            for triangle in earcutr::earcut(&flat, &holes, 2).chunks_exact(3) {
+                output.push((
                     sources.clone(),
-                    loop_indices
-                        .into_iter()
-                        .map(|index| global[index].clone())
-                        .collect(),
+                    vec![
+                        vertices[triangle[0]].clone(),
+                        vertices[triangle[1]].clone(),
+                        vertices[triangle[2]].clone(),
+                    ],
                 ));
             }
         }
     }
-    Ok(merged)
+    Ok(output)
+}
+
+fn point_in_coplanar_polygon(
+    point: Point3,
+    polygon: &[usize],
+    global: &[CsgVertex],
+    normal: Vec3,
+) -> bool {
+    let drop_axis = if normal.x.abs() >= normal.y.abs() && normal.x.abs() >= normal.z.abs() {
+        0
+    } else if normal.y.abs() >= normal.z.abs() {
+        1
+    } else {
+        2
+    };
+    let project = |value: Point3| match drop_axis {
+        0 => (value.y, value.z),
+        1 => (value.x, value.z),
+        _ => (value.x, value.y),
+    };
+    let point = project(point);
+    let mut inside = false;
+    for index in 0..polygon.len() {
+        let first = project(global[polygon[index]].point);
+        let second = project(global[polygon[(index + 1) % polygon.len()]].point);
+        if (first.1 > point.1) != (second.1 > point.1) {
+            let crossing =
+                first.0 + (point.1 - first.1) * (second.0 - first.0) / (second.1 - first.1);
+            if crossing > point.0 {
+                inside = !inside;
+            }
+        }
+    }
+    inside
+}
+
+fn split_coplanar_edge(
+    global: &[CsgVertex],
+    start: usize,
+    end: usize,
+    tolerance: f64,
+) -> Vec<usize> {
+    let first = global[start].point;
+    let direction = global[end].point - first;
+    let length_squared = direction.magnitude2();
+    if length_squared == 0.0 {
+        return vec![start, end];
+    }
+    let mut points = global
+        .iter()
+        .enumerate()
+        .filter_map(|(index, candidate)| {
+            let parameter = (candidate.point - first).dot(direction) / length_squared;
+            let projected = first + direction * parameter;
+            (parameter >= -tolerance
+                && parameter <= 1.0 + tolerance
+                && projected.distance(candidate.point) <= tolerance)
+                .then_some((parameter.clamp(0.0, 1.0), index))
+        })
+        .collect::<Vec<_>>();
+    points.sort_by(|first, second| first.0.total_cmp(&second.0));
+    points.dedup_by(|first, second| first.1 == second.1);
+    points.into_iter().map(|(_, index)| index).collect()
 }
 
 fn global_vertex_index(global: &[CsgVertex], point: Point3, tolerance: f64) -> KernelResult<usize> {

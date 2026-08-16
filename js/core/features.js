@@ -917,7 +917,7 @@ export class RevolveFeature extends Feature {
       },
       angle: {
         title: 'Angle',
-        type: 'length',
+        type: 'angle',
       },
       side: {
         title: 'Side',
@@ -983,7 +983,12 @@ export class LoftFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       const first = references.profiles[0]
-      const tool = first.loft(this.componentId, references.profiles.slice(1), this.untwist)
+      const tool = first.loft(
+        this.componentId,
+        references.profiles.slice(1),
+        this.untwist,
+        this.id,
+      )
       comp.compound = comp.compound.boolean(tool, this.operation, this.id)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }

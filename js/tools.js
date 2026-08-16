@@ -122,30 +122,24 @@ function constrainCoincidentPoints(sketch, elem, index, targetElem, targetIndex)
 function addCapturedSnapConstraint(sketch, snap, elem, index) {
   if(!isConstrainablePoint(elem, index)) return
 
-  // Resolve placed geometry by position as a fallback when transient snap
-  // metadata is unavailable. Prefer explicit points so their dissolve/retain
-  // semantics win over another overlapping handle.
+  // Explicit points retain priority even if another overlapping target won
+  // the screen-space snap tie.
   const position = elem.handles()[index]
   const positionTargets = pointTargetsAtPosition(sketch, position, elem)
-  const positionTarget = positionTargets.find(target => target.elem instanceof SketchPoint) || positionTargets[0]
-  if(positionTarget) return constrainCoincidentPoints(
-    sketch, elem, index, positionTarget.elem, positionTarget.index
+  const explicitTarget = positionTargets.find(target => target.elem instanceof SketchPoint)
+  if(explicitTarget) return constrainCoincidentPoints(
+    sketch, elem, index, explicitTarget.elem, explicitTarget.index
   )
 
-  if(!snap) return
-  if(elem instanceof SketchPoint && snap.elem && snap.elem != elem && snap.index != -1 &&
-    isConstrainablePoint(snap.elem, snap.index)) return constrainCoincidentPoints(
-      sketch, elem, index, snap.elem, snap.index
-    )
-  if(snap.intersection) {
+  if(snap && snap.intersection) {
     const point = sketch.findOrCreateIntersectionPoint(snap.intersection, snap.point)
     if(point == elem) return point
     return constrainCoincidentPoints(sketch, elem, index, point, 0)
   }
-  if(snap.midpoint && snap.elem instanceof Line && snap.elem != elem) return sketch.addConstraint(
+  if(snap && snap.midpoint && snap.elem instanceof Line && snap.elem != elem) return sketch.addConstraint(
     new MidpointConstraint(new ElemRef(elem, index), snap.elem)
   )
-  if(snap.curve && snap.curve != elem) {
+  if(snap && snap.curve && snap.curve != elem) {
     if(!isTouchPoint(elem, index)) return
     const touch = sketch.addConstraint(
       new TouchConstraint(new ElemRef(elem, index), snap.curve)
@@ -153,7 +147,7 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
     addCapturedGuideConstraints(sketch, snap, elem, index)
     return touch
   }
-  if(snap.elem && snap.elem != elem && snap.index != -1) {
+  if(snap && snap.elem && snap.elem != elem && snap.index != -1) {
     if(snap.elem instanceof SketchPoint && snap.elem.dissolvedTo) {
       const target = snap.elem.dissolvedTo
       if(target.elem == elem && target.index == index) return
@@ -164,9 +158,17 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
     return constrainCoincidentPoints(sketch, elem, index, snap.elem, snap.index)
   }
 
-  const origin = snap.origin && sketch.origin()
+  const origin = snap && snap.origin && sketch.origin()
   if(origin) return sketch.addConstraint(
     new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(origin))
+  )
+
+  // Only use another coincident handle as a positional fallback when no
+  // captured target was available. Otherwise an already-connected endpoint
+  // can mask the point the user just snapped to.
+  const positionTarget = positionTargets[0]
+  if(positionTarget) return constrainCoincidentPoints(
+    sketch, elem, index, positionTarget.elem, positionTarget.index
   )
 }
 

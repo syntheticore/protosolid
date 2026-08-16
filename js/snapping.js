@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { Line, Circle, Arc, supportsPointOnCurveConstraint } from './core/geom2d.js'
 import { vecFromOc } from './core/utils.js'
-import { CoincidentConstraint } from './core/sketch.js'
+import { CoincidentConstraint, FixConstraint, HorVertConstraint } from './core/sketch.js'
 
 const snapDistance = 14 // px
 const maxSnapReferences = 5
@@ -96,6 +96,7 @@ export default class Snapper {
   snap(vec, coords, snapToGuides, snapToPoints, localSpace) {
     this.guides = []
     this.snapped = {}
+    this.snapAnchor = null
     if(localSpace) {
       vec = this.snapToGuides(vec, snapToGuides, snapToPoints)
       if(vec) vec.z = 0.0 //XXX project vec to plane before snapping
@@ -105,17 +106,9 @@ export default class Snapper {
   }
 
   getActiveHandleConnections() {
-    const handle = this.viewport.activeHandle
     const connected = new Set()
-    if(!handle) return connected
-
-    const pending = [{ elem: handle.elem, index: handle.index }]
-    const visitedPoints = []
     const visitedConstraints = new Set()
-    while(pending.length) {
-      const point = pending.pop()
-      if(visitedPoints.some(other => other.elem == point.elem && other.index == point.index)) continue
-      visitedPoints.push(point)
+    this.getActiveCoincidentPoints().forEach(point => {
       connected.add(point.elem)
 
       this.viewport.document.activeSketch.constraints.forEach(constraint => {
@@ -124,12 +117,67 @@ export default class Snapper {
         )) return
         visitedConstraints.add(constraint)
         constraint.items.forEach(item => connected.add(item.curve()))
-        if(constraint instanceof CoincidentConstraint) {
-          constraint.items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
-        }
+      })
+    })
+    return connected
+  }
+
+  getActiveCoincidentPoints() {
+    const handle = this.viewport.activeHandle
+    if(!handle) return []
+    const sketch = this.viewport.document.activeSketch
+    const pending = [{ elem: handle.elem, index: handle.index }]
+    const points = []
+    while(pending.length) {
+      const point = pending.pop()
+      if(points.some(other => other.elem == point.elem && other.index == point.index)) continue
+      points.push(point)
+      sketch.constraints.forEach(constraint => {
+        if(!(constraint instanceof CoincidentConstraint) || !constraint.items.some(item =>
+          item.curve() == point.elem && item.index == point.index
+        )) return
+        constraint.items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
       })
     }
-    return connected
+    return points
+  }
+
+  activeHandleReachability() {
+    // This is a targeted pre-filter for fixed points and fixed-axis HorVert
+    // constraints, including those reached through coincident point groups.
+    // It is not a general feasibility test for every constraint combination;
+    // that would require a non-mutating temporary solver pass.
+    const sketch = this.viewport.document.activeSketch
+    const points = this.getActiveCoincidentPoints()
+    if(!points.length) return () => true
+    const isActivePoint = item => points.some(point =>
+      item.curve() == point.elem && item.index == point.index
+    )
+    const isFixedPoint = item => {
+      const curve = item.curve()
+      if(curve == sketch.origin() || curve.projection) return true
+      return sketch.constraints.some(constraint => constraint instanceof FixConstraint &&
+        constraint.items.some(fixed => fixed.curve() == curve &&
+          (fixed.index === undefined || fixed.index == item.index)
+        )
+      )
+    }
+    const pointPosition = item => item.curve().handles()[item.index]
+
+    return candidate => sketch.constraints.every(constraint => {
+      if(constraint instanceof FixConstraint) {
+        const fixedPoint = points.find(point => constraint.items.some(item =>
+          item.curve() == point.elem && (item.index === undefined || item.index == point.index)
+        ))
+        if(fixedPoint) return candidate.almost(fixedPoint.elem.handles()[fixedPoint.index])
+      }
+      if(!(constraint instanceof HorVertConstraint) || constraint.items.length != 2) return true
+      const activeItem = constraint.items.find(isActivePoint)
+      const otherItem = activeItem && constraint.items.find(item => item != activeItem)
+      if(!otherItem || isActivePoint(otherItem) || !isFixedPoint(otherItem)) return true
+      const otherPoint = pointPosition(otherItem)
+      return constraint.isVertical ? candidate.x.almost(otherPoint.x) : candidate.y.almost(otherPoint.y)
+    })
   }
 
   getSnapElements(connectedElements) {
@@ -161,31 +209,41 @@ export default class Snapper {
     return origin && !originConstrained ? [{ point: origin, origin: true }, ...points] : points
   }
 
-  catchSnapTargets(localVec, coords) {
+  catchSnapTargets(localVec, coords, rememberGuides) {
     const connectedElements = this.getActiveHandleConnections()
     const elements = this.getSnapElements(connectedElements)
+    const canReach = this.activeHandleReachability()
     let pointDist = Infinity
     let pointTarget
+    let blockedPointDist = Infinity
     let midpointTarget
     let guidePointDist = Infinity
     let guidePointTarget
     this.getSnapPointTargets(elements, connectedElements).forEach(target => {
       const dist = this.viewport.renderer.toScreen(target.point.clone().applyMatrix4(this.planeTransform)).distanceTo(coords)
-      if(dist < snapDistance && dist < guidePointDist) {
+      const reachable = canReach(target.point)
+      if(rememberGuides && dist < snapDistance && dist < guidePointDist) {
         guidePointDist = dist
         guidePointTarget = target
       }
-      if((target.origin || target.index != -1) && dist < snapDistance && dist < pointDist) {
-        pointDist = dist
-        pointTarget = target
+      if((target.origin || target.index != -1) && dist < snapDistance) {
+        if(reachable && dist < pointDist) {
+          pointDist = dist
+          pointTarget = target
+        } else if(!reachable && dist < blockedPointDist) {
+          blockedPointDist = dist
+        }
       }
-      if(target.midpoint && dist < snapDistance && (!midpointTarget || dist < midpointTarget.distance)) {
+      if(reachable && target.midpoint && dist < snapDistance && (!midpointTarget || dist < midpointTarget.distance)) {
         midpointTarget = { ...target, distance: dist }
       }
     })
 
     // Handles and the sketch origin always take precedence over curves.
-    if(pointTarget) return this.rememberSnapPoint(pointTarget)
+    if(pointTarget && pointDist < blockedPointDist) {
+      return rememberGuides ? this.rememberSnapPoint(pointTarget) : { pointTarget }
+    }
+    if(blockedPointDist < Infinity) return
 
     // An intersection near the pointer must be near both participating
     // curves. Reject the rest before invoking OpenCascade's substantially
@@ -194,7 +252,7 @@ export default class Snapper {
       .filter(supportsPointOnCurveConstraint)
       .map(elem => {
         const point = closestPointOnCurve(elem, localVec)
-        if(!point) return
+        if(!point || !canReach(point)) return
         const distance = this.viewport.renderer
           .toScreen(point.clone().applyMatrix4(this.planeTransform))
           .distanceTo(coords)
@@ -207,6 +265,7 @@ export default class Snapper {
       curves.slice(index + 1).forEach(otherTarget => {
         target.elem.intersect([otherTarget.elem]).forEach(ocPoint => {
           const point = vecFromOc(ocPoint)
+          if(!canReach(point)) return
           const dist = this.viewport.renderer.toScreen(point.clone().applyMatrix4(this.planeTransform)).distanceTo(coords)
           if(dist < snapDistance && (!intersectionTarget || dist < intersectionTarget.distance)) {
             intersectionTarget = { curves: [target.elem, otherTarget.elem], point, distance: dist }
@@ -215,11 +274,11 @@ export default class Snapper {
       })
     )
     if(intersectionTarget) {
-      this.rememberSnapPoint({ point: intersectionTarget.point })
+      if(rememberGuides) this.rememberSnapPoint({ point: intersectionTarget.point })
       return intersectionTarget
     }
 
-    if(midpointTarget) return this.rememberSnapPoint(midpointTarget)
+    if(midpointTarget) return rememberGuides ? this.rememberSnapPoint(midpointTarget) : { pointTarget: midpointTarget }
 
     const curveTarget = nearbyCurves.reduce((closest, target) =>
       !closest || target.distance < closest.distance ? target : closest
@@ -227,22 +286,46 @@ export default class Snapper {
 
     if(curveTarget) return { elem: curveTarget.elem, point: curveTarget.point }
 
-    if(guidePointTarget) return this.rememberSnapPoint(guidePointTarget)
+    if(rememberGuides && guidePointTarget) return this.rememberSnapPoint(guidePointTarget)
   }
 
   rememberSnapPoint(pointTarget) {
-    const point = pointTarget.point
-    if(!(this.lastSnaps[0] && this.lastSnaps[0].equals(point))) {
-      this.lastSnaps.unshift(point)
+    const reference = {
+      ...pointTarget,
+      point: pointTarget.point.clone(),
+    }
+    const previous = this.lastSnaps[0]
+    const sameTarget = previous && (
+      (previous.origin && reference.origin) ||
+      (previous.elem && reference.elem && previous.elem == reference.elem &&
+        previous.index == reference.index && previous.midpoint == reference.midpoint) ||
+      this.resolveSnapReference(previous).equals(this.resolveSnapReference(reference))
+    )
+    if(!sameTarget) {
+      this.lastSnaps.unshift(reference)
       if(this.lastSnaps.length > maxSnapReferences) this.lastSnaps.pop()
     }
     return { pointTarget }
   }
 
+  resolveSnapReference(reference) {
+    if(reference.origin) return this.viewport.document.activeSketch.originPoint()
+    let elem = reference.elem
+    let index = reference.index
+    if(elem && elem.dissolvedTo) {
+      index = elem.dissolvedTo.index
+      elem = elem.dissolvedTo.elem
+    }
+    if(reference.midpoint && elem instanceof Line) return elem.midpoint()
+    const handle = elem && index != -1 && elem.handles && elem.handles()[index]
+    return (handle || reference.point).clone()
+  }
+
   getGuideSnapPoints() {
     const activePoints = this.viewport.activeTool.guideSnapPoints()
     const origin = this.viewport.document.activeSketch.originPoint()
-    return [...activePoints, ...(origin ? [origin] : []), ...this.lastSnaps].filter((point, index, points) =>
+    const remembered = this.lastSnaps.map(reference => this.resolveSnapReference(reference))
+    return [...activePoints, ...(origin ? [origin] : []), ...remembered].filter((point, index, points) =>
       points.findIndex(other => other.equals(point)) === index
     )
   }
@@ -269,10 +352,10 @@ export default class Snapper {
     if(!(snapToGuides || snapToPoints)) return localVec
 
     const snapTarget = snapToPoints &&
-      this.catchSnapTargets(localVec, this.viewport.renderer.toScreen(vec))
+      this.catchSnapTargets(localVec, this.viewport.renderer.toScreen(vec), snapToGuides)
 
     const screenVec = this.viewport.renderer.toScreen(vec)
-    const guideSnapPoints = this.getGuideSnapPoints()
+    const guideSnapPoints = snapToGuides ? this.getGuideSnapPoints() : []
 
     if(snapTarget && snapTarget.curves) {
       const snapVec = snapTarget.point
@@ -283,6 +366,20 @@ export default class Snapper {
         pos: this.viewport.renderer.toScreen(worldSnapVec),
         vec: worldSnapVec,
         id: 'intersection-' + snapTarget.curves.map(curve => curve.id).join('-'),
+      }
+      return snapVec
+    }
+
+    if(snapTarget && snapTarget.pointTarget) {
+      const pointTarget = snapTarget.pointTarget
+      const snapVec = pointTarget.point.clone()
+      const worldSnapVec = snapVec.clone().applyMatrix4(this.planeTransform)
+      this.snapped = { x: snapVec, y: snapVec, pointTarget }
+      this.snapAnchor = {
+        type: 'snap',
+        pos: this.viewport.renderer.toScreen(worldSnapVec),
+        vec: worldSnapVec,
+        id: 'point-' + (pointTarget.elem?.id || 'origin') + '-' + (pointTarget.index ?? 0),
       }
       return snapVec
     }
@@ -312,28 +409,21 @@ export default class Snapper {
       return snapVec
     }
 
-    let snapX = guideSnapPoints.find(snap => {
-      // Compare plane space X axis..
-      const testSnap = snap.clone()//.applyMatrix4(localTransform)
-      testSnap.setY(localVec.y)
+    const closestGuide = axis => guideSnapPoints.reduce((closest, snap) => {
+      const testSnap = snap.clone()
+      if(axis == 'x') testSnap.setY(localVec.y)
+      else testSnap.setX(localVec.x)
       testSnap.setZ(localVec.z)
       testSnap.applyMatrix4(this.planeTransform)
-      const screenSnap = this.viewport.renderer.toScreen(testSnap)
-      // .. in screen space
-      return screenVec.distanceTo(screenSnap) < snapDistance
-    })
-    let snapY = guideSnapPoints.find(snap => {
-      const testSnap = snap.clone()//.applyMatrix4(localTransform)
-      testSnap.setX(localVec.x)
-      testSnap.setZ(localVec.z)
-      testSnap.applyMatrix4(this.planeTransform)
-      const screenSnap = this.viewport.renderer.toScreen(testSnap)
-      return screenVec.distanceTo(screenSnap) < snapDistance
-    })
-    const directSnap = snapTarget && snapTarget.pointTarget
-    const pointTarget = directSnap &&
-      snapX && snapY && snapX.equals(directSnap.point) && snapY.equals(directSnap.point) ? directSnap : null
-    this.snapped = { x: snapX, y: snapY, pointTarget }
+      const distance = screenVec.distanceTo(this.viewport.renderer.toScreen(testSnap))
+      return distance < snapDistance && (!closest || distance < closest.distance) ?
+        { point: snap, distance }
+        :
+        closest
+    }, null)?.point
+    const snapX = closestGuide('x')
+    const snapY = closestGuide('y')
+    this.snapped = { x: snapX, y: snapY }
     // const snapVec = new THREE.Vector3(
     //   snapX ? snapX.clone().applyMatrix4(localTransform).x : localVec.x,
     //   snapY ? snapY.clone().applyMatrix4(localTransform).y : localVec.y,

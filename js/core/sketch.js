@@ -76,6 +76,18 @@ export class Sketch {
   addConstraint(constraint) {
     const existing = this.constraints.find(other => sameConstraint(other, constraint))
     if(existing) return existing
+    if(constraint instanceof CoincidentConstraint && constraint.items.length == 2) {
+      const [left, right] = constraint.items
+      const leftCurve = left.curve()
+      const rightCurve = right.curve()
+      if(leftCurve && rightCurve && this.coincidentPointsConnected(
+        leftCurve, left.index, rightCurve, right.index
+      )) return this.constraints.find(other =>
+        other instanceof CoincidentConstraint && other.items.some(item =>
+          item.curve() == leftCurve && item.index == left.index
+        )
+      ) || constraint
+    }
     constraint.sketch = this
     this.constraints.push(constraint)
     return constraint
@@ -147,9 +159,44 @@ export class Sketch {
     this.constraints = this.constraints.filter((constraint, index, constraints) =>
       constraint instanceof Dimension || constraints.findIndex(other => sameConstraint(other, constraint)) == index
     )
+    this.removeRedundantCoincidentConstraints()
     point.dissolvedTo = { elem, index }
     this.remove(point)
     return true
+  }
+
+  coincidentPointsConnected(elem, index, targetElem, targetIndex) {
+    const pending = [{ elem, index }]
+    const visited = []
+    while(pending.length) {
+      const point = pending.pop()
+      if(visited.some(other => other.elem == point.elem && other.index == point.index)) continue
+      if(point.elem == targetElem && point.index == targetIndex) return true
+      visited.push(point)
+      this.constraints.forEach(constraint => {
+        if(!(constraint instanceof CoincidentConstraint) || !constraint.items.some(item =>
+          item.curve() == point.elem && item.index == point.index
+        )) return
+        constraint.items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
+      })
+    }
+    return false
+  }
+
+  removeRedundantCoincidentConstraints() {
+    const constraints = this.constraints
+    this.constraints = []
+    constraints.forEach(constraint => {
+      if(constraint instanceof CoincidentConstraint && constraint.items.length == 2) {
+        const [left, right] = constraint.items
+        const leftCurve = left.curve()
+        const rightCurve = right.curve()
+        if(leftCurve && rightCurve && this.coincidentPointsConnected(
+          leftCurve, left.index, rightCurve, right.index
+        )) return
+      }
+      this.constraints.push(constraint)
+    })
   }
 
   replaceElement(elem, replacements) {
@@ -449,6 +496,7 @@ export class Sketch {
     // Refresh references before collecting fixed solver primitives.
     // This is also needed by DimensionControls after feature-tree updates.
     this.constraints.forEach(constraint => constraint.update(tree))
+    this.removeRedundantCoincidentConstraints()
 
     const fixedPoints = this.constraints
       .flatMap(constraint => constraint.items.map(item => item.curve()))

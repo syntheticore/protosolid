@@ -739,6 +739,10 @@ export class CreateSketchFeature extends Feature {
     this.sketch.creator = this
   }
 
+  // A sketch may use planar geometry from any visible component as its support.
+  // The plane picker already limits candidates to planar faces and helpers.
+  acceptsInput() { return true }
+
   updateFeature(tree, references) {
     const plane = references.plane
     this.sketch.workplane = plane

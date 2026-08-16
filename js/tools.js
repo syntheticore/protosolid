@@ -175,7 +175,7 @@ class HighlightTool extends Tool {
   getObject(coords, any) {
     return new Promise(resolve => {
       let items = this.viewport.renderer
-        .objectsAtScreen(coords, this.realSelectors)
+        .objectsAtScreen(coords, this.realSelectors, this.includeInactive)
         .flatMap(obj => {
           if(!obj.alcTypes.some(type => type == 'face')) return obj.alcObject
           const mapped = []
@@ -464,6 +464,9 @@ export class AxisPickTool extends PickTool {
 export class PlanePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['plane'], callback)
+    // Planar faces on inactive components are ghosted and live outside the
+    // normal raycast tree, but they can still support a new sketch.
+    this.includeInactive = true
   }
 }
 

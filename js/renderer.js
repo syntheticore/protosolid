@@ -406,10 +406,13 @@ export default class Renderer {
     )
   }
 
-  hitTest(coords) {
+  hitTest(coords, includeInactive) {
     coords = this.getCanvasCoords(coords)
     this.raycaster.setFromCamera(coords, this.activeCamera)
-    return this.raycaster.intersectObjects(this.traceables.children, true)
+    return this.raycaster.intersectObjects(
+      includeInactive ? this.scene.children : this.traceables.children,
+      true,
+    )
   }
 
   fromScreen(coords) {
@@ -430,9 +433,9 @@ export default class Renderer {
     )
   }
 
-  objectsAtScreen(coords, types) {
+  objectsAtScreen(coords, types, includeInactive) {
     if(types && !Array.isArray(types)) types = [types]
-    const intersects = this.hitTest(coords)
+    const intersects = this.hitTest(coords, includeInactive)
     const objects = Array.from(new Set(intersects.map(obj => obj.object )))
     return objects.filter(obj => !types || types.some(t =>
       obj.alcTypes && obj.alcTypes.some(ot => ot == t )

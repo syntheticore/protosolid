@@ -29,6 +29,7 @@
       :key="constraint.id"
       :document="document"
       :constraint="constraint"
+      :parent-transform="parentTransform"
       @dimensionMouseUp="(...args) => emit('dimensionMouseUp', ...args)"
       @dimensionMouseDown="(...args) => emit('dimensionMouseDown', ...args)"
       @dimensionMouseMove="(...args) => emit('dimensionMouseMove', ...args)"

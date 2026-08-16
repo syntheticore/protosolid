@@ -29,7 +29,7 @@
     if(!vertices) return
 
     mesh = window.alcRenderer.convertLine(vertices, materials.line)
-    mesh.applyMatrix4(props.element.sketch.workplane)
+    updateTransform()
     mesh.alcTypes = ['curve', props.element.getAxis && 'axis']
     mesh.material = getMaterial()
     mesh.alcObject = props.element
@@ -51,10 +51,14 @@
 
   watch(() => props.parentTransform, () => {
     if(!mesh) return
-    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(props.element.sketch.workplane)
-    mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
+    updateTransform()
     renderNeeded.value = true
   }, { immediate: true })
+
+  function updateTransform() {
+    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(props.element.sketch.workplane)
+    mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
+  }
 
   function getMaterial() {
     return materials.table.curve[

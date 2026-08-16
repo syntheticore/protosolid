@@ -5,7 +5,7 @@ import materials from '../materials.js'
 
 
 export default class DimensionControls extends THREE.Object3D {
-  constructor(constraint, renderer) {
+  constructor(constraint, renderer, parentTransform) {
     super()
 
     this.alcTypes = ['dimension']
@@ -144,7 +144,9 @@ export default class DimensionControls extends THREE.Object3D {
       this.add(lineTop)
     }
 
-    this.applyMatrix4(constraint.sketch.workplane)
+    this.applyMatrix4(
+      (parentTransform || new THREE.Matrix4()).clone().multiply(constraint.sketch.workplane)
+    )
   }
 }
 

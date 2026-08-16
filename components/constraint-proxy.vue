@@ -122,6 +122,7 @@
     document: Object,
     constraint: Object,
     preview: Boolean,
+    parentTransform: Object,
   })
   const emit = defineEmits(['dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
 
@@ -136,7 +137,7 @@
   const dimension = computed(() => {
     if(!(props.constraint instanceof Dimension)) return
     window.alcRenderer.remove(_dimension)
-    _dimension = new DimensionControls(props.constraint, window.alcRenderer)
+    _dimension = new DimensionControls(props.constraint, window.alcRenderer, props.parentTransform)
     window.alcRenderer.add(_dimension)
     renderNeeded.value = true
     return _dimension
@@ -157,7 +158,7 @@
       return [{
         constraint: props.constraint,
         curve: props.constraint.items[0].curve(),
-        pos: point(props.constraint.items[0], true).clone().applyMatrix4(sketch.workplane),
+        pos: transformPosition(point(props.constraint.items[0], true), sketch),
         offset: { x: 11, y: -11 },
       }]
     }
@@ -167,7 +168,7 @@
       return [{
         constraint: props.constraint,
         curve: item.curve(),
-        pos: point(item, true).clone().applyMatrix4(sketch.workplane),
+        pos: transformPosition(point(item, true), sketch),
         offset: { x: 11, y: -11 },
       }]
     }
@@ -180,16 +181,22 @@
       return {
         constraint: props.constraint,
         curve,
-        pos: ((props.constraint.position && props.constraint.position.clone()) || (props.constraint.items.length == 1 ?
+        pos: transformPosition((props.constraint.position && props.constraint.position.clone()) || (props.constraint.items.length == 1 ?
           point(item)
           :
           point(item).clone()
             .add(common || point(other))
             .divideScalar(2.0)
-        )).applyMatrix4(sketch.workplane),
+        ), sketch),
       }
     })
   })
+
+  function transformPosition(position, sketch) {
+    const transformed = position.clone().applyMatrix4(sketch.workplane)
+    if(props.parentTransform) transformed.applyMatrix4(props.parentTransform)
+    return transformed
+  }
 
   const projectedProxies = computed(() => {
     frame.value

@@ -492,7 +492,10 @@
         } else {
           center = item.center()
         }
-        const componentId = referenceComponentId(reference)
+        const componentId = referenceComponentId(reference) ||
+          item.sketch?.component?.id ||
+          item.sketch?.creator?.componentOccurrenceId ||
+          item.sketch?.creator?.componentId
         const component = componentId && this.document.top().findChild(componentId)
         return component ? center.applyMatrix4(worldTransform(component)) : center
       },

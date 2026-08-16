@@ -159,7 +159,12 @@ export class Feature {
       if(this.distanceGizmo) {
         this.distanceGizmo().set(gizmo.distance, gizmo.side)
       } else {
-        const distanceGizmo = new LengthGizmo(gizmo.center, gizmo.direction, gizmo.distance, gizmo.side, gizmo.cb)
+        const component = this.document.top().findChild(this.componentOccurrenceId) ||
+          this.document.top().findChild(this.componentId)
+        const transform = component && worldTransform(component)
+        const center = transform ? gizmo.center.clone().applyMatrix4(transform) : gizmo.center
+        const direction = transform ? gizmo.direction.clone().transformDirection(transform) : gizmo.direction
+        const distanceGizmo = new LengthGizmo(center, direction, gizmo.distance, gizmo.side, gizmo.cb)
         this.distanceGizmo = () => distanceGizmo
         window.alcRenderer.addGizmo(distanceGizmo)
       }

@@ -39,6 +39,7 @@
         :document="document"
         :constraint="dimensionPreview"
         :preview="true"
+        :parent-transform="activeComponentTransform"
       )
 
       ComponentProxy(
@@ -162,6 +163,7 @@
   import { SketchElement } from './../js/core/geom2d.js'
   import { Dimension, CoincidentConstraint } from './../js/core/sketch.js'
   import { Solid, Face } from './../js/core/geom3d.js'
+  import { worldTransform } from './../js/core/assembly.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -224,7 +226,7 @@
       'document.activeSketch': function(sketch) {
         // Show sketch plane
         if(sketch) {
-          let plane = sketch.workplane
+          const plane = worldTransform(this.document.activeComponent).multiply(sketch.workplane)
           this.snapper.planeTransform = plane
           this.renderer.sketchPlane.setPlane(plane)
         }
@@ -243,6 +245,10 @@
     },
 
     computed: {
+      activeComponentTransform: function() {
+        return this.document.activeSketch ? worldTransform(this.document.activeComponent) : null
+      },
+
       allPaths: function() {
         const paths = [...this.paths]
         if(this.pickingPath && this.pickingPath.target) paths.push(this.pickingPath)
@@ -565,6 +571,7 @@
           compound.tesselate(),
           subtracting ? materials.previewSubtractSurface : materials.previewAddSurface,
         )
+        this.previewMesh.applyMatrix4(worldTransform(this.document.activeComponent))
         this.renderer.add(this.previewMesh)
         this.renderer.render()
       },

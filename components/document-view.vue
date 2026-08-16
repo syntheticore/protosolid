@@ -236,7 +236,7 @@
       document: {
         immediate: true,
         handler: function(document, oldDocument) {
-          if(oldDocument) oldDocument.activeView = oldDocument.activeView || this.dirtyView
+          if(oldDocument) oldDocument.activeView = oldDocument.activeView || oldDocument.dirtyView
           if(!document.activeView) {
             document.activeView = document.views[3]
           }

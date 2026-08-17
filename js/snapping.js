@@ -194,9 +194,10 @@ export default class Snapper {
   getSnapElements(connectedElements) {
     const sketch = this.viewport.document.activeSketch
     let sketchElements = [...sketch.elements]
-    // Filter out sketch element actively being drawn
+    // Filter out sketch elements actively being drawn
     const tool = this.viewport.activeTool
-    if(tool.curve) sketchElements.pop()
+    const snapExclusions = new Set(tool.snapExclusions())
+    sketchElements = sketchElements.filter(elem => !snapExclusions.has(elem))
     sketchElements.push(...sketch.projections.map(projection => projection.geometry()).filter(Boolean))
     if(this.viewport.activeHandle) {
       sketchElements = sketchElements.filter(elem => !connectedElements.has(elem))

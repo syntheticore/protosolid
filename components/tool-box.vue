@@ -251,6 +251,7 @@
     LineTool,
     SplineTool,
     CircleTool,
+    RectangleTool,
     ArcTool,
     TrimTool,
     TouchConstraintTool,
@@ -322,7 +323,7 @@
             tools: [
               { title: 'Point', tool: PointTool },
               { title: 'Line', tool: LineTool, hotKey: 'L', keyCode: 76 },
-              { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
+              { title: 'Rectangle', tool: RectangleTool, hotKey: 'R', keyCode: 82 },
               { title: 'Arc', tool: ArcTool, hotKey: 'A', keyCode: 65 },
               { title: 'Circle', tool: CircleTool, hotKey: 'C', keyCode: 67 },
               { title: 'Spline', tool: SplineTool, hotKey: 'B', keyCode: 66},

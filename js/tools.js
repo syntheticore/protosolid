@@ -71,6 +71,8 @@ class Tool {
 
   guideSnapPoints() { return [] }
 
+  snapExclusions() { return this.curve ? [this.curve] : [] }
+
   dispose() {}
 }
 
@@ -594,7 +596,8 @@ export class SketchTool extends Tool {
     this.cursor = 'crosshair'
   }
 
-  constrainPoint(elem, index, snap=captureSnap(this.viewport.snapper)) {
+  constrainPoint(elem, index, snap) {
+    if(arguments.length < 3) snap = captureSnap(this.viewport.snapper)
     const captured = addCapturedSnapConstraint(this.sketch, snap, elem, index)
     const origin = this.originSnapConstraint(elem, index, snap)
     return captured || origin
@@ -604,7 +607,7 @@ export class SketchTool extends Tool {
     const origin = this.sketch.origin()
     const originPoint = this.sketch.originPoint()
     if(!origin || !originPoint) return
-    const { x, y } = snap || this.viewport.snapper.snapped || {}
+    const { x, y } = snap || {}
     const snapX = x && x.almost(originPoint)
     const snapY = y && y.almost(originPoint)
     if(!snapX && !snapY) return
@@ -807,6 +810,84 @@ export class CircleTool extends SketchTool {
     // this.curve.setHandles([this.center.toArray(), vec.toArray()], false)
     this.curve.setHandles([this.center, vec], false)
     this.viewport.elementChanged()
+  }
+}
+
+
+export class RectangleTool extends SketchTool {
+  static icon = 'vector-square'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
+    this.lines = []
+  }
+
+  snapExclusions() { return this.lines }
+
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
+
+    if(!this.corner) {
+      this.corner = vec.clone()
+      this.startSnap = snap
+      this.lines.push(
+        new Line(this.corner.clone(), this.corner.clone()),
+        new Line(this.corner.clone(), this.corner.clone()),
+        new Line(this.corner.clone(), this.corner.clone()),
+        new Line(this.corner.clone(), this.corner.clone()),
+      )
+      this.lines.forEach(line => this.sketch.add(line))
+    } else {
+      this.mouseMove(vec)
+      this.commit(snap)
+      this.corner = null
+      this.startSnap = null
+      this.lines.length = 0
+    }
+    this.viewport.elementChanged()
+  }
+
+  mouseMove(vec) {
+    if(!this.corner) return
+
+    const [x, y] = [vec.x, vec.y]
+    const [cornerX, cornerY] = [this.corner.x, this.corner.y]
+    const points = [
+      this.corner,
+      new THREE.Vector3(x, cornerY, vec.z),
+      vec,
+      new THREE.Vector3(cornerX, y, vec.z),
+    ]
+    this.lines.forEach((line, index) => {
+      line.setHandles([points[index], points[(index + 1) % points.length]])
+    })
+    this.viewport.elementChanged()
+  }
+
+  commit(endSnap) {
+    const [bottom, right, top, left] = this.lines
+
+    // Keep the four corners topologically connected even though each side is
+    // represented by an ordinary line element.
+    ;[[bottom, 1, right, 0], [right, 1, top, 0],
+      [top, 1, left, 0], [left, 1, bottom, 0]].forEach(([first, firstIndex, second, secondIndex]) => {
+      this.sketch.addConstraint(new CoincidentConstraint(
+        new ElemRef(first, firstIndex), new ElemRef(second, secondIndex)
+      ))
+    })
+    ;[bottom, right, top, left].forEach(line => {
+      this.sketch.addConstraint(new HorVertConstraint(line))
+    })
+
+    this.constrainPoint(bottom, 0, this.startSnap)
+    this.constrainPoint(top, 0, endSnap)
+  }
+
+  dispose() {
+    this.lines.forEach(line => line.remove())
+    this.lines.length = 0
+    this.corner = null
   }
 }
 

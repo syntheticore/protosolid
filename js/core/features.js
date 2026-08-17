@@ -1205,6 +1205,56 @@ export class FilletFeature extends Feature {
 Serialize.register(FilletFeature, 'FilletFeature')
 
 
+export class ChamferFeature extends Feature {
+  static icon = 'screwdriver'
+  constructor(doc) {
+    super(doc, false, 'Chamfer', {
+      edges: {
+        title: 'Edges',
+        type: 'edge',
+        multi: true,
+      },
+      distance: {
+        title: 'Distance',
+        type: 'length',
+        gizmo: true,
+      },
+    })
+
+    this.edges = null
+    this.distance = 1.0
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.chamfer(references.edges, this.distance)
+    } catch(err) { this.error = err || this.error }
+  }
+
+  getGizmo() {
+    return {
+      distance: {
+        center: this.edges()[0].getItem().center(),
+        direction: new THREE.Vector3(0,1,0),
+        distance: this.distance,
+        side: true,
+        cb: (dist, _side) => { this.distance = dist },
+      }
+    }
+  }
+
+  repair() {
+    const tree = this.document.top(this.document.timeline.previousFeature(this))
+    const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
+    this.edges = () => remainingEdges
+    this.error = null
+  }
+}
+
+Serialize.register(ChamferFeature, 'ChamferFeature')
+
+
 export class OffsetFeature extends Feature {
   static icon = 'dot-circle'
   constructor(doc) {

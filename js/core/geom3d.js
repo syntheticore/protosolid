@@ -871,6 +871,21 @@ export class Compound extends Volumetric {
     }
   }
 
+  chamfer(edges, distance) {
+    const chamfer = new window.oc.oc.BRepFilletAPI_MakeChamfer(this.geom())
+    edges.forEach(edge => {
+      chamfer.Add_2(distance, edge.geom())
+    })
+    try {
+      chamfer.Build(new window.oc.oc.Message_ProgressRange_1())
+      if(!chamfer.IsDone()) throw null
+      return this.track(chamfer, 'chamfer')
+
+    } catch(_) {
+      throw { type: 'error', msg: "Chamfer could not be built" }
+    }
+  }
+
   offset(openFaces, distance) {
     openFaces ||= []
     // Offset each affected solid individually

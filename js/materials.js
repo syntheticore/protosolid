@@ -39,6 +39,13 @@ class Materials {
     this.referenceHighlightLine = this.referenceLine.clone()
     this.referenceHighlightLine.color.set('#2590e1')
 
+    this.splineControlLine = this.line.clone()
+    this.splineControlLine.color.set('#8a939b')
+    this.splineControlLine.dashed = true
+    this.splineControlLine.dashScale = 0.5
+    this.splineControlLine.linewidth = 1.5
+    this.splineControlLine.depthTest = false
+
     this.projectedLine = this.line.clone()
     this.projectedLine.color.set('#51bb89')
 

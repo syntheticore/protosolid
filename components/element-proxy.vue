@@ -4,10 +4,10 @@
 
   import * as THREE from 'three'
   import materials from '../js/materials.js'
-  import { SketchPoint } from '../js/core/geom2d.js'
+  import { SketchPoint, Spline } from '../js/core/geom2d.js'
   import { ScreenPointObject } from '../js/three/helper-objects.js'
 
-  const props = defineProps(['document', 'component', 'element', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'element', 'activeTool', 'showSplineControls', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -20,12 +20,15 @@
   ))
 
   let mesh
+  let controlMesh
 
   const getMesh = () => mesh
 
-  watch(() => props.element, () => {
+  function renderElement() {
     window.alcRenderer.remove(mesh)
+    window.alcRenderer.remove(controlMesh)
     mesh = null
+    controlMesh = null
 
     if(props.element instanceof SketchPoint) {
       mesh = new ScreenPointObject(22)
@@ -33,6 +36,14 @@
       const vertices = props.element.tesselate()
       if(!vertices) return
       mesh = window.alcRenderer.convertLine(vertices, materials.line)
+      if(props.showSplineControls && props.element instanceof Spline) {
+        controlMesh = window.alcRenderer.convertLine(
+          props.element.handles().map(point => point.toArray()),
+          materials.splineControlLine,
+        )
+        controlMesh.renderOrder = -1
+        window.alcRenderer.add(controlMesh, true)
+      }
     }
     updateTransform()
     mesh.alcTypes = props.element instanceof SketchPoint ?
@@ -47,7 +58,10 @@
 
     window.alcRenderer.add(mesh, true)
     renderNeeded.value = true
-  }, { immediate: true, deep: 1 })
+  }
+
+  watch(() => props.element, renderElement, { immediate: true, deep: 1 })
+  watch(() => props.showSplineControls, renderElement)
 
   watch([highlighted, selected, toolSelected], () => {
     // Zero-length drawing elements have no mesh, but their reactive selection
@@ -65,6 +79,10 @@
 
   function updateTransform() {
     mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(props.element.sketch.workplane)
+    if(controlMesh) {
+      controlMesh.matrix.copy(mesh.matrix)
+      controlMesh.matrix.decompose(controlMesh.position, controlMesh.quaternion, controlMesh.scale)
+    }
     if(props.element instanceof SketchPoint) {
       mesh.matrix.multiply(new THREE.Matrix4().makeTranslation(
         props.element.point.x,
@@ -90,6 +108,7 @@
 
   onUnmounted(() => {
     window.alcRenderer.remove(mesh)
+    window.alcRenderer.remove(controlMesh)
     props.element.mesh = null
     renderNeeded.value = true
   })

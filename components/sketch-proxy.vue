@@ -7,6 +7,7 @@
     :component="component"
     :element="elem"
     :active-tool="activeTool"
+    :show-spline-controls="active"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
     :parent-transform="parentTransform"

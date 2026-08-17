@@ -520,6 +520,7 @@ export default class Renderer {
     materials.referenceSelectionLine.resolution.set(width, height)
     materials.referenceHighlightLine.resolution.set(width, height)
     materials.referenceLine.resolution.set(width, height)
+    materials.splineControlLine.resolution.set(width, height)
     materials.wire.resolution.set(width, height)
     materials.ghostWire.resolution.set(width, height)
     this.render()

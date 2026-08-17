@@ -423,6 +423,11 @@
 
     mounted: function() {
       this.bus.on('keydown', (key) => {
+        if(this.document.activeSketch && key.toLowerCase() == 'x') {
+          this.toggleReference()
+          return
+        }
+
         const inSketch = !!this.document.activeSketch
         const tool = this.tabs
           .flatMap(tab => tab.tools.filter(tool =>

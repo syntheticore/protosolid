@@ -11,6 +11,7 @@ import {
   arrayFromOcList,
   arrayFromOcVec,
   ocVecFromVec,
+  ocDirFromVec,
   ocAx1FromMatrix,
   ocPlnFromMatrix,
   ocListOfShapeFromArray,
@@ -916,6 +917,26 @@ export class Compound extends Volumetric {
 
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }
+    }
+  }
+
+  draft(faces, plane, angle) {
+    try {
+      const draft = new window.oc.oc.BRepOffsetAPI_DraftAngle_1()
+      draft.Init(this.geom())
+      const direction = ocDirFromVec(normalFromMatrix(plane))
+      const neutralPlane = ocPlnFromMatrix(plane)
+
+      faces.forEach(face => {
+        draft.Add(face.geom(), direction, angle, neutralPlane, true)
+        if(!draft.AddDone()) throw null
+      })
+
+      draft.Build(new window.oc.oc.Message_ProgressRange_1())
+      if(!draft.IsDone()) throw null
+      return this.track(draft, 'draft')
+    } catch(_) {
+      throw { type: 'error', msg: "Draft could not be built" }
     }
   }
 

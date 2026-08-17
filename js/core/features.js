@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { markRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
@@ -164,7 +165,7 @@ export class Feature {
         const transform = component && worldTransform(component)
         const center = transform ? gizmo.center.clone().applyMatrix4(transform) : gizmo.center
         const direction = transform ? gizmo.direction.clone().transformDirection(transform) : gizmo.direction
-        const distanceGizmo = new LengthGizmo(center, direction, gizmo.distance, gizmo.side, gizmo.cb)
+        const distanceGizmo = markRaw(new LengthGizmo(center, direction, gizmo.distance, gizmo.side, gizmo.cb))
         this.distanceGizmo = () => distanceGizmo
         window.alcRenderer.addGizmo(distanceGizmo)
       }
@@ -1086,12 +1087,15 @@ export class DraftFeature extends Feature {
     this.angle = 0.0
   }
 
-  updateFeature() {
-    const list = new window.alcWasm.JsFaceRefList()
-    this.faces().forEach(face => {
-      list.push(face)
-    })
-    this.real.draft(list, this.ref_plane(), this.angle)
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.draft(
+        references.faces,
+        references.ref_plane,
+        rad(this.angle),
+      )
+    } catch(err) { this.error = err || this.error }
   }
 
   updateGizmos() {
@@ -1100,9 +1104,9 @@ export class DraftFeature extends Feature {
         this.angleGizmo.set(this.angle)
       } else {
         const center = new THREE.Vector3()
-        this.angleGizmo = new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
+        this.angleGizmo = markRaw(new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
           this.angle = angle
-        })
+        }))
         window.alcRenderer.addGizmo(this.angleGizmo)
       }
     } else {

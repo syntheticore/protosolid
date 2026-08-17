@@ -489,6 +489,7 @@ mainBuild:
     # - symbol: ChFi3d_FilletShape_ChFi3d_Rational
 
     - symbol: BRepOffset_Mode
+    - symbol: BRepOffsetAPI_DraftAngle
     - symbol: BRepOffsetAPI_MakeThickSolid
     # - symbol: BRepOffsetAPI_MakeOffset
     - symbol: BRepOffsetAPI_MakeOffsetShape

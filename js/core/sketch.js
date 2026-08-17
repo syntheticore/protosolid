@@ -750,13 +750,19 @@ export class Sketch {
 
       } else if(elem instanceof Circle) {
         const [center, circle] = idMap[elem.id]
-        elem.radius = updatePrim(circle).radius
-        elem.setHandles([vecFromPrim(center)])
+        const solvedCenter = vecFromPrim(center)
+        const solvedRadius = Math.abs(updatePrim(circle).radius)
+        if([solvedCenter.x, solvedCenter.y, solvedCenter.z, solvedRadius].every(Number.isFinite) && solvedRadius > EPSILON) {
+          elem.radius = solvedRadius
+          elem.setHandles([solvedCenter])
+        }
 
       } else if(elem instanceof Arc) {
         const [start, end, center, arc] = idMap[elem.id]
-        elem.radius = updatePrim(arc).radius
-        elem.setHandles([vecFromPrim(center), vecFromPrim(start), vecFromPrim(end)])
+        elem.setSolvedHandles(
+          [vecFromPrim(center), vecFromPrim(start), vecFromPrim(end)],
+          updatePrim(arc).radius,
+        )
 
       } else if(elem instanceof Spline) {
         elem.setHandles(idMap[elem.id].slice(0, -1).map(vecFromPrim))

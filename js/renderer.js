@@ -443,8 +443,9 @@ export default class Renderer {
   }
 
   convertLine(vertices, material) {
+    const positions = (vertices || []).flat()
+    if(positions.length < 6 || positions.some(value => !Number.isFinite(Math.fround(value)))) return new THREE.Object3D()
     const geometry = new LineGeometry()
-    const positions = vertices.flat()
     geometry.setPositions(positions)
     // geometry.setColors(positions.map((pos, i) => i / positions.length ))
     geometry.setColors(Array(positions.length).fill(1))

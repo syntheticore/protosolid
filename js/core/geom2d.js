@@ -16,6 +16,15 @@ import {
 } from './utils.js'
 
 
+function ocTry(callback) {
+  try {
+    return callback()
+  } catch(error) {
+    if(typeof error !== 'number') throw error
+  }
+}
+
+
 export class SketchElement {
   constructor() {
     this.id = makeID()
@@ -399,13 +408,15 @@ export class Arc extends SketchElement {
   }
 
   static fromPoints(points) {
-    const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_4(
-      ocPnt2dFromVec(points[0]),
-      ocPnt2dFromVec(points[1]),
-      ocPnt2dFromVec(points[2]),
-    )
-    if(!arc.IsDone()) return
-    const trimmed = arc.Value().get()
+    const trimmed = ocTry(() => {
+      const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_4(
+        ocPnt2dFromVec(points[0]),
+        ocPnt2dFromVec(points[1]),
+        ocPnt2dFromVec(points[2]),
+      )
+      return arc.IsDone() ? arc.Value().get() : undefined
+    })
+    if(!trimmed) return
     // const basis = new window.oc.oc.Geom2dAdaptor_Curve_2(trimmed.BasisCurve())
     // const circle = basis.Circle()
     const circle = trimmed.BasisCurve().get()
@@ -443,6 +454,10 @@ export class Arc extends SketchElement {
   }
 
   setHandles(handles) {
+    return this.setSolvedHandles(handles, this.radius)
+  }
+
+  setSolvedHandles(handles, radius) {
     // The three-point constructor used while drawing can create an arc in
     // either direction. Preserve that direction when the solver writes the
     // center and endpoints back; otherwise forcing `Sense` to true chooses
@@ -451,20 +466,30 @@ export class Arc extends SketchElement {
     const nextRadius = this.sample(1.0e-4).sub(this._center)
     const clockwise = cross2d(startRadius, nextRadius) < 0.0
 
-    this._center = handles[0]
-    const circ = ocCirc2dFromVec(this._center, this.radius)
+    const center = handles[0]
+    radius = Math.abs(radius)
+    if(!Number.isFinite(radius) || radius <= EPSILON) return false
+    if(handles.some(point => !point || ![point.x, point.y, point.z].every(Number.isFinite))) return false
+
     // Keep the stored curve on the canonical clockwise circle used by
     // geometry(), cloning and serialization. Counter-clockwise arcs use the
     // same curve with reversed endpoints and logical sampling direction.
     const endpoints = clockwise ? handles.slice(1) : handles.slice(1).reverse()
-    const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(endpoints[0]), ocPnt2dFromVec(endpoints[1]), true)
-    if(!arc.IsDone()) return
-    const trimmed = arc.Value().get()
-    const circle = trimmed.BasisCurve().get()
-    this.radius = circle.Radius()
-    this.bounds = [trimmed.FirstParameter(), trimmed.LastParameter()]
+    const solved = ocTry(() => {
+      const circ = ocCirc2dFromVec(center, radius)
+      const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(endpoints[0]), ocPnt2dFromVec(endpoints[1]), true)
+      if(!arc.IsDone()) return
+      const trimmed = arc.Value().get()
+      return { trimmed, circle: trimmed.BasisCurve().get() }
+    })
+    if(!solved) return false
+
+    this._center = center
+    this.radius = solved.circle.Radius()
+    this.bounds = [solved.trimmed.FirstParameter(), solved.trimmed.LastParameter()]
     this.forward = clockwise
-    this.update(new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
+    this.update(new window.oc.oc.Handle_Geom2d_Curve_2(solved.trimmed))
+    return true
   }
 
   setEndpoint(index, point) {
@@ -507,7 +532,7 @@ export class Arc extends SketchElement {
 
   tesselate() {
     const tess = super.tesselate()
-    if(!this.forward) tess.reverse()
+    if(tess && !this.forward) tess.reverse()
     return tess
   }
 
@@ -653,13 +678,15 @@ Serialize.register(Spline, 'Spline')
 
 
 function tesselateCurveFixed(geom, steps) {
-  const start = geom.FirstParameter()
-  const range = geom.LastParameter() - start
+  return ocTry(() => {
+    const start = geom.FirstParameter()
+    const range = geom.LastParameter() - start
+    if(!Number.isFinite(start) || !Number.isFinite(range)) return
 
-  const vertices = arrayRange(0, steps - 1).map(i => {
-    const u = start + i / (steps - 1) * range
-    const p = geom.Value(u)
-    return arrayFromOcVec(p)
+    const vertices = arrayRange(0, steps - 1).map(i => {
+      const u = start + i / (steps - 1) * range
+      return arrayFromOcVec(geom.Value(u))
+    })
+    return vertices.every(vertex => vertex.every(Number.isFinite)) ? vertices : undefined
   })
-  return vertices
 }

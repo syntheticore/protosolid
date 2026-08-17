@@ -106,6 +106,7 @@ export class Wire {
   tesselate() {
     let polyline = this.segments.flatMap(curve => {
       let poly = curve.tesselate()
+      if(!poly) return []
       poly.pop()
       return poly
     })

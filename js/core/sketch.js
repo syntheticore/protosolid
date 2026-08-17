@@ -979,7 +979,7 @@ export class HorVertConstraint extends Constraint {
     const points = this.items.length == 1 ?
       this.items[0].curve().endpoints()
       :
-      this.items.map(item => item.curve().endpoints()[item.index])
+      this.items.map(item => item.curve().handles()[item.index])
     const xDiff = Math.abs(points[0].x - points[1].x)
     const yDiff = Math.abs(points[0].y - points[1].y)
     this.isVertical = xDiff < yDiff

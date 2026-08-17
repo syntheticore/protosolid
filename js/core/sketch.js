@@ -481,9 +481,26 @@ export class Sketch {
         primitives = [start, end, center, arc]
 
       } else if(elem instanceof Spline) {
-        const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: elem.projection }
-        const p2 = { id: `${id++}`, type: 'point', x: elem.points.slice(-1)[0].x, y: elem.points.slice(-1)[0].y, fixed: elem.projection }
-        primitives = [p1, p2]
+        const poles = elem.points.map(point => ({
+          id: `${id++}`,
+          type: 'point',
+          x: point.x,
+          y: point.y,
+          fixed: !!elem.projection,
+        }))
+        const degree = Math.min(5, poles.length - 1)
+        const [knots, mult] = Spline.clampedKnots(poles.length, degree)
+        const spline = {
+          id: `${id++}`,
+          type: 'bspline',
+          pole_ids: poles.map(pole => pole.id),
+          weights: poles.map(() => 1.0),
+          knots,
+          mult,
+          degree,
+          periodic: false,
+        }
+        primitives = [...poles, spline]
 
       } else if(elem instanceof ProjectedPoint) {
         primitives = [{ id: `${id++}`, type: 'point', x: elem.point.x, y: elem.point.y, fixed: true }]
@@ -513,12 +530,24 @@ export class Sketch {
       const curve = item.curve()
       const curvePrimitives = idMap[curve.id]
       if(curve instanceof Arc) return curvePrimitives[[2, 0, 1][item.index]]
-      if(curve instanceof Spline) {
-        if(item.index == 0) return curvePrimitives[0]
-        if(item.index == curve.handles().length - 1) return curvePrimitives[1]
-        return
-      }
       return curvePrimitives[item.index]
+    }
+
+    const pointOnCurveConstraint = (constraintId, pointRef, curve, curvePrim, temporary) => {
+      const pointPrim = pointPrimitive(pointRef)
+      if(!pointPrim) throw new Error('Unsupported point-on-curve constraint point')
+      if(curve instanceof Spline) {
+        const point = pointRef.curve().handles()[pointRef.index]
+        const parameterName = `spline-parameter-${constraintId}`
+        return [
+          { type: 'free_param', name: parameterName, value: curve.unsample(point) },
+          { id: constraintId, type: 'point_on_bspline', p_id: pointPrim.id, b_id: curvePrim.id, pointparam: parameterName, temporary },
+        ]
+      }
+      const target = curve instanceof Line ? ['point_on_line_pl', 'l_id'] :
+        curve instanceof Circle ? ['point_on_circle', 'c_id'] :
+        ['point_on_arc', 'a_id']
+      return { id: constraintId, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary }
     }
 
     // An arc has independently stored center, endpoint, angle, and radius
@@ -573,14 +602,10 @@ export class Sketch {
         const pointRef = c.items.find(item => item.index !== undefined )
         const curveRef = c.items.find(item => item.index === undefined )
         const curve = curveRef.curve()
-        const pointPrim = pointPrimitive(pointRef)
 
         const curvePrim = idMap[curve.id].slice(-1)[0]
-        if(!pointPrim || !supportsPointOnCurveConstraint(curve)) throw new Error('Unsupported Touch constraint geometry')
-        const target = curve instanceof Line ? ['point_on_line_pl', 'l_id'] :
-          curve instanceof Circle ? ['point_on_circle', 'c_id'] :
-          ['point_on_arc', 'a_id']
-        return { id: `${id++}`, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary: c.temporary }
+        if(!supportsPointOnCurveConstraint(curve)) throw new Error('Unsupported Touch constraint geometry')
+        return pointOnCurveConstraint(`${id++}`, pointRef, curve, curvePrim, c.temporary)
 
       } else if(c instanceof MidpointConstraint) {
         const pointRef = c.items.find(item => item.index !== undefined)
@@ -594,15 +619,11 @@ export class Sketch {
 
       } else if(c instanceof IntersectionConstraint) {
         const pointRef = c.items.find(item => item.index !== undefined)
-        const pointPrim = pointPrimitive(pointRef)
-        return c.items.filter(item => item.index === undefined).map(item => {
+        return c.items.filter(item => item.index === undefined).flatMap(item => {
           const curve = item.curve()
           const curvePrim = idMap[curve.id].slice(-1)[0]
           if(!supportsPointOnCurveConstraint(curve)) throw new Error('Unsupported Intersection constraint geometry')
-          const target = curve instanceof Line ? ['point_on_line_pl', 'l_id'] :
-            curve instanceof Circle ? ['point_on_circle', 'c_id'] :
-            ['point_on_arc', 'a_id']
-          return { id: `${id++}`, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary: c.temporary }
+          return pointOnCurveConstraint(`${id++}`, pointRef, curve, curvePrim, c.temporary)
         })
 
       } else if(c instanceof PerpendicularConstraint) {
@@ -738,11 +759,7 @@ export class Sketch {
         elem.setHandles([vecFromPrim(center), vecFromPrim(start), vecFromPrim(end)])
 
       } else if(elem instanceof Spline) {
-        const [p1, p2] = idMap[elem.id]
-        const handles = elem.handles()
-        handles[0] = vecFromPrim(p1)
-        handles[handles.length - 1] = vecFromPrim(p2)
-        elem.setHandles(handles)
+        elem.setHandles(idMap[elem.id].slice(0, -1).map(vecFromPrim))
       }
     })
   }

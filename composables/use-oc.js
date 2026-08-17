@@ -59,11 +59,16 @@ export async function useOC() {
 
     solveSystem(primitives) {
       const system = new gcs.GcsSystem()
-      const solver = new GcsWrapper(system)
-
-      solver.set_max_iterations(800) // 100
+      const solver = new GcsWrapper(system, gcs)
+      solver.set_max_iterations(200) // 100
       solver.set_convergence_threshold(1e-10)
 
+      // PlaneGCS needs the module constructors when it builds B-spline
+      // geometry. Free parameters let point-on-spline constraints slide
+      // along the curve instead of pinning the point to the initial snap.
+      const freeParams = primitives.filter(primitive => primitive.type == 'free_param')
+      primitives = primitives.filter(primitive => primitive.type != 'free_param')
+      freeParams.forEach(param => solver.push_sketch_param(param.name, param.value, false))
       solver.push_primitives_and_params(primitives)
       solver.solve()
       solver.apply_solution()

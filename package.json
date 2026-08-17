@@ -29,7 +29,7 @@
     "@fortawesome/free-solid-svg-icons": "^5.15.2",
     "@fortawesome/vue-fontawesome": "^3.0.3",
     "@pinia/nuxt": "^0.5.2",
-    "@salusoft89/planegcs": "^1.1.6",
+    "@salusoft89/planegcs": "^1.2.0",
     "earcut": "^3.0.0",
     "electron": "31.3.0",
     "electron-builder": "^24.13.3",

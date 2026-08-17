@@ -55,8 +55,12 @@ export class SketchElement {
 
   unsample(p) {
     if(p instanceof THREE.Vector3) p = ocPnt2dFromVec(p)
-    const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, this.geom())
-    return projection.LowerDistanceParameter()
+    try {
+      const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, this.geom())
+      if(projection.NbPoints()) return projection.LowerDistanceParameter()
+    } catch(error) {
+      if(typeof error !== 'number') throw error
+    }
   }
 
   distanceTo(p) {
@@ -530,10 +534,9 @@ export class Arc extends SketchElement {
 Serialize.register(Arc, 'Arc')
 
 
-// PlaneGCS currently exposes point-on-curve constraints for these analytic
-// curve primitives. Keep snapping and solver support on this same boundary.
+// Keep snapping and solver point-on-curve support on the same boundary.
 export function supportsPointOnCurveConstraint(elem) {
-  return elem instanceof Line || elem instanceof Circle || elem instanceof Arc
+  return elem instanceof Line || elem instanceof Circle || elem instanceof Arc || elem instanceof Spline
 }
 
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { Line, Circle, Arc, supportsPointOnCurveConstraint } from './core/geom2d.js'
+import { Line, Circle, Arc, Spline, supportsPointOnCurveConstraint } from './core/geom2d.js'
 import { vecFromOc } from './core/utils.js'
 import { CoincidentConstraint, FixConstraint, HorVertConstraint } from './core/sketch.js'
 
@@ -12,6 +12,12 @@ function positiveAngle(angle) {
 }
 
 function closestPointOnCurve(elem, point) {
+  if(elem instanceof Spline) {
+    const parameter = elem.unsample(point)
+    if(parameter === undefined) return
+    return vecFromOc(elem.geom().get().Value(parameter))
+  }
+
   if(elem instanceof Line) {
     const [start, end] = elem.endpoints()
     const segment = end.clone().sub(start)
@@ -48,6 +54,11 @@ function closestPointOnCurve(elem, point) {
 }
 
 function curveGuideIntersections(elem, guidePoint, axis) {
+  // Curve snapping is exact for splines, but guide/spline intersections
+  // require a separate unbounded-line projection. Leave guide snapping out
+  // rather than falling through to the circle-specific center/radius path.
+  if(elem instanceof Spline) return []
+
   if(elem instanceof Line) {
     const [start, end] = elem.endpoints()
     const delta = end.clone().sub(start)

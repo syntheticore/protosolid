@@ -236,6 +236,7 @@
     RevolveFeature,
     SweepFeature,
     OffsetFeature,
+    DissolveFeature,
     SplitFeature,
     BooleanFeature,
     MoveFeature,
@@ -381,6 +382,7 @@
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
               { title: 'Replace', feature: ReplaceFeature },
+              { title: 'Dissolve', feature: DissolveFeature },
               { title: 'Draft', feature: DraftFeature },
               { title: 'Split', feature: SplitFeature },
               { title: 'Align', icon: 'layer-group' }, //XXX also -> Replace Face

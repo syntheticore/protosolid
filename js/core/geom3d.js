@@ -904,6 +904,19 @@ export class Compound extends Volumetric {
     }
   }
 
+  dissolveFaces(faces) {
+    try {
+      const remove = new window.oc.oc.BOPAlgo_RemoveFeatures()
+      remove.SetShape(this.geom())
+      remove.AddFacesToRemove(ocListOfShapeFromArray(faces.map(face => face.geom())))
+      remove.Perform(new window.oc.oc.Message_ProgressRange_1())
+      if(remove.HasErrors()) throw null
+      return this.track(remove, 'remove-faces')
+    } catch(_) {
+      throw { type: 'error', msg: "Faces could not be deleted" }
+    }
+  }
+
   reshape(algoName, cb) {
     const reshaper = new window.oc.oc.ShapeBuild_ReShape()
     cb(reshaper)

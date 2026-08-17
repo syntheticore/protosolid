@@ -1244,6 +1244,31 @@ export class OffsetFeature extends Feature {
 Serialize.register(OffsetFeature, 'OffsetFeature')
 
 
+export class DissolveFeature extends Feature {
+  static icon = 'virus-slash'
+  constructor(doc) {
+    super(doc, false, 'Dissolve', {
+      faces: {
+        title: 'Faces',
+        type: 'face',
+        multi: true,
+      },
+    })
+
+    this.faces = null
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.dissolveFaces(references.faces)
+    } catch(err) { this.error = err || this.error }
+  }
+}
+
+Serialize.register(DissolveFeature, 'DissolveFeature')
+
+
 export class BooleanFeature extends Feature {
   static icon = 'boxes'
   constructor(doc) {

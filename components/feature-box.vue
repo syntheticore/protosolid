@@ -270,7 +270,7 @@
   import { DummyTool, ManipulationTool } from './../js/tools.js'
   import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
-  import { PatternInputReference } from './../js/core/references.js'
+  import { CurveReference, PatternInputReference } from './../js/core/references.js'
   import { referenceComponentId, worldTransform } from './../js/core/assembly.js'
 
   export default {
@@ -395,6 +395,8 @@
               itemRef = item.planarReference()
             } else if(type == 'axis') {
               itemRef = item.axialReference()
+            } else if(type == 'curve') {
+              itemRef = new CurveReference(item)
             }
 
             // Add item reference to feature

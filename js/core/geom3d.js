@@ -260,6 +260,40 @@ export class Profile {
     return new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
   }
 
+  sweep(componentId, rail, bounds) {
+    try {
+      if(this.rings.length != 1) {
+        throw { type: 'error', msg: 'Sweeps with holes are not supported' }
+      }
+      if(bounds[0] != 0.0 || bounds[1] != 1.0) {
+        throw { type: 'error', msg: 'Partial rail sweeps are not supported' }
+      }
+
+      // A wire profile produces a shell. Use the filled face so MakePipe
+      // returns a solid that can participate in the feature boolean.
+      const profile = this.makeFace()
+      const plane = new window.oc.oc.gp_Pln_1()
+      const curve = window.oc.oc.GeomAPI.To3d(rail.geom(), plane)
+      const edge = new window.oc.oc.BRepBuilderAPI_MakeEdge_24(curve).Edge()
+      const pathBuilder = new window.oc.oc.BRepBuilderAPI_MakeWire_1()
+      pathBuilder.Add_1(edge)
+      const path = window.oc.oc.TopoDS.Wire_1(
+        transformGeometry(pathBuilder.Wire(), rail.sketch.workplane).Shape()
+      )
+      const pipe = new window.oc.oc.BRepOffsetAPI_MakePipe_1(path, profile)
+      pipe.Build(new window.oc.oc.Message_ProgressRange_1())
+      if(!pipe.IsDone()) throw { type: 'error', msg: 'Sweep could not be built' }
+
+      return new Compound(componentId, window.oc.oc.TopoDS.Solid_1(pipe.Shape()))
+    } catch(err) {
+      if(typeof err == 'number') {
+        const data = window.oc.oc.OCJS.getStandard_FailureData(err)
+        throw { type: 'error', msg: data.GetMessageString() || 'OpenCascade sweep failed' }
+      }
+      throw err
+    }
+  }
+
   update() {
     const elements = this.sketch.profileElements()
     const cutElements = elements.flatMap(elem => elem.split(elements) )

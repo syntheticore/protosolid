@@ -494,6 +494,7 @@ mainBuild:
     # - symbol: BRepOffsetAPI_MakeOffset
     - symbol: BRepOffsetAPI_MakeOffsetShape
     - symbol: BRepOffsetAPI_ThruSections
+    - symbol: BRepOffsetAPI_MakePipe
 
     - symbol: BRepMesh_IncrementalMesh
     - symbol: BRepMesh_DiscretRoot

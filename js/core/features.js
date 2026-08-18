@@ -187,7 +187,9 @@ export class Feature {
   involvedSketches() {
     return Object.keys(this.settings).flatMap(key => {
       if(this.settings[key].type != 'profile') return []
-      return this[key] ? this[key]().map(ref => ref.getItem().sketch ) : []
+      if(!this[key]) return []
+      const refs = this[key]()
+      return (Array.isArray(refs) ? refs : [refs]).map(ref => ref.getItem().sketch )
     })
   }
 
@@ -1153,6 +1155,15 @@ export class SweepFeature extends Feature {
     this.profile = null
     this.rail = null
     this.bounds = [0.0, 1.0]
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      const tool = references.profile.sweep(this.componentId, references.rail, this.bounds)
+      comp.compound = comp.compound.boolean(tool, this.operation)
+      this.previewBody = tool
+    } catch(err) { this.error = err || this.error }
   }
 }
 

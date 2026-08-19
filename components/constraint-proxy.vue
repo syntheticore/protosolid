@@ -64,12 +64,6 @@
     &.selected
       background: $highlight
 
-  .preview
-    pointer-events: none
-
-    .dim-value
-      pointer-events: none
-
   .dimension
     position: absolute
     transition: color 0.1s
@@ -108,6 +102,12 @@
       margin-top: -14px
       margin-left: -60px
       pointer-events: auto
+
+  .preview
+    pointer-events: none
+
+    .dim-value
+      pointer-events: none
 
   .hide-dimension-enter-active
   .hide-dimension-leave-active

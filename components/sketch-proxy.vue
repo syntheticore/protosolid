@@ -30,6 +30,7 @@
       :key="constraint.id"
       :document="document"
       :constraint="constraint"
+      :active-tool="activeTool"
       :parent-transform="parentTransform"
       @dimensionMouseUp="(...args) => emit('dimensionMouseUp', ...args)"
       @dimensionMouseDown="(...args) => emit('dimensionMouseDown', ...args)"

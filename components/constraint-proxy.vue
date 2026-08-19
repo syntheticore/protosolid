@@ -5,7 +5,7 @@
     v-if="!dimension"
     v-for="proxy in projectedProxies"
     :icon="(constraint.icon && constraint.icon()) ||constraint.constructor.icon"
-    :class="{ selected }"
+    :class="{ selected, preview: preview || drawingToolActive }"
     :style="{ top: proxy.coords.y + 'px', left: proxy.coords.x + 'px' }"
     @click.stop="select"
   )
@@ -13,7 +13,7 @@
   //- Sketch dimension
   .dimension(
     v-else
-    :class="{ selected, preview }"
+    :class="{ selected, preview: preview || drawingToolActive }"
     :style="{ top: projectedProxies[0].coords.y + 'px', left: projectedProxies[0].coords.x + 'px' }"
     @click.stop="select"
     @dblclick="constraint.active = true"
@@ -64,15 +64,15 @@
     &.selected
       background: $highlight
 
+  .preview
+    pointer-events: none
+
+    .dim-value
+      pointer-events: none
+
   .dimension
     position: absolute
     transition: color 0.1s
-
-    &.preview
-      pointer-events: none
-
-      .dim-value
-        pointer-events: none
 
     &.selected .dim-value
       border-color: $highlight
@@ -126,10 +126,12 @@
   import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint } from '../js/core/sketch.js'
   import { Line } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
+  import { SketchTool } from '../js/tools.js'
 
   const props = defineProps({
     document: Object,
     constraint: Object,
+    activeTool: Object,
     preview: Boolean,
     parentTransform: Object,
   })
@@ -140,6 +142,7 @@
   const renderNeeded = inject('render-needed')
 
   const selected = computed(() => props.document.selection.has(props.constraint) )
+  const drawingToolActive = computed(() => props.activeTool instanceof SketchTool)
 
   const parameterized = computed(() => {
     const expression = props.constraint.expression

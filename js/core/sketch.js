@@ -1017,7 +1017,7 @@ export class FixConstraint extends Constraint {
 Serialize.register(FixConstraint, 'FixConstraint')
 
 export class CoincidentConstraint extends Constraint {
-  static icon = 'compress'
+  static icon = 'dot-circle'
   typename() { return 'Coincident Constraint' }
 }
 Serialize.register(CoincidentConstraint, 'CoincidentConstraint')
@@ -1029,7 +1029,7 @@ export class TouchConstraint extends Constraint {
 Serialize.register(TouchConstraint, 'TouchConstraint')
 
 export class MidpointConstraint extends Constraint {
-  static icon = 'compress'
+  static icon = 'expand-alt'
   typename() { return 'Midpoint Constraint' }
 }
 Serialize.register(MidpointConstraint, 'MidpointConstraint')

@@ -501,7 +501,25 @@ export class Sketch {
           degree,
           periodic: false,
         }
-        primitives = [...poles, spline]
+        // A clamped spline's endpoint tangent is exactly the direction of
+        // its first control polygon segment. Keep that derived line in the
+        // solver so tangent constraints can use the stable parallel-line
+        // primitive.
+        const startTangent = {
+          id: `${id++}`,
+          type: 'line',
+          p1_id: poles[0].id,
+          p2_id: poles[1].id,
+          splineTangent: 0,
+        }
+        const endTangent = {
+          id: `${id++}`,
+          type: 'line',
+          p1_id: poles[poles.length - 2].id,
+          p2_id: poles[poles.length - 1].id,
+          splineTangent: 1,
+        }
+        primitives = [...poles, startTangent, endTangent, spline]
 
       } else if(elem instanceof ProjectedPoint) {
         primitives = [{ id: `${id++}`, type: 'point', x: elem.point.x, y: elem.point.y, fixed: true }]
@@ -664,10 +682,20 @@ export class Sketch {
 
       } else if(c instanceof TangentConstraint) {
         const line = c.items.find(item => item.curve() instanceof Line)
-        const curve = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc)
+        const curve = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc || item.curve() instanceof Spline)
         if(!line || !curve) throw new Error('Unsupported Tangent constraint geometry')
         const linePrim = idMap[line.curve().id].slice(-1)[0]
         const curvePrim = idMap[curve.curve().id].slice(-1)[0]
+        if(curve.curve() instanceof Spline) {
+          const spline = curve.curve()
+          const endpoint = spline.endpoints()
+            .map((point, index) => ({ index, distance: line.curve().distanceTo(point) }))
+            .minMaxBy(Math.min, candidate => candidate.distance)
+          const tangentPrim = idMap[spline.id].find(primitive =>
+            primitive.type == 'line' && primitive.splineTangent == endpoint.index
+          )
+          return { id: `${id++}`, type: 'parallel', l1_id: linePrim.id, l2_id: tangentPrim.id, temporary: c.temporary }
+        }
         return curve.curve() instanceof Circle ?
           { id: `${id++}`, type: 'tangent_lc', l_id: linePrim.id, c_id: curvePrim.id, temporary: c.temporary }
           :
@@ -771,7 +799,7 @@ export class Sketch {
         )
 
       } else if(elem instanceof Spline) {
-        elem.setHandles(idMap[elem.id].slice(0, -1).map(vecFromPrim))
+        elem.setHandles(idMap[elem.id].filter(prim => prim.type == 'point').map(vecFromPrim))
       }
     })
   }

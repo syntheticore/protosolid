@@ -1058,11 +1058,13 @@ export class TangentConstraintTool extends ConstraintTool {
 
   isComplete(counts) { return counts.curve == 2 }
 
-  acceptsItem(item) { return item instanceof Line || item instanceof Circle || item instanceof Arc }
+  acceptsItem(item) {
+    return item instanceof Line || item instanceof Circle || item instanceof Arc || item instanceof Spline
+  }
 
   canConstrain(items) {
     return items.filter(item => item instanceof Line).length == 1 &&
-      items.filter(item => item instanceof Circle || item instanceof Arc).length == 1
+      items.filter(item => item instanceof Circle || item instanceof Arc || item instanceof Spline).length == 1
   }
 }
 

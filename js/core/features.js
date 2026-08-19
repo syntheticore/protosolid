@@ -214,7 +214,8 @@ export class Feature {
   }
 
   setExpression(key, expression) {
-    this.expressions[key] = expression
+    if(expression) this.expressions[key] = expression
+    else delete this.expressions[key]
   }
 
   setValues(values) {
@@ -924,6 +925,7 @@ export class ExtrudeFeature extends Feature {
         distance: this.distance,
         side: this.side,
         cb: (dist, side) => {
+          this.setExpression('distance', null)
           this.distance = dist
           this.side = side
         },
@@ -1125,6 +1127,7 @@ export class DraftFeature extends Feature {
       } else {
         const center = new THREE.Vector3()
         this.angleGizmo = markRaw(new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
+          this.setExpression('angle', null)
           this.angle = angle
         }))
         window.alcRenderer.addGizmo(this.angleGizmo)
@@ -1222,7 +1225,10 @@ export class FilletFeature extends Feature {
         direction: new THREE.Vector3(0,1,0),
         distance: this.radius,
         side: true,
-        cb: (dist, _side) => { this.radius = dist },
+        cb: (dist, _side) => {
+          this.setExpression('radius', null)
+          this.radius = dist
+        },
       }
     }
   }
@@ -1272,7 +1278,10 @@ export class ChamferFeature extends Feature {
         direction: new THREE.Vector3(0,1,0),
         distance: this.distance,
         side: true,
-        cb: (dist, _side) => { this.distance = dist },
+        cb: (dist, _side) => {
+          this.setExpression('distance', null)
+          this.distance = dist
+        },
       }
     }
   }

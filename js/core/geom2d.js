@@ -174,6 +174,7 @@ export class SketchElement {
     const clone = this._clone()
     clone.id = this.id
     clone.sketch = this.sketch
+    clone.isReference = this.isReference
     return clone
   }
 
@@ -209,12 +210,14 @@ export class SketchPoint extends SketchElement {
     return {
       id: this.id,
       point: this.point,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const point = new SketchPoint(dump.point)
     point.id = dump.id
+    point.isReference = dump.isReference || false
     return point
   }
 }
@@ -300,12 +303,14 @@ export class Line extends SketchElement {
     return {
       id: this.id,
       points: this.points,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const line = new Line(...dump.points)
     line.id = dump.id
+    line.isReference = dump.isReference || false
     return line
   }
 }
@@ -382,12 +387,14 @@ export class Circle extends SketchElement {
       id: this.id,
       _center: this._center,
       radius: this.radius,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const circle = new Circle(dump._center, dump.radius)
     circle.id = dump.id
+    circle.isReference = dump.isReference || false
     return circle
   }
 }
@@ -547,12 +554,14 @@ export class Arc extends SketchElement {
       radius: this.radius,
       bounds: this.bounds,
       forward: this.forward,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const arc = new Arc(dump._center, dump.radius, dump.bounds, dump.forward)
     arc.id = dump.id
+    arc.isReference = dump.isReference || false
     return arc
   }
 }
@@ -664,12 +673,14 @@ export class Spline extends SketchElement {
     return {
       id: this.id,
       points: this.points,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const line = new Spline(dump.points)
     line.id = dump.id
+    line.isReference = dump.isReference || false
     return line
   }
 }

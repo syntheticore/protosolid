@@ -16,11 +16,29 @@ export default class DimensionControls extends THREE.Object3D {
 
     const isCircle = itemL.curve() instanceof Circle
     const isArc = itemL.curve() instanceof Arc
+    const isCircleOffset = constraint.isCircleOffset()
+    const isCenterDistance = constraint.isPointDistance() && !isCircleOffset
     const isPointDistance = constraint.isPointDistance()
     const isAngular = constraint.isAngular()
 
+    // Offset between concentric circles
+    if(isCircleOffset) {
+      const circles = constraint.items.map(item => item.curve())
+      const center = circles[0].center()
+      const direction = constraint.position.clone().sub(center)
+      if(direction.lengthSq() < 1e-12) direction.set(1, 0, 0)
+      direction.normalize()
+      const points = circles.map(circle => circle.center().clone().add(direction.clone().multiplyScalar(circle.radius)))
+      makeLinearDimension(this, renderer, points[0], points[1], constraint.position)
+
+    // Circle center to point, or center to center
+    } else if(isCenterDistance) {
+      const points = constraint.items.map(item => item.curve() instanceof Circle ?
+        item.curve().center().clone() : item.curve().handles()[item.index].clone())
+      makeLinearDimension(this, renderer, points[0], points[1], constraint.position)
+
     // Circle/Arc diameter/radius
-    if(isCircle || isArc) {
+    } else if(isCircle || isArc) {
       const circle = itemL.curve()
 
       const left = constraint.position.clone().sub(circle.center()).x > 0

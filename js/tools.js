@@ -1085,7 +1085,8 @@ export class DimensionTool extends HighlightTool {
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
 
-    if(!this.isReadyToPlace()) {
+    if(this.items.length == 0 ||
+      (!this.isReadyToPlace() && !(this.items.length == 1 && this.items[0] instanceof Circle))) {
       const curve = await this.getObject(coords)
       // if(!curve || !(curve instanceof Line)) {
       //   this.items = []
@@ -1093,11 +1094,21 @@ export class DimensionTool extends HighlightTool {
       // }
       if(!curve) return
       this.items.push(curve)
-      if(this.isReadyToPlace()) this.updatePreview(vec)
+      if(this.canPlaceDimension()) this.updatePreview(vec)
 
     } else if(this.items.length == 1 && this.items[0] instanceof Line) {
       const curve = await this.getObject(coords)
       if(curve instanceof Line && curve != this.items[0]) {
+        this.items.push(curve)
+        this.updatePreview(vec)
+      } else {
+        this.placeDimension(vec)
+      }
+
+    } else if(this.items.length == 1 && this.items[0] instanceof Circle) {
+      const curve = await this.getObject(coords)
+      if(curve && curve != this.items[0] &&
+        (curve instanceof Circle || (curve instanceof ElemRef && curve.curve() != this.items[0]))) {
         this.items.push(curve)
         this.updatePreview(vec)
       } else {
@@ -1110,16 +1121,23 @@ export class DimensionTool extends HighlightTool {
   }
 
   async mouseMove(vec, coords) {
-    if(!this.isReadyToPlace()) return super.mouseMove(vec, coords)
-    if(this.items.length == 1 && this.items[0] instanceof Line) await super.mouseMove(vec, coords)
+    if(!this.canPlaceDimension()) return super.mouseMove(vec, coords)
+    if(this.items.length == 1 &&
+      (this.items[0] instanceof Line || this.items[0] instanceof Circle)) {
+      await super.mouseMove(vec, coords)
+    }
     this.updatePreview(vec)
+  }
+
+  canPlaceDimension() {
+    return this.isReadyToPlace() ||
+      (this.items.length == 1 && this.items[0] instanceof Circle)
   }
 
   isReadyToPlace() {
     return (
       this.items.length == 2 ||
       this.items[0] instanceof Line ||
-      this.items[0] instanceof Circle ||
       this.items[0] instanceof Arc
     )
   }

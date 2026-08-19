@@ -722,7 +722,27 @@ export class Sketch {
 
       // Dimension
       } else if(c instanceof Dimension) {
-        if(c.items[0].curve() instanceof Circle) {
+        if(c.isCircleOffset()) {
+          const [left, right] = c.items.map(item => idMap[item.curve().id].slice(-1)[0])
+          const leftCenter = idMap[c.items[0].curve().id][0]
+          const rightCenter = idMap[c.items[1].curve().id][0]
+          const centersCoincident = this.coincidentPointsConnected(
+            c.items[0].curve(), 0, c.items[1].curve(), 0
+          )
+          return [
+            // Coincident centers provide the implicit concentric constraint.
+            ...(centersCoincident ? [] : [{ id: `${id++}`, type: 'p2p_coincident', p1_id: leftCenter.id, p2_id: rightCenter.id, temporary: c.temporary }]),
+            { id: `${id++}`, type: 'difference', param1: { o_id: left.id, prop: 'radius' }, param2: { o_id: right.id, prop: 'radius' }, difference: c.radiusDifferenceSign * c.distance, temporary: c.temporary },
+          ]
+
+        } else if(c.isPointDistance()) {
+          // Circle centers participate in point distances even though the
+          // circle itself is selected rather than an ElemRef.
+          const [p1, p2] = c.items.map(item => item.curve() instanceof Circle ?
+            idMap[item.curve().id][0] : pointPrimitive(item))
+          return { id: `${id++}`, type: 'p2p_distance', p1_id: p1.id, p2_id: p2.id, distance: c.distance, temporary: c.temporary }
+
+        } else if(c.items[0].curve() instanceof Circle) {
           // Circle diameter
           const circlePrim = idMap[c.items[0].curve().id].slice(-1)[0]
           return { id: `${id++}`, type: 'circle_diameter', c_id: circlePrim.id, diameter: c.distance, temporary: c.temporary }
@@ -734,11 +754,6 @@ export class Sketch {
         } else if(c.items.length == 1) {
           // Line length
           const [p1, p2] = idMap[c.items[0].curve().id]
-          return { id: `${id++}`, type: 'p2p_distance', p1_id: p1.id, p2_id: p2.id, distance: c.distance, temporary: c.temporary }
-
-        } else if(c.isPointDistance()) {
-          // Point to point distance
-          const [p1, p2] = c.items.map(pointPrimitive)
           return { id: `${id++}`, type: 'p2p_distance', p1_id: p1.id, p2_id: p2.id, distance: c.distance, temporary: c.temporary }
 
         } else if(c.isAngular()) {
@@ -1115,7 +1130,17 @@ export class Dimension extends Constraint {
     super(...items)
     this.position = pos
     this.expression = null
-    if(items[0] instanceof Circle) {
+    if(this.isCircleOffset()) {
+      const [left, right] = items
+      this.distance = Math.abs(left.radius - right.radius)
+      this.radiusDifferenceSign = Math.sign(left.radius - right.radius) || 1
+
+    } else if(this.isPointDistance()) {
+      const point = item => item.curve() instanceof Circle ? item.curve().center() : item.curve().handles()[item.index]
+      const [a, b] = this.items.map(point)
+      this.distance = a.distanceTo(b)
+
+    } else if(items[0] instanceof Circle) {
       this.distance = items[0].radius * 2.0
 
     } else if(items[0] instanceof Arc) {
@@ -1123,10 +1148,6 @@ export class Dimension extends Constraint {
 
     } else if(items.length == 1) {
       this.distance = items[0].length()
-
-    } else if(this.isPointDistance()) {
-      const [a, b] = this.items.map(item => item.curve().handles()[item.index])
-      this.distance = a.distanceTo(b)
 
     } else if(this.isAngular()) {
       const rawAngle = signedLineAngle(items[0], items[1])
@@ -1146,7 +1167,13 @@ export class Dimension extends Constraint {
   }
 
   isPointDistance() {
-    return this.items.length == 2 && this.items.every(item => item.index !== undefined)
+    return this.items.length == 2 && this.items.every(item => item.index !== undefined || item.curve() instanceof Circle)
+  }
+
+  isCircleOffset() {
+    return this.items.length == 2 && this.items.every(item =>
+      item.index === undefined && item.curve() instanceof Circle
+    )
   }
 
   isAngular() {
@@ -1168,6 +1195,7 @@ export class Dimension extends Constraint {
       distance: this.distance,
       angleSign: this.angleSign,
       angleOffset: this.angleOffset,
+      radiusDifferenceSign: this.radiusDifferenceSign,
       expression: this.expression,
     }
   }

@@ -487,6 +487,7 @@
           name: 'width',
           value: '512mm',
         })
+        this.document.regenerateParameters()
       },
 
       addSectionView: function() {

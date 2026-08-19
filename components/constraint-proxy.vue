@@ -20,6 +20,7 @@
   )
 
     .dim-value(
+      :class="{ parameterized }"
       @mouseup="$emit('dimensionMouseUp', $event, constraint)"
       @mousedown="$emit('dimensionMouseDown', $event, constraint)"
       @mousemove="$emit('dimensionMouseMove', $event, constraint)"
@@ -31,7 +32,9 @@
         v-if="constraint.active"
         :component="document.top()"
         v-model:value="constraint.distance"
+        :expression="constraint.expression"
         :focus-on-mount="true"
+        @expression="constraint.expression = $event"
         @enter="constraint.active = false; constraint.sketch.profileUpdateNeeded = true"
       )
 
@@ -74,6 +77,7 @@
     &.selected .dim-value
       border-color: $highlight
       background: lighten($highlight, 73%) !important
+      color: $dark2 !important
 
     > *
       position: absolute
@@ -92,8 +96,13 @@
       cursor: grab
       pointer-events: auto
 
+      &.parameterized
+        background: $purple
+        color: white
+
       &:hover
         background: $bright1
+        color: $dark2
 
     .number-input
       margin-top: -14px
@@ -131,6 +140,14 @@
   const renderNeeded = inject('render-needed')
 
   const selected = computed(() => props.document.selection.has(props.constraint) )
+
+  const parameterized = computed(() => {
+    const expression = props.constraint.expression
+    if(!expression) return false
+    const names = props.document.top().getParameters().map(parameter => parameter.name)
+    const identifiers = expression.match(/[A-Za-z_]\w*/g) || []
+    return identifiers.some(identifier => names.includes(identifier))
+  })
 
   let _dimension
 

@@ -8,6 +8,7 @@ import { AxisHelper, PointHelper } from './helpers.js'
 import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix, ocPntFromVec, transformGeometry } from './utils.js'
 import { Reference, CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
 import { relativeComponentTransform } from './assembly.js'
+import Expression from './expression.js'
 
 function sameCurve(left, right) {
   if(left === right) return true
@@ -513,6 +514,11 @@ export class Sketch {
     // Refresh references before collecting fixed solver primitives.
     // This is also needed by DimensionControls after feature-tree updates.
     this.constraints.forEach(constraint => constraint.update(tree))
+    const parameters = this.creator && tree.findChild(this.creator.componentId)?.getParameters()
+    this.constraints.filter(constraint => constraint instanceof Dimension && constraint.expression)
+      .forEach(constraint => {
+        constraint.distance = new Expression(constraint.expression, parameters).getBase()
+      })
     this.removeRedundantCoincidentConstraints()
 
     const fixedPoints = this.constraints
@@ -1065,6 +1071,7 @@ export class Dimension extends Constraint {
   constructor(items, pos) {
     super(...items)
     this.position = pos
+    this.expression = null
     if(items[0] instanceof Circle) {
       this.distance = items[0].radius * 2.0
 
@@ -1118,6 +1125,7 @@ export class Dimension extends Constraint {
       distance: this.distance,
       angleSign: this.angleSign,
       angleOffset: this.angleOffset,
+      expression: this.expression,
     }
   }
 }

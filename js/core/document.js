@@ -142,6 +142,35 @@ export default class Document extends Emitter {
     this.selection.clear()
   }
 
+  // Parameter values live on component definitions, which are shared by the
+  // cached timeline trees. Invalidate the timeline before regenerating so
+  // every feature that may consume an expression referencing a parameter is
+  // evaluated again.
+  regenerateParameters() {
+    const activeFeature = this.activeFeature
+    const activeSketch = this.activeSketch
+    const firstFeature = this.timeline.features[0]
+    if(firstFeature) this.timeline.invalidateFeature(firstFeature)
+    this.regenerate()
+
+    // regenerate() reactivates the active component, which intentionally
+    // clears sketch-editing state. Parameter edits must not close an active
+    // sketch or switch the toolbar back to non-sketch tools.
+    if(activeFeature) {
+      this.activeFeature = activeFeature
+      this.activeComponent = this.getComponent(activeFeature.componentOccurrenceId) ||
+        this.getComponent(activeFeature.componentId) || this.activeComponent
+      this.activeSketch = activeFeature.sketch || activeSketch
+    }
+
+    // Profiles are cached by the sketch proxies. Mark all current sketches
+    // dirty so closed regions are rebuilt from the regenerated geometry.
+    this.top().getChildren().flatMap(component => component.sketches)
+      .forEach(sketch => { sketch.profileUpdateNeeded = true })
+    this.hasChanges = true
+    this.isFresh = false
+  }
+
   reactivateActiveComponent(comp = this.activeComponent) {
     const updated = this.getComponent(comp.id)
     if(updated) {

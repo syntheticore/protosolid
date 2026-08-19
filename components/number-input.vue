@@ -28,15 +28,16 @@
     props: {
       component: Object,
       value: Number,
+      expression: String,
       autoFocus: Boolean,
       focusOnMount: Boolean,
     },
 
-    emits: ['update:value', 'enter', 'error'],
+    emits: ['update:value', 'expression', 'enter', 'error'],
 
     data() {
       return {
-        inner: new Expression(this.value, this.component.getParameters()),
+        inner: new Expression(this.expression ?? this.value, this.component.getParameters()),
         problem: false,
       }
     },
@@ -54,6 +55,7 @@
         this.problem = false
         try {
           this.inner.set(value)
+          this.$emit('expression', this.inner.expression)
           this.update(noFocus)
           this.$emit('enter')
         } catch(e) {
@@ -71,13 +73,17 @@
       increase() {
         const number = this.inner.parse()
         this.inner.set(truncate(number.value + 1) + number.unit)
+        this.$emit('expression', this.inner.expression)
         this.update()
       },
 
       decrease() {
         const number = this.inner.parse()
         const newValue = number.value - 1
-        if(newValue >= 0) this.inner.set(truncate(newValue) + number.unit)
+        if(newValue >= 0) {
+          this.inner.set(truncate(newValue) + number.unit)
+          this.$emit('expression', this.inner.expression)
+        }
         this.update()
       },
     },

@@ -10,6 +10,7 @@ import { normalFromMatrix, ocCatch, rad } from './utils.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
 import { makeID } from './id.js'
+import Expression from './expression.js'
 import {
   alignJointWorld,
   baselineWorldTransform,
@@ -27,6 +28,7 @@ export class Feature {
     this.title = title
     this.settings = settings
     this.error = null
+    this.expressions = {}
     this.componentId = this.document.activeComponent.sourceId()
     this.componentOccurrenceId = this.document.activeComponent.id
     this.id = makeID()
@@ -72,6 +74,16 @@ export class Feature {
     const references = this.updateReferences(tree)
 
     if(this.error && this.error.type == 'error') return
+
+    const component = tree.findChild(this.componentId)
+    try {
+      Object.entries(this.expressions).forEach(([key, expression]) => {
+        this[key] = new Expression(expression, component.getParameters()).getBase()
+      })
+    } catch(err) {
+      this.error = { type: 'error', msg: 'Invalid parameter expression' }
+      return
+    }
 
     this.updateFeature(tree, references)
 
@@ -201,6 +213,10 @@ export class Feature {
     return values
   }
 
+  setExpression(key, expression) {
+    this.expressions[key] = expression
+  }
+
   setValues(values) {
     Object.keys(values).forEach(key => {
       const value = values[key]
@@ -219,6 +235,7 @@ export class Feature {
       componentId: this.componentId,
       componentOccurrenceId: this.componentOccurrenceId,
       values: this.getValues(),
+      expressions: this.expressions,
     }
   }
 
@@ -228,6 +245,7 @@ export class Feature {
     feature.componentId = dump.componentId
     feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     feature.setValues(dump.values)
+    feature.expressions = dump.expressions || {}
     return feature
   }
 }

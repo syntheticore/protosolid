@@ -32,6 +32,7 @@
             v-model:value="activeFeature[key]"
             :auto-focus="setting.autoFocus !== false && activeFeature.isSettingVisible(setting)"
             @update:value="update"
+            @expression="activeFeature.setExpression(key, $event)"
             @error="error = $event"
           )
 
@@ -324,6 +325,7 @@
       this.bus.on('keydown', this.onKeydown)
       this.document.on('deactivate-feature', this.deactivateFeature)
       this.startValues = this.activeFeature.getValues()
+      this.startExpressions = { ...this.activeFeature.expressions }
       this.activateBaseTool()
       setTimeout(() => {
         this.updatePaths()
@@ -556,9 +558,11 @@
           this.status !== 'confirmed' &&
           this.showHeader && // Only for existing features
           !this.isSketchFeature && // Never reset sketches
-          !shallowEqual(this.activeFeature.getValues(), this.startValues) // Only if feature actually changed
+          (!shallowEqual(this.activeFeature.getValues(), this.startValues) ||
+            !shallowEqual(this.activeFeature.expressions, this.startExpressions)) // Only if feature actually changed
         ) {
           this.activeFeature.setValues(this.startValues)
+          this.activeFeature.expressions = { ...this.startExpressions }
           this.update()
         }
       },

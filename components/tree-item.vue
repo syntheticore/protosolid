@@ -67,6 +67,7 @@
         TreeletParameter(
           :parameter="param"
           :component="component"
+          :document="document"
         )
 
       //- Material

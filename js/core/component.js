@@ -67,14 +67,16 @@ Serialize.register(SectionView, 'SectionView')
 
 
 export class Canvas {
-  constructor(id, src, scale, hidden) {
+  constructor(id, src, scale, hidden, x, y) {
     this.id = id || makeID()
     this.src = src
     this.scale = 1.0
     this.hidden = hidden
+    this.x = x ?? 0
+    this.y = y ?? 0
   }
 
-  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden) }
+  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden, dump.x, dump.y) }
 }
 Serialize.register(Canvas, 'Canvas')
 

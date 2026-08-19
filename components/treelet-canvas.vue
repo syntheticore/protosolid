@@ -36,11 +36,19 @@
               Icon(icon="folder")
             span(:title="path") {{ path || 'Image Source'}}
 
+          img(:src="canvas.data")
+
           label
             input(type="range" v-model="canvas.scale" min="0.01" step="0.001" max="10.0")
             span Scale
 
-        img(:src="canvas.data")
+          label
+            input.input(type="number" v-model.number="canvas.x" step="1")
+            span Position X
+
+          label
+            input.input(type="number" v-model.number="canvas.y" step="1")
+            span Position Y
 
 </template>
 
@@ -68,6 +76,7 @@
   img
     display: block
     width: 198px
+    margin-inline: -12px
 
 </style>
 
@@ -97,7 +106,12 @@
     props.canvas.height = height
 
     const textureLoader = new THREE.TextureLoader()
-    props.canvas.texture = textureLoader.load(data)
+    props.canvas.texture = textureLoader.load(data, texture => {
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.needsUpdate = true
+      bus.emit('render-needed')
+    })
+    props.canvas.texture.colorSpace = THREE.SRGBColorSpace
 
     // Render again, as image takes one frame to load
     setTimeout(() => bus.emit('render-needed') )

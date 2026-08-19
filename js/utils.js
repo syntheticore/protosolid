@@ -46,13 +46,13 @@ function loadFileWeb(filetype, datatype) {
       reader.onload = (e) => {
         if(datatype == 'dataUrl') {
           const img = document.createElement('img')
+          img.onload = () => resolve({
+              data: e.target.result,
+              path: file.name,
+              width: img.naturalWidth,
+              height: img.naturalHeight,
+            })
           img.src = e.target.result
-          resolve({
-            data: e.target.result,
-            path: file.name,
-            width: img.width,
-            height: img.height,
-          })
         } else {
           resolve({ data: e.target.result, path: file.name })
         }

@@ -3,6 +3,7 @@
   NumericInput.number-input(
     ref="input"
     icon="tape"
+    :parameterized="parameterized"
     :value="inner.expression"
     :auto-focus="autoFocus"
     :focus-on-mount="focusOnMount"
@@ -40,6 +41,15 @@
         inner: new Expression(this.expression ?? this.value, this.component.getParameters()),
         problem: false,
       }
+    },
+
+    computed: {
+      parameterized() {
+        if(!this.expression) return false
+        const names = this.component.getParameters().map(parameter => parameter.name)
+        const identifiers = this.expression.match(/[A-Za-z_]\w*/g) || []
+        return identifiers.some(identifier => names.includes(identifier))
+      },
     },
 
     watch: {

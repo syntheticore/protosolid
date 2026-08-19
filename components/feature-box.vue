@@ -539,8 +539,7 @@
       confirm: function() {
         if(!this.canConfirm) return
         this.status = 'confirmed'
-        // if(this.error) this.activeFeature.repair()
-        // this.activeFeature.repair()
+        if(this.error) this.activeFeature.repair()
         if(!this.showHeader) this.activeFeature.confirm()
         this.close()
       },

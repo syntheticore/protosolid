@@ -218,7 +218,7 @@ export default class Snapper {
     const origin = sketch.originPoint()
     const originHelper = sketch.origin()
     const originConstrained = originHelper && connectedElements.has(originHelper)
-    return origin && !originConstrained ? [{ point: origin, origin: true }, ...points] : points
+    return origin && !originConstrained ? [{ point: origin, elem: originHelper, index: 0 }, ...points] : points
   }
 
   catchSnapTargets(localVec, coords, rememberGuides) {
@@ -238,7 +238,7 @@ export default class Snapper {
         guidePointDist = dist
         guidePointTarget = target
       }
-      if((target.origin || target.index != -1) && dist < snapDistance) {
+      if(target.index != -1 && dist < snapDistance) {
         if(reachable && dist < pointDist) {
           pointDist = dist
           pointTarget = target
@@ -308,7 +308,6 @@ export default class Snapper {
     }
     const previous = this.lastSnaps[0]
     const sameTarget = previous && (
-      (previous.origin && reference.origin) ||
       (previous.elem && reference.elem && previous.elem == reference.elem &&
         previous.index == reference.index && previous.midpoint == reference.midpoint) ||
       this.resolveSnapReference(previous).equals(this.resolveSnapReference(reference))
@@ -321,7 +320,6 @@ export default class Snapper {
   }
 
   resolveSnapReference(reference) {
-    if(reference.origin) return this.viewport.document.activeSketch.originPoint()
     let elem = reference.elem
     let index = reference.index
     if(elem && elem.dissolvedTo) {

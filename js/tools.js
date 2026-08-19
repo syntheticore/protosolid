@@ -34,6 +34,7 @@ import {
   Dimension,
   Projection,
   ProjectedPoint,
+  SketchOrigin,
   ElemRef,
 } from './core/sketch.js'
 import { solveAssembly, worldTransform } from './core/assembly.js'
@@ -83,6 +84,7 @@ function captureSnap(snapper) {
 }
 
 function isConstrainablePoint(elem, index) {
+  if(elem instanceof SketchOrigin) return index == 0
   if(elem instanceof SketchPoint) return index == 0
   if(elem instanceof ProjectedPoint) return index == 0
   if(elem instanceof Line) return index == 0 || index == 1
@@ -159,11 +161,6 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
     }
     return constrainCoincidentPoints(sketch, elem, index, snap.elem, snap.index)
   }
-
-  const origin = snap && snap.origin && sketch.origin()
-  if(origin) return sketch.addConstraint(
-    new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(origin))
-  )
 
   // Only use another coincident handle as a positional fallback when no
   // captured target was available. Otherwise an already-connected endpoint
@@ -260,17 +257,15 @@ class HighlightTool extends Tool {
           if(mapped.length) return mapped
           return obj.alcObject
         })
-        .filter(item => {
-          const acceptsInput = this.acceptsInput ||
-            this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
-          return !acceptsInput || acceptsInput(item)
-        })
         // .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
       const handle = this.viewport.hoveredHandle
       if(handle && this.realSelectors.includes('point') && !this.preferPointObjects) {
         items.unshift(new ElemRef(handle.elem, handle.index))
       }
+      const acceptsInput = this.acceptsInput ||
+        this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
+      if(acceptsInput) items = items.filter(item => acceptsInput(item))
       if(items.length > 1 && !any) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({
@@ -940,6 +935,7 @@ export class ConstraintTool extends HighlightTool {
     super(component, viewport, [])
     this.setSelectors(this.constructor.selectors)
     this.sketch = sketch
+    this.acceptsInput = item => this.acceptsItem(item)
     this.items = []
     this.cursor = 'crosshair'
   }

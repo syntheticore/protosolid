@@ -694,7 +694,7 @@ export class Sketch {
         const curvePrim = idMap[curve.curve().id].slice(-1)[0]
         if(curve.curve() instanceof Spline) {
           const splineCurve = curve.curve()
-          const other = line ? line.curve() : c.items.find(item => item.curve() instanceof Circle).curve()
+          const other = line ? line.curve() : c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc).curve()
           const endpoint = splineCurve.endpoints()
             .map((point, index) => ({ index, distance: other.distanceTo(point) }))
             .minMaxBy(Math.min, candidate => candidate.distance)
@@ -704,9 +704,11 @@ export class Sketch {
           if(line) {
             return { id: `${id++}`, type: 'parallel', l1_id: linePrim.id, l2_id: tangentPrim.id, temporary: c.temporary }
           }
-          const circle = c.items.find(item => item.curve() instanceof Circle).curve()
-          const circlePrim = idMap[circle.id].slice(-1)[0]
-          return { id: `${id++}`, type: 'tangent_lc', l_id: tangentPrim.id, c_id: circlePrim.id, temporary: c.temporary }
+          const target = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc).curve()
+          const targetPrim = idMap[target.id].slice(-1)[0]
+          return target instanceof Circle ?
+            { id: `${id++}`, type: 'tangent_lc', l_id: tangentPrim.id, c_id: targetPrim.id, temporary: c.temporary } :
+            { id: `${id++}`, type: 'tangent_la', l_id: tangentPrim.id, a_id: targetPrim.id, temporary: c.temporary }
         }
         if(!line) throw new Error('Unsupported Tangent constraint geometry')
         return curve.curve() instanceof Circle ?

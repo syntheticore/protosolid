@@ -355,7 +355,9 @@
           oldDoc.off('force-view')
           oldDoc.off('look-at')
         }
-        doc.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
+        doc.on('force-view', (view) => {
+          this.renderer.setView(view.position, view.target)
+        })
         doc.on('look-at', (plane) => setTimeout(() => {
           this.renderer.lookAt(plane)
           const sketch = this.document.activeSketch
@@ -586,7 +588,6 @@
           this.cameraPreview = {
             position: (this.renderer.cameraTarget || this.renderer.activeCamera.position).clone(),
             target: (this.renderer.viewControlsTarget || this.renderer.viewControls.target).clone(),
-            zoom: this.renderer.activeCamera.isOrthographicCamera ? this.renderer.activeCamera.zoom : null,
           }
         }
         action()
@@ -601,7 +602,6 @@
         const view = this.cameraPreview
         this.cameraPreview = null
         this.renderer.setView(view.position, view.target)
-        if(view.zoom !== null) this.renderer.setCameraZoom(view.zoom)
       },
 
       zoomToFit: function(objects=[], preview=false) {

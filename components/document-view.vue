@@ -30,7 +30,7 @@
 
       ViewChooser(:document="document")
 
-      .flex.gap.buttons
+      .flex.gap.buttons(@mouseleave="bus.emit('unpreview-camera')")
 
         .flex.gap
 
@@ -38,7 +38,6 @@
             icon="camera"
             title="Fit All"
             @mouseenter="bus.emit('preview-zoom-all')"
-            @mouseleave="bus.emit('unpreview-camera')"
             @click="bus.emit('zoom-all')"
           )
 
@@ -46,7 +45,6 @@
             icon="crop-alt"
             title="Fit Active"
             @mouseenter="bus.emit('preview-zoom-active')"
-            @mouseleave="bus.emit('unpreview-camera')"
             @click="bus.emit('zoom-active')"
           )
 
@@ -55,7 +53,6 @@
             icon="search-plus"
             title="Fit Selection"
             @mouseenter="bus.emit('preview-zoom-selection')"
-            @mouseleave="bus.emit('unpreview-camera')"
             @click="bus.emit('zoom-selection')"
           )
 
@@ -63,7 +60,6 @@
           icon="solar-panel"
           title="Look at nearest plane"
           @mouseenter="lookAtPlane(true)"
-          @mouseleave="bus.emit('unpreview-camera')"
           @click="lookAtPlane()"
         )
 

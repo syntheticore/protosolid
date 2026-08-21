@@ -374,8 +374,12 @@ export default class Renderer {
     // Update orbit controls dampening
     if(!this.cameraUpTarget) this.viewControls.update(delta)
     // Transition to target positions
+    const isMovingView = !!(this.cameraTarget || this.viewControlsTarget)
     this.cameraTarget = this.lerp(this.activeCamera.position, this.cameraTarget)
     this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
+    if(isMovingView && !this.cameraUpTarget) {
+      this.activeCamera.lookAt(this.viewControls.target)
+    }
     if(this.cameraZoomTarget !== undefined) {
       this.activeCamera.zoom = this.activeCamera.zoom * 0.7 + this.cameraZoomTarget * 0.3
       this.activeCamera.updateProjectionMatrix()

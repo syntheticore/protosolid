@@ -75,6 +75,7 @@ export default class Renderer {
     this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -200, 10000)
     this.cameraOrtho.position.set(0, 10, 0)
     this.cameraOrtho.lookAt(this.scene.position)
+    this.orthoFrustumSize = 200
 
     // Scene Objects
     this.traceables = new THREE.Object3D()
@@ -106,7 +107,7 @@ export default class Renderer {
     // this.scene.add(mesh)
 
     // Init viewport
-    this.setActiveCamera(this.camera)
+    this.setActiveCamera(this.cameraOrtho)
 
     const setPixelRatio = () => {
       this.renderer.setPixelRatio(this.getPixelRatio())
@@ -160,6 +161,7 @@ export default class Renderer {
       this.viewControlsTarget = null
       this.cameraTransitionUp = null
       this.cameraUpTarget = null
+      this.cameraZoomTarget = undefined
       this.reportViewChange()
       this.startAnimation()
     })
@@ -172,11 +174,50 @@ export default class Renderer {
     })
 
     this.activeCamera = camera
+    this.gizmos.forEach(gizmo => gizmo.camera = camera)
     this.onWindowResize()
   }
 
   switchCamera() {
-    this.setActiveCamera(this.activeCamera == this.cameraOrtho ? this.camera : this.cameraOrtho)
+    const from = this.activeCamera
+    const to = from == this.cameraOrtho ? this.camera : this.cameraOrtho
+    const target = (this.viewControlsTarget || this.viewControls.target).clone()
+    const position = (this.cameraTarget || from.position).clone()
+    const offset = position.sub(target)
+    const distance = offset.length()
+    if(!distance) return
+
+    const direction = offset.normalize()
+    if(to == this.cameraOrtho) {
+      // Keep the same view direction and make the orthographic viewport cover
+      // the same vertical span at the current target as the perspective view.
+      this.orthoFrustumSize = 2 * distance * Math.tan(
+        THREE.MathUtils.degToRad(this.camera.getEffectiveFOV()) / 2
+      )
+      this.cameraOrtho.zoom = 1
+      this.cameraOrtho.position.copy(target).addScaledVector(direction, distance)
+      this.cameraOrtho.quaternion.copy(from.quaternion)
+    } else {
+      // Convert the orthographic viewport height back into a perspective
+      // distance so switching back does not change the apparent scale.
+      const visibleFrustumSize = this.orthoFrustumSize / this.cameraOrtho.zoom
+      const perspectiveDistance = visibleFrustumSize / (
+        2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)
+      )
+      this.camera.position.copy(target).addScaledVector(direction, perspectiveDistance)
+      this.camera.quaternion.copy(from.quaternion)
+    }
+
+    this.setActiveCamera(to)
+    this.viewControls.target.copy(target)
+    this.viewControls.update()
+  }
+
+  setCameraZoom(zoom) {
+    if(!this.activeCamera.isOrthographicCamera || !Number.isFinite(zoom)) return
+    this.cameraZoomTarget = zoom
+    this.startAnimation()
+    this.endAnimation()
   }
 
   on(event, cb) {
@@ -219,7 +260,7 @@ export default class Renderer {
   lookAt(plane, report=true) {
     const normal = new THREE.Vector3(0,0,1).applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(plane))
     const controlsTarget = (this.viewControlsTarget || this.viewControls.target)
-    const dir = (this.cameraTarget || this.camera.position).clone().sub(controlsTarget).projectOnVector(normal)
+    const dir = (this.cameraTarget || this.activeCamera.position).clone().sub(controlsTarget).projectOnVector(normal)
     const position = controlsTarget.clone().add(dir)
     const target = controlsTarget.clone()
     this.setView(position, target)
@@ -235,18 +276,22 @@ export default class Renderer {
     const radius = Math.max(...size.toArray()) / 2.0
 
     if(this.activeCamera == this.cameraOrtho) {
-      const width = this.camera.right - this.camera.left
-      const height = this.camera.top - this.camera.bottom
       const diameter = radius * 2.0
-      const zoom = Math.min(width / diameter, height / diameter)
-      // this.zoomTo(zoom)
+      const oldTarget = this.viewControlsTarget || this.viewControls.target
+      const oldPosition = this.cameraTarget || this.activeCamera.position
+      const direction = oldPosition.clone().sub(oldTarget).normalize()
+      const distance = oldPosition.distanceTo(oldTarget)
+      const width = this.cameraOrtho.right - this.cameraOrtho.left
+      const height = this.cameraOrtho.top - this.cameraOrtho.bottom
+      this.setCameraZoom(Math.min(width, height) / (diameter * 1.6))
+      this.setView(target.clone().addScaledVector(direction, distance), target)
 
     } else {
       const vFOV = this.camera.getEffectiveFOV() * THREE.MathUtils.DEG2RAD
       const hFOV = Math.atan(Math.tan(vFOV * 0.5) * this.camera.aspect) * 2.0
       const fov = this.camera.aspect > 1.0 ? vFOV : hFOV
       const distanceToFit = radius / (Math.sin(fov * 0.5))
-      const dir = (this.cameraTarget || this.camera.position).clone().sub(this.viewControlsTarget || this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.6)
+      const dir = (this.cameraTarget || this.activeCamera.position).clone().sub(this.viewControlsTarget || this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.6)
       const position = target.clone().add(dir)
       this.setView(position, target)
     }
@@ -254,15 +299,16 @@ export default class Renderer {
   }
 
   setView(position, target) {
+    const camera = this.activeCamera
     const polePosition = this.poleSafePosition(position, target)
     this.cameraTarget = polePosition || position
     this.viewControlsTarget = target
     if(polePosition) {
-      this.camera.updateMatrixWorld()
+      camera.updateMatrixWorld()
       this.cameraTransitionUp = new THREE.Vector3()
-        .setFromMatrixColumn(this.camera.matrixWorld, 1)
+        .setFromMatrixColumn(camera.matrixWorld, 1)
         .normalize()
-      const rotation = new THREE.Matrix4().lookAt(this.cameraTarget, target, this.camera.up)
+      const rotation = new THREE.Matrix4().lookAt(this.cameraTarget, target, camera.up)
       this.cameraUpTarget = new THREE.Vector3()
         .setFromMatrixColumn(rotation, 1)
         .normalize()
@@ -324,12 +370,22 @@ export default class Renderer {
   animate(timestamp) {
     const delta = this.lastTimestamp ? timestamp - this.lastTimestamp : 1
     this.lastTimestamp = timestamp
-    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget) requestAnimationFrame(this.animate.bind(this))
+    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget || this.cameraZoomTarget !== undefined) requestAnimationFrame(this.animate.bind(this))
     // Update orbit controls dampening
     if(!this.cameraUpTarget) this.viewControls.update(delta)
     // Transition to target positions
-    this.cameraTarget = this.lerp(this.camera.position, this.cameraTarget)
+    this.cameraTarget = this.lerp(this.activeCamera.position, this.cameraTarget)
     this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
+    if(this.cameraZoomTarget !== undefined) {
+      this.activeCamera.zoom = this.activeCamera.zoom * 0.7 + this.cameraZoomTarget * 0.3
+      this.activeCamera.updateProjectionMatrix()
+      if(Math.abs(this.cameraZoomTarget - this.activeCamera.zoom) < 0.0001) {
+        this.activeCamera.zoom = this.cameraZoomTarget
+        this.activeCamera.updateProjectionMatrix()
+        this.cameraZoomTarget = undefined
+      }
+      this.render()
+    }
     if(this.cameraUpTarget) {
       // Interpolate only the roll; rebuilding the look-at rotation keeps the
       // moving target fixed in the center of the screen throughout the move.
@@ -338,10 +394,10 @@ export default class Renderer {
         !this.viewControlsTarget &&
         this.cameraTransitionUp.angleTo(this.cameraUpTarget) < 1e-3
       if(transitionDone) this.cameraTransitionUp.copy(this.cameraUpTarget)
-      const viewDirection = this.viewControls.target.clone().sub(this.camera.position).normalize()
+      const viewDirection = this.viewControls.target.clone().sub(this.activeCamera.position).normalize()
       const viewUp = this.cameraTransitionUp.clone().projectOnPlane(viewDirection).normalize()
-      const rotation = new THREE.Matrix4().lookAt(this.camera.position, this.viewControls.target, viewUp)
-      this.camera.quaternion.setFromRotationMatrix(rotation)
+      const rotation = new THREE.Matrix4().lookAt(this.activeCamera.position, this.viewControls.target, viewUp)
+      this.activeCamera.quaternion.setFromRotationMatrix(rotation)
       if(transitionDone) {
         this.cameraTransitionUp = null
         this.cameraUpTarget = null
@@ -505,7 +561,7 @@ export default class Renderer {
     if(this.activeCamera == this.camera) {
       this.camera.aspect = aspect
     } else {
-      const frustumSize = 200
+      const frustumSize = this.orthoFrustumSize
       this.cameraOrtho.left = - 0.5 * frustumSize * aspect
       this.cameraOrtho.right = 0.5 * frustumSize * aspect
       this.cameraOrtho.top = frustumSize / 2

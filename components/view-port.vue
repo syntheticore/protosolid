@@ -336,6 +336,8 @@
       })
 
       this.registerDocument(this.document)
+      const initialView = this.document.dirtyView || this.document.previewView || this.activeView || this.document.activeView
+      if(initialView) this.renderer.setView(initialView.position, initialView.target)
 
       // Window Resize
       setTimeout(() => this.onWindowResize(), 1000)
@@ -582,8 +584,9 @@
       previewCamera: function(action) {
         if(!this.cameraPreview) {
           this.cameraPreview = {
-            position: (this.renderer.cameraTarget || this.renderer.camera.position).clone(),
+            position: (this.renderer.cameraTarget || this.renderer.activeCamera.position).clone(),
             target: (this.renderer.viewControlsTarget || this.renderer.viewControls.target).clone(),
+            zoom: this.renderer.activeCamera.isOrthographicCamera ? this.renderer.activeCamera.zoom : null,
           }
         }
         action()
@@ -598,6 +601,7 @@
         const view = this.cameraPreview
         this.cameraPreview = null
         this.renderer.setView(view.position, view.target)
+        if(view.zoom !== null) this.renderer.setCameraZoom(view.zoom)
       },
 
       zoomToFit: function(objects=[], preview=false) {

@@ -283,7 +283,7 @@
           plane = this.document.activeSketch.workplane
 
         } else {
-          const forward = window.alcRenderer.camera.getWorldDirection(new THREE.Vector3()).toArray()
+          const forward = window.alcRenderer.activeCamera.getWorldDirection(new THREE.Vector3()).toArray()
           const abs = forward.map(v => Math.abs(v) )
           let i = abs.indexOf(Math.max(...abs))
           const normal = [0,0,0]

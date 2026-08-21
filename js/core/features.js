@@ -78,7 +78,7 @@ export class Feature {
     const component = tree.findChild(this.componentId)
     try {
       Object.entries(this.expressions).forEach(([key, expression]) => {
-        this[key] = new Expression(expression, component.getParameters()).getBase()
+        this[key] = new Expression(expression, component.getParameters(), this.settings[key].type).getBase()
       })
     } catch(err) {
       this.error = { type: 'error', msg: 'Invalid parameter expression' }
@@ -307,7 +307,7 @@ export class PatternFeature extends Feature {
       },
       radialStep: {
         title: 'Angle Step',
-        type: 'number',
+        type: 'angle',
         step: 1,
         when: feature => feature.patternType == 'radial',
       },
@@ -961,7 +961,7 @@ export class RevolveFeature extends Feature {
       },
       angle: {
         title: 'Angle',
-        type: 'length',
+        type: 'angle',
       },
       side: {
         title: 'Side',
@@ -982,7 +982,7 @@ export class RevolveFeature extends Feature {
     let tool = new Compound(this.componentId)
     references.profiles.forEach(profile => {
       try {
-        const revolution = profile.revolve(this.componentId, references.axis, angle, this.id)
+        const revolution = profile.revolve(this.componentId, references.axis, rad(angle), this.id)
         tool = tool.boolean(revolution, 'join')
       } catch(err) { this.error = err || this.error }
     })

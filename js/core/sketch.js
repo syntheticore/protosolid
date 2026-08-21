@@ -535,7 +535,11 @@ export class Sketch {
     const parameters = this.creator && tree.findChild(this.creator.componentId)?.getParameters()
     this.constraints.filter(constraint => constraint instanceof Dimension && constraint.expression)
       .forEach(constraint => {
-        constraint.distance = new Expression(constraint.expression, parameters).getBase()
+        constraint.distance = new Expression(
+          constraint.expression,
+          parameters,
+          constraint.isAngular() ? 'angle' : 'length',
+        ).getBase()
       })
     this.removeRedundantCoincidentConstraints()
 

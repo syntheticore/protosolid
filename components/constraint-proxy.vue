@@ -31,6 +31,7 @@
       NumberInput(
         v-if="constraint.active"
         :component="document.top()"
+        :dimension="constraint.isAngular() ? 'angle' : 'length'"
         v-model:value="constraint.distance"
         :expression="constraint.expression"
         :focus-on-mount="true"

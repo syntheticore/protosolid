@@ -1,10 +1,16 @@
 import preferences from '../preferences.js'
 
-const conversions = {
+const lengthConversions = {
   mm: 1.0,
   cm: 10.0,
   m: 1000.0,
   inch: 25.4,
+}
+
+const angleConversions = {
+  '°': 1.0,
+  deg: 1.0,
+  rad: 180.0 / Math.PI,
 }
 
 function fixDecimals(number) {
@@ -12,39 +18,45 @@ function fixDecimals(number) {
 }
 
 export default class Expression {
-  constructor(input, parameters) {
+  constructor(input, parameters, dimension = 'length') {
     this.parameters = parameters || []
+    this.dimension = dimension
+    this.conversions = dimension == 'angle' ? angleConversions : lengthConversions
     this.set(input)
+  }
+
+  get defaultUnit() {
+    return this.dimension == 'angle' ? '°' : preferences.preferredUnit
   }
 
   // Set in any unit
   set(input) {
     if(typeof input == 'number') {
       // Assume preferred unit for raw input
-      this.expression = fixDecimals(input) + preferences.preferredUnit
+      this.expression = fixDecimals(input) + this.defaultUnit
     } else {
       // Allways leave a unit for display purposes
       input = input.replace(/,/g, '.')
       const number = this.parsePlus(input)
-      if(!number.unit && number.value == input) input += preferences.preferredUnit
+      if(!number.unit && number.value == input) input += this.defaultUnit
       this.expression = input
     }
   }
 
   getBase() {
     const number = this.parse()
-    return number.value * conversions[number.unit]
+    return number.value * this.conversions[number.unit]
   }
 
   setBase(mmValue) {
     const unit = this.parse().unit
     // Keep current unit
-    const value = mmValue / conversions[unit]
+    const value = mmValue / this.conversions[unit]
     this.set(fixDecimals(value) + unit)
   }
 
   as(unit) {
-    return this.getBase() / conversions[unit]
+    return this.getBase() / this.conversions[unit]
   }
 
   format(unit) {
@@ -54,7 +66,7 @@ export default class Expression {
   parse() {
     const number = this.parsePlus(this.expression)
     // Assume preferred unit if no unit could be determined by now
-    number.unit = number.unit || preferences.preferredUnit
+    number.unit = number.unit || this.defaultUnit
     return number
   }
 
@@ -87,8 +99,9 @@ export default class Expression {
   }
 
   parseNumber(expr) {
-    const match = /(\d*\.?\d*)\s*(inch\b|mm\b|cm\b|m\b)?/.exec(expr)
-    if(!match || match[1] === '') {
+    const units = this.dimension == 'angle' ? '(°|deg\\b|rad\\b)' : '(inch\\b|mm\\b|cm\\b|m\\b)'
+    const match = new RegExp('(\\d*\\.?\\d*)\\s*' + units + '?').exec(expr)
+    if(!match || match[1] === '' || match[0].trim() != expr.trim()) {
       // Probably a parameter
       const param = this.parameters.find(param => param.name == expr.trim() )
       if(!param) throw 'Unknown Parameter "' + expr + '"'
@@ -117,21 +130,21 @@ export default class Expression {
   }
 
   operation(left, right, op, convertBoth) {
-    const unit = this.decideUnit(left, right)
-    const leftUnit = (convertBoth ? left.unit || right.unit : left.unit) || 'mm'
-    const rightUnit = (convertBoth ? right.unit || left.unit : right.unit) || 'mm'
+    const unit = this.decideUnit(left, right) || this.defaultUnit
+    const leftUnit = (convertBoth ? left.unit || right.unit : left.unit) || this.defaultUnit
+    const rightUnit = (convertBoth ? right.unit || left.unit : right.unit) || this.defaultUnit
     return {
       value: op(
-        left.value * conversions[leftUnit],
-        right.value * conversions[rightUnit],
-      ) / (unit ? conversions[unit] : 1.0),
+        left.value * this.conversions[leftUnit],
+        right.value * this.conversions[rightUnit],
+      ) / (unit ? this.conversions[unit] : 1.0),
       unit,
     }
   }
 
   decideUnit(left, right) {
     return left.unit && right.unit ?
-      left.unit == right.unit ? left.unit : preferences.preferredUnit :
+      left.unit == right.unit ? left.unit : this.defaultUnit :
       left.unit || right.unit
   }
 

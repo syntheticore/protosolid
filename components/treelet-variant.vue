@@ -70,6 +70,7 @@
             input.input.variable(
               type="text"
               v-model.trim="parameter.name"
+              @focus="rememberParameterName(parameter)"
               @keydown.stop
               @change="commit(parameter)"
             )
@@ -213,7 +214,10 @@
     },
 
     data() {
-      return { expanded: true }
+      return {
+        expanded: true,
+        parameterNames: new Map(),
+      }
     },
 
     computed: {
@@ -252,16 +256,24 @@
       },
 
       commit(parameter) {
+        const oldName = this.parameterNames.get(parameter) || parameter.name
+        this.parameterNames.delete(parameter)
         if(parameter.id) {
           this.variant.options.forEach(option => {
             const other = option.parameters.find(item => item.id === parameter.id)
             if(other) other.name = parameter.name
           })
         }
+        if(oldName != parameter.name) this.document.renameParameterReferences(oldName, parameter.name)
         this.document.regenerateParameters()
       },
 
+      rememberParameterName(parameter) {
+        this.parameterNames.set(parameter, parameter.name)
+      },
+
       removeParameter(parameter) {
+        this.document.removeParameterReferences(parameter, this.component)
         if(parameter.id) {
           this.variant.options.forEach(option => {
             option.parameters = option.parameters.filter(item => item.id !== parameter.id)
@@ -280,6 +292,9 @@
       },
 
       remove() {
+        this.option.parameters.forEach(parameter =>
+          this.document.removeParameterReferences(parameter, this.component)
+        )
         this.component.creator.variants =
           this.component.creator.variants.filter(variant => variant !== this.variant)
         this.document.regenerateParameters()

@@ -69,6 +69,8 @@
     methods: {
       commit: function() {
         if(this.name == this.parameter.name && this.value == this.parameter.value) return
+        const oldName = this.parameter.name
+        if(this.name != oldName) this.document.renameParameterReferences(oldName, this.name)
         this.parameter.name = this.name
         this.parameter.value = this.value
         this.document.regenerateParameters()
@@ -81,6 +83,7 @@
       },
 
       remove: function() {
+        this.document.removeParameterReferences(this.parameter, this.component)
         this.component.creator.parameters =
           this.component.creator.parameters.filter(param => param !== this.parameter )
         this.document.regenerateParameters()

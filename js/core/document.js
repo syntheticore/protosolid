@@ -8,6 +8,12 @@ import { Component } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
 import { makeID, lastId, setLastId } from './id.js'
+import Expression from './expression.js'
+import preferences from '../preferences.js'
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 export default class Document extends Emitter {
   constructor() {
@@ -169,6 +175,63 @@ export default class Document extends Emitter {
       .forEach(sketch => { sketch.profileUpdateNeeded = true })
     this.hasChanges = true
     this.isFresh = false
+  }
+
+  renameParameterReferences(oldName, newName) {
+    if(oldName == newName) return
+    this.rewriteParameterReferences(oldName, newName)
+  }
+
+  removeParameterReferences(parameter, component) {
+    let replacement = parameter.value
+    try {
+      replacement = new Expression(parameter.value, component.getParameters())
+        .format(preferences.preferredUnit)
+    } catch(error) {}
+    this.rewriteParameterReferences(parameter.name, replacement)
+  }
+
+  rewriteParameterReferences(oldName, replacement) {
+    if(!oldName || oldName == replacement) return
+    const identifier = new RegExp(`\\b${escapeRegExp(oldName)}\\b`, 'g')
+    const rewrite = expression => typeof expression == 'string' ?
+      expression.replace(identifier, replacement) : expression
+
+    const definitions = [this.timeline.baseCompDef]
+    this.timeline.features.forEach(feature => {
+      if(feature.definition) definitions.push(feature.definition)
+    })
+    this.top().getChildren().forEach(component => definitions.push(component.creator))
+
+    definitions
+      .filter((definition, index, all) => definition && all.indexOf(definition) == index)
+      .forEach(definition => {
+        definition.parameters?.forEach(parameter => {
+          parameter.value = rewrite(parameter.value)
+        })
+        definition.variants?.forEach(variant => variant.options?.forEach(option => {
+          option.parameters?.forEach(parameter => {
+            parameter.value = rewrite(parameter.value)
+          })
+        }))
+      })
+
+    this.timeline.features.forEach(feature => {
+      Object.keys(feature.expressions || {}).forEach(key => {
+        feature.expressions[key] = rewrite(feature.expressions[key])
+      })
+    })
+
+    const sketches = new Set()
+    this.timeline.features.forEach(feature => {
+      if(feature.sketch) sketches.add(feature.sketch)
+    })
+    this.top().getChildren().forEach(component =>
+      component.sketches.forEach(sketch => sketches.add(sketch))
+    )
+    sketches.forEach(sketch => sketch.constraints.forEach(constraint => {
+      constraint.expression = rewrite(constraint.expression)
+    }))
   }
 
   reactivateActiveComponent(comp = this.activeComponent) {

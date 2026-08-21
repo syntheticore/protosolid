@@ -316,7 +316,7 @@
               { title: 'Point', icon: 'asterisk' },
               { title: 'Centroid', action: this.addCog, icon: 'atom' },
               { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
-              { title: 'Variant', icon: 'calculator' },
+              { title: 'Variant', action: this.addVariant, icon: 'calculator' },
             ]
           },
           {
@@ -486,6 +486,17 @@
         this.document.activeComponent.creator.parameters.push({
           name: 'width',
           value: '512mm',
+        })
+        this.document.regenerateParameters()
+      },
+
+      addVariant: function() {
+        this.document.activeComponent.creator.variants.push({
+          activeOption: 0,
+          options: [{
+            title: 'Option 1',
+            parameters: [],
+          }],
         })
         this.document.regenerateParameters()
       },

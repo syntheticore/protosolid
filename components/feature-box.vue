@@ -182,13 +182,6 @@
     .icon-toggle
       flex: 1 1 auto
 
-    .enum-input
-      appearance: auto
-      border-radius: 3px
-      height: 28px
-      -webkit-appearance: menulist
-      min-width: 68px
-
   .picker
     width: 24px
     height: 24px

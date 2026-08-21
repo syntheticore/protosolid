@@ -19,6 +19,7 @@ export class ComponentDefinition {
     this.cog = false
     this.sectionViews = []
     this.parameters = []
+    this.variants = []
     this.exportConfigs = []
     this.canvases = []
     this.itemsHidden = {}
@@ -39,6 +40,8 @@ export class ComponentDefinition {
 
   static undump(dump) {
     const def = Object.assign(new ComponentDefinition(), dump)
+    def.parameters ||= []
+    def.variants ||= []
     def.updateMaterials()
     return def
   }
@@ -201,6 +204,11 @@ export class Component {
 
   getParameters() {
     const params = [...this.creator.parameters]
+    const variants = this.creator.variants || []
+    variants.forEach(variant => {
+      const option = variant.options[variant.activeOption] || variant.options[0]
+      if(option) params.push(...option.parameters)
+    })
     const parentParams = this.parent ? this.parent.getParameters() : []
     parentParams.forEach(other => {
       const index = params.findIndex(own => own.name == other.name)

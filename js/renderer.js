@@ -370,16 +370,14 @@ export default class Renderer {
     const delta = this.lastTimestamp ? timestamp - this.lastTimestamp : 1
     this.lastTimestamp = timestamp
     if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget) requestAnimationFrame(this.animate.bind(this))
-    // Update orbit controls dampening
-    if(!this.cameraUpTarget) this.viewControls.update(delta)
     // Transition to target positions
-    const isMovingView = !!(this.cameraTarget || this.viewControlsTarget)
     this.cameraTarget = this.lerp(this.activeCamera.position, this.cameraTarget)
     this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
-    if(isMovingView && !this.cameraUpTarget) {
-      this.activeCamera.lookAt(this.viewControls.target)
-    }
+    // Update the projection before OrbitControls renders the new camera pose.
     this.updateOrthoProjection()
+    // Let OrbitControls derive the camera orientation from the interpolated
+    // position and target, keeping WebGL and projected UI handles in sync.
+    if(!this.cameraUpTarget) this.viewControls.update(delta)
     if(this.cameraUpTarget) {
       // Interpolate only the roll; rebuilding the look-at rotation keeps the
       // moving target fixed in the center of the screen throughout the move.

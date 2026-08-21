@@ -972,7 +972,7 @@ export class RevolveFeature extends Feature {
 
     this.profiles = null
     this.axis = null
-    this.angle = 1.0
+    this.angle = 180.0
     this.side = true
   }
 

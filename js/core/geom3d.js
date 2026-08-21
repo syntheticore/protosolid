@@ -209,8 +209,14 @@ export class Profile {
     originals.forEach((seg, i) => {
       faces[i].id = '/' + featureId + '/swept/' + this.getBaseId(seg)
     })
-    faces[faces.length - 2].id = '/' + featureId + '/bottom'
-    faces[faces.length - 1].id = '/' + featureId + '/top'
+
+    // Full-turn revolutions of closed profiles can produce a periodic solid
+    // with no separate bottom/top cap faces (e.g. a circle becomes a torus).
+    // Only name caps when the result actually contains them.
+    if(faces.length >= originals.length + 2) {
+      faces[faces.length - 2].id = '/' + featureId + '/bottom'
+      faces[faces.length - 1].id = '/' + featureId + '/top'
+    }
 
     // Name all edges in new solid according to their connected faces
     solid.edges().forEach(edge => {
@@ -826,6 +832,12 @@ export class Compound extends Volumetric {
 
   repair() {
     if(!this.geom) return this
+
+    // Do not run repair operations on valid periodic solids. In particular,
+    // full-turn revolutions of circles can have periodic faces that are valid
+    // as-is but cause face unification/tracking to fail.
+    if(this.validate()) return this
+
     let out
     try {
       out = this.unifyFaces().fixShape()

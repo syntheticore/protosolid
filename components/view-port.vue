@@ -216,11 +216,13 @@
         hoveredDimension: null,
         dimensionPreview: null,
         cameraPreview: null,
+        cameraUnpreviewFrame: null,
       }
     },
 
     watch: {
       document: function(document, oldDocument) {
+        this.cancelCameraUnpreview()
         this.cameraPreview = null
         this.registerDocument(this.document, oldDocument)
       },
@@ -309,12 +311,12 @@
         this.commitCameraPreview()
         this.zoomToFit(this.document.selection.items)
       })
-      this.bus.on('preview-zoom-all', () => this.previewCamera(() => this.zoomToFit([], true)) )
-      this.bus.on('preview-zoom-active', () => this.previewCamera(() =>
-        this.zoomToFit(this.document.activeComponent.compound.solids(), true)
+      this.bus.on('preview-zoom-all', () => this.previewCamera(view => this.zoomToFit([], true, view)) )
+      this.bus.on('preview-zoom-active', () => this.previewCamera(view =>
+        this.zoomToFit(this.document.activeComponent.compound.solids(), true, view)
       ))
-      this.bus.on('preview-zoom-selection', () => this.previewCamera(() =>
-        this.zoomToFit(this.document.selection.items, true)
+      this.bus.on('preview-zoom-selection', () => this.previewCamera(view =>
+        this.zoomToFit(this.document.selection.items, true, view)
       ))
       this.bus.on('preview-look-at', plane => this.previewCamera(() => {
         this.renderer.lookAt(plane, false)
@@ -345,6 +347,7 @@
     },
 
     beforeUnmount: function() {
+      this.cancelCameraUnpreview()
       this.bus.off('resize', this.onWindowResize)
       this.renderer.dispose()
     },
@@ -584,31 +587,47 @@
       },
 
       previewCamera: function(action) {
+        this.cancelCameraUnpreview()
         if(!this.cameraPreview) {
           this.cameraPreview = {
             position: (this.renderer.cameraTarget || this.renderer.activeCamera.position).clone(),
             target: (this.renderer.viewControlsTarget || this.renderer.viewControls.target).clone(),
           }
         }
-        action()
+        action(this.cameraPreview)
       },
 
       commitCameraPreview: function() {
+        this.cancelCameraUnpreview()
         this.cameraPreview = null
       },
 
       unpreviewCamera: function() {
         if(!this.cameraPreview) return
-        const view = this.cameraPreview
-        this.cameraPreview = null
-        this.renderer.setView(view.position, view.target)
+        this.cancelCameraUnpreview()
+        // Pointer transitions between adjacent buttons dispatch mouseleave
+        // before mouseenter. Waiting one frame lets the next preview replace
+        // this one directly, without rendering an intermediate camera reset.
+        this.cameraUnpreviewFrame = requestAnimationFrame(() => {
+          this.cameraUnpreviewFrame = null
+          if(!this.cameraPreview) return
+          const view = this.cameraPreview
+          this.cameraPreview = null
+          this.renderer.setView(view.position, view.target)
+        })
       },
 
-      zoomToFit: function(objects=[], preview=false) {
+      cancelCameraUnpreview: function() {
+        if(this.cameraUnpreviewFrame === null) return
+        cancelAnimationFrame(this.cameraUnpreviewFrame)
+        this.cameraUnpreviewFrame = null
+      },
+
+      zoomToFit: function(objects=[], preview=false, view=null) {
         const solidFaces = objects.filter(sel => sel instanceof Solid ).flatMap(solid => solid.faces() )
         const rest = objects.filter(sel => sel instanceof Face || sel instanceof SketchElement )
         const meshes = solidFaces.concat(rest).map(obj => obj.mesh && obj.mesh() ).filter(Boolean)
-        this.renderer.zoomToFit(meshes.length && meshes, !preview)
+        this.renderer.zoomToFit(meshes.length && meshes, !preview, view)
       },
 
       elementChanged: function() {

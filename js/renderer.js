@@ -255,7 +255,7 @@ export default class Renderer {
   setPivot(coords) {
     const vec = this.fromScreen(coords)
     if(!vec) return
-    const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.camera.position)
+    const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.activeCamera.position)
     this.setView(cameraTarget, vec)
   }
 
@@ -269,18 +269,18 @@ export default class Renderer {
     if(report) this.reportViewChange()
   }
 
-  zoomToFit(objects, report=true) {
+  zoomToFit(objects, report=true, view=null) {
     objects ||= [this.world]
     const box = new THREE.Box3()
     objects.forEach(obj => box.expandByObject(obj) )
     const target = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3())
     const radius = Math.max(...size.toArray()) / 2.0
+    const oldTarget = view ? view.target : this.viewControlsTarget || this.viewControls.target
+    const oldPosition = view ? view.position : this.cameraTarget || this.activeCamera.position
+    const direction = oldPosition.clone().sub(oldTarget).normalize()
 
     if(this.activeCamera == this.cameraOrtho) {
-      const oldTarget = this.viewControlsTarget || this.viewControls.target
-      const oldPosition = this.cameraTarget || this.activeCamera.position
-      const direction = oldPosition.clone().sub(oldTarget).normalize()
       const vFOV = this.camera.getEffectiveFOV() * THREE.MathUtils.DEG2RAD
       const distanceToFit = radius / Math.sin(vFOV * 0.5) * 1.6
       this.setView(target.clone().addScaledVector(direction, distanceToFit), target)
@@ -290,7 +290,7 @@ export default class Renderer {
       const hFOV = Math.atan(Math.tan(vFOV * 0.5) * this.camera.aspect) * 2.0
       const fov = this.camera.aspect > 1.0 ? vFOV : hFOV
       const distanceToFit = radius / (Math.sin(fov * 0.5))
-      const dir = (this.cameraTarget || this.activeCamera.position).clone().sub(this.viewControlsTarget || this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.6)
+      const dir = direction.multiplyScalar(distanceToFit * 1.6)
       const position = target.clone().add(dir)
       this.setView(position, target)
     }

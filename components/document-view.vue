@@ -271,12 +271,14 @@
       },
 
       effectiveColorMode: function() {
+        if(this.document.activeSimulation) return 'thermal'
         return this.activeTool?.diagnosticMode
           ? `diagnostic:${this.activeTool.diagnosticMode}:${this.activeTool.draftDirection}:${this.activeTool.zebraFrequency}`
           : this.previewColorMode || this.colorMode
       },
 
       effectiveDisplayMode: function() {
+        if(this.document.activeSimulation) return 'shaded'
         return this.activeTool?.diagnosticMode
           ? 'shaded'
           : this.previewDisplayMode || this.displayMode

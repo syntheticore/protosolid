@@ -88,6 +88,15 @@
         :component="component"
       )
 
+      //- Simulations
+      TreeletThermal(
+        v-for="simulation in component.creator.simulations"
+        :key="simulation.id"
+        :document="document"
+        :component="component"
+        :simulation="simulation"
+      )
+
       //- Center of Mass
       li(v-if="component.cog")
         .box
@@ -386,6 +395,7 @@
           this.component.sketches.length ||
           this.component.creator.cog ||
           this.component.creator.material ||
+          this.component.creator.simulations.length ||
           this.component.creator.parameters.length ||
           this.component.creator.variants.length ||
           this.component.creator.sectionViews.length ||

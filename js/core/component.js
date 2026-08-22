@@ -21,6 +21,7 @@ export class ComponentDefinition {
     this.parameters = []
     this.variants = []
     this.exportConfigs = []
+    this.simulations = []
     this.canvases = []
     this.itemsHidden = {}
     this.color = color
@@ -42,6 +43,7 @@ export class ComponentDefinition {
     const def = Object.assign(new ComponentDefinition(), dump)
     def.parameters ||= []
     def.variants ||= []
+    def.simulations ||= []
     def.updateMaterials()
     return def
   }

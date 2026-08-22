@@ -26,6 +26,8 @@ export default class Document extends Emitter {
     this.activeComponent = this.top()
     this.activeSketch = null
     this.activeFeature = null
+    this.activeSimulation = null
+    this.activeSimulationPicker = false
     this.selection = new Selection()
 
     this.hasChanges = false
@@ -115,6 +117,7 @@ export default class Document extends Emitter {
   }
 
   addFeature(feature) {
+    this.activateSimulation(null)
     this.activateFeature(null, true, false)
     if(!(feature instanceof PoseFeature)) this.top().resetPose()
     this.timeline.insertFeature(feature)
@@ -146,6 +149,13 @@ export default class Document extends Emitter {
     const compIds = this.timeline.evaluate()
     this.reactivateActiveComponent()
     this.selection.clear()
+    this.emit('regenerated')
+  }
+
+  activateSimulation(simulation) {
+    this.activeSimulation = simulation
+    this.activeSimulationPicker = false
+    if(simulation) this.selection.clear()
   }
 
   // Parameter values live on component definitions, which are shared by the
@@ -250,6 +260,7 @@ export default class Document extends Emitter {
 
   activateFeature(feature, doReset, resetMarker) {
     if(feature) {
+      this.activateSimulation(null)
 
       // Deactivate old active feature
       if(this.activeFeature) this.activateFeature(null, true, false)

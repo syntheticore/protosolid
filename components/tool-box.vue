@@ -278,6 +278,7 @@
   } from './../js/tools.js'
 
   import { Aluminum } from './../js/material.js'
+  import { ThermalSimulation } from './../js/core/thermal.js'
 
   export default {
     name: 'ToolBox',
@@ -408,7 +409,7 @@
               { title: 'Motion Link', icon: 'link' },
               { title: 'Animation', icon: 'feather' }, //icon: 'clapperboard'
               { title: 'Static Load', icon: 'weight' },
-              { title: 'Heat Flow', icon: 'thermometer' },
+              { title: 'Heat Flow', action: this.addHeatFlow, icon: 'thermometer' },
               // { title: 'Modal Frequencies', icon: 'wave-square' },
             ],
           },
@@ -545,6 +546,13 @@
       addMaterial: function() {
         this.document.materials[0] ||= new Aluminum()
         this.document.activeComponent.creator.material = this.document.materials[0]
+      },
+
+      addHeatFlow: function() {
+        const simulation = new ThermalSimulation()
+        this.document.top().creator.simulations.push(simulation)
+        this.document.activateSimulation(simulation)
+        this.document.hasChanges = true
       },
 
       toggleReference: function() {

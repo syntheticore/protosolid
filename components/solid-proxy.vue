@@ -3,6 +3,7 @@
   FaceProxy(
     v-for="face in solid.faces()"
     :key="face.tessId"
+    :document="document"
     :face="face"
     :component="component"
     :display-mode="displayMode"

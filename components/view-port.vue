@@ -13,6 +13,7 @@
       @pointerup="mouseUp"
       @pointerdown="mouseDown"
       @mousemove="mouseMove"
+      @mouseleave="mouseLeave"
     )
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
@@ -20,6 +21,10 @@
       //- Pick indicators
       path(v-for="path in allPaths", :d="path.data", :stroke="path.color")
       circle(v-for="path in allPaths", :cx="path.targetPos.x", :cy="path.targetPos.y", r="5", :fill="path.color")
+
+      g.thermal-probe(v-if="thermalProbe")
+        path(:d="probePath")
+        circle(:cx="thermalProbe.position.x" :cy="thermalProbe.position.y" r="4")
 
       //- Snap guides
       TransitionGroup(name="hide-guides" tag="g")
@@ -58,6 +63,11 @@
         @dimensionMouseDown="dimensionMouseDown"
         @dimensionMouseMove="dimensionMouseMove"
       )
+
+      .thermal-probe-box(
+        v-if="thermalProbe"
+        :style="{ left: thermalProbe.position.x + 22 + 'px', top: thermalProbe.position.y - 31 + 'px' }"
+      ) {{ thermalProbe.temperature.toFixed(1) }} °C
 
       //- Snap anchor highlights active snap point
       .anchor.handle(
@@ -111,6 +121,29 @@
     path
       opacity: 0.7
       stroke-dasharray: 4, 7
+
+    .thermal-probe
+
+      path
+        stroke: darkgray
+        stroke-dasharray: none
+        opacity: 1
+
+      circle
+        fill: darkgray
+        stroke: none
+
+  .thermal-probe-box
+    position: absolute
+    padding: 6px 8px
+    color: white
+    background: rgba($dark1, 0.6)
+    backdrop-filter: blur(32px)
+    border: 1px solid darkgray
+    border-radius: 99px
+    font-size: 12px
+    font-weight: bold
+    white-space: nowrap
 
   .anchor
 
@@ -167,6 +200,7 @@
   import {
     DummyTool,
     ManipulationTool,
+    ThermalProbeTool,
     CurvePickTool,
     ProfilePickTool,
     EdgePickTool,
@@ -217,6 +251,7 @@
         dimensionPreview: null,
         cameraPreview: null,
         cameraUnpreviewFrame: null,
+        thermalProbe: null,
       }
     },
 
@@ -246,6 +281,11 @@
       displayMode: function(mode) {
         this.renderer.setDisplayMode(mode)
       },
+
+      'document.activeSimulation': function() {
+        this.thermalProbe = null
+        this.$nextTick(this.updateFluxArrows)
+      },
     },
 
     computed: {
@@ -257,6 +297,11 @@
         const paths = [...this.paths]
         if(this.pickingPath && this.pickingPath.target) paths.push(this.pickingPath)
         return paths
+      },
+
+      probePath: function() {
+        const position = this.thermalProbe.position
+        return `M ${position.x} ${position.y} L ${position.x + 12} ${position.y - 18} L ${position.x + 22} ${position.y - 18}`
       },
     },
 
@@ -328,6 +373,7 @@
       this.bus.on('render-needed', () => this.renderer.render() )
       this.bus.on('preview-feature', this.previewFeature)
       this.bus.on('unpreview-feature', this.unpreviewFeature)
+      this.bus.on('thermal-result', this.updateFluxArrows)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
       this.bus.on('keyup', this.keyUp)
@@ -349,6 +395,8 @@
     beforeUnmount: function() {
       this.cancelCameraUnpreview()
       this.bus.off('resize', this.onWindowResize)
+      this.bus.off('thermal-result', this.updateFluxArrows)
+      this.clearFluxArrows()
       this.renderer.dispose()
     },
 
@@ -474,7 +522,11 @@
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(this.pickingPath && vec) this.pickingPath.target = vec
-        if(vec) this.activeTool.mouseMove(vec, coords)
+        if(vec || this.activeTool instanceof ThermalProbeTool) this.activeTool.mouseMove(vec, coords)
+      },
+
+      mouseLeave: function() {
+        this.thermalProbe = null
       },
 
       keyDown: function(key) {
@@ -534,6 +586,48 @@
         this.paths = []
       },
 
+      clearFluxArrows: function() {
+        if(!this.fluxArrows) return
+        this.renderer.scene.remove(this.fluxArrows)
+        this.fluxArrows.traverse(object => {
+          object.geometry?.dispose()
+          object.material?.dispose()
+        })
+        this.fluxArrows = null
+      },
+
+      updateFluxArrows: function() {
+        if(!this.renderer) return
+        this.clearFluxArrows()
+        const simulation = this.document.activeSimulation
+        if(!simulation?.result) return this.renderer.render()
+        const component = this.document.top().findChild(simulation.result.componentId)
+        const samples = simulation.fluxSamples()
+        const maximum = Math.max(...samples.map(sample => sample.flux.length()))
+        const group = new THREE.Group()
+        samples.forEach(sample => {
+          const strength = sample.flux.length() / maximum
+          const length = simulation.result.step * (1 + strength * 1.5)
+          const arrow = new THREE.ArrowHelper(
+            sample.flux.clone().normalize(),
+            sample.position,
+            length,
+            0xffffff,
+            length * 0.22,
+            length * 0.1,
+          )
+          arrow.line.material.depthTest = false
+          arrow.cone.material.depthTest = false
+          arrow.line.renderOrder = 10
+          arrow.cone.renderOrder = 10
+          group.add(arrow)
+        })
+        group.applyMatrix4(worldTransform(component))
+        this.fluxArrows = group
+        this.renderer.scene.add(group)
+        this.renderer.render()
+      },
+
       updateWidgets: function() {
         // Update Snap Anchor
         if(this.snapAnchor) this.snapAnchor.pos = this.renderer.toScreen(this.snapAnchor.vec)
@@ -555,6 +649,9 @@
         const sign = this.document.activeFeature ? -1 : 1
         const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200) * sign
         const dy = Math.abs(origin.y - pos.y) / 2.0 * sign
+        if(this.document.activeSimulation) {
+          return `M ${origin.x} ${origin.y} C ${origin.x + dx} ${origin.y} ${pos.x - dx} ${pos.y} ${pos.x} ${pos.y}`
+        }
         return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
       },
 

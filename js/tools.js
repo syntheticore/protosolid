@@ -226,6 +226,40 @@ export class DummyTool extends Tool {
 }
 
 
+export class ThermalProbeTool extends Tool {
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.cursor = 'crosshair'
+  }
+
+  mouseMove(_vec, coords) {
+    const simulation = this.viewport.document.activeSimulation
+    const hit = this.viewport.renderer.hitTest(coords).find(intersection => {
+      const face = intersection.object.alcObject
+      return face?.solid?.component && simulation?.result &&
+        simulation.result.componentId == face.solid.component.id &&
+        simulation.result.solidId == face.solid.id
+    })
+    if(!hit) {
+      this.viewport.thermalProbe = null
+      return
+    }
+
+    const component = hit.object.alcObject.solid.component
+    const position = hit.point.clone().applyMatrix4(worldTransform(component).invert())
+    const temperature = simulation.temperatureAt(position)
+    this.viewport.thermalProbe = temperature === undefined ? null : {
+      position: coords,
+      temperature,
+    }
+  }
+
+  dispose() {
+    this.viewport.thermalProbe = null
+  }
+}
+
+
 export class DiagnosticShadingTool extends Tool {
   static icon = 'palette'
   static hasOptions = true

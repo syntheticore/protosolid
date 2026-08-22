@@ -2,9 +2,10 @@
 
 <script setup>
 
+  import * as THREE from 'three'
   import materials from '../js/materials.js'
 
-  const props = defineProps(['component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -41,13 +42,15 @@
 
   renderNeeded.value = true
 
-  watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.creator.material], () => {
+  watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.creator.material, props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
+    updateThermalColors()
     const material = getMaterial()
     faceMesh.material = material
     renderNeeded.value = true
-  })
+  }, { immediate: true })
 
   function getSurfaceMaterial() {
+    if(props.colorMode == 'thermal') return materials.thermalSurface
     if(props.colorMode.startsWith('diagnostic:')) {
       const [mode, direction, frequency] = props.colorMode.slice('diagnostic:'.length).split(':')
       if(mode == 'zebra') {
@@ -61,7 +64,38 @@
     return material ? material.displayMaterial : materials.surface
   }
 
+  function updateThermalColors() {
+    if(props.colorMode != 'thermal') return
+    const simulation = props.document.activeSimulation
+    const position = faceMesh.geometry.getAttribute('position')
+    const values = new Float32Array(position.count * 3)
+    const color = new THREE.Color()
+    const coldColor = new THREE.Color(0x003cff)
+    const hotColor = new THREE.Color(0xff0000)
+    const simulatedFace = simulation?.result &&
+      simulation.result.componentId == props.component.id &&
+      simulation.result.solidId == props.face.solid.id
+
+    for(let i = 0; i < position.count; i++) {
+      const temperature = simulatedFace ? simulation.temperatureAt(
+        new THREE.Vector3(position.getX(i), position.getY(i), position.getZ(i))
+      ) : undefined
+      if(temperature === undefined) {
+        color.setRGB(0.18, 0.18, 0.18)
+      } else {
+        const ratio = (temperature - simulation.coldTemperature) /
+          (simulation.hotTemperature - simulation.coldTemperature)
+        color.copy(coldColor).lerp(hotColor, ratio)
+      }
+      values.set(color.toArray(), i * 3)
+    }
+    faceMesh.geometry.setAttribute('color', new THREE.BufferAttribute(values, 3))
+  }
+
   function getMaterial() {
+    if(props.colorMode == 'thermal' && !props.document.activeSimulationPicker) {
+      return props.parentActive ? materials.thermalSurface : materials.ghostSurface
+    }
     const diagnostic = props.colorMode.startsWith('diagnostic:')
     return highlighted.value || (props.parentSelected && !diagnostic) ?
       materials.highlightSurface

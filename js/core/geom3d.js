@@ -198,10 +198,10 @@ export class Profile {
     return face.Face()
   }
 
-  makeCompound(componentId, shape, featureId) {
+  makeCompound(componentId, shape, featureId, originals) {
     const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
 
-    const originals = this.rings.flatMap(ring => ring.segments )
+    originals ||= this.rings.flatMap(ring => ring.segments )
     const solid = compound.solids()[0]
 
     // Name faces
@@ -244,7 +244,19 @@ export class Profile {
     const face = this.makeFace()
     const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true) //XXX BRepFeat_MakeRevol
-    return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId)
+
+    // A profile segment lying on the revolution axis collapses instead of
+    // producing a swept face. Exclude it from the positional face-name map.
+    const axisOrigin = new THREE.Vector3().setFromMatrixPosition(axis)
+    const axisDirection = normalFromMatrix(axis)
+    const originals = this.rings
+      .flatMap(ring => ring.segments )
+      .filter(segment => ![0.0, 0.5, 1.0].every(u => {
+        const point = segment.sample(u).applyMatrix4(this.sketch.workplane)
+        return point.sub(axisOrigin).cross(axisDirection).length() < EPSILON
+      }))
+
+    return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId, originals)
   }
 
   loft(componentId, others, untwist) {
@@ -833,18 +845,20 @@ export class Compound extends Volumetric {
   repair() {
     if(!this.geom) return this
 
-    // Do not run repair operations on valid periodic solids. In particular,
-    // full-turn revolutions of circles can have periodic faces that are valid
-    // as-is but cause face unification/tracking to fail.
-    if(this.validate()) return this
-
+    const originallyValid = this.validate()
     let out
     try {
       out = this.unifyFaces().fixShape()
     } catch(_) {
+      // Some valid periodic solids cannot be tracked through face unification.
+      // Keep those solids as-is, but do not mask failures to repair invalid input.
+      if(originallyValid) return this
       throw { type: 'error', msg: "Geometry could not be repaired" }
     }
-    if(!out.validate()) throw { type: 'error', msg: "Operation produced invalid geometry" }
+    if(!out.validate()) {
+      if(originallyValid) return this
+      throw { type: 'error', msg: "Operation produced invalid geometry" }
+    }
     return out
   }
 

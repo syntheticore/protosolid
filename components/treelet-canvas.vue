@@ -15,7 +15,7 @@
 
         Icon.icon(icon="image" fixed-width)
 
-        h2(:title="canvas.src") {{ canvas.src || 'Canvas' }}
+        h2(:title="canvas.src") {{ sourceName }}
 
         Icon.expand(icon="angle-right")
 
@@ -102,15 +102,19 @@
 
   const expanded = ref(true)
   const path = ref(null)
+  const sourceName = computed(() =>
+    props.canvas.src?.split(/[\\/]/).pop() || 'Canvas'
+  )
 
   function toggleVisibility() {
     props.canvas.hidden = !props.canvas.hidden
   }
 
   async function chooseFile() {
-    const { path, data, width, height } = await loadFile('image/*', 'dataUrl')
+    const { path: filePath, data, width, height } = await loadFile('image/*', 'dataUrl')
 
-    props.canvas.src = path
+    path.value = filePath
+    props.canvas.src = filePath
     props.canvas.data = data
     props.canvas.width = width
     props.canvas.height = height

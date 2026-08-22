@@ -381,23 +381,32 @@ ipcMain.on('vue-ready', function() {
   }, 1000)
 });
 
-ipcMain.handle('get-save-path', (e, format) => {
-  const name = (format == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
+ipcMain.handle('get-save-path', (e, format, title) => {
+  const extension = format.toLowerCase().replace(/^\./, '')
+  const name = (extension == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
   return dialog.showSaveDialog({
+    ...(title && { defaultPath: `${title}.${extension}` }),
     properties: ['createDirectory', 'showOverwriteConfirmation'],
     filters: [
-      { name, extensions: [format.toLowerCase()] },
+      { name, extensions: [extension] },
       { name: 'All Files', extensions: ['*'] },
     ]
   }).then(e => e.filePath )
 })
 
 ipcMain.handle('get-load-path', (e, format) => {
-  const name = (format == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
+  const isImage = format.toLowerCase() == 'image/*'
+  const extension = format.toLowerCase().replace(/^\./, '')
+  const name = isImage
+    ? 'Image Files'
+    : (extension == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
+  const extensions = isImage
+    ? ['avif', 'bmp', 'gif', 'ico', 'jpeg', 'jpg', 'png', 'svg', 'webp']
+    : [extension]
   return dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [
-      { name, extensions: [format.toLowerCase()] },
+      { name, extensions },
       { name: 'All Files', extensions: ['*'] },
     ]
   }).then(e => e.filePaths[0] )

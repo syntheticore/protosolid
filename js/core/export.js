@@ -27,7 +27,7 @@ const rels3mf = `
 </Relationships>
 `
 
-export function export3mf(component, path) {
+export async function export3mf(component, path) {
   var zip = new JSZip()
   zip.file('[Content_Types].xml', header3mf)
   const Metadata = zip.folder('Metadata')
@@ -36,7 +36,6 @@ export function export3mf(component, path) {
   threeD.file('3dmodel.model', component.real.export_3mf())
   var _rels = zip.folder('_rels')
   _rels.file('.rels', rels3mf)
-  zip.generateAsync({type:'uint8array'}).then(function(binarystring) {
-    saveFile(binarystring, '3mf', path, component.title)
-  })
+  const binarystring = await zip.generateAsync({type:'uint8array'})
+  return await saveFile(binarystring, '3mf', path, component.title)
 }

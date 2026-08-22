@@ -47,9 +47,9 @@
           span Max Angular Deviation
 
         label
-          button.button(title="Choose file location" @click="exportFile")
+          button.button(title="Choose file location" @click="chooseDestination")
             Icon(icon="folder")
-          span(:title="path") {{ path || 'Destination Path'}}
+          span(:title="path") {{ path || 'Destination Path' }}
 
         label(title="Auto-export when saving document")
           input(type="checkbox" v-model="config.autoSave")
@@ -88,6 +88,7 @@
 
 <script>
   import { export3mf, exportStl } from './../js/core/export.js'
+  import { chooseSavePath } from './../js/utils.js'
 
   export default {
     name: 'TreeletExport',
@@ -100,17 +101,36 @@
     data() {
       return {
         expanded: true,
-        path: null,
+        path: this.config.path || null,
       }
     },
 
     methods: {
+      chooseDestination: async function() {
+        const path = await chooseSavePath(
+          this.config.format.toLowerCase(),
+          this.component.title,
+        )
+        if(!path) return
+        this.path = path
+        this.config.path = path
+      },
+
       exportFile: async function() {
+        if(!this.path) {
+          await this.chooseDestination()
+          if(!this.path) return
+        }
+
         const exporter = {
           'STL': exportStl,
           '3MF': export3mf,
         }[this.config.format]
-        this.path = await exporter(this.component, this.path)
+        const path = await exporter(this.component, this.path)
+        if(path) {
+          this.path = path
+          this.config.path = path
+        }
       },
 
       remove: function() {

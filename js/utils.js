@@ -3,7 +3,7 @@ import { isProxy, toRaw } from 'vue'
 
 export async function loadFile(filetype, datatype, path) {
   if(window.ipc) {
-    return loadFileElectron(filetype, path)
+    return loadFileElectron(filetype, datatype, path)
   } else {
     return loadFileWeb(filetype, datatype)
   }
@@ -17,12 +17,49 @@ export async function saveFile(data, filetype, path, title) {
   }
 }
 
+export async function chooseSavePath(filetype, title) {
+  return await window.ipc.invoke('get-save-path', filetype, title)
+}
+
 // Electron
-async function loadFileElectron(filetype, path) {
+async function loadFileElectron(filetype, datatype, path) {
   path = path || await window.ipc.invoke('get-load-path', filetype)
   if(!path) throw 'canceled'
-  const data = await window.ipc.invoke('load-file', path)
+
+  if(datatype == 'dataUrl') {
+    const base64 = await window.ipc.invoke('load-file', path, 'base64')
+    const extension = path.split('.').pop().toLowerCase()
+    const mimeType = {
+      avif: 'image/avif',
+      bmp: 'image/bmp',
+      gif: 'image/gif',
+      ico: 'image/x-icon',
+      jpeg: 'image/jpeg',
+      jpg: 'image/jpeg',
+      png: 'image/png',
+      svg: 'image/svg+xml',
+      webp: 'image/webp',
+    }[extension] || 'application/octet-stream'
+    const data = `data:${mimeType};base64,${base64}`
+    const dimensions = await loadImageDimensions(data)
+    return { data, path, ...dimensions }
+  }
+
+  const encoding = datatype == 'text' ? 'utf-8' : undefined
+  const data = await window.ipc.invoke('load-file', path, encoding)
   return {data, path}
+}
+
+function loadImageDimensions(src) {
+  return new Promise((resolve, reject) => {
+    const img = document.createElement('img')
+    img.onload = () => resolve({
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+    })
+    img.onerror = reject
+    img.src = src
+  })
 }
 
 async function saveFileElectron(data, filetype, path) {

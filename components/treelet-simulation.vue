@@ -199,6 +199,10 @@
         this.solve()
         this.bus.emit('activate-tool', this.configuration.probeTool)
         this.$nextTick(this.updatePaths)
+        if(this.simulation.activateFirstPicker) {
+          this.simulation.activateFirstPicker = false
+          this.$nextTick(() => this.pick(this.configuration.pickers[0].key))
+        }
       }
     },
 
@@ -260,7 +264,13 @@
           this.cancelPick()
           this.document.hasChanges = true
           this.solve()
-          setTimeout(() => repick ? this.pick(key) : this.bus.emit('activate-tool', this.configuration.probeTool))
+          const pickerIndex = this.configuration.pickers.findIndex(picker => picker.key == key)
+          const nextPicker = this.configuration.pickers[pickerIndex + 1]
+          setTimeout(() => {
+            if(repick) this.pick(key)
+            else if(nextPicker) this.pick(nextPicker.key)
+            else this.bus.emit('activate-tool', this.configuration.probeTool)
+          })
         })
 
         this.updatePicker = () => {

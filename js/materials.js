@@ -179,11 +179,9 @@ class Materials {
       // wireframe: true,
     })
 
-    this.thermalSurface = new THREE.MeshStandardMaterial({
+    this.thermalSurface = new THREE.MeshBasicMaterial({
       side: THREE.DoubleSide,
       vertexColors: true,
-      roughness: 0.65,
-      metalness: 0.0,
     })
 
     this.highlightSurface = new THREE.MeshStandardMaterial({

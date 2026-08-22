@@ -50,36 +50,53 @@ Serialize.register(ComponentDefinition, 'ComponentDefinition')
 
 
 export class SectionView {
-  constructor(id, orientation) {
+  constructor(id, orientation, position) {
     this.id = id || makeID()
     this.orientation = orientation || {
       x: 0,
       y: 0,
+    }
+    this.position = position || {
+      x: 0,
+      y: 0,
+      z: 0,
     }
     this.side = false
   }
 
   getTransform() {
     const euler = new THREE.Euler(rad(this.orientation.x), rad(this.orientation.y), 0)
-    return new THREE.Matrix4().makeRotationFromEuler(euler)
+    return new THREE.Matrix4()
+      .makeRotationFromEuler(euler)
+      .setPosition(this.position.x, this.position.y, this.position.z)
   }
 
-  static undump(dump) { return new this(dump.id, dump.orientation) }
+  static undump(dump) { return new this(dump.id, dump.orientation, dump.position) }
 }
 Serialize.register(SectionView, 'SectionView')
 
 
 export class Canvas {
-  constructor(id, src, scale, hidden, x, y) {
+  constructor(id, src, scale, hidden, x, y, plane) {
     this.id = id || makeID()
     this.src = src
-    this.scale = 1.0
+    this.scale = scale ?? 1.0
     this.hidden = hidden
     this.x = x ?? 0
     this.y = y ?? 0
+    this.plane = plane || 'side'
   }
 
-  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden, dump.x, dump.y) }
+  getTransform() {
+    const rotations = {
+      top: new THREE.Matrix4().makeRotationX(Math.PI / 2),
+      front: new THREE.Matrix4(),
+      side: new THREE.Matrix4().makeRotationY(Math.PI / 2),
+    }
+    return rotations[this.plane] || rotations.top
+  }
+
+  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden, dump.x, dump.y, dump.plane) }
 }
 Serialize.register(Canvas, 'Canvas')
 

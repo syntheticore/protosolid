@@ -33,7 +33,16 @@
 
           label
 
-            .flex.gap
+            .flex.gap.section-fields
+              input.input(type="number" v-model.number="section.position.x" step="1")
+              input.input(type="number" v-model.number="section.position.y" step="1")
+              input.input(type="number" v-model.number="section.position.z" step="1")
+
+            span Position
+
+          label
+
+            .flex.gap.section-fields
 
               input.input(type="number" v-model="section.orientation.x" min="0.0" step="1.0" max="360.0")
 
@@ -43,7 +52,8 @@
 
           label
 
-            input(type="checkbox" v-model="section.side")
+            .section-fields.side-field
+              input(type="checkbox" v-model="section.side")
 
             span Side
 
@@ -66,12 +76,15 @@
     .expanded &
       transform: rotate(90deg)
 
-  // input[type="number"]
-  //   width: 3.75rem
+  .flex > *
+    width: 0 !important
 
-  .flex
-    > *
-      width: 0 !important
+  .side-field
+    display: flex
+    justify-content: flex-end
+
+  .form label > :first-child
+    width: 184px
 
 </style>
 

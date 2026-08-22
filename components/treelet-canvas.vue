@@ -31,24 +31,29 @@
 
         fieldset
 
+          img(v-if="canvas.data" :src="canvas.data")
+
           label
-            button.button(title="Choose file location" @click="chooseFile")
+            button.button.canvas-fields(title="Choose file location" @click="chooseFile")
               Icon(icon="folder")
             span(:title="path") {{ path || 'Image Source'}}
 
-          img(:src="canvas.data")
+          label
+            select.input.canvas-fields(v-model="canvas.plane")
+              option(value="top") Top
+              option(value="front") Front
+              option(value="side") Side
+            span Plane
 
           label
-            input(type="range" v-model="canvas.scale" min="0.01" step="0.001" max="10.0")
+            input.canvas-fields(type="range" v-model="canvas.scale" min="0.01" step="0.001" max="10.0")
             span Scale
 
           label
-            input.input(type="number" v-model.number="canvas.x" step="1")
-            span Position X
-
-          label
-            input.input(type="number" v-model.number="canvas.y" step="1")
-            span Position Y
+            .flex.gap.canvas-fields
+              input.input(type="number" v-model.number="canvas.x" step="1")
+              input.input(type="number" v-model.number="canvas.y" step="1")
+            span Position
 
 </template>
 
@@ -74,9 +79,14 @@
       transform: rotate(90deg)
 
   img
-    display: block
-    width: 198px
+    max-width: 240px
     margin-inline: -12px
+
+  .flex > *
+    min-width: 0
+
+  .form label > :first-child
+    width: 122px
 
 </style>
 

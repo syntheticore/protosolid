@@ -27,6 +27,7 @@
     props.canvas.scale,
     props.canvas.x,
     props.canvas.y,
+    props.canvas.plane,
   ], () => {
     if(!mesh) return
 
@@ -53,7 +54,9 @@
       Number(props.canvas.y) || 0,
       0,
     )
-    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(localTransform)
+    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4())
+      .multiply(props.canvas.getTransform())
+      .multiply(localTransform)
     mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
 
     const width = Number(props.canvas.width)

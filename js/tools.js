@@ -226,6 +226,52 @@ export class DummyTool extends Tool {
 }
 
 
+export class DiagnosticShadingTool extends Tool {
+  static icon = 'palette'
+  static hasOptions = true
+
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.diagnosticMode = 'zebra'
+    this.draftDirection = 'top'
+    this.zebraFrequency = 16
+    this.settings = {
+      diagnosticMode: {
+        title: 'Analysis',
+        type: 'select',
+        options: {
+          zebra: { title: 'Zebra Stripes', icon: 'bars' },
+          draft: { title: 'Draft Angle', icon: 'angle-double-up' },
+        },
+      },
+      draftDirection: {
+        title: 'Direction',
+        type: 'enum',
+        options: {
+          top: 'Top',
+          front: 'Front',
+          side: 'Side',
+        },
+        visible: tool => tool.diagnosticMode == 'draft',
+      },
+      zebraFrequency: {
+        title: 'Frequency',
+        type: 'integer',
+        min: 1,
+        max: 64,
+        visible: tool => tool.diagnosticMode == 'zebra',
+      },
+    }
+  }
+
+  setOption(key, value) {
+    if(!this.settings[key]) return
+    this[key] = value
+    this.viewport.renderer.render()
+  }
+}
+
+
 class HighlightTool extends Tool {
   constructor(component, viewport, selectors) {
     super(component, viewport)

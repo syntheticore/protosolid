@@ -5,8 +5,8 @@
     ViewPort(
       :document="document"
       :active-view="document.previewView || document.activeView"
-      :display-mode="previewDisplayMode || displayMode"
-      :color-mode="previewColorMode || colorMode"
+      :display-mode="effectiveDisplayMode"
+      :color-mode="effectiveColorMode"
       v-model:active-tool="activeTool"
       v-model:highlight="highlight"
     )
@@ -264,6 +264,18 @@
     computed: {
       tree: function() {
         return this.document.top()
+      },
+
+      effectiveColorMode: function() {
+        return this.activeTool?.diagnosticMode
+          ? `diagnostic:${this.activeTool.diagnosticMode}:${this.activeTool.draftDirection}:${this.activeTool.zebraFrequency}`
+          : this.previewColorMode || this.colorMode
+      },
+
+      effectiveDisplayMode: function() {
+        return this.activeTool?.diagnosticMode
+          ? 'shaded'
+          : this.previewDisplayMode || this.displayMode
       },
     },
 

@@ -42,18 +42,28 @@
   renderNeeded.value = true
 
   watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.creator.material], () => {
-    faceMesh.material = getMaterial()
+    const material = getMaterial()
+    faceMesh.material = material
     renderNeeded.value = true
   })
 
   function getSurfaceMaterial() {
+    if(props.colorMode.startsWith('diagnostic:')) {
+      const [mode, direction, frequency] = props.colorMode.slice('diagnostic:'.length).split(':')
+      if(mode == 'zebra') {
+        materials.diagnostic.zebra.setFrequency(Number(frequency))
+        return materials.diagnostic.zebra
+      }
+      return materials.diagnostic.draft[direction]
+    }
     if(props.colorMode == 'component') return props.component.creator.compMaterial
     const material = props.component.getMaterial()
     return material ? material.displayMaterial : materials.surface
   }
 
   function getMaterial() {
-    return highlighted.value || props.parentSelected ?
+    const diagnostic = props.colorMode.startsWith('diagnostic:')
+    return highlighted.value || (props.parentSelected && !diagnostic) ?
       materials.highlightSurface
       :
       props.displayMode == 'wireframe' ?

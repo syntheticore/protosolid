@@ -52,6 +52,13 @@
               @close="closeFeature"
             )
 
+          transition(name="fade")
+            ToolOptionsBox.tipped(
+              v-if="!feature && isActiveToolWithOptions(tool)"
+              :active-tool="activeTool"
+              @close="closeActiveTool"
+            )
+
 </template>
 
 
@@ -202,6 +209,7 @@
     justify-content: center
 
   .feature-box
+  .tool-options-box
     margin-top: 9px
     position: absolute
 
@@ -248,6 +256,7 @@
   } from './../js/core/features.js'
 
   import {
+    DummyTool,
     ManipulationTool,
     PointTool,
     LineTool,
@@ -265,6 +274,7 @@
     FixConstraintTool,
     DimensionTool,
     ProjectTool,
+    DiagnosticShadingTool,
   } from './../js/tools.js'
 
   import { Aluminum } from './../js/material.js'
@@ -407,8 +417,7 @@
             tools: [
               { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
               { title: 'Curvature', icon: 'route' },
-              { title: 'Diagnostic Shading', icon: 'palette' },
-              { title: 'Draft Angle', icon: 'remove-format' },
+              { title: 'Diagnostic Shading', tool: DiagnosticShadingTool },
               { title: 'Section View', icon: 'object-group', action: this.addSectionView },
             ],
           },
@@ -448,6 +457,9 @@
     methods: {
       activateTab: function(index) {
         this.closeFeature()
+        if(index !== this.activeTab && this.activeTool?.constructor.hasOptions) {
+          this.closeActiveTool()
+        }
         this.activeTab = index
       },
 
@@ -474,8 +486,18 @@
         || (this.activeTool && this.activeTool.constructor === tool.tool)
       },
 
+      isActiveToolWithOptions: function(tool) {
+        return this.activeTool &&
+          this.activeTool.constructor === tool.tool &&
+          this.activeTool.constructor.hasOptions
+      },
+
       closeFeature: function() {
         this.feature = null
+      },
+
+      closeActiveTool: function() {
+        this.bus.emit('activate-tool', this.document.activeSketch ? ManipulationTool : DummyTool)
       },
 
       addCog: function() {

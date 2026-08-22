@@ -1,6 +1,12 @@
 import * as THREE from 'three'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 
+export const DRAFT_DIRECTIONS = {
+  top: [0, 1, 0],
+  front: [0, 0, 1],
+  side: [1, 0, 0],
+}
+
 class Materials {
   constructor() {
     // Fat Line Materials
@@ -225,9 +231,9 @@ class Materials {
     this.diagnostic = {
       zebra: this.makeDiagnosticSurface('zebra', [0, 0, 1]),
       draft: {
-        top: this.makeDiagnosticSurface('draft', [0, 1, 0]),
-        front: this.makeDiagnosticSurface('draft', [0, 0, 1]),
-        side: this.makeDiagnosticSurface('draft', [1, 0, 0]),
+        top: this.makeDiagnosticSurface('draft', DRAFT_DIRECTIONS.top),
+        front: this.makeDiagnosticSurface('draft', DRAFT_DIRECTIONS.front),
+        side: this.makeDiagnosticSurface('draft', DRAFT_DIRECTIONS.side),
       },
     }
   }

@@ -38,6 +38,7 @@ import {
   ElemRef,
 } from './core/sketch.js'
 import { solveAssembly, worldTransform } from './core/assembly.js'
+import { DRAFT_DIRECTIONS } from './materials.js'
 
 const dragThreshold = 2
 const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
@@ -230,6 +231,7 @@ export class SimulationProbeTool extends Tool {
   constructor(component, viewport) {
     super(component, viewport)
     this.cursor = 'crosshair'
+    this.probesSurface = true
   }
 
   mouseMove(_vec, coords) {
@@ -285,6 +287,7 @@ export class DiagnosticShadingTool extends Tool {
     this.diagnosticMode = 'zebra'
     this.draftDirection = 'top'
     this.zebraFrequency = 16
+    this.probesSurface = true
     this.settings = {
       diagnosticMode: {
         title: 'Analysis',
@@ -317,7 +320,34 @@ export class DiagnosticShadingTool extends Tool {
   setOption(key, value) {
     if(!this.settings[key]) return
     this[key] = value
+    this.viewport.thermalProbe = null
     this.viewport.renderer.render()
+  }
+
+  mouseMove(_vec, coords) {
+    if(this.diagnosticMode != 'draft') {
+      this.viewport.thermalProbe = null
+      return
+    }
+    const hit = this.viewport.renderer.hitTest(coords).find(intersection => intersection.object.alcObject?.solid)
+    if(!hit) {
+      this.viewport.thermalProbe = null
+      return
+    }
+
+    const normal = hit.normal.clone().applyNormalMatrix(
+      new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)
+    ).normalize()
+    const direction = new THREE.Vector3(...DRAFT_DIRECTIONS[this.draftDirection])
+    const angle = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(normal.dot(direction), -1, 1)))
+    this.viewport.thermalProbe = {
+      position: coords,
+      label: `Draft ${angle.toFixed(1)}°`,
+    }
+  }
+
+  dispose() {
+    this.viewport.thermalProbe = null
   }
 }
 

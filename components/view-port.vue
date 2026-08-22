@@ -139,7 +139,7 @@
     color: white
     background: rgba($dark1, 0.6)
     backdrop-filter: blur(32px)
-    border: 1px solid darkgray
+    border: 2px solid darkgray
     border-radius: 99px
     font-size: 12px
     font-weight: bold
@@ -200,7 +200,6 @@
   import {
     DummyTool,
     ManipulationTool,
-    SimulationProbeTool,
     CurvePickTool,
     ProfilePickTool,
     EdgePickTool,
@@ -522,7 +521,7 @@
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(this.pickingPath && vec) this.pickingPath.target = vec
-        if(vec || this.activeTool instanceof SimulationProbeTool) this.activeTool.mouseMove(vec, coords)
+        if(vec || this.activeTool.probesSurface) this.activeTool.mouseMove(vec, coords)
       },
 
       mouseLeave: function() {

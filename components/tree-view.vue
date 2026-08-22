@@ -1,6 +1,6 @@
 <template lang="pug">
 
-  ul.tree-view
+  ul.tree-view(@scroll="bus.emit('tree-scroll')")
 
     TreeItem(
       :document="document"
@@ -52,5 +52,6 @@
 <script setup>
 
   const props = defineProps(['top', 'document'])
+  const bus = inject('bus')
 
 </script>

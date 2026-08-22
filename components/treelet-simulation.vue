@@ -193,6 +193,7 @@
 
     mounted() {
       this.bus.on('resize', this.updatePaths)
+      this.bus.on('tree-scroll', this.updatePaths)
       this.bus.on('escape', this.onEscape)
       this.document.on('regenerated', this.regenerated)
       if(this.expanded) {
@@ -209,6 +210,7 @@
     beforeUnmount() {
       this.cancelPick()
       this.bus.off('resize', this.updatePaths)
+      this.bus.off('tree-scroll', this.updatePaths)
       this.bus.off('escape', this.onEscape)
       this.document.off('regenerated', this.regenerated)
     },
@@ -294,22 +296,19 @@
 
       updatePaths() {
         if(!this.expanded) return
-        setTimeout(() => {
-          if(!this.expanded) return
-          this.bus.emit('clear-pickers')
-          this.configuration.pickers.forEach(({ key }) => {
-            const { pickerPos, color } = this.getPickerInfo(key)
-            this.simulation[key].forEach(reference => {
-              const component = this.document.top().findChild(reference.componentId)
-              const solid = component && component.compound.solids().find(item => item.id == reference.solidId)
-              const face = solid && solid.faces().find(item => item.id == reference.topoId)
-              if(!face) return
-              const center = face.center().applyMatrix4(worldTransform(component))
-              this.bus.emit('show-picker', pickerPos, center, color)
-            })
+        this.bus.emit('clear-pickers')
+        this.configuration.pickers.forEach(({ key }) => {
+          const { pickerPos, color } = this.getPickerInfo(key)
+          this.simulation[key].forEach(reference => {
+            const component = this.document.top().findChild(reference.componentId)
+            const solid = component && component.compound.solids().find(item => item.id == reference.solidId)
+            const face = solid && solid.faces().find(item => item.id == reference.topoId)
+            if(!face) return
+            const center = face.center().applyMatrix4(worldTransform(component))
+            this.bus.emit('show-picker', pickerPos, center, color)
           })
-          if(this.updatePicker) this.updatePicker()
         })
+        if(this.updatePicker) this.updatePicker()
       },
 
       getPickerInfo(key) {

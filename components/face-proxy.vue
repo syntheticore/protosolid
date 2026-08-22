@@ -14,6 +14,8 @@
   const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value )
 
   const faceMesh = window.alcRenderer.convertMesh(props.face.tesselate(), getMaterial())
+  const basePositions = faceMesh.geometry.getAttribute('position').array.slice()
+  const baseNormals = faceMesh.geometry.getAttribute('normal').array.slice()
   faceMesh.alcTypes = [
     'face',
     props.face.getPlane() && 'plane',
@@ -43,14 +45,14 @@
   renderNeeded.value = true
 
   watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.creator.material, props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
-    updateThermalColors()
+    updateAnalysisGeometry()
     const material = getMaterial()
     faceMesh.material = material
     renderNeeded.value = true
   }, { immediate: true })
 
   function getSurfaceMaterial() {
-    if(props.colorMode == 'thermal') return materials.thermalSurface
+    if(props.colorMode == 'thermal' || props.colorMode == 'static') return materials.thermalSurface
     if(props.colorMode.startsWith('diagnostic:')) {
       const [mode, direction, frequency] = props.colorMode.slice('diagnostic:'.length).split(':')
       if(mode == 'zebra') {
@@ -64,10 +66,16 @@
     return material ? material.displayMaterial : materials.surface
   }
 
-  function updateThermalColors() {
-    if(props.colorMode != 'thermal') return
-    const simulation = props.document.activeSimulation
+  function updateAnalysisGeometry() {
     const position = faceMesh.geometry.getAttribute('position')
+    const normal = faceMesh.geometry.getAttribute('normal')
+    position.array.set(basePositions)
+    normal.array.set(baseNormals)
+    position.needsUpdate = true
+    normal.needsUpdate = true
+    if(props.colorMode != 'thermal' && props.colorMode != 'static') return
+
+    const simulation = props.document.activeSimulation
     const values = new Float32Array(position.count * 3)
     const color = new THREE.Color()
     const coldColor = new THREE.Color(0x003cff)
@@ -77,23 +85,40 @@
       simulation.result.solidId == props.face.solid.id
 
     for(let i = 0; i < position.count; i++) {
-      const temperature = simulatedFace ? simulation.temperatureAt(
-        new THREE.Vector3(position.getX(i), position.getY(i), position.getZ(i))
-      ) : undefined
-      if(temperature === undefined) {
+      const point = new THREE.Vector3(basePositions[i * 3], basePositions[i * 3 + 1], basePositions[i * 3 + 2])
+      const staticSample = props.colorMode == 'static' && simulatedFace && simulation.sampleAt(point)
+      const value = props.colorMode == 'thermal'
+        ? simulatedFace && simulation.temperatureAt(point)
+        : staticSample?.stress
+      if(value === undefined || value === false) {
         color.setRGB(0.18, 0.18, 0.18)
       } else {
-        const ratio = (temperature - simulation.coldTemperature) /
-          (simulation.hotTemperature - simulation.coldTemperature)
+        const ratio = props.colorMode == 'thermal'
+          ? (value - simulation.coldTemperature) / (simulation.hotTemperature - simulation.coldTemperature)
+          : Math.sqrt(Math.min(1, value))
         color.copy(coldColor).lerp(hotColor, ratio)
+        if(props.colorMode == 'static') {
+          const displacement = staticSample.displacement
+          position.setXYZ(
+            i,
+            point.x + displacement.x * simulation.result.displayScale,
+            point.y + displacement.y * simulation.result.displayScale,
+            point.z + displacement.z * simulation.result.displayScale,
+          )
+        }
       }
       values.set(color.toArray(), i * 3)
     }
     faceMesh.geometry.setAttribute('color', new THREE.BufferAttribute(values, 3))
+    if(props.colorMode == 'static') {
+      position.needsUpdate = true
+      faceMesh.geometry.computeVertexNormals()
+      faceMesh.geometry.computeBoundingSphere()
+    }
   }
 
   function getMaterial() {
-    if(props.colorMode == 'thermal' && !props.document.activeSimulationPicker) {
+    if((props.colorMode == 'thermal' || props.colorMode == 'static') && !props.document.activeSimulationPicker) {
       return props.parentActive ? materials.thermalSurface : materials.ghostSurface
     }
     const diagnostic = props.colorMode.startsWith('diagnostic:')

@@ -279,6 +279,7 @@
 
   import { Aluminum } from './../js/material.js'
   import { ThermalSimulation } from './../js/core/thermal.js'
+  import { StaticSimulation } from './../js/core/static.js'
 
   export default {
     name: 'ToolBox',
@@ -408,7 +409,7 @@
               { title: 'Group', icon: 'object-group' },
               { title: 'Motion Link', icon: 'link' },
               { title: 'Animation', icon: 'feather' }, //icon: 'clapperboard'
-              { title: 'Static Load', icon: 'weight' },
+              { title: 'Static Load', action: this.addStaticLoad, icon: 'weight' },
               { title: 'Heat Flow', action: this.addHeatFlow, icon: 'thermometer' },
               // { title: 'Modal Frequencies', icon: 'wave-square' },
             ],
@@ -550,6 +551,13 @@
 
       addHeatFlow: function() {
         const simulation = new ThermalSimulation()
+        this.document.top().creator.simulations.push(simulation)
+        this.document.activateSimulation(simulation)
+        this.document.hasChanges = true
+      },
+
+      addStaticLoad: function() {
+        const simulation = new StaticSimulation()
         this.document.top().creator.simulations.push(simulation)
         this.document.activateSimulation(simulation)
         this.document.hasChanges = true

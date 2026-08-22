@@ -271,7 +271,7 @@
       },
 
       effectiveColorMode: function() {
-        if(this.document.activeSimulation) return 'thermal'
+        if(this.document.activeSimulation) return this.document.activeSimulation.mode
         return this.activeTool?.diagnosticMode
           ? `diagnostic:${this.activeTool.diagnosticMode}:${this.activeTool.draftDirection}:${this.activeTool.zebraFrequency}`
           : this.previewColorMode || this.colorMode

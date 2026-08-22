@@ -2,11 +2,14 @@ import * as THREE from 'three'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
+import { resolveSimulationFaces } from './simulation.js'
+import { findVoxelNode, makeTriangles, voxelizeSolid } from './voxel.js'
 
 
 export class ThermalSimulation {
   constructor(id) {
     this.id = id || makeID()
+    this.mode = 'thermal'
     this.title = 'Heat Flow'
     this.coldTemperature = 20
     this.hotTemperature = 100
@@ -17,23 +20,8 @@ export class ThermalSimulation {
   }
 
   resolve(tree) {
-    const references = [...this.coldFaces, ...this.hotFaces]
     if(!this.coldFaces.length || !this.hotFaces.length) return 'Pick hot and cold faces'
-
-    for(const reference of references) {
-      const component = tree.findChild(reference.componentId)
-      if(!component) return 'A picked face does not exist here'
-      const solid = component.compound.solids().find(item => item.id == reference.solidId)
-      if(!solid) return 'A picked face does not exist here'
-      const face = solid.faces().find(item => item.id == reference.topoId)
-      if(!face) return 'A picked face does not exist here'
-      reference.item = face
-    }
-
-    const first = references[0]
-    if(references.some(reference =>
-      reference.componentId != first.componentId || reference.solidId != first.solidId
-    )) return 'Pick faces on one solid'
+    return resolveSimulationFaces(tree, [this.coldFaces, this.hotFaces])
   }
 
   solve(tree) {
@@ -60,21 +48,8 @@ export class ThermalSimulation {
   temperatureAt(position) {
     const result = this.result
     if(!result) return
-    const i = Math.floor((position.x - result.min[0]) / result.step)
-    const j = Math.floor((position.y - result.min[1]) / result.step)
-    const k = Math.floor((position.z - result.min[2]) / result.step)
-
-    for(let radius = 0; radius < 3; radius++) {
-      for(let z = k - radius; z <= k + radius; z++) {
-        for(let y = j - radius; y <= j + radius; y++) {
-          for(let x = i - radius; x <= i + radius; x++) {
-            if(x < 0 || y < 0 || z < 0 || x >= result.nx || y >= result.ny || z >= result.nz) continue
-            const node = result.grid[x + result.nx * (y + result.ny * z)]
-            if(node >= 0) return result.temperatures[node]
-          }
-        }
-      }
-    }
+    const node = findVoxelNode(result, position)
+    if(node !== undefined) return result.temperatures[node]
   }
 
   fluxSamples() {
@@ -132,38 +107,9 @@ Serialize.register(ThermalSimulation, 'ThermalSimulation')
 
 
 function solveVoxelHeat(solid, coldFaces, hotFaces, coldTemperature, hotTemperature) {
-  const triangles = makeTriangles(solid.faces())
   const coldTriangles = makeTriangles(coldFaces)
   const hotTriangles = makeTriangles(hotFaces)
-  const bounds = new THREE.Box3()
-  triangles.forEach(triangle => {
-    bounds.expandByPoint(triangle.a)
-    bounds.expandByPoint(triangle.b)
-    bounds.expandByPoint(triangle.c)
-  })
-
-  const size = bounds.getSize(new THREE.Vector3())
-  const step = Math.max(size.x, size.y, size.z) / 14
-  const nx = Math.ceil(size.x / step)
-  const ny = Math.ceil(size.y / step)
-  const nz = Math.ceil(size.z / step)
-  const grid = new Int32Array(nx * ny * nz).fill(-1)
-  const points = []
-
-  for(let k = 0; k < nz; k++) {
-    for(let j = 0; j < ny; j++) {
-      for(let i = 0; i < nx; i++) {
-        const point = new THREE.Vector3(
-          bounds.min.x + (i + 0.5) * step,
-          bounds.min.y + (j + 0.5) * step,
-          bounds.min.z + (k + 0.5) * step,
-        )
-        if(!isInside(point, triangles)) continue
-        grid[i + nx * (j + ny * k)] = points.length
-        points.push(point)
-      }
-    }
-  }
+  const { bounds, step, nx, ny, nz, grid, points } = voxelizeSolid(solid)
 
   const neighbors = points.map(() => [])
   const directions = [[-1,0,0], [1,0,0], [0,-1,0], [0,1,0], [0,0,-1], [0,0,1]]
@@ -215,62 +161,4 @@ function solveVoxelHeat(solid, coldFaces, hotFaces, coldTemperature, hotTemperat
     grid,
     temperatures,
   }
-}
-
-
-function makeTriangles(faces) {
-  return faces.flatMap(face => {
-    const positions = face.tesselate().positions
-    const triangles = []
-    for(let i = 0; i < positions.length; i += 9) {
-      triangles.push(new THREE.Triangle(
-        new THREE.Vector3(...positions.slice(i, i + 3)),
-        new THREE.Vector3(...positions.slice(i + 3, i + 6)),
-        new THREE.Vector3(...positions.slice(i + 6, i + 9)),
-      ))
-    }
-    return triangles
-  })
-}
-
-
-function isInside(point, triangles) {
-  let intersections = 0
-  triangles.forEach(triangle => {
-    if(rayIntersectsTriangle(point, triangle)) intersections++
-  })
-  return intersections % 2 == 1
-}
-
-
-function rayIntersectsTriangle(origin, triangle) {
-  const dx = 1
-  const dy = 0.371390676
-  const dz = 0.557086014
-  const e1x = triangle.b.x - triangle.a.x
-  const e1y = triangle.b.y - triangle.a.y
-  const e1z = triangle.b.z - triangle.a.z
-  const e2x = triangle.c.x - triangle.a.x
-  const e2y = triangle.c.y - triangle.a.y
-  const e2z = triangle.c.z - triangle.a.z
-  const px = dy * e2z - dz * e2y
-  const py = dz * e2x - dx * e2z
-  const pz = dx * e2y - dy * e2x
-  const det = e1x * px + e1y * py + e1z * pz
-  if(Math.abs(det) < 1e-10) return false
-
-  const tx = origin.x - triangle.a.x
-  const ty = origin.y - triangle.a.y
-  const tz = origin.z - triangle.a.z
-  const u = (tx * px + ty * py + tz * pz) / det
-  if(u < 0 || u > 1) return false
-
-  const qx = ty * e1z - tz * e1y
-  const qy = tz * e1x - tx * e1z
-  const qz = tx * e1y - ty * e1x
-  const v = (dx * qx + dy * qy + dz * qz) / det
-  if(v < 0 || u + v > 1) return false
-
-  const distance = (e2x * qx + e2y * qy + e2z * qz) / det
-  return distance > 1e-8
 }

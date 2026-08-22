@@ -67,7 +67,7 @@
       .thermal-probe-box(
         v-if="thermalProbe"
         :style="{ left: thermalProbe.position.x + 22 + 'px', top: thermalProbe.position.y - 31 + 'px' }"
-      ) {{ thermalProbe.temperature.toFixed(1) }} °C
+      ) {{ thermalProbe.label }}
 
       //- Snap anchor highlights active snap point
       .anchor.handle(
@@ -200,7 +200,7 @@
   import {
     DummyTool,
     ManipulationTool,
-    ThermalProbeTool,
+    SimulationProbeTool,
     CurvePickTool,
     ProfilePickTool,
     EdgePickTool,
@@ -522,7 +522,7 @@
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(this.pickingPath && vec) this.pickingPath.target = vec
-        if(vec || this.activeTool instanceof ThermalProbeTool) this.activeTool.mouseMove(vec, coords)
+        if(vec || this.activeTool instanceof SimulationProbeTool) this.activeTool.mouseMove(vec, coords)
       },
 
       mouseLeave: function() {
@@ -600,7 +600,7 @@
         if(!this.renderer) return
         this.clearFluxArrows()
         const simulation = this.document.activeSimulation
-        if(!simulation?.result) return this.renderer.render()
+        if(simulation?.mode != 'thermal' || !simulation.result) return this.renderer.render()
         const component = this.document.top().findChild(simulation.result.componentId)
         const samples = simulation.fluxSamples()
         const maximum = Math.max(...samples.map(sample => sample.flux.length()))

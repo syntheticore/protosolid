@@ -89,7 +89,7 @@
       )
 
       //- Simulations
-      TreeletThermal(
+      TreeletSimulation(
         v-for="simulation in component.creator.simulations"
         :key="simulation.id"
         :document="document"

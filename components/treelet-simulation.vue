@@ -1,54 +1,42 @@
 <template lang="pug">
 
-  li.treelet-thermal(:class="{ expanded, invalid: problem }")
+  li.treelet-simulation(:class="{ expanded, invalid: warning }")
 
     .box
 
       header(@click="toggle")
 
-        Icon(icon="thermometer-half" fixed-width)
-
+        Icon.simulation-icon(
+          :icon="configuration.icon"
+          :class="{ problem: warning }"
+          :title="warning || null"
+          fixed-width
+        )
         h2 {{ simulation.title }}
-
-        Icon.problem(v-if="problem" icon="exclamation-triangle" :title="problem")
-
         Icon.expand(icon="angle-right")
 
         .controls
-
-          Icon.delete(
-            icon="trash-alt" fixed-width
-            title="Delete"
-            @click.stop="remove"
-          )
+          Icon.delete(icon="trash-alt" fixed-width title="Delete" @click.stop="remove")
 
       .content.form(v-if="expanded")
 
         fieldset
 
-          label
-            span Cold faces ({{ simulation.coldFaces.length }})
-            .picker.cold(
-              ref="coldFaces"
-              :class="{ active: activePicker == 'coldFaces', filled: simulation.coldFaces.length }"
-              @click="pick('coldFaces')"
+          label.picker-row(v-for="picker in configuration.pickers" :key="picker.key")
+            span {{ picker.label }} ({{ simulation[picker.key].length }})
+            .picker(
+              :ref="element => setPickerElement(picker.key, element)"
+              :class="{ active: activePicker == picker.key, filled: simulation[picker.key].length }"
+              @click="pick(picker.key)"
             )
 
-          label
-            span Hot faces ({{ simulation.hotFaces.length }})
-            .picker.hot(
-              ref="hotFaces"
-              :class="{ active: activePicker == 'hotFaces', filled: simulation.hotFaces.length }"
-              @click="pick('hotFaces')"
+          label(v-for="input in configuration.inputs" :key="input.key")
+            span {{ input.label }}
+            input.input(
+              type="number"
+              :value="simulation[input.key]"
+              @change="changed(input.key, $event)"
             )
-
-          label
-            span Cold temperature °C
-            input.input(type="number" v-model.number="simulation.coldTemperature" @change="changed")
-
-          label
-            span Hot temperature °C
-            input.input(type="number" v-model.number="simulation.hotTemperature" @change="changed")
 
 </template>
 
@@ -92,13 +80,13 @@
       border-width: 2px
       animation: 2s infinite linear rotate
 
-  .cold
-    background: #168cff
-    border-color: lighten(#168cff, 75%)
+  .picker-row:nth-of-type(1) .picker
+    background: $blue
+    border-color: lighten($blue, 75%)
 
-  .hot
-    background: #ff3b24
-    border-color: lighten(#ff3b24, 75%)
+  .picker-row:nth-of-type(2) .picker
+    background: $purple
+    border-color: lighten($purple, 75%)
 
   .input
     width: 64px
@@ -123,11 +111,40 @@
 
 
 <script>
-  import { ManipulationTool, ThermalProbeTool } from '../js/tools.js'
+  import { ManipulationTool, StaticProbeTool, ThermalProbeTool } from '../js/tools.js'
   import { worldTransform } from '../js/core/assembly.js'
 
+  const configurations = {
+    thermal: {
+      icon: 'thermometer-half',
+      probeTool: ThermalProbeTool,
+      resultEvent: 'thermal-result',
+      pickers: [
+        { key: 'coldFaces', label: 'Cold faces' },
+        { key: 'hotFaces', label: 'Hot faces' },
+      ],
+      inputs: [
+        { key: 'coldTemperature', label: 'Cold °C' },
+        { key: 'hotTemperature', label: 'Hot °C' },
+      ],
+    },
+    static: {
+      icon: 'weight',
+      probeTool: StaticProbeTool,
+      pickers: [
+        { key: 'fixedFaces', label: 'Fixed faces' },
+        { key: 'loadFaces', label: 'Loaded faces' },
+      ],
+      inputs: [
+        { key: 'forceX', label: 'Force X' },
+        { key: 'forceY', label: 'Force Y' },
+        { key: 'forceZ', label: 'Force Z' },
+      ],
+    },
+  }
+
   export default {
-    name: 'TreeletThermal',
+    name: 'TreeletSimulation',
 
     inject: ['bus'],
 
@@ -140,26 +157,31 @@
     data() {
       return {
         activePicker: null,
+        pickerElements: {},
       }
     },
 
     computed: {
+      configuration() {
+        return configurations[this.simulation.mode]
+      },
+
       expanded() {
         return this.document.activeSimulation === this.simulation
       },
 
-      problem() {
+      warning() {
         this.document.timeline.marker
-        return this.simulation.resolve(this.document.top())
+        const problem = this.simulation.resolve(this.document.top())
+        return problem?.warning ? problem.message : null
       },
-
     },
 
     watch: {
       expanded(expanded) {
         if(expanded) {
           this.solve()
-          this.bus.emit('activate-tool', ThermalProbeTool)
+          this.bus.emit('activate-tool', this.configuration.probeTool)
           this.$nextTick(this.updatePaths)
         } else {
           this.cancelPick()
@@ -175,7 +197,7 @@
       this.document.on('regenerated', this.regenerated)
       if(this.expanded) {
         this.solve()
-        this.bus.emit('activate-tool', ThermalProbeTool)
+        this.bus.emit('activate-tool', this.configuration.probeTool)
         this.$nextTick(this.updatePaths)
       }
     },
@@ -188,6 +210,10 @@
     },
 
     methods: {
+      setPickerElement(key, element) {
+        this.pickerElements[key] = element
+      },
+
       toggle() {
         this.document.activateSimulation(this.expanded ? null : this.simulation)
       },
@@ -199,12 +225,13 @@
 
       solve() {
         this.simulation.solve(this.document.top())
-        this.bus.emit('thermal-result')
+        if(this.configuration.resultEvent) this.bus.emit(this.configuration.resultEvent)
         this.bus.emit('render-needed')
         this.$nextTick(this.updatePaths)
       },
 
-      changed() {
+      changed(key, event) {
+        this.simulation[key] = Number(event.target.value)
         this.document.hasChanges = true
         this.solve()
       },
@@ -227,16 +254,13 @@
             reference.solidId == face.solid.id &&
             reference.topoId == face.id
           )
-          if(existing) {
-            references.splice(references.indexOf(existing), 1)
-          } else {
-            references.push(face.faceReference())
-          }
+          if(existing) references.splice(references.indexOf(existing), 1)
+          else references.push(face.faceReference())
 
           this.cancelPick()
           this.document.hasChanges = true
           this.solve()
-          setTimeout(() => repick ? this.pick(key) : this.bus.emit('activate-tool', ThermalProbeTool))
+          setTimeout(() => repick ? this.pick(key) : this.bus.emit('activate-tool', this.configuration.probeTool))
         })
 
         this.updatePicker = () => {
@@ -247,7 +271,7 @@
       },
 
       cancelPick() {
-        if(this.activePicker) this.bus.emit('activate-tool', ThermalProbeTool)
+        if(this.activePicker) this.bus.emit('activate-tool', this.configuration.probeTool)
         this.bus.off('picked')
         this.document.activeSimulationPicker = false
         this.activePicker = null
@@ -263,7 +287,7 @@
         setTimeout(() => {
           if(!this.expanded) return
           this.bus.emit('clear-pickers')
-          for(const key of ['coldFaces', 'hotFaces']) {
+          this.configuration.pickers.forEach(({ key }) => {
             const { pickerPos, color } = this.getPickerInfo(key)
             this.simulation[key].forEach(reference => {
               const component = this.document.top().findChild(reference.componentId)
@@ -273,19 +297,16 @@
               const center = face.center().applyMatrix4(worldTransform(component))
               this.bus.emit('show-picker', pickerPos, center, color)
             })
-          }
+          })
           if(this.updatePicker) this.updatePicker()
         })
       },
 
       getPickerInfo(key) {
-        const picker = this.$refs[key]
+        const picker = this.pickerElements[key]
         const rectangle = picker.getBoundingClientRect()
         return {
-          pickerPos: {
-            x: rectangle.left + rectangle.width / 2,
-            y: rectangle.top + rectangle.height / 2,
-          },
+          pickerPos: { x: rectangle.left + rectangle.width / 2, y: rectangle.top + rectangle.height / 2 },
           color: window.getComputedStyle(picker).backgroundColor,
         }
       },

@@ -226,7 +226,7 @@ export class DummyTool extends Tool {
 }
 
 
-export class ThermalProbeTool extends Tool {
+export class SimulationProbeTool extends Tool {
   constructor(component, viewport) {
     super(component, viewport)
     this.cursor = 'crosshair'
@@ -247,15 +247,31 @@ export class ThermalProbeTool extends Tool {
 
     const component = hit.object.alcObject.solid.component
     const position = hit.point.clone().applyMatrix4(worldTransform(component).invert())
-    const temperature = simulation.temperatureAt(position)
-    this.viewport.thermalProbe = temperature === undefined ? null : {
+    const label = this.label(simulation, position)
+    this.viewport.thermalProbe = label === undefined ? null : {
       position: coords,
-      temperature,
+      label,
     }
   }
 
   dispose() {
     this.viewport.thermalProbe = null
+  }
+}
+
+
+export class ThermalProbeTool extends SimulationProbeTool {
+  label(simulation, position) {
+    const temperature = simulation.temperatureAt(position)
+    if(temperature !== undefined) return `${temperature.toFixed(1)} °C`
+  }
+}
+
+
+export class StaticProbeTool extends SimulationProbeTool {
+  label(simulation, position) {
+    const stress = simulation.stressAt(position)
+    if(stress !== undefined) return `Relative stress ${(stress * 100).toFixed(0)}%`
   }
 }
 

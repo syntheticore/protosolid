@@ -219,7 +219,11 @@ export class Component {
   }
 
   getVolume() {
-    return this.compound.volume() + this.children.reduce((acc, child) => { acc + child.getVolume() }, 0.0)
+    return this.compound.volume() + this.children.reduce((acc, child) => acc + child.getVolume(), 0.0)
+  }
+
+  getArea() {
+    return this.compound.area() + this.children.reduce((acc, child) => acc + child.getArea(), 0.0)
   }
 
   hasAncestor(parent) {

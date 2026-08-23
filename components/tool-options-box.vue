@@ -12,6 +12,14 @@
 
             span {{ setting.title }}
 
+            .info-list(v-if="setting.type == 'info-list'")
+
+              .info-list-row(v-for="item in activeTool[key]" :key="item.label")
+                span {{ item.label }}
+                strong {{ item.value }}
+
+              span.empty(v-if="!activeTool[key].length") —
+
             RadioBar(
               v-if="setting.type == 'select'"
               :items="setting.options"
@@ -63,6 +71,7 @@
   .tool-options-box
     font-size: 12px
     display: flex
+
     &::before
       left: 24px
 
@@ -78,14 +87,32 @@
     color: $bright1
     font-weight: bold
     white-space: nowrap
+
     & + .setting
       margin-left: 12px
+
     > :not(span)
       margin-top: 6px
+
     input
     .radio-bar
     .icon-toggle
+    .info-list
       flex: 1 1 auto
+
+    .info-list
+      display: flex
+      flex-direction: column
+      gap: 6px
+
+    .info-list-row
+      display: flex
+      gap: 12px
+      font-weight: normal
+
+    .empty
+      align-self: center
+      font-size: 16px
 
   .confirmation
     display: flex
@@ -102,8 +129,10 @@
       font-size: 16px
       padding: 0px 9px 0px 11px
       transition: all 0.15s
+
       &:hover
         color: $cancel
+
       &:active
         color: darken($cancel, 15%)
         transition: none

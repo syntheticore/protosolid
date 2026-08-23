@@ -54,6 +54,7 @@
 
   function getSurfaceMaterial() {
     if(props.colorMode == 'thermal' || props.colorMode == 'static') return materials.thermalSurface
+    if(props.colorMode == 'interference') return materials.interferenceSurface
     if(props.colorMode.startsWith('diagnostic:')) {
       const [mode, direction, frequency] = props.colorMode.slice('diagnostic:'.length).split(':')
       if(mode == 'zebra') {
@@ -122,6 +123,9 @@
     if(props.displayMode == 'exportPreview') return materials.invisibleSurface
     if((props.colorMode == 'thermal' || props.colorMode == 'static') && !props.document.activeSimulationPicker) {
       return props.parentActive ? materials.thermalSurface : materials.ghostSurface
+    }
+    if(props.colorMode == 'interference') {
+      return props.parentActive ? materials.interferenceSurface : materials.ghostSurface
     }
     const diagnostic = props.colorMode.startsWith('diagnostic:')
     return highlighted.value || (props.parentSelected && !diagnostic) ?

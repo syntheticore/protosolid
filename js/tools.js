@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { markRaw } from 'vue'
 
 // import {
 //   vecToThree,
@@ -38,7 +39,7 @@ import {
   ElemRef,
 } from './core/sketch.js'
 import { solveAssembly, worldTransform } from './core/assembly.js'
-import { DRAFT_DIRECTIONS } from './materials.js'
+import materials, { DRAFT_DIRECTIONS } from './materials.js'
 
 const dragThreshold = 2
 const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
@@ -348,6 +349,84 @@ export class DiagnosticShadingTool extends Tool {
 
   dispose() {
     this.viewport.thermalProbe = null
+  }
+}
+
+
+export class InterferenceTool extends Tool {
+  static icon = 'traffic-light'
+  static hasOptions = true
+
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.interferenceMode = true
+    this.collisionVolumes = []
+    this.collisionPreview = markRaw(new THREE.Group())
+    this.settings = {
+      collisionVolumes: {
+        title: 'Collisions',
+        type: 'info-list',
+      },
+    }
+
+    const parts = component.getChildren()
+      .filter(part => part.compound.solids().length)
+      .map(part => ({
+        component: part,
+        bounds: this.worldBounds(part),
+      }))
+    const overlaps = []
+
+    for(let i = 0; i < parts.length; i++) {
+      for(let j = i + 1; j < parts.length; j++) {
+        if(!parts[i].bounds.intersectsBox(parts[j].bounds)) continue
+
+        const first = this.worldCompound(parts[i])
+        const second = this.worldCompound(parts[j])
+        const overlap = first.boolean(second, 'intersect')
+        const volume = overlap.volume()
+        if(!overlap.solids().length || !(volume > 0.000001)) continue
+        overlaps.push({ overlap, volume })
+      }
+    }
+
+    this.collisionVolumes = overlaps.map(({ volume }, index) => ({
+      label: `${index + 1}`,
+      value: `${(volume / 1000).toFixed(2)} cm³`,
+    }))
+    overlaps.forEach(({ overlap }) => this.collisionPreview.add(
+      viewport.renderer.convertMesh(overlap.tesselate(), materials.collisionSurface)
+    ))
+    viewport.renderer.add(this.collisionPreview)
+    viewport.renderer.render()
+  }
+
+  worldBounds(part) {
+    const bounds = new THREE.Box3()
+    const positions = part.compound.tesselate().positions
+    const transform = worldTransform(part)
+    for(let i = 0; i < positions.length; i += 3) {
+      bounds.expandByPoint(
+        new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2])
+          .applyMatrix4(transform)
+      )
+    }
+    // Tessellation is generated with a 0.4 linear deflection. Expanding by
+    // that amount keeps this broad-phase check conservative around curves.
+    return bounds.expandByScalar(0.4)
+  }
+
+  worldCompound(part) {
+    if(!part.worldCompound) {
+      part.worldCompound = part.component.compound.transform(worldTransform(part.component))
+    }
+    return part.worldCompound
+  }
+
+  dispose() {
+    this.viewport.renderer.remove(this.collisionPreview)
+    this.collisionPreview = null
+    this.viewport.renderer.render()
   }
 }
 

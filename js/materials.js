@@ -199,6 +199,24 @@ class Materials {
       opacity: 0.035,
     })
 
+    this.interferenceSurface = new THREE.MeshBasicMaterial({
+      side: THREE.DoubleSide,
+      color: '#abc5d9',
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    })
+
+    this.collisionSurface = new THREE.MeshStandardMaterial({
+      side: THREE.DoubleSide,
+      color: '#ff2020',
+      emissive: '#660000',
+      roughness: 0.55,
+      metalness: 0.0,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    })
+
     this.previewAddSurface = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,
       color: '#0070ff',

@@ -272,6 +272,7 @@
 
       effectiveColorMode: function() {
         if(this.document.activeSimulation) return this.document.activeSimulation.mode
+        if(this.activeTool?.interferenceMode) return 'interference'
         return this.activeTool?.diagnosticMode
           ? `diagnostic:${this.activeTool.diagnosticMode}:${this.activeTool.draftDirection}:${this.activeTool.zebraFrequency}`
           : this.previewColorMode || this.colorMode
@@ -280,7 +281,7 @@
       effectiveDisplayMode: function() {
         if(this.document.activeSimulation) return 'shaded'
         if(this.document.activeExportConfig) return 'exportPreview'
-        return this.activeTool?.diagnosticMode
+        return this.activeTool?.diagnosticMode || this.activeTool?.interferenceMode
           ? 'shaded'
           : this.previewDisplayMode || this.displayMode
       },

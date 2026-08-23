@@ -257,7 +257,6 @@
   } from './../js/core/features.js'
 
   import {
-    DummyTool,
     ManipulationTool,
     PointTool,
     LineTool,
@@ -276,6 +275,7 @@
     DimensionTool,
     ProjectTool,
     DiagnosticShadingTool,
+    InterferenceTool,
   } from './../js/tools.js'
 
   import { Aluminum } from './../js/material.js'
@@ -418,7 +418,7 @@
           {
             title: 'Inspect',
             tools: [
-              { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
+              { title: 'Interference', tool: InterferenceTool },
               { title: 'Curvature', icon: 'route' },
               { title: 'Diagnostic Shading', tool: DiagnosticShadingTool },
               { title: 'Section View', icon: 'object-group', action: this.addSectionView },
@@ -500,7 +500,7 @@
       },
 
       closeActiveTool: function() {
-        this.bus.emit('activate-tool', this.document.activeSketch ? ManipulationTool : DummyTool)
+        this.bus.emit('activate-tool', ManipulationTool)
       },
 
       addCog: function() {

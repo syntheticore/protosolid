@@ -534,14 +534,16 @@
       },
 
       addExportConfig: function() {
-        this.document.activeComponent.creator.exportConfigs.push({
+        const config = {
           title: 'High Detail',
           path: null,
           format: 'STL',
           maxDistance: 0.1,
           maxAngle: 10.0,
           autoSave: false,
-        })
+        }
+        this.document.activeComponent.creator.exportConfigs.push(config)
+        this.document.activateExport(config, this.document.activeComponent)
       },
 
       addMaterial: function() {

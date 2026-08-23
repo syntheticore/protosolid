@@ -279,6 +279,7 @@
 
       effectiveDisplayMode: function() {
         if(this.document.activeSimulation) return 'shaded'
+        if(this.document.activeExportConfig) return 'exportPreview'
         return this.activeTool?.diagnosticMode
           ? 'shaded'
           : this.previewDisplayMode || this.displayMode

@@ -46,7 +46,7 @@ function binaryStl(component, config, title) {
   return bytes
 }
 
-function componentTriangles(component, maxDistance, maxAngle) {
+export function componentTriangles(component, maxDistance, maxAngle) {
   const triangles = []
   component.getChildren().forEach(occurrence => {
     if(!occurrence.compound.geom) return

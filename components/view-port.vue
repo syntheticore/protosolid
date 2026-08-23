@@ -190,6 +190,7 @@
 <script>
 
   import * as THREE from 'three'
+  import { markRaw } from 'vue'
 
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
@@ -197,6 +198,7 @@
   import { Dimension, CoincidentConstraint } from './../js/core/sketch.js'
   import { Solid, Face } from './../js/core/geom3d.js'
   import { worldTransform } from './../js/core/assembly.js'
+  import { componentTriangles } from './../js/core/export.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -251,6 +253,7 @@
         cameraPreview: null,
         cameraUnpreviewFrame: null,
         thermalProbe: null,
+        exportPreviewMesh: null,
       }
     },
 
@@ -285,11 +288,26 @@
         this.thermalProbe = null
         this.$nextTick(this.updateFluxArrows)
       },
+
+      exportPreview: function() {
+        if(this.renderer) this.updateExportPreview()
+      },
     },
 
     computed: {
       activeComponentTransform: function() {
         return this.document.activeSketch ? worldTransform(this.document.activeComponent) : null
+      },
+
+      exportPreview: function() {
+        const config = this.document.activeExportConfig
+        return config && {
+          config,
+          componentId: this.document.activeExportComponentId,
+          maxDistance: config.maxDistance,
+          maxAngle: config.maxAngle,
+          marker: this.document.timeline.marker,
+        }
       },
 
       allPaths: function() {
@@ -393,17 +411,79 @@
 
     beforeUnmount: function() {
       this.cancelCameraUnpreview()
+      this.document.off('regenerated', this.updateExportPreview)
       this.bus.off('resize', this.onWindowResize)
       this.bus.off('thermal-result', this.updateFluxArrows)
       this.clearFluxArrows()
+      this.clearExportPreview()
       this.renderer.dispose()
     },
 
     methods: {
+      updateExportPreview: function() {
+        this.clearExportPreview()
+        const preview = this.exportPreview
+        if(!preview) {
+          this.renderer.render()
+          return
+        }
+
+        const component = this.document.getComponent(preview.componentId)
+        if(!component) {
+          this.renderer.render()
+          return
+        }
+        const maxDistance = Number(preview.maxDistance)
+        const maxAngle = THREE.MathUtils.degToRad(Number(preview.maxAngle))
+        const triangles = componentTriangles(
+          component,
+          Number.isFinite(maxDistance) && maxDistance > 0 ? maxDistance : 0.1,
+          Number.isFinite(maxAngle) && maxAngle > 0 ? maxAngle : THREE.MathUtils.degToRad(10),
+        )
+        const positions = triangles.flatMap(triangle => triangle.flatMap(vertex => vertex.toArray()))
+        const surfaceGeometry = new THREE.BufferGeometry()
+        surfaceGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+        surfaceGeometry.computeVertexNormals()
+        const surfaceMaterial = new THREE.MeshStandardMaterial({
+          color: '#9eb5c5',
+          side: THREE.DoubleSide,
+          roughness: 0.8,
+          metalness: 0,
+          transparent: true,
+          opacity: 0.18,
+          polygonOffset: true,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 1,
+        })
+        const wireMaterial = new THREE.MeshBasicMaterial({
+          color: '#d7e4ed',
+          wireframe: true,
+        })
+        const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial)
+        const wire = new THREE.Mesh(surfaceGeometry.clone(), wireMaterial)
+        this.exportPreviewMesh = markRaw(new THREE.Group())
+        this.exportPreviewMesh.add(surface, wire)
+        this.exportPreviewMesh.applyMatrix4(worldTransform(component))
+        this.renderer.add(this.exportPreviewMesh)
+        this.renderer.render()
+      },
+
+      clearExportPreview: function() {
+        if(!this.exportPreviewMesh) return
+        const previewMaterials = new Set()
+        this.exportPreviewMesh.traverse(child => {
+          if(child.material) previewMaterials.add(child.material)
+        })
+        this.renderer.remove(this.exportPreviewMesh)
+        previewMaterials.forEach(material => material.dispose())
+        this.exportPreviewMesh = null
+      },
+
       registerDocument: function(doc, oldDoc) {
         if(oldDoc) {
           oldDoc.off('force-view')
           oldDoc.off('look-at')
+          oldDoc.off('regenerated', this.updateExportPreview)
         }
         doc.on('force-view', (view) => {
           this.renderer.setView(view.position, view.target)
@@ -413,6 +493,7 @@
           const sketch = this.document.activeSketch
           if(sketch && sketch.elements.length) this.zoomToFit(sketch.elements)
         }))
+        doc.on('regenerated', this.updateExportPreview)
       },
 
       getMouseCoords: function(e) {

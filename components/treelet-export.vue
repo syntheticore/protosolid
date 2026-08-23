@@ -2,7 +2,7 @@
 
   .box.treelet-export(:class="{ expanded }")
 
-    header(@click="expanded = !expanded")
+    header(@click="toggle")
 
       Icon(icon="file-export" fixed-width)
 
@@ -101,12 +101,27 @@
 
     data() {
       return {
-        expanded: this.document.treeletsExpandedByDefault,
         path: this.config.path || null,
       }
     },
 
+    computed: {
+      expanded() {
+        return this.document.activeExportConfig === this.config &&
+          this.document.activeExportComponentId === this.component.id
+      },
+    },
+
     methods: {
+      toggle: function() {
+        if(this.expanded) {
+          this.document.activateExport(null)
+        } else {
+          this.document.activateComponent(this.component)
+          this.document.activateExport(this.config, this.component)
+        }
+      },
+
       chooseDestination: async function() {
         const path = await chooseSavePath(
           this.config.format.toLowerCase(),
@@ -132,6 +147,7 @@
       },
 
       remove: function() {
+        if(this.expanded) this.document.activateExport(null)
         this.component.creator.exportConfigs =
           this.component.creator.exportConfigs.filter(conf => conf !== this.config )
       },

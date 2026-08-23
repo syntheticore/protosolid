@@ -30,6 +30,8 @@ export default class Document extends Emitter {
     this.activeFeature = null
     this.activeSimulation = null
     this.activeSimulationPicker = false
+    this.activeExportConfig = null
+    this.activeExportComponentId = null
     this.selection = new Selection()
 
     this.hasChanges = false
@@ -156,9 +158,19 @@ export default class Document extends Emitter {
   }
 
   activateSimulation(simulation) {
+    this.activateExport(null)
     this.activeSimulation = simulation
     this.activeSimulationPicker = false
     if(simulation) this.selection.clear()
+  }
+
+  activateExport(config, component) {
+    if(config) {
+      this.activeSimulation = null
+      this.activeSimulationPicker = false
+    }
+    this.activeExportConfig = config
+    this.activeExportComponentId = config && component ? component.id : null
   }
 
   // Parameter values live on component definitions, which are shared by the

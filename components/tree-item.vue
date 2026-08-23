@@ -59,7 +59,8 @@
             )
 
     ul.widgets(
-      v-if="expanded && !isInstance"
+      v-if="!isInstance"
+      v-show="expanded"
     )
 
       //- Parameters

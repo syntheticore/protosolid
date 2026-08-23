@@ -617,12 +617,12 @@ export class MotionLinkFeature extends Feature {
     super(doc, false, 'Motion Link', {
       jointA: { title: 'Joint 1', type: 'joint' },
       jointB: { title: 'Joint 2', type: 'joint' },
-      motionA: { title: 'Motion 1', type: 'enum', options: {} },
-      angleA: { title: 'Travel 1', type: 'angle', when: rotational('A') },
-      distanceA: { title: 'Travel 1', type: 'length', when: linear('A') },
-      motionB: { title: 'Motion 2', type: 'enum', options: {} },
-      angleB: { title: 'Travel 2', type: 'angle', when: rotational('B') },
-      distanceB: { title: 'Travel 2', type: 'length', when: linear('B') },
+      motionA: { title: 'Motion 1', type: 'enum', options: {}, when: feature => !!feature.motionA },
+      angleA: { title: 'Travel 1', type: 'angle', autoFocus: false, when: rotational('A') },
+      distanceA: { title: 'Travel 1', type: 'length', autoFocus: false, when: linear('A') },
+      motionB: { title: 'Motion 2', type: 'enum', options: {}, when: feature => !!feature.motionB },
+      angleB: { title: 'Travel 2', type: 'angle', autoFocus: false, when: rotational('B') },
+      distanceB: { title: 'Travel 2', type: 'length', autoFocus: false, when: linear('B') },
       reverse: { title: 'Reverse', type: 'bool', icons: ['exchange-alt', 'arrows-alt-h'] },
     })
     this.componentId = doc.activeComponent.id

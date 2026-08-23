@@ -95,6 +95,15 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
     return
   }
 
+  // Capture link coordinates before applying the requested drag. Angular
+  // coordinates are unwrapped from this state across successive pointer moves.
+  const motionLinks = tree.motionLinks || []
+  motionLinks.forEach(link => {
+    const linkedJoints = [link.jointA, link.jointB]
+      .map(id => joints.find(joint => joint.id == id))
+    if(linkedJoints.every(Boolean)) ensureMotionLinkState(tree, link, linkedJoints)
+  })
+
   const fixed = new Set(
     joints.filter(joint => joint.type == 'fix').map(joint => joint.componentA)
   )
@@ -145,10 +154,169 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
     }
   }
 
+  const activeLinks = motionLinks.map(link => {
+    const jointA = joints.find(joint => joint.id == link.jointA)
+    const jointB = joints.find(joint => joint.id == link.jointB)
+    if(!jointA || !jointB) return
+    return {
+      link,
+      joints: [jointA, jointB],
+      // The unconstrained kinematic pass above reveals which linked degree of
+      // freedom the drag actually drove. Lock that choice on first movement.
+      driver: null,
+    }
+  }).filter(Boolean)
+
   for(let i = 0; i < iterations; i++) {
     projectJoints()
     if(!pathSolved) setWorldTransform(movedComponent, desiredWorld)
-    if(assemblyError(tree, joints) < SOLVER_TOLERANCE) return
+    const linkError = activeLinks.reduce((largest, active) =>
+      Math.max(largest, projectMotionLink(tree, active, fixed)), 0
+    )
+    if(assemblyError(tree, joints) < SOLVER_TOLERANCE && linkError < SOLVER_TOLERANCE) break
+  }
+
+  activeLinks.forEach(active => updateMotionLinkState(tree, active.link, active.joints))
+}
+
+export function jointMotionOptions(joint) {
+  if(!joint) return {}
+  if(joint.type == 'axis') return {
+    rotateZ: 'Rotate Z',
+    ...(!joint.lockSlide ? { slideZ: 'Slide Z' } : {}),
+  }
+  if(joint.type == 'coplanar') return {
+    slideX: 'Slide X',
+    slideY: 'Slide Y',
+    rotateZ: 'Rotate Z',
+  }
+  if(joint.type == 'ball') return {
+    rotateX: 'Rotate X',
+    rotateY: 'Rotate Y',
+    rotateZ: 'Rotate Z',
+  }
+  return {}
+}
+
+export function captureMotionLinkStates(tree) {
+  return new Map((tree.motionLinks || []).map(link => [
+    link.id,
+    link.state && link.state.map(state => ({ ...state })),
+  ]))
+}
+
+export function restoreMotionLinkStates(tree, states) {
+  const motionLinks = tree.motionLinks || []
+  motionLinks.forEach(link => {
+    const state = states.get(link.id)
+    link.state = state && state.map(entry => ({ ...entry }))
+  })
+}
+
+export function isRotationalMotion(motion) {
+  return !!motion && motion.startsWith('rotate')
+}
+
+export function jointMotionValue(tree, joint, motion) {
+  const componentA = joint && tree.findChild(joint.componentA)
+  const componentB = joint && tree.findChild(joint.componentB)
+  if(!componentA || !componentB) return 0
+  const attachmentA = worldTransform(componentA).multiply(joint.frameA)
+  const attachmentB = worldTransform(componentB).multiply(joint.frameB)
+  const relative = attachmentA.clone().invert().multiply(attachmentB)
+  if(motion.startsWith('slide')) {
+    const axis = motionAxis(motion)
+    return new THREE.Vector3().setFromMatrixPosition(relative).getComponent(axis)
+  }
+  const rotation = new THREE.Euler().setFromRotationMatrix(relative, 'XYZ')
+  return [rotation.x, rotation.y, rotation.z][motionAxis(motion)]
+}
+
+function motionAxis(motion) {
+  return { X: 0, Y: 1, Z: 2 }[motion.at(-1)]
+}
+
+function motionDelta(current, previous, rotational) {
+  let delta = current - previous
+  if(rotational) delta = THREE.MathUtils.euclideanModulo(delta + Math.PI, Math.PI * 2) - Math.PI
+  return delta
+}
+
+function ensureMotionLinkState(tree, link, joints) {
+  if(link.state?.length == 2) return link.state
+  link.state = joints.map((joint, index) => {
+    const raw = jointMotionValue(tree, joint, index ? link.motionB : link.motionA)
+    return { raw, accumulated: 0 }
+  })
+  return link.state
+}
+
+function projectMotionLink(tree, active, fixed) {
+  const { link, joints } = active
+  let { driver } = active
+  const motions = [link.motionA, link.motionB]
+  const state = ensureMotionLinkState(tree, link, joints)
+  if(driver === null) {
+    const fractions = joints.map((joint, index) => {
+      const raw = jointMotionValue(tree, joint, motions[index])
+      const delta = motionDelta(raw, state[index].raw, isRotationalMotion(motions[index]))
+      const travel = index ? link.travelB : link.travelA
+      return Math.abs(delta / travel)
+    })
+    driver = fractions[1] > fractions[0] ? 1 : 0
+    if(Math.max(...fractions) > EPSILON) active.driver = driver
+  }
+  const driven = 1 - driver
+  const driverRaw = jointMotionValue(tree, joints[driver], motions[driver])
+  const driverAccumulated = state[driver].accumulated + motionDelta(
+    driverRaw,
+    state[driver].raw,
+    isRotationalMotion(motions[driver]),
+  )
+  const forwardRatio = link.travelB / link.travelA * (link.reverse ? -1 : 1)
+  const ratio = driver == 0 ? forwardRatio : 1 / forwardRatio
+  if(!Number.isFinite(ratio)) return 0
+  const targetAccumulated = driverAccumulated * ratio
+  const drivenRaw = jointMotionValue(tree, joints[driven], motions[driven])
+  const drivenAccumulated = state[driven].accumulated + motionDelta(
+    drivenRaw,
+    state[driven].raw,
+    isRotationalMotion(motions[driven]),
+  )
+  const error = targetAccumulated - drivenAccumulated
+  applyJointMotionDelta(tree, joints[driven], motions[driven], error, fixed)
+  return Math.abs(error)
+}
+
+function updateMotionLinkState(tree, link, joints) {
+  const motions = [link.motionA, link.motionB]
+  const state = ensureMotionLinkState(tree, link, joints)
+  state.forEach((entry, index) => {
+    const raw = jointMotionValue(tree, joints[index], motions[index])
+    entry.accumulated += motionDelta(raw, entry.raw, isRotationalMotion(motions[index]))
+    entry.raw = raw
+  })
+}
+
+function applyJointMotionDelta(tree, joint, motion, delta, fixed) {
+  if(Math.abs(delta) < EPSILON) return
+  const componentA = tree.findChild(joint.componentA)
+  const componentB = tree.findChild(joint.componentB)
+  if(!componentA || !componentB) return
+  const groupA = connectedRigidGroup(tree, componentA, tree.assemblyJoints || [])
+  const groupB = connectedRigidGroup(tree, componentB, tree.assemblyJoints || [])
+  const moveB = !groupB.some(component => fixed.has(component.id))
+  const components = moveB ? groupB : groupA
+  if(components.some(component => fixed.has(component.id))) return
+  const attachmentA = worldTransform(componentA).multiply(joint.frameA)
+  const pivot = framePosition(attachmentA)
+  const axis = new THREE.Vector3().setFromMatrixColumn(attachmentA, motionAxis(motion)).normalize()
+  const signedDelta = moveB ? delta : -delta
+  if(isRotationalMotion(motion)) {
+    const rotation = new THREE.Quaternion().setFromAxisAngle(axis, signedDelta)
+    rotateWorldGroup(components, pivot, rotation)
+  } else {
+    translateWorldGroup(components, axis.multiplyScalar(signedDelta))
   }
 }
 

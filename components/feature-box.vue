@@ -76,7 +76,7 @@
             v-model="activeFeature[key]"
             @change="updateSetting"
           )
-            option(v-for="(name, option) in setting.options" :value="option") {{ name }}
+            option(v-for="(name, option) in settingOptions(key, setting)" :value="option") {{ name }}
 
           RadioBar(
             v-if="setting.type == 'select'"
@@ -266,7 +266,7 @@
   import { DummyTool, ManipulationTool } from './../js/tools.js'
   import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
-  import { CurveReference, PatternInputReference } from './../js/core/references.js'
+  import { CurveReference, JointReference, PatternInputReference } from './../js/core/references.js'
   import { referenceComponentId, worldTransform } from './../js/core/assembly.js'
 
   export default {
@@ -361,6 +361,10 @@
         }
       },
 
+      settingOptions: function(key, setting) {
+        return this.activeFeature.settingOptions?.(key) || setting.options
+      },
+
       pick: function(type, key, restart) {
         // Toggle picker off if active
         if(this.activePicker) {
@@ -394,6 +398,8 @@
               itemRef = item.axialReference()
             } else if(type == 'curve') {
               itemRef = new CurveReference(item)
+            } else if(type == 'joint') {
+              itemRef = new JointReference(item)
             }
 
             // Add item reference to feature
@@ -413,6 +419,7 @@
               // Hide heavy data from Vue in a closure
               this.activeFeature[key] = () => itemRef
             }
+            this.activeFeature.pickedInput?.(key, itemRef, item)
 
             this.cancelPick()
             // Regenerate feature once unsuppressed
@@ -434,6 +441,7 @@
           this.activePicker = key
           this.bus.featurePickerActive = type == 'patternInput'
           this.bus.componentPickerActive = type == 'componentRef' || type == 'patternInput'
+          this.bus.jointPickerActive = type == 'joint'
           this.updatePicker = () => {
             const { pickerPos, color } = this.getPickerInfo(key)
             this.bus.emit('pick', type, pickerPos, color, item => this.activeFeature.acceptsInput(item))
@@ -449,6 +457,7 @@
         this.activeFeature.suppressUpdate = false
         this.bus.featurePickerActive = false
         this.bus.componentPickerActive = false
+        this.bus.jointPickerActive = false
       },
 
       // Activate pickers using number keys
@@ -488,6 +497,11 @@
         let center
         if(item instanceof THREE.Matrix4) {
           center = new THREE.Vector3().setFromMatrixPosition(item)
+        } else if(item.componentA && item.frameA) {
+          const component = this.document.top().findChild(item.componentA)
+          return component
+            ? new THREE.Vector3().setFromMatrixPosition(worldTransform(component).multiply(item.frameA))
+            : new THREE.Vector3()
         } else {
           center = item.center()
         }

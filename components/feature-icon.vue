@@ -1,6 +1,6 @@
 <template lang="pug">
 
-  .feature(
+  .feature-icon(
     :title="featureTitle"
     :class="featureStyle"
     :draggable="true"
@@ -41,7 +41,7 @@
 
 <style lang="stylus" scoped>
 
-  .feature
+  .feature-icon
     position: relative
     padding: 13px
     transition: all 0.15s

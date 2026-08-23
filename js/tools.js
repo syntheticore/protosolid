@@ -38,7 +38,12 @@ import {
   SketchOrigin,
   ElemRef,
 } from './core/sketch.js'
-import { solveAssembly, worldTransform } from './core/assembly.js'
+import {
+  captureMotionLinkStates,
+  restoreMotionLinkStates,
+  solveAssembly,
+  worldTransform,
+} from './core/assembly.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
 
 const dragThreshold = 2
@@ -64,11 +69,15 @@ class Tool {
   }
 
   mouseUp(vec, coords) {
-    if(!this.lastCoords ||
-      coords.distanceTo(this.lastCoords) > dragThreshold) return this.viewport.renderer.render()
+    const lastCoords = this.lastCoords
+    this.lastCoords = null
+    if(!vec || !lastCoords ||
+      coords.distanceTo(lastCoords) > dragThreshold) return this.viewport.renderer.render()
     this.click(vec, coords)
     // window.gc && window.gc()
   }
+
+  cancelPointer() { this.lastCoords = null }
 
   mouseMove(vec, coords) {}
 
@@ -524,6 +533,7 @@ export class ManipulationTool extends HighlightTool {
           component.transform && component.transform.clone(),
         ])
       )
+      this.startMotionLinkStates = captureMotionLinkStates(this.viewport.document.top())
     }
     console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
@@ -538,6 +548,7 @@ export class ManipulationTool extends HighlightTool {
     this.snapToPoints = false
     this.cursor = 'auto'
     delete this.object
+    delete this.startMotionLinkStates
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
     if(sketch && handle) {
@@ -551,6 +562,17 @@ export class ManipulationTool extends HighlightTool {
       }
     }
   }
+
+  cancelPointer() {
+    super.cancelPointer()
+    this.pointerDown = false
+    this.snapToPoints = false
+    this.cursor = 'auto'
+    delete this.object
+    delete this.startMotionLinkStates
+  }
+
+  dispose() { this.cancelPointer() }
 
   mouseMove(vec, coords) {
     const handle = this.viewport.activeHandle
@@ -575,7 +597,7 @@ export class ManipulationTool extends HighlightTool {
     // Drag Solids
     } else if(this.object) {
       if(coords.distanceTo(this.startCoords) <= dragThreshold) return
-      const cameraMatrix = this.viewport.renderer.camera.matrixWorld
+      const cameraMatrix = this.viewport.renderer.activeCamera.matrixWorld
       const right = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 0)
       const up = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 1)
 
@@ -587,11 +609,13 @@ export class ManipulationTool extends HighlightTool {
       const desiredWorld = new THREE.Matrix4().makeTranslation(translation).multiply(this.startWorld)
 
       const comp = this.object.component
-      this.viewport.document.top().getChildren().forEach(component => {
+      const tree = this.viewport.document.top()
+      tree.getChildren().forEach(component => {
         const pose = this.startPoses.get(component.id)
         component.transform = pose && pose.clone()
       })
-      solveAssembly(this.viewport.document.top(), comp, desiredWorld)
+      restoreMotionLinkStates(tree, this.startMotionLinkStates)
+      solveAssembly(tree, comp, desiredWorld)
 
     } else {
       super.mouseMove(vec, coords)
@@ -776,6 +800,16 @@ export class ComponentPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['component'], callback)
   }
+}
+
+export class JointPickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    // Joint markers are projected DOM controls, so canvas raycasting is only
+    // used to keep hover clearing and picker lifecycle consistent.
+    super(component, viewport, ['joint'], callback)
+  }
+
+  pick(joint, repick = false) { this.callback(joint, repick) }
 }
 
 export class PatternInputPickTool extends PickTool {

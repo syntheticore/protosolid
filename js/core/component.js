@@ -126,6 +126,7 @@ export class Component {
     ]
     this.children = []
     this.assemblyJoints = []
+    this.motionLinks = []
   }
 
   typename() { return 'Component' }
@@ -153,6 +154,11 @@ export class Component {
         frameA: joint.frameA && joint.frameA.clone(),
         frameB: joint.frameB && joint.frameB.clone(),
         fixedWorld: joint.fixedWorld && joint.fixedWorld.clone(),
+      })),
+      motionLinks: this.motionLinks && this.motionLinks.map(link => ({
+        ...link,
+        // Unwrapped motion is runtime drag state, never timeline state.
+        state: undefined,
       })),
     })
     return clone

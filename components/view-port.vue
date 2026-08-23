@@ -12,6 +12,8 @@
       @dblclick="doubleClick"
       @pointerup="mouseUp"
       @pointerdown="mouseDown"
+      @pointercancel="pointerCancel"
+      @lostpointercapture="pointerCancel"
       @mousemove="mouseMove"
       @mouseleave="mouseLeave"
     )
@@ -62,6 +64,15 @@
         @dimensionMouseUp="mouseUp"
         @dimensionMouseDown="dimensionMouseDown"
         @dimensionMouseMove="dimensionMouseMove"
+      )
+
+      JointProxy(
+        v-if="isReady"
+        v-for="joint in visibleJoints"
+        :key="joint.id"
+        :document="document"
+        :joint="joint"
+        :active-tool="activeTool"
       )
 
       .thermal-probe-box(
@@ -211,6 +222,7 @@
     SolidPickTool,
     PointPickTool,
     ComponentPickTool,
+    JointPickTool,
     PatternInputPickTool,
     LineTool,
     SplineTool,
@@ -320,6 +332,15 @@
         const position = this.thermalProbe.position
         return `M ${position.x} ${position.y} L ${position.x + 12} ${position.y - 18} L ${position.x + 22} ${position.y - 18}`
       },
+
+      visibleJoints: function() {
+        const seen = new Set()
+        return (this.document.top().assemblyJoints || []).filter(joint => {
+          if(seen.has(joint.id)) return false
+          seen.add(joint.id)
+          return true
+        })
+      },
     },
 
     mounted: function() {
@@ -355,8 +376,11 @@
           patternInput: PatternInputPickTool,
           point: PointPickTool,
           componentRef: ComponentPickTool,
+          joint: JointPickTool,
         }[type], acceptsInput)
       })
+
+      this.bus.on('joint-picked', this.jointPicked)
 
       this.bus.on('show-picker', this.addPath)
       this.bus.on('clear-pickers', this.clearPaths)
@@ -414,12 +438,17 @@
       this.document.off('regenerated', this.updateExportPreview)
       this.bus.off('resize', this.onWindowResize)
       this.bus.off('thermal-result', this.updateFluxArrows)
+      this.bus.off('joint-picked', this.jointPicked)
       this.clearFluxArrows()
       this.clearExportPreview()
       this.renderer.dispose()
     },
 
     methods: {
+      jointPicked: function(joint) {
+        if(this.activeTool instanceof JointPickTool) this.activeTool.pick(joint)
+      },
+
       updateExportPreview: function() {
         this.clearExportPreview()
         const preview = this.exportPreview
@@ -515,7 +544,17 @@
         }
         const [vec, coords] = this.snap(e)
         const draggedHandle = this.activeHandle
-        if(vec) this.activeTool.mouseUp(vec, coords)
+        this.activeTool?.mouseUp(vec, coords)
+        this.activeHandle = null
+        this.activeDimension = null
+        this.snapper.reset()
+        this.updateRegions(false, draggedHandle)
+      },
+
+      pointerCancel: function() {
+        const draggedHandle = this.activeHandle
+        this.activeTool?.cancelPointer?.()
+        this.isPanning = false
         this.activeHandle = null
         this.activeDimension = null
         this.snapper.reset()
@@ -563,6 +602,9 @@
           return
         }
         if(e.altKey) return
+        if(e.pointerId !== undefined && e.currentTarget?.setPointerCapture) {
+          try { e.currentTarget.setPointerCapture(e.pointerId) } catch(_) {}
+        }
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, coords, e)
       },
@@ -615,7 +657,8 @@
           if(this.document.selection.items.length) {
             [...this.document.selection.items].forEach(item => {
               const type = item.typename()
-              if(type != 'Solid' && type != 'Component') {
+              const isAssemblyJoint = (this.document.top().assemblyJoints || []).includes(item)
+              if(type != 'Solid' && type != 'Component' && !isAssemblyJoint) {
                 this.deleteElement(item)
               }
             })

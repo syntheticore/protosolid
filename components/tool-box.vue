@@ -253,6 +253,7 @@
     LoftFeature,
     PatternFeature,
     JointFeature,
+    MotionLinkFeature,
     GroupFeature,
   } from './../js/core/features.js'
 
@@ -408,7 +409,7 @@
               { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
               { title: 'Joint', feature: JointFeature },
               { title: 'Group', feature: GroupFeature },
-              { title: 'Motion Link', icon: 'link' },
+              { title: 'Motion Link', feature: MotionLinkFeature },
               { title: 'Animation', icon: 'feather' }, //icon: 'clapperboard'
               { title: 'Static Load', action: this.addStaticLoad, icon: 'weight' },
               { title: 'Heat Flow', action: this.addHeatFlow, icon: 'thermometer' },

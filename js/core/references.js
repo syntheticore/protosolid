@@ -35,6 +35,25 @@ export class ComponentReference extends Reference {
 }
 Serialize.register(ComponentReference, 'ComponentReference')
 
+export class JointReference extends Reference {
+  constructor(item, jointId) {
+    super(item)
+    this.jointId = jointId || item.id
+  }
+
+  update(tree) {
+    const joint = (tree.assemblyJoints || []).find(joint => joint.id == this.jointId)
+    if(!joint) return { type: 'error', msg: 'Joint reference was lost' }
+    this.item = joint
+  }
+
+  clone() { return new JointReference(this.item, this.jointId) }
+  matches(item) { return this.jointId == item.id }
+  dump() { return { jointId: this.jointId } }
+  static undump(dump) { return new JointReference(null, dump.jointId) }
+}
+Serialize.register(JointReference, 'JointReference')
+
 class TopoReference extends Reference {
   constructor(item, componentId, solidId, topoId) {
     super(item)

@@ -14,7 +14,9 @@ import Expression from './expression.js'
 import {
   alignJointWorld,
   baselineWorldTransform,
+  isRotationalMotion,
   jointFrame,
+  jointMotionOptions,
   referenceComponentId,
   relativeComponentTransform,
   setBaselineWorldTransform,
@@ -129,13 +131,13 @@ export class Feature {
 
   needsPicker(setting, includeOptionals) {
     setting = this.settings[setting]
-    return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput'].some(type =>
+    return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].some(type =>
       type == setting.type && (!setting.optional || includeOptionals)
     )
   }
 
   isPickerSetting(setting) {
-    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput'].includes(setting.type)
+    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].includes(setting.type)
   }
 
   isSettingVisible(setting) {
@@ -604,6 +606,103 @@ export class JointFeature extends Feature {
   }
 }
 Serialize.register(JointFeature, 'JointFeature')
+
+
+export class MotionLinkFeature extends Feature {
+  static icon = 'link'
+
+  constructor(doc) {
+    const rotational = side => feature => isRotationalMotion(feature[`motion${side}`])
+    const linear = side => feature => !!feature[`motion${side}`] && !rotational(side)(feature)
+    super(doc, false, 'Motion Link', {
+      jointA: { title: 'Joint 1', type: 'joint' },
+      jointB: { title: 'Joint 2', type: 'joint' },
+      motionA: { title: 'Motion 1', type: 'enum', options: {} },
+      angleA: { title: 'Travel 1', type: 'angle', when: rotational('A') },
+      distanceA: { title: 'Travel 1', type: 'length', when: linear('A') },
+      motionB: { title: 'Motion 2', type: 'enum', options: {} },
+      angleB: { title: 'Travel 2', type: 'angle', when: rotational('B') },
+      distanceB: { title: 'Travel 2', type: 'length', when: linear('B') },
+      reverse: { title: 'Reverse', type: 'bool', icons: ['exchange-alt', 'arrows-alt-h'] },
+    })
+    this.componentId = doc.activeComponent.id
+    this.angleA = 360
+    this.angleB = 360
+    this.distanceA = 10
+    this.distanceB = 10
+    this.motionA = null
+    this.motionB = null
+    this.reverse = false
+  }
+
+  settingOptions(key) {
+    if(key != 'motionA' && key != 'motionB') return this.settings[key].options
+    const side = key.at(-1)
+    const reference = this[`joint${side}`]?.()
+    const joint = reference?.getItem() || this.document.top()?.assemblyJoints?.find(joint =>
+      joint.id == reference?.jointId
+    )
+    return jointMotionOptions(joint)
+  }
+
+  pickedInput(key, _reference, item) {
+    if(key != 'jointA' && key != 'jointB') return
+    const side = key.at(-1)
+    const options = jointMotionOptions(item)
+    const motionKey = `motion${side}`
+    if(!options[this[motionKey]]) this[motionKey] = Object.keys(options)[0] || null
+  }
+
+  isComplete() {
+    if(!super.isComplete()) return false
+    const refs = [this.jointA(), this.jointB()]
+    if(refs[0].jointId == refs[1].jointId) return false
+    return ['A', 'B'].every(side => {
+      const motion = this[`motion${side}`]
+      const travel = isRotationalMotion(motion) ? this[`angle${side}`] : this[`distance${side}`]
+      return !!motion && Number.isFinite(travel) && travel != 0
+    })
+  }
+
+  execute(tree) {
+    if(this.suppressUpdate || !this.isComplete()) return
+    this.error = null
+    const references = this.updateReferences(tree)
+    if(this.error && this.error.type == 'error') return
+    const jointA = references.jointA
+    const jointB = references.jointB
+    if(!jointA || !jointB || jointA.id == jointB.id) {
+      this.error = { type: 'error', msg: 'Select two different joints' }
+      return
+    }
+    if(!jointMotionOptions(jointA)[this.motionA] || !jointMotionOptions(jointB)[this.motionB]) {
+      this.error = { type: 'error', msg: 'The selected motion is not available on this joint' }
+      return
+    }
+    const travel = side => isRotationalMotion(this[`motion${side}`])
+      ? rad(this[`angle${side}`])
+      : this[`distance${side}`]
+    const travelA = travel('A')
+    const travelB = travel('B')
+    if(!Number.isFinite(travelA) || !Number.isFinite(travelB) || !travelA || !travelB) {
+      this.error = { type: 'error', msg: 'Motion link travel must be non-zero' }
+      return
+    }
+    tree.motionLinks.push({
+      id: this.id,
+      jointA: jointA.id,
+      motionA: this.motionA,
+      travelA,
+      jointB: jointB.id,
+      motionB: this.motionB,
+      travelB,
+      reverse: this.reverse,
+    })
+  }
+
+  acceptsInput(item) { return !!Object.keys(jointMotionOptions(item)).length }
+}
+Serialize.register(MotionLinkFeature, 'MotionLinkFeature')
 
 
 export class GroupFeature extends Feature {

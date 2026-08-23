@@ -4,6 +4,9 @@ import * as THREE from 'three'
 
 import {
   alignJointWorld,
+  captureMotionLinkStates,
+  jointMotionValue,
+  restoreMotionLinkStates,
   solveAssembly,
   worldTransform,
 } from '../js/core/assembly.js'
@@ -76,6 +79,45 @@ function axialChain(length, lockSlide = false) {
   return { root, links }
 }
 
+function linkedAxes(motionB = 'rotateZ', travelB = Math.PI, reverse = true) {
+  const root = new TestComponent('root')
+  const baseA = new TestComponent('base-a', root)
+  const movingA = new TestComponent('moving-a', root)
+  const baseB = new TestComponent('base-b', root)
+  const movingB = new TestComponent('moving-b', root)
+  root.assemblyJoints = [
+    {
+      id: 'joint-a',
+      type: 'axis',
+      componentA: baseA.id,
+      componentB: movingA.id,
+      frameA: new THREE.Matrix4(),
+      frameB: new THREE.Matrix4(),
+      lockSlide: true,
+    },
+    {
+      id: 'joint-b',
+      type: 'axis',
+      componentA: baseB.id,
+      componentB: movingB.id,
+      frameA: new THREE.Matrix4(),
+      frameB: new THREE.Matrix4(),
+      lockSlide: motionB != 'slideZ',
+    },
+  ]
+  root.motionLinks = [{
+    id: 'motion-link',
+    jointA: 'joint-a',
+    motionA: 'rotateZ',
+    travelA: Math.PI * 2,
+    jointB: 'joint-b',
+    motionB,
+    travelB,
+    reverse,
+  }]
+  return { root, movingA, movingB }
+}
+
 test('axis alignment removes radial offset while preserving axial slide', () => {
   const frameB = at(2, 0, 7)
   const aligned = alignJointWorld('axis', new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4(), frameB)
@@ -125,6 +167,45 @@ test('fixed joints reject manipulation', () => {
   root.assemblyJoints = [{ type: 'fix', componentA: fixed.id, fixedWorld: new THREE.Matrix4() }]
   solveAssembly(root, fixed, at(20))
   assert.ok(point(fixed).length() < 1e-8)
+})
+
+test('motion links map reversed rotational travel in either joint coordinate', () => {
+  const { root, movingA } = linkedAxes()
+  solveAssembly(root, movingA, new THREE.Matrix4().makeRotationZ(Math.PI / 2))
+
+  assert.ok(Math.abs(jointMotionValue(root, root.assemblyJoints[0], 'rotateZ') - Math.PI / 2) < 1e-8)
+  assert.ok(Math.abs(jointMotionValue(root, root.assemblyJoints[1], 'rotateZ') + Math.PI / 4) < 1e-8)
+
+  const reverse = linkedAxes()
+  solveAssembly(reverse.root, reverse.movingB, new THREE.Matrix4().makeRotationZ(Math.PI / 4))
+  assert.ok(Math.abs(jointMotionValue(reverse.root, reverse.root.assemblyJoints[0], 'rotateZ') + Math.PI / 2) < 1e-8)
+})
+
+test('motion links map rotational travel onto linear travel', () => {
+  const { root, movingA } = linkedAxes('slideZ', 10, false)
+  solveAssembly(root, movingA, new THREE.Matrix4().makeRotationZ(Math.PI / 2))
+
+  assert.ok(Math.abs(jointMotionValue(root, root.assemblyJoints[1], 'slideZ') - 2.5) < 1e-8)
+})
+
+test('restored motion-link state makes repeated drag updates absolute', () => {
+  const { root, movingA } = linkedAxes()
+  const startPoses = new Map(root.getChildren().map(component => [
+    component.id,
+    component.transform && component.transform.clone(),
+  ]))
+  const startMotionLinkStates = captureMotionLinkStates(root)
+
+  const angles = [Math.PI / 6, Math.PI / 3]
+  angles.forEach(angle => {
+    root.getChildren().forEach(component => {
+      const pose = startPoses.get(component.id)
+      component.transform = pose && pose.clone()
+    })
+    restoreMotionLinkStates(root, startMotionLinkStates)
+    solveAssembly(root, movingA, new THREE.Matrix4().makeRotationZ(angle))
+    assert.ok(Math.abs(jointMotionValue(root, root.assemblyJoints[1], 'rotateZ') + angle / 2) < 1e-8)
+  })
 })
 
 test('joint picking only accepts strict descendants of the owning component', () => {

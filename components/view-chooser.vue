@@ -10,9 +10,9 @@
       li(
         v-for="(view, i) in document.views"
         :key="view.id",
-        :class="{ active: document.activeView == view, editing: view.editing }"
-        @click="clickView(view, i)"
-        @mouseenter="document.previewView = view"
+        :class="{ active: document.activeView?.id == view.id, editing: view.editing }"
+        @click="clickView(view, i, $event)"
+        @mouseenter="document.previewView = modifiedView(view, i, $event)"
       )
 
         .anchor
@@ -330,15 +330,23 @@
     props.document.addView(view)
   }
 
-  function clickView(view, i) {
-    const isActive = props.document.activeView == view
-    if(isActive) {
+  function clickView(view, i, event) {
+    const selectedView = modifiedView(view, i, event)
+    if(props.document.activeView == selectedView) {
       view.editing = true
       setTimeout(() => {
         input.value[i].select()
       }, 100 )
     } else {
-      props.document.activateView(view)
+      props.document.activateView(selectedView)
+    }
+  }
+
+  function modifiedView(view, i, event) {
+    if(!view.system || i >= 3 || (!event.ctrlKey && !event.metaKey)) return view
+    return {
+      ...view,
+      position: view.target.clone().multiplyScalar(2).sub(view.position),
     }
   }
 

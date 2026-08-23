@@ -28,6 +28,7 @@
     margin: 0
     border-radius: 0
     flex: 1 1 auto
+    min-width: 0
     text-shadow: none
 
     & + .button
@@ -52,10 +53,11 @@
   .hot-key
     position: absolute
     top: 2px
-    right: 2px
+    left: 2px
     font-size: 9px
     color: white
-    background: $bright2
+    font-weight: bold
+    background: $bright2 * 0.75
     width: 12px
     height: 12px
     border-radius: 3px

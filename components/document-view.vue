@@ -27,69 +27,87 @@
 
     .side-bar.right
 
-      h1 View
+      section.side-section
 
-      ViewChooser(:document="document")
+        h1 View
 
-      .flex.gap.buttons
+        ViewChooser(:document="document")
 
-        .flex.gap
+        .buttons
 
-          IconButton(
-            icon="camera"
-            title="Fit All"
-            @mouseenter="bus.emit('preview-zoom-all')"
-            @mouseleave="bus.emit('unpreview-camera')"
-            @click="bus.emit('zoom-all')"
+          .view-row
+            .view-label Zoom
+
+            .flex.gap
+
+              IconButton(
+                icon="camera"
+                title="Fit All"
+                @mouseenter="bus.emit('preview-zoom-all')"
+                @mouseleave="bus.emit('unpreview-camera')"
+                @click="bus.emit('zoom-all')"
+              )
+
+              IconButton(
+                icon="crop-alt"
+                title="Fit Active"
+                @mouseenter="bus.emit('preview-zoom-active')"
+                @mouseleave="bus.emit('unpreview-camera')"
+                @click="bus.emit('zoom-active')"
+              )
+
+              IconButton(
+                v-if="document.selection.items.length"
+                icon="search-plus"
+                title="Fit Selection"
+                @mouseenter="bus.emit('preview-zoom-selection')"
+                @mouseleave="bus.emit('unpreview-camera')"
+                @click="bus.emit('zoom-selection')"
+              )
+
+          .view-row
+            .view-label Nearest Plane
+
+            IconButton(
+              icon="solar-panel"
+              title="Look at nearest plane"
+              @mouseenter="lookAtPlane(true)"
+              @mouseleave="bus.emit('unpreview-camera')"
+              @click="lookAtPlane()"
+            )
+
+
+      section.side-section
+
+        h1 DISPLAY
+
+        .display-row
+          .display-label Projection
+          RadioBar(
+            :items="projectionModes"
+            hot-key="O"
+            v-model:chosen="projectionMode"
           )
 
-          IconButton(
-            icon="crop-alt"
-            title="Fit Active"
-            @mouseenter="bus.emit('preview-zoom-active')"
-            @mouseleave="bus.emit('unpreview-camera')"
-            @click="bus.emit('zoom-active')"
+        .display-row
+          .display-label Shading
+          RadioBar(
+            :items="displayModes"
+            hot-key="W"
+            v-model:chosen="displayMode"
+            @hover="previewDisplayMode = $event"
+            @unhover="previewDisplayMode = null"
           )
 
-          IconButton(
-            v-if="document.selection.items.length"
-            icon="search-plus"
-            title="Fit Selection"
-            @mouseenter="bus.emit('preview-zoom-selection')"
-            @mouseleave="bus.emit('unpreview-camera')"
-            @click="bus.emit('zoom-selection')"
+        .display-row
+          .display-label Material
+          RadioBar(
+            :items="colorModes"
+            hot-key="M"
+            v-model:chosen="colorMode"
+            @hover="previewColorMode = $event"
+            @unhover="previewColorMode = null"
           )
-
-        IconButton(
-          icon="solar-panel"
-          title="Look at nearest plane"
-          @mouseenter="lookAtPlane(true)"
-          @mouseleave="bus.emit('unpreview-camera')"
-          @click="lookAtPlane()"
-        )
-
-
-      h1 DISPLAY
-
-      RadioBar(
-        :items="projectionModes"
-        hot-key="O"
-        v-model:chosen="projectionMode"
-      )
-
-      RadioBar(
-        :items="displayModes"
-        v-model:chosen="displayMode"
-        @hover="previewDisplayMode = $event"
-        @unhover="previewDisplayMode = null"
-      )
-
-      RadioBar(
-        :items="colorModes"
-        v-model:chosen="colorMode"
-        @hover="previewColorMode = $event"
-        @unhover="previewColorMode = null"
-      )
 
       .pose(:class="{ hidden: !document.top().hasPoseChange() }")
 
@@ -159,9 +177,50 @@
       h1
         margin-top: 1rem
 
+      .side-section
+        display: flex
+        flex-direction: column
+        pointer-events: auto
+
+        &:hover
+          .view-label
+          .display-label
+            opacity: 1
+
       .view-chooser
       .radio-bar
         margin-bottom: 0.5rem
+
+      .view-row
+      .display-row
+        align-items: center
+        align-self: flex-end
+        display: grid
+        gap: 0.5rem
+        grid-template-columns: 64px 110px
+
+      .view-label
+      .display-label
+        color: $bright2
+        font-size: 11px
+        opacity: 0
+        text-align: right
+        transition: opacity 0.15s
+        white-space: nowrap
+
+      .view-row
+        > .flex
+          min-width: 0
+
+        .button
+          min-width: 0
+
+      .display-row
+        margin-bottom: 0.5rem
+
+        .radio-bar
+          margin-bottom: 0
+          min-width: 0
 
     .pose
       transition: all 0.25s
@@ -178,7 +237,9 @@
 
   .buttons
     pointer-events: auto
+    display: flex
     flex-direction: column
+    gap: 0.25rem
 
   .view-port
     width: 100%
@@ -333,6 +394,20 @@
       },
 
       keyDown: function(keyCode) {
+        if(keyCode.toLowerCase() == 'm') {
+          this.previewColorMode = null
+          this.colorMode = this.colorMode == 'material' ? 'component' : 'material'
+          return
+        }
+
+        if(keyCode.toLowerCase() == 'w') {
+          this.previewDisplayMode = null
+          const modes = Object.keys(this.displayModes)
+          const index = modes.indexOf(this.displayMode)
+          this.displayMode = modes[(index + 1) % modes.length]
+          return
+        }
+
         if(keyCode == 46 || keyCode == 8) { // Del / Backspace
           // Delete Selection
           if(!this.document.selection.items.length) return;

@@ -198,7 +198,10 @@
       if(activeDocument.value.isFresh) deleteDocument(activeDocument.value)
       activeDocument.value = doc
       documents.value.push(doc)
-      nextTick().then(() => bus.emit('zoom-all') )
+      nextTick().then(() => {
+        doc.treeletsExpandedByDefault = true
+        bus.emit('zoom-all')
+      })
     })
   }
 

@@ -215,7 +215,7 @@
 
     data() {
       return {
-        expanded: true,
+        expanded: this.document.treeletsExpandedByDefault,
         parameterNames: new Map(),
       }
     },

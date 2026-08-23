@@ -106,7 +106,7 @@
 
       //- Export Configs
       li(v-for="config in component.creator.exportConfigs")
-        TreeletExport(:config="config", :component="component")
+        TreeletExport(:config="config", :component="component", :document="document")
 
       //- Canvases
       TreeletCanvas(
@@ -343,6 +343,7 @@
 
       h2
         margin-right: 8px
+        white-space: nowrap
 
       .content
         border-top: 1px solid $dark1 * 1.4

@@ -96,11 +96,12 @@
     props: {
       config: Object,
       component: Object,
+      document: Object,
     },
 
     data() {
       return {
-        expanded: true,
+        expanded: this.document.treeletsExpandedByDefault,
         path: this.config.path || null,
       }
     },

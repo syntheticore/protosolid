@@ -23,6 +23,7 @@ export default class Document extends Emitter {
     this.filePath = null
     this.timeline = new Timeline()
     this.materials = []
+    this.treeletsExpandedByDefault = true
 
     this.activeComponent = this.top()
     this.activeSketch = null
@@ -398,6 +399,7 @@ export default class Document extends Emitter {
     }
     this.filePath = file.path
     this.isFresh = false
+    this.treeletsExpandedByDefault = false
     const dump = Serialize.parse(file.data, { document: this, sketches: {} })
     setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
     this.timeline = dump.timeline

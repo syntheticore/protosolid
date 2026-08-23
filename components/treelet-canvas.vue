@@ -100,7 +100,7 @@
 
   const bus = inject('bus')
 
-  const expanded = ref(true)
+  const expanded = ref(props.document.treeletsExpandedByDefault)
   const path = ref(null)
   const sourceName = computed(() =>
     props.canvas.src?.split(/[\\/]/).pop() || 'Canvas'

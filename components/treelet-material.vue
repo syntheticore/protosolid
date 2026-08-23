@@ -107,7 +107,7 @@
 
     data() {
       return {
-        expanded: true,
+        expanded: this.document.treeletsExpandedByDefault,
       }
     },
 

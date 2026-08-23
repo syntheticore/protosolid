@@ -538,8 +538,8 @@
           title: 'High Detail',
           path: null,
           format: 'STL',
-          maxDistance: 0.01,
-          maxAngle: 1.0,
+          maxDistance: 0.1,
+          maxAngle: 10.0,
           autoSave: false,
         })
       },

@@ -87,7 +87,7 @@
 
 
 <script>
-  import { export3mf, exportStl } from './../js/core/export.js'
+  import { exportConfigured } from './../js/core/export.js'
   import { chooseSavePath } from './../js/utils.js'
 
   export default {
@@ -109,7 +109,7 @@
       chooseDestination: async function() {
         const path = await chooseSavePath(
           this.config.format.toLowerCase(),
-          this.component.title,
+          this.component.creator.title,
         )
         if(!path) return
         this.path = path
@@ -122,11 +122,8 @@
           if(!this.path) return
         }
 
-        const exporter = {
-          'STL': exportStl,
-          '3MF': export3mf,
-        }[this.config.format]
-        const path = await exporter(this.component, this.path)
+        this.config.path = this.path
+        const path = await exportConfigured(this.component, this.config)
         if(path) {
           this.path = path
           this.config.path = path

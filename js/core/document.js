@@ -10,6 +10,7 @@ import Serialize from './serialize.js'
 import { makeID, lastId, setLastId } from './id.js'
 import Expression from './expression.js'
 import preferences from '../preferences.js'
+import { autoExportComponents } from './export.js'
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -379,6 +380,7 @@ export default class Document extends Emitter {
     try {
       this.filePath = await saveFile(json, 'cad', as ? null : this.filePath)
       this.hasChanges = false
+      await autoExportComponents(this.top())
     } catch(error) {
       if(error != 'canceled') alert(error)
       throw error

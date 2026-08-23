@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { markRaw } from 'vue'
+import Serialize from './core/serialize.js'
 
 export class Material {
   constructor(title) {
@@ -86,6 +87,32 @@ export class Material {
     return out
   }
 
+  dump() {
+    return {
+      title: this.title,
+      density: this.density,
+      color: this.color,
+      roughness: this.roughness,
+      metal: this.metal,
+      clearcoat: this.clearcoat,
+      transparency: this.transparency,
+      translucency: this.translucency,
+    }
+  }
+
+  static undump(dump) {
+    const material = new this(dump.title)
+    material.title = dump.title
+    material.density = dump.density
+    material.color = dump.color
+    material.roughness = dump.roughness
+    material.metal = dump.metal
+    material.clearcoat = dump.clearcoat
+    material.transparency = dump.transparency
+    material.translucency = dump.translucency
+    return material
+  }
+
   dispose() {
     this.displayMaterial.dispose()
   }
@@ -152,6 +179,13 @@ export class Glass extends Material {
     this.transparency = 0.98
   }
 }
+
+Serialize.register(Material, 'Material')
+Serialize.register(Aluminum, 'Aluminum')
+Serialize.register(DarkViolet, 'DarkViolet')
+Serialize.register(Polystyrene, 'Polystyrene')
+Serialize.register(CarPaint, 'CarPaint')
+Serialize.register(Glass, 'Glass')
 
 
 // 0.9 Polystyrene

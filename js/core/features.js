@@ -503,6 +503,13 @@ export class JointFeature extends Feature {
         icons: ['lock', 'lock-open'],
         when: is('axis'),
       },
+      offset: {
+        title: 'Offset',
+        type: 'length',
+        autoFocus: false,
+        allowNegative: true,
+        when: feature => feature.jointType == 'axis' && feature.lockSlide,
+      },
       planeA: { title: '1', type: 'face', when: is('coplanar') },
       planeB: { title: '2', type: 'face', when: is('coplanar') },
       pointA: { title: '1', type: 'point', when: is('ball') },
@@ -513,6 +520,7 @@ export class JointFeature extends Feature {
     this.componentId = doc.activeComponent.id
     this.jointType = 'axis'
     this.lockSlide = false
+    this.offset = 0
   }
 
   inputKeys() {
@@ -551,7 +559,7 @@ export class JointFeature extends Feature {
       return
     }
 
-    const frameA = jointFrame(this.jointType, references[keys[0]])
+    let frameA = jointFrame(this.jointType, references[keys[0]])
     const frameB = keys[1] && jointFrame(this.jointType, references[keys[1]])
     if(!frameA || (keys[1] && !frameB)) {
       this.error = {
@@ -561,6 +569,13 @@ export class JointFeature extends Feature {
           'This joint requires points',
       }
       return
+    }
+
+    // A locked axis normally makes the two attachment origins coincide. Move
+    // that target along axis A so the same solver behavior locks at the
+    // requested axial position instead.
+    if(this.jointType == 'axis' && this.lockSlide && this.offset) {
+      frameA = frameA.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, this.offset))
     }
 
     const componentA = tree.findChild(componentIds[0])
@@ -1279,6 +1294,7 @@ export class DraftFeature extends Feature {
       angle: {
         title: 'Angle',
         type: 'angle',
+        allowNegative: true,
       },
     })
 

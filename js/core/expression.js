@@ -80,9 +80,13 @@ export default class Expression {
 
   // * / -
   parseMinus(expr) {
+    expr = expr.trim()
+    const negative = expr.startsWith('-')
+    if(negative) expr = expr.slice(1)
     const numbers = this.split(expr, ['-']).map(chunk =>
       this.parseMultiplication(chunk.chunk)
     )
+    if(negative && numbers.length) numbers[0].value *= -1
     return numbers.reduce((acc, number) => this.subtract(acc, number) )
   }
 

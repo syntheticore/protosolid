@@ -30,6 +30,7 @@
             v-if="setting.type == 'length' || setting.type == 'angle'"
             :component="document.top()"
             :dimension="setting.type"
+            :allow-negative="setting.allowNegative"
             v-model:value="activeFeature[key]"
             :expression="activeFeature.expressions[key]"
             :auto-focus="setting.autoFocus !== false && activeFeature.isSettingVisible(setting)"

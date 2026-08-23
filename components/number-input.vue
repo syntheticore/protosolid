@@ -34,6 +34,7 @@
         type: String,
         default: 'length',
       },
+      allowNegative: Boolean,
       autoFocus: Boolean,
       focusOnMount: Boolean,
     },
@@ -94,7 +95,7 @@
       decrease() {
         const number = this.inner.parse()
         const newValue = number.value - 1
-        if(newValue >= 0) {
+        if(this.allowNegative || newValue >= 0) {
           this.inner.set(truncate(newValue) + number.unit)
           this.$emit('expression', this.inner.expression)
         }

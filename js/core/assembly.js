@@ -98,6 +98,22 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
   const fixed = new Set(
     joints.filter(joint => joint.type == 'fix').map(joint => joint.componentA)
   )
+
+  const rigidGroup = connectedRigidGroup(tree, movedComponent, joints)
+  const fixedGroupComponent = rigidGroup.find(component => fixed.has(component.id))
+  if(fixedGroupComponent) {
+    const fixedJoint = joints.find(joint =>
+      joint.type == 'fix' && joint.componentA == fixedGroupComponent.id
+    )
+    if(fixedJoint) setWorldTransform(fixedGroupComponent, fixedJoint.fixedWorld)
+    projectRigidGroup(tree, fixedGroupComponent, joints)
+    return
+  }
+  if(rigidGroup.length > 1) {
+    const transform = desiredWorld.clone().multiply(worldTransform(movedComponent).invert())
+    transformWorldGroup(rigidGroup, transform)
+  }
+
   if(fixed.has(movedComponent.id)) {
     const anchor = joints.find(joint => joint.type == 'fix' && joint.componentA == movedComponent.id)
     if(anchor) setWorldTransform(movedComponent, anchor.fixedWorld)
@@ -215,6 +231,10 @@ function rotateWorldGroup(components, pivot, rotation) {
   const transform = new THREE.Matrix4().makeTranslation(pivot)
     .multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation))
     .multiply(new THREE.Matrix4().makeTranslation(pivot.clone().negate()))
+  transformWorldGroup(components, transform)
+}
+
+function transformWorldGroup(components, transform) {
   const worlds = new Map(components.map(component => [
     component,
     transform.clone().multiply(worldTransform(component)),
@@ -225,11 +245,45 @@ function rotateWorldGroup(components, pivot, rotation) {
 
 function translateWorldGroup(components, translation) {
   const transform = new THREE.Matrix4().makeTranslation(translation)
-  const worlds = new Map(components.map(component => [
-    component,
-    transform.clone().multiply(worldTransform(component)),
-  ]))
-  components.slice().sort((a, b) => componentDepth(a) - componentDepth(b))
+  transformWorldGroup(components, transform)
+}
+
+function connectedRigidGroup(tree, component, joints) {
+  const groupJoints = joints.filter(joint => joint.type == 'group')
+  const ids = new Set([component.id])
+  const queue = [component.id]
+  while(queue.length) {
+    const id = queue.shift()
+    groupJoints.forEach(joint => {
+      const other = joint.componentA == id ? joint.componentB :
+        joint.componentB == id ? joint.componentA : null
+      if(!other || ids.has(other)) return
+      ids.add(other)
+      queue.push(other)
+    })
+  }
+  return [...ids].map(id => tree.findChild(id)).filter(Boolean)
+}
+
+function projectRigidGroup(tree, anchor, joints) {
+  const groupJoints = joints.filter(joint => joint.type == 'group')
+  const worlds = new Map([[anchor, worldTransform(anchor)]])
+  const queue = [anchor]
+  while(queue.length) {
+    const component = queue.shift()
+    for(const joint of groupJoints) {
+      const isA = joint.componentA == component.id
+      const otherId = isA ? joint.componentB :
+        joint.componentB == component.id ? joint.componentA : null
+      const other = otherId && tree.findChild(otherId)
+      if(!other || worlds.has(other)) continue
+      const fromFrame = isA ? joint.frameA : joint.frameB
+      const toFrame = isA ? joint.frameB : joint.frameA
+      worlds.set(other, worlds.get(component).clone().multiply(fromFrame).multiply(toFrame.clone().invert()))
+      queue.push(other)
+    }
+  }
+  [...worlds.keys()].sort((a, b) => componentDepth(a) - componentDepth(b))
     .forEach(component => setWorldTransform(component, worlds.get(component)))
 }
 
@@ -252,6 +306,18 @@ function solvePair(joint, componentA, componentB, mobilityA, mobilityB) {
   let worldB = worldTransform(componentB)
   let attachmentA = worldA.clone().multiply(joint.frameA)
   let attachmentB = worldB.clone().multiply(joint.frameB)
+
+  if(joint.type == 'group') {
+    const desiredA = attachmentB.clone().multiply(joint.frameA.clone().invert())
+    const desiredB = attachmentA.clone().multiply(joint.frameB.clone().invert())
+    if(mobilityA) setWorldTransform(componentA,
+      mobilityB ? interpolateWorld(worldA, desiredA, weightA * RELAXATION) : desiredA
+    )
+    if(mobilityB) setWorldTransform(componentB,
+      mobilityA ? interpolateWorld(worldB, desiredB, weightB * RELAXATION) : desiredB
+    )
+    return
+  }
 
   if(joint.type == 'ball' || joint.type == 'axis') {
     let targetA = framePosition(attachmentB)
@@ -307,6 +373,22 @@ function solvePair(joint, componentA, componentB, mobilityA, mobilityB) {
   if(mobilityB) setWorldTransform(componentB, translateWorld(worldTransform(componentB), error.clone().multiplyScalar(weightB * RELAXATION)))
 }
 
+function interpolateWorld(from, to, weight) {
+  const fromPosition = new THREE.Vector3()
+  const fromRotation = new THREE.Quaternion()
+  const fromScale = new THREE.Vector3()
+  from.decompose(fromPosition, fromRotation, fromScale)
+  const toPosition = new THREE.Vector3()
+  const toRotation = new THREE.Quaternion()
+  const toScale = new THREE.Vector3()
+  to.decompose(toPosition, toRotation, toScale)
+  return new THREE.Matrix4().compose(
+    fromPosition.lerp(toPosition, weight),
+    fromRotation.slerp(toRotation, weight),
+    fromScale.lerp(toScale, weight),
+  )
+}
+
 function rotateWorldAbout(world, pivot, from, to, weight) {
   if(from.dot(to) < 0) to = to.clone().negate()
   const full = new THREE.Quaternion().setFromUnitVectors(from, to)
@@ -347,7 +429,10 @@ function assemblyError(tree, joints) {
     } else if(joint.type == 'coplanar') {
       positional = directionA.clone().multiplyScalar(positional.dot(directionA))
     }
-    const angular = joint.type == 'ball' ? 0 : directionA.cross(directionB).length()
+    const angular = joint.type == 'ball' ? 0 : joint.type == 'group' ?
+      new THREE.Quaternion().setFromRotationMatrix(attachmentA)
+        .angleTo(new THREE.Quaternion().setFromRotationMatrix(attachmentB)) :
+      directionA.cross(directionB).length()
     return Math.max(largest, positional.length(), angular)
   }, 0)
 }

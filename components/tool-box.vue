@@ -253,6 +253,7 @@
     LoftFeature,
     PatternFeature,
     JointFeature,
+    GroupFeature,
   } from './../js/core/features.js'
 
   import {
@@ -406,7 +407,7 @@
             tools: [
               { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
               { title: 'Joint', feature: JointFeature },
-              { title: 'Group', icon: 'object-group' },
+              { title: 'Group', feature: GroupFeature },
               { title: 'Motion Link', icon: 'link' },
               { title: 'Animation', icon: 'feather' }, //icon: 'clapperboard'
               { title: 'Static Load', action: this.addStaticLoad, icon: 'weight' },

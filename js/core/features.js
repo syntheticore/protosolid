@@ -606,6 +606,85 @@ export class JointFeature extends Feature {
 Serialize.register(JointFeature, 'JointFeature')
 
 
+export class GroupFeature extends Feature {
+  static icon = 'object-group'
+
+  constructor(doc) {
+    super(doc, false, 'Group', {
+      components: {
+        title: 'Components',
+        type: 'componentRef',
+        multi: true,
+      },
+    })
+    // Assembly relationships belong to an occurrence, not to its shared definition.
+    this.componentId = doc.activeComponent.id
+
+    const selected = doc.selection.items
+      .filter(item => item?.typename?.() == 'Component' && this.acceptsInput(item))
+      .filter((item, index, items) => items.findIndex(other => other.id == item.id) == index)
+      .map(component => component.componentReference())
+    this.components = selected.length ? () => selected : null
+  }
+
+  isComplete() {
+    if(!super.isComplete()) return false
+    const componentIds = this.components().map(reference => reference.componentId)
+    return new Set(componentIds).size >= 2
+  }
+
+  execute(tree) {
+    if(this.suppressUpdate || !this.isComplete()) return
+    this.error = null
+    const references = this.updateReferences(tree)
+    if(this.error && this.error.type == 'error') return
+    this.updateFeature(tree, references)
+  }
+
+  updateFeature(tree, references) {
+    const components = references.components || []
+    const componentIds = components.map(component => component.id)
+    if(new Set(componentIds).size != componentIds.length) {
+      this.error = { type: 'error', msg: 'Group components must be different' }
+      return
+    }
+
+    const owner = tree.findChild(this.componentId)
+    if(!owner || components.some(component => component == owner || !component.hasAncestor(owner))) {
+      this.error = { type: 'error', msg: 'Select components inside the active assembly' }
+      return
+    }
+
+    const anchor = components[0]
+    const anchorWorld = baselineWorldTransform(anchor)
+    components.slice(1).forEach(component => {
+      const componentWorld = baselineWorldTransform(component)
+      tree.assemblyJoints.push({
+        id: this.id,
+        type: 'group',
+        componentA: anchor.id,
+        componentB: component.id,
+        frameA: new THREE.Matrix4(),
+        // Both attachment frames coincide at creation, preserving the full
+        // relative transform without repositioning either component.
+        frameB: componentWorld.clone().invert().multiply(anchorWorld),
+      })
+    })
+  }
+
+  modifiedComponents() {
+    return (this.components?.() || []).map(reference => reference.componentId)
+  }
+
+  acceptsInput(item) {
+    const component = item?.typename?.() == 'Component' ? item : null
+    const owner = this.document.top().findChild(this.componentId)
+    return !!component && !!owner && component != owner && component.hasAncestor(owner)
+  }
+}
+Serialize.register(GroupFeature, 'GroupFeature')
+
+
 function inputComponentId(item) {
   if(!item) return
   if(item.componentId) return item.componentId

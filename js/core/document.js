@@ -106,7 +106,8 @@ export default class Document extends Emitter {
     this.addFeature(feature)
   }
 
-  activateComponent(comp) {
+  activateComponent(comp, closeSimulation = true) {
+    if(closeSimulation) this.activateSimulation(null)
     if(comp) comp.creator.hidden = false
     this.activeComponent = comp
     this.selection.clear()
@@ -248,7 +249,7 @@ export default class Document extends Emitter {
   reactivateActiveComponent(comp = this.activeComponent) {
     const updated = this.getComponent(comp.id)
     if(updated) {
-      this.activateComponent(updated)
+      this.activateComponent(updated, false)
     } else {
       this.reactivateActiveComponent(comp.parent)
     }

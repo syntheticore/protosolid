@@ -552,7 +552,7 @@
       addHeatFlow: function() {
         const simulation = new ThermalSimulation()
         simulation.activateFirstPicker = true
-        this.document.top().creator.simulations.push(simulation)
+        this.document.activeComponent.creator.simulations.push(simulation)
         this.document.activateSimulation(simulation)
         this.document.hasChanges = true
       },
@@ -560,7 +560,7 @@
       addStaticLoad: function() {
         const simulation = new StaticSimulation()
         simulation.activateFirstPicker = true
-        this.document.top().creator.simulations.push(simulation)
+        this.document.activeComponent.creator.simulations.push(simulation)
         this.document.activateSimulation(simulation)
         this.document.hasChanges = true
       },

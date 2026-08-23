@@ -221,7 +221,12 @@
       },
 
       toggle() {
-        this.document.activateSimulation(this.expanded ? null : this.simulation)
+        if(this.expanded) {
+          this.document.activateSimulation(null)
+        } else {
+          this.document.activateComponent(this.component)
+          this.document.activateSimulation(this.simulation)
+        }
       },
 
       regenerated() {

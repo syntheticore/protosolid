@@ -676,7 +676,7 @@
       keyUp: function(key) {
         if(key == 'Alt') {
         } else if(key.toLowerCase() == 'o') {
-          const projectionMode = this.renderer.activeCamera == this.renderer.cameraOrtho
+          const projectionMode = this.projectionMode == 'orthographic'
             ? 'perspective'
             : 'orthographic'
           this.$emit('update:projectionMode', projectionMode)

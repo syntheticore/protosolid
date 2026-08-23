@@ -9,6 +9,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
 
 import materials from './materials.js'
+import DualCamera from './three/dual-camera.js'
 import SketchPlane from './three/sketch-plane.js'
 import ShadowCatcher from './three/shadow-catcher.js'
 // import ArrowControls from './arrow-controls.js'
@@ -69,13 +70,9 @@ export default class Renderer {
     // Camera
     this.raycaster = new THREE.Raycaster()
 
-    this.camera = new THREE.PerspectiveCamera(70, 1, 0.5, 10000)
-    this.camera.position.set(90, 90, 90)
-
-    this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -200, 10000)
-    this.cameraOrtho.position.set(0, 10, 0)
-    this.cameraOrtho.lookAt(this.scene.position)
-    this.orthoFrustumSize = 200
+    this.dualCamera = new DualCamera()
+    this.camera = this.dualCamera.perspective
+    this.cameraOrtho = this.dualCamera.orthographic
 
     // Scene Objects
     this.traceables = new THREE.Object3D()
@@ -153,13 +150,7 @@ export default class Renderer {
     this.viewControls.update()
 
     this.viewControls.addEventListener('change', () => {
-      if(camera == this.cameraOrtho && Math.abs(camera.zoom - 1) > 1e-6) {
-        const target = this.viewControls.target
-        const offset = camera.position.clone().sub(target)
-        camera.position.copy(target).addScaledVector(offset, 1 / camera.zoom)
-        camera.zoom = 1
-        this.updateOrthoProjection()
-      }
+      this.dualCamera.normalizeOrthographicZoom(this.viewControls.target)
       this.render()
     } )
 
@@ -182,49 +173,18 @@ export default class Renderer {
     })
 
     this.activeCamera = camera
+    this.dualCamera.active = camera
     this.gizmos.forEach(gizmo => gizmo.camera = camera)
     this.onWindowResize()
   }
 
-  switchCamera() {
-    const from = this.activeCamera
-    const to = from == this.cameraOrtho ? this.camera : this.cameraOrtho
-    const target = (this.viewControlsTarget || this.viewControls.target).clone()
-    const position = (this.cameraTarget || from.position).clone()
-    const offset = position.sub(target)
-    const distance = offset.length()
-    if(!distance) return
-
-    const direction = offset.normalize()
-    if(to == this.cameraOrtho) {
-      // Keep the same view direction and make the orthographic viewport cover
-      // the same vertical span at the current target as the perspective view.
-      this.orthoFrustumSize = 2 * distance * Math.tan(
-        THREE.MathUtils.degToRad(this.camera.getEffectiveFOV()) / 2
-      )
-      this.cameraOrtho.zoom = 1
-      this.cameraOrtho.position.copy(target).addScaledVector(direction, distance)
-      this.cameraOrtho.quaternion.copy(from.quaternion)
-    } else {
-      // Convert the orthographic viewport height back into a perspective
-      // distance so switching back does not change the apparent scale.
-      const visibleFrustumSize = this.orthoFrustumSize / this.cameraOrtho.zoom
-      const perspectiveDistance = visibleFrustumSize / (
-        2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)
-      )
-      this.camera.position.copy(target).addScaledVector(direction, perspectiveDistance)
-      this.camera.quaternion.copy(from.quaternion)
-    }
-
-    this.setActiveCamera(to)
-    this.viewControls.target.copy(target)
-    this.viewControls.update()
-    this.updateOrthoProjection()
-  }
-
   setProjectionMode(mode) {
-    const camera = mode == 'orthographic' ? this.cameraOrtho : this.camera
-    if(this.activeCamera != camera) this.switchCamera()
+    const target = (this.viewControlsTarget || this.viewControls.target).clone()
+    const position = (this.cameraTarget || this.activeCamera.position).clone()
+    if(!this.dualCamera.setMode(mode, target, position)) return
+    this.dualCamera.prepareMaterials(this.scene)
+    this.startAnimation()
+    this.endAnimation()
   }
 
   on(event, cb) {
@@ -232,6 +192,7 @@ export default class Renderer {
   }
 
   add(obj, selectable) {
+    this.dualCamera.prepareMaterials(obj)
     if(selectable) {
       this.world.add(obj)
     } else {
@@ -374,12 +335,14 @@ export default class Renderer {
   animate(timestamp) {
     const delta = this.lastTimestamp ? timestamp - this.lastTimestamp : 1
     this.lastTimestamp = timestamp
-    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget) requestAnimationFrame(this.animate.bind(this))
+    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget || this.dualCamera.isTransitioning) requestAnimationFrame(this.animate.bind(this))
     // Transition to target positions
     this.cameraTarget = this.lerp(this.activeCamera.position, this.cameraTarget)
     this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
     // Update the projection before OrbitControls renders the new camera pose.
-    this.updateOrthoProjection()
+    if(!this.dualCamera.isTransitioning) {
+      this.dualCamera.updateOrthographic(this.viewControlsTarget || this.viewControls.target)
+    }
     // Let OrbitControls derive the camera orientation from the interpolated
     // position and target, keeping WebGL and projected UI handles in sync.
     if(!this.cameraUpTarget) this.viewControls.update(delta)
@@ -401,6 +364,17 @@ export default class Renderer {
       }
       this.render()
     }
+    this.updateProjectionTransition()
+  }
+
+  updateProjectionTransition() {
+    const update = this.dualCamera.update()
+    if(update === undefined) return
+    if(!update) return this.render()
+
+    this.setActiveCamera(update.camera)
+    this.viewControls.target.copy(update.target)
+    this.viewControls.update()
   }
 
   lerp(vec, target) {
@@ -418,24 +392,6 @@ export default class Renderer {
   slerpDirection(direction, target) {
     const rotation = new THREE.Quaternion().setFromUnitVectors(direction, target)
     direction.applyQuaternion(new THREE.Quaternion().slerp(rotation, 0.15)).normalize()
-  }
-
-  updateOrthoProjection() {
-    if(this.activeCamera != this.cameraOrtho) return
-    const target = this.viewControlsTarget || this.viewControls.target
-    const distance = this.cameraOrtho.position.distanceTo(target)
-    if(!distance) return
-    this.orthoFrustumSize = distance * 2 * Math.tan(
-      THREE.MathUtils.degToRad(this.camera.getEffectiveFOV()) / 2
-    )
-    const aspect = this.cameraOrtho.right && this.cameraOrtho.top
-      ? (this.cameraOrtho.right - this.cameraOrtho.left) / (this.cameraOrtho.top - this.cameraOrtho.bottom)
-      : 1
-    this.cameraOrtho.left = -0.5 * this.orthoFrustumSize * aspect
-    this.cameraOrtho.right = 0.5 * this.orthoFrustumSize * aspect
-    this.cameraOrtho.top = this.orthoFrustumSize / 2
-    this.cameraOrtho.bottom = -this.orthoFrustumSize / 2
-    this.cameraOrtho.updateProjectionMatrix()
   }
 
   updateShadows() {
@@ -479,7 +435,7 @@ export default class Renderer {
 
   hitTest(coords, includeInactive) {
     coords = this.getCanvasCoords(coords)
-    this.raycaster.setFromCamera(coords, this.activeCamera)
+    this.dualCamera.setRaycaster(this.raycaster, coords)
     return this.raycaster.intersectObjects(
       includeInactive ? this.scene.children : this.traceables.children,
       true,
@@ -573,16 +529,7 @@ export default class Renderer {
 
     // Update camera projection
     const aspect = width / height
-    if(this.activeCamera == this.camera) {
-      this.camera.aspect = aspect
-    } else {
-      const frustumSize = this.orthoFrustumSize
-      this.cameraOrtho.left = - 0.5 * frustumSize * aspect
-      this.cameraOrtho.right = 0.5 * frustumSize * aspect
-      this.cameraOrtho.top = frustumSize / 2
-      this.cameraOrtho.bottom = - frustumSize / 2
-    }
-    this.activeCamera.updateProjectionMatrix()
+    this.dualCamera.resize(aspect)
     // Update line materials
     materials.line.resolution.set(width, height)
     materials.selectionLine.resolution.set(width, height)

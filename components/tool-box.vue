@@ -264,6 +264,8 @@
     SplineTool,
     CircleTool,
     RectangleTool,
+    SlotTool,
+    PolygonTool,
     ArcTool,
     TrimTool,
     TouchConstraintTool,
@@ -343,7 +345,8 @@
               { title: 'Arc', tool: ArcTool, hotKey: 'A', keyCode: 65 },
               { title: 'Circle', tool: CircleTool, hotKey: 'C', keyCode: 67 },
               { title: 'Spline', tool: SplineTool, hotKey: 'B', keyCode: 66},
-              { title: 'Polygon', icon: 'layer-group' },
+              { title: 'Slot', tool: SlotTool },
+              { title: 'Polygon', tool: PolygonTool },
               { title: 'Text', icon: 'layer-group' },
               { title: 'Split all', action: this.splitAll, icon: 'file-export' },
             ]

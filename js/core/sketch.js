@@ -464,7 +464,10 @@ export class Sketch {
       } else if(elem instanceof Arc) {
         const center = { id: `${id++}`, type: 'point', x: elem._center.x, y: elem._center.y, fixed: elem.projection }
         const endpoints = elem.endpoints()
-        const bounds = [elem.geom().get().FirstParameter(), elem.geom().get().LastParameter()]
+        const angles = endpoints.map(point => Math.atan2(
+          point.y - elem._center.y,
+          point.x - elem._center.x,
+        ))
         const start =  { id: `${id++}`, type: 'point', x: endpoints[0].x, y: endpoints[0].y, fixed: elem.projection }
         const end =    { id: `${id++}`, type: 'point', x: endpoints[1].x, y: endpoints[1].y, fixed: elem.projection }
         const arc = {
@@ -472,10 +475,12 @@ export class Sketch {
           type: 'arc',
           c_id: center.id,
           radius: elem.radius,
-          // OpenCascade's sketch circles use an indirect (clockwise)
-          // parameterization, while PlaneGCS angles are counter-clockwise.
-          start_angle: -(elem.forward ? bounds[0] : bounds[1]),
-          end_angle: -(elem.forward ? bounds[1] : bounds[0]),
+          // A three-point OpenCascade arc can choose either direction for
+          // its local circle axis. PlaneGCS uses Cartesian counter-clockwise
+          // angles, so derive them from the actual endpoints rather than OC's
+          // axis-relative curve parameters.
+          start_angle: angles[0],
+          end_angle: angles[1],
           start_id: start.id,
           end_id: end.id,
         }

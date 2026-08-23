@@ -1121,6 +1121,240 @@ export class RectangleTool extends SketchTool {
 }
 
 
+export class SlotTool extends SketchTool {
+  static icon = 'capsules'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
+    this.elements = []
+  }
+
+  snapExclusions() { return this.elements }
+
+  guideSnapPoints() {
+    return this.firstCenter && !this.secondCenter ? [this.firstCenter] : []
+  }
+
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
+
+    if(!this.firstCenter) {
+      this.firstCenter = vec.clone()
+      this.firstCenterSnap = snap
+    } else if(!this.secondCenter) {
+      if(vec.distanceToSquared(this.firstCenter) < 1e-12) return
+      this.secondCenter = vec.clone()
+      this.secondCenterSnap = snap
+    } else {
+      if(!this.updateShape(vec)) return
+      this.commit()
+      this.firstCenter = null
+      this.secondCenter = null
+      this.firstCenterSnap = null
+      this.secondCenterSnap = null
+      this.elements = []
+    }
+    this.viewport.elementChanged()
+  }
+
+  mouseMove(vec) {
+    if(!this.firstCenter || !this.secondCenter) return
+    if(this.updateShape(vec)) this.viewport.elementChanged()
+  }
+
+  slotPoints(sizePoint) {
+    const axis = this.secondCenter.clone().sub(this.firstCenter)
+    if(axis.lengthSq() < 1e-12) return
+    axis.normalize()
+    const normal = new THREE.Vector3(-axis.y, axis.x, 0)
+    const radius = Math.abs(sizePoint.clone().sub(this.firstCenter).dot(normal))
+    if(radius < 1e-6) return
+    const offset = normal.multiplyScalar(radius)
+    return {
+      topFirst: this.firstCenter.clone().add(offset),
+      topSecond: this.secondCenter.clone().add(offset),
+      bottomFirst: this.firstCenter.clone().sub(offset),
+      bottomSecond: this.secondCenter.clone().sub(offset),
+      outerFirst: this.firstCenter.clone().sub(axis.clone().multiplyScalar(radius)),
+      outerSecond: this.secondCenter.clone().add(axis.multiplyScalar(radius)),
+    }
+  }
+
+  updateShape(sizePoint) {
+    const points = this.slotPoints(sizePoint)
+    if(!points) return false
+
+    const {
+      topFirst, topSecond, bottomFirst, bottomSecond, outerFirst, outerSecond,
+    } = points
+    if(!this.elements.length) {
+      const firstArc = Arc.fromPoints([bottomFirst, outerFirst, topFirst])
+      const secondArc = Arc.fromPoints([topSecond, outerSecond, bottomSecond])
+      if(!firstArc || !secondArc) return false
+      this.elements = [
+        new Line(topFirst, topSecond),
+        secondArc,
+        new Line(bottomSecond, bottomFirst),
+        firstArc,
+      ]
+      this.elements.forEach(element => this.sketch.add(element))
+    } else {
+      const [top, secondArc, bottom, firstArc] = this.elements
+      top.setHandles([topFirst, topSecond])
+      bottom.setHandles([bottomSecond, bottomFirst])
+      if(!firstArc.setPoints([bottomFirst, outerFirst, topFirst])) return false
+      if(!secondArc.setPoints([topSecond, outerSecond, bottomSecond])) return false
+    }
+    return true
+  }
+
+  commit() {
+    const [top, secondArc, bottom, firstArc] = this.elements
+    ;[
+      [top, 0, firstArc, 2],
+      [top, 1, secondArc, 1],
+      [bottom, 0, secondArc, 2],
+      [bottom, 1, firstArc, 1],
+    ].forEach(([line, lineIndex, arc, arcIndex]) => {
+      this.sketch.addConstraint(new CoincidentConstraint(
+        new ElemRef(line, lineIndex), new ElemRef(arc, arcIndex)
+      ))
+    })
+    this.sketch.addConstraint(new EqualConstraint(firstArc, secondArc))
+    ;[top, bottom].forEach(line => {
+      this.sketch.addConstraint(new TangentConstraint(line, firstArc))
+      this.sketch.addConstraint(new TangentConstraint(line, secondArc))
+    })
+    if(this.firstCenter.x.almost(this.secondCenter.x) ||
+      this.firstCenter.y.almost(this.secondCenter.y)) {
+      this.sketch.addConstraint(new HorVertConstraint(
+        new ElemRef(firstArc, 0), new ElemRef(secondArc, 0)
+      ))
+    }
+    this.constrainPoint(firstArc, 0, this.firstCenterSnap)
+    this.constrainPoint(secondArc, 0, this.secondCenterSnap)
+  }
+
+  dispose() {
+    this.elements.forEach(element => element.remove())
+    this.elements = []
+    this.firstCenter = null
+    this.secondCenter = null
+  }
+}
+
+
+export class PolygonTool extends SketchTool {
+  static icon = 'draw-polygon'
+  static hasOptions = true
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
+    this.sides = 6
+    this.lines = []
+    this.settings = {
+      sides: {
+        title: 'Sides',
+        type: 'integer',
+        min: 3,
+        max: 64,
+      },
+    }
+  }
+
+  snapExclusions() { return this.lines }
+
+  setOption(key, value) {
+    if(key != 'sides') return
+    this.sides = Math.min(64, Math.max(3, Number(value)))
+    if(!this.center || !this.radiusPoint) return
+    this.rebuildLines()
+    this.updatePolygon(this.radiusPoint)
+    this.viewport.elementChanged()
+  }
+
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
+
+    if(!this.center) {
+      this.center = vec.clone()
+    } else {
+      if(!this.updatePolygon(vec)) return
+      this.commit(snap)
+      this.center = null
+      this.radiusPoint = null
+      this.lines = []
+    }
+    this.viewport.elementChanged()
+  }
+
+  mouseMove(vec) {
+    if(!this.center) return
+    if(this.updatePolygon(vec)) this.viewport.elementChanged()
+  }
+
+  rebuildLines() {
+    this.lines.forEach(line => line.remove())
+    this.lines = Array.from({ length: this.sides }, () =>
+      new Line(this.center.clone(), this.center.clone())
+    )
+    this.lines.forEach(line => this.sketch.add(line))
+  }
+
+  updatePolygon(radiusPoint) {
+    if(radiusPoint.distanceToSquared(this.center) < 1e-12) return false
+    this.radiusPoint = radiusPoint.clone()
+    if(this.lines.length != this.sides) this.rebuildLines()
+
+    const radius = radiusPoint.distanceTo(this.center)
+    const startAngle = Math.atan2(
+      radiusPoint.y - this.center.y,
+      radiusPoint.x - this.center.x,
+    )
+    const vertices = Array.from({ length: this.sides }, (_value, index) => {
+      const angle = startAngle + index * Math.PI * 2 / this.sides
+      return new THREE.Vector3(
+        this.center.x + Math.cos(angle) * radius,
+        this.center.y + Math.sin(angle) * radius,
+        this.center.z,
+      )
+    })
+    this.lines.forEach((line, index) => line.setHandles([
+      vertices[index], vertices[(index + 1) % vertices.length],
+    ]))
+    return true
+  }
+
+  commit(vertexSnap) {
+    this.lines.forEach((line, index) => {
+      const next = this.lines[(index + 1) % this.lines.length]
+      this.sketch.addConstraint(new CoincidentConstraint(
+        new ElemRef(line, 1), new ElemRef(next, 0)
+      ))
+      if(index) this.sketch.addConstraint(new EqualConstraint(this.lines[0], line))
+    })
+    if(this.lines.length % 2 == 0) {
+      const oppositeOffset = this.lines.length / 2
+      this.lines.slice(0, oppositeOffset).forEach((line, index) => {
+        this.sketch.addConstraint(new ParallelConstraint(
+          line, this.lines[index + oppositeOffset]
+        ))
+      })
+    }
+    this.constrainPoint(this.lines[0], 0, vertexSnap)
+  }
+
+  dispose() {
+    this.lines.forEach(line => line.remove())
+    this.lines = []
+    this.center = null
+    this.radiusPoint = null
+  }
+}
+
+
 export class ArcTool extends SketchTool {
   static icon = 'bezier-curve'
 

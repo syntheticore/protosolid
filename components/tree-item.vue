@@ -80,6 +80,10 @@
         :document="document"
       )
 
+      //- Export Configs
+      li(v-for="config in component.creator.exportConfigs")
+        TreeletExport(:config="config", :component="component", :document="document")
+
       //- Material
       TreeletMaterial(
         v-if="component.creator.material"
@@ -103,10 +107,6 @@
           header
             Icon(icon="atom" fixed-width)
             h2 Center of Mass
-
-      //- Export Configs
-      li(v-for="config in component.creator.exportConfigs")
-        TreeletExport(:config="config", :component="component", :document="document")
 
       //- Canvases
       TreeletCanvas(

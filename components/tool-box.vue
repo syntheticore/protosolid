@@ -36,7 +36,7 @@
           button.button(
             :class="{active: isActive(tool)}"
             :title="tool.title"
-            :disabled="!tool.tool && !tool.feature && !tool.action"
+            :disabled="tool.disabled || (!tool.tool && !tool.feature && !tool.action)"
             @click="activateTool(tool)"
           )
             Icon(:icon="(tool.feature && tool.feature.icon) || (tool.tool && tool.tool.icon) || tool.icon" fixed-width)
@@ -391,10 +391,10 @@
             tools: [
               { title: 'Offset', feature: OffsetFeature },
               { title: 'Boolean', feature: BooleanFeature },
-              { title: 'Move', feature: MoveFeature, hotKey: 'M', keyCode: 77 },
+              { title: 'Move', feature: MoveFeature, hotKey: 'M', keyCode: 77, disabled: true },
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', feature: ChamferFeature, hotKey: 'H', keyCode: 72 },
-              { title: 'Replace', feature: ReplaceFeature },
+              { title: 'Replace', feature: ReplaceFeature, disabled: true },
               { title: 'Dissolve', feature: DissolveFeature },
               { title: 'Draft', feature: DraftFeature },
               { title: 'Split', feature: SplitFeature },

@@ -88,7 +88,7 @@ export function alignJointWorld(type, worldA, frameA, worldB, frameB, lockSlide 
   return translateWorld(result, delta)
 }
 
-export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 64) {
+export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 64, targetLocal) {
   const joints = tree.assemblyJoints || []
   if(!movedComponent || !movedComponent.parent || !joints.length) {
     if(movedComponent) setWorldTransform(movedComponent, desiredWorld)
@@ -134,7 +134,16 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
     return !pathSolved && component.id == movedComponent.id ? 0 : 1
   }
 
-  pathSolved = solveKinematicPath(tree, movedComponent, framePosition(desiredWorld), joints, fixed, iterations)
+  const effector = targetLocal || new THREE.Vector3()
+  pathSolved = solveKinematicPath(
+    tree,
+    movedComponent,
+    effector.clone().applyMatrix4(desiredWorld),
+    effector,
+    joints,
+    fixed,
+    iterations,
+  )
   if(!pathSolved) {
     setWorldTransform(movedComponent, desiredWorld)
   }
@@ -320,7 +329,7 @@ function applyJointMotionDelta(tree, joint, motion, delta, fixed) {
   }
 }
 
-function solveKinematicPath(tree, movedComponent, target, joints, fixed, iterations) {
+function solveKinematicPath(tree, movedComponent, target, effector, joints, fixed, iterations) {
   const adjacency = new Map()
   joints.filter(joint => joint.type != 'fix').forEach(joint => {
     const add = (from, to) => {
@@ -359,6 +368,27 @@ function solveKinematicPath(tree, movedComponent, target, joints, fixed, iterati
   }
   if(pathJoints.some(joint => joint.type != 'axis')) return false
 
+  // Rotate every component on the dragged side of each path joint. Limiting
+  // this to the path itself leaves branches and the free end of a chain behind,
+  // breaking their joints and making the later projection fight the IK result.
+  const movingGroups = pathJoints.map((pathJoint, index) => {
+    const ids = new Set([components[index].id])
+    const queue = [components[index].id]
+    while(queue.length) {
+      const id = queue.shift()
+      for(const edge of adjacency.get(id) || []) {
+        if(edge.joint == pathJoint || ids.has(edge.componentId)) continue
+        ids.add(edge.componentId)
+        queue.push(edge.componentId)
+      }
+    }
+    if([...ids].some(id => fixed.has(id))) return
+    return [...ids].map(id => tree.findChild(id)).filter(Boolean)
+  })
+  // A joint in a closed loop does not divide the assembly into a movable side.
+  // Leave those graphs to the general projection solver.
+  if(movingGroups.some(group => !group)) return false
+
   for(let iteration = 0; iteration < iterations; iteration++) {
     for(let index = 0; index < pathJoints.length; index++) {
       const joint = pathJoints[index]
@@ -369,15 +399,15 @@ function solveKinematicPath(tree, movedComponent, target, joints, fixed, iterati
       const anchorFrame = joint.componentA == anchor.id ? joint.frameA : joint.frameB
       const attachment = worldTransform(anchor).multiply(anchorFrame)
       const pivot = framePosition(attachment)
-      const movingGroup = components.slice(0, index + 1)
-      let from = framePosition(worldTransform(movedComponent)).sub(pivot)
+      const movingGroup = movingGroups[index]
+      let from = effector.clone().applyMatrix4(worldTransform(movedComponent)).sub(pivot)
       const to = target.clone().sub(pivot)
       const axis = frameDirection(attachment)
 
       if(!joint.lockSlide) {
         const distance = to.dot(axis) - from.dot(axis)
         translateWorldGroup(movingGroup, axis.clone().multiplyScalar(distance))
-        from = framePosition(worldTransform(movedComponent)).sub(pivot)
+        from = effector.clone().applyMatrix4(worldTransform(movedComponent)).sub(pivot)
       }
 
       from.sub(axis.clone().multiplyScalar(from.dot(axis)))
@@ -390,7 +420,7 @@ function solveKinematicPath(tree, movedComponent, target, joints, fixed, iterati
 
       rotateWorldGroup(movingGroup, pivot, rotation)
     }
-    if(framePosition(worldTransform(movedComponent)).distanceTo(target) < SOLVER_TOLERANCE) break
+    if(effector.clone().applyMatrix4(worldTransform(movedComponent)).distanceTo(target) < SOLVER_TOLERANCE) break
   }
   return true
 }

@@ -39,8 +39,6 @@ import {
   ElemRef,
 } from './core/sketch.js'
 import {
-  captureMotionLinkStates,
-  restoreMotionLinkStates,
   solveAssembly,
   worldTransform,
 } from './core/assembly.js'
@@ -527,13 +525,12 @@ export class ManipulationTool extends HighlightTool {
       this.object = object
       this.startCoords = coords
       this.startWorld = worldTransform(this.object.component)
-      this.startPoses = new Map(
-        this.viewport.document.top().getChildren().map(component => [
-          component.id,
-          component.transform && component.transform.clone(),
-        ])
+      const hit = this.viewport.renderer.hitTest(coords).find(intersection =>
+        intersection.object.alcObject?.solid == object
       )
-      this.startMotionLinkStates = captureMotionLinkStates(this.viewport.document.top())
+      this.dragPoint = hit
+        ? hit.point.clone().applyMatrix4(this.startWorld.clone().invert())
+        : new THREE.Vector3()
     }
     console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
@@ -548,7 +545,7 @@ export class ManipulationTool extends HighlightTool {
     this.snapToPoints = false
     this.cursor = 'auto'
     delete this.object
-    delete this.startMotionLinkStates
+    delete this.dragPoint
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
     if(sketch && handle) {
@@ -569,7 +566,7 @@ export class ManipulationTool extends HighlightTool {
     this.snapToPoints = false
     this.cursor = 'auto'
     delete this.object
-    delete this.startMotionLinkStates
+    delete this.dragPoint
   }
 
   dispose() { this.cancelPointer() }
@@ -610,12 +607,10 @@ export class ManipulationTool extends HighlightTool {
 
       const comp = this.object.component
       const tree = this.viewport.document.top()
-      tree.getChildren().forEach(component => {
-        const pose = this.startPoses.get(component.id)
-        component.transform = pose && pose.clone()
-      })
-      restoreMotionLinkStates(tree, this.startMotionLinkStates)
-      solveAssembly(tree, comp, desiredWorld)
+      // The target is absolute relative to mouse-down, but the solve should be
+      // continuous. Keeping the previous solution as the next initial pose
+      // prevents multi-joint chains from jumping to another valid branch.
+      solveAssembly(tree, comp, desiredWorld, 64, this.dragPoint)
 
     } else {
       super.mouseMove(vec, coords)

@@ -308,6 +308,47 @@ test('dragging an axial chain rotates its links while keeping every joint axis c
   assert.ok(links.slice(1).some(link => Math.abs(new THREE.Vector3().setFromMatrixColumn(worldTransform(link), 0).y) > 0.1))
 })
 
+test('dragging a middle link carries the free side of the chain', () => {
+  const { root, links } = axialChain(5, true)
+  const moved = links[2]
+
+  for(const target of [
+    new THREE.Vector3(1.8, 0.4, 0),
+    new THREE.Vector3(1.6, 0.8, 0),
+    new THREE.Vector3(1.4, 1.1, 0),
+  ]) {
+    solveAssembly(root, moved, at(...target.toArray()))
+
+    assert.ok(point(moved).distanceTo(target) < 1e-2)
+    root.assemblyJoints.slice(1).forEach((joint, index) => {
+      assert.ok(point(links[index], joint.frameA).distanceTo(point(links[index + 1], joint.frameB)) < 1e-6)
+    })
+  }
+})
+
+test('dragging away from a joint rotates a link whose origin is on the joint', () => {
+  const root = new TestComponent('root')
+  const anchor = new TestComponent('anchor', root)
+  const link = new TestComponent('link', root)
+  root.assemblyJoints = [
+    { type: 'fix', componentA: anchor.id, fixedWorld: new THREE.Matrix4() },
+    {
+      type: 'axis',
+      componentA: anchor.id,
+      componentB: link.id,
+      frameA: new THREE.Matrix4(),
+      frameB: new THREE.Matrix4(),
+      lockSlide: true,
+    },
+  ]
+  const dragPoint = new THREE.Vector3(1, 0, 0)
+
+  solveAssembly(root, link, at(-1, 1), 64, dragPoint)
+
+  assert.ok(dragPoint.clone().applyMatrix4(worldTransform(link)).distanceTo(new THREE.Vector3(0, 1, 0)) < 1e-6)
+  assert.ok(point(link).length() < 1e-8)
+})
+
 test('axial chain joints remain coincident when the drag target is unreachable', () => {
   for(const target of [new THREE.Vector3(8, 0, 0), new THREE.Vector3(0.75, 0.1, 0)]) {
     const { root, links } = axialChain(3)

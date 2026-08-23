@@ -1,8 +1,9 @@
 <template lang="pug">
 
-  ul.tree-view(@scroll="bus.emit('tree-scroll')")
+  ul.tree-view(@scroll="bus.emit('tree-layout')")
 
     TreeItem(
+      ref="tree"
       :document="document"
       :component="top"
       v-bind="$attrs"
@@ -53,5 +54,14 @@
 
   const props = defineProps(['top', 'document'])
   const bus = inject('bus')
+  const tree = ref(null)
+  let resizeObserver
+
+  onMounted(() => {
+    resizeObserver = new ResizeObserver(() => bus.emit('tree-layout'))
+    resizeObserver.observe(tree.value.$el)
+  })
+
+  onBeforeUnmount(() => resizeObserver?.disconnect())
 
 </script>

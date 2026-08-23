@@ -193,7 +193,7 @@
 
     mounted() {
       this.bus.on('resize', this.updatePaths)
-      this.bus.on('tree-scroll', this.updatePaths)
+      this.bus.on('tree-layout', this.updatePaths)
       this.bus.on('escape', this.onEscape)
       this.document.on('regenerated', this.regenerated)
       if(this.expanded) {
@@ -210,7 +210,7 @@
     beforeUnmount() {
       this.cancelPick()
       this.bus.off('resize', this.updatePaths)
-      this.bus.off('tree-scroll', this.updatePaths)
+      this.bus.off('tree-layout', this.updatePaths)
       this.bus.off('escape', this.onEscape)
       this.document.off('regenerated', this.regenerated)
     },

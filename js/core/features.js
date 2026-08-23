@@ -1019,6 +1019,7 @@ export class PlaneFeature extends Feature {
       offset: {
         title: 'Offset',
         type: 'length',
+        allowNegative: true,
       },
     })
 

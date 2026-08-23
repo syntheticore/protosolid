@@ -245,6 +245,7 @@
       activeView: Object,
       displayMode: String,
       colorMode: String,
+      projectionMode: String,
     },
 
     data() {
@@ -294,6 +295,10 @@
 
       displayMode: function(mode) {
         this.renderer.setDisplayMode(mode)
+      },
+
+      projectionMode: function(mode) {
+        this.renderer.setProjectionMode(mode)
       },
 
       'document.activeSimulation': function() {
@@ -347,6 +352,7 @@
       // Renderer
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
       this.renderer.setDisplayMode(this.displayMode)
+      this.renderer.setProjectionMode(this.projectionMode)
       this.renderer.on('render', () => {
         this.frame++
         this.updateWidgets()
@@ -668,8 +674,11 @@
 
       keyUp: function(key) {
         if(key == 'Alt') {
-        } else if(key == 'o') {
-          this.renderer.switchCamera()
+        } else if(key.toLowerCase() == 'o') {
+          const projectionMode = this.renderer.activeCamera == this.renderer.cameraOrtho
+            ? 'perspective'
+            : 'orthographic'
+          this.$emit('update:projectionMode', projectionMode)
         }
       },
 

@@ -222,6 +222,11 @@ export default class Renderer {
     this.updateOrthoProjection()
   }
 
+  setProjectionMode(mode) {
+    const camera = mode == 'orthographic' ? this.cameraOrtho : this.camera
+    if(this.activeCamera != camera) this.switchCamera()
+  }
+
   on(event, cb) {
     return this.emitter.on(event, cb)
   }

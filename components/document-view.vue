@@ -7,6 +7,7 @@
       :active-view="document.previewView || document.activeView"
       :display-mode="effectiveDisplayMode"
       :color-mode="effectiveColorMode"
+      v-model:projection-mode="projectionMode"
       v-model:active-tool="activeTool"
       v-model:highlight="highlight"
     )
@@ -69,6 +70,12 @@
 
 
       h1 DISPLAY
+
+      RadioBar(
+        :items="projectionModes"
+        hot-key="O"
+        v-model:chosen="projectionMode"
+      )
 
       RadioBar(
         :items="displayModes"
@@ -217,6 +224,17 @@
     data() {
       return {
         activeTool: null,
+        projectionModes: {
+          perspective: {
+            title: 'Perspective',
+            icon: 'cube',
+          },
+          orthographic: {
+            title: 'Orthographic',
+            icon: 'vector-square',
+          },
+        },
+        projectionMode: 'orthographic',
         displayModes: {
           wireShade: {
             title: 'Shaded + Wire',

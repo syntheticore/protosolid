@@ -12,6 +12,8 @@
 
       Icon(:icon="item.icon" fixed-width)
 
+    .hot-key(v-if="hotKey") {{ hotKey }}
+
 </template>
 
 
@@ -20,6 +22,7 @@
   .radio-bar
     pointer-events: auto
     display: flex
+    position: relative
 
   .button
     margin: 0
@@ -33,11 +36,11 @@
     .button + &
       border-right: none
 
-    &:first-child
+    &:first-of-type
       border-top-left-radius: 4px
       border-bottom-left-radius: 4px
 
-    &:last-child
+    &:last-of-type
       border-top-right-radius: 4px
       border-bottom-right-radius: 4px
 
@@ -45,6 +48,22 @@
       background: $highlight
       border-color: lighten($highlight, 0%)
       color: white
+
+  .hot-key
+    position: absolute
+    top: 2px
+    right: 2px
+    font-size: 9px
+    color: white
+    background: $bright2
+    width: 12px
+    height: 12px
+    border-radius: 3px
+    border: 0.5px solid $dark2
+    display: flex
+    align-items: center
+    justify-content: center
+    pointer-events: none
 
 </style>
 
@@ -56,6 +75,7 @@
     props: {
       items: Object,
       chosen: String,
+      hotKey: String,
     },
   }
 

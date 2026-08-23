@@ -24,7 +24,10 @@
       @mouseup="$emit('dimensionMouseUp', $event, constraint)"
       @mousedown="$emit('dimensionMouseDown', $event, constraint)"
       @mousemove="$emit('dimensionMouseMove', $event, constraint)"
-    ) {{ constraint.distance.toFixed(2) }}{{ constraint.isAngular() ? '°' : '' }}
+    )
+      span.diameter-symbol(v-if="isDiameter") ⌀
+      span(v-else-if="isRadius") R
+      span {{ constraint.distance.toFixed(2) }}{{ constraint.isAngular() ? '°' : '' }}
 
     Transition(name="hide-dimension")
 
@@ -90,6 +93,16 @@
       transition: all 0.1s
       cursor: grab
       pointer-events: auto
+      display: flex
+      gap: 6px
+      align-items: center
+
+      .diameter-symbol
+        font-size: 1.7em
+        font-weight: 900
+        line-height: 0
+        position: relative
+        top: -2px
 
       &.parameterized
         background: $purple
@@ -125,7 +138,7 @@
 <script setup>
 
   import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint } from '../js/core/sketch.js'
-  import { Line } from '../js/core/geom2d.js'
+  import { Line, Circle, Arc } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
   import { SketchTool } from '../js/tools.js'
 
@@ -144,6 +157,12 @@
 
   const selected = computed(() => props.document.selection.has(props.constraint) )
   const drawingToolActive = computed(() => props.activeTool instanceof SketchTool)
+  const isDiameter = computed(() =>
+    props.constraint.items.length == 1 && props.constraint.items[0].curve() instanceof Circle
+  )
+  const isRadius = computed(() =>
+    props.constraint.items.length == 1 && props.constraint.items[0].curve() instanceof Arc
+  )
 
   const parameterized = computed(() => {
     const expression = props.constraint.expression

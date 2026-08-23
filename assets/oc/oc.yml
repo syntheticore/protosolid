@@ -532,6 +532,8 @@ mainBuild:
 
     - symbol: IFSelect_ReturnStatus
     - symbol: STEPCAFControl_Reader
+    - symbol: STEPControl_StepModelType
+    - symbol: STEPControl_Writer
     - symbol: RWGltf_CafWriter
 
     # - symbol: STEPCAFControl_Reader

@@ -318,7 +318,8 @@
 
       exportPreview: function() {
         const config = this.document.activeExportConfig
-        return config && {
+        if(!config || config.format == 'STEP') return null
+        return {
           config,
           componentId: this.document.activeExportComponentId,
           maxDistance: config.maxDistance,

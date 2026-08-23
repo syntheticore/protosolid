@@ -38,11 +38,11 @@
             option STEP
           span Format
 
-        label
+        label(v-if="config.format != 'STEP'")
           input.input(type="number" v-model="config.maxDistance" min="0.0" step="0.01" max="10.0")
           span Max Deviation
 
-        label
+        label(v-if="config.format != 'STEP'")
           input.input(type="number" v-model="config.maxAngle" min="0.0" step="0.1" max="360.0")
           span Max Angular Deviation
 
@@ -109,6 +109,17 @@
       expanded() {
         return this.document.activeExportConfig === this.config &&
           this.document.activeExportComponentId === this.component.id
+      },
+    },
+
+    watch: {
+      'config.format': function(format) {
+        if(!this.path) return
+        const extension = format.toLowerCase()
+        const updatedPath = this.path.replace(/\.(stl|3mf|step|stp)$/i, `.${extension}`)
+        if(updatedPath == this.path) return
+        this.path = updatedPath
+        this.config.path = updatedPath
       },
     },
 

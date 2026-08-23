@@ -359,7 +359,8 @@
 
       effectiveDisplayMode: function() {
         if(this.document.activeSimulation) return 'shaded'
-        if(this.document.activeExportConfig) return 'exportPreview'
+        const exportConfig = this.document.activeExportConfig
+        if(exportConfig && exportConfig.format != 'STEP') return 'exportPreview'
         return this.activeTool?.diagnosticMode || this.activeTool?.interferenceMode
           ? 'shaded'
           : this.previewDisplayMode || this.displayMode

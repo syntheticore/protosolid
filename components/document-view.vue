@@ -7,7 +7,8 @@
       :active-view="document.previewView || document.activeView"
       :display-mode="effectiveDisplayMode"
       :color-mode="effectiveColorMode"
-      v-model:projection-mode="projectionMode"
+      :projection-mode="effectiveProjectionMode"
+      @update:projection-mode="projectionMode = $event"
       v-model:active-tool="activeTool"
       v-model:highlight="highlight"
     )
@@ -87,6 +88,8 @@
             :items="projectionModes"
             hot-key="O"
             v-model:chosen="projectionMode"
+            @hover="previewProjectionMode = $event"
+            @unhover="previewProjectionMode = null"
           )
 
         .display-row
@@ -296,6 +299,7 @@
           },
         },
         projectionMode: 'orthographic',
+        previewProjectionMode: null,
         displayModes: {
           wireShade: {
             title: 'Shaded + Wire',
@@ -355,6 +359,10 @@
         return this.activeTool?.diagnosticMode
           ? `diagnostic:${this.activeTool.diagnosticMode}:${this.activeTool.draftDirection}:${this.activeTool.zebraFrequency}`
           : this.previewColorMode || this.colorMode
+      },
+
+      effectiveProjectionMode: function() {
+        return this.previewProjectionMode || this.projectionMode
       },
 
       effectiveDisplayMode: function() {

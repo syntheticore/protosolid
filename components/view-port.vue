@@ -14,6 +14,7 @@
       @pointerdown="mouseDown"
       @pointercancel="pointerCancel"
       @lostpointercapture="pointerCancel"
+      @wheel="mouseWheel"
       @mousemove="mouseMove"
       @mouseleave="mouseLeave"
     )
@@ -257,6 +258,8 @@
         guides: [],
         widgets: [],
         isOrbiting: false,
+        isZooming: false,
+        zoomEndTimer: null,
         isPanning: false,
         activeHandle: null,
         hoveredHandle: null,
@@ -441,6 +444,7 @@
     },
 
     beforeUnmount: function() {
+      clearTimeout(this.zoomEndTimer)
       this.cancelCameraUnpreview()
       this.document.off('regenerated', this.updateExportPreview)
       this.bus.off('resize', this.onWindowResize)
@@ -644,10 +648,24 @@
         this.hoveredDimension = null
       },
 
+      mouseWheel: function(e) {
+        this.isZooming = true
+        this.renderer.setPickingEnabled(false)
+        clearTimeout(this.zoomEndTimer)
+        this.zoomEndTimer = setTimeout(() => {
+          this.isZooming = false
+          this.zoomEndTimer = null
+          this.renderer.setPickingEnabled(true)
+          // Refresh hover and picker state once, at the camera's settled pose.
+          this.mouseMove(e)
+        }, 60)
+      },
+
       mouseMove: function(e) {
         if(e.button != 0) return
         if(this.isPanning) return
         if(this.isOrbiting) return
+        if(this.isZooming) return
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(this.pickingPath && vec) this.pickingPath.target = vec

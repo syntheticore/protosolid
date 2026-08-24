@@ -94,6 +94,8 @@ export default class Renderer {
 
     // Gizmos
     this.gizmos = []
+    this.pickingEnabled = true
+    this.viewInteracting = false
 
     // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
     // const mesh = new THREE.Mesh(torusGeometry, this.materials.surface)
@@ -156,7 +158,8 @@ export default class Renderer {
 
     this.viewControls.addEventListener('start', () => {
       // this.isOrbiting = true
-      this.gizmos.forEach(gizmo => gizmo.enabled = false)
+      this.viewInteracting = true
+      this.updateGizmoEnabled()
       this.cameraTarget = null
       this.viewControlsTarget = null
       this.cameraTransitionUp = null
@@ -167,7 +170,8 @@ export default class Renderer {
 
     this.viewControls.addEventListener('end', () => {
       // this.isOrbiting = false
-      this.gizmos.forEach(gizmo => gizmo.enabled = true)
+      this.viewInteracting = false
+      this.updateGizmoEnabled()
       this.reportViewChange()
       this.endAnimation()
     })
@@ -400,6 +404,7 @@ export default class Renderer {
 
   addGizmo(gizmo) {
     this.gizmos.push(gizmo)
+    gizmo.enabled = this.pickingEnabled && !this.viewInteracting
 
     // Don't orbit when dragging on gizmo
     gizmo.addEventListener('dragging-changed', (event) => {
@@ -423,6 +428,16 @@ export default class Renderer {
     this.scene.remove(gizmo)
     gizmo.dispose()
     this.render()
+  }
+
+  setPickingEnabled(enabled) {
+    this.pickingEnabled = enabled
+    this.updateGizmoEnabled()
+  }
+
+  updateGizmoEnabled() {
+    const enabled = this.pickingEnabled && !this.viewInteracting
+    this.gizmos.forEach(gizmo => gizmo.enabled = enabled)
   }
 
   getCanvasCoords(mouseCoords) {

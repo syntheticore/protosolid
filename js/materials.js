@@ -32,6 +32,9 @@ class Materials {
     this.highlightLine.color.set('#2590e1')
     this.highlightLine.depthTest = false
 
+    this.constrainedLine = this.line.clone()
+    this.constrainedLine.color.set('#d7e4ed')
+
     this.referenceLine = this.line.clone()
     this.referenceLine.color.set('#8eca53')
     this.referenceLine.dashed = true
@@ -44,6 +47,9 @@ class Materials {
 
     this.referenceHighlightLine = this.referenceLine.clone()
     this.referenceHighlightLine.color.set('#2590e1')
+
+    this.constrainedReferenceLine = this.referenceLine.clone()
+    this.constrainedReferenceLine.color.set('#d7e4ed')
 
     this.splineControlLine = this.line.clone()
     this.splineControlLine.color.set('#8a939b')
@@ -102,6 +108,16 @@ class Materials {
           projected: {
             actual: this.highlightLine,
             reference: this.referenceHighlightLine,
+          },
+        },
+        constrained: {
+          regular: {
+            actual: this.constrainedLine,
+            reference: this.constrainedReferenceLine,
+          },
+          projected: {
+            actual: this.projectedLine,
+            reference: this.referenceLine,
           },
         },
       },
@@ -169,6 +185,9 @@ class Materials {
 
     this.highlightUiPoint = this.uiPoint.clone()
     this.highlightUiPoint.color.set('#0070ff')
+
+    this.constrainedUiPoint = this.uiPoint.clone()
+    this.constrainedUiPoint.color.set('#d7e4ed')
 
     // Surface Materials
     this.surface = new THREE.MeshStandardMaterial({

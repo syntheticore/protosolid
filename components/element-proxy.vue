@@ -18,6 +18,9 @@
   const toolSelected = computed(() => props.activeTool && props.activeTool.items && props.activeTool.items.some(item =>
     (item.curve ? item.curve() : item) == props.element
   ))
+  const fullyConstrained = computed(() =>
+    !props.element.projection && props.element.fullyConstrained
+  )
 
   let mesh
   let controlMesh
@@ -63,7 +66,7 @@
   watch(() => props.element, renderElement, { immediate: true, deep: 1 })
   watch(() => props.showSplineControls, renderElement)
 
-  watch([highlighted, selected, toolSelected], () => {
+  watch([highlighted, selected, toolSelected, fullyConstrained], () => {
     // Zero-length drawing elements have no mesh, but their reactive selection
     // state can still change before Vue unmounts their proxy.
     if(!mesh) return
@@ -95,10 +98,12 @@
 
   function getMaterial() {
     if(props.element instanceof SketchPoint) {
-      return (selected.value || toolSelected.value || highlighted.value) ? materials.highlightUiPoint : materials.uiPoint
+      if(selected.value || toolSelected.value || highlighted.value) return materials.highlightUiPoint
+      return fullyConstrained.value ? materials.constrainedUiPoint : materials.uiPoint
     }
     return materials.table.curve[
-      (selected.value || toolSelected.value) ? 'selected' : (highlighted.value ? 'highlighted' : 'unselected')
+      (selected.value || toolSelected.value) ? 'selected' :
+        (highlighted.value ? 'highlighted' : (fullyConstrained.value ? 'constrained' : 'unselected'))
     ][
       props.element.projection ? 'projected' : 'regular'
     ][

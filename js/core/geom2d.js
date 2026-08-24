@@ -29,6 +29,7 @@ export class SketchElement {
   constructor() {
     this.id = makeID()
     this.geom = null
+    this.fullyConstrained = false
   }
 
   typename(base) { return base + (this.projection ? ' Projection' : '') }

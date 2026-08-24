@@ -72,6 +72,7 @@ export class Sketch {
   add(elem) {
     if(!this.elements.includes(elem)) this.elements.push(elem)
     elem.sketch = this
+    elem.fullyConstrained = false
   }
 
   addConstraint(constraint) {
@@ -109,6 +110,7 @@ export class Sketch {
   }
 
   remove(elem) {
+    this.elements.forEach(element => element.fullyConstrained = false)
     if(elem instanceof SketchElement) {
       this.elements = this.elements.filter(e => e != elem )
       this.constraints = this.constraints.filter(c => !c.items.some(item => item.curve() == elem ) )
@@ -242,6 +244,7 @@ export class Sketch {
 
     this.constraints = this.constraints.filter(constraint => !lostConstraints.has(constraint))
     this.elements.splice(elementIndex, 1, ...replacements)
+    this.elements.forEach(element => element.fullyConstrained = false)
     elem.clear()
     return replacements
   }
@@ -796,7 +799,13 @@ export class Sketch {
     }
 
     // Solve
-    const { results, conflicting, _dof } = window.oc.solveSystem([...primitives, ...constraints])
+    const parameterGroups = draggedHandle ? [] : this.elements.map(elem =>
+      idMap[elem.id].map(primitive => primitive.id)
+    )
+    const { results, conflicting, fullyConstrained } = window.oc.solveSystem(
+      [...primitives, ...constraints],
+      parameterGroups,
+    )
 
     if(conflicting) {
       window.bus.emit('toast', 'Sketch was over-constrained')
@@ -804,6 +813,12 @@ export class Sketch {
       this.solve(tree, draggedHandle)
       return
     }
+
+    // Pointer-driving constraints temporarily remove freedom while dragging;
+    // retain each element's last structural state until a normal solve.
+    if(!draggedHandle) this.elements.forEach((elem, index) =>
+      elem.fullyConstrained = fullyConstrained[index]
+    )
 
     // Write back results
     const updatePrim = (prim) => results.find(res => res.id == prim.id )

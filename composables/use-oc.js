@@ -57,19 +57,24 @@ export async function useOC() {
       return this.tesselateDoc(doc)
     },
 
-    solveSystem(primitives) {
-      const system = new gcs.GcsSystem()
-      const solver = new GcsWrapper(system, gcs)
-      solver.set_max_iterations(200) // 100
-      solver.set_convergence_threshold(1e-10)
-
+    solveSystem(primitives, parameterGroups=[]) {
       // PlaneGCS needs the module constructors when it builds B-spline
       // geometry. Free parameters let point-on-spline constraints slide
       // along the curve instead of pinning the point to the initial snap.
       const freeParams = primitives.filter(primitive => primitive.type == 'free_param')
       primitives = primitives.filter(primitive => primitive.type != 'free_param')
-      freeParams.forEach(param => solver.push_sketch_param(param.name, param.value, false))
-      solver.push_primitives_and_params(primitives)
+
+      const makeSolver = () => {
+        const system = new gcs.GcsSystem()
+        const solver = new GcsWrapper(system, gcs)
+        solver.set_max_iterations(200) // 100
+        solver.set_convergence_threshold(1e-10)
+        freeParams.forEach(param => solver.push_sketch_param(param.name, param.value, false))
+        solver.push_primitives_and_params(primitives)
+        return solver
+      }
+
+      const solver = makeSolver()
       solver.solve()
       solver.apply_solution()
 
@@ -77,9 +82,40 @@ export async function useOC() {
       const conflicting = solver.has_gcs_conflicting_constraints() || solver.has_gcs_partially_redundant_constraints() || solver.has_gcs_redundant_constraints()
       const dof = solver.gcs.dof()
 
+      // PlaneGCS only exposes total DOF. Probe whether each element owns any
+      // of that freedom by fixing its parameters at the solved position. If
+      // doing so does not lower total DOF, that element cannot move.
+      const parameterCounts = { point: 2, circle: 1, arc: 3 }
+      const primitiveById = new Map(primitives.map(primitive => [primitive.id, primitive]))
+      const parameterIndices = (target, primitiveIds) => primitiveIds.flatMap(id => {
+        const primitive = primitiveById.get(id)
+        const start = target.p_param_index.get(id)
+        const count = parameterCounts[primitive?.type] || 0
+        return start === undefined ? [] : Array.from({ length: count }, (_, offset) => start + offset)
+      }).filter((index, position, indices) => indices.indexOf(index) == position)
+
+      const probeFullyConstrained = primitiveIds => {
+        const baseIndices = parameterIndices(solver, primitiveIds)
+        if(baseIndices.every(index => solver.gcs.get_is_fixed(index))) return true
+
+        // PlaneGCS establishes its parameter structure during the first solve,
+        // so changing fixed flags on the solved system would leave stale DOF.
+        const probe = makeSolver()
+        const indices = parameterIndices(probe, primitiveIds)
+          .filter(index => !probe.gcs.get_is_fixed(index))
+        indices.forEach(index => probe.gcs.set_p_param(index, probe.gcs.get_p_param(index), true))
+        const status = probe.solve()
+        const probeDof = probe.gcs.dof()
+        probe.destroy_gcs_module()
+
+        return status < 2 && probeDof == dof
+      }
+      const fullyConstrained = dof == 0 ?
+        parameterGroups.map(() => true) : parameterGroups.map(probeFullyConstrained)
+
       solver.destroy_gcs_module()
 
-      return { results, conflicting, dof }
+      return { results, conflicting, dof, fullyConstrained }
     },
   }
 }

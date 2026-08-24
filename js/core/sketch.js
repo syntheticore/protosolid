@@ -90,6 +90,7 @@ export class Sketch {
         )
       ) || constraint
     }
+    constraint.id ||= makeID()
     constraint.sketch = this
     this.constraints.push(constraint)
     return constraint
@@ -441,7 +442,8 @@ export class Sketch {
     })
   }
 
-  solve(tree, draggedHandle) {
+  solve(tree, draggedHandle, options={}) {
+    const { applyResults=true, refreshFullyConstrained=false } = options
     let id = 1
     const idMap = {}
 
@@ -810,7 +812,7 @@ export class Sketch {
     if(conflicting) {
       window.bus.emit('toast', 'Sketch was over-constrained')
       this.constraints.pop()
-      this.solve(tree, draggedHandle)
+      this.solve(tree, draggedHandle, options)
       return
     }
 
@@ -819,6 +821,11 @@ export class Sketch {
     if(!draggedHandle) this.elements.forEach((elem, index) =>
       elem.fullyConstrained = fullyConstrained[index]
     )
+
+    // A status refresh after pointer release must not apply the unconstrained
+    // solver result: doing so can move the geometry away from the position
+    // established by the temporary pointer-driving constraints.
+    if(!applyResults) return
 
     // Write back results
     const updatePrim = (prim) => results.find(res => res.id == prim.id )
@@ -856,6 +863,10 @@ export class Sketch {
         elem.setHandles(idMap[elem.id].filter(prim => prim.type == 'point').map(vecFromPrim))
       }
     })
+
+    if(draggedHandle && refreshFullyConstrained) {
+      this.solve(tree, undefined, { applyResults: false })
+    }
   }
 
   dump() {
@@ -1053,6 +1064,7 @@ export class Constraint {
 
   dump() {
     return {
+      id: this.id,
       items: this.items,
     }
   }
@@ -1060,6 +1072,7 @@ export class Constraint {
   static undump(dump) {
     const constraint = Object.create(this.prototype)
     Object.assign(constraint, dump)
+    constraint.id ||= makeID()
     delete constraint.$class
     return constraint
   }

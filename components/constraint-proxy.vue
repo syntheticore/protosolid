@@ -191,6 +191,15 @@
       return curve.center()
     }
 
+    // A dimension's position is the label anchor on its rendered line. Point
+    // constraints normally shift their icons away from the referenced point,
+    // but applying that icon offset here moves point-to-point labels off the
+    // dimension line.
+    if(props.constraint instanceof Dimension) return [{
+      constraint: props.constraint,
+      pos: transformPosition(props.constraint.position.clone(), sketch),
+    }]
+
     if(props.constraint instanceof CoincidentConstraint) {
       // Connected line segments read as a single polyline, so a constraint icon
       // at every join would add noise rather than useful information.

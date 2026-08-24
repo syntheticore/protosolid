@@ -130,8 +130,12 @@
   })
 
   function solve() {
-    const handle = props.activeHandle || props.sketch.solveHandle
-    props.sketch.solve(props.document.top(), handle)
+    const activeHandle = props.activeHandle
+    const releasedHandle = !activeHandle && props.sketch.solveHandle
+    const handle = activeHandle || releasedHandle
+    props.sketch.solve(props.document.top(), handle, {
+      refreshFullyConstrained: !!releasedHandle,
+    })
   }
 
   watch(() => props.sketch.solveNeeded, () => {

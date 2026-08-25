@@ -125,11 +125,16 @@
       document: Object,
     },
 
-    data() {
-      return { expanded: this.document.treeletsExpandedByDefault }
-    },
-
     computed: {
+      expanded: {
+        get() {
+          return this.document.isTreeletExpanded(`variant:${this.component.id}`)
+        },
+        set(value) {
+          this.document.setTreeletExpanded(`variant:${this.component.id}`, value)
+        },
+      },
+
       option() {
         return this.variant.options[this.variant.activeOption] || this.variant.options[0]
       },

@@ -100,7 +100,10 @@
 
   const bus = inject('bus')
 
-  const expanded = ref(props.document.treeletsExpandedByDefault)
+  const expanded = computed({
+    get: () => props.document.isTreeletExpanded(`canvas:${props.canvas.id}`),
+    set: value => props.document.setTreeletExpanded(`canvas:${props.canvas.id}`, value),
+  })
   const path = ref(null)
   const sourceName = computed(() =>
     props.canvas.src?.split(/[\\/]/).pop() || 'Canvas'

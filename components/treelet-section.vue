@@ -95,7 +95,10 @@
 
   const props = defineProps(['document', 'component', 'section', 'index'])
 
-  const expanded = ref(props.document.treeletsExpandedByDefault)
+  const expanded = computed({
+    get: () => props.document.isTreeletExpanded(`section:${props.section.id}`),
+    set: value => props.document.setTreeletExpanded(`section:${props.section.id}`, value),
+  })
 
   function toggleVisibility() {
     props.section.hidden = !props.section.hidden

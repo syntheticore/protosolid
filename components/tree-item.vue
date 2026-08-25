@@ -374,12 +374,20 @@
 
     data() {
       return {
-        expanded: true,
         foo: Math.random(),
       };
     },
 
     computed: {
+      expanded: {
+        get() {
+          return this.document.isTreeletExpanded(`component:${this.component.id}`, true)
+        },
+        set(value) {
+          this.document.setTreeletExpanded(`component:${this.component.id}`, value)
+        },
+      },
+
       isInstance: function() {
         return !!this.component.instanceOf
       },

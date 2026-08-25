@@ -24,6 +24,7 @@ export default class Document extends Emitter {
     this.timeline = new Timeline()
     this.materials = []
     this.treeletsExpandedByDefault = true
+    this.treeletExpansion = new Map()
 
     this.activeComponent = this.top()
     this.activeSketch = null
@@ -79,6 +80,17 @@ export default class Document extends Emitter {
 
   top(at) {
     return this.timeline.tree(at)
+  }
+
+  isTreeletExpanded(key, defaultValue = this.treeletsExpandedByDefault) {
+    if(!this.treeletExpansion.has(key)) {
+      this.treeletExpansion.set(key, defaultValue)
+    }
+    return this.treeletExpansion.get(key)
+  }
+
+  setTreeletExpanded(key, expanded) {
+    this.treeletExpansion.set(key, expanded)
   }
 
   createComponent(parent) {

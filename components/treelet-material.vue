@@ -105,18 +105,23 @@
       component: Object,
     },
 
-    data() {
-      return {
-        expanded: this.document.treeletsExpandedByDefault,
-      }
-    },
-
     watch: {
       'component.creator.material': {
         handler() {
           this.bus.emit('render-needed')
         },
         deep: true
+      },
+    },
+
+    computed: {
+      expanded: {
+        get() {
+          return this.document.isTreeletExpanded(`material:${this.component.id}`)
+        },
+        set(value) {
+          this.document.setTreeletExpanded(`material:${this.component.id}`, value)
+        },
       },
     },
 

@@ -42,6 +42,7 @@ import {
   solveAssembly,
   worldTransform,
 } from './core/assembly.js'
+import { EPSILON } from './core/utils.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
 
 const dragThreshold = 2
@@ -531,10 +532,36 @@ export class ManipulationTool extends HighlightTool {
       this.dragPoint = hit
         ? hit.point.clone().applyMatrix4(this.startWorld.clone().invert())
         : new THREE.Vector3()
+    } else if(
+      !this.viewport.activeHandle &&
+      !this.viewport.activeDimension &&
+      (object instanceof Line || object instanceof Circle || object instanceof Arc) &&
+      this.viewport.document.activeSketch?.elements.includes(object) &&
+      !object.projection
+    ) {
+      this.curveDrag = {
+        elem: object,
+        pointer: vec.clone(),
+        coords: coords.clone(),
+        handles: object.handles().map(handle => handle.clone()),
+      }
+      // Reuse the solver's temporary pointer-driving constraint. Lines use
+      // one endpoint while circles and arcs use their center; the remaining
+      // parameters start from the dragged geometry and are then allowed to
+      // respond to the sketch's constraints.
+      this.viewport.activeHandle = {
+        type: 'curve',
+        elem: object,
+        index: 0,
+        curveDrag: true,
+      }
     }
     console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
-    this.snapToPoints = true
+    // A curve body has no single snap handle under the pointer. Snapping it
+    // as though its first handle were being dragged would create surprising
+    // endpoint/center constraints on release.
+    this.snapToPoints = !this.curveDrag
     this.cursor = 'grabbing'
   }
 
@@ -548,7 +575,7 @@ export class ManipulationTool extends HighlightTool {
     delete this.dragPoint
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
-    if(sketch && handle) {
+    if(sketch && handle && !handle.curveDrag) {
       addCapturedSnapConstraint(sketch, captureSnap(this.viewport.snapper), handle.elem, handle.index)
       const replacement = handle.elem.dissolvedTo
       if(replacement && !sketch.elements.includes(handle.elem)) {
@@ -558,6 +585,7 @@ export class ManipulationTool extends HighlightTool {
         handle.index = replacement.index
       }
     }
+    delete this.curveDrag
   }
 
   cancelPointer() {
@@ -567,6 +595,7 @@ export class ManipulationTool extends HighlightTool {
     this.cursor = 'auto'
     delete this.object
     delete this.dragPoint
+    delete this.curveDrag
   }
 
   dispose() { this.cancelPointer() }
@@ -575,8 +604,32 @@ export class ManipulationTool extends HighlightTool {
     const handle = this.viewport.activeHandle
     const dimension = this.viewport.activeDimension
 
+    // Drag a line by its body, or change a circle/arc radius from the curve.
+    // Updates are absolute from mouse-down, so solver adjustments between
+    // pointer events cannot build up into drift.
+    if(handle?.curveDrag && this.curveDrag) {
+      if(coords.distanceTo(this.curveDrag.coords) <= dragThreshold) return
+      const originalHandles = this.curveDrag.handles
+      if(handle.elem instanceof Line) {
+        const delta = vec.clone().sub(this.curveDrag.pointer)
+        handle.elem.setHandles(originalHandles.map(point => point.clone().add(delta)), false)
+      } else {
+        const center = originalHandles[0].clone()
+        const radius = center.distanceTo(vec)
+        if(radius <= EPSILON) return
+        if(handle.elem instanceof Arc) {
+          const endpoints = originalHandles.slice(1).map(point =>
+            point.clone().sub(center).normalize().multiplyScalar(radius).add(center)
+          )
+          handle.elem.setSolvedHandles([center, ...endpoints], radius)
+        } else {
+          handle.elem.setHandles([center, vec.clone()], false)
+        }
+      }
+      this.viewport.updateSketch(true)
+
     // Drag Handles
-    if(handle) {
+    } else if(handle) {
       if(handle.elem instanceof Arc && handle.index > 0) {
         handle.elem.setEndpoint(handle.index, vec)
       } else {

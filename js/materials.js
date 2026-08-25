@@ -54,7 +54,10 @@ class Materials {
     this.splineControlLine = this.line.clone()
     this.splineControlLine.color.set('#8a939b')
     this.splineControlLine.dashed = true
-    this.splineControlLine.dashScale = 0.5
+    // Distances are converted to screen pixels by Renderer before drawing.
+    this.splineControlLine.dashScale = 1
+    this.splineControlLine.dashSize = 10
+    this.splineControlLine.gapSize = 12
     this.splineControlLine.linewidth = 1.5
     this.splineControlLine.depthTest = false
 

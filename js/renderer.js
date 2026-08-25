@@ -87,6 +87,9 @@ export default class Renderer {
     // Sketch Plane
     this.sketchPlane = new SketchPlane(this.camera)
     this.traceables.add(this.sketchPlane)
+    this.splineDashOrigin = new THREE.Vector3()
+    this.splineDashX = new THREE.Vector3()
+    this.splineDashY = new THREE.Vector3()
 
     // Shadow Catcher
     if(preferences.shadowMaps) {
@@ -350,8 +353,32 @@ export default class Renderer {
     this.displayMode = mode
   }
 
+  updateSplineDashScale() {
+    if(!this.sketchPlane.visible) return
+
+    this.sketchPlane.updateWorldMatrix(true, false)
+    const transform = this.sketchPlane.matrixWorld
+    const camera = this.activeCamera
+    const canvas = this.renderer.domElement
+    const width = canvas.width / this.getPixelRatio()
+    const height = canvas.height / this.getPixelRatio()
+
+    const origin = this.splineDashOrigin.set(0, 0, 0).applyMatrix4(transform).project(camera)
+    const x = this.splineDashX.set(1, 0, 0).applyMatrix4(transform).project(camera)
+    const y = this.splineDashY.set(0, 1, 0).applyMatrix4(transform).project(camera)
+    const projectedLength = point => Math.hypot(
+      (point.x - origin.x) * width * 0.5,
+      (point.y - origin.y) * height * 0.5,
+    )
+    const pixelsPerUnit = (projectedLength(x) + projectedLength(y)) * 0.5
+    if(Number.isFinite(pixelsPerUnit) && pixelsPerUnit > 0) {
+      materials.splineControlLine.dashScale = pixelsPerUnit
+    }
+  }
+
   render() {
     this.sketchPlane.update(this.activeCamera)
+    this.updateSplineDashScale()
     this.renderer.render(this.scene, this.activeCamera)
     this.emitter.emit('render')
   }

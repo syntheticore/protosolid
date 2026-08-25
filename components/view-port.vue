@@ -302,6 +302,7 @@
           this.snapper.planeTransform = plane
           this.renderer.sketchPlane.setPlane(plane)
         }
+        this.renderer.sketchPlane.setSketch(sketch)
         this.renderer.sketchPlane.visible = !!sketch
         this.renderer.render()
       },
@@ -370,6 +371,7 @@
     mounted: function() {
       // Renderer
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
+      this.renderer.sketchPlane.setSketch(this.document.activeSketch)
       this.renderer.setDisplayMode(this.displayMode)
       this.renderer.setProjectionMode(this.projectionMode)
       this.renderer.on('render', () => {

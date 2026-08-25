@@ -8,7 +8,7 @@
 
         Icon(icon="calculator" fixed-width)
 
-        h2 Variant {{ index + 1 }}
+        h2 Variant
 
         .expand-toggle
 
@@ -18,13 +18,13 @@
 
           select.variant-option(
             ref="optionSelect"
-            v-model.number="variant.activeOption"
+            :value="variant.activeOption"
             @click.stop
             @change="changeOption"
           )
             option(v-for="(option, i) in variant.options" :value="i") {{ option.title }}
 
-        .controls.ultra-wide
+        .controls(:class="{ wide: variant.options.length == 1, 'ultra-wide': variant.options.length > 1 }")
 
           Icon(
             icon="plus-circle" fixed-width
@@ -32,10 +32,11 @@
             @click.stop="addOption"
           )
 
-          Icon(
-            icon="square-root-alt" fixed-width
-            title="Add variable"
-            @click.stop="addParameter"
+          Icon.option-delete(
+            v-if="variant.options.length > 1"
+            icon="minus-circle" fixed-width
+            title="Delete option"
+            @click.stop="removeOption"
           )
 
           Icon.delete(
@@ -46,49 +47,12 @@
 
       .content(v-if="expanded")
 
-        .option-title-row
-          input.input.option-title(
-            type="text"
-            v-model.trim="option.title"
-            @change="changeOption"
-            @keydown.stop
-          )
-
-          Icon.option-delete(
-            v-if="variant.options.length > 1"
-            icon="trash-alt" fixed-width
-            title="Delete option"
-            @click.stop="removeOption"
-          )
-
-        ul.parameters
-
-          li.parameter(v-for="parameter in option.parameters" :key="parameter")
-
-            Icon(icon="square-root-alt" fixed-width)
-
-            input.input.variable(
-              type="text"
-              v-model.trim="parameter.name"
-              @focus="rememberParameterName(parameter)"
-              @keydown.stop
-              @change="commit(parameter)"
-            )
-
-            span =
-
-            input.input.value(
-              type="text"
-              v-model.trim="parameter.value"
-              @keydown.stop
-              @change="commit(parameter)"
-            )
-
-            Icon.delete(
-              icon="times-circle" fixed-width
-              title="Delete variable"
-              @click.stop="removeParameter(parameter)"
-            )
+        input.input.option-title(
+          type="text"
+          v-model.trim="option.title"
+          @change="document.regenerateParameters()"
+          @keydown.stop
+        )
 
 </template>
 
@@ -118,7 +82,7 @@
     align-items: center
 
   .content
-    padding: 12px 12px 4px
+    padding: 12px
 
   .variant-option
     height: auto
@@ -141,67 +105,16 @@
       background: none
       color: white
 
-  .option-title-row
-    display: flex
-    align-items: center
-    gap: 12px
-    margin-bottom: 8px
-
   .option-delete
     color: $bright1
 
     &:hover
       color: $cancel
 
-  .parameters
-    margin: 0
-
-  .parameter
-    display: flex
-    align-items: center
-    min-height: 23px
-
-    svg
-      flex: 0 0 auto
-
-    input
-      width: 0
-      padding: 0 3px
-      font-weight: 800
-      font-size: 9px
-      box-shadow: none
-
-      &:not(:hover):not(:focus)
-        background: none
-        color: white
-
-    .variable
-      flex: 1 1 0
-      min-width: 0
-      margin-left: 5px
-      text-align: right
-
-    span
-      margin: 0 3px
-
-    .value
-      flex: 1 1 0
-      min-width: 0
-      margin-right: 5px
-
-    .delete
-      margin-left: auto
-      color: $bright1
-
-      &:hover
-        color: $cancel
-
 </style>
 
 
 <script>
-
-  import { makeID } from '../js/core/id.js'
 
   export default {
     name: 'TreeletVariant',
@@ -210,14 +123,10 @@
       variant: Object,
       component: Object,
       document: Object,
-      index: Number,
     },
 
     data() {
-      return {
-        expanded: this.document.treeletsExpandedByDefault,
-        parameterNames: new Map(),
-      }
+      return { expanded: this.document.treeletsExpandedByDefault }
     },
 
     computed: {
@@ -227,25 +136,20 @@
     },
 
     methods: {
-      addParameter() {
-        const id = makeID()
-        this.variant.options.forEach(option => {
-          option.parameters.push({ id, name: 'width', value: '512mm' })
-        })
-        this.document.regenerateParameters()
-      },
-
       addOption() {
-        const source = this.option
+        this.component.creator.syncActiveVariantOption()
         this.variant.options.push({
           title: `Option ${this.variant.options.length + 1}`,
-          parameters: source.parameters.map(parameter => ({ ...parameter })),
+          values: Object.fromEntries(this.component.creator.parameters.map(parameter =>
+            [parameter.id, parameter.value]
+          )),
         })
         this.variant.activeOption = this.variant.options.length - 1
         this.document.regenerateParameters()
       },
 
-      changeOption() {
+      changeOption(event) {
+        this.component.creator.selectVariantOption(Number(event.target.value))
         this.document.regenerateParameters()
       },
 
@@ -255,48 +159,16 @@
         else select?.click()
       },
 
-      commit(parameter) {
-        const oldName = this.parameterNames.get(parameter) || parameter.name
-        this.parameterNames.delete(parameter)
-        if(parameter.id) {
-          this.variant.options.forEach(option => {
-            const other = option.parameters.find(item => item.id === parameter.id)
-            if(other) other.name = parameter.name
-          })
-        }
-        if(oldName != parameter.name) this.document.renameParameterReferences(oldName, parameter.name)
-        this.document.regenerateParameters()
-      },
-
-      rememberParameterName(parameter) {
-        this.parameterNames.set(parameter, parameter.name)
-      },
-
-      removeParameter(parameter) {
-        this.document.removeParameterReferences(parameter, this.component)
-        if(parameter.id) {
-          this.variant.options.forEach(option => {
-            option.parameters = option.parameters.filter(item => item.id !== parameter.id)
-          })
-        } else {
-          this.option.parameters = this.option.parameters.filter(item => item !== parameter)
-        }
-        this.document.regenerateParameters()
-      },
-
       removeOption() {
         const index = this.variant.options.indexOf(this.option)
         this.variant.options.splice(index, 1)
         this.variant.activeOption = Math.min(this.variant.activeOption, this.variant.options.length - 1)
+        this.component.creator.selectVariantOption(this.variant.activeOption, false)
         this.document.regenerateParameters()
       },
 
       remove() {
-        this.option.parameters.forEach(parameter =>
-          this.document.removeParameterReferences(parameter, this.component)
-        )
-        this.component.creator.variants =
-          this.component.creator.variants.filter(variant => variant !== this.variant)
+        this.component.creator.variant = null
         this.document.regenerateParameters()
       },
     },

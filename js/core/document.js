@@ -234,11 +234,11 @@ export default class Document extends Emitter {
         definition.parameters?.forEach(parameter => {
           parameter.value = rewrite(parameter.value)
         })
-        definition.variants?.forEach(variant => variant.options?.forEach(option => {
-          option.parameters?.forEach(parameter => {
-            parameter.value = rewrite(parameter.value)
+        definition.variant?.options?.forEach(option => {
+          Object.keys(option.values || {}).forEach(key => {
+            option.values[key] = rewrite(option.values[key])
           })
-        }))
+        })
       })
 
     this.timeline.features.forEach(feature => {

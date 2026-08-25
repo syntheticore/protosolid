@@ -36,7 +36,7 @@
           button.button(
             :class="{active: isActive(tool)}"
             :title="tool.title"
-            :disabled="tool.disabled || (!tool.tool && !tool.feature && !tool.action)"
+            :disabled="tool.disabled || tool.isDisabled?.() || (!tool.tool && !tool.feature && !tool.action)"
             @click="activateTool(tool)"
           )
             Icon(:icon="(tool.feature && tool.feature.icon) || (tool.tool && tool.tool.icon) || tool.icon" fixed-width)
@@ -332,7 +332,12 @@
               { title: 'Point', icon: 'asterisk' },
               { title: 'Centroid', action: this.addCog, icon: 'atom' },
               { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
-              { title: 'Variant', action: this.addVariant, icon: 'calculator' },
+              {
+                title: 'Variant',
+                action: this.addVariant,
+                icon: 'calculator',
+                isDisabled: () => !!this.document.activeComponent.creator.variant,
+              },
             ]
           },
           {
@@ -512,7 +517,7 @@
       },
 
       addParameter: function() {
-        this.document.activeComponent.creator.parameters.push({
+        this.document.activeComponent.creator.addParameter({
           name: 'width',
           value: '512mm',
         })
@@ -520,13 +525,17 @@
       },
 
       addVariant: function() {
-        this.document.activeComponent.creator.variants.push({
+        const definition = this.document.activeComponent.creator
+        if(definition.variant) return
+        definition.variant = {
           activeOption: 0,
           options: [{
             title: 'Option 1',
-            parameters: [],
+            values: Object.fromEntries(definition.parameters.map(parameter =>
+              [parameter.id, parameter.value]
+            )),
           }],
-        })
+        }
         this.document.regenerateParameters()
       },
 

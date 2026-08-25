@@ -73,10 +73,8 @@
 
       //- Variants
       TreeletVariant(
-        v-for="(variant, i) in component.creator.variants"
-        :key="variant"
-        :variant="variant"
-        :index="i"
+        v-if="component.creator.variant"
+        :variant="component.creator.variant"
         :component="component"
         :document="document"
       )
@@ -399,7 +397,7 @@
           this.component.creator.material ||
           this.component.creator.simulations.length ||
           this.component.creator.parameters.length ||
-          this.component.creator.variants.length ||
+          this.component.creator.variant ||
           this.component.creator.sectionViews.length ||
           this.component.creator.exportConfigs.length
       },

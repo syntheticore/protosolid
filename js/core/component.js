@@ -19,7 +19,7 @@ export class ComponentDefinition {
     this.cog = false
     this.sectionViews = []
     this.parameters = []
-    this.variants = []
+    this.variant = null
     this.exportConfigs = []
     this.simulations = []
     this.canvases = []
@@ -28,6 +28,40 @@ export class ComponentDefinition {
     this.compMaterial = materials.surface.clone()
     this.compLineMaterial = materials.wire.clone()
     this.updateMaterials()
+  }
+
+  addParameter(parameter) {
+    parameter.id ||= makeID()
+    this.parameters.push(parameter)
+    this.variant?.options.forEach(option => {
+      option.values[parameter.id] = parameter.value
+    })
+  }
+
+  removeParameter(parameter) {
+    this.parameters = this.parameters.filter(item => item !== parameter)
+    this.variant?.options.forEach(option => delete option.values[parameter.id])
+  }
+
+  syncActiveVariantOption() {
+    const variant = this.variant
+    const option = variant?.options[variant.activeOption] || variant?.options[0]
+    if(!option) return
+    option.values = Object.fromEntries(this.parameters.map(parameter =>
+      [parameter.id, parameter.value]
+    ))
+  }
+
+  selectVariantOption(index, syncCurrent=true) {
+    const variant = this.variant
+    if(!variant) return
+    if(syncCurrent) this.syncActiveVariantOption()
+    const option = variant.options[index] || variant.options[0]
+    if(!option) return
+    variant.activeOption = variant.options.indexOf(option)
+    this.parameters.forEach(parameter => {
+      if(option.values[parameter.id] !== undefined) parameter.value = option.values[parameter.id]
+    })
   }
 
   updateMaterials() {
@@ -42,7 +76,6 @@ export class ComponentDefinition {
   static undump(dump) {
     const def = Object.assign(new ComponentDefinition(), dump)
     def.parameters ||= []
-    def.variants ||= []
     def.simulations ||= []
     def.updateMaterials()
     return def
@@ -233,11 +266,6 @@ export class Component {
 
   getParameters() {
     const params = [...this.creator.parameters]
-    const variants = this.creator.variants || []
-    variants.forEach(variant => {
-      const option = variant.options[variant.activeOption] || variant.options[0]
-      if(option) params.push(...option.parameters)
-    })
     const parentParams = this.parent ? this.parent.getParameters() : []
     parentParams.forEach(other => {
       const index = params.findIndex(own => own.name == other.name)

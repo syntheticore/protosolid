@@ -70,6 +70,8 @@
         @handleMouseDown="handleMouseDown"
         @handleMouseMove="handleMouseMove"
         @handleMouseLeave="handleMouseLeave"
+        @handlePointerDown="forwardCameraPointerDown"
+        @handleWheel="forwardWheelToCanvas"
         @dimensionMouseUp="mouseUp"
         @dimensionMouseDown="dimensionMouseDown"
         @dimensionMouseMove="dimensionMouseMove"
@@ -676,6 +678,72 @@
           // Refresh hover and picker state once, at the camera's settled pose.
           this.mouseMove(e)
         }, 60)
+      },
+
+      forwardWheelToCanvas: function(e) {
+        // Sketch handles live in an HTML overlay, while OrbitControls listens
+        // for wheel input on the canvas. Re-dispatch the wheel gesture there
+        // so zoom works without making the handles ignore pointer input.
+        this.$refs.canvas.dispatchEvent(new WheelEvent(e.type, {
+          bubbles: false,
+          cancelable: true,
+          composed: true,
+          view: window,
+          detail: e.detail,
+          screenX: e.screenX,
+          screenY: e.screenY,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey,
+          button: e.button,
+          buttons: e.buttons,
+          relatedTarget: e.relatedTarget,
+          deltaX: e.deltaX,
+          deltaY: e.deltaY,
+          deltaZ: e.deltaZ,
+          deltaMode: e.deltaMode,
+        }))
+      },
+
+      forwardCameraPointerDown: function(e) {
+        const cameraGesture = e.button != 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey
+        if(!cameraGesture) return
+
+        // OrbitControls also owns camera drag gestures on the canvas. Forward
+        // the real pointer id so it can capture the remainder of this gesture;
+        // an unmodified primary click remains exclusively a handle drag.
+        e.preventDefault()
+        this.$refs.canvas.dispatchEvent(new PointerEvent(e.type, {
+          bubbles: false,
+          cancelable: true,
+          composed: true,
+          view: window,
+          detail: e.detail,
+          screenX: e.screenX,
+          screenY: e.screenY,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey,
+          button: e.button,
+          buttons: e.buttons,
+          relatedTarget: e.relatedTarget,
+          pointerId: e.pointerId,
+          width: e.width,
+          height: e.height,
+          pressure: e.pressure,
+          tangentialPressure: e.tangentialPressure,
+          tiltX: e.tiltX,
+          tiltY: e.tiltY,
+          twist: e.twist,
+          pointerType: e.pointerType,
+          isPrimary: e.isPrimary,
+        }))
       },
 
       mouseMove: function(e) {

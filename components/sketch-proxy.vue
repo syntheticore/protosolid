@@ -45,6 +45,8 @@
       @mousedown="emit('handleMouseDown', $event, handle)"
       @mousemove="emit('handleMouseMove', $event, handle)"
       @mouseleave="emit('handleMouseLeave', $event, handle)"
+      @pointerdown="emit('handlePointerDown', $event)"
+      @wheel.prevent="emit('handleWheel', $event)"
     )
 
 </template>
@@ -80,7 +82,7 @@
   import { ProjectedPoint } from '../js/core/sketch.js'
 
   const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
-  const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
+  const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
   const highlight = inject('highlight')

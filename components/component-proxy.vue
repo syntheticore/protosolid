@@ -38,6 +38,8 @@
       @handleMouseDown="handleMouseDown"
       @handleMouseMove="handleMouseMove"
       @handleMouseLeave="handleMouseLeave"
+      @handlePointerDown="handlePointerDown"
+      @handleWheel="handleWheel"
       @dimensionMouseUp="dimensionMouseUp"
       @dimensionMouseDown="dimensionMouseDown"
       @dimensionMouseMove="dimensionMouseMove"
@@ -90,6 +92,8 @@
       @handleMouseDown="handleMouseDown"
       @handleMouseMove="handleMouseMove"
       @handleMouseLeave="handleMouseLeave"
+      @handlePointerDown="handlePointerDown"
+      @handleWheel="handleWheel"
       @dimensionMouseUp="dimensionMouseUp"
       @dimensionMouseDown="dimensionMouseDown"
       @dimensionMouseMove="dimensionMouseMove"
@@ -106,7 +110,7 @@
   import { ProjectTool } from '../js/tools.js'
 
   const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
-  const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
+  const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
   const highlight = inject('highlight')
@@ -140,6 +144,8 @@
   const handleMouseDown = (...args) => emit('handleMouseDown', ...args)
   const handleMouseMove = (...args) => emit('handleMouseMove', ...args)
   const handleMouseLeave = (...args) => emit('handleMouseLeave', ...args)
+  const handlePointerDown = (...args) => emit('handlePointerDown', ...args)
+  const handleWheel = (...args) => emit('handleWheel', ...args)
 
   const dimensionMouseUp = (...args) => emit('dimensionMouseUp', ...args)
   const dimensionMouseDown = (...args) => emit('dimensionMouseDown', ...args)

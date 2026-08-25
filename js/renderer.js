@@ -15,6 +15,8 @@ import ShadowCatcher from './three/shadow-catcher.js'
 // import ArrowControls from './arrow-controls.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
 
+const SKETCH_RENDER_OFFSET = 0.0001
+
 
 export default class Renderer {
   constructor(canvas) {
@@ -201,6 +203,39 @@ export default class Renderer {
       this.world.add(obj)
     } else {
       this.scene.add(obj)
+    }
+  }
+
+  offsetSketchObject(object) {
+    // Physically separate sketch rendering from its support face. A
+    // polygon offset alone is unreliable for coplanar wide lines and
+    // transparent profile triangles viewed along the world-up axis.
+    const onBeforeRender = object.onBeforeRender
+    const onAfterRender = object.onAfterRender
+    const originalMatrixWorld = new THREE.Matrix4()
+    const planePosition = new THREE.Vector3()
+    const cameraPosition = new THREE.Vector3()
+    const normal = new THREE.Vector3()
+    const translation = new THREE.Matrix4()
+
+    object.onBeforeRender = function(renderer, scene, camera, geometry, material, group) {
+      onBeforeRender.call(this, renderer, scene, camera, geometry, material, group)
+      originalMatrixWorld.copy(object.matrixWorld)
+      planePosition.setFromMatrixPosition(object.matrixWorld)
+      camera.getWorldPosition(cameraPosition)
+      normal.setFromMatrixColumn(object.matrixWorld, 2).normalize()
+      const offset = normal.dot(cameraPosition.sub(planePosition)) * SKETCH_RENDER_OFFSET
+      translation.makeTranslation(
+        normal.x * offset,
+        normal.y * offset,
+        normal.z * offset,
+      )
+      object.matrixWorld.premultiply(translation)
+    }
+
+    object.onAfterRender = function(renderer, scene, camera, geometry, material, group) {
+      object.matrixWorld.copy(originalMatrixWorld)
+      onAfterRender.call(this, renderer, scene, camera, geometry, material, group)
     }
   }
 

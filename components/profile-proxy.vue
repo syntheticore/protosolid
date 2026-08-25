@@ -17,6 +17,7 @@
   mesh.applyMatrix4(props.profile.sketch.workplane)
   mesh.alcTypes = ['profile']
   mesh.alcObject = props.profile
+  window.alcRenderer.offsetSketchObject(mesh)
   props.profile.mesh = () => mesh
   props.profile.component = props.component
   window.alcRenderer.add(mesh, true)

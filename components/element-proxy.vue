@@ -55,6 +55,9 @@
       ['curve', props.element.getAxis && 'axis']
     mesh.material = getMaterial()
     mesh.alcObject = props.element
+    if(!(props.element instanceof SketchPoint)) {
+      window.alcRenderer.offsetSketchObject(mesh)
+    }
 
     props.element.mesh = getMesh
     props.element.component = props.component

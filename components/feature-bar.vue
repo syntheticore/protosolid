@@ -19,9 +19,10 @@
     ul.features(ref="features", @scroll="onScroll", :style="{'--tip': tip + 'px'}")
 
       li.past(
-        v-for="(feature, i) in past",
+        v-for="feature in past",
         :ref="feature === document.activeFeature ? 'active' : 'dummy'"
         :style="{'--color': getFeatureColor(feature)}"
+        :class="{ dimmed: isFeatureDimmed(feature) }"
       )
         transition(name="fade")
           FeatureBox.tipped-bottom(
@@ -40,7 +41,8 @@
           :document="document"
           :feature="feature"
           :is-active="isActive(feature)"
-          @move-marker="document.moveMarker(i + 1)"
+          :is-dimmed="isFeatureDimmed(feature)"
+          @move-marker="moveMarkerToFeature(feature)"
         )
 
       .marker(
@@ -51,15 +53,17 @@
         Icon(icon="circle")
 
       li.future(
-        v-for="(feature, i) in future"
+        v-for="feature in future"
         :style="{'--color': getFeatureColor(feature)}"
+        :class="{ dimmed: isFeatureDimmed(feature) }"
       )
         FeatureIcon(
           isFuture
           :document="document"
           :feature="feature"
           :is-active="isActive(feature)"
-          @move-marker="document.moveMarker(past.length + i + 1)"
+          :is-dimmed="isFeatureDimmed(feature)"
+          @move-marker="moveMarkerToFeature(feature)"
         )
 
 </template>
@@ -142,6 +146,10 @@
 
     > li
       border-bottom: 1px solid var(--color)
+      transition: border-bottom-color 0.15s
+
+      &.dimmed
+        border-bottom-color: unquote('color-mix(in srgb, var(--color) 35%, transparent)')
 
       &:first-of-type
         margin-left: 10px
@@ -193,6 +201,7 @@
 <script>
 
   import { inject } from 'vue'
+  import preferences from './../js/preferences.js'
 
   const emptyImg = new Image()
   emptyImg.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs='
@@ -210,12 +219,16 @@
     computed: {
       past: function() {
         const past = this.document.timeline.features.slice(0, this.document.timeline.marker)
-        return past.filter(feature => this.shouldDisplayFeature(feature) )
+        return this.showAllFeatures ? past : past.filter(feature => this.isFeatureRelevant(feature) )
       },
 
       future: function() {
         const future = this.document.timeline.features.slice(this.document.timeline.marker)
-        return future.filter(feature => this.shouldDisplayFeature(feature) )
+        return this.showAllFeatures ? future : future.filter(feature => this.isFeatureRelevant(feature) )
+      },
+
+      showAllFeatures() {
+        return this.preferences.timelineFeatureVisibility === 'all'
       },
 
       atStart: function() {
@@ -239,6 +252,7 @@
 
     data() {
       return {
+        preferences,
         scrolled: 0,
         tip: 0,
       }
@@ -300,11 +314,19 @@
         return compId && this.document.timeline.finalTree().findChild(compId).creator.color //XXX super slow
       },
 
-      shouldDisplayFeature(feature) {
+      isFeatureRelevant(feature) {
         const modified = feature.modifiedComponents()
         return modified.length == 0 || modified.some(compId =>
           this.relevantComponentIds.some(childId => childId === compId )
         )
+      },
+
+      isFeatureDimmed(feature) {
+        return this.showAllFeatures && !this.isFeatureRelevant(feature)
+      },
+
+      moveMarkerToFeature(feature) {
+        this.document.moveMarker(this.document.timeline.features.indexOf(feature) + 1)
       },
 
       dragstart(e) {

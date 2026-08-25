@@ -8,6 +8,7 @@ const preferences = {
   antiAlias: true,
   shadowMaps: true,
   blurredOverlays: true,
+  timelineFeatureVisibility: 'all',
   zoomToCursor: true,
   cacheTesselation: true,
 }

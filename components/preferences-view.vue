@@ -51,6 +51,12 @@
           input.input(type="checkbox" v-model="preferences.blurredOverlays")
           span Blurred overlays
 
+        label
+          select.input(v-model="preferences.timelineFeatureVisibility")
+            option(value="active-component") Active component and children only
+            option(value="all") All features (dim unrelated)
+          span Timeline features
+
       fieldset
         legend Tolerances
 

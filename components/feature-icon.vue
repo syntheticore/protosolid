@@ -48,8 +48,11 @@
     border-inline: 1px solid transparent
 
     > svg
-      transition: color 0.15s
+      transition: color 0.15s, opacity 0.15s
       pointer-events: none
+
+    &.dimmed > svg
+      opacity: 0.35
 
     &.active
     &.selected
@@ -135,6 +138,7 @@
     props: {
       document: Object,
       isFuture: Boolean,
+      isDimmed: Boolean,
       // selection: Object,
       feature: Object,
       isActive: Boolean,
@@ -164,6 +168,7 @@
         const style = {
           active: this.isActive,
           selected: this.document.selection.has(this.feature),
+          dimmed: this.isDimmed,
           dragTarget: this.isDragTarget,
           targetLeft: this.targetLeft,
         }

@@ -541,11 +541,22 @@ export class ManipulationTool extends HighlightTool {
       this.viewport.document.activeSketch?.elements.includes(object) &&
       !object.projection
     ) {
+      const selectedElements = this.viewport.document.selection.items.filter(item =>
+        this.viewport.document.activeSketch.elements.includes(item)
+      )
+      const group = selectedElements.includes(object) && selectedElements.length > 1 ?
+        selectedElements.map(elem => ({
+          elem,
+          handles: elem.handles().map(handle => handle.clone()),
+          radius: elem.radius,
+        }))
+        : null
       this.curveDrag = {
         elem: object,
         pointer: vec.clone(),
         coords: coords.clone(),
         handles: object.handles().map(handle => handle.clone()),
+        group,
       }
       // Reuse the solver's temporary pointer-driving constraint. Lines use
       // one endpoint while circles and arcs use their center; the remaining
@@ -628,7 +639,17 @@ export class ManipulationTool extends HighlightTool {
     if(handle?.curveDrag && this.curveDrag) {
       if(coords.distanceTo(this.curveDrag.coords) <= dragThreshold) return
       const originalHandles = this.curveDrag.handles
-      if(handle.elem instanceof Line) {
+      if(this.curveDrag.group) {
+        const delta = vec.clone().sub(this.curveDrag.pointer)
+        this.curveDrag.group.forEach(item => {
+          const handles = item.handles.map(point => point.clone().add(delta))
+          if(item.elem instanceof Arc) {
+            item.elem.setSolvedHandles(handles, item.radius)
+          } else {
+            item.elem.setHandles(handles, false)
+          }
+        })
+      } else if(handle.elem instanceof Line) {
         const delta = vec.clone().sub(this.curveDrag.pointer)
         handle.elem.setHandles(originalHandles.map(point => point.clone().add(delta)), false)
       } else {

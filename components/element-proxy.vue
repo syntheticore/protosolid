@@ -102,8 +102,9 @@
       return fullyConstrained.value ? materials.constrainedUiPoint : materials.uiPoint
     }
     return materials.table.curve[
-      (selected.value || toolSelected.value) ? 'selected' :
-        (highlighted.value ? 'highlighted' : (fullyConstrained.value ? 'constrained' : 'unselected'))
+      highlighted.value ? 'highlighted' :
+        ((selected.value || toolSelected.value) ? 'selected' :
+          (fullyConstrained.value ? 'constrained' : 'unselected'))
     ][
       props.element.projection ? 'projected' : 'regular'
     ][

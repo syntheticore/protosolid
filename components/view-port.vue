@@ -40,6 +40,14 @@
           :y2="guide.end.y"
         )
 
+      rect.selection-box(
+        v-if="selectionBox"
+        :x="selectionBox.x"
+        :y="selectionBox.y"
+        :width="selectionBox.width"
+        :height="selectionBox.height"
+      )
+
     .floaters
 
       ConstraintProxy(
@@ -133,6 +141,12 @@
     path
       opacity: 0.7
       stroke-dasharray: 4, 7
+
+    .selection-box
+      fill: rgba($highlight, 0.12)
+      stroke: $highlight
+      stroke-width: 1
+      stroke-dasharray: 4, 3
 
     .thermal-probe
 
@@ -265,6 +279,7 @@
         hoveredHandle: null,
         activeDimension: null,
         hoveredDimension: null,
+        selectionBox: null,
         dimensionPreview: null,
         cameraPreview: null,
         cameraUnpreviewFrame: null,
@@ -826,6 +841,7 @@
         this.hoveredHandle = null
         this.activeDimension = null
         this.hoveredDimension = null
+        this.selectionBox = null
       },
 
       deleteElement: function(elem) {

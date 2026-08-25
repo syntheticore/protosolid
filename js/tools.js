@@ -535,6 +535,8 @@ export class ManipulationTool extends HighlightTool {
     } else if(
       !this.viewport.activeHandle &&
       !this.viewport.activeDimension &&
+      !this.viewport.hoveredHandle &&
+      !this.viewport.hoveredDimension &&
       (object instanceof Line || object instanceof Circle || object instanceof Arc) &&
       this.viewport.document.activeSketch?.elements.includes(object) &&
       !object.projection
@@ -555,6 +557,15 @@ export class ManipulationTool extends HighlightTool {
         index: 0,
         curveDrag: true,
       }
+    } else if(
+      !object &&
+      this.viewport.document.activeSketch &&
+      !this.viewport.activeHandle &&
+      !this.viewport.activeDimension &&
+      !this.viewport.hoveredHandle &&
+      !this.viewport.hoveredDimension
+    ) {
+      this.boxDrag = { start: coords.clone() }
     }
     console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
@@ -567,6 +578,8 @@ export class ManipulationTool extends HighlightTool {
 
   mouseUp(vec, coords) {
     this.pointerDown = false
+    const boxDrag = this.boxDrag
+    const boxSelecting = boxDrag && coords.distanceTo(boxDrag.start) > dragThreshold
     // this.mouseMove(vec, coords)
     super.mouseUp(vec, coords)
     this.snapToPoints = false
@@ -585,6 +598,9 @@ export class ManipulationTool extends HighlightTool {
         handle.index = replacement.index
       }
     }
+    if(boxSelecting) this.selectBox(boxDrag.start, coords)
+    this.viewport.selectionBox = null
+    delete this.boxDrag
     delete this.curveDrag
   }
 
@@ -596,6 +612,8 @@ export class ManipulationTool extends HighlightTool {
     delete this.object
     delete this.dragPoint
     delete this.curveDrag
+    delete this.boxDrag
+    this.viewport.selectionBox = null
   }
 
   dispose() { this.cancelPointer() }
@@ -665,9 +683,47 @@ export class ManipulationTool extends HighlightTool {
       // prevents multi-joint chains from jumping to another valid branch.
       solveAssembly(tree, comp, desiredWorld, 64, this.dragPoint)
 
+    // Drag Empty Sketch Area
+    } else if(this.boxDrag) {
+      if(coords.distanceTo(this.boxDrag.start) <= dragThreshold) return
+      this.viewport.selectionBox = this.screenRect(this.boxDrag.start, coords)
+      this.viewport.$emit('update:highlight', null)
+
     } else {
       super.mouseMove(vec, coords)
     }
+  }
+
+  screenRect(start, end) {
+    return {
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+    }
+  }
+
+  selectBox(start, end) {
+    const rect = this.screenRect(start, end)
+    const sketch = this.viewport.document.activeSketch
+    const transform = this.viewport.snapper.planeTransform
+    const contains = point => {
+      const screen = this.viewport.renderer.toScreen(point.clone().applyMatrix4(transform))
+      return screen.x >= rect.x && screen.x <= rect.x + rect.width &&
+        screen.y >= rect.y && screen.y <= rect.y + rect.height
+    }
+    const selected = sketch.elements.filter(elem => {
+      const vertices = elem instanceof SketchPoint ? elem.handles() : elem.tesselate?.()
+      const points = (vertices || elem.handles?.() || []).map(vertex =>
+        vertex instanceof THREE.Vector3 ? vertex : new THREE.Vector3(...vertex)
+      )
+      return points.length > 0 && points.every(contains)
+    })
+
+    const selection = this.viewport.document.selection
+    if(!this.viewport.bus.isCtrlPressed) selection.clear()
+    selected.forEach(item => this.viewport.bus.isCtrlPressed ? selection.toggle(item) : selection.add(item))
+    this.viewport.renderer.render()
   }
 }
 

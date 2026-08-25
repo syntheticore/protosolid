@@ -1037,6 +1037,22 @@ export class PlaneFeature extends Feature {
     tree.findChild(this.componentId).helpers.push(helper)
   }
 
+  getGizmo() {
+    const base = this.base().getItem()
+    return {
+      distance: {
+        center: new THREE.Vector3().setFromMatrixPosition(base),
+        direction: normalFromMatrix(base),
+        distance: Math.abs(this.offset),
+        side: this.offset >= 0,
+        cb: (distance, side) => {
+          this.setExpression('offset', null)
+          this.offset = distance * (side ? 1 : -1)
+        },
+      }
+    }
+  }
+
   dump() {
     return {
       ...super.dump(),

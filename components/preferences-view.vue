@@ -1,114 +1,289 @@
 <template lang="pug">
   .preferences-view
-    h2 Preferences
-    .panes.form
-      fieldset
-        legend Standard Units
+    aside.sidebar
+      nav(aria-label="Settings sections")
+        button(
+          v-for="section in sections"
+          :key="section.id"
+          :class="{ active: activeSection === section.id }"
+          @click="activeSection = section.id"
+        )
+          Icon(:icon="section.icon" fixed-width)
+          span {{ section.title }}
 
-        label
-          select.input(v-model="preferences.preferredUnit")
-            option mm
-            option cm
-            option m
-            option inch
-          span Length
+    main.settings-content
+      section(v-if="activeSection === 'units'")
+        header
+          h1 Units
+          p Choose the standard units used for new values and measurements.
 
-        label
-          select.input
-            option °
-            option Radians
-          span Angle
+        .settings-group
+          label
+            span.setting-label
+              strong Length
+              small Default unit for distances and dimensions
+            select.input(v-model="preferences.preferredUnit")
+              option(value="mm") Millimeters
+              option(value="cm") Centimeters
+              option(value="m") Meters
+              option(value="inch") Inches
 
-        label
-          select.input
-            option g/cm³
-            option kg/m³
-          span Density
+          label
+            span.setting-label
+              strong Angle
+              small Default unit for angular measurements
+            select.input(v-model="preferences.angleUnit")
+              option(value="degrees") Degrees
+              option(value="radians") Radians
 
-      fieldset
-        legend User Interface
+          label
+            span.setting-label
+              strong Density
+              small Default unit for material density
+            select.input(v-model="preferences.densityUnit")
+              option(value="g/cm3") g/cm³
+              option(value="kg/m3") kg/m³
 
-        label
-          select.input
-            option Bright
-            option Dark
-            option System default
-          span Theme
+      section(v-else-if="activeSection === 'appearance'")
+        header
+          h1 Appearance
+          p Control how ProtoSolid and the modeling viewport are displayed.
 
-        label
-          input.input(type="checkbox" v-model="preferences.antiAlias" @change="restartRequired = true")
-          span Anti-aliasing
+        .settings-group
+          label
+            span.setting-label
+              strong Theme
+              small Match the system or choose a fixed appearance
+            select.input(v-model="preferences.theme")
+              option(value="system") System default
+              option(value="light") Light
+              option(value="dark") Dark
 
-        label(:disabled="!isHighDPI")
-          input.input(type="checkbox" v-model="preferences.highDPI")
-          span High-DPI rendering
+          label
+            span.setting-label
+              strong Anti-aliasing
+              small Smooth jagged edges in the viewport
+            input.input(type="checkbox" v-model="preferences.antiAlias" @change="restartRequired = true")
 
-        label
-          input.input(type="checkbox" v-model="preferences.shadowMaps" @change="restartRequired = true")
-          span Display shadows
+          label(:disabled="!isHighDPI")
+            span.setting-label
+              strong High-DPI rendering
+              small Render the viewport at the display's native resolution
+            input.input(type="checkbox" v-model="preferences.highDPI")
 
-        label
-          input.input(type="checkbox" v-model="preferences.blurredOverlays")
-          span Blurred overlays
+          label
+            span.setting-label
+              strong Display shadows
+              small Show real-time shadows in the viewport
+            input.input(type="checkbox" v-model="preferences.shadowMaps" @change="restartRequired = true")
 
-        label
-          select.input(v-model="preferences.timelineFeatureVisibility")
-            option(value="active-component") Active component and children only
-            option(value="all") All features (dim unrelated)
-          span Timeline features
+          label
+            span.setting-label
+              strong Blurred overlays
+              small Blur content behind floating controls
+            input.input(type="checkbox" v-model="preferences.blurredOverlays")
 
-      fieldset
-        legend Tolerances
+          label
+            span.setting-label
+              strong Timeline features
+              small Choose which features remain visible in the timeline
+            select.input.wide(v-model="preferences.timelineFeatureVisibility")
+              option(value="active-component") Active component and children only
+              option(value="all") All features (dim unrelated)
 
-        label
-          input.input(type="numer" value="0.01mm" step="0.01")
-          span Center of Mass Deviation
+      section(v-else)
+        header
+          h1 Tolerances
+          p Set the precision used for geometry calculations and display meshes.
 
-        label
-          input.input(type="numer" value="0.0001mm" step="0.0001")
-          span Curve/Surface Tesselation
+        .settings-group
+          label
+            span.setting-label
+              strong Center of mass deviation
+              small Allowed deviation when calculating mass properties
+            input.input.measurement(type="text" v-model="preferences.centerOfMassTolerance")
 
-        label
-          input.input(type="numer" value="0.001mm" step="0.001")
-          span Curve Fitting Accuracy
+          label
+            span.setting-label
+              strong Curve and surface tessellation
+              small Maximum deviation of the display mesh
+            input.input.measurement(type="text" v-model="preferences.tessellationTolerance")
 
-    transition(name="fade")
-      .restart(v-if="restartRequired")
-        | A restart is required for some changes to take effect
-        button.button(@click="restart") Restart ProtoSolid
+          label
+            span.setting-label
+              strong Curve fitting accuracy
+              small Maximum error when fitting generated curves
+            input.input.measurement(type="text" v-model="preferences.curveFittingTolerance")
 
+      transition(name="fade")
+        .restart(v-if="restartRequired")
+          span Some rendering changes require a restart.
+          button.button(@click="restart") Restart ProtoSolid
 </template>
 
 
 <style lang="stylus" scoped>
+  contentInset = 40px
+  sidebarInset = 12px
+
   .preferences-view
     position: relative
+    display: grid
+    grid-template-columns: 190px minmax(0, 1fr)
+    width: 100%
+    height: 100%
+    color: $bright1
+    background: $dark2 * 0.8
 
-    .panes
+    [data-platform="darwin"] &::before
+      content: ''
+      position: absolute
+      z-index: 2
+      top: 0
+      right: 0
+      left: 0
+      height: 28px
+      -webkit-app-region: drag
+
+  .sidebar
+    background: $dark2 * 1.25
+    border-right: 1px solid $dark1
+    padding: 12px sidebarInset
+
+    [data-platform="darwin"] &
+      padding-top: 34px
+
+  nav
+    display: flex
+    flex-direction: column
+    gap: 4px
+
+    button
       display: flex
+      align-items: center
+      gap: 10px
+      width: 100%
+      height: 36px
+      padding: 0 12px
+      border: 0
+      border-radius: 5px
+      color: $bright2
+      background: transparent
+      font-size: 13px
+      font-weight: 600
+      text-align: left
 
-    fieldset
-      margin: 18px 8px
+      svg
+        color: $bright2 * 0.9
+
+      &:hover
+        color: $bright1
+        background: rgba(white, 0.06)
+
+      &.active
+        color: white
+        background: rgba(white, 0.1)
+
+        svg
+          color: white
+
+  .settings-content
+    position: relative
+    min-width: 0
+    padding: contentInset contentInset 88px
+    overflow: auto
+
+    .input:focus
+      border-color: $bright2 * 0.7
+
+    section
+      max-width: 560px
+
+    header
+      margin-bottom: 32px
+
+      h1
+        margin: 0 0 8px
+        font-size: 22px
+        font-weight: 650
+
+      p
+        margin: 0
+        color: $bright2
+        font-size: 12px
+        line-height: 1.5
+
+  .settings-group
+    label
+      display: grid
+      grid-template-columns: minmax(0, 1fr) auto
+      align-items: center
+      gap: 32px
+      min-height: 56px
+      margin: 0
+      padding: 12px 0
+
+      > :first-child
+        width: auto
+        margin: 0
+
+    select
+      width: 168px
+
+      &.wide
+        width: 224px
+
+    .measurement
+      box-sizing: border-box
+      width: 112px
+      height: 28px
+      text-align: right
 
     input[type="checkbox"]
-      margin-left: 0
-      height: 18px
+      width: 16px
+      height: 16px
+      margin: 0
+      accent-color: $highlight
+
+  .setting-label
+    display: flex
+    flex-direction: column
+    gap: 4px
+
+    strong
+      color: $bright1
+      font-size: 13px
+      font-weight: 600
+
+    small
+      color: $bright2
+      font-size: 11px
+      line-height: 1.35
 
   .restart
     position: absolute
-    bottom: 7px
-    right: 7px
-    white-space: nowrap
+    right: contentInset
+    bottom: 24px
+    left: contentInset
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 16px
+    padding: 12px 16px
+    border: 1px solid rgba($warn, 0.42)
+    border-radius: 5px
     color: $warn
+    background: $dark2 * 0.84
+    font-size: 11px
     transition: all 0.2s
+
     .button
-      margin-left: 12px
+      white-space: nowrap
 
   .fade-enter-from
   .fade-leave-to
     opacity: 0
-    transform: translateY(10px)
-
+    transform: translateY(8px)
 </style>
 
 
@@ -124,8 +299,14 @@
     data() {
       return {
         preferences,
+        activeSection: 'units',
         isHighDPI: window.devicePixelRatio > 1,
         restartRequired: false,
+        sections: [
+          { id: 'units', title: 'Units', icon: 'ruler' },
+          { id: 'appearance', title: 'Appearance', icon: 'desktop' },
+          { id: 'tolerances', title: 'Tolerances', icon: 'crosshairs' },
+        ],
       }
     },
 
@@ -133,6 +314,7 @@
       preferences: {
         handler() {
           savePreferences()
+          if(window.ipc) window.ipc.send('set-theme', preferences.theme)
         },
         deep: true,
       },

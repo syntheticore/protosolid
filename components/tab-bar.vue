@@ -5,7 +5,6 @@
     MenuButton.left.app-menu-btn(icon="atom")
 
       AppMenu(
-        :document="activeDocument"
         v-bind="$attrs"
       )
 

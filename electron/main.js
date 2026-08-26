@@ -118,9 +118,7 @@ const template = [
       {
         label: "Settings...",
         accelerator: "CmdOrCtrl+,",
-        click: async () => {
-          mainWindow.webContents.send('openPreferences')
-        },
+        click: openPreferencesWindow,
       },
       { type: 'separator' },
       // { role: 'services' },
@@ -249,6 +247,44 @@ Menu.setApplicationMenu(menu)
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
 let mainWindow
+let preferencesWindow
+
+function openPreferencesWindow() {
+  if(preferencesWindow && !preferencesWindow.isDestroyed()) {
+    if(preferencesWindow.isMinimized()) preferencesWindow.restore()
+    preferencesWindow.show()
+    preferencesWindow.focus()
+    return
+  }
+
+  preferencesWindow = new BrowserWindow({
+    width: 760,
+    height: 560,
+    minWidth: 680,
+    minHeight: 480,
+    title: 'Settings',
+    backgroundColor: '#1c2127',
+    show: false,
+    frame: true,
+    titleBarStyle: isMac ? 'hiddenInset' : 'default',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      scrollBounce: true,
+    },
+  })
+
+  preferencesWindow.loadFile('app/index.html', {
+    query: { window: 'preferences' },
+  })
+
+  preferencesWindow.once('ready-to-show', () => preferencesWindow.show())
+  preferencesWindow.webContents.on('did-finish-load', () => {
+    preferencesWindow.webContents.send('dark-mode', nativeTheme.shouldUseDarkColors)
+  })
+  preferencesWindow.on('closed', () => {
+    preferencesWindow = null
+  })
+}
 
 function createWindow() {
   // Create the browser window.
@@ -272,7 +308,7 @@ function createWindow() {
       // contextIsolation: false,
       scrollBounce: true,
       // webSecurity: false,
-      nodeIntegration: true,
+      // nodeIntegration: true,
     }
   })
 
@@ -334,7 +370,11 @@ function showSplash() {
 }
 
 function setDarkMode() {
-  mainWindow.webContents.send('dark-mode', nativeTheme.shouldUseDarkColors)
+  BrowserWindow.getAllWindows().forEach(window => {
+    if(!window.isDestroyed()) {
+      window.webContents.send('dark-mode', nativeTheme.shouldUseDarkColors)
+    }
+  })
 }
 nativeTheme.on('updated', setDarkMode)
 
@@ -373,11 +413,27 @@ ipcMain.on('restart', function() {
   app.quit()
 });
 
+ipcMain.on('open-preferences', openPreferencesWindow)
+
+ipcMain.on('preferences-updated', function(event, preferences) {
+  BrowserWindow.getAllWindows().forEach(window => {
+    if(!window.isDestroyed() && window.webContents.id !== event.sender.id) {
+      window.webContents.send('preferences-updated', preferences)
+    }
+  })
+})
+
+ipcMain.on('set-theme', function(event, theme) {
+  if(['system', 'light', 'dark'].includes(theme)) {
+    nativeTheme.themeSource = theme
+  }
+})
+
 ipcMain.on('vue-ready', function() {
   setDarkMode()
   setTimeout(() => {
-    splash.destroy()
-    mainWindow.show()
+    if(splash && !splash.isDestroyed()) splash.destroy()
+    if(mainWindow && !mainWindow.isDestroyed()) mainWindow.show()
   }, 1000)
 });
 

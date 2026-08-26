@@ -1,10 +1,10 @@
 <template lang="pug">
 
-  .app-menu(:class="{ open }")
+  .app-menu
 
     .file-menu
 
-      button.button.settings-btn(@click="toggleSettings" title="Preferences")
+      button.button.settings-btn(@click="openSettings" title="Settings")
         Icon(icon="sliders-h")
 
       .about
@@ -45,10 +45,6 @@
         //-     Icon(icon="network-wired" fixed-width)
         //-     span Open Network Project...
 
-      ul.recents
-
-    PreferencesView.panel
-
 </template>
 
 
@@ -56,20 +52,11 @@
   .app-menu
     display: flex
     width: 164px
-    transition: all 0.3s
-    &.open
-      width: 755px
 
   .file-menu
-  .panel
-    transition: all 0.3s
     width: 165px
     flex: 0 0 auto
     overflow: hidden
-    .open &
-      transition-delay: 0.15s
-
-  .file-menu
     position: relative
     border-right: 1px solid $dark1
 
@@ -138,55 +125,27 @@
         margin-left: 8px
         white-space: nowrap
 
-  .panel
-    width: 590px
-    opacity: 0
-    padding-top: 0
-    .open &
-      opacity: 1
-
-</style>
-
-<style lang="stylus">
-  .app-menu
-    h2
-      font-size: 14px
-      font-weight: 600
-      text-align: center
-      padding: 9px
-      border-bottom: 1px solid $dark1
-      background: linear-gradient(0deg, $dark2 * 0.83, transparent)
-
 </style>
 
 
 <script>
-  // import PreferencesView from './preferences-view.vue'
-
   export default {
     name: 'AppMenu',
 
     inject: ['bus'],
 
-    props: {
-      document: Object,
-    },
-
-    // components: {
-    //   PreferencesView,
-    // },
-
-    data() {
-      return {
-        open: false,
-      }
-    },
-
-    mounted() {},
-
     methods: {
-      toggleSettings: function() {
-        this.open = !this.open
+      openSettings: function() {
+        this.bus.emit('close-widgets')
+
+        if(window.ipc) {
+          window.ipc.send('open-preferences')
+          return
+        }
+
+        const url = new URL(window.location.href)
+        url.searchParams.set('window', 'preferences')
+        window.open(url, 'protosolid-settings', 'popup,width=760,height=560')
       },
     },
   }

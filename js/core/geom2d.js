@@ -132,10 +132,14 @@ export class SketchElement {
     const start = geom.get().FirstParameter()
     const end = geom.get().LastParameter()
     const isCircle = (this.constructor == Circle)
+    // Recursive pieces are trimmed views of this curve. Do not intersect
+    // them with their unsplit parent: overlapping spline geometry can make
+    // OC report hundreds of spurious points and recurse indefinitely.
+    const cutters = others.filter(other => other != this)
 
     if(isCircle) {
       const period = end - start
-      const intersections = this.splitIntersections(others)
+      const intersections = this.splitIntersections(cutters)
         .map(p => this.unsample(p) )
         // A circle is periodic, so its start and end parameters describe the
         // same point. Keep intersections at that seam and normalize them to
@@ -157,13 +161,13 @@ export class SketchElement {
 
     } else {
       const [p, u] = this
-        .splitIntersections(others)
+        .splitIntersections(cutters)
         .map(p => [p, this.unsample(p)] )
         .find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
       if(!p) return [this]
       const left = new window.oc.oc.Geom2d_TrimmedCurve(geom, start, u, true, true)
       const right = new window.oc.oc.Geom2d_TrimmedCurve(geom, u, end, true, true)
-      return [...this.constructor.fromGeometry(left, this.id + '/1').split(others), ...this.constructor.fromGeometry(right, this.id + '/2').split(others)]
+      return [...this.constructor.fromGeometry(left, this.id + '/1').split(cutters), ...this.constructor.fromGeometry(right, this.id + '/2').split(cutters)]
     }
   }
 

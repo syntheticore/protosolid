@@ -528,6 +528,12 @@ export default class Renderer {
     )
   }
 
+  intersectScreenPlane(coords, plane) {
+    coords = this.getCanvasCoords(coords)
+    this.dualCamera.setRaycaster(this.raycaster, coords)
+    return this.raycaster.ray.intersectPlane(plane, new THREE.Vector3())
+  }
+
   fromScreen(coords) {
     const intersects = this.hitTest(coords).filter(obj => obj.object.alcProjectable )
     const hit = intersects[0]

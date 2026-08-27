@@ -529,6 +529,10 @@ export class ManipulationTool extends HighlightTool {
       const hit = this.viewport.renderer.hitTest(coords).find(intersection =>
         intersection.object.alcObject?.solid == object
       )
+      const dragOrigin = hit?.point || new THREE.Vector3().setFromMatrixPosition(this.startWorld)
+      const cameraDirection = this.viewport.renderer.activeCamera.getWorldDirection(new THREE.Vector3())
+      this.dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDirection, dragOrigin)
+      this.dragStart = this.viewport.renderer.intersectScreenPlane(coords, this.dragPlane)
       this.dragPoint = hit
         ? hit.point.clone().applyMatrix4(this.startWorld.clone().invert())
         : new THREE.Vector3()
@@ -597,6 +601,8 @@ export class ManipulationTool extends HighlightTool {
     this.cursor = 'auto'
     delete this.object
     delete this.dragPoint
+    delete this.dragPlane
+    delete this.dragStart
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
     if(sketch && handle && !handle.curveDrag) {
@@ -622,6 +628,8 @@ export class ManipulationTool extends HighlightTool {
     this.cursor = 'auto'
     delete this.object
     delete this.dragPoint
+    delete this.dragPlane
+    delete this.dragStart
     delete this.curveDrag
     delete this.boxDrag
     this.viewport.selectionBox = null
@@ -686,15 +694,9 @@ export class ManipulationTool extends HighlightTool {
     // Drag Solids
     } else if(this.object) {
       if(coords.distanceTo(this.startCoords) <= dragThreshold) return
-      const cameraMatrix = this.viewport.renderer.activeCamera.matrixWorld
-      const right = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 0)
-      const up = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 1)
-
-      const scale = 0.5
-      const diffX = coords.x - this.startCoords.x
-      const diffY = coords.y - this.startCoords.y
-      const translation = right.multiplyScalar(diffX * scale)
-        .add(up.multiplyScalar(-diffY * scale))
+      const dragEnd = this.viewport.renderer.intersectScreenPlane(coords, this.dragPlane)
+      if(!dragEnd || !this.dragStart) return
+      const translation = dragEnd.sub(this.dragStart)
       const desiredWorld = new THREE.Matrix4().makeTranslation(translation).multiply(this.startWorld)
 
       const comp = this.object.component

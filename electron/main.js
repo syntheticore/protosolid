@@ -392,6 +392,10 @@ app.on('activate', function() {
   if (mainWindow === null) createWindow()
 })
 
+ipcMain.on('get-app-path', function(event) {
+  event.returnValue = app.getAppPath()
+})
+
 ipcMain.on('maximize', function() {
   mainWindow.maximize()
 });

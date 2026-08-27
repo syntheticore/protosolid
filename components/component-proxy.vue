@@ -47,17 +47,18 @@
 
   //- Helpers
 
-  HelperProxy(
-    v-if="component === document.activeComponent || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper)"
-    v-for="helper in component.helpers"
-    :key="helper.id"
-    :document="document"
-    :component="component"
-    :helper="helper"
-    :parent-transform="transform"
-    :parent-highlighted="highlighted"
-    :parent-selected="selected"
-  )
+  template(v-for="helper in component.helpers")
+
+    HelperProxy(
+      v-if="!component.isItemHidden(helper.id) && (component === document.activeComponent || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper))"
+      :key="helper.id"
+      :document="document"
+      :component="component"
+      :helper="helper"
+      :parent-transform="transform"
+      :parent-highlighted="highlighted"
+      :parent-selected="selected"
+    )
 
   //- Canvases
 

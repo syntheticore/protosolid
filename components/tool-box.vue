@@ -29,7 +29,7 @@
           @click.prevent="toggleReference"
         )
 
-      ul.tools
+      ul.tools(@scroll="onScroll")
 
         li(v-for="(tool, index) in tabs[activeTab].tools")
 
@@ -46,6 +46,8 @@
           transition(name="fade")
             FeatureBox.tipped(
               v-if="feature && isActive(tool)"
+              ref="featureBox"
+              :style="scrollStyle"
               :document="document"
               :active-tool="activeTool"
               :active-feature="feature"
@@ -55,6 +57,7 @@
           transition(name="fade")
             ToolOptionsBox.tipped(
               v-if="!feature && isActiveToolWithOptions(tool)"
+              :style="scrollStyle"
               :active-tool="activeTool"
               @close="closeActiveTool"
             )
@@ -302,6 +305,12 @@
     },
 
     computed: {
+      scrollStyle: function() {
+        return {
+          marginLeft: String(-this.scrolled) + 'px',
+        }
+      },
+
       refChecked: function() {
         if(this.document.selection.items.length) {
           return this.document.selection.items.some(sel => sel.isReference )
@@ -321,6 +330,7 @@
       return {
         activeTab: 0,
         feature: null,
+        scrolled: 0,
         tabs: [
           {
             title: 'Construct',
@@ -467,6 +477,11 @@
     },
 
     methods: {
+      onScroll: function(event) {
+        this.scrolled = event.currentTarget.scrollLeft
+        this.$nextTick(() => this.$refs.featureBox?.[0]?.updatePaths())
+      },
+
       activateTab: function(index) {
         this.closeFeature()
         if(index !== this.activeTab && this.activeTool?.constructor.hasOptions) {

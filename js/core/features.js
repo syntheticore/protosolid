@@ -445,8 +445,24 @@ Serialize.register(PatternFeature, 'PatternFeature')
 export class PoseFeature extends Feature {
   static icon = 'street-view'
 
-  constructor(doc, transforms) {
-    super(doc, false, 'Pose', {})
+  constructor(doc, transforms, transformSpace='component') {
+    super(doc, false, 'Pose', {
+      transformSpace: {
+        title: 'Gizmo Space',
+        type: 'select',
+        options: {
+          world: {
+            title: 'World',
+            icon: 'globe',
+          },
+          component: {
+            title: 'Component',
+            icon: 'cube',
+          },
+        },
+      },
+    })
+    this.transformSpace = transformSpace
     this.transforms = transforms || doc.top().getChildren()
       .filter(component => component.parent && component.transform)
       .map(component => ({ id: component.id, transform: component.localTransform() }))
@@ -468,8 +484,11 @@ export class PoseFeature extends Feature {
 
   modifiedComponents() { return this.transforms.map(entry => entry.id) }
   isComplete() { return this.transforms.length > 0 }
-  getValues() { return { transforms: this.transforms } }
-  setValues(values) { this.transforms = values.transforms || [] }
+  getValues() { return { transforms: this.transforms, transformSpace: this.transformSpace } }
+  setValues(values) {
+    this.transforms = values.transforms || []
+    this.transformSpace = values.transformSpace || 'component'
+  }
 
   updateGizmos() {
     this.clearPoseGizmos()
@@ -496,7 +515,7 @@ export class PoseFeature extends Feature {
           const moved = currentTree.findChild(id)
           if(moved) other.setTransform(worldTransform(moved))
         })
-      }))
+      }, this.transformSpace == 'world' ? 'world' : 'local'))
       this.poseGizmos.push({ id: entry.id, gizmo })
       window.alcRenderer.addGizmo(gizmo)
     })
@@ -540,10 +559,16 @@ export class PoseFeature extends Feature {
     super.dispose()
   }
 
-  dump() { return { ...super.dump(), values: {}, transforms: this.transforms } }
+  dump() {
+    return {
+      ...super.dump(),
+      values: { transformSpace: this.transformSpace },
+      transforms: this.transforms,
+    }
+  }
 
   static undump(dump, context) {
-    const feature = new PoseFeature(context.document, dump.transforms)
+    const feature = new PoseFeature(context.document, dump.transforms, dump.values?.transformSpace)
     feature.id = dump.id
     feature.componentId = dump.componentId
     feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId

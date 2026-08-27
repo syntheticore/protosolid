@@ -6,7 +6,7 @@ import { rotationFromNormal } from '../core/utils.js'
 
 
 export class TransformGizmo extends THREE.Object3D {
-  constructor(transform, onChange) {
+  constructor(transform, onChange, space='local') {
     super()
 
     const renderer = window.alcRenderer
@@ -20,7 +20,7 @@ export class TransformGizmo extends THREE.Object3D {
 
     const size = 1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight)
     this.controls.forEach(control => {
-      control.setSpace('local')
+      control.setSpace(space)
       control.setSize(size)
       control.attach(this.dummy)
       this.add(control)

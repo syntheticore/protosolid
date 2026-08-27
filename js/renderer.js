@@ -488,8 +488,17 @@ export default class Renderer {
   removeGizmo(gizmo) {
     if(!gizmo) return
     this.scene.remove(gizmo)
+    this.gizmos = this.gizmos.filter(item => item != gizmo)
     gizmo.dispose()
     this.render()
+  }
+
+  isGizmoHovered() {
+    return this.gizmos.some(gizmo => !!gizmo.axis)
+  }
+
+  isGizmoDragging() {
+    return this.gizmos.some(gizmo => !!gizmo.dragging)
   }
 
   setPickingEnabled(enabled) {

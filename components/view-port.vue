@@ -225,7 +225,8 @@
   import { SketchElement } from './../js/core/geom2d.js'
   import { Dimension, CoincidentConstraint } from './../js/core/sketch.js'
   import { Solid, Face } from './../js/core/geom3d.js'
-  import { worldTransform } from './../js/core/assembly.js'
+  import { setWorldTransform, solveAssembly, worldTransform } from './../js/core/assembly.js'
+  import { TransformGizmo } from './../js/three/gizmos.js'
   import { componentTriangles } from './../js/core/export.js'
   import {
     DummyTool,
@@ -330,6 +331,10 @@
       exportPreview: function() {
         if(this.renderer) this.updateExportPreview()
       },
+
+      transformSelectionKey: function() {
+        if(this.renderer) this.updateSelectionTransformGizmo()
+      },
     },
 
     computed: {
@@ -347,6 +352,18 @@
           maxAngle: config.maxAngle,
           marker: this.document.timeline.marker,
         }
+      },
+
+      transformSelectionKey: function() {
+        const feature = this.document.activeFeature
+        const sketch = this.document.activeSketch
+        const simulation = this.document.activeSimulation
+        const exportConfig = this.document.activeExportConfig
+        const items = this.document.selection.items.map(item => {
+          const component = item?.typename?.() == 'Component' ? item : item?.component
+          return `${item?.id || ''}:${component?.id || ''}`
+        })
+        return `${feature?.id || ''}|${sketch?.id || ''}|${simulation?.id || ''}|${exportConfig?.id || ''}|${items.join(',')}`
       },
 
       allPaths: function() {
@@ -378,6 +395,7 @@
       this.renderer.setProjectionMode(this.projectionMode)
       this.renderer.on('render', () => {
         this.frame++
+        this.syncSelectionTransformGizmo()
         this.updateWidgets()
       })
       this.renderer.on('change-view', (position, target) => {
@@ -460,6 +478,7 @@
       // Window Resize
       setTimeout(() => this.onWindowResize(), 1000)
       this.onWindowResize()
+      this.updateSelectionTransformGizmo()
     },
 
     beforeUnmount: function() {
@@ -471,12 +490,103 @@
       this.bus.off('joint-picked', this.jointPicked)
       this.clearFluxArrows()
       this.clearExportPreview()
+      this.clearSelectionTransformGizmo()
       this.renderer.dispose()
     },
 
     methods: {
       jointPicked: function(joint) {
         if(this.activeTool instanceof JointPickTool) this.activeTool.pick(joint)
+      },
+
+      updateSelectionTransformGizmo: function() {
+        this.clearSelectionTransformGizmo()
+        if(
+          this.document.activeFeature ||
+          this.document.activeSketch ||
+          this.document.activeSimulation ||
+          this.document.activeExportConfig
+        ) return
+
+        const selectedComponents = this.document.selection.items
+          .map(item => item?.typename?.() == 'Component' ? item :
+            item?.typename?.() == 'Solid' ? item.component : null
+          )
+          .filter(Boolean)
+          .filter(component => component.parent)
+          // Keep the latest occurrence so selecting a solid after its
+          // component also makes that component the group anchor.
+          .filter((component, index, all) =>
+            all.map(other => other.id).lastIndexOf(component.id) == index
+          )
+        if(!selectedComponents.length) return
+
+        const anchor = selectedComponents.at(-1)
+        const components = selectedComponents
+          .filter((component, _, all) => !all.some(other =>
+            other != component && component.hasAncestor(other)
+          ))
+
+        const componentIds = components.map(component => component.id)
+        const grouped = selectedComponents.length > 1
+        // Keep the assembly solver's effector off every local rotation axis
+        // so all three rotation rings can drive constrained components.
+        const target = new THREE.Vector3(1, 2, 3).normalize().multiplyScalar(10)
+
+        let gizmo
+        gizmo = markRaw(new TransformGizmo(worldTransform(anchor), desiredWorld => {
+          const tree = this.document.top()
+          const current = componentIds.map(id => tree.findChild(id)).filter(Boolean)
+          if(current.length != componentIds.length) return
+
+          if(!grouped) {
+            solveAssembly(tree, current[0], desiredWorld, 64, target)
+            gizmo.setTransform(worldTransform(current[0]))
+          } else {
+            const start = this.selectionTransformStart
+            if(!start) return
+            const delta = desiredWorld.clone().multiply(start.gizmo.clone().invert())
+            current.forEach(component => {
+              const initialWorld = start.worlds.get(component.id)
+              if(initialWorld) setWorldTransform(component, delta.clone().multiply(initialWorld))
+            })
+            gizmo.setTransform(desiredWorld)
+          }
+          this.renderer.render()
+        }))
+        const captureStart = () => {
+          const tree = this.document.top()
+          this.selectionTransformStart = {
+            gizmo: gizmo.getTransform(),
+            worlds: new Map(componentIds.map(id => {
+              const current = tree.findChild(id)
+              return [id, current && worldTransform(current)]
+            })),
+          }
+        }
+        gizmo.addEventListener('mouseDown', captureStart)
+        captureStart()
+        this.selectionTransformComponentIds = componentIds
+        this.selectionTransformAnchorId = anchor.id
+        this.selectionTransformGizmo = gizmo
+        this.renderer.addGizmo(gizmo)
+      },
+
+      syncSelectionTransformGizmo: function() {
+        const gizmo = this.selectionTransformGizmo
+        if(!gizmo || gizmo.dragging) return
+        const tree = this.document.top()
+        const anchor = tree.findChild(this.selectionTransformAnchorId)
+        if(anchor) gizmo.setTransform(worldTransform(anchor))
+      },
+
+      clearSelectionTransformGizmo: function() {
+        if(!this.selectionTransformGizmo || !this.renderer) return
+        this.renderer.removeGizmo(this.selectionTransformGizmo)
+        this.selectionTransformGizmo = null
+        this.selectionTransformComponentIds = null
+        this.selectionTransformAnchorId = null
+        this.selectionTransformStart = null
       },
 
       updateExportPreview: function() {
@@ -565,6 +675,7 @@
       },
 
       mouseUp: function(e) {
+        if(this.renderer.isGizmoDragging()) return
         if(this.isPanning) {
           this.isPanning = false
           this.activeHandle = null
@@ -622,6 +733,7 @@
       mouseDown: function(e) {
         document.activeElement.blur() // Necessary since THREE R123
         if(e.button != 0) return
+        if(this.renderer.isGizmoHovered()) return
         this.isPanning = e.shiftKey
         if(this.isPanning) {
           // Shift gives the complete pointer gesture to OrbitControls. This
@@ -748,6 +860,7 @@
 
       mouseMove: function(e) {
         if(e.button != 0) return
+        if(this.renderer.isGizmoDragging()) return
         if(this.isPanning) return
         if(this.isOrbiting) return
         if(this.isZooming) return

@@ -8,7 +8,7 @@ import { Reference, PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, ocCatch, rad } from './utils.js'
 import Serialize from './serialize.js'
-import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
+import { LengthGizmo, AngleGizmo, TransformGizmo } from '../three/gizmos.js'
 import { makeID } from './id.js'
 import Expression from './expression.js'
 import {
@@ -19,6 +19,7 @@ import {
   jointMotionOptions,
   referenceComponentId,
   relativeComponentTransform,
+  solveAssembly,
   setBaselineWorldTransform,
   worldTransform,
 } from './assembly.js'
@@ -449,6 +450,7 @@ export class PoseFeature extends Feature {
     this.transforms = transforms || doc.top().getChildren()
       .filter(component => component.parent && component.transform)
       .map(component => ({ id: component.id, transform: component.localTransform() }))
+    this.poseGizmos = []
   }
 
   execute(tree) {
@@ -466,7 +468,79 @@ export class PoseFeature extends Feature {
 
   modifiedComponents() { return this.transforms.map(entry => entry.id) }
   isComplete() { return this.transforms.length > 0 }
-  dump() { return { ...super.dump(), transforms: this.transforms } }
+  getValues() { return { transforms: this.transforms } }
+  setValues(values) { this.transforms = values.transforms || [] }
+
+  updateGizmos() {
+    this.clearPoseGizmos()
+    const tree = this.document.top()
+
+    this.transforms.forEach(entry => {
+      const component = tree.findChild(entry.id)
+      if(!component?.parent) return
+
+      // A point away from every local gizmo axis lets the point-based
+      // assembly solver observe rotations around X, Y, and Z.
+      const target = new THREE.Vector3(1, 2, 3).normalize().multiplyScalar(10)
+
+      let gizmo
+      gizmo = markRaw(new TransformGizmo(worldTransform(component), desiredWorld => {
+        const currentTree = this.document.top()
+        const current = currentTree.findChild(entry.id)
+        if(!current) return
+
+        solveAssembly(currentTree, current, desiredWorld, 64, target)
+        this.captureTransforms(currentTree)
+        this.document.timeline.invalidateFeature(this)
+        this.poseGizmos.forEach(({ id, gizmo: other }) => {
+          const moved = currentTree.findChild(id)
+          if(moved) other.setTransform(worldTransform(moved))
+        })
+      }))
+      this.poseGizmos.push({ id: entry.id, gizmo })
+      window.alcRenderer.addGizmo(gizmo)
+    })
+  }
+
+  captureTransforms(tree) {
+    const featureIndex = this.document.timeline.features.indexOf(this)
+    const before = this.document.timeline.tree(featureIndex)
+    const retainedIds = new Set(this.poseGizmos.map(({ id }) => id))
+    const locals = tree.getChildren()
+      .filter(component => component.parent)
+      .map(component => ({ component, transform: component.localTransform() }))
+
+    // Turn the transient assembly-solver result into the new design pose.
+    // The tree before this feature remains untouched and is the comparison
+    // point used to decide which component transforms the pose must store.
+    locals.forEach(({ component, transform }) => {
+      if(!component.transform) return
+      component.designTransform = transform.clone()
+      component.transform = null
+    })
+
+    this.transforms = locals.flatMap(({ component, transform }) => {
+      const previous = before?.findChild(component.id)
+      if(
+        !retainedIds.has(component.id) &&
+        previous &&
+        matricesAlmostEqual(transform, previous.localTransform())
+      ) return []
+      return [{ id: component.id, transform: transform.clone() }]
+    })
+  }
+
+  clearPoseGizmos() {
+    this.poseGizmos.forEach(({ gizmo }) => window.alcRenderer?.removeGizmo(gizmo))
+    this.poseGizmos = []
+  }
+
+  dispose() {
+    this.clearPoseGizmos()
+    super.dispose()
+  }
+
+  dump() { return { ...super.dump(), values: {}, transforms: this.transforms } }
 
   static undump(dump, context) {
     const feature = new PoseFeature(context.document, dump.transforms)
@@ -477,6 +551,11 @@ export class PoseFeature extends Feature {
   }
 }
 Serialize.register(PoseFeature, 'PoseFeature')
+
+
+function matricesAlmostEqual(left, right, epsilon=1e-8) {
+  return left.elements.every((value, index) => Math.abs(value - right.elements[index]) < epsilon)
+}
 
 
 export class JointFeature extends Feature {

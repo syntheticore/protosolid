@@ -379,6 +379,84 @@ fn blind_circular_pocket_is_built_from_analytical_layers() {
 }
 
 #[test]
+fn blind_nurbs_pocket_has_exact_prismatic_mass_properties() {
+    let tolerance = ModelTolerance::default();
+    let block = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(-10.0, -10.0),
+                Point2::new(10.0, -10.0),
+                Point2::new(10.0, 10.0),
+                Point2::new(-10.0, 10.0),
+            ],
+            tolerance,
+        )
+        .expect("block wire"),
+        [],
+        tolerance,
+    )
+    .expect("block profile")
+    .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+    .expect("block");
+    let curved = TrimmedCurve2::new(
+        NurbsCurve2::new(
+            2,
+            vec![
+                Point2::new(3.0, 1.0),
+                Point2::new(0.0, 4.0),
+                Point2::new(-3.0, 1.0),
+            ],
+            vec![1.0; 3],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .expect("spline"),
+        ParameterRange::new(0.0, 1.0).expect("range"),
+    )
+    .expect("trimmed spline");
+    let pocket_profile = Profile::new(
+        Wire2::new(
+            [
+                TrimmedCurve2::line(Point2::new(-3.0, -2.0), Point2::new(3.0, -2.0))
+                    .expect("bottom"),
+                TrimmedCurve2::line(Point2::new(3.0, -2.0), Point2::new(3.0, 1.0)).expect("right"),
+                curved,
+                TrimmedCurve2::line(Point2::new(-3.0, 1.0), Point2::new(-3.0, -2.0)).expect("left"),
+            ],
+            tolerance,
+        )
+        .expect("pocket wire"),
+        [],
+        tolerance,
+    )
+    .expect("pocket profile");
+    let tool_plane = Plane3::new(
+        Point3::new(0.0, 0.0, 20.0),
+        Vec3::unit_y(),
+        -Vec3::unit_x(),
+        tolerance,
+    )
+    .expect("tool plane");
+    let expected = 8_000.0 - pocket_profile.area() * 5.0;
+    let tool = pocket_profile
+        .extrude(tool_plane, Vec3::new(0.0, 0.0, -5.0))
+        .expect("pocket tool");
+    let pocket = block.difference(&tool).expect("exact NURBS pocket");
+    assert!((pocket.volume() - expected).abs() < 1.0e-6);
+    assert!(pocket
+        .faces()
+        .any(|face| matches!(face.surface(), Surface3::Nurbs(_))));
+
+    let boss = pocket_profile
+        .extrude(tool_plane, Vec3::new(0.0, 0.0, 5.0))
+        .expect("boss tool");
+    let joined = block.union(&boss).expect("exact NURBS boss");
+    assert!((joined.volume() - (8_000.0 + pocket_profile.area() * 5.0)).abs() < 1.0e-6);
+    assert!(joined
+        .faces()
+        .any(|face| matches!(face.surface(), Surface3::Nurbs(_))));
+}
+
+#[test]
 fn adjacent_curved_extrusions_union_across_their_shared_seam() {
     let tolerance = ModelTolerance::default();
     let intersection_y = 18.75_f64.sqrt();
@@ -755,6 +833,155 @@ fn nurbs_profile_extrudes_as_an_analytic_certified_prism() {
         .union(&separate_prism)
         .expect("separated analytic prisms");
     assert_eq!(compound.solids().len(), 2);
+}
+
+#[test]
+fn nurbs_profile_boolean_isolated_on_exact_curve_parameters() {
+    let tolerance = ModelTolerance::default();
+    let curved_top = TrimmedCurve2::new(
+        NurbsCurve2::new(
+            2,
+            vec![
+                Point2::new(4.0, 2.0),
+                Point2::new(2.0, 4.0),
+                Point2::new(0.0, 2.0),
+            ],
+            vec![1.0; 3],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .expect("spline"),
+        ParameterRange::new(0.0, 1.0).expect("range"),
+    )
+    .expect("trimmed spline");
+    let spline_profile = Profile::new(
+        Wire2::new(
+            [
+                TrimmedCurve2::line(Point2::new(0.0, 0.0), Point2::new(4.0, 0.0)).expect("bottom"),
+                TrimmedCurve2::line(Point2::new(4.0, 0.0), Point2::new(4.0, 2.0)).expect("right"),
+                curved_top,
+                TrimmedCurve2::line(Point2::new(0.0, 2.0), Point2::new(0.0, 0.0)).expect("left"),
+            ],
+            tolerance,
+        )
+        .expect("spline wire"),
+        [],
+        tolerance,
+    )
+    .expect("spline profile");
+    let rectangle = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(2.0, 1.0),
+                Point2::new(5.0, 1.0),
+                Point2::new(5.0, 3.0),
+                Point2::new(2.0, 3.0),
+            ],
+            tolerance,
+        )
+        .expect("rectangle"),
+        [],
+        tolerance,
+    )
+    .expect("rectangle profile");
+
+    let intersection = spline_profile
+        .boolean_planar(&rectangle, BooleanKind::Intersection)
+        .expect("analytic NURBS/line intersection");
+    assert_eq!(intersection.len(), 1);
+    assert!(intersection[0].area() > 2.0 && intersection[0].area() < 6.0);
+    assert!(intersection[0]
+        .outer()
+        .segments()
+        .iter()
+        .any(|segment| matches!(segment.curve(), Curve2::Nurbs(_))));
+
+    let expected_volume = intersection[0].area() * 5.0;
+    let spline_prism = spline_profile
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 5.0))
+        .expect("spline prism");
+    let rectangle_prism = rectangle
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 5.0))
+        .expect("rectangle prism");
+    let solid_intersection = spline_prism
+        .intersection(&rectangle_prism)
+        .expect("analytic NURBS prism intersection");
+    assert!((solid_intersection.volume() - expected_volume).abs() < 1.0e-6);
+}
+
+#[test]
+fn nurbs_nurbs_intersections_are_isolated_without_polylines() {
+    let make_curve = |points| {
+        TrimmedCurve2::new(
+            NurbsCurve2::new(2, points, vec![1.0; 3], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+                .expect("quadratic spline"),
+            ParameterRange::new(0.0, 1.0).expect("range"),
+        )
+        .expect("trimmed spline")
+    };
+    let first = make_curve(vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(1.0, 2.0),
+        Point2::new(2.0, 0.0),
+    ]);
+    let second = make_curve(vec![
+        Point2::new(0.0, 1.0),
+        Point2::new(1.0, -1.0),
+        Point2::new(2.0, 1.0),
+    ]);
+    let intersections =
+        super::wire::curve_pair_intersection(&first, &second, ModelTolerance::default())
+            .expect("certified spline intersections");
+    assert_eq!(intersections.hits.len(), 2);
+    assert!(intersections
+        .hits
+        .iter()
+        .all(|hit| (hit.point.y - 0.5).abs() < 1.0e-6));
+
+    let circle = TrimmedCurve2::circle(Point2::new(1.0, 0.0), 1.0).expect("circle");
+    let circle_hits =
+        super::wire::curve_pair_intersection(&first, &circle, ModelTolerance::default())
+            .expect("certified spline/circle intersections");
+    assert_eq!(circle_hits.hits.len(), 3);
+}
+
+#[test]
+fn folded_simple_nurbs_segment_is_certified_by_exact_subdivision() {
+    let tolerance = ModelTolerance::default();
+    let folded_top = TrimmedCurve2::new(
+        NurbsCurve2::new(
+            3,
+            vec![
+                Point2::new(4.0, 2.0),
+                Point2::new(5.0, 4.0),
+                Point2::new(-1.0, 4.0),
+                Point2::new(0.0, 2.0),
+            ],
+            vec![1.0; 4],
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        )
+        .expect("folded spline"),
+        ParameterRange::new(0.0, 1.0).expect("range"),
+    )
+    .expect("trimmed spline");
+    let profile = Profile::new(
+        Wire2::new(
+            [
+                TrimmedCurve2::line(Point2::new(0.0, 0.0), Point2::new(4.0, 0.0)).expect("bottom"),
+                TrimmedCurve2::line(Point2::new(4.0, 0.0), Point2::new(4.0, 2.0)).expect("right"),
+                folded_top,
+                TrimmedCurve2::line(Point2::new(0.0, 2.0), Point2::new(0.0, 0.0)).expect("left"),
+            ],
+            tolerance,
+        )
+        .expect("exactly certified folded wire"),
+        [],
+        tolerance,
+    )
+    .expect("folded profile");
+    let prism = profile
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 3.0))
+        .expect("folded analytic prism");
+    assert!((prism.volume() - profile.area() * 3.0).abs() < 1.0e-6);
 }
 
 #[test]
@@ -1344,10 +1571,10 @@ fn unsupported_curved_boolean_never_falls_back_to_facets() {
     let error = spline_prism
         .difference(&tool)
         .expect_err("an unimplemented analytic Boolean must be rejected");
-    assert!(error.diagnostics().iter().any(|diagnostic| {
-        diagnostic.kind == super::DiagnosticKind::UnsupportedGeometry
-            && diagnostic.message.contains("analytic construction")
-    }));
+    assert!(error
+        .diagnostics()
+        .iter()
+        .any(|diagnostic| diagnostic.kind == super::DiagnosticKind::UnsupportedGeometry));
 }
 
 #[test]

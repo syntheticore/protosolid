@@ -12,8 +12,9 @@ use super::validation::{validate, ValidationMode};
 use super::{
     BodyId, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, DiagnosticKind, EdgeId,
     FaceId, FaceOrientation, Kernel, KernelError, KernelResult, Line2, Line3, LoopId, LoopKind,
-    NurbsCurve3, NurbsSurface3, OperationHistory, ParameterRange, Plane3, PolyhedralMesh, Profile,
-    ShellId, ShellKind, Sphere3, Surface3, Topology, Torus3, TrimmedCurve2, VertexId, Wire2,
+    NurbsCurve2, NurbsCurve3, NurbsSurface3, OperationHistory, ParameterRange, Plane3,
+    PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3, Topology, Torus3,
+    TrimmedCurve2, VertexId, Wire2,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -2794,12 +2795,20 @@ impl<'kernel> EulerTransaction<'kernel> {
                         }
                         Circle2::new(Point2::new(center.0, center.1), radius)?.into()
                     }
-                    Curve3::Nurbs(_) => {
-                        return Err(KernelError::new(
-                            DiagnosticKind::UnsupportedGeometry,
-                            "planar NURBS face reparameterization is not available",
-                        ));
-                    }
+                    Curve3::Nurbs(curve) => NurbsCurve2::new(
+                        curve.degree(),
+                        curve
+                            .control_points()
+                            .iter()
+                            .map(|point| {
+                                let projected = plane.project(*point)?.parameters;
+                                Ok(Point2::new(projected.0, projected.1))
+                            })
+                            .collect::<KernelResult<Vec<_>>>()?,
+                        curve.weights().to_vec(),
+                        curve.knots().to_vec(),
+                    )?
+                    .into(),
                 };
             }
         }

@@ -275,6 +275,43 @@ impl NurbsCurve2 {
             .collect()
     }
 
+    /// Extract exact rational Bézier spans by raising every internal knot to
+    /// full degree multiplicity. The returned homogeneous control polygons
+    /// retain the original NURBS parameterization.
+    pub(crate) fn bezier_spans(&self) -> KernelResult<Vec<(ParameterRange, Vec<Vec3>)>> {
+        let mut controls = self.homogeneous_controls();
+        let mut knots = self.knots.clone();
+        let degree = self.degree;
+        let start = knots[degree];
+        let end = knots[controls.len()];
+        let internal = knots
+            .iter()
+            .copied()
+            .filter(|knot| *knot > start && *knot < end)
+            .fold(Vec::<f64>::new(), |mut unique, knot| {
+                if unique.last().is_none_or(|last| *last != knot) {
+                    unique.push(knot);
+                }
+                unique
+            });
+        for knot in internal {
+            while knots.iter().filter(|candidate| **candidate == knot).count() < degree {
+                insert_homogeneous_knot(degree, knot, &mut knots, &mut controls)?;
+            }
+        }
+        let mut spans = Vec::new();
+        for index in degree..controls.len() {
+            if knots[index + 1] <= knots[index] {
+                continue;
+            }
+            spans.push((
+                ParameterRange::new(knots[index], knots[index + 1])?,
+                controls[index - degree..=index].to_vec(),
+            ));
+        }
+        Ok(spans)
+    }
+
     fn evaluate(&self, parameter: f64) -> KernelResult<Curve2Evaluation> {
         if !parameter.is_finite() {
             return Err(invalid("curve parameter must be finite"));
@@ -317,6 +354,40 @@ impl NurbsCurve2 {
             second_derivative,
         })
     }
+}
+
+fn insert_homogeneous_knot(
+    degree: usize,
+    knot: f64,
+    knots: &mut Vec<f64>,
+    controls: &mut Vec<Vec3>,
+) -> KernelResult<()> {
+    let old_count = controls.len();
+    let span = if knot >= knots[old_count] {
+        old_count - 1
+    } else {
+        (degree..old_count)
+            .find(|index| knot >= knots[*index] && knot < knots[*index + 1])
+            .ok_or_else(|| invalid("NURBS knot insertion parameter is outside the domain"))?
+    };
+    let multiplicity = knots.iter().filter(|candidate| **candidate == knot).count();
+    let mut inserted = vec![Vec3::new(0.0, 0.0, 0.0); old_count + 1];
+    inserted[..=span - degree].copy_from_slice(&controls[..=span - degree]);
+    for index in span - multiplicity..old_count {
+        inserted[index + 1] = controls[index];
+    }
+    for index in span - degree + 1..=span - multiplicity {
+        let denominator = knots[index + degree] - knots[index];
+        let alpha = if denominator == 0.0 {
+            0.0
+        } else {
+            (knot - knots[index]) / denominator
+        };
+        inserted[index] = controls[index] * alpha + controls[index - 1] * (1.0 - alpha);
+    }
+    knots.insert(span + 1, knot);
+    *controls = inserted;
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]

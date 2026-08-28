@@ -1,6 +1,6 @@
 use cgmath::prelude::*;
 
-use crate::{Point2, Vec2};
+use crate::{Point2, Vec2, Vec3};
 
 use super::{
     Circle2, Curve2, DiagnosticKind, KernelError, KernelResult, Line2, ModelTolerance,
@@ -371,30 +371,85 @@ fn validate_segment_is_simple(
     let Curve2::Nurbs(curve) = segment.curve() else {
         return Ok(());
     };
-    let controls = curve.control_points();
-    let direction = segment.end()? - segment.start()?;
-    let length = direction.magnitude();
-    if length <= tolerance.linear {
+    if segment.start()?.distance(segment.end()?) <= tolerance.linear {
         return Err(invalid("a NURBS wire segment needs distinct endpoints"));
     }
-    let unit = direction / length;
-    let ordered = if segment.range().span() >= 0.0 {
-        controls.iter().collect::<Vec<_>>()
-    } else {
-        controls.iter().rev().collect::<Vec<_>>()
-    };
-    let mut previous = ordered[0].to_vec().dot(unit);
-    for control in ordered.iter().skip(1) {
-        let projection = control.to_vec().dot(unit);
-        if projection + tolerance.linear < previous {
+
+    // Exact rational Bézier subdivision turns an arbitrary regular spline into
+    // projection-monotone pieces. Each such piece is simple; testing every
+    // non-adjacent pair then proves that the complete segment is simple too.
+    // The subdivision changes representation only and never approximates the
+    // curve.
+    let mut pending = trimmed_bezier_spans(curve, segment.range())?
+        .into_iter()
+        .map(|(range, controls)| (range, controls, 0_u8))
+        .collect::<Vec<_>>();
+    let mut pieces = Vec::new();
+    while let Some((range, controls, depth)) = pending.pop() {
+        if bezier_controls_projection_monotone(&controls, tolerance.linear) {
+            pieces.push((range, controls));
+            continue;
+        }
+        if depth >= 32 || range.span().abs() <= tolerance.parameter * 16.0 {
             return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "certifying a non-monotone NURBS wire segment is not implemented",
+                DiagnosticKind::NumericalFailure,
+                "could not certify NURBS segment simplicity at the model tolerance",
             ));
         }
-        previous = projection;
+        let (left, right) = split_values(&controls);
+        let middle = (range.start + range.end) * 0.5;
+        pending.push((
+            ParameterRange {
+                start: middle,
+                end: range.end,
+            },
+            right,
+            depth + 1,
+        ));
+        pending.push((
+            ParameterRange {
+                start: range.start,
+                end: middle,
+            },
+            left,
+            depth + 1,
+        ));
+    }
+    pieces.sort_by(|first, second| first.0.start.total_cmp(&second.0.start));
+    for first in 0..pieces.len() {
+        for second in first + 1..pieces.len() {
+            let first_curve = TrimmedCurve2::new(curve.clone(), pieces[first].0)?;
+            let second_curve = TrimmedCurve2::new(curve.clone(), pieces[second].0)?;
+            let intersection = nurbs_nurbs_intersection(&first_curve, &second_curve, tolerance)?;
+            let adjacent = second == first + 1;
+            let shared = first_curve.end()?;
+            if intersection.coincident
+                || intersection
+                    .hits
+                    .iter()
+                    .any(|hit| !adjacent || hit.point.distance(shared) > tolerance.linear)
+            {
+                return Err(invalid("wire must not self-intersect"));
+            }
+        }
     }
     Ok(())
+}
+
+fn bezier_controls_projection_monotone(controls: &[Vec3], tolerance: f64) -> bool {
+    let points = controls
+        .iter()
+        .map(|control| Point2::new(control.x / control.z, control.y / control.z))
+        .collect::<Vec<_>>();
+    let direction = points.last().unwrap() - points[0];
+    let length = direction.magnitude();
+    if length <= tolerance {
+        return false;
+    }
+    let unit = direction / length;
+    points
+        .windows(2)
+        .all(|pair| (pair[1] - pair[0]).dot(unit) >= -tolerance)
 }
 
 pub(crate) fn wires_intersect(
@@ -425,6 +480,24 @@ pub(crate) fn wire_contains_point(
         point.x,
         point.y + tolerance.linear * 0.271_828_182_845_904_5,
     );
+    let ray_end_x = wire
+        .segments()
+        .iter()
+        .map(|segment| match segment.curve() {
+            Curve2::Line(_) => segment
+                .start()
+                .and_then(|start| segment.end().map(|end| start.x.max(end.x))),
+            Curve2::Circle(circle) => Ok(circle.center().x + circle.radius()),
+            Curve2::Nurbs(curve) => Ok(curve
+                .control_points()
+                .iter()
+                .map(|control| control.x)
+                .fold(f64::NEG_INFINITY, f64::max)),
+        })
+        .collect::<KernelResult<Vec<_>>>()?
+        .into_iter()
+        .fold(point.x + 1.0, f64::max)
+        + point.x.abs().max(1.0) * 2.0;
     for segment in wire.segments() {
         match segment.curve() {
             Curve2::Line(_) => {
@@ -496,10 +569,43 @@ pub(crate) fn wire_contains_point(
                 }
             }
             Curve2::Nurbs(_) => {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "certified point containment for a NURBS boundary is not implemented",
-                ));
+                let boundary_ray = TrimmedCurve2::line(
+                    Point2::new(point.x - tolerance.linear * 2.0, point.y),
+                    Point2::new(point.x + tolerance.linear * 2.0, point.y),
+                )?;
+                if curve_pair_intersection(segment, &boundary_ray, tolerance)?
+                    .hits
+                    .iter()
+                    .any(|hit| hit.point.distance(point) <= tolerance.linear)
+                {
+                    return Ok(false);
+                }
+                let ray = TrimmedCurve2::line(ray_point, Point2::new(ray_end_x, ray_point.y))?;
+                for hit in curve_pair_intersection(segment, &ray, tolerance)?.hits {
+                    if hit.point.x <= ray_point.x + tolerance.linear {
+                        continue;
+                    }
+                    let derivative = segment
+                        .curve()
+                        .evaluate(hit.first_parameter)?
+                        .first_derivative
+                        .y
+                        * segment.range().span().signum();
+                    if derivative.abs() <= tolerance.linear {
+                        continue;
+                    }
+                    let progress = (hit.first_parameter - segment.range().start)
+                        * segment.range().span().signum();
+                    let length = segment.range().span().abs();
+                    let at_start = progress.abs() <= tolerance.parameter;
+                    let at_end = (progress - length).abs() <= tolerance.parameter;
+                    let include = (!at_start && !at_end)
+                        || (at_start && derivative > 0.0)
+                        || (at_end && derivative < 0.0);
+                    if include {
+                        winding += if derivative > 0.0 { 1 } else { -1 };
+                    }
+                }
             }
         }
     }
@@ -552,8 +658,14 @@ pub(crate) fn curve_pair_intersection(
         (Curve2::Circle(_), Curve2::Circle(_)) => {
             circle_circle_intersection(first, second, tolerance)
         }
-        (Curve2::Nurbs(curve), _) => certified_nurbs_pair(curve, second, tolerance),
-        (_, Curve2::Nurbs(curve)) => certified_nurbs_pair(curve, first, tolerance),
+        (Curve2::Nurbs(_), _) => certified_nurbs_pair(first, second, tolerance),
+        (_, Curve2::Nurbs(_)) => {
+            let mut intersection = certified_nurbs_pair(second, first, tolerance)?;
+            for hit in &mut intersection.hits {
+                std::mem::swap(&mut hit.first_parameter, &mut hit.second_parameter);
+            }
+            Ok(intersection)
+        }
     }
 }
 
@@ -738,82 +850,473 @@ fn circular_ranges_overlap(first: ParameterRange, second: ParameterRange, tolera
 }
 
 fn certified_nurbs_pair(
-    nurbs: &super::NurbsCurve2,
+    nurbs_segment: &TrimmedCurve2,
     other: &TrimmedCurve2,
     tolerance: ModelTolerance,
 ) -> KernelResult<CurvePairIntersection> {
-    let mut controls = nurbs.control_points().to_vec();
-    let other_points = match other.curve() {
-        Curve2::Line(_) => vec![other.start()?, other.end()?],
-        Curve2::Nurbs(curve) => curve.control_points().to_vec(),
-        Curve2::Circle(circle) => {
-            let bounds = control_bounds(&controls);
-            let closest_x = circle.center().x.clamp(bounds.0, bounds.1);
-            let closest_y = circle.center().y.clamp(bounds.2, bounds.3);
-            if circle.center().distance(Point2::new(closest_x, closest_y))
-                > circle.radius() + tolerance.linear
-            {
-                return Ok(CurvePairIntersection::default());
-            }
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "certifying a possible NURBS/circle boundary intersection is not implemented",
-            ));
-        }
+    let Curve2::Nurbs(nurbs) = nurbs_segment.curve() else {
+        unreachable!()
     };
-    let first_bounds = control_bounds(&controls);
-    let second_bounds = control_bounds(&other_points);
-    if first_bounds.1 + tolerance.linear < second_bounds.0
-        || second_bounds.1 + tolerance.linear < first_bounds.0
-        || first_bounds.3 + tolerance.linear < second_bounds.2
-        || second_bounds.3 + tolerance.linear < first_bounds.2
-    {
-        return Ok(CurvePairIntersection::default());
+    if let Curve2::Nurbs(_) = other.curve() {
+        return nurbs_nurbs_intersection(nurbs_segment, other, tolerance);
     }
-    if let Curve2::Line(_) = other.curve() {
-        let start = other_points[0];
-        let end = other_points[1];
-        let direction = other_points[1] - start;
-        let cross =
-            |point: Point2| direction.x * (point.y - start.y) - direction.y * (point.x - start.x);
-        controls.retain(|point| {
-            point.distance(start) > tolerance.linear && point.distance(end) > tolerance.linear
-        });
-        let values = controls
-            .iter()
-            .map(|point| cross(*point))
-            .collect::<Vec<_>>();
-        let threshold = tolerance.linear * direction.magnitude().max(1.0);
-        if !values.is_empty()
-            && (values.iter().all(|value| *value > threshold)
-                || values.iter().all(|value| *value < -threshold))
-        {
-            return Ok(CurvePairIntersection::default());
+    let mut parameters = Vec::new();
+    for (span, controls) in nurbs.bezier_spans()? {
+        let coefficients: Vec<f64> = match other.curve() {
+            Curve2::Line(line) => controls
+                .iter()
+                .map(|control| {
+                    line.direction().x * (control.y - line.origin().y * control.z)
+                        - line.direction().y * (control.x - line.origin().x * control.z)
+                })
+                .collect(),
+            Curve2::Circle(circle) => {
+                let x = controls
+                    .iter()
+                    .map(|control| control.x - circle.center().x * control.z)
+                    .collect::<Vec<_>>();
+                let y = controls
+                    .iter()
+                    .map(|control| control.y - circle.center().y * control.z)
+                    .collect::<Vec<_>>();
+                let w = controls.iter().map(|control| control.z).collect::<Vec<_>>();
+                let xx = bernstein_product(&x, &x);
+                let yy = bernstein_product(&y, &y);
+                let ww = bernstein_product(&w, &w);
+                xx.iter()
+                    .zip(yy)
+                    .zip(ww)
+                    .map(|((x, y), w)| x + y - circle.radius().powi(2) * w)
+                    .collect()
+            }
+            Curve2::Nurbs(_) => unreachable!(),
+        };
+        isolate_bernstein_roots(&coefficients, span, 0, tolerance.parameter, &mut parameters);
+    }
+    parameters.sort_by(f64::total_cmp);
+    parameters.dedup_by(|first, second| (*first - *second).abs() <= tolerance.parameter * 32.0);
+    let mut hits = Vec::new();
+    for seed in parameters {
+        let parameter = refine_implicit_root(nurbs_segment, other, seed)?;
+        if !nurbs_segment.range().contains(parameter, tolerance) {
+            continue;
+        }
+        let point = nurbs_segment.curve().evaluate(parameter)?.point;
+        let projection = match other.curve() {
+            Curve2::Line(line) => {
+                let value =
+                    (point - line.origin()).dot(line.direction()) / line.direction().magnitude2();
+                (value, line.origin() + line.direction() * value)
+            }
+            Curve2::Circle(circle) => {
+                let value = (point.y - circle.center().y).atan2(point.x - circle.center().x);
+                (
+                    value,
+                    circle.center() + Vec2::new(value.cos(), value.sin()) * circle.radius(),
+                )
+            }
+            Curve2::Nurbs(_) => unreachable!(),
+        };
+        let in_other = match other.curve() {
+            Curve2::Circle(_) => {
+                periodic_range_contains(other.range(), projection.0, tolerance.parameter)
+            }
+            _ => other.range().contains(projection.0, tolerance),
+        };
+        if in_other && point.distance(projection.1) <= tolerance.linear * 4.0 {
+            hits.push(CurvePairHit {
+                point,
+                first_parameter: parameter,
+                second_parameter: projection.0,
+            });
         }
     }
-    Err(KernelError::new(
-        DiagnosticKind::UnsupportedGeometry,
-        "certifying this possible NURBS boundary intersection is not implemented",
-    ))
+    deduplicate_hits(&mut hits, tolerance.linear);
+    Ok(CurvePairIntersection {
+        hits,
+        coincident: false,
+    })
 }
 
-fn control_bounds(points: &[Point2]) -> (f64, f64, f64, f64) {
-    points.iter().fold(
+fn binomial(n: usize, k: usize) -> f64 {
+    let k = k.min(n - k);
+    (0..k).fold(1.0, |value, index| {
+        value * (n - index) as f64 / (index + 1) as f64
+    })
+}
+
+fn bernstein_product(first: &[f64], second: &[f64]) -> Vec<f64> {
+    let p = first.len() - 1;
+    let q = second.len() - 1;
+    let mut result = vec![0.0; p + q + 1];
+    for (i, left) in first.iter().enumerate() {
+        for (j, right) in second.iter().enumerate() {
+            result[i + j] +=
+                left * right * binomial(p, i) * binomial(q, j) / binomial(p + q, i + j);
+        }
+    }
+    result
+}
+
+fn split_values<T>(values: &[T]) -> (Vec<T>, Vec<T>)
+where
+    T: Copy + std::ops::Add<Output = T> + std::ops::Mul<f64, Output = T>,
+{
+    split_values_at(values, 0.5)
+}
+
+fn split_values_at<T>(values: &[T], parameter: f64) -> (Vec<T>, Vec<T>)
+where
+    T: Copy + std::ops::Add<Output = T> + std::ops::Mul<f64, Output = T>,
+{
+    let mut levels = vec![values.to_vec()];
+    while levels.last().is_some_and(|level| level.len() > 1) {
+        let previous = levels.last().unwrap();
+        levels.push(
+            previous
+                .windows(2)
+                .map(|pair| pair[0] * (1.0 - parameter) + pair[1] * parameter)
+                .collect(),
+        );
+    }
+    let left = levels.iter().map(|level| level[0]).collect();
+    let right = levels
+        .iter()
+        .rev()
+        .map(|level| *level.last().unwrap())
+        .collect();
+    (left, right)
+}
+
+fn trimmed_bezier_spans(
+    curve: &super::NurbsCurve2,
+    trim: ParameterRange,
+) -> KernelResult<Vec<(ParameterRange, Vec<Vec3>)>> {
+    let trim_start = trim.start.min(trim.end);
+    let trim_end = trim.start.max(trim.end);
+    let mut result = Vec::new();
+    for (span, controls) in curve.bezier_spans()? {
+        let start = span.start.max(trim_start);
+        let end = span.end.min(trim_end);
+        if end <= start {
+            continue;
+        }
+        let span_length = span.end - span.start;
+        let end_fraction = (end - span.start) / span_length;
+        let mut clipped = if end_fraction < 1.0 {
+            split_values_at(&controls, end_fraction).0
+        } else {
+            controls
+        };
+        if start > span.start {
+            let start_fraction = (start - span.start) / (end - span.start);
+            clipped = split_values_at(&clipped, start_fraction).1;
+        }
+        result.push((ParameterRange { start, end }, clipped));
+    }
+    Ok(result)
+}
+
+fn isolate_bernstein_roots(
+    coefficients: &[f64],
+    range: ParameterRange,
+    depth: u8,
+    parameter_tolerance: f64,
+    output: &mut Vec<f64>,
+) {
+    let scale = coefficients
+        .iter()
+        .map(|value| value.abs())
+        .fold(1.0, f64::max);
+    let rounding = scale * f64::EPSILON * 128.0;
+    let nonnegative = coefficients.iter().all(|value| *value >= -rounding);
+    let nonpositive = coefficients.iter().all(|value| *value <= rounding);
+    if nonnegative || nonpositive {
+        if coefficients[0].abs() <= rounding {
+            output.push(range.start);
+        }
+        if coefficients
+            .last()
+            .is_some_and(|value| value.abs() <= rounding)
+        {
+            output.push(range.end);
+        }
+        return;
+    }
+    if depth >= 56 || range.span().abs() <= parameter_tolerance * 16.0 {
+        output.push((range.start + range.end) * 0.5);
+        return;
+    }
+    let (left, right) = split_values(coefficients);
+    let middle = (range.start + range.end) * 0.5;
+    isolate_bernstein_roots(
+        &left,
+        ParameterRange {
+            start: range.start,
+            end: middle,
+        },
+        depth + 1,
+        parameter_tolerance,
+        output,
+    );
+    isolate_bernstein_roots(
+        &right,
+        ParameterRange {
+            start: middle,
+            end: range.end,
+        },
+        depth + 1,
+        parameter_tolerance,
+        output,
+    );
+}
+
+fn refine_implicit_root(
+    nurbs: &TrimmedCurve2,
+    other: &TrimmedCurve2,
+    mut parameter: f64,
+) -> KernelResult<f64> {
+    for _ in 0..24 {
+        let evaluation = nurbs.curve().evaluate(parameter)?;
+        let (value, derivative) = match other.curve() {
+            Curve2::Line(line) => {
+                let delta = evaluation.point - line.origin();
+                (
+                    line.direction().x * delta.y - line.direction().y * delta.x,
+                    line.direction().x * evaluation.first_derivative.y
+                        - line.direction().y * evaluation.first_derivative.x,
+                )
+            }
+            Curve2::Circle(circle) => {
+                let delta = evaluation.point - circle.center();
+                (
+                    delta.magnitude2() - circle.radius().powi(2),
+                    2.0 * delta.dot(evaluation.first_derivative),
+                )
+            }
+            Curve2::Nurbs(_) => unreachable!(),
+        };
+        if derivative.abs() <= f64::EPSILON {
+            break;
+        }
+        let next = (parameter - value / derivative).clamp(
+            nurbs.range().start.min(nurbs.range().end),
+            nurbs.range().start.max(nurbs.range().end),
+        );
+        if (next - parameter).abs() <= f64::EPSILON * 64.0 {
+            break;
+        }
+        parameter = next;
+    }
+    Ok(parameter)
+}
+
+fn deduplicate_hits(hits: &mut Vec<CurvePairHit>, tolerance: f64) {
+    let mut unique = Vec::<CurvePairHit>::new();
+    for hit in hits.drain(..) {
+        if unique
+            .iter()
+            .all(|candidate| candidate.point.distance(hit.point) > tolerance)
+        {
+            unique.push(hit);
+        }
+    }
+    *hits = unique;
+}
+
+fn nurbs_nurbs_intersection(
+    first: &TrimmedCurve2,
+    second: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<CurvePairIntersection> {
+    if first.curve() == second.curve() {
+        let overlap_start = first
+            .range()
+            .start
+            .min(first.range().end)
+            .max(second.range().start.min(second.range().end));
+        let overlap_end = first
+            .range()
+            .start
+            .max(first.range().end)
+            .min(second.range().start.max(second.range().end));
+        if overlap_end > overlap_start + tolerance.parameter {
+            return Ok(CurvePairIntersection {
+                coincident: true,
+                ..Default::default()
+            });
+        }
+    }
+    let (Curve2::Nurbs(first_curve), Curve2::Nurbs(second_curve)) = (first.curve(), second.curve())
+    else {
+        unreachable!()
+    };
+    let mut stack = Vec::new();
+    for first_span in trimmed_bezier_spans(first_curve, first.range())? {
+        for second_span in trimmed_bezier_spans(second_curve, second.range())? {
+            stack.push((
+                first_span.0,
+                first_span.1.clone(),
+                second_span.0,
+                second_span.1.clone(),
+                0_u8,
+            ));
+        }
+    }
+    let mut seeds = Vec::new();
+    let mut visited = 0_usize;
+    while let Some((first_range, first_controls, second_range, second_controls, depth)) =
+        stack.pop()
+    {
+        visited += 1;
+        if visited > 250_000 {
+            return Err(KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                "certified NURBS intersection exceeded its subdivision budget",
+            ));
+        }
+        let first_bounds = homogeneous_bounds(&first_controls);
+        let second_bounds = homogeneous_bounds(&second_controls);
+        if bounds_separated(first_bounds, second_bounds, tolerance.linear) {
+            continue;
+        }
+        let first_size = bounds_size(first_bounds);
+        let second_size = bounds_size(second_bounds);
+        if depth >= 48 || first_size.max(second_size) <= tolerance.linear * 2.0 {
+            seeds.push((
+                (first_range.start + first_range.end) * 0.5,
+                (second_range.start + second_range.end) * 0.5,
+            ));
+            continue;
+        }
+        if first_size * first_range.span().abs() >= second_size * second_range.span().abs() {
+            let (left, right) = split_values(&first_controls);
+            let middle = (first_range.start + first_range.end) * 0.5;
+            stack.push((
+                ParameterRange {
+                    start: middle,
+                    end: first_range.end,
+                },
+                right,
+                second_range,
+                second_controls.clone(),
+                depth + 1,
+            ));
+            stack.push((
+                ParameterRange {
+                    start: first_range.start,
+                    end: middle,
+                },
+                left,
+                second_range,
+                second_controls,
+                depth + 1,
+            ));
+        } else {
+            let (left, right) = split_values(&second_controls);
+            let middle = (second_range.start + second_range.end) * 0.5;
+            stack.push((
+                first_range,
+                first_controls.clone(),
+                ParameterRange {
+                    start: middle,
+                    end: second_range.end,
+                },
+                right,
+                depth + 1,
+            ));
+            stack.push((
+                first_range,
+                first_controls,
+                ParameterRange {
+                    start: second_range.start,
+                    end: middle,
+                },
+                left,
+                depth + 1,
+            ));
+        }
+    }
+    let mut hits = Vec::new();
+    for (mut first_parameter, mut second_parameter) in seeds {
+        for _ in 0..24 {
+            let first_value = first.curve().evaluate(first_parameter)?;
+            let second_value = second.curve().evaluate(second_parameter)?;
+            let delta = first_value.point - second_value.point;
+            let determinant = first_value.first_derivative.y * second_value.first_derivative.x
+                - first_value.first_derivative.x * second_value.first_derivative.y;
+            if determinant.abs() <= f64::EPSILON * 128.0 {
+                break;
+            }
+            let first_step = (delta.x * second_value.first_derivative.y
+                - delta.y * second_value.first_derivative.x)
+                / determinant;
+            let second_step = (first_value.first_derivative.x * delta.y
+                - first_value.first_derivative.y * delta.x)
+                / determinant;
+            first_parameter = (first_parameter + first_step).clamp(
+                first.range().start.min(first.range().end),
+                first.range().start.max(first.range().end),
+            );
+            second_parameter = (second_parameter - second_step).clamp(
+                second.range().start.min(second.range().end),
+                second.range().start.max(second.range().end),
+            );
+            if first_step.abs().max(second_step.abs()) <= tolerance.parameter {
+                break;
+            }
+        }
+        if !first.range().contains(first_parameter, tolerance)
+            || !second.range().contains(second_parameter, tolerance)
+        {
+            continue;
+        }
+        let first_point = first.curve().evaluate(first_parameter)?.point;
+        let second_point = second.curve().evaluate(second_parameter)?.point;
+        if first_point.distance(second_point) <= tolerance.linear * 4.0 {
+            hits.push(CurvePairHit {
+                point: Point2::from_vec((first_point.to_vec() + second_point.to_vec()) * 0.5),
+                first_parameter,
+                second_parameter,
+            });
+        }
+    }
+    deduplicate_hits(&mut hits, tolerance.linear);
+    Ok(CurvePairIntersection {
+        hits,
+        coincident: false,
+    })
+}
+
+fn homogeneous_bounds(controls: &[cgmath::Vector3<f64>]) -> (f64, f64, f64, f64) {
+    controls.iter().fold(
         (
             f64::INFINITY,
             f64::NEG_INFINITY,
             f64::INFINITY,
             f64::NEG_INFINITY,
         ),
-        |(min_x, max_x, min_y, max_y), point| {
-            (
-                min_x.min(point.x),
-                max_x.max(point.x),
-                min_y.min(point.y),
-                max_y.max(point.y),
-            )
+        |(min_x, max_x, min_y, max_y), control| {
+            let x = control.x / control.z;
+            let y = control.y / control.z;
+            (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
         },
     )
+}
+
+fn bounds_separated(
+    first: (f64, f64, f64, f64),
+    second: (f64, f64, f64, f64),
+    tolerance: f64,
+) -> bool {
+    first.1 < second.0 - tolerance
+        || second.1 < first.0 - tolerance
+        || first.3 < second.2 - tolerance
+        || second.3 < first.2 - tolerance
+}
+
+fn bounds_size(bounds: (f64, f64, f64, f64)) -> f64 {
+    (bounds.1 - bounds.0).hypot(bounds.3 - bounds.2)
 }
 
 pub(crate) fn segments_intersect(

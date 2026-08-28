@@ -126,7 +126,7 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
         return Ok(certificate);
     }
     if let Some(certificate) =
-        try_certify_prism_with_cylindrical_bosses(topology, body_id, &face_ids, physical_tolerance)?
+        try_certify_prism_with_bosses(topology, body_id, &face_ids, physical_tolerance)?
     {
         return Ok(certificate);
     }
@@ -809,7 +809,7 @@ fn validate_prism_side_incidence(
     Ok(first_incidence == first_edges.len() && second_incidence == second_edges.len())
 }
 
-fn try_certify_prism_with_cylindrical_bosses(
+fn try_certify_prism_with_bosses(
     topology: &Topology,
     body_id: BodyId,
     face_ids: &BTreeSet<FaceId>,
@@ -897,6 +897,15 @@ fn try_certify_prism_with_cylindrical_bosses(
         let mut components = vec![base_certificate.properties];
         let mut shared_area = 0.0;
         for (inner_loop, component_faces) in boss_components {
+            let segments = topology
+                .loop_coedges(inner_loop)?
+                .into_iter()
+                .map(|coedge_id| {
+                    let coedge = topology.coedge(coedge_id)?;
+                    super::TrimmedCurve2::new(coedge.pcurve().clone(), coedge.range())
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            let shared_profile = super::Wire2::new(segments, tolerance)?;
             let mut boss_topology = topology.clone();
             let mut base_face = boss_topology.face(*target_face)?.clone();
             base_face.orientation = match base_face.orientation {
@@ -920,19 +929,7 @@ fn try_certify_prism_with_cylindrical_bosses(
                 failed = true;
                 break;
             };
-            shared_area += std::f64::consts::PI
-                * component_face_ids
-                    .iter()
-                    .find_map(|face| match boss_topology.face(*face).ok()?.surface() {
-                        Surface3::Cylinder(cylinder) => Some(cylinder.radius().powi(2)),
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::GeometryInvariant,
-                            "certified cylindrical boss has no cylindrical wall",
-                        )
-                    })?;
+            shared_area += shared_profile.area();
             components.push(certificate.properties);
         }
         if failed {
@@ -1033,45 +1030,44 @@ fn try_certify_prism_with_pockets(
         let mut voids = Vec::new();
         let mut lateral_area = 0.0;
         for (inner_loop, component_faces) in pocket_components {
-            let mut pocket_topology = topology.clone();
-            for face_id in &component_faces {
-                let orientation = pocket_topology.face(*face_id)?.orientation;
-                pocket_topology.faces.get_mut(*face_id)?.orientation = match orientation {
-                    super::FaceOrientation::Forward => super::FaceOrientation::Reversed,
-                    super::FaceOrientation::Reversed => super::FaceOrientation::Forward,
-                };
+            let segments = topology
+                .loop_coedges(inner_loop)?
+                .into_iter()
+                .map(|coedge_id| {
+                    let coedge = topology.coedge(coedge_id)?;
+                    super::TrimmedCurve2::new(coedge.pcurve().clone(), coedge.range())
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            let profile =
+                super::Profile::new(super::Wire2::new(segments, tolerance)?, [], tolerance)?;
+            let mut component_vertices = BTreeSet::new();
+            for face in &component_faces {
+                for edge in face_edges(topology, *face)? {
+                    component_vertices.extend(topology.edge(edge)?.vertices());
+                }
             }
-            let mut cap = pocket_topology.face(*opening_face)?.clone();
-            cap.loops = vec![inner_loop];
-            let cap_id = pocket_topology.faces.insert(cap);
-            {
-                let loop_value = pocket_topology.loops.get_mut(inner_loop)?;
-                loop_value.face = cap_id;
-                loop_value.kind = super::LoopKind::Outer;
-            }
-            let mut component_face_ids = component_faces.clone();
-            component_face_ids.insert(cap_id);
-            pocket_topology.shells.get_mut(shell_id)?.faces =
-                component_face_ids.iter().copied().collect();
-            let properties =
-                cylindrical_component_properties(&pocket_topology, &component_face_ids, tolerance)?;
-            let Some(properties) = properties else {
+            let depth = component_vertices
+                .into_iter()
+                .map(|vertex| {
+                    topology
+                        .vertex(vertex)
+                        .map(|vertex| (vertex.point() - opening_plane.origin()).dot(opening_normal))
+                })
+                .collect::<KernelResult<Vec<_>>>()?
+                .into_iter()
+                .fold(0.0_f64, f64::min);
+            let height = -depth;
+            if height <= tolerance.linear {
                 failed = true;
                 break;
-            };
-            let cap_area = std::f64::consts::PI
-                * component_face_ids
-                    .iter()
-                    .find_map(|face| match pocket_topology.face(*face).ok()?.surface() {
-                        Surface3::Cylinder(cylinder) => Some(cylinder.radius().powi(2)),
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::GeometryInvariant,
-                            "a cylindrical pocket has no cylindrical wall",
-                        )
-                    })?;
+            }
+            let void = profile.extrude(*opening_plane, opening_normal * depth)?;
+            if void.solids().len() != 1 {
+                failed = true;
+                break;
+            }
+            let properties = void.mass_properties();
+            let cap_area = profile.area();
             lateral_area += properties.surface_area - 2.0 * cap_area;
             voids.push(properties);
         }
@@ -1083,80 +1079,6 @@ fn try_certify_prism_with_pockets(
         }));
     }
     Ok(None)
-}
-
-fn cylindrical_component_properties(
-    topology: &Topology,
-    faces: &BTreeSet<FaceId>,
-    tolerance: ModelTolerance,
-) -> KernelResult<Option<MassProperties>> {
-    let cylinders = faces
-        .iter()
-        .filter_map(|face| match topology.face(*face).ok()?.surface() {
-            Surface3::Cylinder(cylinder) => Some(*cylinder),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let Some(reference) = cylinders.first().copied() else {
-        return Ok(None);
-    };
-    let axis = reference.axis().normalize();
-    let linear = tolerance.linear_at_scale(reference.radius()) * 8.0;
-    if faces.iter().any(|face| {
-        !matches!(
-            topology.face(*face).map(|face| face.surface()),
-            Ok(Surface3::Plane(_) | Surface3::Cylinder(_))
-        )
-    }) || cylinders.iter().any(|cylinder| {
-        (cylinder.radius() - reference.radius()).abs() > linear
-            || cylinder.axis().normalize().cross(axis).magnitude() > tolerance.angular
-            || (cylinder.origin() - reference.origin())
-                .cross(axis)
-                .magnitude()
-                > linear
-    }) {
-        return Ok(None);
-    }
-    let vertices = faces
-        .iter()
-        .try_fold(BTreeSet::new(), |mut vertices, face| {
-            for edge in face_edges(topology, *face)? {
-                vertices.extend(topology.edge(edge)?.vertices());
-            }
-            Ok::<_, KernelError>(vertices)
-        })?;
-    let (minimum, maximum) = vertices.into_iter().try_fold(
-        (f64::INFINITY, f64::NEG_INFINITY),
-        |(minimum, maximum), vertex| {
-            let level = axis.dot(topology.vertex(vertex)?.point().to_vec());
-            Ok::<_, KernelError>((minimum.min(level), maximum.max(level)))
-        },
-    )?;
-    let height = maximum - minimum;
-    if height <= linear {
-        return Ok(None);
-    }
-    let reference_level = axis.dot(reference.origin().to_vec());
-    let centroid = reference.origin() + axis * ((minimum + maximum) * 0.5 - reference_level);
-    let volume = std::f64::consts::PI * reference.radius().powi(2) * height;
-    let axial = 0.5 * volume * reference.radius().powi(2);
-    let transverse = volume * (3.0 * reference.radius().powi(2) + height.powi(2)) / 12.0;
-    let inertia = std::array::from_fn(|row| {
-        std::array::from_fn(|column| {
-            transverse * if row == column { 1.0 } else { 0.0 }
-                + (axial - transverse) * axis[row] * axis[column]
-        })
-    });
-    Ok(Some(MassProperties {
-        volume,
-        signed_volume: volume,
-        surface_area: 2.0
-            * std::f64::consts::PI
-            * reference.radius()
-            * (height + reference.radius()),
-        centroid,
-        inertia,
-    }))
 }
 
 fn component_centroid(topology: &Topology, faces: &BTreeSet<FaceId>) -> KernelResult<Point3> {

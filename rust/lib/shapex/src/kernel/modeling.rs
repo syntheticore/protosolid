@@ -10,8 +10,8 @@ use super::physical::PhysicalCertificate;
 use super::{
     BodyId, BooleanKind, ChangeKind, Circle2, Curve2, Curve3, Cylinder3, DiagnosticKind, EdgeId,
     FaceId, Kernel, KernelError, KernelResult, LoopKind, MassProperties, ModelTolerance,
-    OperationHistory, Origin, ParameterRange, PersistentId, Plane3, Profile, RigidTransform3,
-    Surface3, Tessellate, TessellationOptions, TriangleMesh, TrimmedCurve2, Wire2,
+    NurbsCurve2, OperationHistory, Origin, ParameterRange, PersistentId, Plane3, Profile,
+    RigidTransform3, Surface3, Tessellate, TessellationOptions, TriangleMesh, TrimmedCurve2, Wire2,
 };
 
 #[derive(Clone, Copy)]
@@ -899,6 +899,23 @@ impl Compound {
             .chain(other.faces())
             .find_map(|face| match face.surface() {
                 Surface3::Cylinder(cylinder) => Some(cylinder.axis().normalize()),
+                Surface3::Nurbs(surface)
+                    if surface.degrees().1 == 1 && surface.control_points().len() == 2 =>
+                {
+                    let first = &surface.control_points()[0];
+                    let second = &surface.control_points()[1];
+                    let vector = second
+                        .first()
+                        .zip(first.first())
+                        .map(|(top, bottom)| *top - *bottom)?;
+                    let scale = vector.magnitude().max(1.0);
+                    (vector.magnitude() > self.tolerance().linear
+                        && first.iter().zip(second).all(|(bottom, top)| {
+                            ((*top - *bottom) - vector).magnitude()
+                                <= self.tolerance().linear_at_scale(scale) * 8.0
+                        }))
+                    .then(|| vector.normalize())
+                }
                 _ => None,
             });
         let Some(axis) = axis else {
@@ -1102,7 +1119,20 @@ impl Compound {
                             TrimmedCurve2::arc_through(start, middle, end)?
                         }
                     }
-                    Curve2::Nurbs(_) => return Ok(None),
+                    Curve2::Nurbs(curve) => TrimmedCurve2::new(
+                        NurbsCurve2::new(
+                            curve.degree(),
+                            curve
+                                .control_points()
+                                .iter()
+                                .copied()
+                                .map(map)
+                                .collect::<KernelResult<Vec<_>>>()?,
+                            curve.weights().to_vec(),
+                            curve.knots().to_vec(),
+                        )?,
+                        range,
+                    )?,
                 };
                 segments.push(segment);
             }

@@ -16,6 +16,16 @@ function toArray(values) {
   return Array.from(values)
 }
 
+function planeFrame(matrix) {
+  const elements = matrix.elements
+  const origin = new THREE.Vector3().setFromMatrixPosition(matrix)
+  const u = new THREE.Vector3(elements[0], elements[1], elements[2]).normalize()
+  const v = new THREE.Vector3(elements[4], elements[5], elements[6])
+  v.addScaledVector(u, -v.dot(u)).normalize()
+  const normal = new THREE.Vector3().crossVectors(u, v).normalize()
+  return { origin, u, v, normal }
+}
+
 function meshFromBridge(mesh) {
   return {
     positions: toArray(mesh.positions),
@@ -40,6 +50,24 @@ function addSegment(wire, segment) {
     const middle = segment.sample(0.5)
     const end = segment.sample(1.0)
     wire.addArcThrough(start.x, start.y, middle.x, middle.y, end.x, end.y)
+    return
+  }
+  if(type == 'Spline') {
+    const count = segment.points.length
+    const degree = Math.min(5, count - 1)
+    const interior = count - degree - 1
+    const end = interior + 1
+    const knots = [
+      ...Array(degree + 1).fill(0),
+      ...Array.from({ length: interior }, (_, index) => index + 1),
+      ...Array(degree + 1).fill(end),
+    ]
+    wire.addNurbs(
+      degree,
+      new Float64Array(segment.points.flatMap(point => [point.x, point.y])),
+      new Float64Array(Array(count).fill(1)),
+      new Float64Array(knots),
+    )
     return
   }
   unsupported(`${type.toLowerCase()} profile curves`)
@@ -68,11 +96,11 @@ export class ShapexBackend {
       boolean: true,
       transform: true,
       tessellate: true,
-      revolve: true,
-      loft: true,
-      fillet: true,
-      offset: true,
-      split: true,
+      revolve: false,
+      loft: false,
+      fillet: false,
+      offset: false,
+      split: false,
       compoundMerge: true,
       multiSolidBoolean: true,
     })
@@ -83,11 +111,8 @@ export class ShapexBackend {
     const kernelProfile = new this.api.Profile(built[0])
     built.slice(1).forEach(hole => kernelProfile.addHole(hole))
 
-    const origin = new THREE.Vector3().setFromMatrixPosition(profile.sketch.workplane)
-    const rotation = new THREE.Quaternion().setFromRotationMatrix(profile.sketch.workplane)
-    const u = new THREE.Vector3(1, 0, 0).applyQuaternion(rotation)
-    const v = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation)
-    const vector = new THREE.Vector3(0, 0, height).applyQuaternion(rotation)
+    const { origin, u, v, normal } = planeFrame(profile.sketch.workplane)
+    const vector = normal.multiplyScalar(height)
     let raw
     try {
       raw = kernelProfile.extrude(
@@ -105,57 +130,23 @@ export class ShapexBackend {
     return new ShapexGeometry(raw)
   }
 
-  revolve(profile, axis, angle) {
-    const built = profile.rings.map(ring => buildWire(this.api, ring))
-    const kernelProfile = new this.api.Profile(built[0])
-    built.slice(1).forEach(hole => kernelProfile.addHole(hole))
-    const profileOrigin = new THREE.Vector3().setFromMatrixPosition(profile.sketch.workplane)
-    const profileRotation = new THREE.Quaternion().setFromRotationMatrix(profile.sketch.workplane)
-    const u = new THREE.Vector3(1, 0, 0).applyQuaternion(profileRotation)
-    const v = new THREE.Vector3(0, 1, 0).applyQuaternion(profileRotation)
-    const axisOrigin = new THREE.Vector3().setFromMatrixPosition(axis)
-    const axisDirection = new THREE.Vector3(0, 0, 1)
-      .applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(axis))
-    try {
-      return new ShapexGeometry(kernelProfile.revolve(
-        profileOrigin.x, profileOrigin.y, profileOrigin.z,
-        u.x, u.y, u.z,
-        v.x, v.y, v.z,
-        axisOrigin.x, axisOrigin.y, axisOrigin.z,
-        axisDirection.x, axisDirection.y, axisDirection.z,
-        angle,
-      ))
-    } catch(error) {
-      throw { type: 'error', msg: `Shapex revolution failed: ${error?.message || error}` }
-    }
+  revolve() {
+    unsupported('analytical revolutions yet')
   }
 
-  loft(profiles, _untwist) {
-    const loft = new this.api.Loft()
-    for(const profile of profiles) {
-      const built = profile.rings.map(ring => buildWire(this.api, ring))
-      const kernelProfile = new this.api.Profile(built[0])
-      built.slice(1).forEach(hole => kernelProfile.addHole(hole))
-      const origin = new THREE.Vector3().setFromMatrixPosition(profile.sketch.workplane)
-      const rotation = new THREE.Quaternion().setFromRotationMatrix(profile.sketch.workplane)
-      const u = new THREE.Vector3(1, 0, 0).applyQuaternion(rotation)
-      const v = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation)
-      loft.addProfile(
-        kernelProfile,
-        origin.x, origin.y, origin.z,
-        u.x, u.y, u.z,
-        v.x, v.y, v.z,
-      )
-    }
-    try {
-      return new ShapexGeometry(loft.build(_untwist))
-    } catch(error) {
-      throw { type: 'error', msg: `Shapex loft failed: ${error?.message || error}` }
-    }
+  loft() {
+    unsupported('analytical lofts yet')
   }
 
   boolean(first, second, operation) {
-    return new ShapexGeometry(first.raw.boolean(second.raw, operation))
+    try {
+      return new ShapexGeometry(first.raw.boolean(second.raw, operation))
+    } catch(error) {
+      throw {
+        type: 'error',
+        msg: `Shapex ${operation} failed: ${error?.message || error}`,
+      }
+    }
   }
 
   combine(first, others) {
@@ -165,41 +156,16 @@ export class ShapexBackend {
     )
   }
 
-  shell(geometry, openings, distance) {
-    const faces = new this.api.FaceList()
-    openings.forEach(face => faces.add(face))
-    try {
-      return new ShapexGeometry(geometry.raw.shell(faces, distance))
-    } catch(error) {
-      throw { type: 'error', msg: `Shapex shell failed: ${error?.message || error}` }
-    }
+  shell() {
+    unsupported('analytical shelling yet')
   }
 
-  fillet(geometry, selected, radius) {
-    const edges = new this.api.EdgeList()
-    selected.forEach(edge => edges.add(edge))
-    try {
-      return new ShapexGeometry(geometry.raw.fillet(edges, radius))
-    } catch(error) {
-      throw { type: 'error', msg: `Shapex fillet failed: ${error?.message || error}` }
-    }
+  fillet() {
+    unsupported('analytical fillets yet')
   }
 
-  split(geometry, plane, keep) {
-    const origin = new THREE.Vector3().setFromMatrixPosition(plane)
-    const rotation = new THREE.Quaternion().setFromRotationMatrix(plane)
-    const u = new THREE.Vector3(1, 0, 0).applyQuaternion(rotation)
-    const v = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation)
-    try {
-      return new ShapexGeometry(geometry.raw.split(
-        origin.x, origin.y, origin.z,
-        u.x, u.y, u.z,
-        v.x, v.y, v.z,
-        keep,
-      ))
-    } catch(error) {
-      throw { type: 'error', msg: `Shapex split failed: ${error?.message || error}` }
-    }
+  split() {
+    unsupported('analytical splitting yet')
   }
 
   removeSolids(geometry, removed) {

@@ -1712,14 +1712,34 @@ impl<'kernel> EulerTransaction<'kernel> {
         }
         let target_loops = self.working.face(target_face)?.loops.clone();
         let source_loops = self.working.face(source_face)?.loops.clone();
-        if target_loops.len() != 1 || source_loops.len() != 1 {
+        let preserve_inner_patch = target_loops.len() == 1 && source_loops.len() > 1;
+        if target_loops.len() != 1 || (source_loops.len() != 1 && !preserve_inner_patch) {
             return Err(KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "adjacent face sewing currently requires simply connected faces",
+                "adjacent face sewing requires a simple target and at most one source outer loop",
             ));
         }
         let target_loop = target_loops[0];
-        let source_loop = source_loops[0];
+        let source_loop = source_loops
+            .iter()
+            .copied()
+            .find(|loop_id| {
+                self.working
+                    .loop_(*loop_id)
+                    .map(|loop_value| loop_value.kind == LoopKind::Outer)
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "the source face has no outer loop",
+                )
+            })?;
+        let source_inner_loops = source_loops
+            .iter()
+            .copied()
+            .filter(|loop_id| *loop_id != source_loop)
+            .collect::<Vec<_>>();
         let target_boundary = self.collect_loop(target_loop)?;
         let source_boundary = self.collect_loop(source_loop)?;
         if target_boundary.len() != source_boundary.len() {
@@ -1879,14 +1899,22 @@ impl<'kernel> EulerTransaction<'kernel> {
         let source_face_name = self.working.face(source_face)?.name;
         self.working.loops.remove(target_loop)?;
         self.working.loops.remove(source_loop)?;
-        self.working.faces.remove(target_face)?;
+        if preserve_inner_patch {
+            self.working.faces.get_mut(target_face)?.loops = source_inner_loops.clone();
+            for loop_id in &source_inner_loops {
+                let loop_value = self.working.loops.get_mut(*loop_id)?;
+                loop_value.face = target_face;
+                loop_value.kind = LoopKind::Outer;
+            }
+        } else {
+            self.working.faces.remove(target_face)?;
+            self.working
+                .shells
+                .get_mut(target_shell)?
+                .faces
+                .retain(|face| *face != target_face);
+        }
         self.working.faces.remove(source_face)?;
-
-        self.working
-            .shells
-            .get_mut(target_shell)?
-            .faces
-            .retain(|face| *face != target_face);
         let source_faces = self.working.shell(source_shell)?.faces.clone();
         for face in source_faces.into_iter().filter(|face| *face != source_face) {
             self.working.faces.get_mut(face)?.shell = target_shell;
@@ -1915,13 +1943,36 @@ impl<'kernel> EulerTransaction<'kernel> {
             if first_face == second_face {
                 continue;
             }
-            let same_surface = {
+            let (same_surface, reparameterize) = {
                 let first = self.working.face(first_face)?;
                 let second = self.working.face(second_face)?;
-                first.surface == second.surface && first.orientation == second.orientation
+                let same_orientation = first.orientation == second.orientation;
+                match (&first.surface, &second.surface) {
+                    (Surface3::Plane(first_plane), Surface3::Plane(second_plane)) => {
+                        let normals_parallel = first_plane
+                            .normal()
+                            .cross(second_plane.normal())
+                            .magnitude()
+                            <= self.kernel.tolerance.angular;
+                        let coplanar = (second_plane.origin() - first_plane.origin())
+                            .dot(first_plane.normal())
+                            .abs()
+                            <= self.kernel.tolerance.linear;
+                        (same_orientation && normals_parallel && coplanar, true)
+                    }
+                    _ => (first.surface == second.surface && same_orientation, false),
+                }
             };
             if same_surface {
+                let remaining_face = if source_face == first_face {
+                    second_face
+                } else {
+                    first_face
+                };
                 self.kef_unchecked(*edge, source_face)?;
+                if reparameterize {
+                    self.reparameterize_planar_face(remaining_face)?;
+                }
             }
         }
 
@@ -1933,14 +1984,21 @@ impl<'kernel> EulerTransaction<'kernel> {
             self.history
                 .changed(source_name, ChangeKind::Merged, [target_name]);
         }
-        for name in removed_names.into_iter().chain([
+        let mut deleted_names = vec![
             target_loop_name,
             source_loop_name,
-            target_face_name,
             source_face_name,
             source_shell_name,
             source_body_name,
-        ]) {
+        ];
+        if !preserve_inner_patch {
+            deleted_names.push(target_face_name);
+        } else {
+            self.history
+                .changed(target_face_name, ChangeKind::Modified, [target_face_name]);
+            self.reparameterize_planar_face(target_face)?;
+        }
+        for name in removed_names.into_iter().chain(deleted_names) {
             self.history
                 .changed(name, ChangeKind::Deleted, std::iter::empty());
         }
@@ -2002,6 +2060,14 @@ impl<'kernel> EulerTransaction<'kernel> {
                 "face-patch sewing requires two distinct bodies",
             ));
         }
+        if self.working.face(source_face)?.loops.len() > 1 {
+            return self.sew_bodies_across_faces_unchecked(
+                target,
+                source,
+                target_face,
+                source_face,
+            );
+        }
         let target_shells = self.working.body(target)?.shells.clone();
         let source_shells = self.working.body(source)?.shells.clone();
         if target_shells.len() != 1 || source_shells.len() != 1 {
@@ -2022,6 +2088,45 @@ impl<'kernel> EulerTransaction<'kernel> {
             ));
         }
 
+        let source_loop = self.working.face(source_face)?.loops[0];
+        let circular_frame = self
+            .collect_loop(source_loop)?
+            .into_iter()
+            .find_map(|coedge| {
+                let edge = self.working.coedge(coedge).ok()?.edge();
+                match self.working.edge(edge).ok()?.curve() {
+                    Curve3::Circle(circle) => Some(*circle),
+                    _ => None,
+                }
+            });
+        let target_plane = match self.working.face(target_face)?.surface() {
+            Surface3::Plane(plane) => *plane,
+            _ => {
+                return Err(KernelError::new(
+                    DiagnosticKind::InvalidInput,
+                    "a sewn face patch requires a planar target face",
+                ));
+            }
+        };
+        let parameter_plane = if let Some(circle) = circular_frame {
+            Plane3::new(
+                circle.center(),
+                circle.x_radius().normalize(),
+                circle.y_radius().normalize(),
+                self.kernel.tolerance,
+            )?
+        } else {
+            Plane3::from_origin_normal(target_plane.origin(), target_plane.normal())?
+        };
+        if parameter_plane.normal().dot(target_plane.normal()) < 0.0 {
+            let orientation = self.working.face(target_face)?.orientation;
+            self.working.faces.get_mut(target_face)?.orientation = match orientation {
+                FaceOrientation::Forward => FaceOrientation::Reversed,
+                FaceOrientation::Reversed => FaceOrientation::Forward,
+            };
+        }
+        self.working.faces.get_mut(target_face)?.surface = parameter_plane.into();
+
         let source_faces = self.working.shell(source_shell)?.faces.clone();
         for face in source_faces {
             self.working.faces.get_mut(face)?.shell = target_shell;
@@ -2033,6 +2138,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         self.working.bodies.remove(source)?;
 
         self.kfmrh_unchecked(target_face, source_face)?;
+        self.reparameterize_planar_face(target_face)?;
         self.history
             .changed(source_shell_name, ChangeKind::Deleted, std::iter::empty());
         self.history
@@ -2228,16 +2334,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         second: BodyId,
         kind: super::BooleanKind,
     ) -> KernelResult<Vec<BodyId>> {
-        self.boolean_rebuilding(first, second, kind, true)
-    }
-
-    pub(crate) fn boolean_from_facets(
-        &mut self,
-        first: BodyId,
-        second: BodyId,
-        kind: super::BooleanKind,
-    ) -> KernelResult<Vec<BodyId>> {
-        self.boolean_rebuilding(first, second, kind, false)
+        self.boolean_rebuilding(first, second, kind)
     }
 
     fn boolean_rebuilding(
@@ -2245,7 +2342,6 @@ impl<'kernel> EulerTransaction<'kernel> {
         first: BodyId,
         second: BodyId,
         kind: super::BooleanKind,
-        merge_planar_faces: bool,
     ) -> KernelResult<Vec<BodyId>> {
         let topology_snapshot = self.working.clone();
         let history_snapshot = self.history.clone();
@@ -2271,7 +2367,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 let (body, merge_faces) = if let Some(body) = reconstructed {
                     (body, false)
                 } else {
-                    (self.polyhedron_unchecked(&mesh.outer)?, merge_planar_faces)
+                    (self.polyhedron_unchecked(&mesh.outer)?, true)
                 };
                 for (cavity_index, cavity) in mesh.cavities.iter().enumerate() {
                     self.names.push_scope(format!("cavity{cavity_index}"))?;
@@ -2660,18 +2756,51 @@ impl<'kernel> EulerTransaction<'kernel> {
         for loop_id in loops {
             for coedge_id in self.collect_loop(loop_id)? {
                 let edge_id = self.working.coedge(coedge_id)?.edge();
-                let vertices = self.working.edge(edge_id)?.vertices();
-                let start = plane
-                    .project(self.working.vertex(vertices[0])?.point())?
-                    .parameters;
-                let end = plane
-                    .project(self.working.vertex(vertices[1])?.point())?
-                    .parameters;
-                self.working.coedges.get_mut(coedge_id)?.pcurve = Line2::new(
-                    Point2::new(start.0, start.1),
-                    Point2::new(end.0, end.1) - Point2::new(start.0, start.1),
-                )?
-                .into();
+                let edge = self.working.edge(edge_id)?;
+                self.working.coedges.get_mut(coedge_id)?.pcurve = match edge.curve() {
+                    Curve3::Line(_) => {
+                        let vertices = self.working.coedge_vertices(coedge_id)?;
+                        let start = plane
+                            .project(self.working.vertex(vertices[0])?.point())?
+                            .parameters;
+                        let end = plane
+                            .project(self.working.vertex(vertices[1])?.point())?
+                            .parameters;
+                        let range = self.working.coedge(coedge_id)?.range;
+                        let start = Point2::new(start.0, start.1);
+                        let end = Point2::new(end.0, end.1);
+                        let direction = (end - start) / range.span();
+                        Line2::new(start - direction * range.start, direction)?.into()
+                    }
+                    Curve3::Circle(circle) => {
+                        let center = plane.project(circle.center())?.parameters;
+                        let x = plane
+                            .project(circle.center() + circle.x_radius())?
+                            .parameters;
+                        let y = plane
+                            .project(circle.center() + circle.y_radius())?
+                            .parameters;
+                        let radius = circle.radius();
+                        let achieved = (x.0 - center.0 - radius)
+                            .abs()
+                            .max((x.1 - center.1).abs())
+                            .max((y.0 - center.0).abs())
+                            .max((y.1 - center.1 - radius).abs());
+                        if achieved > self.kernel.tolerance.linear_at_scale(radius) {
+                            return Err(KernelError::new(
+                                DiagnosticKind::UnsupportedGeometry,
+                                "a circular planar edge requires an aligned face parameter frame",
+                            ));
+                        }
+                        Circle2::new(Point2::new(center.0, center.1), radius)?.into()
+                    }
+                    Curve3::Nurbs(_) => {
+                        return Err(KernelError::new(
+                            DiagnosticKind::UnsupportedGeometry,
+                            "planar NURBS face reparameterization is not available",
+                        ));
+                    }
+                };
             }
         }
         Ok(())

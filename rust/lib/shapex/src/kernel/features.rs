@@ -464,45 +464,6 @@ pub(crate) fn shell(
     )
 }
 
-pub(crate) fn facet(source: &Compound) -> KernelResult<Compound> {
-    if source.solids().len() != 1 {
-        return Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "faceting currently requires exactly one solid",
-        ));
-    }
-    let tolerance = source.tolerance();
-    let mesh = source
-        .solids()
-        .next()
-        .ok_or_else(|| invalid("faceting source contains no solid"))?
-        .tessellate(construction_tessellation(tolerance)?)?;
-    let soup = mesh
-        .triangles
-        .into_iter()
-        .zip(mesh.triangle_faces)
-        .map(|(triangle, face)| {
-            source.face_name(face).map(|name| {
-                (
-                    [
-                        mesh.positions[triangle[0]],
-                        mesh.positions[triangle[1]],
-                        mesh.positions[triangle[2]],
-                    ],
-                    vec![name],
-                )
-            })
-        })
-        .collect::<KernelResult<Vec<_>>>()?;
-    let mut mesh = PolyhedralMesh::from_tagged_triangle_soup(soup, tolerance)?;
-    tag_source_edges(&mut mesh, source, tolerance)?;
-    let mut kernel = Kernel::new(tolerance)?;
-    let mut transaction = kernel.begin_operation();
-    transaction.merged_polyhedron(&mesh)?;
-    let committed = transaction.finish()?;
-    Compound::from_operation(kernel, committed, [source])
-}
-
 pub(crate) fn coincident_opposite_face_names(
     first: &Compound,
     second: &Compound,

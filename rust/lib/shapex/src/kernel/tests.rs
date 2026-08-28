@@ -3,9 +3,10 @@ use cgmath::prelude::*;
 use crate::{Matrix3, Point2, Point3, Vec3};
 
 use super::{
-    Axis3, BodyId, BooleanKind, Circle3, Curve3, IntersectionSet, Kernel, Line3, MassProperties,
-    ModelTolerance, NurbsCurve3, NurbsSurface3, Plane3, PolyhedralMesh, Profile, Resolution,
-    RigidTransform3, Sphere3, Surface3, TessellationOptions, TrimmedCurve2, Wire2,
+    Axis3, BodyId, BooleanKind, Circle3, Curve2, Curve3, IntersectionSet, Kernel, Line3,
+    MassProperties, ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, ParameterRange,
+    Plane3, PolyhedralMesh, Profile, Resolution, RigidTransform3, Sphere3, Surface3,
+    TessellationOptions, TrimmedCurve2, Wire2,
 };
 
 fn certified_properties(kernel: &Kernel, body: BodyId) -> MassProperties {
@@ -165,6 +166,26 @@ fn profile_with_hole_extrudes_to_the_expected_volume() {
 }
 
 #[test]
+fn concentric_circular_hole_is_certified_without_tessellation() {
+    let tolerance = ModelTolerance::default();
+    let outer = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 5.0).expect("outer circle")],
+        tolerance,
+    )
+    .expect("outer wire");
+    let hole = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 2.0).expect("inner circle")],
+        tolerance,
+    )
+    .expect("hole wire");
+    let profile = Profile::new(outer, [hole], tolerance).expect("annular profile");
+    let solid = profile
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 3.0))
+        .expect("annular prism");
+    assert!((solid.volume() - 63.0 * std::f64::consts::PI).abs() < 1.0e-8);
+}
+
+#[test]
 fn semicircular_profile_extrudes_without_pathological_work() {
     let tolerance = ModelTolerance::default();
     let radius = 5.0;
@@ -212,6 +233,149 @@ fn two_arc_lobe_profile_extrudes() {
         .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
         .expect("two-arc lobe extrusion");
     assert!(extrusion.volume() > 0.0);
+}
+
+#[test]
+fn analytical_planar_boolean_splits_lines_and_circles() {
+    let tolerance = ModelTolerance::default();
+    let circle = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 5.0).expect("circle")],
+            tolerance,
+        )
+        .expect("circle wire"),
+        [],
+        tolerance,
+    )
+    .expect("circle profile");
+    let right_half_plane = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(0.0, -6.0),
+                Point2::new(6.0, -6.0),
+                Point2::new(6.0, 6.0),
+                Point2::new(0.0, 6.0),
+            ],
+            tolerance,
+        )
+        .expect("rectangle wire"),
+        [],
+        tolerance,
+    )
+    .expect("rectangle profile");
+    let intersection = circle
+        .boolean_planar(&right_half_plane, BooleanKind::Intersection)
+        .expect("analytical intersection");
+    let difference = circle
+        .boolean_planar(&right_half_plane, BooleanKind::Difference)
+        .expect("analytical difference");
+    assert_eq!(intersection.len(), 1);
+    assert_eq!(difference.len(), 1);
+    let half_area = std::f64::consts::PI * 25.0 * 0.5;
+    assert!((intersection[0].area() - half_area).abs() < 1.0e-8);
+    assert!((difference[0].area() - half_area).abs() < 1.0e-8);
+    assert!(intersection[0]
+        .outer()
+        .segments()
+        .iter()
+        .any(|segment| matches!(segment.curve(), Curve2::Circle(_))));
+}
+
+#[test]
+fn coaxial_prism_boolean_preserves_partial_circular_boundaries() {
+    let tolerance = ModelTolerance::default();
+    let circle = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 5.0).expect("circle")],
+            tolerance,
+        )
+        .expect("circle wire"),
+        [],
+        tolerance,
+    )
+    .expect("circle profile")
+    .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 8.0))
+    .expect("cylinder");
+    let box_prism = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(0.0, -6.0),
+                Point2::new(6.0, -6.0),
+                Point2::new(6.0, 6.0),
+                Point2::new(0.0, 6.0),
+            ],
+            tolerance,
+        )
+        .expect("rectangle wire"),
+        [],
+        tolerance,
+    )
+    .expect("rectangle profile")
+    .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 8.0))
+    .expect("box prism");
+    let intersection = circle
+        .intersection(&box_prism)
+        .expect("analytical prism intersection");
+    let difference = circle
+        .difference(&box_prism)
+        .expect("analytical prism difference");
+    let union = circle.union(&box_prism).expect("analytical prism union");
+    let half_volume = std::f64::consts::PI * 25.0 * 4.0;
+    assert!((intersection.volume() - half_volume).abs() < 1.0e-7);
+    assert!((difference.volume() - half_volume).abs() < 1.0e-7);
+    assert!((union.volume() - (circle.volume() + box_prism.volume() - half_volume)).abs() < 1.0e-7);
+    for result in [&intersection, &difference, &union] {
+        assert!(result
+            .faces()
+            .all(|face| matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_))));
+    }
+}
+
+#[test]
+fn blind_circular_pocket_is_built_from_analytical_layers() {
+    let tolerance = ModelTolerance::default();
+    let block = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(-10.0, -10.0),
+                Point2::new(10.0, -10.0),
+                Point2::new(10.0, 10.0),
+                Point2::new(-10.0, 10.0),
+            ],
+            tolerance,
+        )
+        .expect("block wire"),
+        [],
+        tolerance,
+    )
+    .expect("block profile")
+    .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+    .expect("block");
+    let tool_plane = Plane3::new(
+        Point3::new(0.0, 0.0, 20.0),
+        Vec3::unit_y(),
+        -Vec3::unit_x(),
+        tolerance,
+    )
+    .expect("tool plane");
+    let tool = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 3.0).expect("circle")],
+            tolerance,
+        )
+        .expect("circle wire"),
+        [],
+        tolerance,
+    )
+    .expect("tool profile")
+    .extrude(tool_plane, Vec3::new(0.0, 0.0, -10.0))
+    .expect("tool");
+    let pocket = block.difference(&tool).expect("blind analytical pocket");
+    assert_eq!(pocket.solids().len(), 1);
+    assert!((pocket.volume() - (8000.0 - 90.0 * std::f64::consts::PI)).abs() < 1.0e-6);
+    assert!(pocket
+        .faces()
+        .all(|face| matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_))));
 }
 
 #[test]
@@ -291,18 +455,79 @@ fn curved_extrusion_cuts_a_prismatic_body() {
     .expect("cutter");
     let cut = block.difference(&cutter).expect("curved cut");
     assert!(cut.volume() > 0.0);
+    assert!(cut
+        .faces()
+        .all(|face| matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_))));
+    assert!(cut
+        .edges()
+        .all(|edge| matches!(edge.curve(), Curve3::Line(_) | Curve3::Circle(_))));
     assert!(!cut
         .tessellate(TessellationOptions::default())
         .expect("mesh")
         .is_empty());
     let intersection = block.intersection(&cutter).expect("curved intersection");
     assert!(intersection.volume() > 0.0);
+    assert!(intersection
+        .faces()
+        .all(|face| matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_))));
     assert!(!intersection
         .tessellate(TessellationOptions::default())
         .expect("intersection mesh")
         .is_empty());
     let union = block.union(&cutter).expect("curved contained union");
     assert!((union.volume() - block.volume()).abs() < 1.0e-3);
+    assert!(union
+        .faces()
+        .all(|face| matches!(face.surface(), Surface3::Plane(_))));
+}
+
+#[test]
+fn overlapping_cylinders_have_analytic_boolean_results() {
+    let tolerance = ModelTolerance::default();
+    let cylinder = |center: Point2, radius: f64| {
+        Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(center, radius).expect("circle")],
+                tolerance,
+            )
+            .expect("circle wire"),
+            [],
+            tolerance,
+        )
+        .expect("circle profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("cylinder")
+    };
+    let first = cylinder(Point2::new(0.0, 0.0), 15.0);
+    let second = cylinder(Point2::new(6.0, 0.0), 10.0);
+    assert_eq!(
+        first
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+            .count(),
+        2
+    );
+
+    let intersection = first.intersection(&second).expect("intersection");
+    let union = first.union(&second).expect("union");
+    let difference = first.difference(&second).expect("difference");
+    assert_eq!(intersection.solids().len(), 1);
+    assert!(intersection.volume() > 0.0);
+    assert!(intersection.volume() < first.volume());
+    assert!(intersection.volume() < second.volume());
+    assert!(
+        (union.volume() - (first.volume() + second.volume() - intersection.volume())).abs()
+            < 1.0e-5
+    );
+    assert!((difference.volume() - (first.volume() - intersection.volume())).abs() < 1.0e-5);
+    for result in [&intersection, &union, &difference] {
+        assert!(result
+            .faces()
+            .all(|face| matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_))));
+        assert!(result
+            .edges()
+            .all(|edge| matches!(edge.curve(), Curve3::Line(_) | Curve3::Circle(_))));
+    }
 }
 
 #[test]
@@ -477,6 +702,59 @@ fn rational_splines_validate_domains_and_derivatives() {
         vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0],
     )
     .is_err());
+}
+
+#[test]
+fn nurbs_profile_extrudes_as_an_analytic_certified_prism() {
+    let tolerance = ModelTolerance::default();
+    let curved_top = TrimmedCurve2::new(
+        NurbsCurve2::new(
+            2,
+            vec![
+                Point2::new(4.0, 2.0),
+                Point2::new(2.0, 4.0),
+                Point2::new(0.0, 2.0),
+            ],
+            vec![1.0; 3],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .expect("spline"),
+        ParameterRange::new(0.0, 1.0).expect("range"),
+    )
+    .expect("trimmed spline");
+    let wire = Wire2::new(
+        [
+            TrimmedCurve2::line(Point2::new(0.0, 0.0), Point2::new(4.0, 0.0)).expect("bottom"),
+            TrimmedCurve2::line(Point2::new(4.0, 0.0), Point2::new(4.0, 2.0)).expect("right"),
+            curved_top,
+            TrimmedCurve2::line(Point2::new(0.0, 2.0), Point2::new(0.0, 0.0)).expect("left"),
+        ],
+        tolerance,
+    )
+    .expect("wire");
+    let prism = Profile::new(wire, [], tolerance)
+        .expect("profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 5.0))
+        .expect("analytic NURBS prism");
+
+    assert!(prism.volume() > 40.0);
+    assert!(prism
+        .edges()
+        .any(|edge| matches!(edge.curve(), Curve3::Nurbs(_))));
+
+    let separate_circle = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(12.0, 2.0), 1.0).expect("circle")],
+        tolerance,
+    )
+    .expect("circle wire");
+    let separate_prism = Profile::new(separate_circle, [], tolerance)
+        .expect("circle profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 5.0))
+        .expect("separate prism");
+    let compound = prism
+        .union(&separate_prism)
+        .expect("separated analytic prisms");
+    assert_eq!(compound.solids().len(), 2);
 }
 
 #[test]
@@ -1031,22 +1309,45 @@ fn moving_a_face_rebuilds_and_certifies_the_changed_solid() {
 }
 
 #[test]
-fn curved_boolean_operands_are_faceted_and_certified() {
+fn unsupported_curved_boolean_never_falls_back_to_facets() {
     let tolerance = ModelTolerance::default();
-    let circle = Wire2::new(
-        [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 3.0).expect("circle")],
+    let curved_top = TrimmedCurve2::new(
+        NurbsCurve2::new(
+            2,
+            vec![
+                Point2::new(4.0, 2.0),
+                Point2::new(2.0, 4.0),
+                Point2::new(0.0, 2.0),
+            ],
+            vec![1.0; 3],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .expect("spline"),
+        ParameterRange::new(0.0, 1.0).expect("range"),
+    )
+    .expect("trimmed spline");
+    let spline_wire = Wire2::new(
+        [
+            TrimmedCurve2::line(Point2::new(0.0, 0.0), Point2::new(4.0, 0.0)).expect("bottom"),
+            TrimmedCurve2::line(Point2::new(4.0, 0.0), Point2::new(4.0, 2.0)).expect("right"),
+            curved_top,
+            TrimmedCurve2::line(Point2::new(0.0, 2.0), Point2::new(0.0, 0.0)).expect("left"),
+        ],
         tolerance,
     )
-    .expect("circle wire");
-    let cylinder = Profile::new(circle, [], tolerance)
-        .expect("circle profile")
+    .expect("spline wire");
+    let spline_prism = Profile::new(spline_wire, [], tolerance)
+        .expect("spline profile")
         .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
-        .expect("cylinder");
+        .expect("spline prism");
     let tool = owned_cuboid(Point3::new(0.0, -4.0, -1.0), Point3::new(4.0, 4.0, 11.0));
-    let cut = cylinder.difference(&tool).expect("curved difference");
-
-    assert!(cut.volume() > 0.0);
-    assert!(cut.volume() < cylinder.volume());
+    let error = spline_prism
+        .difference(&tool)
+        .expect_err("an unimplemented analytic Boolean must be rejected");
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.kind == super::DiagnosticKind::UnsupportedGeometry
+            && diagnostic.message.contains("analytic construction")
+    }));
 }
 
 #[test]
@@ -1062,13 +1363,13 @@ fn circular_prism_can_join_partially_across_a_planar_face() {
         .expect("circle profile")
         .extrude(
             Plane3::new(
-                Point3::new(0.0, 0.0, 20.0),
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::unit_z(),
                 Vec3::unit_x(),
-                Vec3::unit_y(),
                 tolerance,
             )
             .expect("top plane"),
-            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, -1.0, 0.0),
         )
         .expect("boss");
 

@@ -298,9 +298,11 @@ fn validate_no_self_intersection(
     tolerance: ModelTolerance,
 ) -> KernelResult<()> {
     if let Curve2::Circle(reference) = segments[0].curve() {
-        let same_circle = segments.iter().all(
-            |segment| matches!(segment.curve(), Curve2::Circle(circle) if circle == reference),
-        );
+        let same_circle = segments.iter().all(|segment| {
+            matches!(segment.curve(), Curve2::Circle(circle)
+                if circle.center().distance(reference.center()) <= tolerance.linear
+                    && (circle.radius() - reference.radius()).abs() <= tolerance.linear)
+        });
         let total_turn = segments
             .iter()
             .map(|segment| segment.range().span())
@@ -315,69 +317,503 @@ fn validate_no_self_intersection(
             return Ok(());
         }
     }
-    let polylines = segments
-        .iter()
-        .map(|segment| segment.polyline(tolerance))
-        .collect::<KernelResult<Vec<_>>>()?;
-    #[derive(Clone, Copy)]
-    struct PolylineEdge {
-        start: Point2,
-        end: Point2,
-        min_x: f64,
-        max_x: f64,
-        min_y: f64,
-        max_y: f64,
+    for segment in segments {
+        validate_segment_is_simple(segment, tolerance)?;
     }
-
-    let mut edges = Vec::new();
-    for polyline in &polylines {
-        edges.extend(polyline.windows(2).map(|edge| PolylineEdge {
-            start: edge[0],
-            end: edge[1],
-            min_x: edge[0].x.min(edge[1].x),
-            max_x: edge[0].x.max(edge[1].x),
-            min_y: edge[0].y.min(edge[1].y),
-            max_y: edge[0].y.max(edge[1].y),
-        }));
-    }
-
-    // A quadratic all-pairs scan becomes pathological for exact circles at a
-    // tight model tolerance. Sweep along X and retain only edges whose bounding
-    // boxes can still overlap. This preserves the same geometric test while a
-    // normal curved profile now validates in approximately linear time.
-    let mut order = (0..edges.len()).collect::<Vec<_>>();
-    order.sort_by(|first, second| edges[*first].min_x.total_cmp(&edges[*second].min_x));
-    let mut active = Vec::<usize>::new();
-    for current_index in order {
-        let current = edges[current_index];
-        active.retain(|candidate| edges[*candidate].max_x + tolerance.linear >= current.min_x);
-        for candidate_index in &active {
-            let candidate = edges[*candidate_index];
-            if candidate.max_y + tolerance.linear < current.min_y
-                || current.max_y + tolerance.linear < candidate.min_y
+    for first in 0..segments.len() {
+        for second in first + 1..segments.len() {
+            let adjacent = second == first + 1 || (first == 0 && second + 1 == segments.len());
+            let first_endpoints = [segments[first].start()?, segments[first].end()?];
+            let second_endpoints = [segments[second].start()?, segments[second].end()?];
+            let shared = first_endpoints
+                .into_iter()
+                .flat_map(|first| {
+                    second_endpoints
+                        .into_iter()
+                        .filter(move |second| first.distance(*second) <= tolerance.linear)
+                        .map(move |_| first)
+                })
+                .collect::<Vec<_>>();
+            let intersection =
+                curve_pair_intersection(&segments[first], &segments[second], tolerance)?;
+            if intersection.coincident
+                || intersection.hits.iter().any(|hit| {
+                    !adjacent
+                        || shared
+                            .iter()
+                            .all(|shared| shared.distance(hit.point) > tolerance.linear)
+                })
             {
-                continue;
-            }
-            let shares_endpoint = candidate.start.distance(current.start) <= tolerance.linear
-                || candidate.start.distance(current.end) <= tolerance.linear
-                || candidate.end.distance(current.start) <= tolerance.linear
-                || candidate.end.distance(current.end) <= tolerance.linear;
-            if shares_endpoint {
-                continue;
-            }
-            if segments_intersect(
-                candidate.start,
-                candidate.end,
-                current.start,
-                current.end,
-                tolerance.linear,
-            ) {
                 return Err(invalid("wire must not self-intersect"));
             }
         }
-        active.push(current_index);
     }
     Ok(())
+}
+
+#[derive(Default)]
+pub(crate) struct CurvePairIntersection {
+    pub hits: Vec<CurvePairHit>,
+    pub coincident: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CurvePairHit {
+    pub point: Point2,
+    pub first_parameter: f64,
+    pub second_parameter: f64,
+}
+
+fn validate_segment_is_simple(
+    segment: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    let Curve2::Nurbs(curve) = segment.curve() else {
+        return Ok(());
+    };
+    let controls = curve.control_points();
+    let direction = segment.end()? - segment.start()?;
+    let length = direction.magnitude();
+    if length <= tolerance.linear {
+        return Err(invalid("a NURBS wire segment needs distinct endpoints"));
+    }
+    let unit = direction / length;
+    let ordered = if segment.range().span() >= 0.0 {
+        controls.iter().collect::<Vec<_>>()
+    } else {
+        controls.iter().rev().collect::<Vec<_>>()
+    };
+    let mut previous = ordered[0].to_vec().dot(unit);
+    for control in ordered.iter().skip(1) {
+        let projection = control.to_vec().dot(unit);
+        if projection + tolerance.linear < previous {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "certifying a non-monotone NURBS wire segment is not implemented",
+            ));
+        }
+        previous = projection;
+    }
+    Ok(())
+}
+
+pub(crate) fn wires_intersect(
+    first: &Wire2,
+    second: &Wire2,
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
+    for first_segment in first.segments() {
+        for second_segment in second.segments() {
+            let intersection = curve_pair_intersection(first_segment, second_segment, tolerance)?;
+            if intersection.coincident || !intersection.hits.is_empty() {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub(crate) fn wire_contains_point(
+    wire: &Wire2,
+    point: Point2,
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
+    let mut winding = 0_i32;
+    // Move the classification ray away from shared vertices. The original
+    // point is still used for the exact boundary-distance checks below.
+    let ray_point = Point2::new(
+        point.x,
+        point.y + tolerance.linear * 0.271_828_182_845_904_5,
+    );
+    for segment in wire.segments() {
+        match segment.curve() {
+            Curve2::Line(_) => {
+                let start = segment.start()?;
+                let end = segment.end()?;
+                if point_on_segment(point, start, end, tolerance.linear) {
+                    return Ok(false);
+                }
+                let cross = (end.x - start.x) * (ray_point.y - start.y)
+                    - (end.y - start.y) * (ray_point.x - start.x);
+                if start.y <= ray_point.y && end.y > ray_point.y && cross > 0.0 {
+                    winding += 1;
+                } else if start.y > ray_point.y && end.y <= ray_point.y && cross < 0.0 {
+                    winding -= 1;
+                }
+            }
+            Curve2::Circle(circle) => {
+                let radial = point - circle.center();
+                let point_parameter = radial.y.atan2(radial.x);
+                if (radial.magnitude() - circle.radius()).abs() <= tolerance.linear
+                    && periodic_range_contains(
+                        segment.range(),
+                        point_parameter,
+                        tolerance.parameter,
+                    )
+                {
+                    return Ok(false);
+                }
+                if (segment.range().span().abs() - std::f64::consts::TAU).abs()
+                    <= tolerance.parameter
+                {
+                    if radial.magnitude() < circle.radius() - tolerance.linear {
+                        winding += segment.range().span().signum() as i32;
+                    }
+                    continue;
+                }
+                let sine = (ray_point.y - circle.center().y) / circle.radius();
+                if sine.abs() > 1.0 + tolerance.linear / circle.radius() {
+                    continue;
+                }
+                let first = sine.clamp(-1.0, 1.0).asin();
+                let candidates = [first, std::f64::consts::PI - first];
+                for base in candidates {
+                    for parameter in periodic_parameters_in_range(segment.range(), base) {
+                        let x = circle.center().x + circle.radius() * parameter.cos();
+                        if x <= ray_point.x + tolerance.linear {
+                            continue;
+                        }
+                        let direction = segment.range().span().signum();
+                        let vertical = circle.radius() * parameter.cos() * direction;
+                        if vertical.abs() <= tolerance.linear {
+                            continue;
+                        }
+                        let progress = if direction > 0.0 {
+                            parameter - segment.range().start
+                        } else {
+                            segment.range().start - parameter
+                        };
+                        let length = segment.range().span().abs();
+                        let at_start = progress.abs() <= tolerance.parameter;
+                        let at_end = (progress - length).abs() <= tolerance.parameter;
+                        let include = (!at_start && !at_end)
+                            || (at_start && vertical > 0.0)
+                            || (at_end && vertical < 0.0);
+                        if include {
+                            winding += if vertical > 0.0 { 1 } else { -1 };
+                        }
+                    }
+                }
+            }
+            Curve2::Nurbs(_) => {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "certified point containment for a NURBS boundary is not implemented",
+                ));
+            }
+        }
+    }
+    Ok(winding != 0)
+}
+
+fn point_on_segment(point: Point2, start: Point2, end: Point2, tolerance: f64) -> bool {
+    let direction = end - start;
+    let length = direction.magnitude();
+    if length == 0.0 {
+        return point.distance(start) <= tolerance;
+    }
+    let cross = direction.x * (point.y - start.y) - direction.y * (point.x - start.x);
+    cross.abs() <= tolerance * length
+        && point.x >= start.x.min(end.x) - tolerance
+        && point.x <= start.x.max(end.x) + tolerance
+        && point.y >= start.y.min(end.y) - tolerance
+        && point.y <= start.y.max(end.y) + tolerance
+}
+
+fn periodic_parameters_in_range(range: ParameterRange, base: f64) -> Vec<f64> {
+    let low = range.start.min(range.end);
+    let high = range.start.max(range.end);
+    let period = std::f64::consts::TAU;
+    let first = base + ((low - base) / period).ceil() * period;
+    let mut result = Vec::new();
+    let mut parameter = first;
+    while parameter <= high + f64::EPSILON * 64.0 && result.len() < 3 {
+        result.push(parameter);
+        parameter += period;
+    }
+    result
+}
+
+pub(crate) fn curve_pair_intersection(
+    first: &TrimmedCurve2,
+    second: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<CurvePairIntersection> {
+    match (first.curve(), second.curve()) {
+        (Curve2::Line(_), Curve2::Line(_)) => line_line_intersection(first, second, tolerance),
+        (Curve2::Line(_), Curve2::Circle(_)) => line_circle_intersection(first, second, tolerance),
+        (Curve2::Circle(_), Curve2::Line(_)) => {
+            let mut intersection = line_circle_intersection(second, first, tolerance)?;
+            for hit in &mut intersection.hits {
+                std::mem::swap(&mut hit.first_parameter, &mut hit.second_parameter);
+            }
+            Ok(intersection)
+        }
+        (Curve2::Circle(_), Curve2::Circle(_)) => {
+            circle_circle_intersection(first, second, tolerance)
+        }
+        (Curve2::Nurbs(curve), _) => certified_nurbs_pair(curve, second, tolerance),
+        (_, Curve2::Nurbs(curve)) => certified_nurbs_pair(curve, first, tolerance),
+    }
+}
+
+fn line_line_intersection(
+    first: &TrimmedCurve2,
+    second: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<CurvePairIntersection> {
+    let a = first.start()?;
+    let b = first.end()?;
+    let c = second.start()?;
+    let d = second.end()?;
+    if !segments_intersect(a, b, c, d, tolerance.linear) {
+        return Ok(CurvePairIntersection::default());
+    }
+    let cross = |left: Vec2, right: Vec2| left.x * right.y - left.y * right.x;
+    let denominator = cross(b - a, d - c);
+    if denominator.abs() <= tolerance.linear.powi(2) {
+        return Ok(CurvePairIntersection {
+            coincident: true,
+            ..Default::default()
+        });
+    }
+    let parameter = cross(c - a, d - c) / denominator;
+    let second_parameter = cross(c - a, b - a) / denominator;
+    Ok(CurvePairIntersection {
+        hits: vec![CurvePairHit {
+            point: a + (b - a) * parameter,
+            first_parameter: first.range().start + first.range().span() * parameter,
+            second_parameter: second.range().start + second.range().span() * second_parameter,
+        }],
+        coincident: false,
+    })
+}
+
+fn line_circle_intersection(
+    line_segment: &TrimmedCurve2,
+    circle_segment: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<CurvePairIntersection> {
+    let Curve2::Line(line) = line_segment.curve() else {
+        unreachable!()
+    };
+    let Curve2::Circle(circle) = circle_segment.curve() else {
+        unreachable!()
+    };
+    let offset = line.origin() - circle.center();
+    let direction = line.direction();
+    let a = direction.magnitude2();
+    let b = 2.0 * offset.dot(direction);
+    let c = offset.magnitude2() - circle.radius().powi(2);
+    let discriminant = b * b - 4.0 * a * c;
+    let threshold = tolerance.linear.powi(2) * a.max(1.0);
+    if discriminant < -threshold {
+        return Ok(CurvePairIntersection::default());
+    }
+    let root = discriminant.max(0.0).sqrt();
+    let parameters = if discriminant.abs() <= threshold {
+        vec![-b / (2.0 * a)]
+    } else {
+        vec![(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)]
+    };
+    let mut hits = Vec::new();
+    for parameter in parameters {
+        let point = line.origin() + direction * parameter;
+        let circle_parameter = (point.y - circle.center().y).atan2(point.x - circle.center().x);
+        if line_segment.range().contains(parameter, tolerance)
+            && periodic_range_contains(
+                circle_segment.range(),
+                circle_parameter,
+                tolerance.parameter,
+            )
+        {
+            hits.push(CurvePairHit {
+                point,
+                first_parameter: parameter,
+                second_parameter: circle_parameter,
+            });
+        }
+    }
+    Ok(CurvePairIntersection {
+        hits,
+        coincident: false,
+    })
+}
+
+fn circle_circle_intersection(
+    first_segment: &TrimmedCurve2,
+    second_segment: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<CurvePairIntersection> {
+    let Curve2::Circle(first) = first_segment.curve() else {
+        unreachable!()
+    };
+    let Curve2::Circle(second) = second_segment.curve() else {
+        unreachable!()
+    };
+    let delta = second.center() - first.center();
+    let distance = delta.magnitude();
+    let linear = tolerance.linear_at_scale(first.radius().max(second.radius()));
+    if distance <= linear && (first.radius() - second.radius()).abs() <= linear {
+        return Ok(CurvePairIntersection {
+            coincident: circular_ranges_overlap(
+                first_segment.range(),
+                second_segment.range(),
+                tolerance.parameter,
+            ),
+            ..Default::default()
+        });
+    }
+    if distance > first.radius() + second.radius() + linear
+        || distance + first.radius().min(second.radius())
+            < first.radius().max(second.radius()) - linear
+        || distance <= linear
+    {
+        return Ok(CurvePairIntersection::default());
+    }
+    let along =
+        (first.radius().powi(2) - second.radius().powi(2) + distance.powi(2)) / (2.0 * distance);
+    let height_squared = first.radius().powi(2) - along.powi(2);
+    if height_squared < -linear.powi(2) {
+        return Ok(CurvePairIntersection::default());
+    }
+    let direction = delta / distance;
+    let perpendicular = Vec2::new(-direction.y, direction.x);
+    let midpoint = first.center() + direction * along;
+    let height = height_squared.max(0.0).sqrt();
+    let candidates = if height <= linear {
+        vec![midpoint]
+    } else {
+        vec![
+            midpoint + perpendicular * height,
+            midpoint - perpendicular * height,
+        ]
+    };
+    let hits = candidates
+        .into_iter()
+        .filter_map(|point| {
+            let first_parameter = (point.y - first.center().y).atan2(point.x - first.center().x);
+            let second_parameter = (point.y - second.center().y).atan2(point.x - second.center().x);
+            (periodic_range_contains(first_segment.range(), first_parameter, tolerance.parameter)
+                && periodic_range_contains(
+                    second_segment.range(),
+                    second_parameter,
+                    tolerance.parameter,
+                ))
+            .then_some(CurvePairHit {
+                point,
+                first_parameter,
+                second_parameter,
+            })
+        })
+        .collect();
+    Ok(CurvePairIntersection {
+        hits,
+        coincident: false,
+    })
+}
+
+fn periodic_range_contains(range: ParameterRange, parameter: f64, tolerance: f64) -> bool {
+    let low = range.start.min(range.end);
+    let high = range.start.max(range.end);
+    let period = std::f64::consts::TAU;
+    let normalized = low + (parameter - low).rem_euclid(period);
+    normalized <= high + tolerance || normalized - period >= low - tolerance
+}
+
+fn circular_ranges_overlap(first: ParameterRange, second: ParameterRange, tolerance: f64) -> bool {
+    let interior = |range: ParameterRange| {
+        [
+            range.start + range.span() * 0.25,
+            range.start + range.span() * 0.5,
+            range.start + range.span() * 0.75,
+        ]
+    };
+    interior(first)
+        .into_iter()
+        .any(|parameter| periodic_range_contains(second, parameter, tolerance))
+        || interior(second)
+            .into_iter()
+            .any(|parameter| periodic_range_contains(first, parameter, tolerance))
+}
+
+fn certified_nurbs_pair(
+    nurbs: &super::NurbsCurve2,
+    other: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<CurvePairIntersection> {
+    let mut controls = nurbs.control_points().to_vec();
+    let other_points = match other.curve() {
+        Curve2::Line(_) => vec![other.start()?, other.end()?],
+        Curve2::Nurbs(curve) => curve.control_points().to_vec(),
+        Curve2::Circle(circle) => {
+            let bounds = control_bounds(&controls);
+            let closest_x = circle.center().x.clamp(bounds.0, bounds.1);
+            let closest_y = circle.center().y.clamp(bounds.2, bounds.3);
+            if circle.center().distance(Point2::new(closest_x, closest_y))
+                > circle.radius() + tolerance.linear
+            {
+                return Ok(CurvePairIntersection::default());
+            }
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "certifying a possible NURBS/circle boundary intersection is not implemented",
+            ));
+        }
+    };
+    let first_bounds = control_bounds(&controls);
+    let second_bounds = control_bounds(&other_points);
+    if first_bounds.1 + tolerance.linear < second_bounds.0
+        || second_bounds.1 + tolerance.linear < first_bounds.0
+        || first_bounds.3 + tolerance.linear < second_bounds.2
+        || second_bounds.3 + tolerance.linear < first_bounds.2
+    {
+        return Ok(CurvePairIntersection::default());
+    }
+    if let Curve2::Line(_) = other.curve() {
+        let start = other_points[0];
+        let end = other_points[1];
+        let direction = other_points[1] - start;
+        let cross =
+            |point: Point2| direction.x * (point.y - start.y) - direction.y * (point.x - start.x);
+        controls.retain(|point| {
+            point.distance(start) > tolerance.linear && point.distance(end) > tolerance.linear
+        });
+        let values = controls
+            .iter()
+            .map(|point| cross(*point))
+            .collect::<Vec<_>>();
+        let threshold = tolerance.linear * direction.magnitude().max(1.0);
+        if !values.is_empty()
+            && (values.iter().all(|value| *value > threshold)
+                || values.iter().all(|value| *value < -threshold))
+        {
+            return Ok(CurvePairIntersection::default());
+        }
+    }
+    Err(KernelError::new(
+        DiagnosticKind::UnsupportedGeometry,
+        "certifying this possible NURBS boundary intersection is not implemented",
+    ))
+}
+
+fn control_bounds(points: &[Point2]) -> (f64, f64, f64, f64) {
+    points.iter().fold(
+        (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ),
+        |(min_x, max_x, min_y, max_y), point| {
+            (
+                min_x.min(point.x),
+                max_x.max(point.x),
+                min_y.min(point.y),
+                max_y.max(point.y),
+            )
+        },
+    )
 }
 
 pub(crate) fn segments_intersect(

@@ -368,14 +368,49 @@ impl Curve2 {
                     + circle.radius * circle.radius * range.span();
                 Ok(0.5 * integral)
             }
-            Self::Nurbs(_) => {
+            Self::Nurbs(curve) => {
                 let integrand = |parameter: f64| -> KernelResult<f64> {
                     let evaluation = self.evaluate(parameter)?;
                     Ok(0.5
                         * (evaluation.point.x * evaluation.first_derivative.y
                             - evaluation.point.y * evaluation.first_derivative.x))
                 };
-                adaptive_simpson(&integrand, range.start, range.end, tolerance, 24)
+                let coordinate_scale = curve
+                    .control_points()
+                    .iter()
+                    .map(|point| point.x.abs().max(point.y.abs()))
+                    .fold(1.0_f64, f64::max);
+                let absolute_tolerance =
+                    tolerance.max(f64::EPSILON * coordinate_scale.powi(2) * 4096.0);
+                let mut breaks = curve
+                    .knots()
+                    .iter()
+                    .copied()
+                    .filter(|value| {
+                        *value >= range.start.min(range.end) && *value <= range.start.max(range.end)
+                    })
+                    .collect::<Vec<_>>();
+                breaks.extend([range.start, range.end]);
+                breaks.sort_by(f64::total_cmp);
+                breaks.dedup_by(|first, second| (*first - *second).abs() <= f64::EPSILON * 64.0);
+                if range.span() < 0.0 {
+                    breaks.reverse();
+                }
+                let interval_tolerance = absolute_tolerance / breaks.len().max(2) as f64;
+                breaks.windows(2).try_fold(0.0, |sum, interval| {
+                    if (interval[1] - interval[0]).abs() <= f64::EPSILON * 64.0 {
+                        Ok(sum)
+                    } else {
+                        Ok(sum
+                            + adaptive_simpson(
+                                &integrand,
+                                interval[0],
+                                interval[1],
+                                interval_tolerance,
+                                24,
+                            )?)
+                    }
+                })
             }
         }
     }

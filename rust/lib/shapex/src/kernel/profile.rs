@@ -1,6 +1,11 @@
-use crate::Point2;
+use cgmath::prelude::*;
 
-use super::{DiagnosticKind, KernelError, KernelResult, ModelTolerance, Wire2};
+use super::wire::curve_pair_intersection;
+use super::wire::{wire_contains_point, wires_intersect};
+use super::{
+    BooleanKind, Curve2, DiagnosticKind, KernelError, KernelResult, ModelTolerance, ParameterRange,
+    TrimmedCurve2, Wire2,
+};
 
 /// A validated planar region bounded by exact 2D curve wires.
 ///
@@ -35,11 +40,9 @@ impl Profile {
                 }
             })
             .collect::<Vec<_>>();
-        let outer_polyline = outer.polyline(tolerance)?;
         for hole in &holes {
-            let hole_polyline = hole.polyline(tolerance)?;
-            if boundaries_intersect(&outer_polyline, &hole_polyline, tolerance.linear)
-                || !point_inside_polygon(hole_polyline[0], &outer_polyline, tolerance.linear)
+            if wires_intersect(&outer, hole, tolerance)?
+                || !wire_contains_point(&outer, hole.segments()[0].start()?, tolerance)?
             {
                 return Err(invalid(
                     "profile holes must lie strictly inside the outer wire",
@@ -47,12 +50,10 @@ impl Profile {
             }
         }
         for first in 0..holes.len() {
-            let first_polyline = holes[first].polyline(tolerance)?;
             for second in holes.iter().skip(first + 1) {
-                let second_polyline = second.polyline(tolerance)?;
-                if boundaries_intersect(&first_polyline, &second_polyline, tolerance.linear)
-                    || point_inside_polygon(first_polyline[0], &second_polyline, tolerance.linear)
-                    || point_inside_polygon(second_polyline[0], &first_polyline, tolerance.linear)
+                if wires_intersect(&holes[first], second, tolerance)?
+                    || wire_contains_point(second, holes[first].segments()[0].start()?, tolerance)?
+                    || wire_contains_point(&holes[first], second.segments()[0].start()?, tolerance)?
                 {
                     return Err(invalid("profile holes may not touch, overlap, or nest"));
                 }
@@ -82,92 +83,213 @@ impl Profile {
     pub fn tolerance(&self) -> ModelTolerance {
         self.tolerance
     }
-}
 
-fn boundaries_intersect(first: &[Point2], second: &[Point2], tolerance: f64) -> bool {
-    #[derive(Clone, Copy)]
-    struct Edge {
-        start: Point2,
-        end: Point2,
-        boundary: bool,
-        min_x: f64,
-        max_x: f64,
-        min_y: f64,
-        max_y: f64,
-    }
-
-    let edges_for = |points: &[Point2], boundary| {
-        (0..points.len())
-            .map(|index| {
-                let start = points[index];
-                let end = points[(index + 1) % points.len()];
-                Edge {
-                    start,
-                    end,
-                    boundary,
-                    min_x: start.x.min(end.x),
-                    max_x: start.x.max(end.x),
-                    min_y: start.y.min(end.y),
-                    max_y: start.y.max(end.y),
+    pub(crate) fn boolean_planar(
+        &self,
+        other: &Self,
+        kind: BooleanKind,
+    ) -> KernelResult<Vec<Self>> {
+        if self.tolerance != other.tolerance {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidTolerance,
+                "planar Boolean profiles require the same model tolerance",
+            ));
+        }
+        let mut first_boundaries = vec![self.outer.clone()];
+        first_boundaries.extend(self.holes.iter().cloned());
+        let mut second_boundaries = vec![other.outer.clone()];
+        second_boundaries.extend(other.holes.iter().cloned());
+        let mut first_splits = first_boundaries
+            .iter()
+            .map(|wire| vec![Vec::<f64>::new(); wire.segments().len()])
+            .collect::<Vec<_>>();
+        let mut second_splits = second_boundaries
+            .iter()
+            .map(|wire| vec![Vec::<f64>::new(); wire.segments().len()])
+            .collect::<Vec<_>>();
+        for (first_wire_index, first_wire) in first_boundaries.iter().enumerate() {
+            for (second_wire_index, second_wire) in second_boundaries.iter().enumerate() {
+                for (first_segment_index, first_segment) in first_wire.segments().iter().enumerate()
+                {
+                    for (second_segment_index, second_segment) in
+                        second_wire.segments().iter().enumerate()
+                    {
+                        let intersection =
+                            curve_pair_intersection(first_segment, second_segment, self.tolerance)?;
+                        if intersection.coincident {
+                            return Err(KernelError::new(
+                                DiagnosticKind::UnsupportedGeometry,
+                                "analytical planar Booleans do not yet support coincident curve intervals",
+                            ));
+                        }
+                        for hit in intersection.hits {
+                            first_splits[first_wire_index][first_segment_index]
+                                .push(hit.first_parameter);
+                            second_splits[second_wire_index][second_segment_index]
+                                .push(hit.second_parameter);
+                        }
+                    }
                 }
-            })
-            .collect::<Vec<_>>()
-    };
-    let mut edges = edges_for(first, false);
-    edges.extend(edges_for(second, true));
-    edges.sort_by(|first, second| first.min_x.total_cmp(&second.min_x));
-
-    let mut active = Vec::<Edge>::new();
-    for current in edges {
-        active.retain(|candidate| candidate.max_x + tolerance >= current.min_x);
-        for candidate in &active {
-            if candidate.boundary == current.boundary
-                || candidate.max_y + tolerance < current.min_y
-                || current.max_y + tolerance < candidate.min_y
-            {
-                continue;
-            }
-            if super::wire::segments_intersect(
-                candidate.start,
-                candidate.end,
-                current.start,
-                current.end,
-                tolerance,
-            ) {
-                return true;
             }
         }
-        active.push(current);
+
+        let first_fragments = split_boundaries(&first_boundaries, first_splits, self.tolerance)?;
+        let second_fragments = split_boundaries(&second_boundaries, second_splits, self.tolerance)?;
+        let mut selected = Vec::new();
+        for fragment in first_fragments {
+            let inside = profile_contains(other, fragment_midpoint(&fragment)?)?;
+            let keep = match kind {
+                BooleanKind::Union | BooleanKind::Difference => !inside,
+                BooleanKind::Intersection => inside,
+            };
+            if keep {
+                selected.push(fragment);
+            }
+        }
+        for fragment in second_fragments {
+            let inside = profile_contains(self, fragment_midpoint(&fragment)?)?;
+            let keep = match kind {
+                BooleanKind::Union => !inside,
+                BooleanKind::Difference | BooleanKind::Intersection => inside,
+            };
+            if keep {
+                selected.push(if kind == BooleanKind::Difference {
+                    fragment.reversed()
+                } else {
+                    fragment
+                });
+            }
+        }
+        profiles_from_fragments(selected, self.tolerance)
     }
-    false
 }
 
-fn point_inside_polygon(point: Point2, polygon: &[Point2], tolerance: f64) -> bool {
-    if (0..polygon.len()).any(|index| {
-        let start = polygon[index];
-        let end = polygon[(index + 1) % polygon.len()];
-        let cross =
-            (end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x);
-        cross.abs() <= tolerance * tolerance
-            && point.x >= start.x.min(end.x) - tolerance
-            && point.x <= start.x.max(end.x) + tolerance
-            && point.y >= start.y.min(end.y) - tolerance
-            && point.y <= start.y.max(end.y) + tolerance
-    }) {
-        return false;
-    }
-    let mut inside = false;
-    for index in 0..polygon.len() {
-        let start = polygon[index];
-        let end = polygon[(index + 1) % polygon.len()];
-        if (start.y > point.y) != (end.y > point.y) {
-            let crossing = start.x + (point.y - start.y) * (end.x - start.x) / (end.y - start.y);
-            if crossing > point.x {
-                inside = !inside;
+fn split_boundaries(
+    boundaries: &[Wire2],
+    split_parameters: Vec<Vec<Vec<f64>>>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Vec<TrimmedCurve2>> {
+    let mut output = Vec::new();
+    for (wire_index, wire) in boundaries.iter().enumerate() {
+        for (segment_index, segment) in wire.segments().iter().enumerate() {
+            let mut parameters = vec![segment.range().start, segment.range().end];
+            parameters.extend(
+                split_parameters[wire_index][segment_index]
+                    .iter()
+                    .map(|parameter| trim_parameter(segment, *parameter)),
+            );
+            let start = segment.range().start;
+            let span = segment.range().span();
+            parameters.sort_by(|first, second| {
+                ((*first - start) / span).total_cmp(&((*second - start) / span))
+            });
+            parameters.dedup_by(|first, second| (*first - *second).abs() <= tolerance.parameter);
+            for interval in parameters.windows(2) {
+                if (interval[1] - interval[0]).abs() <= tolerance.parameter {
+                    continue;
+                }
+                output.push(TrimmedCurve2::new(
+                    segment.curve().clone(),
+                    ParameterRange::new(interval[0], interval[1])?,
+                )?);
             }
         }
     }
-    inside
+    Ok(output)
+}
+
+fn trim_parameter(segment: &TrimmedCurve2, parameter: f64) -> f64 {
+    if !matches!(segment.curve(), Curve2::Circle(_)) {
+        return parameter;
+    }
+    let low = segment.range().start.min(segment.range().end);
+    let high = segment.range().start.max(segment.range().end);
+    let period = std::f64::consts::TAU;
+    let candidate = parameter + ((low - parameter) / period).ceil() * period;
+    if candidate <= high + f64::EPSILON * 64.0 {
+        candidate
+    } else {
+        candidate - period
+    }
+}
+
+fn fragment_midpoint(fragment: &TrimmedCurve2) -> KernelResult<crate::Point2> {
+    Ok(fragment
+        .curve()
+        .evaluate((fragment.range().start + fragment.range().end) * 0.5)?
+        .point)
+}
+
+fn profile_contains(profile: &Profile, point: crate::Point2) -> KernelResult<bool> {
+    Ok(
+        wire_contains_point(profile.outer(), point, profile.tolerance())?
+            && !profile
+                .holes()
+                .iter()
+                .map(|hole| wire_contains_point(hole, point, profile.tolerance()))
+                .collect::<KernelResult<Vec<_>>>()?
+                .into_iter()
+                .any(|inside| inside),
+    )
+}
+
+fn profiles_from_fragments(
+    mut fragments: Vec<TrimmedCurve2>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Vec<Profile>> {
+    let mut wires = Vec::new();
+    while let Some(first) = fragments.pop() {
+        let start = first.start()?;
+        let mut end = first.end()?;
+        let mut loop_segments = vec![first];
+        while end.distance(start) > tolerance.linear {
+            let Some(next_index) = fragments.iter().position(|candidate| {
+                candidate
+                    .start()
+                    .is_ok_and(|point| point.distance(end) <= tolerance.linear)
+            }) else {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "analytical planar Boolean fragments do not form closed wires",
+                ));
+            };
+            let next = fragments.swap_remove(next_index);
+            end = next.end()?;
+            loop_segments.push(next);
+        }
+        wires.push(Wire2::new(loop_segments, tolerance)?);
+    }
+    let mut outers = wires
+        .iter()
+        .filter(|wire| wire.is_counter_clockwise())
+        .cloned()
+        .map(|wire| (wire, Vec::new()))
+        .collect::<Vec<(Wire2, Vec<Wire2>)>>();
+    for hole in wires
+        .into_iter()
+        .filter(|wire| !wire.is_counter_clockwise())
+    {
+        let point = hole.segments()[0].start()?;
+        let mut owner: Option<usize> = None;
+        for (index, (outer, _)) in outers.iter().enumerate() {
+            if wire_contains_point(outer, point, tolerance)?
+                && owner.is_none_or(|current| outer.area() < outers[current].0.area())
+            {
+                owner = Some(index);
+            }
+        }
+        let Some(owner) = owner else {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "analytical planar Boolean produced a hole without an outer boundary",
+            ));
+        };
+        outers[owner].1.push(hole);
+    }
+    outers
+        .into_iter()
+        .map(|(outer, holes)| Profile::new(outer, holes, tolerance))
+        .collect()
 }
 
 fn invalid(message: impl Into<String>) -> KernelError {

@@ -429,11 +429,14 @@ export class Face extends Shape {
     if(this.solid.compound.isShapex) {
       const frame = Array.from(this.geom().planeFrame())
       if(!frame.length) return
+      const u = new THREE.Vector3(...frame.slice(3, 6)).normalize()
+      const v = new THREE.Vector3(...frame.slice(6, 9))
+      v.addScaledVector(u, -v.dot(u)).normalize()
       return new THREE.Matrix4()
         .makeBasis(
-          new THREE.Vector3(...frame.slice(3, 6)),
-          new THREE.Vector3(...frame.slice(6, 9)),
-          new THREE.Vector3(...frame.slice(3, 6)).cross(new THREE.Vector3(...frame.slice(6, 9))).normalize(),
+          u,
+          v,
+          new THREE.Vector3().crossVectors(u, v).normalize(),
         )
         .setPosition(new THREE.Vector3(...frame.slice(0, 3)))
     }
@@ -686,55 +689,15 @@ export class Solid extends Volumetric {
   shapexFaceTessellation(face) {
     if(!this.cachedShapexFaceTessellations) {
       const faces = this.faces()
-      const parent = new Map(faces.map(candidate => [candidate.kernelId, candidate.kernelId]))
-      const find = id => {
-        let root = id
-        while(parent.get(root) != root) root = parent.get(root)
-        while(parent.get(id) != id) {
-          const next = parent.get(id)
-          parent.set(id, root)
-          id = next
-        }
-        return root
-      }
-      const join = (first, second) => {
-        const a = find(first)
-        const b = find(second)
-        if(a != b) parent.set(b, a)
-      }
-      this.edges().filter(edge => !edge.isSemantic()).forEach(edge => {
-        const connected = edge.connectedFaces()
-        if(connected.length == 2) join(connected[0].kernelId, connected[1].kernelId)
-      })
-
-      const meshes = new Map(faces.map(candidate => [
+      // Shapex tessellates each exact face with its analytical surface
+      // normals. Do not average those normals across topological edges: doing
+      // so rounds genuine CAD creases, and history is not a geometric
+      // continuity test. Smooth cylinders and NURBS faces are already smooth
+      // within their own tessellation.
+      this.cachedShapexFaceTessellations = new Map(faces.map(candidate => [
         candidate.kernelId,
         window.kernel.modeling.mesh(candidate.geom()),
       ]))
-      const sums = new Map()
-      const vertexKey = (candidate, position) => [
-        find(candidate.kernelId),
-        position[0].toFixed(7),
-        position[1].toFixed(7),
-        position[2].toFixed(7),
-      ].join('/')
-      faces.forEach(candidate => {
-        const mesh = meshes.get(candidate.kernelId)
-        for(let index = 0; index < mesh.positions.length; index += 3) {
-          const key = vertexKey(candidate, mesh.positions.slice(index, index + 3))
-          const normal = new THREE.Vector3(...mesh.normals.slice(index, index + 3))
-          sums.set(key, (sums.get(key) || new THREE.Vector3()).add(normal))
-        }
-      })
-      this.cachedShapexFaceTessellations = new Map(faces.map(candidate => {
-        const mesh = meshes.get(candidate.kernelId)
-        const normals = []
-        for(let index = 0; index < mesh.positions.length; index += 3) {
-          const key = vertexKey(candidate, mesh.positions.slice(index, index + 3))
-          normals.push(...sums.get(key).clone().normalize().toArray())
-        }
-        return [candidate.kernelId, { positions: mesh.positions, normals }]
-      }))
     }
     return this.cachedShapexFaceTessellations.get(face.kernelId)
   }

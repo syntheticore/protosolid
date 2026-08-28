@@ -3,15 +3,49 @@ use std::sync::Arc;
 
 use cgmath::prelude::*;
 
-use crate::{Point3, Vec3};
+use crate::{Point2, Point3, Vec3};
 
 use super::euler::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
-    BodyId, BooleanKind, ChangeKind, DiagnosticKind, EdgeId, FaceId, Kernel, KernelError,
-    KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin, PersistentId, Plane3,
-    Profile, RigidTransform3, Surface3, Tessellate, TessellationOptions, TriangleMesh,
+    BodyId, BooleanKind, ChangeKind, Circle2, Curve2, Curve3, Cylinder3, DiagnosticKind, EdgeId,
+    FaceId, Kernel, KernelError, KernelResult, LoopKind, MassProperties, ModelTolerance,
+    OperationHistory, Origin, ParameterRange, PersistentId, Plane3, Profile, RigidTransform3,
+    Surface3, Tessellate, TessellationOptions, TriangleMesh, TrimmedCurve2, Wire2,
 };
+
+#[derive(Clone, Copy)]
+struct ConservativeBounds3 {
+    minimum: Point3,
+    maximum: Point3,
+}
+
+impl ConservativeBounds3 {
+    fn empty() -> Self {
+        Self {
+            minimum: Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            maximum: Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+        }
+    }
+
+    fn include(&mut self, point: Point3) {
+        self.minimum.x = self.minimum.x.min(point.x);
+        self.minimum.y = self.minimum.y.min(point.y);
+        self.minimum.z = self.minimum.z.min(point.z);
+        self.maximum.x = self.maximum.x.max(point.x);
+        self.maximum.y = self.maximum.y.max(point.y);
+        self.maximum.z = self.maximum.z.max(point.z);
+    }
+
+    fn separated(self, other: Self, tolerance: f64) -> bool {
+        self.maximum.x < other.minimum.x - tolerance
+            || other.maximum.x < self.minimum.x - tolerance
+            || self.maximum.y < other.minimum.y - tolerance
+            || other.maximum.y < self.minimum.y - tolerance
+            || self.maximum.z < other.minimum.z - tolerance
+            || other.maximum.z < self.minimum.z - tolerance
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 struct LineageEntry {
@@ -757,19 +791,53 @@ impl Compound {
     fn boolean_single(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
         debug_assert_eq!(self.solids.len(), 1);
         debug_assert_eq!(other.solids.len(), 1);
+        if self
+            .conservative_bounds()
+            .separated(other.conservative_bounds(), self.tolerance().linear * 8.0)
+        {
+            let result = match kind {
+                BooleanKind::Union => {
+                    combine_compounds(vec![self.clone(), other.clone()], self.tolerance())?
+                }
+                BooleanKind::Difference => self.clone(),
+                BooleanKind::Intersection => combine_compounds(Vec::new(), self.tolerance())?,
+            };
+            let role = match kind {
+                BooleanKind::Union => "boolean.union",
+                BooleanKind::Difference => "boolean.difference",
+                BooleanKind::Intersection => "boolean.intersection",
+            };
+            return result.with_boolean_parents(self, other, role);
+        }
         let curved = self
             .faces()
             .chain(other.faces())
             .any(|face| !matches!(face.surface(), Surface3::Plane(_)));
         if curved {
+            // Sewing an exactly shared boundary is both more specific and more
+            // robust than rebuilding the cross-section arrangement. In
+            // particular, the arrangement intentionally rejects coincident
+            // curve intervals because their multiplicity is ambiguous in the
+            // general case, while an adjacent solid union has an unambiguous
+            // Euler construction.
             if kind == BooleanKind::Union {
                 if let Some(result) = self.union_adjacent_exact(other)? {
                     return Ok(result);
                 }
             }
-            let first = super::features::facet(self)?;
-            let second = super::features::facet(other)?;
-            return first.boolean_faceted_single(&second, kind);
+            if let Some(result) = self.boolean_coaxial_prisms_exact(other, kind)? {
+                return Ok(result);
+            }
+            if let Some(result) = self.boolean_parallel_cylinders_exact(other, kind)? {
+                return Ok(result);
+            }
+            if let Some(result) = self.boolean_contained_cylinder_in_linear_prism(other, kind)? {
+                return Ok(result);
+            }
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "this curved Boolean does not yet have an analytic construction",
+            ));
         }
         let mut kernel = Kernel::new(self.state.tolerance())?;
         let first = kernel
@@ -784,20 +852,762 @@ impl Compound {
         Self::from_operation(kernel, committed, [self, other])
     }
 
-    fn boolean_faceted_single(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
-        debug_assert_eq!(self.solids.len(), 1);
-        debug_assert_eq!(other.solids.len(), 1);
-        let mut kernel = Kernel::new(self.state.tolerance())?;
-        let first = kernel
-            .topology
-            .import_body(self.state.topology(), self.solids[0].body)?;
-        let second = kernel
-            .topology
-            .import_body(other.state.topology(), other.solids[0].body)?;
-        let mut transaction = kernel.begin_operation();
-        transaction.boolean_from_facets(first, second, kind)?;
-        let committed = transaction.finish()?;
-        Self::from_operation(kernel, committed, [self, other])
+    /// A conservative analytic enclosure used only to prove separation. Circle
+    /// extents are closed-form and positive-weight NURBS lie in the convex hull
+    /// of their control points, so a reported gap cannot hide an intersection.
+    fn conservative_bounds(&self) -> ConservativeBounds3 {
+        let mut bounds = ConservativeBounds3::empty();
+        for vertex in self.vertices() {
+            bounds.include(vertex.point());
+        }
+        for edge in self.edges() {
+            match edge.curve() {
+                Curve3::Line(_) => {}
+                Curve3::Circle(circle) => {
+                    let x = circle.x_radius();
+                    let y = circle.y_radius();
+                    let amplitude = Vec3::new(x.x.hypot(y.x), x.y.hypot(y.y), x.z.hypot(y.z));
+                    bounds.include(circle.center() - amplitude);
+                    bounds.include(circle.center() + amplitude);
+                }
+                Curve3::Nurbs(curve) => {
+                    for point in curve.control_points() {
+                        bounds.include(*point);
+                    }
+                }
+            }
+        }
+        for face in self.faces() {
+            if let Surface3::Nurbs(surface) = face.surface() {
+                for row in surface.control_points() {
+                    for point in row {
+                        bounds.include(*point);
+                    }
+                }
+            }
+        }
+        bounds
+    }
+
+    fn boolean_coaxial_prisms_exact(
+        &self,
+        other: &Self,
+        kind: BooleanKind,
+    ) -> KernelResult<Option<Self>> {
+        let axis = self
+            .faces()
+            .chain(other.faces())
+            .find_map(|face| match face.surface() {
+                Surface3::Cylinder(cylinder) => Some(cylinder.axis().normalize()),
+                _ => None,
+            });
+        let Some(axis) = axis else {
+            return Ok(None);
+        };
+        let bounds = |compound: &Self| {
+            compound
+                .vertices()
+                .map(|vertex| axis.dot(vertex.point().to_vec()))
+                .fold(
+                    (f64::INFINITY, f64::NEG_INFINITY),
+                    |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
+                )
+        };
+        let first_bounds = bounds(self);
+        let second_bounds = bounds(other);
+        let scale = first_bounds
+            .0
+            .abs()
+            .max(first_bounds.1.abs())
+            .max(second_bounds.0.abs())
+            .max(second_bounds.1.abs())
+            .max(1.0);
+        let linear = self.tolerance().linear_at_scale(scale) * 8.0;
+        let overlap_start = first_bounds.0.max(second_bounds.0);
+        let overlap_end = first_bounds.1.min(second_bounds.1);
+        if overlap_end < overlap_start - linear {
+            return Ok(Some(match kind {
+                BooleanKind::Union => {
+                    combine_compounds(vec![self.clone(), other.clone()], self.tolerance())?
+                        .with_boolean_parents(self, other, "boolean.union")?
+                }
+                BooleanKind::Difference => {
+                    self.clone()
+                        .with_boolean_parents(self, other, "boolean.difference")?
+                }
+                BooleanKind::Intersection => combine_compounds(Vec::new(), self.tolerance())?
+                    .with_boolean_parents(self, other, "boolean.intersection")?,
+            }));
+        }
+        if (overlap_end - overlap_start).abs() <= linear {
+            return match kind {
+                // A shared cap may still be sewable into one body; leave that
+                // case to the adjacent Euler union path.
+                BooleanKind::Union => Ok(None),
+                BooleanKind::Difference => Ok(Some(self.clone().with_boolean_parents(
+                    self,
+                    other,
+                    "boolean.difference",
+                )?)),
+                // The intersection has no three-dimensional measure and is
+                // therefore empty in a solid-only kernel.
+                BooleanKind::Intersection => Ok(Some(
+                    combine_compounds(Vec::new(), self.tolerance())?.with_boolean_parents(
+                        self,
+                        other,
+                        "boolean.intersection",
+                    )?,
+                )),
+            };
+        }
+        let minimum = first_bounds.0.min(second_bounds.0);
+        let base_plane = Plane3::from_origin_normal(Point3::from_vec(axis * minimum), axis)?;
+        let Some(first_profile) = self.profile_on_parallel_cap(axis, first_bounds.0, base_plane)?
+        else {
+            return Ok(None);
+        };
+        let Some(second_profile) =
+            other.profile_on_parallel_cap(axis, second_bounds.0, base_plane)?
+        else {
+            return Ok(None);
+        };
+        let mut levels = vec![
+            first_bounds.0,
+            first_bounds.1,
+            second_bounds.0,
+            second_bounds.1,
+        ];
+        levels.sort_by(f64::total_cmp);
+        levels.dedup_by(|first, second| (*first - *second).abs() <= linear);
+        let mut layers = Vec::new();
+        for interval in levels.windows(2) {
+            let start = interval[0];
+            let end = interval[1];
+            if end - start <= linear {
+                continue;
+            }
+            let middle = (start + end) * 0.5;
+            let first_active = middle > first_bounds.0 - linear && middle < first_bounds.1 + linear;
+            let second_active =
+                middle > second_bounds.0 - linear && middle < second_bounds.1 + linear;
+            let profiles = match (first_active, second_active, kind) {
+                (true, true, kind) => first_profile.boolean_planar(&second_profile, kind)?,
+                (true, false, BooleanKind::Union | BooleanKind::Difference) => {
+                    vec![first_profile.clone()]
+                }
+                (false, true, BooleanKind::Union) => vec![second_profile.clone()],
+                _ => Vec::new(),
+            };
+            if profiles.is_empty() {
+                continue;
+            }
+            let plane = Plane3::new(
+                base_plane.origin() + axis * (start - minimum),
+                base_plane.u(),
+                base_plane.v(),
+                self.tolerance(),
+            )?;
+            let pieces = profiles
+                .into_iter()
+                .map(|profile| profile.extrude(plane, axis * (end - start)))
+                .collect::<KernelResult<Vec<_>>>()?;
+            layers.push(combine_compounds(pieces, self.tolerance())?);
+        }
+        let mut layers = layers.into_iter();
+        let mut result = layers
+            .next()
+            .unwrap_or(combine_compounds(Vec::new(), self.tolerance())?);
+        for layer in layers {
+            result = result.union(&layer)?;
+        }
+        let role = match kind {
+            BooleanKind::Union => "boolean.union",
+            BooleanKind::Difference => "boolean.difference",
+            BooleanKind::Intersection => "boolean.intersection",
+        };
+        Ok(Some(result.with_boolean_parents(self, other, role)?))
+    }
+
+    fn profile_on_parallel_cap(
+        &self,
+        axis: Vec3,
+        minimum: f64,
+        target_plane: Plane3,
+    ) -> KernelResult<Option<Profile>> {
+        let tolerance = self.tolerance();
+        let cap = self.faces().find(|face| {
+            let Surface3::Plane(plane) = face.surface() else {
+                return false;
+            };
+            if plane
+                .normal()
+                .angle(axis)
+                .0
+                .min(plane.normal().angle(-axis).0)
+                > tolerance.angular
+            {
+                return false;
+            }
+            (axis.dot(plane.origin().to_vec()) - minimum).abs()
+                <= tolerance.linear_at_scale(minimum.abs().max(1.0)) * 8.0
+        });
+        let Some(cap) = cap else {
+            return Ok(None);
+        };
+        let Surface3::Plane(cap_plane) = cap.surface() else {
+            unreachable!()
+        };
+        let map = |point: Point2| -> KernelResult<Point2> {
+            let world = cap_plane.evaluate(point.x, point.y)?.point;
+            let projected = target_plane.project(world)?.parameters;
+            Ok(Point2::new(projected.0, projected.1))
+        };
+        let topology = self.state.topology();
+        let mut outer = None;
+        let mut holes = Vec::new();
+        for loop_id in topology.face(cap.face)?.loops() {
+            let mut segments = Vec::new();
+            for coedge_id in topology.loop_coedges(*loop_id)? {
+                let coedge = topology.coedge(coedge_id)?;
+                let range = coedge.range();
+                let start = map(coedge.pcurve().evaluate(range.start)?.point)?;
+                let end = map(coedge.pcurve().evaluate(range.end)?.point)?;
+                let segment = match coedge.pcurve() {
+                    Curve2::Line(_) => TrimmedCurve2::line(start, end)?,
+                    Curve2::Circle(_) => {
+                        if start.distance(end) <= tolerance.linear {
+                            let quarter = map(coedge
+                                .pcurve()
+                                .evaluate(range.start + range.span() * 0.25)?
+                                .point)?;
+                            let center = map(match coedge.pcurve() {
+                                Curve2::Circle(circle) => circle.center(),
+                                _ => unreachable!(),
+                            })?;
+                            let radius = center.distance(start);
+                            let orientation = (start - center).x * (quarter - center).y
+                                - (start - center).y * (quarter - center).x;
+                            TrimmedCurve2::new(
+                                Circle2::new(center, radius)?,
+                                ParameterRange::new(
+                                    0.0,
+                                    orientation.signum() * std::f64::consts::TAU,
+                                )?,
+                            )?
+                        } else {
+                            let middle = map(coedge
+                                .pcurve()
+                                .evaluate((range.start + range.end) * 0.5)?
+                                .point)?;
+                            TrimmedCurve2::arc_through(start, middle, end)?
+                        }
+                    }
+                    Curve2::Nurbs(_) => return Ok(None),
+                };
+                segments.push(segment);
+            }
+            let wire = Wire2::new(segments, tolerance)?;
+            match topology.loop_(*loop_id)?.kind() {
+                LoopKind::Outer => outer = Some(wire),
+                LoopKind::Inner => holes.push(wire),
+            }
+        }
+        let Some(outer) = outer else {
+            return Ok(None);
+        };
+        Profile::new(outer, holes, tolerance).map(Some)
+    }
+
+    fn boolean_parallel_cylinders_exact(
+        &self,
+        other: &Self,
+        kind: BooleanKind,
+    ) -> KernelResult<Option<Self>> {
+        let (Some(first), Some(second)) = (
+            self.single_cylindrical_prism(),
+            other.single_cylindrical_prism(),
+        ) else {
+            return Ok(None);
+        };
+        let tolerance = self.tolerance();
+        let axis = first.axis().normalize();
+        if axis
+            .angle(second.axis())
+            .0
+            .min(axis.angle(-second.axis()).0)
+            > tolerance.angular
+        {
+            return Ok(None);
+        }
+        let axial_bounds = |compound: &Self| {
+            compound
+                .vertices()
+                .map(|vertex| axis.dot(vertex.point().to_vec()))
+                .fold(
+                    (f64::INFINITY, f64::NEG_INFINITY),
+                    |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
+                )
+        };
+        let first_bounds = axial_bounds(self);
+        let second_bounds = axial_bounds(other);
+        let scale = first_bounds
+            .0
+            .abs()
+            .max(first_bounds.1.abs())
+            .max(second_bounds.0.abs())
+            .max(second_bounds.1.abs())
+            .max(1.0);
+        let linear = tolerance.linear_at_scale(scale) * 8.0;
+        if (first_bounds.0 - second_bounds.0).abs() > linear
+            || (first_bounds.1 - second_bounds.1).abs() > linear
+        {
+            return Ok(None);
+        }
+        let minimum = (first_bounds.0 + second_bounds.0) * 0.5;
+        let maximum = (first_bounds.1 + second_bounds.1) * 0.5;
+        if maximum - minimum <= linear {
+            return Ok(None);
+        }
+        let u = first.x_radius().normalize();
+        let v = axis.cross(u).normalize();
+        let base_origin = first.origin() + axis * (minimum - axis.dot(first.origin().to_vec()));
+        let plane = Plane3::new(base_origin, u, v, tolerance)?;
+        let center = |cylinder: Cylinder3| {
+            let relative = cylinder.origin() - base_origin;
+            Point2::new(relative.dot(u), relative.dot(v))
+        };
+        let first_center = center(first);
+        let second_center = center(second);
+        let first_radius = first.radius();
+        let second_radius = second.radius();
+        let delta = second_center - first_center;
+        let distance = delta.magnitude();
+        let circle_wire =
+            |center, radius| Wire2::new([TrimmedCurve2::circle(center, radius)?], tolerance);
+        if distance >= first_radius + second_radius - linear {
+            return Ok(Some(match kind {
+                BooleanKind::Union => {
+                    combine_compounds(vec![self.clone(), other.clone()], tolerance)?
+                }
+                BooleanKind::Difference => self.clone(),
+                BooleanKind::Intersection => combine_compounds(Vec::new(), tolerance)?
+                    .with_boolean_parents(self, other, "boolean.intersection")?,
+            }));
+        }
+
+        let first_inside_second = distance + first_radius <= second_radius + linear;
+        let second_inside_first = distance + second_radius <= first_radius + linear;
+        let (outer, holes) = if first_inside_second || second_inside_first {
+            match kind {
+                BooleanKind::Intersection => {
+                    if first_inside_second {
+                        (circle_wire(first_center, first_radius)?, Vec::new())
+                    } else {
+                        (circle_wire(second_center, second_radius)?, Vec::new())
+                    }
+                }
+                BooleanKind::Union => {
+                    if first_inside_second {
+                        (circle_wire(second_center, second_radius)?, Vec::new())
+                    } else {
+                        (circle_wire(first_center, first_radius)?, Vec::new())
+                    }
+                }
+                BooleanKind::Difference if first_inside_second => {
+                    return Ok(Some(
+                        combine_compounds(Vec::new(), tolerance)?.with_boolean_parents(
+                            self,
+                            other,
+                            "boolean.difference",
+                        )?,
+                    ));
+                }
+                BooleanKind::Difference => (
+                    circle_wire(first_center, first_radius)?,
+                    vec![circle_wire(second_center, second_radius)?],
+                ),
+            }
+        } else {
+            let along = (first_radius * first_radius - second_radius * second_radius
+                + distance * distance)
+                / (2.0 * distance);
+            let height = (first_radius * first_radius - along * along)
+                .max(0.0)
+                .sqrt();
+            if height <= linear {
+                return Ok(None);
+            }
+            let direction = delta / distance;
+            let perpendicular = crate::Vec2::new(-direction.y, direction.x);
+            let midpoint = first_center + direction * along;
+            let first_hit = midpoint + perpendicular * height;
+            let second_hit = midpoint - perpendicular * height;
+            let arc = |center: Point2,
+                       radius: f64,
+                       start: Point2,
+                       end: Point2,
+                       other_center: Point2,
+                       other_radius: f64,
+                       want_inside: bool|
+             -> KernelResult<TrimmedCurve2> {
+                let start_parameter = (start.y - center.y).atan2(start.x - center.x);
+                let end_parameter = (end.y - center.y).atan2(end.x - center.x);
+                let counter_clockwise =
+                    (end_parameter - start_parameter).rem_euclid(std::f64::consts::TAU);
+                let middle_parameter = start_parameter + counter_clockwise * 0.5;
+                let middle = center
+                    + crate::Vec2::new(middle_parameter.cos(), middle_parameter.sin()) * radius;
+                let inside = middle.distance(other_center) <= other_radius + linear;
+                let end_parameter = if inside == want_inside {
+                    start_parameter + counter_clockwise
+                } else {
+                    start_parameter - (std::f64::consts::TAU - counter_clockwise)
+                };
+                TrimmedCurve2::new(
+                    Circle2::new(center, radius)?,
+                    ParameterRange::new(start_parameter, end_parameter)?,
+                )
+            };
+            let (first_inside, second_inside) = match kind {
+                BooleanKind::Intersection => (true, true),
+                BooleanKind::Union => (false, false),
+                BooleanKind::Difference => (false, true),
+            };
+            (
+                Wire2::new(
+                    [
+                        arc(
+                            first_center,
+                            first_radius,
+                            first_hit,
+                            second_hit,
+                            second_center,
+                            second_radius,
+                            first_inside,
+                        )?,
+                        arc(
+                            second_center,
+                            second_radius,
+                            second_hit,
+                            first_hit,
+                            first_center,
+                            first_radius,
+                            second_inside,
+                        )?,
+                    ],
+                    tolerance,
+                )?,
+                Vec::new(),
+            )
+        };
+        let result =
+            Profile::new(outer, holes, tolerance)?.extrude(plane, axis * (maximum - minimum))?;
+        let role = match kind {
+            BooleanKind::Union => "boolean.union",
+            BooleanKind::Difference => "boolean.difference",
+            BooleanKind::Intersection => "boolean.intersection",
+        };
+        Ok(Some(result.with_boolean_parents(self, other, role)?))
+    }
+
+    fn with_boolean_parents(&self, first: &Self, second: &Self, role: &str) -> KernelResult<Self> {
+        let tolerance = self.tolerance();
+        let mut kernel = Kernel::new(tolerance)?;
+        let bodies = self
+            .solids
+            .iter()
+            .map(|solid| {
+                kernel
+                    .topology
+                    .import_body(solid.state.topology(), solid.body)
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        let outputs = body_entities(&kernel, &bodies)?;
+        let mut sources = body_entities(
+            &first.state,
+            &first
+                .solids
+                .iter()
+                .map(|solid| solid.body)
+                .collect::<Vec<_>>(),
+        )?;
+        sources.extend(body_entities(
+            &second.state,
+            &second
+                .solids
+                .iter()
+                .map(|solid| solid.body)
+                .collect::<Vec<_>>(),
+        )?);
+        let mut history = OperationHistory::default();
+        for (output, kind) in &outputs {
+            history.derived(
+                *output,
+                sources
+                    .iter()
+                    .filter_map(|(source, source_kind)| (source_kind == kind).then_some(*source)),
+                role,
+            );
+        }
+        for (source, kind) in sources {
+            let descendants = outputs
+                .iter()
+                .filter_map(|(output, output_kind)| (output_kind == &kind).then_some(*output))
+                .collect::<Vec<_>>();
+            history.changed(
+                source,
+                if descendants.len() > 1 {
+                    ChangeKind::Split
+                } else {
+                    ChangeKind::Modified
+                },
+                descendants,
+            );
+        }
+        let certificates = certify_bodies(&kernel, &bodies)?;
+        Self::from_parts(
+            kernel,
+            super::identity::fresh_uuid(),
+            bodies,
+            history,
+            certificates,
+            [first, second],
+        )
+    }
+
+    fn boolean_contained_cylinder_in_linear_prism(
+        &self,
+        other: &Self,
+        kind: BooleanKind,
+    ) -> KernelResult<Option<Self>> {
+        let (cylinder_is_first, cylinder, prism) = match (
+            self.single_cylindrical_prism(),
+            other.single_cylindrical_prism(),
+        ) {
+            (Some(cylinder), None) => (true, cylinder, other),
+            (None, Some(cylinder)) => (false, cylinder, self),
+            _ => return Ok(None),
+        };
+        if prism
+            .faces()
+            .any(|face| !matches!(face.surface(), Surface3::Plane(_)))
+        {
+            return Ok(None);
+        }
+        let tolerance = self.tolerance();
+        let axis = cylinder.axis().normalize();
+        let bounds = |compound: &Self| {
+            compound
+                .vertices()
+                .map(|vertex| axis.dot(vertex.point().to_vec()))
+                .fold(
+                    (f64::INFINITY, f64::NEG_INFINITY),
+                    |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
+                )
+        };
+        let cylinder_bounds = bounds(if cylinder_is_first { self } else { other });
+        let prism_bounds = bounds(prism);
+        let scale = cylinder_bounds
+            .0
+            .abs()
+            .max(cylinder_bounds.1.abs())
+            .max(prism_bounds.0.abs())
+            .max(prism_bounds.1.abs())
+            .max(1.0);
+        let linear = tolerance.linear_at_scale(scale) * 8.0;
+        if (cylinder_bounds.0 - prism_bounds.0).abs() > linear
+            || (cylinder_bounds.1 - prism_bounds.1).abs() > linear
+        {
+            return Ok(None);
+        }
+        let minimum = (cylinder_bounds.0 + prism_bounds.0) * 0.5;
+        let maximum = (cylinder_bounds.1 + prism_bounds.1) * 0.5;
+        let base_origin = Point3::from_vec(axis * minimum);
+        let plane = Plane3::from_origin_normal(base_origin, axis)?;
+        let cap = prism
+            .faces()
+            .filter_map(|face| match face.surface() {
+                Surface3::Plane(surface)
+                    if surface
+                        .normal()
+                        .angle(axis)
+                        .0
+                        .min(surface.normal().angle(-axis).0)
+                        <= tolerance.angular =>
+                {
+                    Some(face)
+                }
+                _ => None,
+            })
+            .min_by(|first, second| {
+                let level = |face: &&FaceHandle| match face.surface() {
+                    Surface3::Plane(surface) => axis.dot(surface.origin().to_vec()),
+                    _ => unreachable!(),
+                };
+                level(first).total_cmp(&level(second))
+            })
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "a linear prism has no planar cap",
+                )
+            })?;
+        let topology = prism.state.topology();
+        let mut outer = None;
+        let mut holes = Vec::new();
+        for loop_id in topology.face(cap.face)?.loops() {
+            let segments = topology
+                .loop_coedges(*loop_id)?
+                .into_iter()
+                .map(|coedge| {
+                    let vertices = topology.coedge_vertices(coedge)?;
+                    let start = plane
+                        .project(topology.vertex(vertices[0])?.point())?
+                        .parameters;
+                    let end = plane
+                        .project(topology.vertex(vertices[1])?.point())?
+                        .parameters;
+                    TrimmedCurve2::line(Point2::new(start.0, start.1), Point2::new(end.0, end.1))
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            let wire = Wire2::new(segments, tolerance)?;
+            match topology.loop_(*loop_id)?.kind() {
+                LoopKind::Outer => outer = Some(wire),
+                LoopKind::Inner => holes.push(wire),
+            }
+        }
+        let outer = outer.ok_or_else(|| {
+            KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "a linear prism cap has no outer loop",
+            )
+        })?;
+        let prism_profile = Profile::new(outer, holes, tolerance)?;
+        if prism_profile
+            .outer()
+            .segments()
+            .iter()
+            .chain(
+                prism_profile
+                    .holes()
+                    .iter()
+                    .flat_map(|hole| hole.segments()),
+            )
+            .any(|segment| !matches!(segment.curve(), Curve2::Line(_)))
+        {
+            return Ok(None);
+        }
+        let center = plane.project(cylinder.origin())?.parameters;
+        let center = Point2::new(center.0, center.1);
+        let point_inside = |point: Point2, wire: &Wire2| -> KernelResult<bool> {
+            let points = wire
+                .segments()
+                .iter()
+                .map(TrimmedCurve2::start)
+                .collect::<KernelResult<Vec<_>>>()?;
+            let mut inside = false;
+            for index in 0..points.len() {
+                let first = points[index];
+                let second = points[(index + 1) % points.len()];
+                if (first.y > point.y) != (second.y > point.y)
+                    && point.x
+                        < (second.x - first.x) * (point.y - first.y) / (second.y - first.y)
+                            + first.x
+                {
+                    inside = !inside;
+                }
+            }
+            Ok(inside)
+        };
+        let boundary_clearance = |wire: &Wire2| -> KernelResult<f64> {
+            wire.segments()
+                .iter()
+                .map(|segment| {
+                    let start = segment.start()?;
+                    let end = segment.end()?;
+                    let direction = end - start;
+                    let parameter =
+                        ((center - start).dot(direction) / direction.magnitude2()).clamp(0.0, 1.0);
+                    Ok(center.distance(start + direction * parameter))
+                })
+                .try_fold(f64::INFINITY, |minimum, distance| {
+                    distance.map(|distance| minimum.min(distance))
+                })
+        };
+        if !point_inside(center, prism_profile.outer())?
+            || prism_profile
+                .holes()
+                .iter()
+                .map(|hole| point_inside(center, hole))
+                .collect::<KernelResult<Vec<_>>>()?
+                .into_iter()
+                .any(|inside| inside)
+            || boundary_clearance(prism_profile.outer())? <= cylinder.radius() + linear
+            || prism_profile
+                .holes()
+                .iter()
+                .map(boundary_clearance)
+                .collect::<KernelResult<Vec<_>>>()?
+                .into_iter()
+                .any(|clearance| clearance <= cylinder.radius() + linear)
+        {
+            return Ok(None);
+        }
+        let circle = Wire2::new(
+            [TrimmedCurve2::circle(center, cylinder.radius())?],
+            tolerance,
+        )?;
+        let height = maximum - minimum;
+        let role = match kind {
+            BooleanKind::Union => "boolean.union",
+            BooleanKind::Difference => "boolean.difference",
+            BooleanKind::Intersection => "boolean.intersection",
+        };
+        let result = match kind {
+            BooleanKind::Union => prism_profile.extrude(plane, axis * height)?,
+            BooleanKind::Intersection => {
+                Profile::new(circle, [], tolerance)?.extrude(plane, axis * height)?
+            }
+            BooleanKind::Difference if cylinder_is_first => {
+                combine_compounds(Vec::new(), tolerance)?
+            }
+            BooleanKind::Difference => {
+                let mut result_holes = prism_profile.holes().to_vec();
+                result_holes.push(circle);
+                Profile::new(prism_profile.outer().clone(), result_holes, tolerance)?
+                    .extrude(plane, axis * height)?
+            }
+        };
+        Ok(Some(result.with_boolean_parents(self, other, role)?))
+    }
+
+    fn single_cylindrical_prism(&self) -> Option<Cylinder3> {
+        let cylinders = self
+            .faces()
+            .filter_map(|face| match face.surface() {
+                Surface3::Cylinder(cylinder) => Some(*cylinder),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let reference = cylinders.first().copied()?;
+        let linear = self.tolerance().linear_at_scale(reference.radius()) * 8.0;
+        (self
+            .faces()
+            .all(|face| matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_)))
+            && cylinders.iter().all(|candidate| {
+                reference
+                    .axis()
+                    .normalize()
+                    .cross(candidate.axis().normalize())
+                    .magnitude()
+                    <= self.tolerance().angular
+                    && (candidate.radius() - reference.radius()).abs() <= linear
+                    && (candidate.origin() - reference.origin())
+                        .cross(reference.axis().normalize())
+                        .magnitude()
+                        <= linear
+            }))
+        .then_some(reference)
     }
 
     fn union_adjacent_exact(&self, other: &Self) -> KernelResult<Option<Self>> {

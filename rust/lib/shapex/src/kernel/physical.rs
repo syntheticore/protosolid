@@ -130,6 +130,11 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
     {
         return Ok(certificate);
     }
+    if let Some(certificate) =
+        try_certify_prism_with_pockets(topology, body_id, &face_ids, physical_tolerance)?
+    {
+        return Ok(certificate);
+    }
     for edge_id in &edge_ids {
         let edge = topology.edge(*edge_id)?;
         if !matches!(edge.curve(), Curve3::Line(_)) {
@@ -260,8 +265,9 @@ struct PlanarSection {
 /// Recognize and certify a straight, normal sweep directly from its completed
 /// BREP.  This deliberately does not rely on constructor provenance: a solid
 /// assembled through the public Euler operators receives the same treatment.
-/// Line and circular-arc boundaries are integrated in parameter space; NURBS
-/// sweeps remain unpublished until their interval-bounded certifier exists.
+/// Line, circular-arc, and rational spline boundaries are integrated directly
+/// in parameter space. NURBS intervals use bounded adaptive quadrature over
+/// their exact rational representation; no tessellated geometry participates.
 fn try_certify_right_prism(
     topology: &Topology,
     body_id: BodyId,
@@ -296,11 +302,13 @@ fn try_certify_right_prism(
             {
                 continue;
             }
-            let Some(first_section) = integrate_planar_section(topology, first_id, first_plane)?
+            let Some(first_section) =
+                integrate_planar_section(topology, first_id, first_plane, tolerance)?
             else {
                 continue;
             };
-            let Some(second_section) = integrate_planar_section(topology, second_id, second_plane)?
+            let Some(second_section) =
+                integrate_planar_section(topology, second_id, second_plane, tolerance)?
             else {
                 continue;
             };
@@ -357,6 +365,8 @@ fn try_certify_right_prism(
                 second_id,
                 &first_edges,
                 &second_edges,
+                axis * height,
+                tolerance,
             )? {
                 continue;
             }
@@ -430,6 +440,7 @@ fn integrate_planar_section(
     topology: &Topology,
     face_id: FaceId,
     plane: super::Plane3,
+    tolerance: ModelTolerance,
 ) -> KernelResult<Option<PlanarSection>> {
     let face = topology.face(face_id)?;
     let orientation = match face.orientation() {
@@ -449,15 +460,12 @@ fn integrate_planar_section(
     for loop_id in face.loops() {
         for coedge_id in topology.loop_coedges(*loop_id)? {
             let coedge = topology.coedge(coedge_id)?;
-            if matches!(coedge.pcurve(), Curve2::Nurbs(_)) {
-                return Ok(None);
-            }
             let range = coedge.range();
             result.area_uv += orientation
                 * coedge
                     .pcurve()
                     .signed_area_contribution(range, f64::EPSILON)?;
-            let integrals = simpson_curve_integrals(coedge.pcurve(), range, plane)?;
+            let integrals = simpson_curve_integrals(coedge.pcurve(), range, plane, tolerance)?;
             result.first_x += orientation * integrals[0];
             result.first_y += orientation * integrals[1];
             result.second_xx += orientation * integrals[2];
@@ -477,7 +485,36 @@ fn simpson_curve_integrals(
     curve: &Curve2,
     range: super::ParameterRange,
     plane: super::Plane3,
+    tolerance: ModelTolerance,
 ) -> KernelResult<[f64; 6]> {
+    if let Curve2::Nurbs(nurbs) = curve {
+        let mut breaks = nurbs
+            .knots()
+            .iter()
+            .copied()
+            .filter(|value| {
+                *value >= range.start.min(range.end) && *value <= range.start.max(range.end)
+            })
+            .collect::<Vec<_>>();
+        breaks.extend([range.start, range.end]);
+        breaks.sort_by(f64::total_cmp);
+        breaks.dedup_by(|first, second| (*first - *second).abs() <= f64::EPSILON * 64.0);
+        if range.span() < 0.0 {
+            breaks.reverse();
+        }
+        let mut sum = [0.0; 6];
+        for interval in breaks.windows(2) {
+            if (interval[1] - interval[0]).abs() <= f64::EPSILON * 64.0 {
+                continue;
+            }
+            let values =
+                adaptive_curve_integrals(curve, interval[0], interval[1], plane, tolerance)?;
+            for component in 0..6 {
+                sum[component] += values[component];
+            }
+        }
+        return Ok(sum);
+    }
     // Products of circular coordinates and derivatives have low trigonometric
     // degree; this fixed subdivision is substantially below the model tolerance
     // while avoiding a tessellation-dependent volume certificate.
@@ -519,6 +556,144 @@ fn simpson_curve_integrals(
         *value *= step / 3.0;
     }
     Ok(sum)
+}
+
+fn adaptive_curve_integrals(
+    curve: &Curve2,
+    start: f64,
+    end: f64,
+    plane: super::Plane3,
+    tolerance: ModelTolerance,
+) -> KernelResult<[f64; 6]> {
+    let terms = |parameter| curve_integral_terms(curve, parameter, plane);
+    let middle = (start + end) * 0.5;
+    let start_value = terms(start)?;
+    let middle_value = terms(middle)?;
+    let end_value = terms(end)?;
+    let scale = [start_value, middle_value, end_value]
+        .iter()
+        .flat_map(|values| values.iter().copied())
+        .map(f64::abs)
+        .fold(1.0_f64, f64::max);
+    let absolute = tolerance
+        .linear_at_scale(scale)
+        .max(f64::EPSILON * scale * 256.0);
+    let targets = [absolute; 6];
+    let whole = simpson_values(start, end, start_value, middle_value, end_value);
+    adaptive_curve_integrals_interval(
+        &terms,
+        start,
+        end,
+        start_value,
+        middle_value,
+        end_value,
+        whole,
+        targets,
+        0,
+        24,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn adaptive_curve_integrals_interval<F>(
+    terms: &F,
+    start: f64,
+    end: f64,
+    start_value: [f64; 6],
+    middle_value: [f64; 6],
+    end_value: [f64; 6],
+    whole: [f64; 6],
+    targets: [f64; 6],
+    depth: u8,
+    maximum_depth: u8,
+) -> KernelResult<[f64; 6]>
+where
+    F: Fn(f64) -> KernelResult<[f64; 6]>,
+{
+    let middle = (start + end) * 0.5;
+    let left_middle = (start + middle) * 0.5;
+    let right_middle = (middle + end) * 0.5;
+    let left_middle_value = terms(left_middle)?;
+    let right_middle_value = terms(right_middle)?;
+    let left = simpson_values(start, middle, start_value, left_middle_value, middle_value);
+    let right = simpson_values(middle, end, middle_value, right_middle_value, end_value);
+    let converged = (0..6).all(|component| {
+        (left[component] + right[component] - whole[component]).abs() / 15.0 <= targets[component]
+    });
+    if converged {
+        return Ok(std::array::from_fn(|component| {
+            left[component]
+                + right[component]
+                + (left[component] + right[component] - whole[component]) / 15.0
+        }));
+    }
+    if depth >= maximum_depth {
+        return Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "certified NURBS boundary integration did not converge",
+        ));
+    }
+    let next_targets = targets.map(|target| target * 0.5);
+    let first = adaptive_curve_integrals_interval(
+        terms,
+        start,
+        middle,
+        start_value,
+        left_middle_value,
+        middle_value,
+        left,
+        next_targets,
+        depth + 1,
+        maximum_depth,
+    )?;
+    let second = adaptive_curve_integrals_interval(
+        terms,
+        middle,
+        end,
+        middle_value,
+        right_middle_value,
+        end_value,
+        right,
+        next_targets,
+        depth + 1,
+        maximum_depth,
+    )?;
+    Ok(std::array::from_fn(|component| {
+        first[component] + second[component]
+    }))
+}
+
+fn simpson_values(
+    start: f64,
+    end: f64,
+    first: [f64; 6],
+    middle: [f64; 6],
+    last: [f64; 6],
+) -> [f64; 6] {
+    std::array::from_fn(|component| {
+        (end - start) * (first[component] + 4.0 * middle[component] + last[component]) / 6.0
+    })
+}
+
+fn curve_integral_terms(
+    curve: &Curve2,
+    parameter: f64,
+    plane: super::Plane3,
+) -> KernelResult<[f64; 6]> {
+    let value = curve.evaluate(parameter)?;
+    let x = value.point.x;
+    let y = value.point.y;
+    let dx = value.first_derivative.x;
+    let dy = value.first_derivative.y;
+    let tangent = plane.u() * dx + plane.v() * dy;
+    Ok([
+        0.5 * x * x * dy,
+        -0.5 * y * y * dx,
+        x * x * x * dy / 3.0,
+        -y * y * y * dx / 3.0,
+        0.5 * x * x * y * dy,
+        tangent.magnitude(),
+    ])
 }
 
 fn section_centroid(plane: super::Plane3, section: PlanarSection) -> Point3 {
@@ -580,6 +755,8 @@ fn validate_prism_side_incidence(
     second_cap: FaceId,
     first_edges: &BTreeSet<super::EdgeId>,
     second_edges: &BTreeSet<super::EdgeId>,
+    sweep: Vec3,
+    tolerance: ModelTolerance,
 ) -> KernelResult<bool> {
     let mut first_incidence = 0usize;
     let mut second_incidence = 0usize;
@@ -588,9 +765,36 @@ fn validate_prism_side_incidence(
             continue;
         }
         let face = topology.face(*face_id)?;
-        if face.loops().len() != 1
-            || !matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_))
-        {
+        if face.loops().len() != 1 {
+            return Ok(false);
+        }
+        if let Surface3::Nurbs(surface) = face.surface() {
+            if surface.degrees().1 != 1 || surface.control_points().len() != 2 {
+                return Ok(false);
+            }
+            let first = &surface.control_points()[0];
+            let second = &surface.control_points()[1];
+            if first.len() != second.len()
+                || surface.weights()[0].len() != surface.weights()[1].len()
+                || surface.weights()[0]
+                    .iter()
+                    .zip(&surface.weights()[1])
+                    .any(|(first, second)| {
+                        (*first - *second).abs()
+                            > f64::EPSILON * first.abs().max(second.abs()).max(1.0) * 256.0
+                    })
+            {
+                return Ok(false);
+            }
+            let scale = sweep.magnitude().max(1.0);
+            let allowed = tolerance.linear_at_scale(scale) * 8.0;
+            if first.iter().zip(second).any(|(first, second)| {
+                let delta = *second - *first;
+                (delta - sweep).magnitude() > allowed && (delta + sweep).magnitude() > allowed
+            }) {
+                return Ok(false);
+            }
+        } else if !matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_)) {
             return Ok(false);
         }
         let edges = face_edges(topology, *face_id)?;
@@ -649,6 +853,22 @@ fn try_certify_prism_with_cylindrical_bosses(
             boss_components.push((*inner_loop, component));
         }
         if failed || boss_faces.iter().any(|face| !face_ids.contains(face)) {
+            continue;
+        }
+        let Surface3::Plane(target_plane) = target.surface() else {
+            unreachable!()
+        };
+        let target_normal = match target.orientation() {
+            super::FaceOrientation::Forward => target_plane.normal(),
+            super::FaceOrientation::Reversed => -target_plane.normal(),
+        };
+        if boss_components.iter().any(|(_, faces)| {
+            component_centroid(topology, faces)
+                .map(|centroid| {
+                    (centroid - target_plane.origin()).dot(target_normal) <= tolerance.linear
+                })
+                .unwrap_or(true)
+        }) {
             continue;
         }
 
@@ -723,6 +943,303 @@ fn try_certify_prism_with_cylindrical_bosses(
         }));
     }
     Ok(None)
+}
+
+fn try_certify_prism_with_pockets(
+    topology: &Topology,
+    body_id: BodyId,
+    face_ids: &BTreeSet<FaceId>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<PhysicalCertificate>> {
+    let body = topology.body(body_id)?;
+    if body.shells().len() != 1 {
+        return Ok(None);
+    }
+    let shell_id = body.shells()[0];
+    for opening_face in face_ids {
+        let opening = topology.face(*opening_face)?;
+        if !matches!(opening.surface(), Surface3::Plane(_)) || opening.loops().len() < 2 {
+            continue;
+        }
+        let inner_loops = opening
+            .loops()
+            .iter()
+            .copied()
+            .filter(|loop_id| {
+                topology
+                    .loop_(*loop_id)
+                    .map(|loop_value| loop_value.kind() == super::LoopKind::Inner)
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        if inner_loops.is_empty() {
+            continue;
+        }
+
+        let mut pocket_components = Vec::new();
+        let mut pocket_faces = BTreeSet::new();
+        let mut failed = false;
+        for inner_loop in &inner_loops {
+            let component = faces_across_loop(topology, *opening_face, *inner_loop)?;
+            if component.is_empty() || component.iter().any(|face| pocket_faces.contains(face)) {
+                failed = true;
+                break;
+            }
+            pocket_faces.extend(component.iter().copied());
+            pocket_components.push((*inner_loop, component));
+        }
+        if failed || pocket_faces.iter().any(|face| !face_ids.contains(face)) {
+            continue;
+        }
+        let Surface3::Plane(opening_plane) = opening.surface() else {
+            unreachable!()
+        };
+        let opening_normal = match opening.orientation() {
+            super::FaceOrientation::Forward => opening_plane.normal(),
+            super::FaceOrientation::Reversed => -opening_plane.normal(),
+        };
+        if pocket_components.iter().any(|(_, faces)| {
+            component_centroid(topology, faces)
+                .map(|centroid| {
+                    (centroid - opening_plane.origin()).dot(opening_normal) >= -tolerance.linear
+                })
+                .unwrap_or(true)
+        }) {
+            continue;
+        }
+
+        let mut base_topology = topology.clone();
+        base_topology
+            .shells
+            .get_mut(shell_id)?
+            .faces
+            .retain(|face| !pocket_faces.contains(face));
+        base_topology
+            .faces
+            .get_mut(*opening_face)?
+            .loops
+            .retain(|loop_id| !inner_loops.contains(loop_id));
+        let base_faces = face_ids
+            .iter()
+            .copied()
+            .filter(|face| !pocket_faces.contains(face))
+            .collect::<BTreeSet<_>>();
+        let Some(base_certificate) =
+            try_certify_right_prism(&base_topology, body_id, &base_faces, tolerance)?
+        else {
+            continue;
+        };
+
+        let mut voids = Vec::new();
+        let mut lateral_area = 0.0;
+        for (inner_loop, component_faces) in pocket_components {
+            let mut pocket_topology = topology.clone();
+            for face_id in &component_faces {
+                let orientation = pocket_topology.face(*face_id)?.orientation;
+                pocket_topology.faces.get_mut(*face_id)?.orientation = match orientation {
+                    super::FaceOrientation::Forward => super::FaceOrientation::Reversed,
+                    super::FaceOrientation::Reversed => super::FaceOrientation::Forward,
+                };
+            }
+            let mut cap = pocket_topology.face(*opening_face)?.clone();
+            cap.loops = vec![inner_loop];
+            let cap_id = pocket_topology.faces.insert(cap);
+            {
+                let loop_value = pocket_topology.loops.get_mut(inner_loop)?;
+                loop_value.face = cap_id;
+                loop_value.kind = super::LoopKind::Outer;
+            }
+            let mut component_face_ids = component_faces.clone();
+            component_face_ids.insert(cap_id);
+            pocket_topology.shells.get_mut(shell_id)?.faces =
+                component_face_ids.iter().copied().collect();
+            let properties =
+                cylindrical_component_properties(&pocket_topology, &component_face_ids, tolerance)?;
+            let Some(properties) = properties else {
+                failed = true;
+                break;
+            };
+            let cap_area = std::f64::consts::PI
+                * component_face_ids
+                    .iter()
+                    .find_map(|face| match pocket_topology.face(*face).ok()?.surface() {
+                        Surface3::Cylinder(cylinder) => Some(cylinder.radius().powi(2)),
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::GeometryInvariant,
+                            "a cylindrical pocket has no cylindrical wall",
+                        )
+                    })?;
+            lateral_area += properties.surface_area - 2.0 * cap_area;
+            voids.push(properties);
+        }
+        if failed {
+            continue;
+        }
+        return Ok(Some(PhysicalCertificate {
+            properties: subtract_properties(base_certificate.properties, &voids, lateral_area)?,
+        }));
+    }
+    Ok(None)
+}
+
+fn cylindrical_component_properties(
+    topology: &Topology,
+    faces: &BTreeSet<FaceId>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<MassProperties>> {
+    let cylinders = faces
+        .iter()
+        .filter_map(|face| match topology.face(*face).ok()?.surface() {
+            Surface3::Cylinder(cylinder) => Some(*cylinder),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some(reference) = cylinders.first().copied() else {
+        return Ok(None);
+    };
+    let axis = reference.axis().normalize();
+    let linear = tolerance.linear_at_scale(reference.radius()) * 8.0;
+    if faces.iter().any(|face| {
+        !matches!(
+            topology.face(*face).map(|face| face.surface()),
+            Ok(Surface3::Plane(_) | Surface3::Cylinder(_))
+        )
+    }) || cylinders.iter().any(|cylinder| {
+        (cylinder.radius() - reference.radius()).abs() > linear
+            || cylinder.axis().normalize().cross(axis).magnitude() > tolerance.angular
+            || (cylinder.origin() - reference.origin())
+                .cross(axis)
+                .magnitude()
+                > linear
+    }) {
+        return Ok(None);
+    }
+    let vertices = faces
+        .iter()
+        .try_fold(BTreeSet::new(), |mut vertices, face| {
+            for edge in face_edges(topology, *face)? {
+                vertices.extend(topology.edge(edge)?.vertices());
+            }
+            Ok::<_, KernelError>(vertices)
+        })?;
+    let (minimum, maximum) = vertices.into_iter().try_fold(
+        (f64::INFINITY, f64::NEG_INFINITY),
+        |(minimum, maximum), vertex| {
+            let level = axis.dot(topology.vertex(vertex)?.point().to_vec());
+            Ok::<_, KernelError>((minimum.min(level), maximum.max(level)))
+        },
+    )?;
+    let height = maximum - minimum;
+    if height <= linear {
+        return Ok(None);
+    }
+    let reference_level = axis.dot(reference.origin().to_vec());
+    let centroid = reference.origin() + axis * ((minimum + maximum) * 0.5 - reference_level);
+    let volume = std::f64::consts::PI * reference.radius().powi(2) * height;
+    let axial = 0.5 * volume * reference.radius().powi(2);
+    let transverse = volume * (3.0 * reference.radius().powi(2) + height.powi(2)) / 12.0;
+    let inertia = std::array::from_fn(|row| {
+        std::array::from_fn(|column| {
+            transverse * if row == column { 1.0 } else { 0.0 }
+                + (axial - transverse) * axis[row] * axis[column]
+        })
+    });
+    Ok(Some(MassProperties {
+        volume,
+        signed_volume: volume,
+        surface_area: 2.0
+            * std::f64::consts::PI
+            * reference.radius()
+            * (height + reference.radius()),
+        centroid,
+        inertia,
+    }))
+}
+
+fn component_centroid(topology: &Topology, faces: &BTreeSet<FaceId>) -> KernelResult<Point3> {
+    let mut vertices = BTreeSet::new();
+    for face in faces {
+        for edge in face_edges(topology, *face)? {
+            vertices.extend(topology.edge(edge)?.vertices());
+        }
+    }
+    if vertices.is_empty() {
+        return Err(KernelError::new(
+            DiagnosticKind::TopologyInvariant,
+            "a connected face component has no vertices",
+        ));
+    }
+    let count = vertices.len() as f64;
+    Ok(Point3::from_vec(
+        vertices
+            .into_iter()
+            .try_fold(Vec3::new(0.0, 0.0, 0.0), |sum, vertex| {
+                Ok::<_, KernelError>(sum + topology.vertex(vertex)?.point().to_vec())
+            })?
+            / count,
+    ))
+}
+
+fn subtract_properties(
+    base: MassProperties,
+    voids: &[MassProperties],
+    added_surface_area: f64,
+) -> KernelResult<MassProperties> {
+    let removed_volume = voids
+        .iter()
+        .map(|properties| properties.volume)
+        .sum::<f64>();
+    let volume = base.volume - removed_volume;
+    if volume <= 0.0 {
+        return Err(KernelError::new(
+            DiagnosticKind::GeometryInvariant,
+            "pockets remove the entire certified base volume",
+        ));
+    }
+    let first_moment = voids.iter().fold(
+        base.centroid.to_vec() * base.volume,
+        |moment, properties| moment - properties.centroid.to_vec() * properties.volume,
+    );
+    let centroid = Point3::from_vec(first_moment / volume);
+    let origin_inertia = |properties: MassProperties| {
+        let center = properties.centroid.to_vec();
+        let distance2 = center.magnitude2();
+        std::array::from_fn(|row| {
+            std::array::from_fn(|column| {
+                properties.inertia[row][column]
+                    + properties.volume
+                        * (if row == column { distance2 } else { 0.0 }
+                            - center[row] * center[column])
+            })
+        })
+    };
+    let mut inertia = origin_inertia(base);
+    for properties in voids {
+        let removed = origin_inertia(*properties);
+        for row in 0..3 {
+            for column in 0..3 {
+                inertia[row][column] -= removed[row][column];
+            }
+        }
+    }
+    let center = centroid.to_vec();
+    let distance2 = center.magnitude2();
+    for row in 0..3 {
+        for column in 0..3 {
+            inertia[row][column] -= volume
+                * (if row == column { distance2 } else { 0.0 } - center[row] * center[column]);
+        }
+    }
+    Ok(MassProperties {
+        volume,
+        signed_volume: volume,
+        surface_area: base.surface_area + added_surface_area,
+        centroid,
+        inertia,
+    })
 }
 
 fn faces_across_loop(

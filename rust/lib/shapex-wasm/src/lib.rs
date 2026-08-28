@@ -4,7 +4,10 @@
 //! values at the boundary and exposes only Shapex's owned, high-level API.
 
 use js_sys::Float64Array;
-use shapex::kernel::{Axis3, BooleanKind, Curve3, Origin, RigidTransform3, Surface3};
+use shapex::kernel::{
+    Axis3, BooleanKind, Curve3, NurbsCurve2, Origin, ParameterRange, RigidTransform3,
+    Surface3,
+};
 use shapex::{
     Compound, CreationRole, EdgeHandle, FaceHandle, Matrix3, ModelTolerance, Plane3, Point2,
     Profile, ProfileBoundary, Resolution, Solid, TessellationOptions, TriangleMesh, TrimmedCurve2,
@@ -79,6 +82,37 @@ impl WasmWire2 {
             )
             .map_err(js_error)?,
         );
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = addNurbs)]
+    pub fn add_nurbs(
+        &mut self,
+        degree: usize,
+        control_points: &[f64],
+        weights: &[f64],
+        knots: &[f64],
+    ) -> Result<(), JsValue> {
+        if control_points.len() % 2 != 0 || control_points.len() / 2 != weights.len() {
+            return Err(JsValue::from_str(
+                "a planar NURBS needs one XY control point per weight",
+            ));
+        }
+        let points = control_points
+            .chunks_exact(2)
+            .map(|point| Point2::new(point[0], point[1]))
+            .collect::<Vec<_>>();
+        let range = ParameterRange::new(
+            *knots.get(degree).ok_or_else(|| JsValue::from_str("invalid NURBS knots"))?,
+            *knots
+                .get(points.len())
+                .ok_or_else(|| JsValue::from_str("invalid NURBS knots"))?,
+        )
+        .map_err(js_error)?;
+        let curve = NurbsCurve2::new(degree, points, weights.to_vec(), knots.to_vec())
+            .map_err(js_error)?;
+        self.segments
+            .push(TrimmedCurve2::new(curve, range).map_err(js_error)?);
         Ok(())
     }
 }

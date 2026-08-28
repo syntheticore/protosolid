@@ -6,11 +6,11 @@
 
       Icon(icon="square-root-alt" fixed-width)
 
-      input.input.variable(type="text" v-model.trim="parameter.name" @keydown.stop)
+      input.input.variable(type="text" v-model.trim="name" @keydown.stop @change="commit" @keydown.enter="commitAndSelect")
 
       span =
 
-      input.input.value(type="text" v-model.trim="value" @keydown.stop)
+      input.input.value(type="text" v-model.trim="value" @keydown.stop @change="commit" @keydown.enter="commitAndSelect")
 
       .controls
 
@@ -56,24 +56,43 @@
     props: {
       parameter: Object,
       component: Object,
+      document: Object,
     },
 
     data() {
       return {
+        name: this.parameter.name,
         value: this.parameter.value,
       }
     },
 
     watch: {
-      value: function(value) {
-        this.parameter.value = value
+      'parameter.value': function(value) {
+        this.value = value
       },
     },
 
     methods: {
+      commit: function() {
+        if(this.name == this.parameter.name && this.value == this.parameter.value) return
+        const oldName = this.parameter.name
+        if(this.name != oldName) this.document.renameParameterReferences(oldName, this.name)
+        this.parameter.name = this.name
+        this.parameter.value = this.value
+        this.component.creator.syncActiveVariantOption()
+        this.document.regenerateParameters()
+      },
+
+      commitAndSelect: function(event) {
+        event.preventDefault()
+        this.commit()
+        event.target.select()
+      },
+
       remove: function() {
-        this.component.creator.parameters =
-          this.component.creator.parameters.filter(param => param !== this.parameter )
+        this.document.removeParameterReferences(this.parameter, this.component)
+        this.component.creator.removeParameter(this.parameter)
+        this.document.regenerateParameters()
       },
     },
   }

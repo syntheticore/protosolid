@@ -5,7 +5,7 @@ import materials from '../materials.js'
 
 
 export default class DimensionControls extends THREE.Object3D {
-  constructor(constraint, renderer) {
+  constructor(constraint, renderer, parentTransform) {
     super()
 
     this.alcTypes = ['dimension']
@@ -16,11 +16,29 @@ export default class DimensionControls extends THREE.Object3D {
 
     const isCircle = itemL.curve() instanceof Circle
     const isArc = itemL.curve() instanceof Arc
+    const isCircleOffset = constraint.isCircleOffset()
+    const isCenterDistance = constraint.isPointDistance() && !isCircleOffset
     const isPointDistance = constraint.isPointDistance()
     const isAngular = constraint.isAngular()
 
+    // Offset between concentric circles
+    if(isCircleOffset) {
+      const circles = constraint.items.map(item => item.curve())
+      const center = circles[0].center()
+      const direction = constraint.position.clone().sub(center)
+      if(direction.lengthSq() < 1e-12) direction.set(1, 0, 0)
+      direction.normalize()
+      const points = circles.map(circle => circle.center().clone().add(direction.clone().multiplyScalar(circle.radius)))
+      makeLinearDimension(this, renderer, points[0], points[1], constraint.position)
+
+    // Circle center to point, or center to center
+    } else if(isCenterDistance) {
+      const points = constraint.items.map(item => item.curve() instanceof Circle ?
+        item.curve().center().clone() : item.curve().handles()[item.index].clone())
+      makeLinearDimension(this, renderer, points[0], points[1], constraint.position)
+
     // Circle/Arc diameter/radius
-    if(isCircle || isArc) {
+    } else if(isCircle || isArc) {
       const circle = itemL.curve()
 
       const left = constraint.position.clone().sub(circle.center()).x > 0
@@ -144,7 +162,9 @@ export default class DimensionControls extends THREE.Object3D {
       this.add(lineTop)
     }
 
-    this.applyMatrix4(constraint.sketch.workplane)
+    this.applyMatrix4(
+      (parentTransform || new THREE.Matrix4()).clone().multiply(constraint.sketch.workplane)
+    )
   }
 }
 
@@ -183,28 +203,63 @@ function makeAngularDimension(controls, renderer, constraint) {
 
   const directions = curves.map(curve => curve.direction().normalize())
   const towardPosition = constraint.position.clone().sub(center)
-  directions.forEach(direction => {
-    if(direction.dot(towardPosition) < 0) direction.negate()
-  })
+  const sector = angularSector(directions[0], directions[1], towardPosition, constraint.distance)
 
   const radius = Math.max(towardPosition.length(), 1)
-  const startAngle = Math.atan2(directions[0].y, directions[0].x)
-  const delta = Math.atan2(
-    directions[0].x * directions[1].y - directions[0].y * directions[1].x,
-    directions[0].dot(directions[1]),
+  const startAngle = Math.atan2(sector.start.y, sector.start.x)
+  const delta = sector.sign * THREE.MathUtils.degToRad(Math.abs(constraint.distance))
+  const angle = Math.abs(delta)
+  const targetAngle = Math.atan2(towardPosition.y, towardPosition.x)
+  const targetProgress = THREE.MathUtils.euclideanModulo(
+    sector.sign * (targetAngle - startAngle),
+    Math.PI * 2,
   )
-  const arc = Array.from({ length: 33 }, (_value, index) => {
-    const angle = startAngle + delta * index / 32
-    return [center.x + Math.cos(angle) * radius, center.y + Math.sin(angle) * radius, center.z]
-  })
+  const endExtension = targetProgress - angle
+  const startExtension = Math.PI * 2 - targetProgress
+  const extension = targetProgress <= angle
+    ? { start: 0, end: angle }
+    : startExtension < endExtension
+    ? { start: -startExtension, end: angle }
+    : { start: 0, end: targetProgress }
+  const pointAt = progress => {
+    const pointAngle = startAngle + sector.sign * progress
+    return [center.x + Math.cos(pointAngle) * radius, center.y + Math.sin(pointAngle) * radius, center.z]
+  }
+  const arc = Array.from({ length: 33 }, (_value, index) => pointAt(
+    extension.start + (extension.end - extension.start) * index / 32
+  ))
+  const arrowStart = pointAt(0)
+  const arrowEnd = pointAt(angle)
 
-  const ray1 = center.clone().add(directions[0].clone().multiplyScalar(radius + 1))
-  const ray2 = center.clone().add(directions[1].clone().multiplyScalar(radius + 1))
+  const ray1 = center.clone().add(sector.start.clone().multiplyScalar(radius + 1))
+  const ray2 = center.clone().add(sector.end.clone().multiplyScalar(radius + 1))
   controls.add(renderer.convertLine([center.toArray(), ray1.toArray()], materials.wire))
   controls.add(renderer.convertLine([center.toArray(), ray2.toArray()], materials.wire))
   controls.add(renderer.convertLine(arc, materials.wire))
-  controls.add(makeArrow(new THREE.Vector3().fromArray(arc[0]), directions[0].clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(delta) * Math.PI / 2)))
-  controls.add(makeArrow(new THREE.Vector3().fromArray(arc.at(-1)), directions[1].clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), -Math.sign(delta) * Math.PI / 2)))
+  controls.add(makeArrow(new THREE.Vector3().fromArray(arrowStart), sector.start.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), sector.sign * Math.PI / 2).negate()))
+  controls.add(makeArrow(new THREE.Vector3().fromArray(arrowEnd), sector.end.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), -sector.sign * Math.PI / 2).negate()))
+}
+
+// Lines are unoriented, so their endpoint directions alone cannot identify
+// whether an angular dimension is the acute or obtuse sector. Pick the
+// sector matching the stored dimension value and use the label position to
+// choose between the two sectors of that size.
+function angularSector(directionL, directionR, towardPosition, degrees) {
+  const angle = THREE.MathUtils.degToRad(Math.min(Math.abs(degrees), 180))
+  const target = towardPosition.lengthSq() > 1e-12 ? towardPosition.clone().normalize() : new THREE.Vector3(1, 0, 0)
+  const candidates = []
+
+  for(const start of [directionL, directionL.clone().negate()]) {
+    for(const sign of [-1, 1]) {
+      const end = start.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), sign * angle)
+      const midpoint = start.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), sign * angle / 2)
+      // Prefer geometrically valid sectors, then the one under the label.
+      const lineMatch = Math.abs(end.dot(directionR))
+      candidates.push({ start, end, sign, score: lineMatch * 2 + midpoint.dot(target) })
+    }
+  }
+
+  return candidates.reduce((best, candidate) => candidate.score > best.score ? candidate : best)
 }
 
 function lineIntersection(left, right) {

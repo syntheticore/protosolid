@@ -12,7 +12,11 @@
       @dblclick="doubleClick"
       @pointerup="mouseUp"
       @pointerdown="mouseDown"
+      @pointercancel="pointerCancel"
+      @lostpointercapture="pointerCancel"
+      @wheel="mouseWheel"
       @mousemove="mouseMove"
+      @mouseleave="mouseLeave"
     )
 
     svg.drawpad(ref="drawpad" viewBox="0 0 100 100" fill="transparent")
@@ -20,6 +24,10 @@
       //- Pick indicators
       path(v-for="path in allPaths", :d="path.data", :stroke="path.color")
       circle(v-for="path in allPaths", :cx="path.targetPos.x", :cy="path.targetPos.y", r="5", :fill="path.color")
+
+      g.thermal-probe(v-if="thermalProbe")
+        path(:d="probePath")
+        circle(:cx="thermalProbe.position.x" :cy="thermalProbe.position.y" r="4")
 
       //- Snap guides
       TransitionGroup(name="hide-guides" tag="g")
@@ -32,6 +40,14 @@
           :y2="guide.end.y"
         )
 
+      rect.selection-box(
+        v-if="selectionBox"
+        :x="selectionBox.x"
+        :y="selectionBox.y"
+        :width="selectionBox.width"
+        :height="selectionBox.height"
+      )
+
     .floaters
 
       ConstraintProxy(
@@ -39,6 +55,7 @@
         :document="document"
         :constraint="dimensionPreview"
         :preview="true"
+        :parent-transform="activeComponentTransform"
       )
 
       ComponentProxy(
@@ -53,10 +70,26 @@
         @handleMouseDown="handleMouseDown"
         @handleMouseMove="handleMouseMove"
         @handleMouseLeave="handleMouseLeave"
+        @handlePointerDown="forwardCameraPointerDown"
+        @handleWheel="forwardWheelToCanvas"
         @dimensionMouseUp="mouseUp"
         @dimensionMouseDown="dimensionMouseDown"
         @dimensionMouseMove="dimensionMouseMove"
       )
+
+      JointProxy(
+        v-if="isReady && displayMode != 'pathTraced'"
+        v-for="joint in visibleJoints"
+        :key="joint.id"
+        :document="document"
+        :joint="joint"
+        :active-tool="activeTool"
+      )
+
+      .thermal-probe-box(
+        v-if="thermalProbe"
+        :style="{ left: thermalProbe.position.x + 22 + 'px', top: thermalProbe.position.y - 31 + 'px' }"
+      ) {{ thermalProbe.label }}
 
       //- Snap anchor highlights active snap point
       .anchor.handle(
@@ -111,6 +144,35 @@
       opacity: 0.7
       stroke-dasharray: 4, 7
 
+    .selection-box
+      fill: rgba($highlight, 0.12)
+      stroke: $highlight
+      stroke-width: 1
+      stroke-dasharray: 4, 3
+
+    .thermal-probe
+
+      path
+        stroke: darkgray
+        stroke-dasharray: none
+        opacity: 1
+
+      circle
+        fill: darkgray
+        stroke: none
+
+  .thermal-probe-box
+    position: absolute
+    padding: 6px 8px
+    color: white
+    background: rgba($dark1, 0.6)
+    backdrop-filter: blur(32px)
+    border: 2px solid darkgray
+    border-radius: 99px
+    font-size: 12px
+    font-weight: bold
+    white-space: nowrap
+
   .anchor
 
     &::after
@@ -156,12 +218,16 @@
 <script>
 
   import * as THREE from 'three'
+  import { markRaw } from 'vue'
 
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
   import { SketchElement } from './../js/core/geom2d.js'
   import { Dimension, CoincidentConstraint } from './../js/core/sketch.js'
   import { Solid, Face } from './../js/core/geom3d.js'
+  import { setWorldTransform, solveAssembly, worldTransform } from './../js/core/assembly.js'
+  import { TransformGizmo } from './../js/three/gizmos.js'
+  import { componentTriangles } from './../js/core/export.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -174,6 +240,7 @@
     SolidPickTool,
     PointPickTool,
     ComponentPickTool,
+    JointPickTool,
     PatternInputPickTool,
     LineTool,
     SplineTool,
@@ -196,6 +263,7 @@
       activeView: Object,
       displayMode: String,
       colorMode: String,
+      projectionMode: String,
     },
 
     data() {
@@ -207,26 +275,37 @@
         guides: [],
         widgets: [],
         isOrbiting: false,
+        isZooming: false,
+        zoomEndTimer: null,
+        isPanning: false,
         activeHandle: null,
         hoveredHandle: null,
         activeDimension: null,
         hoveredDimension: null,
+        selectionBox: null,
         dimensionPreview: null,
+        cameraPreview: null,
+        cameraUnpreviewFrame: null,
+        thermalProbe: null,
+        exportPreviewMesh: null,
       }
     },
 
     watch: {
       document: function(document, oldDocument) {
+        this.cancelCameraUnpreview()
+        this.cameraPreview = null
         this.registerDocument(this.document, oldDocument)
       },
 
       'document.activeSketch': function(sketch) {
         // Show sketch plane
         if(sketch) {
-          let plane = sketch.workplane
+          const plane = worldTransform(this.document.activeComponent).multiply(sketch.workplane)
           this.snapper.planeTransform = plane
           this.renderer.sketchPlane.setPlane(plane)
         }
+        this.renderer.sketchPlane.setSketch(sketch)
         this.renderer.sketchPlane.visible = !!sketch
         this.renderer.render()
       },
@@ -239,22 +318,84 @@
       displayMode: function(mode) {
         this.renderer.setDisplayMode(mode)
       },
+
+      projectionMode: function(mode) {
+        this.renderer.setProjectionMode(mode)
+      },
+
+      'document.activeSimulation': function() {
+        this.thermalProbe = null
+        this.$nextTick(this.updateFluxArrows)
+      },
+
+      exportPreview: function() {
+        if(this.renderer) this.updateExportPreview()
+      },
+
+      transformSelectionKey: function() {
+        if(this.renderer) this.updateSelectionTransformGizmo()
+      },
     },
 
     computed: {
+      activeComponentTransform: function() {
+        return this.document.activeSketch ? worldTransform(this.document.activeComponent) : null
+      },
+
+      exportPreview: function() {
+        const config = this.document.activeExportConfig
+        if(!config || config.format == 'STEP') return null
+        return {
+          config,
+          componentId: this.document.activeExportComponentId,
+          maxDistance: config.maxDistance,
+          maxAngle: config.maxAngle,
+          marker: this.document.timeline.marker,
+        }
+      },
+
+      transformSelectionKey: function() {
+        const feature = this.document.activeFeature
+        const sketch = this.document.activeSketch
+        const simulation = this.document.activeSimulation
+        const exportConfig = this.document.activeExportConfig
+        const items = this.document.selection.items.map(item => {
+          const component = item?.typename?.() == 'Component' ? item : item?.component
+          return `${item?.id || ''}:${component?.id || ''}`
+        })
+        return `${feature?.id || ''}|${sketch?.id || ''}|${simulation?.id || ''}|${exportConfig?.id || ''}|${items.join(',')}`
+      },
+
       allPaths: function() {
         const paths = [...this.paths]
         if(this.pickingPath && this.pickingPath.target) paths.push(this.pickingPath)
         return paths
+      },
+
+      probePath: function() {
+        const position = this.thermalProbe.position
+        return `M ${position.x} ${position.y} L ${position.x + 12} ${position.y - 18} L ${position.x + 22} ${position.y - 18}`
+      },
+
+      visibleJoints: function() {
+        const seen = new Set()
+        return (this.document.top().assemblyJoints || []).filter(joint => {
+          if(seen.has(joint.id)) return false
+          seen.add(joint.id)
+          return true
+        })
       },
     },
 
     mounted: function() {
       // Renderer
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
+      this.renderer.sketchPlane.setSketch(this.document.activeSketch)
       this.renderer.setDisplayMode(this.displayMode)
+      this.renderer.setProjectionMode(this.projectionMode)
       this.renderer.on('render', () => {
         this.frame++
+        this.syncSelectionTransformGizmo()
         this.updateWidgets()
       })
       this.renderer.on('change-view', (position, target) => {
@@ -282,18 +423,45 @@
           patternInput: PatternInputPickTool,
           point: PointPickTool,
           componentRef: ComponentPickTool,
+          joint: JointPickTool,
         }[type], acceptsInput)
       })
+
+      this.bus.on('joint-picked', this.jointPicked)
 
       this.bus.on('show-picker', this.addPath)
       this.bus.on('clear-pickers', this.clearPaths)
       this.bus.on('activate-tool', this.activateTool)
-      this.bus.on('zoom-all', () => this.zoomToFit() )
-      this.bus.on('zoom-active', () => this.zoomToFit(this.document.activeComponent.compound.solids()) )
-      this.bus.on('zoom-selection', () => this.zoomToFit(this.document.selection.items) )
+      this.bus.on('zoom-all', () => {
+        this.commitCameraPreview()
+        this.zoomToFit()
+      })
+      this.bus.on('zoom-active', () => {
+        this.commitCameraPreview()
+        this.zoomToFit(this.document.activeComponent.compound.solids())
+      })
+      this.bus.on('zoom-selection', () => {
+        this.commitCameraPreview()
+        this.zoomToFit(this.document.selection.items)
+      })
+      this.bus.on('preview-zoom-all', () => this.previewCamera(view => this.zoomToFit([], true, view)) )
+      this.bus.on('preview-zoom-active', () => this.previewCamera(view =>
+        this.zoomToFit(this.document.activeComponent.compound.solids(), true, view)
+      ))
+      this.bus.on('preview-zoom-selection', () => this.previewCamera(view =>
+        this.zoomToFit(this.document.selection.items, true, view)
+      ))
+      this.bus.on('preview-look-at', plane => this.previewCamera(() => {
+        this.renderer.lookAt(plane, false)
+        const sketch = this.document.activeSketch
+        if(sketch && sketch.elements.length) this.zoomToFit(sketch.elements, true)
+      }))
+      this.bus.on('commit-camera-preview', this.commitCameraPreview)
+      this.bus.on('unpreview-camera', this.unpreviewCamera)
       this.bus.on('render-needed', () => this.renderer.render() )
       this.bus.on('preview-feature', this.previewFeature)
       this.bus.on('unpreview-feature', this.unpreviewFeature)
+      this.bus.on('thermal-result', this.updateFluxArrows)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
       this.bus.on('keyup', this.keyUp)
@@ -304,29 +472,197 @@
       })
 
       this.registerDocument(this.document)
+      const initialView = this.document.dirtyView || this.document.previewView || this.activeView || this.document.activeView
+      if(initialView) this.renderer.setView(initialView.position, initialView.target)
 
       // Window Resize
       setTimeout(() => this.onWindowResize(), 1000)
       this.onWindowResize()
+      this.updateSelectionTransformGizmo()
     },
 
     beforeUnmount: function() {
+      clearTimeout(this.zoomEndTimer)
+      this.cancelCameraUnpreview()
+      this.document.off('regenerated', this.updateExportPreview)
       this.bus.off('resize', this.onWindowResize)
+      this.bus.off('thermal-result', this.updateFluxArrows)
+      this.bus.off('joint-picked', this.jointPicked)
+      this.clearFluxArrows()
+      this.clearExportPreview()
+      this.clearSelectionTransformGizmo()
       this.renderer.dispose()
     },
 
     methods: {
+      jointPicked: function(joint) {
+        if(this.activeTool instanceof JointPickTool) this.activeTool.pick(joint)
+      },
+
+      updateSelectionTransformGizmo: function() {
+        this.clearSelectionTransformGizmo()
+        if(
+          this.document.activeFeature ||
+          this.document.activeSketch ||
+          this.document.activeSimulation ||
+          this.document.activeExportConfig
+        ) return
+
+        const selectedComponents = this.document.selection.items
+          .map(item => item?.typename?.() == 'Component' ? item :
+            item?.typename?.() == 'Solid' ? item.component : null
+          )
+          .filter(Boolean)
+          .filter(component => component.parent)
+          // Keep the latest occurrence so selecting a solid after its
+          // component also makes that component the group anchor.
+          .filter((component, index, all) =>
+            all.map(other => other.id).lastIndexOf(component.id) == index
+          )
+        if(!selectedComponents.length) return
+
+        const anchor = selectedComponents.at(-1)
+        const components = selectedComponents
+          .filter((component, _, all) => !all.some(other =>
+            other != component && component.hasAncestor(other)
+          ))
+
+        const componentIds = components.map(component => component.id)
+        const grouped = selectedComponents.length > 1
+        // Keep the assembly solver's effector off every local rotation axis
+        // so all three rotation rings can drive constrained components.
+        const target = new THREE.Vector3(1, 2, 3).normalize().multiplyScalar(10)
+
+        let gizmo
+        gizmo = markRaw(new TransformGizmo(worldTransform(anchor), desiredWorld => {
+          const tree = this.document.top()
+          const current = componentIds.map(id => tree.findChild(id)).filter(Boolean)
+          if(current.length != componentIds.length) return
+
+          if(!grouped) {
+            solveAssembly(tree, current[0], desiredWorld, 64, target)
+            gizmo.setTransform(worldTransform(current[0]))
+          } else {
+            const start = this.selectionTransformStart
+            if(!start) return
+            const delta = desiredWorld.clone().multiply(start.gizmo.clone().invert())
+            current.forEach(component => {
+              const initialWorld = start.worlds.get(component.id)
+              if(initialWorld) setWorldTransform(component, delta.clone().multiply(initialWorld))
+            })
+            gizmo.setTransform(desiredWorld)
+          }
+          this.renderer.render()
+        }))
+        const captureStart = () => {
+          const tree = this.document.top()
+          this.selectionTransformStart = {
+            gizmo: gizmo.getTransform(),
+            worlds: new Map(componentIds.map(id => {
+              const current = tree.findChild(id)
+              return [id, current && worldTransform(current)]
+            })),
+          }
+        }
+        gizmo.addEventListener('mouseDown', captureStart)
+        captureStart()
+        this.selectionTransformComponentIds = componentIds
+        this.selectionTransformAnchorId = anchor.id
+        this.selectionTransformGizmo = gizmo
+        this.renderer.addGizmo(gizmo)
+      },
+
+      syncSelectionTransformGizmo: function() {
+        const gizmo = this.selectionTransformGizmo
+        if(!gizmo || gizmo.dragging) return
+        const tree = this.document.top()
+        const anchor = tree.findChild(this.selectionTransformAnchorId)
+        if(anchor) gizmo.setTransform(worldTransform(anchor))
+      },
+
+      clearSelectionTransformGizmo: function() {
+        if(!this.selectionTransformGizmo || !this.renderer) return
+        this.renderer.removeGizmo(this.selectionTransformGizmo)
+        this.selectionTransformGizmo = null
+        this.selectionTransformComponentIds = null
+        this.selectionTransformAnchorId = null
+        this.selectionTransformStart = null
+      },
+
+      updateExportPreview: function() {
+        this.clearExportPreview()
+        const preview = this.exportPreview
+        if(!preview) {
+          this.renderer.render()
+          return
+        }
+
+        const component = this.document.getComponent(preview.componentId)
+        if(!component) {
+          this.renderer.render()
+          return
+        }
+        const maxDistance = Number(preview.maxDistance)
+        const maxAngle = THREE.MathUtils.degToRad(Number(preview.maxAngle))
+        const triangles = componentTriangles(
+          component,
+          Number.isFinite(maxDistance) && maxDistance > 0 ? maxDistance : 0.1,
+          Number.isFinite(maxAngle) && maxAngle > 0 ? maxAngle : THREE.MathUtils.degToRad(10),
+        )
+        const positions = triangles.flatMap(triangle => triangle.flatMap(vertex => vertex.toArray()))
+        const surfaceGeometry = new THREE.BufferGeometry()
+        surfaceGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+        surfaceGeometry.computeVertexNormals()
+        const surfaceMaterial = new THREE.MeshStandardMaterial({
+          color: '#9eb5c5',
+          side: THREE.DoubleSide,
+          roughness: 0.8,
+          metalness: 0,
+          transparent: true,
+          opacity: 0.18,
+          polygonOffset: true,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 1,
+        })
+        const wireMaterial = new THREE.MeshBasicMaterial({
+          color: '#d7e4ed',
+          wireframe: true,
+        })
+        const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial)
+        const wire = new THREE.Mesh(surfaceGeometry.clone(), wireMaterial)
+        this.exportPreviewMesh = markRaw(new THREE.Group())
+        this.exportPreviewMesh.add(surface, wire)
+        this.exportPreviewMesh.applyMatrix4(worldTransform(component))
+        this.renderer.add(this.exportPreviewMesh)
+        this.renderer.render()
+      },
+
+      clearExportPreview: function() {
+        if(!this.exportPreviewMesh) return
+        const previewMaterials = new Set()
+        this.exportPreviewMesh.traverse(child => {
+          if(child.material) previewMaterials.add(child.material)
+        })
+        this.renderer.remove(this.exportPreviewMesh)
+        previewMaterials.forEach(material => material.dispose())
+        this.exportPreviewMesh = null
+      },
+
       registerDocument: function(doc, oldDoc) {
         if(oldDoc) {
           oldDoc.off('force-view')
           oldDoc.off('look-at')
+          oldDoc.off('regenerated', this.updateExportPreview)
         }
-        doc.on('force-view', (view) => this.renderer.setView(view.position, view.target) )
+        doc.on('force-view', (view) => {
+          this.renderer.setView(view.position, view.target)
+        })
         doc.on('look-at', (plane) => setTimeout(() => {
           this.renderer.lookAt(plane)
           const sketch = this.document.activeSketch
           if(sketch && sketch.elements.length) this.zoomToFit(sketch.elements)
         }))
+        doc.on('regenerated', this.updateExportPreview)
       },
 
       getMouseCoords: function(e) {
@@ -339,9 +675,27 @@
       },
 
       mouseUp: function(e) {
+        if(this.renderer.isGizmoDragging()) return
+        if(this.isPanning) {
+          this.isPanning = false
+          this.activeHandle = null
+          this.activeDimension = null
+          this.snapper.reset()
+          return
+        }
         const [vec, coords] = this.snap(e)
         const draggedHandle = this.activeHandle
-        if(vec) this.activeTool.mouseUp(vec, coords)
+        this.activeTool?.mouseUp(vec, coords)
+        this.activeHandle = null
+        this.activeDimension = null
+        this.snapper.reset()
+        this.updateRegions(false, draggedHandle)
+      },
+
+      pointerCancel: function() {
+        const draggedHandle = this.activeHandle
+        this.activeTool?.cancelPointer?.()
+        this.isPanning = false
         this.activeHandle = null
         this.activeDimension = null
         this.snapper.reset()
@@ -379,7 +733,20 @@
       mouseDown: function(e) {
         document.activeElement.blur() // Necessary since THREE R123
         if(e.button != 0) return
+        if(this.renderer.isGizmoHovered()) return
+        this.isPanning = e.shiftKey
+        if(this.isPanning) {
+          // Shift gives the complete pointer gesture to OrbitControls. This
+          // also clears proxy state when the pan starts over a sketch handle.
+          this.activeHandle = null
+          this.activeDimension = null
+          this.snapper.reset()
+          return
+        }
         if(e.altKey) return
+        if(e.pointerId !== undefined && e.currentTarget?.setPointerCapture) {
+          try { e.currentTarget.setPointerCapture(e.pointerId) } catch(_) {}
+        }
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, coords, e)
       },
@@ -412,13 +779,99 @@
         this.hoveredDimension = null
       },
 
+      mouseWheel: function(e) {
+        this.isZooming = true
+        this.renderer.setPickingEnabled(false)
+        clearTimeout(this.zoomEndTimer)
+        this.zoomEndTimer = setTimeout(() => {
+          this.isZooming = false
+          this.zoomEndTimer = null
+          this.renderer.setPickingEnabled(true)
+          // Refresh hover and picker state once, at the camera's settled pose.
+          this.mouseMove(e)
+        }, 60)
+      },
+
+      forwardWheelToCanvas: function(e) {
+        // Sketch handles live in an HTML overlay, while OrbitControls listens
+        // for wheel input on the canvas. Re-dispatch the wheel gesture there
+        // so zoom works without making the handles ignore pointer input.
+        this.$refs.canvas.dispatchEvent(new WheelEvent(e.type, {
+          bubbles: false,
+          cancelable: true,
+          composed: true,
+          view: window,
+          detail: e.detail,
+          screenX: e.screenX,
+          screenY: e.screenY,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey,
+          button: e.button,
+          buttons: e.buttons,
+          relatedTarget: e.relatedTarget,
+          deltaX: e.deltaX,
+          deltaY: e.deltaY,
+          deltaZ: e.deltaZ,
+          deltaMode: e.deltaMode,
+        }))
+      },
+
+      forwardCameraPointerDown: function(e) {
+        const cameraGesture = e.button != 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey
+        if(!cameraGesture) return
+
+        // OrbitControls also owns camera drag gestures on the canvas. Forward
+        // the real pointer id so it can capture the remainder of this gesture;
+        // an unmodified primary click remains exclusively a handle drag.
+        e.preventDefault()
+        this.$refs.canvas.dispatchEvent(new PointerEvent(e.type, {
+          bubbles: false,
+          cancelable: true,
+          composed: true,
+          view: window,
+          detail: e.detail,
+          screenX: e.screenX,
+          screenY: e.screenY,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey,
+          button: e.button,
+          buttons: e.buttons,
+          relatedTarget: e.relatedTarget,
+          pointerId: e.pointerId,
+          width: e.width,
+          height: e.height,
+          pressure: e.pressure,
+          tangentialPressure: e.tangentialPressure,
+          tiltX: e.tiltX,
+          tiltY: e.tiltY,
+          twist: e.twist,
+          pointerType: e.pointerType,
+          isPrimary: e.isPrimary,
+        }))
+      },
+
       mouseMove: function(e) {
         if(e.button != 0) return
+        if(this.renderer.isGizmoDragging()) return
+        if(this.isPanning) return
         if(this.isOrbiting) return
+        if(this.isZooming) return
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         if(this.pickingPath && vec) this.pickingPath.target = vec
-        if(vec) this.activeTool.mouseMove(vec, coords)
+        if(vec || this.activeTool.probesSurface) this.activeTool.mouseMove(vec, coords)
+      },
+
+      mouseLeave: function() {
+        this.thermalProbe = null
       },
 
       keyDown: function(key) {
@@ -427,7 +880,8 @@
           if(this.document.selection.items.length) {
             [...this.document.selection.items].forEach(item => {
               const type = item.typename()
-              if(type != 'Solid' && type != 'Component') {
+              const isAssemblyJoint = (this.document.top().assemblyJoints || []).includes(item)
+              if(type != 'Solid' && type != 'Component' && !isAssemblyJoint) {
                 this.deleteElement(item)
               }
             })
@@ -437,8 +891,11 @@
 
       keyUp: function(key) {
         if(key == 'Alt') {
-        } else if(key == 'o') {
-          this.renderer.switchCamera()
+        } else if(key.toLowerCase() == 'o') {
+          const projectionMode = this.projectionMode == 'orthographic'
+            ? 'perspective'
+            : 'orthographic'
+          this.$emit('update:projectionMode', projectionMode)
         }
       },
 
@@ -478,6 +935,48 @@
         this.paths = []
       },
 
+      clearFluxArrows: function() {
+        if(!this.fluxArrows) return
+        this.renderer.scene.remove(this.fluxArrows)
+        this.fluxArrows.traverse(object => {
+          object.geometry?.dispose()
+          object.material?.dispose()
+        })
+        this.fluxArrows = null
+      },
+
+      updateFluxArrows: function() {
+        if(!this.renderer) return
+        this.clearFluxArrows()
+        const simulation = this.document.activeSimulation
+        if(simulation?.mode != 'thermal' || !simulation.result) return this.renderer.render()
+        const component = this.document.top().findChild(simulation.result.componentId)
+        const samples = simulation.fluxSamples()
+        const maximum = Math.max(...samples.map(sample => sample.flux.length()))
+        const group = new THREE.Group()
+        samples.forEach(sample => {
+          const strength = sample.flux.length() / maximum
+          const length = simulation.result.step * (1 + strength * 1.5)
+          const arrow = new THREE.ArrowHelper(
+            sample.flux.clone().normalize(),
+            sample.position,
+            length,
+            0xffffff,
+            length * 0.22,
+            length * 0.1,
+          )
+          arrow.line.material.depthTest = false
+          arrow.cone.material.depthTest = false
+          arrow.line.renderOrder = 10
+          arrow.cone.renderOrder = 10
+          group.add(arrow)
+        })
+        group.applyMatrix4(worldTransform(component))
+        this.fluxArrows = group
+        this.renderer.scene.add(group)
+        this.renderer.render()
+      },
+
       updateWidgets: function() {
         // Update Snap Anchor
         if(this.snapAnchor) this.snapAnchor.pos = this.renderer.toScreen(this.snapAnchor.vec)
@@ -499,6 +998,9 @@
         const sign = this.document.activeFeature ? -1 : 1
         const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200) * sign
         const dy = Math.abs(origin.y - pos.y) / 2.0 * sign
+        if(this.document.activeSimulation) {
+          return `M ${origin.x} ${origin.y} C ${origin.x + dx} ${origin.y} ${pos.x - dx} ${pos.y} ${pos.x} ${pos.y}`
+        }
         return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x} ${pos.y - dy} ${pos.x} ${pos.y}`
       },
 
@@ -522,6 +1024,7 @@
         this.hoveredHandle = null
         this.activeDimension = null
         this.hoveredDimension = null
+        this.selectionBox = null
       },
 
       deleteElement: function(elem) {
@@ -530,11 +1033,48 @@
         this.updateRegions(true)
       },
 
-      zoomToFit: function(objects=[]) {
+      previewCamera: function(action) {
+        this.cancelCameraUnpreview()
+        if(!this.cameraPreview) {
+          this.cameraPreview = {
+            position: (this.renderer.cameraTarget || this.renderer.activeCamera.position).clone(),
+            target: (this.renderer.viewControlsTarget || this.renderer.viewControls.target).clone(),
+          }
+        }
+        action(this.cameraPreview)
+      },
+
+      commitCameraPreview: function() {
+        this.cancelCameraUnpreview()
+        this.cameraPreview = null
+      },
+
+      unpreviewCamera: function() {
+        if(!this.cameraPreview) return
+        this.cancelCameraUnpreview()
+        // Pointer transitions between adjacent buttons dispatch mouseleave
+        // before mouseenter. Waiting one frame lets the next preview replace
+        // this one directly, without rendering an intermediate camera reset.
+        this.cameraUnpreviewFrame = requestAnimationFrame(() => {
+          this.cameraUnpreviewFrame = null
+          if(!this.cameraPreview) return
+          const view = this.cameraPreview
+          this.cameraPreview = null
+          this.renderer.setView(view.position, view.target)
+        })
+      },
+
+      cancelCameraUnpreview: function() {
+        if(this.cameraUnpreviewFrame === null) return
+        cancelAnimationFrame(this.cameraUnpreviewFrame)
+        this.cameraUnpreviewFrame = null
+      },
+
+      zoomToFit: function(objects=[], preview=false, view=null) {
         const solidFaces = objects.filter(sel => sel instanceof Solid ).flatMap(solid => solid.faces() )
         const rest = objects.filter(sel => sel instanceof Face || sel instanceof SketchElement )
         const meshes = solidFaces.concat(rest).map(obj => obj.mesh && obj.mesh() ).filter(Boolean)
-        this.renderer.zoomToFit(meshes.length && meshes)
+        this.renderer.zoomToFit(meshes.length && meshes, !preview, view)
       },
 
       elementChanged: function() {
@@ -547,6 +1087,7 @@
           compound.tesselate(),
           subtracting ? materials.previewSubtractSurface : materials.previewAddSurface,
         )
+        this.previewMesh.applyMatrix4(worldTransform(this.document.activeComponent))
         this.renderer.add(this.previewMesh)
         this.renderer.render()
       },

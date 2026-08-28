@@ -30,9 +30,12 @@
             v-if="setting.type == 'length' || setting.type == 'angle'"
             :component="document.top()"
             :dimension="setting.type"
+            :allow-negative="setting.allowNegative"
             v-model:value="activeFeature[key]"
+            :expression="activeFeature.expressions[key]"
             :auto-focus="setting.autoFocus !== false && activeFeature.isSettingVisible(setting)"
             @update:value="update"
+            @expression="activeFeature.setExpression(key, $event)"
             @error="error = $event"
           )
 
@@ -74,7 +77,7 @@
             v-model="activeFeature[key]"
             @change="updateSetting"
           )
-            option(v-for="(name, option) in setting.options" :value="option") {{ name }}
+            option(v-for="(name, option) in settingOptions(key, setting)" :value="option") {{ name }}
 
           RadioBar(
             v-if="setting.type == 'select'"
@@ -181,13 +184,6 @@
     .icon-toggle
       flex: 1 1 auto
 
-    .enum-input
-      appearance: auto
-      border-radius: 3px
-      height: 28px
-      -webkit-appearance: menulist
-      min-width: 68px
-
   .picker
     width: 24px
     height: 24px
@@ -271,7 +267,7 @@
   import { DummyTool, ManipulationTool } from './../js/tools.js'
   import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
-  import { PatternInputReference } from './../js/core/references.js'
+  import { CurveReference, JointReference, PatternInputReference } from './../js/core/references.js'
   import { referenceComponentId, worldTransform } from './../js/core/assembly.js'
 
   export default {
@@ -325,6 +321,7 @@
       this.bus.on('keydown', this.onKeydown)
       this.document.on('deactivate-feature', this.deactivateFeature)
       this.startValues = this.activeFeature.getValues()
+      this.startExpressions = { ...this.activeFeature.expressions }
       this.activateBaseTool()
       setTimeout(() => {
         this.updatePaths()
@@ -365,6 +362,10 @@
         }
       },
 
+      settingOptions: function(key, setting) {
+        return this.activeFeature.settingOptions?.(key) || setting.options
+      },
+
       pick: function(type, key, restart) {
         // Toggle picker off if active
         if(this.activePicker) {
@@ -396,6 +397,10 @@
               itemRef = item.planarReference()
             } else if(type == 'axis') {
               itemRef = item.axialReference()
+            } else if(type == 'curve') {
+              itemRef = new CurveReference(item)
+            } else if(type == 'joint') {
+              itemRef = new JointReference(item)
             }
 
             // Add item reference to feature
@@ -415,6 +420,7 @@
               // Hide heavy data from Vue in a closure
               this.activeFeature[key] = () => itemRef
             }
+            this.activeFeature.pickedInput?.(key, itemRef, item)
 
             this.cancelPick()
             // Regenerate feature once unsuppressed
@@ -436,6 +442,7 @@
           this.activePicker = key
           this.bus.featurePickerActive = type == 'patternInput'
           this.bus.componentPickerActive = type == 'componentRef' || type == 'patternInput'
+          this.bus.jointPickerActive = type == 'joint'
           this.updatePicker = () => {
             const { pickerPos, color } = this.getPickerInfo(key)
             this.bus.emit('pick', type, pickerPos, color, item => this.activeFeature.acceptsInput(item))
@@ -451,6 +458,7 @@
         this.activeFeature.suppressUpdate = false
         this.bus.featurePickerActive = false
         this.bus.componentPickerActive = false
+        this.bus.jointPickerActive = false
       },
 
       // Activate pickers using number keys
@@ -490,10 +498,18 @@
         let center
         if(item instanceof THREE.Matrix4) {
           center = new THREE.Vector3().setFromMatrixPosition(item)
+        } else if(item.componentA && item.frameA) {
+          const component = this.document.top().findChild(item.componentA)
+          return component
+            ? new THREE.Vector3().setFromMatrixPosition(worldTransform(component).multiply(item.frameA))
+            : new THREE.Vector3()
         } else {
           center = item.center()
         }
-        const componentId = referenceComponentId(reference)
+        const componentId = referenceComponentId(reference) ||
+          item.sketch?.component?.id ||
+          item.sketch?.creator?.componentOccurrenceId ||
+          item.sketch?.creator?.componentId
         const component = componentId && this.document.top().findChild(componentId)
         return component ? center.applyMatrix4(worldTransform(component)) : center
       },
@@ -535,8 +551,7 @@
       confirm: function() {
         if(!this.canConfirm) return
         this.status = 'confirmed'
-        // if(this.error) this.activeFeature.repair()
-        // this.activeFeature.repair()
+        if(this.error) this.activeFeature.repair()
         if(!this.showHeader) this.activeFeature.confirm()
         this.close()
       },
@@ -553,9 +568,11 @@
           this.status !== 'confirmed' &&
           this.showHeader && // Only for existing features
           !this.isSketchFeature && // Never reset sketches
-          !shallowEqual(this.activeFeature.getValues(), this.startValues) // Only if feature actually changed
+          (!shallowEqual(this.activeFeature.getValues(), this.startValues) ||
+            !shallowEqual(this.activeFeature.expressions, this.startExpressions)) // Only if feature actually changed
         ) {
           this.activeFeature.setValues(this.startValues)
+          this.activeFeature.expressions = { ...this.startExpressions }
           this.update()
         }
       },

@@ -59,7 +59,8 @@
             )
 
     ul.widgets(
-      v-if="expanded && !isInstance"
+      v-if="!isInstance"
+      v-show="expanded"
     )
 
       //- Parameters
@@ -67,7 +68,20 @@
         TreeletParameter(
           :parameter="param"
           :component="component"
+          :document="document"
         )
+
+      //- Variants
+      TreeletVariant(
+        v-if="component.creator.variant"
+        :variant="component.creator.variant"
+        :component="component"
+        :document="document"
+      )
+
+      //- Export Configs
+      li(v-for="config in component.creator.exportConfigs")
+        TreeletExport(:config="config", :component="component", :document="document")
 
       //- Material
       TreeletMaterial(
@@ -77,6 +91,15 @@
         :component="component"
       )
 
+      //- Simulations
+      TreeletSimulation(
+        v-for="simulation in component.creator.simulations"
+        :key="simulation.id"
+        :document="document"
+        :component="component"
+        :simulation="simulation"
+      )
+
       //- Center of Mass
       li(v-if="component.cog")
         .box
@@ -84,9 +107,15 @@
             Icon(icon="atom" fixed-width)
             h2 Center of Mass
 
-      //- Export Configs
-      li(v-for="config in component.creator.exportConfigs")
-        TreeletExport(:config="config", :component="component")
+      //- Planes
+      TreeletPlane(
+        v-for="(plane, i) in planes"
+        :key="plane.id"
+        v-bind="$attrs"
+        :component="component"
+        :plane="plane"
+        :index="i"
+      )
 
       //- Canvases
       TreeletCanvas(
@@ -323,6 +352,7 @@
 
       h2
         margin-right: 8px
+        white-space: nowrap
 
       .content
         border-top: 1px solid $dark1 * 1.4
@@ -340,6 +370,8 @@
 
 <script>
 
+  import { PlaneHelper } from '../js/core/helpers.js'
+
   export default {
     name: 'TreeItem',
 
@@ -354,12 +386,20 @@
 
     data() {
       return {
-        expanded: true,
         foo: Math.random(),
       };
     },
 
     computed: {
+      expanded: {
+        get() {
+          return this.document.isTreeletExpanded(`component:${this.component.id}`, true)
+        },
+        set(value) {
+          this.document.setTreeletExpanded(`component:${this.component.id}`, value)
+        },
+      },
+
       isInstance: function() {
         return !!this.component.instanceOf
       },
@@ -371,13 +411,23 @@
       canExpand: function() {
         if(this.isInstance) return false
         return this.component.children.length ||
+          this.planes.length ||
           this.component.compound.solids().length ||
           this.component.sketches.length ||
           this.component.creator.cog ||
           this.component.creator.material ||
+          this.component.creator.simulations.length ||
           this.component.creator.parameters.length ||
+          this.component.creator.variant ||
           this.component.creator.sectionViews.length ||
           this.component.creator.exportConfigs.length
+      },
+
+      planes: function() {
+        const defaultPlaneIds = ['XY', 'XZ', 'YZ'].map(name => `${this.component.id}/${name}`)
+        return this.component.helpers.filter(helper =>
+          helper instanceof PlaneHelper && !defaultPlaneIds.includes(helper.id)
+        )
       },
 
       isVisible: function() {

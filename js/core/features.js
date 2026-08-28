@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { markRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
@@ -7,14 +8,20 @@ import { Reference, PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, ocCatch, rad } from './utils.js'
 import Serialize from './serialize.js'
-import { LengthGizmo, AngleGizmo } from '../three/gizmos.js'
+import { LengthGizmo, AngleGizmo, TransformGizmo } from '../three/gizmos.js'
 import { makeID } from './id.js'
+import Expression from './expression.js'
 import {
   alignJointWorld,
   baselineWorldTransform,
+  isRotationalMotion,
   jointFrame,
+  jointMotionOptions,
   referenceComponentId,
+  relativeComponentTransform,
+  solveAssembly,
   setBaselineWorldTransform,
+  worldTransform,
 } from './assembly.js'
 
 
@@ -24,7 +31,9 @@ export class Feature {
     this.title = title
     this.settings = settings
     this.error = null
+    this.expressions = {}
     this.componentId = this.document.activeComponent.sourceId()
+    this.componentOccurrenceId = this.document.activeComponent.id
     this.id = makeID()
 
     if(!booleanOutput) return
@@ -68,6 +77,16 @@ export class Feature {
     const references = this.updateReferences(tree)
 
     if(this.error && this.error.type == 'error') return
+
+    const component = tree.findChild(this.componentId)
+    try {
+      Object.entries(this.expressions).forEach(([key, expression]) => {
+        this[key] = new Expression(expression, component.getParameters(), this.settings[key].type).getBase()
+      })
+    } catch(err) {
+      this.error = { type: 'error', msg: 'Invalid parameter expression' }
+      return
+    }
 
     this.updateFeature(tree, references)
 
@@ -113,13 +132,13 @@ export class Feature {
 
   needsPicker(setting, includeOptionals) {
     setting = this.settings[setting]
-    return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput'].some(type =>
+    return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].some(type =>
       type == setting.type && (!setting.optional || includeOptionals)
     )
   }
 
   isPickerSetting(setting) {
-    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput'].includes(setting.type)
+    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].includes(setting.type)
   }
 
   isSettingVisible(setting) {
@@ -156,7 +175,12 @@ export class Feature {
       if(this.distanceGizmo) {
         this.distanceGizmo().set(gizmo.distance, gizmo.side)
       } else {
-        const distanceGizmo = new LengthGizmo(gizmo.center, gizmo.direction, gizmo.distance, gizmo.side, gizmo.cb)
+        const component = this.document.top().findChild(this.componentOccurrenceId) ||
+          this.document.top().findChild(this.componentId)
+        const transform = component && worldTransform(component)
+        const center = transform ? gizmo.center.clone().applyMatrix4(transform) : gizmo.center
+        const direction = transform ? gizmo.direction.clone().transformDirection(transform) : gizmo.direction
+        const distanceGizmo = markRaw(new LengthGizmo(center, direction, gizmo.distance, gizmo.side, gizmo.cb))
         this.distanceGizmo = () => distanceGizmo
         window.alcRenderer.addGizmo(distanceGizmo)
       }
@@ -178,7 +202,9 @@ export class Feature {
   involvedSketches() {
     return Object.keys(this.settings).flatMap(key => {
       if(this.settings[key].type != 'profile') return []
-      return this[key] ? this[key]().map(ref => ref.getItem().sketch ) : []
+      if(!this[key]) return []
+      const refs = this[key]()
+      return (Array.isArray(refs) ? refs : [refs]).map(ref => ref.getItem().sketch )
     })
   }
 
@@ -188,6 +214,11 @@ export class Feature {
       values[key] = (this[key] && this.isPickerSetting(this.settings[key]) ? this[key]() : this[key])
     })
     return values
+  }
+
+  setExpression(key, expression) {
+    if(expression) this.expressions[key] = expression
+    else delete this.expressions[key]
   }
 
   setValues(values) {
@@ -206,7 +237,9 @@ export class Feature {
     return {
       id: this.id,
       componentId: this.componentId,
+      componentOccurrenceId: this.componentOccurrenceId,
       values: this.getValues(),
+      expressions: this.expressions,
     }
   }
 
@@ -214,7 +247,9 @@ export class Feature {
     const feature = new this(context.document)
     feature.id = dump.id
     feature.componentId = dump.componentId
+    feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     feature.setValues(dump.values)
+    feature.expressions = dump.expressions || {}
     return feature
   }
 }
@@ -275,7 +310,7 @@ export class PatternFeature extends Feature {
       },
       radialStep: {
         title: 'Angle Step',
-        type: 'number',
+        type: 'angle',
         step: 1,
         when: feature => feature.patternType == 'radial',
       },
@@ -410,11 +445,28 @@ Serialize.register(PatternFeature, 'PatternFeature')
 export class PoseFeature extends Feature {
   static icon = 'street-view'
 
-  constructor(doc, transforms) {
-    super(doc, false, 'Pose', {})
+  constructor(doc, transforms, transformSpace='component') {
+    super(doc, false, 'Pose', {
+      transformSpace: {
+        title: 'Gizmo Space',
+        type: 'select',
+        options: {
+          world: {
+            title: 'World',
+            icon: 'globe',
+          },
+          component: {
+            title: 'Component',
+            icon: 'cube',
+          },
+        },
+      },
+    })
+    this.transformSpace = transformSpace
     this.transforms = transforms || doc.top().getChildren()
       .filter(component => component.parent && component.transform)
       .map(component => ({ id: component.id, transform: component.localTransform() }))
+    this.poseGizmos = []
   }
 
   execute(tree) {
@@ -432,16 +484,103 @@ export class PoseFeature extends Feature {
 
   modifiedComponents() { return this.transforms.map(entry => entry.id) }
   isComplete() { return this.transforms.length > 0 }
-  dump() { return { ...super.dump(), transforms: this.transforms } }
+  getValues() { return { transforms: this.transforms, transformSpace: this.transformSpace } }
+  setValues(values) {
+    this.transforms = values.transforms || []
+    this.transformSpace = values.transformSpace || 'component'
+  }
+
+  updateGizmos() {
+    this.clearPoseGizmos()
+    const tree = this.document.top()
+
+    this.transforms.forEach(entry => {
+      const component = tree.findChild(entry.id)
+      if(!component?.parent) return
+
+      // A point away from every local gizmo axis lets the point-based
+      // assembly solver observe rotations around X, Y, and Z.
+      const target = new THREE.Vector3(1, 2, 3).normalize().multiplyScalar(10)
+
+      let gizmo
+      gizmo = markRaw(new TransformGizmo(worldTransform(component), desiredWorld => {
+        const currentTree = this.document.top()
+        const current = currentTree.findChild(entry.id)
+        if(!current) return
+
+        solveAssembly(currentTree, current, desiredWorld, 64, target)
+        this.captureTransforms(currentTree)
+        this.document.timeline.invalidateFeature(this)
+        this.poseGizmos.forEach(({ id, gizmo: other }) => {
+          const moved = currentTree.findChild(id)
+          if(moved) other.setTransform(worldTransform(moved))
+        })
+      }, this.transformSpace == 'world' ? 'world' : 'local'))
+      this.poseGizmos.push({ id: entry.id, gizmo })
+      window.alcRenderer.addGizmo(gizmo)
+    })
+  }
+
+  captureTransforms(tree) {
+    const featureIndex = this.document.timeline.features.indexOf(this)
+    const before = this.document.timeline.tree(featureIndex)
+    const retainedIds = new Set(this.poseGizmos.map(({ id }) => id))
+    const locals = tree.getChildren()
+      .filter(component => component.parent)
+      .map(component => ({ component, transform: component.localTransform() }))
+
+    // Turn the transient assembly-solver result into the new design pose.
+    // The tree before this feature remains untouched and is the comparison
+    // point used to decide which component transforms the pose must store.
+    locals.forEach(({ component, transform }) => {
+      if(!component.transform) return
+      component.designTransform = transform.clone()
+      component.transform = null
+    })
+
+    this.transforms = locals.flatMap(({ component, transform }) => {
+      const previous = before?.findChild(component.id)
+      if(
+        !retainedIds.has(component.id) &&
+        previous &&
+        matricesAlmostEqual(transform, previous.localTransform())
+      ) return []
+      return [{ id: component.id, transform: transform.clone() }]
+    })
+  }
+
+  clearPoseGizmos() {
+    this.poseGizmos.forEach(({ gizmo }) => window.alcRenderer?.removeGizmo(gizmo))
+    this.poseGizmos = []
+  }
+
+  dispose() {
+    this.clearPoseGizmos()
+    super.dispose()
+  }
+
+  dump() {
+    return {
+      ...super.dump(),
+      values: { transformSpace: this.transformSpace },
+      transforms: this.transforms,
+    }
+  }
 
   static undump(dump, context) {
-    const feature = new PoseFeature(context.document, dump.transforms)
+    const feature = new PoseFeature(context.document, dump.transforms, dump.values?.transformSpace)
     feature.id = dump.id
     feature.componentId = dump.componentId
+    feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     return feature
   }
 }
 Serialize.register(PoseFeature, 'PoseFeature')
+
+
+function matricesAlmostEqual(left, right, epsilon=1e-8) {
+  return left.elements.every((value, index) => Math.abs(value - right.elements[index]) < epsilon)
+}
 
 
 export class JointFeature extends Feature {
@@ -468,6 +607,13 @@ export class JointFeature extends Feature {
         icons: ['lock', 'lock-open'],
         when: is('axis'),
       },
+      offset: {
+        title: 'Offset',
+        type: 'length',
+        autoFocus: false,
+        allowNegative: true,
+        when: feature => feature.jointType == 'axis' && feature.lockSlide,
+      },
       planeA: { title: '1', type: 'face', when: is('coplanar') },
       planeB: { title: '2', type: 'face', when: is('coplanar') },
       pointA: { title: '1', type: 'point', when: is('ball') },
@@ -478,6 +624,7 @@ export class JointFeature extends Feature {
     this.componentId = doc.activeComponent.id
     this.jointType = 'axis'
     this.lockSlide = false
+    this.offset = 0
   }
 
   inputKeys() {
@@ -516,7 +663,7 @@ export class JointFeature extends Feature {
       return
     }
 
-    const frameA = jointFrame(this.jointType, references[keys[0]])
+    let frameA = jointFrame(this.jointType, references[keys[0]])
     const frameB = keys[1] && jointFrame(this.jointType, references[keys[1]])
     if(!frameA || (keys[1] && !frameB)) {
       this.error = {
@@ -526,6 +673,13 @@ export class JointFeature extends Feature {
           'This joint requires points',
       }
       return
+    }
+
+    // A locked axis normally makes the two attachment origins coincide. Move
+    // that target along axis A so the same solver behavior locks at the
+    // requested axial position instead.
+    if(this.jointType == 'axis' && this.lockSlide && this.offset) {
+      frameA = frameA.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, this.offset))
     }
 
     const componentA = tree.findChild(componentIds[0])
@@ -571,6 +725,182 @@ export class JointFeature extends Feature {
   }
 }
 Serialize.register(JointFeature, 'JointFeature')
+
+
+export class MotionLinkFeature extends Feature {
+  static icon = 'link'
+
+  constructor(doc) {
+    const rotational = side => feature => isRotationalMotion(feature[`motion${side}`])
+    const linear = side => feature => !!feature[`motion${side}`] && !rotational(side)(feature)
+    super(doc, false, 'Motion Link', {
+      jointA: { title: 'Joint 1', type: 'joint' },
+      jointB: { title: 'Joint 2', type: 'joint' },
+      motionA: { title: 'Motion 1', type: 'enum', options: {}, when: feature => !!feature.motionA },
+      angleA: { title: 'Travel 1', type: 'angle', autoFocus: false, when: rotational('A') },
+      distanceA: { title: 'Travel 1', type: 'length', autoFocus: false, when: linear('A') },
+      motionB: { title: 'Motion 2', type: 'enum', options: {}, when: feature => !!feature.motionB },
+      angleB: { title: 'Travel 2', type: 'angle', autoFocus: false, when: rotational('B') },
+      distanceB: { title: 'Travel 2', type: 'length', autoFocus: false, when: linear('B') },
+      reverse: { title: 'Reverse', type: 'bool', icons: ['exchange-alt', 'arrows-alt-h'] },
+    })
+    this.componentId = doc.activeComponent.id
+    this.angleA = 360
+    this.angleB = 360
+    this.distanceA = 10
+    this.distanceB = 10
+    this.motionA = null
+    this.motionB = null
+    this.reverse = false
+  }
+
+  settingOptions(key) {
+    if(key != 'motionA' && key != 'motionB') return this.settings[key].options
+    const side = key.at(-1)
+    const reference = this[`joint${side}`]?.()
+    const joint = reference?.getItem() || this.document.top()?.assemblyJoints?.find(joint =>
+      joint.id == reference?.jointId
+    )
+    return jointMotionOptions(joint)
+  }
+
+  pickedInput(key, _reference, item) {
+    if(key != 'jointA' && key != 'jointB') return
+    const side = key.at(-1)
+    const options = jointMotionOptions(item)
+    const motionKey = `motion${side}`
+    if(!options[this[motionKey]]) this[motionKey] = Object.keys(options)[0] || null
+  }
+
+  isComplete() {
+    if(!super.isComplete()) return false
+    const refs = [this.jointA(), this.jointB()]
+    if(refs[0].jointId == refs[1].jointId) return false
+    return ['A', 'B'].every(side => {
+      const motion = this[`motion${side}`]
+      const travel = isRotationalMotion(motion) ? this[`angle${side}`] : this[`distance${side}`]
+      return !!motion && Number.isFinite(travel) && travel != 0
+    })
+  }
+
+  execute(tree) {
+    if(this.suppressUpdate || !this.isComplete()) return
+    this.error = null
+    const references = this.updateReferences(tree)
+    if(this.error && this.error.type == 'error') return
+    const jointA = references.jointA
+    const jointB = references.jointB
+    if(!jointA || !jointB || jointA.id == jointB.id) {
+      this.error = { type: 'error', msg: 'Select two different joints' }
+      return
+    }
+    if(!jointMotionOptions(jointA)[this.motionA] || !jointMotionOptions(jointB)[this.motionB]) {
+      this.error = { type: 'error', msg: 'The selected motion is not available on this joint' }
+      return
+    }
+    const travel = side => isRotationalMotion(this[`motion${side}`])
+      ? rad(this[`angle${side}`])
+      : this[`distance${side}`]
+    const travelA = travel('A')
+    const travelB = travel('B')
+    if(!Number.isFinite(travelA) || !Number.isFinite(travelB) || !travelA || !travelB) {
+      this.error = { type: 'error', msg: 'Motion link travel must be non-zero' }
+      return
+    }
+    tree.motionLinks.push({
+      id: this.id,
+      jointA: jointA.id,
+      motionA: this.motionA,
+      travelA,
+      jointB: jointB.id,
+      motionB: this.motionB,
+      travelB,
+      reverse: this.reverse,
+    })
+  }
+
+  acceptsInput(item) { return !!Object.keys(jointMotionOptions(item)).length }
+}
+Serialize.register(MotionLinkFeature, 'MotionLinkFeature')
+
+
+export class GroupFeature extends Feature {
+  static icon = 'object-group'
+
+  constructor(doc) {
+    super(doc, false, 'Group', {
+      components: {
+        title: 'Components',
+        type: 'componentRef',
+        multi: true,
+      },
+    })
+    // Assembly relationships belong to an occurrence, not to its shared definition.
+    this.componentId = doc.activeComponent.id
+
+    const selected = doc.selection.items
+      .filter(item => item?.typename?.() == 'Component' && this.acceptsInput(item))
+      .filter((item, index, items) => items.findIndex(other => other.id == item.id) == index)
+      .map(component => component.componentReference())
+    this.components = selected.length ? () => selected : null
+  }
+
+  isComplete() {
+    if(!super.isComplete()) return false
+    const componentIds = this.components().map(reference => reference.componentId)
+    return new Set(componentIds).size >= 2
+  }
+
+  execute(tree) {
+    if(this.suppressUpdate || !this.isComplete()) return
+    this.error = null
+    const references = this.updateReferences(tree)
+    if(this.error && this.error.type == 'error') return
+    this.updateFeature(tree, references)
+  }
+
+  updateFeature(tree, references) {
+    const components = references.components || []
+    const componentIds = components.map(component => component.id)
+    if(new Set(componentIds).size != componentIds.length) {
+      this.error = { type: 'error', msg: 'Group components must be different' }
+      return
+    }
+
+    const owner = tree.findChild(this.componentId)
+    if(!owner || components.some(component => component == owner || !component.hasAncestor(owner))) {
+      this.error = { type: 'error', msg: 'Select components inside the active assembly' }
+      return
+    }
+
+    const anchor = components[0]
+    const anchorWorld = baselineWorldTransform(anchor)
+    components.slice(1).forEach(component => {
+      const componentWorld = baselineWorldTransform(component)
+      tree.assemblyJoints.push({
+        id: this.id,
+        type: 'group',
+        componentA: anchor.id,
+        componentB: component.id,
+        frameA: new THREE.Matrix4(),
+        // Both attachment frames coincide at creation, preserving the full
+        // relative transform without repositioning either component.
+        frameB: componentWorld.clone().invert().multiply(anchorWorld),
+      })
+    })
+  }
+
+  modifiedComponents() {
+    return (this.components?.() || []).map(reference => reference.componentId)
+  }
+
+  acceptsInput(item) {
+    const component = item?.typename?.() == 'Component' ? item : null
+    const owner = this.document.top().findChild(this.componentId)
+    return !!component && !!owner && component != owner && component.hasAncestor(owner)
+  }
+}
+Serialize.register(GroupFeature, 'GroupFeature')
 
 
 function inputComponentId(item) {
@@ -713,9 +1043,9 @@ export class CreateComponentInstanceFeature extends Feature {
   dump() { return { ...super.dump(), sourceId: this.sourceId, parentId: this.parentId } }
 
   static undump(dump, context) {
-    const feature = new CreateComponentInstanceFeature(context.document, dump.sourceId, dump.parentId)
-    feature.id = dump.id
-    feature.componentId = dump.componentId
+    const feature = super.undump(dump, context)
+    feature.sourceId = dump.sourceId
+    feature.parentId = dump.parentId
     return feature
   }
 }
@@ -739,8 +1069,18 @@ export class CreateSketchFeature extends Feature {
     this.sketch.creator = this
   }
 
+  // A sketch may use planar geometry from any visible component as its support.
+  // The plane picker already limits candidates to planar faces and helpers.
+  acceptsInput() { return true }
+
   updateFeature(tree, references) {
-    const plane = references.plane
+    let plane = references.plane
+    const sourceId = referenceComponentId(this.plane())
+    const source = sourceId && tree.findChild(sourceId)
+    const target = tree.findChild(this.componentOccurrenceId) || tree.findChild(this.componentId)
+    if(source && target && source != target) {
+      plane = relativeComponentTransform(source, target).multiply(plane)
+    }
     this.sketch.workplane = plane
     tree.findChild(this.componentId).sketches.push(this.sketch)
     this.sketch.solve(tree)
@@ -764,7 +1104,7 @@ export class CreateSketchFeature extends Feature {
   static undump(dump, context) {
     const feature = super.undump(dump, context)
     feature.sketch = dump.sketch
-    feature.sketch.creator = this
+    feature.sketch.creator = feature
     return feature
   }
 }
@@ -783,6 +1123,7 @@ export class PlaneFeature extends Feature {
       offset: {
         title: 'Offset',
         type: 'length',
+        allowNegative: true,
       },
     })
 
@@ -798,6 +1139,22 @@ export class PlaneFeature extends Feature {
     const plane = references.base.clone().setPosition(pos.add(vec))
     const helper = new PlaneHelper(this.componentId, plane, this.planeId)
     tree.findChild(this.componentId).helpers.push(helper)
+  }
+
+  getGizmo() {
+    const base = this.base().getItem()
+    return {
+      distance: {
+        center: new THREE.Vector3().setFromMatrixPosition(base),
+        direction: normalFromMatrix(base),
+        distance: Math.abs(this.offset),
+        side: this.offset >= 0,
+        cb: (distance, side) => {
+          this.setExpression('offset', null)
+          this.offset = distance * (side ? 1 : -1)
+        },
+      }
+    }
   }
 
   dump() {
@@ -882,6 +1239,7 @@ export class ExtrudeFeature extends Feature {
         distance: this.distance,
         side: this.side,
         cb: (dist, side) => {
+          this.setExpression('distance', null)
           this.distance = dist
           this.side = side
         },
@@ -928,7 +1286,7 @@ export class RevolveFeature extends Feature {
 
     this.profiles = null
     this.axis = null
-    this.angle = 1.0
+    this.angle = 180.0
     this.side = true
   }
 
@@ -938,7 +1296,7 @@ export class RevolveFeature extends Feature {
     let tool = new Compound(this.componentId)
     references.profiles.forEach(profile => {
       try {
-        const revolution = profile.revolve(this.componentId, references.axis, angle, this.id)
+        const revolution = profile.revolve(this.componentId, references.axis, rad(angle), this.id)
         tool = tool.boolean(revolution, 'join', this.id)
       } catch(err) { this.error = err || this.error }
     })
@@ -1062,6 +1420,7 @@ export class DraftFeature extends Feature {
       angle: {
         title: 'Angle',
         type: 'angle',
+        allowNegative: true,
       },
     })
 
@@ -1070,12 +1429,15 @@ export class DraftFeature extends Feature {
     this.angle = 0.0
   }
 
-  updateFeature() {
-    const list = new window.alcWasm.JsFaceRefList()
-    this.faces().forEach(face => {
-      list.push(face)
-    })
-    this.real.draft(list, this.ref_plane(), this.angle)
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.draft(
+        references.faces,
+        references.ref_plane,
+        rad(this.angle),
+      )
+    } catch(err) { this.error = err || this.error }
   }
 
   updateGizmos() {
@@ -1084,9 +1446,10 @@ export class DraftFeature extends Feature {
         this.angleGizmo.set(this.angle)
       } else {
         const center = new THREE.Vector3()
-        this.angleGizmo = new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
+        this.angleGizmo = markRaw(new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
+          this.setExpression('angle', null)
           this.angle = angle
-        })
+        }))
         window.alcRenderer.addGizmo(this.angleGizmo)
       }
     } else {
@@ -1134,6 +1497,15 @@ export class SweepFeature extends Feature {
     this.rail = null
     this.bounds = [0.0, 1.0]
   }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      const tool = references.profile.sweep(this.componentId, references.rail, this.bounds)
+      comp.compound = comp.compound.boolean(tool, this.operation)
+      this.previewBody = tool
+    } catch(err) { this.error = err || this.error }
+  }
 }
 
 Serialize.register(SweepFeature, 'SweepFeature')
@@ -1173,7 +1545,10 @@ export class FilletFeature extends Feature {
         direction: new THREE.Vector3(0,1,0),
         distance: this.radius,
         side: true,
-        cb: (dist, _side) => { this.radius = dist },
+        cb: (dist, _side) => {
+          this.setExpression('radius', null)
+          this.radius = dist
+        },
       }
     }
   }
@@ -1187,6 +1562,59 @@ export class FilletFeature extends Feature {
 }
 
 Serialize.register(FilletFeature, 'FilletFeature')
+
+
+export class ChamferFeature extends Feature {
+  static icon = 'screwdriver'
+  constructor(doc) {
+    super(doc, false, 'Chamfer', {
+      edges: {
+        title: 'Edges',
+        type: 'edge',
+        multi: true,
+      },
+      distance: {
+        title: 'Distance',
+        type: 'length',
+        gizmo: true,
+      },
+    })
+
+    this.edges = null
+    this.distance = 1.0
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.chamfer(references.edges, this.distance)
+    } catch(err) { this.error = err || this.error }
+  }
+
+  getGizmo() {
+    return {
+      distance: {
+        center: this.edges()[0].getItem().center(),
+        direction: new THREE.Vector3(0,1,0),
+        distance: this.distance,
+        side: true,
+        cb: (dist, _side) => {
+          this.setExpression('distance', null)
+          this.distance = dist
+        },
+      }
+    }
+  }
+
+  repair() {
+    const tree = this.document.top(this.document.timeline.previousFeature(this))
+    const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
+    this.edges = () => remainingEdges
+    this.error = null
+  }
+}
+
+Serialize.register(ChamferFeature, 'ChamferFeature')
 
 
 export class OffsetFeature extends Feature {
@@ -1228,6 +1656,31 @@ export class OffsetFeature extends Feature {
 Serialize.register(OffsetFeature, 'OffsetFeature')
 
 
+export class DissolveFeature extends Feature {
+  static icon = 'virus-slash'
+  constructor(doc) {
+    super(doc, false, 'Dissolve', {
+      faces: {
+        title: 'Faces',
+        type: 'face',
+        multi: true,
+      },
+    })
+
+    this.faces = null
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      comp.compound = comp.compound.dissolveFaces(references.faces)
+    } catch(err) { this.error = err || this.error }
+  }
+}
+
+Serialize.register(DissolveFeature, 'DissolveFeature')
+
+
 export class BooleanFeature extends Feature {
   static icon = 'boxes'
   constructor(doc) {
@@ -1248,16 +1701,36 @@ export class BooleanFeature extends Feature {
     this.keepTools = false
   }
 
+  acceptsInput(item) {
+    return item?.typename?.() == 'Solid' || super.acceptsInput(item)
+  }
+
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      const tools = references.tools.map(tool => tool.toCompound() )
+      const target = tree.findChild(this.componentOccurrenceId) || comp
+      const inputs = references.tools.map(tool => {
+        const source = tree.findChild(inputComponentId(tool))
+        const external = !!source && source != target
+        let compound = tool.toCompound()
+        if(external) {
+          compound = compound.transform(relativeComponentTransform(source, target))
+        }
+        return { tool, compound, external }
+      })
+      const tools = inputs.map(input => input.compound)
       const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join', this.id) )
-      comp.compound = comp.compound.removeShapes(references.tools).boolean(tool, this.operation, this.id)
-      if(this.keepTools) comp.compound = comp.compound.merge(tools)
+      const localTools = inputs.filter(input => !input.external)
+      comp.compound = comp.compound
+        .removeShapes(localTools.map(input => input.tool))
+        .boolean(tool, this.operation, this.id)
+      if(this.keepTools && localTools.length) {
+        comp.compound = comp.compound.merge(localTools.map(input => input.compound))
+      }
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
   }
+
 }
 
 Serialize.register(BooleanFeature, 'BooleanFeature')

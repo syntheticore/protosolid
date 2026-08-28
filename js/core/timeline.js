@@ -111,12 +111,12 @@ export class Timeline {
   }
 
   reorder(feature, other, after) {
+    const sourceIndex = this.features.indexOf(feature)
     this.features = this.features.filter(f => f != feature )
     const otherIndex = this.features.indexOf(other)
     const targetIndex = otherIndex + (after ? 1 : 0)
     this.features.splice(targetIndex, 0, feature)
-    this.invalidateFeature(feature)
-    this.invalidateFeature(other)
+    this.last_change_index = Math.min(this.last_change_index, sourceIndex, targetIndex)
   }
 
   componentsModified(from, to) {

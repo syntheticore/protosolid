@@ -2,7 +2,7 @@
 
   .box.treelet-export(:class="{ expanded }")
 
-    header(@click="expanded = !expanded")
+    header(@click="toggle")
 
       Icon(icon="file-export" fixed-width)
 
@@ -38,18 +38,18 @@
             option STEP
           span Format
 
-        label
+        label(v-if="config.format != 'STEP'")
           input.input(type="number" v-model="config.maxDistance" min="0.0" step="0.01" max="10.0")
           span Max Deviation
 
-        label
+        label(v-if="config.format != 'STEP'")
           input.input(type="number" v-model="config.maxAngle" min="0.0" step="0.1" max="360.0")
           span Max Angular Deviation
 
         label
-          button.button(title="Choose file location" @click="exportFile")
+          button.button(title="Choose file location" @click="chooseDestination")
             Icon(icon="folder")
-          span(:title="path") {{ path || 'Destination Path'}}
+          span(:title="path") {{ path || 'Destination Path' }}
 
         label(title="Auto-export when saving document")
           input(type="checkbox" v-model="config.autoSave")
@@ -87,7 +87,8 @@
 
 
 <script>
-  import { export3mf, exportStl } from './../js/core/export.js'
+  import { exportConfigured } from './../js/core/export.js'
+  import { chooseSavePath } from './../js/utils.js'
 
   export default {
     name: 'TreeletExport',
@@ -95,25 +96,69 @@
     props: {
       config: Object,
       component: Object,
+      document: Object,
     },
 
     data() {
       return {
-        expanded: true,
-        path: null,
+        path: this.config.path || null,
       }
     },
 
+    computed: {
+      expanded() {
+        return this.document.activeExportConfig === this.config &&
+          this.document.activeExportComponentId === this.component.id
+      },
+    },
+
+    watch: {
+      'config.format': function(format) {
+        if(!this.path) return
+        const extension = format.toLowerCase()
+        const updatedPath = this.path.replace(/\.(stl|3mf|step|stp)$/i, `.${extension}`)
+        if(updatedPath == this.path) return
+        this.path = updatedPath
+        this.config.path = updatedPath
+      },
+    },
+
     methods: {
+      toggle: function() {
+        if(this.expanded) {
+          this.document.activateExport(null)
+        } else {
+          this.document.activateComponent(this.component)
+          this.document.activateExport(this.config, this.component)
+        }
+      },
+
+      chooseDestination: async function() {
+        const path = await chooseSavePath(
+          this.config.format.toLowerCase(),
+          this.component.creator.title,
+        )
+        if(!path) return
+        this.path = path
+        this.config.path = path
+      },
+
       exportFile: async function() {
-        const exporter = {
-          'STL': exportStl,
-          '3MF': export3mf,
-        }[this.config.format]
-        this.path = await exporter(this.component, this.path)
+        if(!this.path) {
+          await this.chooseDestination()
+          if(!this.path) return
+        }
+
+        this.config.path = this.path
+        const path = await exportConfigured(this.component, this.config)
+        if(path) {
+          this.path = path
+          this.config.path = path
+        }
       },
 
       remove: function() {
+        if(this.expanded) this.document.activateExport(null)
         this.component.creator.exportConfigs =
           this.component.creator.exportConfigs.filter(conf => conf !== this.config )
       },

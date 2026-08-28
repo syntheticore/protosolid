@@ -16,10 +16,20 @@ import {
 } from './utils.js'
 
 
+function ocTry(callback) {
+  try {
+    return callback()
+  } catch(error) {
+    if(typeof error !== 'number') throw error
+  }
+}
+
+
 export class SketchElement {
   constructor() {
     this.id = makeID()
     this.geom = null
+    this.fullyConstrained = false
   }
 
   typename(base) { return base + (this.projection ? ' Projection' : '') }
@@ -55,8 +65,12 @@ export class SketchElement {
 
   unsample(p) {
     if(p instanceof THREE.Vector3) p = ocPnt2dFromVec(p)
-    const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, this.geom())
-    return projection.LowerDistanceParameter()
+    try {
+      const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, this.geom())
+      if(projection.NbPoints()) return projection.LowerDistanceParameter()
+    } catch(error) {
+      if(typeof error !== 'number') throw error
+    }
   }
 
   distanceTo(p) {
@@ -67,11 +81,6 @@ export class SketchElement {
 
   endpoints() {
     return [this.sample(0.0), this.sample(1.0)]
-  }
-
-  endpointHandleIndex(endpointIndex) {
-    const endpoint = this.endpoints()[endpointIndex]
-    return this.handles().findIndex(handle => handle.almost(endpoint))
   }
 
   otherBound(bound) {
@@ -123,10 +132,14 @@ export class SketchElement {
     const start = geom.get().FirstParameter()
     const end = geom.get().LastParameter()
     const isCircle = (this.constructor == Circle)
+    // Recursive pieces are trimmed views of this curve. Do not intersect
+    // them with their unsplit parent: overlapping spline geometry can make
+    // OC report hundreds of spurious points and recurse indefinitely.
+    const cutters = others.filter(other => other != this)
 
     if(isCircle) {
       const period = end - start
-      const intersections = this.splitIntersections(others)
+      const intersections = this.splitIntersections(cutters)
         .map(p => this.unsample(p) )
         // A circle is periodic, so its start and end parameters describe the
         // same point. Keep intersections at that seam and normalize them to
@@ -148,13 +161,13 @@ export class SketchElement {
 
     } else {
       const [p, u] = this
-        .splitIntersections(others)
+        .splitIntersections(cutters)
         .map(p => [p, this.unsample(p)] )
         .find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
       if(!p) return [this]
       const left = new window.oc.oc.Geom2d_TrimmedCurve(geom, start, u, true, true)
       const right = new window.oc.oc.Geom2d_TrimmedCurve(geom, u, end, true, true)
-      return [...this.constructor.fromGeometry(left, this.id + '/1').split(others), ...this.constructor.fromGeometry(right, this.id + '/2').split(others)]
+      return [...this.constructor.fromGeometry(left, this.id + '/1').split(cutters), ...this.constructor.fromGeometry(right, this.id + '/2').split(cutters)]
     }
   }
 
@@ -166,6 +179,7 @@ export class SketchElement {
     const clone = this._clone()
     clone.id = this.id
     clone.sketch = this.sketch
+    clone.isReference = this.isReference
     return clone
   }
 
@@ -180,6 +194,39 @@ export class SketchElement {
   //   return line
   // }
 }
+
+
+export class SketchPoint extends SketchElement {
+  typename() { return 'Point' }
+
+  constructor(point) {
+    super()
+    this.point = point
+  }
+
+  center() { return this.point }
+  endpoints() { return [this.point] }
+  snapPoints() { return [this.point] }
+  handles() { return [this.point] }
+  setHandles(handles) { this.point = handles[0] }
+  _clone() { return new SketchPoint(this.point.clone()) }
+
+  dump() {
+    return {
+      id: this.id,
+      point: this.point,
+      isReference: this.isReference,
+    }
+  }
+
+  static undump(dump) {
+    const point = new SketchPoint(dump.point)
+    point.id = dump.id
+    point.isReference = dump.isReference || false
+    return point
+  }
+}
+Serialize.register(SketchPoint, 'SketchPoint')
 
 
 export class Line extends SketchElement {
@@ -261,12 +308,14 @@ export class Line extends SketchElement {
     return {
       id: this.id,
       points: this.points,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const line = new Line(...dump.points)
     line.id = dump.id
+    line.isReference = dump.isReference || false
     return line
   }
 }
@@ -343,12 +392,14 @@ export class Circle extends SketchElement {
       id: this.id,
       _center: this._center,
       radius: this.radius,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const circle = new Circle(dump._center, dump.radius)
     circle.id = dump.id
+    circle.isReference = dump.isReference || false
     return circle
   }
 }
@@ -369,13 +420,15 @@ export class Arc extends SketchElement {
   }
 
   static fromPoints(points) {
-    const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_4(
-      ocPnt2dFromVec(points[0]),
-      ocPnt2dFromVec(points[1]),
-      ocPnt2dFromVec(points[2]),
-    )
-    if(!arc.IsDone()) return
-    const trimmed = arc.Value().get()
+    const trimmed = ocTry(() => {
+      const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_4(
+        ocPnt2dFromVec(points[0]),
+        ocPnt2dFromVec(points[1]),
+        ocPnt2dFromVec(points[2]),
+      )
+      return arc.IsDone() ? arc.Value().get() : undefined
+    })
+    if(!trimmed) return
     // const basis = new window.oc.oc.Geom2dAdaptor_Curve_2(trimmed.BasisCurve())
     // const circle = basis.Circle()
     const circle = trimmed.BasisCurve().get()
@@ -413,6 +466,10 @@ export class Arc extends SketchElement {
   }
 
   setHandles(handles) {
+    return this.setSolvedHandles(handles, this.radius)
+  }
+
+  setSolvedHandles(handles, radius) {
     // The three-point constructor used while drawing can create an arc in
     // either direction. Preserve that direction when the solver writes the
     // center and endpoints back; otherwise forcing `Sense` to true chooses
@@ -421,20 +478,30 @@ export class Arc extends SketchElement {
     const nextRadius = this.sample(1.0e-4).sub(this._center)
     const clockwise = cross2d(startRadius, nextRadius) < 0.0
 
-    this._center = handles[0]
-    const circ = ocCirc2dFromVec(this._center, this.radius)
+    const center = handles[0]
+    radius = Math.abs(radius)
+    if(!Number.isFinite(radius) || radius <= EPSILON) return false
+    if(handles.some(point => !point || ![point.x, point.y, point.z].every(Number.isFinite))) return false
+
     // Keep the stored curve on the canonical clockwise circle used by
     // geometry(), cloning and serialization. Counter-clockwise arcs use the
     // same curve with reversed endpoints and logical sampling direction.
     const endpoints = clockwise ? handles.slice(1) : handles.slice(1).reverse()
-    const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(endpoints[0]), ocPnt2dFromVec(endpoints[1]), true)
-    if(!arc.IsDone()) return
-    const trimmed = arc.Value().get()
-    const circle = trimmed.BasisCurve().get()
-    this.radius = circle.Radius()
-    this.bounds = [trimmed.FirstParameter(), trimmed.LastParameter()]
+    const solved = ocTry(() => {
+      const circ = ocCirc2dFromVec(center, radius)
+      const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(endpoints[0]), ocPnt2dFromVec(endpoints[1]), true)
+      if(!arc.IsDone()) return
+      const trimmed = arc.Value().get()
+      return { trimmed, circle: trimmed.BasisCurve().get() }
+    })
+    if(!solved) return false
+
+    this._center = center
+    this.radius = solved.circle.Radius()
+    this.bounds = [solved.trimmed.FirstParameter(), solved.trimmed.LastParameter()]
     this.forward = clockwise
-    this.update(new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
+    this.update(new window.oc.oc.Handle_Geom2d_Curve_2(solved.trimmed))
+    return true
   }
 
   setEndpoint(index, point) {
@@ -477,7 +544,7 @@ export class Arc extends SketchElement {
 
   tesselate() {
     const tess = super.tesselate()
-    if(!this.forward) tess.reverse()
+    if(tess && !this.forward) tess.reverse()
     return tess
   }
 
@@ -492,16 +559,24 @@ export class Arc extends SketchElement {
       radius: this.radius,
       bounds: this.bounds,
       forward: this.forward,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const arc = new Arc(dump._center, dump.radius, dump.bounds, dump.forward)
     arc.id = dump.id
+    arc.isReference = dump.isReference || false
     return arc
   }
 }
 Serialize.register(Arc, 'Arc')
+
+
+// Keep snapping and solver point-on-curve support on the same boundary.
+export function supportsPointOnCurveConstraint(elem) {
+  return elem instanceof Line || elem instanceof Circle || elem instanceof Arc || elem instanceof Spline
+}
 
 
 export class Spline extends SketchElement {
@@ -511,6 +586,18 @@ export class Spline extends SketchElement {
     super()
     this.points = points
     this.update(geom)
+  }
+
+  static fromGeometry(geom, id) {
+    const spline = new Spline(
+      [vecFromOc(geom.StartPoint()), vecFromOc(geom.EndPoint())],
+      new window.oc.oc.Handle_Geom2d_Curve_2(geom),
+    )
+    // Split/profile splines retain an exact trimmed OC curve. Rebuilding one
+    // from the two stored boundary points would turn it into a straight line.
+    spline.preserveGeometry = true
+    spline.id = id
+    return spline
   }
 
   static clampedKnots(n, degree) {
@@ -566,10 +653,24 @@ export class Spline extends SketchElement {
 
   flip() {
     this.points.reverse()
+    if(this.preserveGeometry) {
+      this.geom().get().Reverse()
+      return
+    }
     this.update()
   }
 
   _clone() {
+    if(this.preserveGeometry) {
+      const geom = this.geom().get()
+      return Spline.fromGeometry(new window.oc.oc.Geom2d_TrimmedCurve(
+        this.geom(),
+        geom.FirstParameter(),
+        geom.LastParameter(),
+        true,
+        true,
+      ))
+    }
     return new Spline([...this.points])
   }
 
@@ -577,12 +678,14 @@ export class Spline extends SketchElement {
     return {
       id: this.id,
       points: this.points,
+      isReference: this.isReference,
     }
   }
 
   static undump(dump) {
     const line = new Spline(dump.points)
     line.id = dump.id
+    line.isReference = dump.isReference || false
     return line
   }
 }
@@ -591,13 +694,15 @@ Serialize.register(Spline, 'Spline')
 
 
 function tesselateCurveFixed(geom, steps) {
-  const start = geom.FirstParameter()
-  const range = geom.LastParameter() - start
+  return ocTry(() => {
+    const start = geom.FirstParameter()
+    const range = geom.LastParameter() - start
+    if(!Number.isFinite(start) || !Number.isFinite(range)) return
 
-  const vertices = arrayRange(0, steps - 1).map(i => {
-    const u = start + i / (steps - 1) * range
-    const p = geom.Value(u)
-    return arrayFromOcVec(p)
+    const vertices = arrayRange(0, steps - 1).map(i => {
+      const u = start + i / (steps - 1) * range
+      return arrayFromOcVec(geom.Value(u))
+    })
+    return vertices.every(vertex => vertex.every(Number.isFinite)) ? vertices : undefined
   })
-  return vertices
 }

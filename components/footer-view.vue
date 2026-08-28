@@ -226,6 +226,11 @@
               unit: 'cm²',
               value: item.compound.area() / 100.0,
             },
+            ...item.children.length && { TotalArea: {
+              title: 'Total Surface Area',
+              unit: 'cm²',
+              value: item.getArea() / 100.0,
+            } },
           }
         } else if(type == 'Line' || type == 'Spline') {
           return {

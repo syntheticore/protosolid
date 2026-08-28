@@ -1,15 +1,19 @@
 import * as THREE from 'three'
+import { markRaw } from 'vue'
+import Serialize from './core/serialize.js'
 
 export class Material {
   constructor(title) {
     this.title = title
     this.density = 1.0 // g/cm^3
-    this.displayMaterial = new THREE.MeshPhysicalMaterial({
+    // Three.js materials contain mutable render state and should not be
+    // deeply proxied when the owning document is made reactive by Vue.
+    this.displayMaterial = markRaw(new THREE.MeshPhysicalMaterial({
       side: THREE.DoubleSide,
       clearcoatRoughness: 0.05,
       iridescence: 0.25,
       sheen: 0.25,
-    })
+    }))
   }
 
   get color() {
@@ -29,7 +33,7 @@ export class Material {
   }
 
   get transparency() {
-    return this.displayMaterial.transmission
+    return 1.0 - this.displayMaterial.opacity
   }
 
   get translucency() {
@@ -47,7 +51,7 @@ export class Material {
 
   set metal(bool) {
     this.isMetal = bool
-    this.displayMaterial.metalness = bool ? 1.0 - this.displayMaterial.transmission : 0.0
+    this.displayMaterial.metalness = bool ? 1.0 : 0.0
   }
 
   set clearcoat(bool) {
@@ -55,8 +59,14 @@ export class Material {
   }
 
   set transparency(transparency) {
-    this.displayMaterial.transmission = transparency
-    this.displayMaterial.transparent = (this.displayMaterial.transmission > 0.000001)
+    const transparent = transparency > 0.000001
+    this.displayMaterial.opacity = 1.0 - transparency
+    if(this.displayMaterial.transparent !== transparent) {
+      this.displayMaterial.transparent = transparent
+      // `transparent` affects renderer state and shader selection. Make sure
+      // switching back to opaque does not retain the previous shader variant.
+      this.displayMaterial.needsUpdate = true
+    }
     this.metal = this.isMetal
   }
 
@@ -75,6 +85,32 @@ export class Material {
     out.transparency = this.transparency
     out.translucency = this.translucency
     return out
+  }
+
+  dump() {
+    return {
+      title: this.title,
+      density: this.density,
+      color: this.color,
+      roughness: this.roughness,
+      metal: this.metal,
+      clearcoat: this.clearcoat,
+      transparency: this.transparency,
+      translucency: this.translucency,
+    }
+  }
+
+  static undump(dump) {
+    const material = new this(dump.title)
+    material.title = dump.title
+    material.density = dump.density
+    material.color = dump.color
+    material.roughness = dump.roughness
+    material.metal = dump.metal
+    material.clearcoat = dump.clearcoat
+    material.transparency = dump.transparency
+    material.translucency = dump.translucency
+    return material
   }
 
   dispose() {
@@ -143,6 +179,13 @@ export class Glass extends Material {
     this.transparency = 0.98
   }
 }
+
+Serialize.register(Material, 'Material')
+Serialize.register(Aluminum, 'Aluminum')
+Serialize.register(DarkViolet, 'DarkViolet')
+Serialize.register(Polystyrene, 'Polystyrene')
+Serialize.register(CarPaint, 'CarPaint')
+Serialize.register(Glass, 'Glass')
 
 
 // 0.9 Polystyrene

@@ -4,10 +4,12 @@ const dimensions = {
   length: {
     conversions: { mm: 1.0, cm: 10.0, m: 1000.0, inch: 25.4 },
     preferred: () => preferences.preferredUnit,
+    units: '(inch\\b|mm\\b|cm\\b|m\\b)',
   },
   angle: {
-    conversions: { rad: 1.0, deg: Math.PI / 180.0, '°': Math.PI / 180.0 },
-    preferred: () => preferences.preferredAngleUnit,
+    conversions: { '°': 1.0, deg: 1.0, rad: 180.0 / Math.PI },
+    preferred: () => '°',
+    units: '(°|deg\\b|rad\\b)',
   },
 }
 
@@ -23,7 +25,7 @@ export default class Expression {
     this.set(input)
   }
 
-  preferredUnit() {
+  get defaultUnit() {
     return this.dimension.preferred()
   }
 
@@ -32,13 +34,13 @@ export default class Expression {
     if(typeof input == 'number') {
       // Assume preferred unit for raw input
       this.expression = fixDecimals(
-        input / this.dimension.conversions[this.preferredUnit()]
-      ) + this.preferredUnit()
+        input / this.dimension.conversions[this.defaultUnit]
+      ) + this.defaultUnit
     } else {
       // Allways leave a unit for display purposes
       input = input.replace(/,/g, '.')
       const number = this.parsePlus(input)
-      if(!number.unit && number.value == input) input += this.preferredUnit()
+      if(!number.unit && number.value == input) input += this.defaultUnit
       this.expression = input
     }
   }
@@ -67,7 +69,7 @@ export default class Expression {
   parse() {
     const number = this.parsePlus(this.expression)
     // Assume preferred unit if no unit could be determined by now
-    number.unit = number.unit || this.preferredUnit()
+    number.unit = number.unit || this.defaultUnit
     if(!(number.unit in this.dimension.conversions)) {
       throw new Error(`Invalid unit for this value: ${number.unit}`)
     }
@@ -84,9 +86,13 @@ export default class Expression {
 
   // * / -
   parseMinus(expr) {
+    expr = expr.trim()
+    const negative = expr.startsWith('-')
+    if(negative) expr = expr.slice(1)
     const numbers = this.split(expr, ['-']).map(chunk =>
       this.parseMultiplication(chunk.chunk)
     )
+    if(negative && numbers.length) numbers[0].value *= -1
     return numbers.reduce((acc, number) => this.subtract(acc, number) )
   }
 
@@ -103,8 +109,8 @@ export default class Expression {
   }
 
   parseNumber(expr) {
-    const match = /(\d*\.?\d*)\s*(inch\b|mm\b|cm\b|m\b|deg\b|rad\b|°)?/.exec(expr)
-    if(!match || match[1] === '') {
+    const match = new RegExp('(\\d*\\.?\\d*)\\s*' + this.dimension.units + '?').exec(expr)
+    if(!match || match[1] === '' || match[0].trim() != expr.trim()) {
       // Probably a parameter
       const param = this.parameters.find(param => param.name == expr.trim() )
       if(!param) throw 'Unknown Parameter "' + expr + '"'
@@ -133,10 +139,9 @@ export default class Expression {
   }
 
   operation(left, right, op, convertBoth) {
-    const unit = this.decideUnit(left, right)
-    const fallback = this.preferredUnit()
-    const leftUnit = (convertBoth ? left.unit || right.unit : left.unit) || fallback
-    const rightUnit = (convertBoth ? right.unit || left.unit : right.unit) || fallback
+    const unit = this.decideUnit(left, right) || this.defaultUnit
+    const leftUnit = (convertBoth ? left.unit || right.unit : left.unit) || this.defaultUnit
+    const rightUnit = (convertBoth ? right.unit || left.unit : right.unit) || this.defaultUnit
     return {
       value: op(
         left.value * this.dimension.conversions[leftUnit],
@@ -148,7 +153,7 @@ export default class Expression {
 
   decideUnit(left, right) {
     return left.unit && right.unit ?
-      left.unit == right.unit ? left.unit : this.preferredUnit() :
+      left.unit == right.unit ? left.unit : this.defaultUnit :
       left.unit || right.unit
   }
 

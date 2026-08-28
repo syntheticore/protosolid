@@ -9,10 +9,14 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
 
 import materials from './materials.js'
+import DualCamera from './three/dual-camera.js'
+import PathTracingViewport from './three/path-tracing-viewport.js'
 import SketchPlane from './three/sketch-plane.js'
 import ShadowCatcher from './three/shadow-catcher.js'
 // import ArrowControls from './arrow-controls.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
+
+const SKETCH_RENDER_OFFSET = 0.0001
 
 
 export default class Renderer {
@@ -38,6 +42,8 @@ export default class Renderer {
     this.renderer.shadowMap.autoUpdate = false
     this.renderer.shadowMap.enabled = preferences.shadowMaps
 
+    this.pathTracingViewport = new PathTracingViewport(this.renderer)
+
     // this.renderer.shadowMap.type = THREE.VSMShadowMap
     // this.renderer.toneMapping = THREE.ReinhardToneMapping
     // this.renderer.toneMapping = THREE.LinearToneMapping
@@ -61,7 +67,8 @@ export default class Renderer {
       var pmremGenerator = new THREE.PMREMGenerator(this.renderer)
       pmremGenerator.compileCubemapShader()
       this.scene.environment = pmremGenerator.fromCubemap(texture).texture
-      texture.dispose()
+      // texture.dispose()
+      this.pathTracingViewport.setEnvironment(texture)
       pmremGenerator.dispose()
       this.render()
     })
@@ -69,12 +76,9 @@ export default class Renderer {
     // Camera
     this.raycaster = new THREE.Raycaster()
 
-    this.camera = new THREE.PerspectiveCamera(70, 1, 0.5, 10000)
-    this.camera.position.set(90, 90, 90)
-
-    this.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, -200, 10000)
-    this.cameraOrtho.position.set(0, 10, 0)
-    this.cameraOrtho.lookAt(this.scene.position)
+    this.dualCamera = new DualCamera()
+    this.camera = this.dualCamera.perspective
+    this.cameraOrtho = this.dualCamera.orthographic
 
     // Scene Objects
     this.traceables = new THREE.Object3D()
@@ -87,6 +91,9 @@ export default class Renderer {
     // Sketch Plane
     this.sketchPlane = new SketchPlane(this.camera)
     this.traceables.add(this.sketchPlane)
+    this.splineDashOrigin = new THREE.Vector3()
+    this.splineDashX = new THREE.Vector3()
+    this.splineDashY = new THREE.Vector3()
 
     // Shadow Catcher
     if(preferences.shadowMaps) {
@@ -96,6 +103,8 @@ export default class Renderer {
 
     // Gizmos
     this.gizmos = []
+    this.pickingEnabled = true
+    this.viewInteracting = false
 
     // var torusGeometry = new THREE.TorusKnotBufferGeometry(1, 0.4, 170, 36)
     // const mesh = new THREE.Mesh(torusGeometry, this.materials.surface)
@@ -106,7 +115,7 @@ export default class Renderer {
     // this.scene.add(mesh)
 
     // Init viewport
-    this.setActiveCamera(this.camera)
+    this.setActiveCamera(this.cameraOrtho)
 
     const setPixelRatio = () => {
       this.renderer.setPixelRatio(this.getPixelRatio())
@@ -127,7 +136,7 @@ export default class Renderer {
   reportViewChange() {
     this.emitter.emit(
       'change-view',
-      this.cameraTarget || this.camera.position,
+      this.cameraTarget || this.activeCamera.position,
       this.viewControlsTarget || this.viewControls.target
     )
   }
@@ -151,11 +160,15 @@ export default class Renderer {
     if(target) this.viewControls.target.copy(target)
     this.viewControls.update()
 
-    this.viewControls.addEventListener('change', () => this.render() )
+    this.viewControls.addEventListener('change', () => {
+      this.dualCamera.normalizeOrthographicZoom(this.viewControls.target)
+      this.render()
+    } )
 
     this.viewControls.addEventListener('start', () => {
       // this.isOrbiting = true
-      this.gizmos.forEach(gizmo => gizmo.enabled = false)
+      this.viewInteracting = true
+      this.updateGizmoEnabled()
       this.cameraTarget = null
       this.viewControlsTarget = null
       this.cameraTransitionUp = null
@@ -166,17 +179,25 @@ export default class Renderer {
 
     this.viewControls.addEventListener('end', () => {
       // this.isOrbiting = false
-      this.gizmos.forEach(gizmo => gizmo.enabled = true)
+      this.viewInteracting = false
+      this.updateGizmoEnabled()
       this.reportViewChange()
       this.endAnimation()
     })
 
     this.activeCamera = camera
+    this.dualCamera.active = camera
+    this.gizmos.forEach(gizmo => gizmo.camera = camera)
     this.onWindowResize()
   }
 
-  switchCamera() {
-    this.setActiveCamera(this.activeCamera == this.cameraOrtho ? this.camera : this.cameraOrtho)
+  setProjectionMode(mode) {
+    const target = (this.viewControlsTarget || this.viewControls.target).clone()
+    const position = (this.cameraTarget || this.activeCamera.position).clone()
+    if(!this.dualCamera.setMode(mode, target, position)) return
+    this.dualCamera.prepareMaterials(this.scene)
+    this.startAnimation()
+    this.endAnimation()
   }
 
   on(event, cb) {
@@ -184,10 +205,44 @@ export default class Renderer {
   }
 
   add(obj, selectable) {
+    this.dualCamera.prepareMaterials(obj)
     if(selectable) {
       this.world.add(obj)
     } else {
       this.scene.add(obj)
+    }
+  }
+
+  offsetSketchObject(object) {
+    // Physically separate sketch rendering from its support face. A
+    // polygon offset alone is unreliable for coplanar wide lines and
+    // transparent profile triangles viewed along the world-up axis.
+    const onBeforeRender = object.onBeforeRender
+    const onAfterRender = object.onAfterRender
+    const originalMatrixWorld = new THREE.Matrix4()
+    const planePosition = new THREE.Vector3()
+    const cameraPosition = new THREE.Vector3()
+    const normal = new THREE.Vector3()
+    const translation = new THREE.Matrix4()
+
+    object.onBeforeRender = function(renderer, scene, camera, geometry, material, group) {
+      onBeforeRender.call(this, renderer, scene, camera, geometry, material, group)
+      originalMatrixWorld.copy(object.matrixWorld)
+      planePosition.setFromMatrixPosition(object.matrixWorld)
+      camera.getWorldPosition(cameraPosition)
+      normal.setFromMatrixColumn(object.matrixWorld, 2).normalize()
+      const offset = normal.dot(cameraPosition.sub(planePosition)) * SKETCH_RENDER_OFFSET
+      translation.makeTranslation(
+        normal.x * offset,
+        normal.y * offset,
+        normal.z * offset,
+      )
+      object.matrixWorld.premultiply(translation)
+    }
+
+    object.onAfterRender = function(renderer, scene, camera, geometry, material, group) {
+      object.matrixWorld.copy(originalMatrixWorld)
+      onAfterRender.call(this, renderer, scene, camera, geometry, material, group)
     }
   }
 
@@ -212,57 +267,59 @@ export default class Renderer {
   setPivot(coords) {
     const vec = this.fromScreen(coords)
     if(!vec) return
-    const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.camera.position)
+    const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.activeCamera.position)
     this.setView(cameraTarget, vec)
   }
 
-  lookAt(plane) {
+  lookAt(plane, report=true) {
     const normal = new THREE.Vector3(0,0,1).applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(plane))
     const controlsTarget = (this.viewControlsTarget || this.viewControls.target)
-    const dir = (this.cameraTarget || this.camera.position).clone().sub(controlsTarget).projectOnVector(normal)
+    const dir = (this.cameraTarget || this.activeCamera.position).clone().sub(controlsTarget).projectOnVector(normal)
     const position = controlsTarget.clone().add(dir)
     const target = controlsTarget.clone()
     this.setView(position, target)
-    this.reportViewChange()
+    if(report) this.reportViewChange()
   }
 
-  zoomToFit(objects) {
+  zoomToFit(objects, report=true, view=null) {
     objects ||= [this.world]
     const box = new THREE.Box3()
     objects.forEach(obj => box.expandByObject(obj) )
     const target = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3())
     const radius = Math.max(...size.toArray()) / 2.0
+    const oldTarget = view ? view.target : this.viewControlsTarget || this.viewControls.target
+    const oldPosition = view ? view.position : this.cameraTarget || this.activeCamera.position
+    const direction = oldPosition.clone().sub(oldTarget).normalize()
 
     if(this.activeCamera == this.cameraOrtho) {
-      const width = this.camera.right - this.camera.left
-      const height = this.camera.top - this.camera.bottom
-      const diameter = radius * 2.0
-      const zoom = Math.min(width / diameter, height / diameter)
-      // this.zoomTo(zoom)
+      const vFOV = this.camera.getEffectiveFOV() * THREE.MathUtils.DEG2RAD
+      const distanceToFit = radius / Math.sin(vFOV * 0.5) * 1.6
+      this.setView(target.clone().addScaledVector(direction, distanceToFit), target)
 
     } else {
       const vFOV = this.camera.getEffectiveFOV() * THREE.MathUtils.DEG2RAD
       const hFOV = Math.atan(Math.tan(vFOV * 0.5) * this.camera.aspect) * 2.0
       const fov = this.camera.aspect > 1.0 ? vFOV : hFOV
       const distanceToFit = radius / (Math.sin(fov * 0.5))
-      const dir = (this.cameraTarget || this.camera.position).clone().sub(this.viewControlsTarget || this.viewControls.target).normalize().multiplyScalar(distanceToFit * 1.6)
+      const dir = direction.multiplyScalar(distanceToFit * 1.6)
       const position = target.clone().add(dir)
       this.setView(position, target)
     }
-    this.reportViewChange()
+    if(report) this.reportViewChange()
   }
 
   setView(position, target) {
+    const camera = this.activeCamera
     const polePosition = this.poleSafePosition(position, target)
     this.cameraTarget = polePosition || position
     this.viewControlsTarget = target
     if(polePosition) {
-      this.camera.updateMatrixWorld()
+      camera.updateMatrixWorld()
       this.cameraTransitionUp = new THREE.Vector3()
-        .setFromMatrixColumn(this.camera.matrixWorld, 1)
+        .setFromMatrixColumn(camera.matrixWorld, 1)
         .normalize()
-      const rotation = new THREE.Matrix4().lookAt(this.cameraTarget, target, this.camera.up)
+      const rotation = new THREE.Matrix4().lookAt(this.cameraTarget, target, camera.up)
       this.cameraUpTarget = new THREE.Vector3()
         .setFromMatrixColumn(rotation, 1)
         .normalize()
@@ -297,12 +354,44 @@ export default class Renderer {
   }
 
   setDisplayMode(mode) {
+    if(this.displayMode == mode) return
     this.displayMode = mode
+    this.pathTracingViewport.invalidate()
+    this.render()
+  }
+
+  updateSplineDashScale() {
+    if(!this.sketchPlane.visible) return
+
+    this.sketchPlane.updateWorldMatrix(true, false)
+    const transform = this.sketchPlane.matrixWorld
+    const camera = this.activeCamera
+    const canvas = this.renderer.domElement
+    const width = canvas.width / this.getPixelRatio()
+    const height = canvas.height / this.getPixelRatio()
+
+    const origin = this.splineDashOrigin.set(0, 0, 0).applyMatrix4(transform).project(camera)
+    const x = this.splineDashX.set(1, 0, 0).applyMatrix4(transform).project(camera)
+    const y = this.splineDashY.set(0, 1, 0).applyMatrix4(transform).project(camera)
+    const projectedLength = point => Math.hypot(
+      (point.x - origin.x) * width * 0.5,
+      (point.y - origin.y) * height * 0.5,
+    )
+    const pixelsPerUnit = (projectedLength(x) + projectedLength(y)) * 0.5
+    if(Number.isFinite(pixelsPerUnit) && pixelsPerUnit > 0) {
+      materials.splineControlLine.dashScale = pixelsPerUnit
+    }
   }
 
   render() {
     this.sketchPlane.update(this.activeCamera)
-    this.renderer.render(this.scene, this.activeCamera)
+    this.updateSplineDashScale()
+    const pathTraced = this.displayMode == 'pathTraced' &&
+      this.pathTracingViewport.render(this.scene, this.activeCamera)
+    if(!pathTraced) {
+      this.pathTracingViewport.stop()
+      this.renderer.render(this.scene, this.activeCamera)
+    }
     this.emitter.emit('render')
   }
 
@@ -324,12 +413,17 @@ export default class Renderer {
   animate(timestamp) {
     const delta = this.lastTimestamp ? timestamp - this.lastTimestamp : 1
     this.lastTimestamp = timestamp
-    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget) requestAnimationFrame(this.animate.bind(this))
-    // Update orbit controls dampening
-    if(!this.cameraUpTarget) this.viewControls.update(delta)
+    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget || this.dualCamera.isTransitioning) requestAnimationFrame(this.animate.bind(this))
     // Transition to target positions
-    this.cameraTarget = this.lerp(this.camera.position, this.cameraTarget)
+    this.cameraTarget = this.lerp(this.activeCamera.position, this.cameraTarget)
     this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
+    // Update the projection before OrbitControls renders the new camera pose.
+    if(!this.dualCamera.isTransitioning) {
+      this.dualCamera.updateOrthographic(this.viewControlsTarget || this.viewControls.target)
+    }
+    // Let OrbitControls derive the camera orientation from the interpolated
+    // position and target, keeping WebGL and projected UI handles in sync.
+    if(!this.cameraUpTarget) this.viewControls.update(delta)
     if(this.cameraUpTarget) {
       // Interpolate only the roll; rebuilding the look-at rotation keeps the
       // moving target fixed in the center of the screen throughout the move.
@@ -338,16 +432,27 @@ export default class Renderer {
         !this.viewControlsTarget &&
         this.cameraTransitionUp.angleTo(this.cameraUpTarget) < 1e-3
       if(transitionDone) this.cameraTransitionUp.copy(this.cameraUpTarget)
-      const viewDirection = this.viewControls.target.clone().sub(this.camera.position).normalize()
+      const viewDirection = this.viewControls.target.clone().sub(this.activeCamera.position).normalize()
       const viewUp = this.cameraTransitionUp.clone().projectOnPlane(viewDirection).normalize()
-      const rotation = new THREE.Matrix4().lookAt(this.camera.position, this.viewControls.target, viewUp)
-      this.camera.quaternion.setFromRotationMatrix(rotation)
+      const rotation = new THREE.Matrix4().lookAt(this.activeCamera.position, this.viewControls.target, viewUp)
+      this.activeCamera.quaternion.setFromRotationMatrix(rotation)
       if(transitionDone) {
         this.cameraTransitionUp = null
         this.cameraUpTarget = null
       }
       this.render()
     }
+    this.updateProjectionTransition()
+  }
+
+  updateProjectionTransition() {
+    const update = this.dualCamera.update()
+    if(update === undefined) return
+    if(!update) return this.render()
+
+    this.setActiveCamera(update.camera)
+    this.viewControls.target.copy(update.target)
+    this.viewControls.update()
   }
 
   lerp(vec, target) {
@@ -373,6 +478,7 @@ export default class Renderer {
 
   addGizmo(gizmo) {
     this.gizmos.push(gizmo)
+    gizmo.enabled = this.pickingEnabled && !this.viewInteracting
 
     // Don't orbit when dragging on gizmo
     gizmo.addEventListener('dragging-changed', (event) => {
@@ -394,8 +500,27 @@ export default class Renderer {
   removeGizmo(gizmo) {
     if(!gizmo) return
     this.scene.remove(gizmo)
+    this.gizmos = this.gizmos.filter(item => item != gizmo)
     gizmo.dispose()
     this.render()
+  }
+
+  isGizmoHovered() {
+    return this.gizmos.some(gizmo => !!gizmo.axis)
+  }
+
+  isGizmoDragging() {
+    return this.gizmos.some(gizmo => !!gizmo.dragging)
+  }
+
+  setPickingEnabled(enabled) {
+    this.pickingEnabled = enabled
+    this.updateGizmoEnabled()
+  }
+
+  updateGizmoEnabled() {
+    const enabled = this.pickingEnabled && !this.viewInteracting
+    this.gizmos.forEach(gizmo => gizmo.enabled = enabled)
   }
 
   getCanvasCoords(mouseCoords) {
@@ -406,10 +531,19 @@ export default class Renderer {
     )
   }
 
-  hitTest(coords) {
+  hitTest(coords, includeInactive) {
     coords = this.getCanvasCoords(coords)
-    this.raycaster.setFromCamera(coords, this.activeCamera)
-    return this.raycaster.intersectObjects(this.traceables.children, true)
+    this.dualCamera.setRaycaster(this.raycaster, coords)
+    return this.raycaster.intersectObjects(
+      includeInactive ? this.scene.children : this.traceables.children,
+      true,
+    )
+  }
+
+  intersectScreenPlane(coords, plane) {
+    coords = this.getCanvasCoords(coords)
+    this.dualCamera.setRaycaster(this.raycaster, coords)
+    return this.raycaster.ray.intersectPlane(plane, new THREE.Vector3())
   }
 
   fromScreen(coords) {
@@ -430,9 +564,9 @@ export default class Renderer {
     )
   }
 
-  objectsAtScreen(coords, types) {
+  objectsAtScreen(coords, types, includeInactive) {
     if(types && !Array.isArray(types)) types = [types]
-    const intersects = this.hitTest(coords)
+    const intersects = this.hitTest(coords, includeInactive)
     const objects = Array.from(new Set(intersects.map(obj => obj.object )))
     return objects.filter(obj => !types || types.some(t =>
       obj.alcTypes && obj.alcTypes.some(ot => ot == t )
@@ -440,8 +574,9 @@ export default class Renderer {
   }
 
   convertLine(vertices, material) {
+    const positions = (vertices || []).flatMap(vertex => vertex?.isVector3 ? vertex.toArray() : vertex)
+    if(positions.length < 6 || positions.some(value => !Number.isFinite(Math.fround(value)))) return new THREE.Object3D()
     const geometry = new LineGeometry()
-    const positions = vertices.flatMap(vertex => vertex?.isVector3 ? vertex.toArray() : vertex)
     geometry.setPositions(positions)
     // geometry.setColors(positions.map((pos, i) => i / positions.length ))
     geometry.setColors(Array(positions.length).fill(1))
@@ -498,16 +633,7 @@ export default class Renderer {
 
     // Update camera projection
     const aspect = width / height
-    if(this.activeCamera == this.camera) {
-      this.camera.aspect = aspect
-    } else {
-      const frustumSize = 200
-      this.cameraOrtho.left = - 0.5 * frustumSize * aspect
-      this.cameraOrtho.right = 0.5 * frustumSize * aspect
-      this.cameraOrtho.top = frustumSize / 2
-      this.cameraOrtho.bottom = - frustumSize / 2
-    }
-    this.activeCamera.updateProjectionMatrix()
+    this.dualCamera.resize(aspect)
     // Update line materials
     materials.line.resolution.set(width, height)
     materials.selectionLine.resolution.set(width, height)
@@ -516,15 +642,17 @@ export default class Renderer {
     materials.referenceSelectionLine.resolution.set(width, height)
     materials.referenceHighlightLine.resolution.set(width, height)
     materials.referenceLine.resolution.set(width, height)
+    materials.splineControlLine.resolution.set(width, height)
     materials.wire.resolution.set(width, height)
     materials.ghostWire.resolution.set(width, height)
     this.render()
   }
 
   dispose() {
+    this.pathTracingViewport.dispose()
     this.viewControls.dispose()
     this.gizmos.forEach(gizmo => gizmo.dispose() )
-    this.scene.environment.dispose()
+    this.scene.environment?.dispose()
     this.dropResources(this.scene)
   }
 }

@@ -15,7 +15,7 @@
 
         Icon.icon(icon="image" fixed-width)
 
-        h2(:title="canvas.src") {{ canvas.src || 'Canvas' }}
+        h2(:title="canvas.src") {{ sourceName }}
 
         Icon.expand(icon="angle-right")
 
@@ -31,16 +31,29 @@
 
         fieldset
 
+          img(v-if="canvas.data" :src="canvas.data")
+
           label
-            button.button(title="Choose file location" @click="chooseFile")
+            button.button.canvas-fields(title="Choose file location" @click="chooseFile")
               Icon(icon="folder")
             span(:title="path") {{ path || 'Image Source'}}
 
           label
-            input(type="range" v-model="canvas.scale" min="0.01" step="0.001" max="10.0")
+            select.input.canvas-fields(v-model="canvas.plane")
+              option(value="top") Top
+              option(value="front") Front
+              option(value="side") Side
+            span Plane
+
+          label
+            input.canvas-fields(type="range" v-model="canvas.scale" min="0.01" step="0.001" max="10.0")
             span Scale
 
-        img(:src="canvas.data")
+          label
+            .flex.gap.canvas-fields
+              input.input(type="number" v-model.number="canvas.x" step="1")
+              input.input(type="number" v-model.number="canvas.y" step="1")
+            span Position
 
 </template>
 
@@ -66,8 +79,14 @@
       transform: rotate(90deg)
 
   img
-    display: block
-    width: 198px
+    max-width: 240px
+    margin-inline: -12px
+
+  .flex > *
+    min-width: 0
+
+  .form label > :first-child
+    width: 122px
 
 </style>
 
@@ -81,23 +100,35 @@
 
   const bus = inject('bus')
 
-  const expanded = ref(true)
+  const expanded = computed({
+    get: () => props.document.isTreeletExpanded(`canvas:${props.canvas.id}`),
+    set: value => props.document.setTreeletExpanded(`canvas:${props.canvas.id}`, value),
+  })
   const path = ref(null)
+  const sourceName = computed(() =>
+    props.canvas.src?.split(/[\\/]/).pop() || 'Canvas'
+  )
 
   function toggleVisibility() {
     props.canvas.hidden = !props.canvas.hidden
   }
 
   async function chooseFile() {
-    const { path, data, width, height } = await loadFile('image/*', 'dataUrl')
+    const { path: filePath, data, width, height } = await loadFile('image/*', 'dataUrl')
 
-    props.canvas.src = path
+    path.value = filePath
+    props.canvas.src = filePath
     props.canvas.data = data
     props.canvas.width = width
     props.canvas.height = height
 
     const textureLoader = new THREE.TextureLoader()
-    props.canvas.texture = textureLoader.load(data)
+    props.canvas.texture = textureLoader.load(data, texture => {
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.needsUpdate = true
+      bus.emit('render-needed')
+    })
+    props.canvas.texture.colorSpace = THREE.SRGBColorSpace
 
     // Render again, as image takes one frame to load
     setTimeout(() => bus.emit('render-needed') )

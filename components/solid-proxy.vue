@@ -3,6 +3,7 @@
   FaceProxy(
     v-for="face in solid.faces()"
     :key="face.tessId"
+    :document="document"
     :face="face"
     :component="component"
     :display-mode="displayMode"
@@ -14,7 +15,7 @@
   )
 
   EdgeProxy(
-    v-if="parentActive"
+    v-if="parentActive || projectInactive"
     v-for="edge in solid.edges().filter(edge => edge.isSemantic())"
     :key="edge.tessId"
     :edge="edge"
@@ -32,7 +33,7 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'projectInactive'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')

@@ -1,6 +1,12 @@
 import * as THREE from 'three'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 
+export const DRAFT_DIRECTIONS = {
+  top: [0, 1, 0],
+  front: [0, 0, 1],
+  side: [1, 0, 0],
+}
+
 class Materials {
   constructor() {
     // Fat Line Materials
@@ -26,6 +32,9 @@ class Materials {
     this.highlightLine.color.set('#2590e1')
     this.highlightLine.depthTest = false
 
+    this.constrainedLine = this.line.clone()
+    this.constrainedLine.color.set('#d7e4ed')
+
     this.referenceLine = this.line.clone()
     this.referenceLine.color.set('#8eca53')
     this.referenceLine.dashed = true
@@ -38,6 +47,19 @@ class Materials {
 
     this.referenceHighlightLine = this.referenceLine.clone()
     this.referenceHighlightLine.color.set('#2590e1')
+
+    this.constrainedReferenceLine = this.referenceLine.clone()
+    this.constrainedReferenceLine.color.set('#d7e4ed')
+
+    this.splineControlLine = this.line.clone()
+    this.splineControlLine.color.set('#8a939b')
+    this.splineControlLine.dashed = true
+    // Distances are converted to screen pixels by Renderer before drawing.
+    this.splineControlLine.dashScale = 1
+    this.splineControlLine.dashSize = 10
+    this.splineControlLine.gapSize = 12
+    this.splineControlLine.linewidth = 1.5
+    this.splineControlLine.depthTest = false
 
     this.projectedLine = this.line.clone()
     this.projectedLine.color.set('#51bb89')
@@ -89,6 +111,16 @@ class Materials {
           projected: {
             actual: this.highlightLine,
             reference: this.referenceHighlightLine,
+          },
+        },
+        constrained: {
+          regular: {
+            actual: this.constrainedLine,
+            reference: this.constrainedReferenceLine,
+          },
+          projected: {
+            actual: this.projectedLine,
+            reference: this.referenceLine,
           },
         },
       },
@@ -146,6 +178,20 @@ class Materials {
       color: new THREE.Color('#0070ff'),
     })
 
+    this.uiPoint = new THREE.MeshBasicMaterial({
+      color: new THREE.Color('darkgray'),
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    })
+
+    this.highlightUiPoint = this.uiPoint.clone()
+    this.highlightUiPoint.color.set('#0070ff')
+
+    this.constrainedUiPoint = this.uiPoint.clone()
+    this.constrainedUiPoint.color.set('#d7e4ed')
+
     // Surface Materials
     this.surface = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,
@@ -153,6 +199,11 @@ class Materials {
       roughness: 0.5,
       metalness: 1.0,
       // wireframe: true,
+    })
+
+    this.thermalSurface = new THREE.MeshBasicMaterial({
+      side: THREE.DoubleSide,
+      vertexColors: true,
     })
 
     this.highlightSurface = new THREE.MeshStandardMaterial({
@@ -168,6 +219,24 @@ class Materials {
       transparent: true,
       depthWrite: false,
       opacity: 0.035,
+    })
+
+    this.interferenceSurface = new THREE.MeshBasicMaterial({
+      side: THREE.DoubleSide,
+      color: '#abc5d9',
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    })
+
+    this.collisionSurface = new THREE.MeshStandardMaterial({
+      side: THREE.DoubleSide,
+      color: '#ff2020',
+      emissive: '#660000',
+      roughness: 0.55,
+      metalness: 0.0,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
     })
 
     this.previewAddSurface = new THREE.MeshStandardMaterial({
@@ -196,6 +265,70 @@ class Materials {
       opacity: 0,
       depthWrite: false,
     })
+
+    this.diagnostic = {
+      zebra: this.makeDiagnosticSurface('zebra', [0, 0, 1]),
+      draft: {
+        top: this.makeDiagnosticSurface('draft', DRAFT_DIRECTIONS.top),
+        front: this.makeDiagnosticSurface('draft', DRAFT_DIRECTIONS.front),
+        side: this.makeDiagnosticSurface('draft', DRAFT_DIRECTIONS.side),
+      },
+    }
+  }
+
+  makeDiagnosticSurface(mode, direction) {
+    const material = new THREE.MeshStandardMaterial({
+      side: THREE.DoubleSide,
+      color: '#abc5d9',
+      roughness: 0.65,
+      metalness: 0.0,
+    })
+    let frequency = 8
+    const diagnosticDirection = new THREE.Vector3(...direction)
+    material.setFrequency = value => {
+      frequency = value
+      if(material.userData.diagnosticShader) {
+        material.userData.diagnosticShader.uniforms.diagnosticFrequency.value = value
+      }
+    }
+    material.customProgramCacheKey = () => mode + (direction || []).join(',')
+    material.onBeforeCompile = shader => {
+      shader.uniforms.diagnosticFrequency = { value: frequency }
+      shader.uniforms.diagnosticDirection = { value: diagnosticDirection }
+      material.userData.diagnosticShader = shader
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform vec3 diagnosticDirection;\nvarying vec3 diagnosticViewDirection;'
+        )
+        .replace(
+          '#include <defaultnormal_vertex>',
+          '#include <defaultnormal_vertex>\ndiagnosticViewDirection = normalize(mat3(viewMatrix) * diagnosticDirection);'
+        )
+
+      const shading = mode == 'zebra' ?
+        `
+          vec3 diagnosticView = normalize(vViewPosition);
+          vec3 diagnosticReflection = reflect(-diagnosticView, normal);
+          float stripe = step(0.0, sin(dot(diagnosticReflection, normalize(vec3(1.0, 0.65, 0.35))) * diagnosticFrequency));
+          diffuseColor.rgb = mix(vec3(0.03), vec3(0.95), stripe);
+        `
+        :
+        `
+          float draftAngle = acos(clamp(dot(normal, normalize(diagnosticViewDirection)), -1.0, 1.0));
+          float warning = smoothstep(0.0, radians(45.0), draftAngle);
+          float failure = smoothstep(radians(45.0), radians(90.0), draftAngle);
+          diffuseColor.rgb = mix(vec3(0.1, 0.75, 0.25), vec3(1.0, 0.8, 0.05), warning);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.1, 0.05), failure);
+        `
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform float diagnosticFrequency;\nvarying vec3 diagnosticViewDirection;'
+        )
+        .replace('#include <opaque_fragment>', `${shading}\n\toutgoingLight = diffuseColor.rgb;\n\t#include <opaque_fragment>`)
+    }
+    return material
   }
 }
 

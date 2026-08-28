@@ -7,6 +7,7 @@
     :component="component"
     :element="elem"
     :active-tool="activeTool"
+    :show-spline-controls="active"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
     :parent-transform="parentTransform"
@@ -29,6 +30,8 @@
       :key="constraint.id"
       :document="document"
       :constraint="constraint"
+      :active-tool="activeTool"
+      :parent-transform="parentTransform"
       @dimensionMouseUp="(...args) => emit('dimensionMouseUp', ...args)"
       @dimensionMouseDown="(...args) => emit('dimensionMouseDown', ...args)"
       @dimensionMouseMove="(...args) => emit('dimensionMouseMove', ...args)"
@@ -42,6 +45,8 @@
       @mousedown="emit('handleMouseDown', $event, handle)"
       @mousemove="emit('handleMouseMove', $event, handle)"
       @mouseleave="emit('handleMouseLeave', $event, handle)"
+      @pointerdown="emit('handlePointerDown', $event)"
+      @wheel.prevent="emit('handleWheel', $event)"
     )
 
 </template>
@@ -74,9 +79,10 @@
 <script setup>
 
   import { Circle } from '../js/core/geom2d.js'
+  import { ProjectedPoint } from '../js/core/sketch.js'
 
   const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
-  const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
+  const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
   const highlight = inject('highlight')
@@ -87,7 +93,8 @@
   const active = computed(() => props.sketch == props.document.activeSketch )
 
   const elements = computed(() =>
-    [...props.sketch.elements, ...props.sketch.projections.map(proj => proj.geometry() )].filter(Boolean)
+    [...props.sketch.elements, ...props.sketch.projections.map(proj => proj.geometry() )]
+      .filter(elem => elem && !(elem instanceof ProjectedPoint))
   )
 
   const allHandles = computed(() => {
@@ -95,8 +102,9 @@
 
     const projectedElements = props.sketch.projections
       .map(projection => projection.geometry())
-      .filter(elem => elem instanceof Circle)
-    const handles = [...props.sketch.elements, ...projectedElements].flatMap(elem => {
+      .filter(elem => elem instanceof Circle || elem instanceof ProjectedPoint)
+    const origin = props.sketch.origin()
+    const handles = [...props.sketch.elements, ...projectedElements, origin].flatMap(elem => {
       const elemHandles = elem.projection ? elem.handles().slice(0, 1) : elem.handles()
       return elemHandles.map((p, i) => {
         p = p.clone().applyMatrix4(elem.sketch.workplane)
@@ -108,7 +116,7 @@
           id: elem.id + i,
           elem,
           index: i,
-          readonly: !!elem.projection,
+          readonly: elem == origin || !!elem.projection,
         }
       })
     })
@@ -124,8 +132,12 @@
   })
 
   function solve() {
-    const handle = props.activeHandle || props.sketch.solveHandle
-    props.sketch.solve(props.document.top(), handle)
+    const activeHandle = props.activeHandle
+    const releasedHandle = !activeHandle && props.sketch.solveHandle
+    const handle = activeHandle || releasedHandle
+    props.sketch.solve(props.document.top(), handle, {
+      refreshFullyConstrained: !!releasedHandle,
+    })
   }
 
   watch(() => props.sketch.solveNeeded, () => {
@@ -137,8 +149,8 @@
   const profiles = ref([])
   let fresh = true
 
-  watch(() => props.sketch.profileUpdateNeeded, () => {
-    if(!props.sketch.profileUpdateNeeded && !fresh) return
+  watch([() => props.sketch, () => props.sketch.profileUpdateNeeded], ([sketch, updateNeeded], [oldSketch] = []) => {
+    if(!updateNeeded && sketch == oldSketch && !fresh) return
     solve()
     profiles.value = props.sketch.profiles(props.component)
     props.sketch.profileUpdateNeeded = false

@@ -29,14 +29,14 @@
           @click.prevent="toggleReference"
         )
 
-      ul.tools
+      ul.tools(@scroll="onScroll")
 
         li(v-for="(tool, index) in tabs[activeTab].tools")
 
           button.button(
             :class="{active: isActive(tool)}"
             :title="tool.title"
-            :disabled="!tool.tool && !tool.feature && !tool.action"
+            :disabled="tool.disabled || tool.isDisabled?.() || (!tool.tool && !tool.feature && !tool.action)"
             @click="activateTool(tool)"
           )
             Icon(:icon="(tool.feature && tool.feature.icon) || (tool.tool && tool.tool.icon) || tool.icon" fixed-width)
@@ -46,10 +46,20 @@
           transition(name="fade")
             FeatureBox.tipped(
               v-if="feature && isActive(tool)"
+              ref="featureBox"
+              :style="scrollStyle"
               :document="document"
               :active-tool="activeTool"
               :active-feature="feature"
               @close="closeFeature"
+            )
+
+          transition(name="fade")
+            ToolOptionsBox.tipped(
+              v-if="!feature && isActiveToolWithOptions(tool)"
+              :style="scrollStyle"
+              :active-tool="activeTool"
+              @close="closeActiveTool"
             )
 
 </template>
@@ -202,6 +212,7 @@
     justify-content: center
 
   .feature-box
+  .tool-options-box
     margin-top: 9px
     position: absolute
 
@@ -232,10 +243,12 @@
     PlaneFeature,
     ExtrudeFeature,
     FilletFeature,
+    ChamferFeature,
     DraftFeature,
     RevolveFeature,
     SweepFeature,
     OffsetFeature,
+    DissolveFeature,
     SplitFeature,
     BooleanFeature,
     MoveFeature,
@@ -243,13 +256,19 @@
     LoftFeature,
     PatternFeature,
     JointFeature,
+    MotionLinkFeature,
+    GroupFeature,
   } from './../js/core/features.js'
 
   import {
     ManipulationTool,
+    PointTool,
     LineTool,
     SplineTool,
     CircleTool,
+    RectangleTool,
+    SlotTool,
+    PolygonTool,
     ArcTool,
     TrimTool,
     TouchConstraintTool,
@@ -261,9 +280,13 @@
     FixConstraintTool,
     DimensionTool,
     ProjectTool,
+    DiagnosticShadingTool,
+    InterferenceTool,
   } from './../js/tools.js'
 
   import { Aluminum } from './../js/material.js'
+  import { ThermalSimulation } from './../js/core/thermal.js'
+  import { StaticSimulation } from './../js/core/static.js'
 
   export default {
     name: 'ToolBox',
@@ -282,6 +305,12 @@
     },
 
     computed: {
+      scrollStyle: function() {
+        return {
+          marginLeft: String(-this.scrolled) + 'px',
+        }
+      },
+
       refChecked: function() {
         if(this.document.selection.items.length) {
           return this.document.selection.items.some(sel => sel.isReference )
@@ -301,6 +330,7 @@
       return {
         activeTab: 0,
         feature: null,
+        scrolled: 0,
         tabs: [
           {
             title: 'Construct',
@@ -312,19 +342,26 @@
               { title: 'Point', icon: 'asterisk' },
               { title: 'Centroid', action: this.addCog, icon: 'atom' },
               { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
-              { title: 'Variant', icon: 'calculator' },
+              {
+                title: 'Variant',
+                action: this.addVariant,
+                icon: 'calculator',
+                isDisabled: () => !!this.document.activeComponent.creator.variant,
+              },
             ]
           },
           {
             title: 'Sketch',
             sketchOnly: true,
             tools: [
+              { title: 'Point', tool: PointTool },
               { title: 'Line', tool: LineTool, hotKey: 'L', keyCode: 76 },
-              { title: 'Rectangle', icon: 'vector-square', hotKey: 'R', keyCode: 82 },
+              { title: 'Rectangle', tool: RectangleTool, hotKey: 'R', keyCode: 82 },
               { title: 'Arc', tool: ArcTool, hotKey: 'A', keyCode: 65 },
               { title: 'Circle', tool: CircleTool, hotKey: 'C', keyCode: 67 },
               { title: 'Spline', tool: SplineTool, hotKey: 'B', keyCode: 66},
-              { title: 'Polygon', icon: 'layer-group' },
+              { title: 'Slot', tool: SlotTool },
+              { title: 'Polygon', tool: PolygonTool },
               { title: 'Text', icon: 'layer-group' },
               { title: 'Split all', action: this.splitAll, icon: 'file-export' },
             ]
@@ -374,10 +411,11 @@
             tools: [
               { title: 'Offset', feature: OffsetFeature },
               { title: 'Boolean', feature: BooleanFeature },
-              { title: 'Move', feature: MoveFeature, hotKey: 'M', keyCode: 77 },
+              { title: 'Move', feature: MoveFeature, hotKey: 'Q', keyCode: 81, disabled: true },
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
-              { title: 'Chamfer', icon: 'screwdriver', hotKey: 'H', keyCode: 72 },
-              { title: 'Replace', feature: ReplaceFeature },
+              { title: 'Chamfer', feature: ChamferFeature, hotKey: 'H', keyCode: 72 },
+              { title: 'Replace', feature: ReplaceFeature, disabled: true },
+              { title: 'Dissolve', feature: DissolveFeature },
               { title: 'Draft', feature: DraftFeature },
               { title: 'Split', feature: SplitFeature },
               { title: 'Align', icon: 'layer-group' }, //XXX also -> Replace Face
@@ -388,21 +426,20 @@
             tools: [
               { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
               { title: 'Joint', feature: JointFeature },
-              { title: 'Group', icon: 'object-group' },
-              { title: 'Motion Link', icon: 'link' },
+              { title: 'Group', feature: GroupFeature },
+              { title: 'Motion Link', feature: MotionLinkFeature },
               { title: 'Animation', icon: 'feather' }, //icon: 'clapperboard'
-              { title: 'Static Load', icon: 'weight' },
-              { title: 'Heat Flow', icon: 'thermometer' },
+              { title: 'Static Load', action: this.addStaticLoad, icon: 'weight' },
+              { title: 'Heat Flow', action: this.addHeatFlow, icon: 'thermometer' },
               // { title: 'Modal Frequencies', icon: 'wave-square' },
             ],
           },
           {
             title: 'Inspect',
             tools: [
-              { title: 'Interference', icon: 'traffic-light' }, //XXX Save as treelet
+              { title: 'Interference', tool: InterferenceTool },
               { title: 'Curvature', icon: 'route' },
-              { title: 'Diagnostic Shading', icon: 'palette' },
-              { title: 'Draft Angle', icon: 'remove-format' },
+              { title: 'Diagnostic Shading', tool: DiagnosticShadingTool },
               { title: 'Section View', icon: 'object-group', action: this.addSectionView },
             ],
           },
@@ -420,6 +457,11 @@
 
     mounted: function() {
       this.bus.on('keydown', (key) => {
+        if(this.document.activeSketch && key.toLowerCase() == 'x') {
+          this.toggleReference()
+          return
+        }
+
         const inSketch = !!this.document.activeSketch
         const tool = this.tabs
           .flatMap(tab => tab.tools.filter(tool =>
@@ -435,8 +477,16 @@
     },
 
     methods: {
+      onScroll: function(event) {
+        this.scrolled = event.currentTarget.scrollLeft
+        this.$nextTick(() => this.$refs.featureBox?.[0]?.updatePaths())
+      },
+
       activateTab: function(index) {
         this.closeFeature()
+        if(index !== this.activeTab && this.activeTool?.constructor.hasOptions) {
+          this.closeActiveTool()
+        }
         this.activeTab = index
       },
 
@@ -463,8 +513,18 @@
         || (this.activeTool && this.activeTool.constructor === tool.tool)
       },
 
+      isActiveToolWithOptions: function(tool) {
+        return this.activeTool &&
+          this.activeTool.constructor === tool.tool &&
+          this.activeTool.constructor.hasOptions
+      },
+
       closeFeature: function() {
         this.feature = null
+      },
+
+      closeActiveTool: function() {
+        this.bus.emit('activate-tool', ManipulationTool)
       },
 
       addCog: function() {
@@ -472,10 +532,26 @@
       },
 
       addParameter: function() {
-        this.document.activeComponent.creator.parameters.push({
+        this.document.activeComponent.creator.addParameter({
           name: 'width',
           value: '512mm',
         })
+        this.document.regenerateParameters()
+      },
+
+      addVariant: function() {
+        const definition = this.document.activeComponent.creator
+        if(definition.variant) return
+        definition.variant = {
+          activeOption: 0,
+          options: [{
+            title: 'Option 1',
+            values: Object.fromEntries(definition.parameters.map(parameter =>
+              [parameter.id, parameter.value]
+            )),
+          }],
+        }
+        this.document.regenerateParameters()
       },
 
       addSectionView: function() {
@@ -487,19 +563,37 @@
       },
 
       addExportConfig: function() {
-        this.document.activeComponent.creator.exportConfigs.push({
+        const config = {
           title: 'High Detail',
           path: null,
           format: 'STL',
-          maxDistance: 0.01,
-          maxAngle: 1.0,
+          maxDistance: 0.1,
+          maxAngle: 10.0,
           autoSave: false,
-        })
+        }
+        this.document.activeComponent.creator.exportConfigs.push(config)
+        this.document.activateExport(config, this.document.activeComponent)
       },
 
       addMaterial: function() {
         this.document.materials[0] ||= new Aluminum()
         this.document.activeComponent.creator.material = this.document.materials[0]
+      },
+
+      addHeatFlow: function() {
+        const simulation = new ThermalSimulation()
+        simulation.activateFirstPicker = true
+        this.document.activeComponent.creator.simulations.push(simulation)
+        this.document.activateSimulation(simulation)
+        this.document.hasChanges = true
+      },
+
+      addStaticLoad: function() {
+        const simulation = new StaticSimulation()
+        simulation.activateFirstPicker = true
+        this.document.activeComponent.creator.simulations.push(simulation)
+        this.document.activateSimulation(simulation)
+        this.document.hasChanges = true
       },
 
       toggleReference: function() {
@@ -510,6 +604,7 @@
             .filter(item => item instanceof SketchElement )
             .forEach(elem => {
               elem.isReference = !elem.isReference
+              if(elem.projection) elem.projection.isReference = elem.isReference
               elem.sketch.profileUpdateNeeded = true
             })
         }

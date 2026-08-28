@@ -1,6 +1,6 @@
 <template lang="pug">
 
-  .numeric-input(:class="{ 'has-tool': icon }")
+  .numeric-input(:class="{ 'has-tool': icon, parameterized }")
 
     button.button(v-if="icon" type="button")
       Icon(:icon="icon")
@@ -20,10 +20,10 @@
 
     .controls
 
-      button.button(type="button" @click="$emit('increase')")
+      button.button(type="button" @mousedown.prevent @click="$emit('increase')")
         Icon(icon="caret-up")
 
-      button.button(type="button" @click="$emit('decrease')")
+      button.button(type="button" @mousedown.prevent @click="$emit('decrease')")
         Icon(icon="caret-down")
 
 </template>
@@ -51,6 +51,15 @@
       &.problem
         border-color: $red
         background: lighten($red, 80%)
+
+    &.parameterized
+
+      input:focus
+        background: lighten($purple, 80%)
+        border-color: $purple
+
+      input::selection
+        background: lighten($purple, 50%)
 
     &:not(.has-tool) input
       border-top-left-radius: 3px
@@ -93,6 +102,7 @@
         default: null,
       },
       inputmode: String,
+      parameterized: Boolean,
     },
 
     emits: ['commit', 'increase', 'decrease'],

@@ -489,10 +489,12 @@ mainBuild:
     # - symbol: ChFi3d_FilletShape_ChFi3d_Rational
 
     - symbol: BRepOffset_Mode
+    - symbol: BRepOffsetAPI_DraftAngle
     - symbol: BRepOffsetAPI_MakeThickSolid
     # - symbol: BRepOffsetAPI_MakeOffset
     - symbol: BRepOffsetAPI_MakeOffsetShape
     - symbol: BRepOffsetAPI_ThruSections
+    - symbol: BRepOffsetAPI_MakePipe
 
     - symbol: BRepMesh_IncrementalMesh
     - symbol: BRepMesh_DiscretRoot
@@ -530,6 +532,8 @@ mainBuild:
 
     - symbol: IFSelect_ReturnStatus
     - symbol: STEPCAFControl_Reader
+    - symbol: STEPControl_StepModelType
+    - symbol: STEPControl_Writer
     - symbol: RWGltf_CafWriter
 
     # - symbol: STEPCAFControl_Reader

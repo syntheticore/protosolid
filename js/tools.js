@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { markRaw } from 'vue'
 
 // import {
 //   vecToThree,
@@ -12,15 +13,19 @@ import {
   Circle,
   Arc,
   Spline,
+  SketchPoint,
 } from './core/geom2d.js'
 
 import {
+  Edge,
   Solid,
 } from './core/geom3d.js'
+import { PointHelper } from './core/helpers.js'
 
 import {
   CoincidentConstraint,
   TouchConstraint,
+  MidpointConstraint,
   PerpendicularConstraint,
   HorVertConstraint,
   ParallelConstraint,
@@ -29,9 +34,16 @@ import {
   FixConstraint,
   Dimension,
   Projection,
+  ProjectedPoint,
+  SketchOrigin,
   ElemRef,
 } from './core/sketch.js'
-import { solveAssembly, worldTransform } from './core/assembly.js'
+import {
+  solveAssembly,
+  worldTransform,
+} from './core/assembly.js'
+import { EPSILON } from './core/utils.js'
+import materials, { DRAFT_DIRECTIONS } from './materials.js'
 
 const dragThreshold = 2
 const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
@@ -56,26 +68,35 @@ class Tool {
   }
 
   mouseUp(vec, coords) {
-    if(!this.lastCoords ||
-      coords.distanceTo(this.lastCoords) > dragThreshold) return this.viewport.renderer.render()
+    const lastCoords = this.lastCoords
+    this.lastCoords = null
+    if(!vec || !lastCoords ||
+      coords.distanceTo(lastCoords) > dragThreshold) return this.viewport.renderer.render()
     this.click(vec, coords)
     // window.gc && window.gc()
   }
+
+  cancelPointer() { this.lastCoords = null }
 
   mouseMove(vec, coords) {}
 
   guideSnapPoints() { return [] }
 
+  snapExclusions() { return this.curve ? [this.curve] : [] }
+
   dispose() {}
 }
 
 function captureSnap(snapper) {
-  const { curve, pointTarget } = snapper.snapped || {}
-  if(curve) return { curve }
-  return pointTarget
+  const { curve, pointTarget, intersection, point, x, y } = snapper.snapped || {}
+  if(!(curve || pointTarget || intersection || x || y)) return
+  return { ...pointTarget, curve, intersection, point, x, y }
 }
 
 function isConstrainablePoint(elem, index) {
+  if(elem instanceof SketchOrigin) return index == 0
+  if(elem instanceof SketchPoint) return index == 0
+  if(elem instanceof ProjectedPoint) return index == 0
   if(elem instanceof Line) return index == 0 || index == 1
   if(elem instanceof Circle) return index == 0
   if(elem instanceof Arc) return index >= 0 && index <= 2
@@ -87,40 +108,107 @@ function isTouchPoint(elem, index) {
   return isConstrainablePoint(elem, index) && !(elem instanceof Arc && index == 0)
 }
 
-function addCapturedSnapConstraint(sketch, snap, elem, index) {
-  if(!snap || !isConstrainablePoint(elem, index)) return
-  if(snap.curve && snap.curve != elem) {
-    if(!isTouchPoint(elem, index)) return
-    const existing = sketch.constraints.find(constraint =>
-      constraint.items.some(item => item.curve() == elem && item.index == index) &&
-      constraint.items.some(item => item.curve() == snap.curve)
-    )
-    return existing || sketch.addConstraint(
-      new TouchConstraint(new ElemRef(elem, index), snap.curve)
-    )
-  }
-  if(snap.elem && snap.elem != elem && snap.index != -1) return sketch.addConstraint(
-    new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(snap.elem, snap.index))
-  )
-
-  const origin = snap.origin && sketch.origin()
-  if(origin) return sketch.addConstraint(
-    new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(origin))
-  )
-}
-
-function addCoincidentAtPosition(sketch, elem, index, position) {
+function pointTargetsAtPosition(sketch, position, excludedElem) {
+  if(!position) return []
   const candidates = [
     ...sketch.elements,
     ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
   ]
-  for(const target of candidates) {
-    if(target == elem || !target.handles) continue
-    const targetIndex = target.handles().findIndex(handle => handle.almost(position))
-    if(isConstrainablePoint(target, targetIndex)) return sketch.addConstraint(
-      new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(target, targetIndex))
-    )
+  return candidates.flatMap(candidate =>
+    candidate == excludedElem || !candidate.handles ? [] : candidate.handles().map((point, index) => ({
+      elem: candidate,
+      index,
+      point,
+    }))
+  ).filter(target =>
+    isConstrainablePoint(target.elem, target.index) && target.point.almost(position)
+  )
+}
+
+function constrainCoincidentPoints(sketch, elem, index, targetElem, targetIndex) {
+  if(elem instanceof SketchPoint && sketch.dissolvePoint(elem, targetElem, targetIndex)) return elem
+  if(targetElem instanceof SketchPoint && sketch.dissolvePoint(targetElem, elem, index)) return targetElem
+  return sketch.addConstraint(
+    new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(targetElem, targetIndex))
+  )
+}
+
+function addCapturedSnapConstraint(sketch, snap, elem, index) {
+  if(!isConstrainablePoint(elem, index)) return
+
+  // Explicit points retain priority even if another overlapping target won
+  // the screen-space snap tie.
+  const position = elem.handles()[index]
+  const positionTargets = pointTargetsAtPosition(sketch, position, elem)
+  const explicitTarget = positionTargets.find(target => target.elem instanceof SketchPoint)
+  if(explicitTarget) return constrainCoincidentPoints(
+    sketch, elem, index, explicitTarget.elem, explicitTarget.index
+  )
+
+  if(snap && snap.intersection) {
+    const point = sketch.findOrCreateIntersectionPoint(snap.intersection, snap.point)
+    if(point == elem) return point
+    return constrainCoincidentPoints(sketch, elem, index, point, 0)
   }
+  if(snap && snap.midpoint && snap.elem instanceof Line && snap.elem != elem) return sketch.addConstraint(
+    new MidpointConstraint(new ElemRef(elem, index), snap.elem)
+  )
+  if(snap && snap.curve && snap.curve != elem) {
+    if(!isTouchPoint(elem, index)) return
+    const touch = sketch.addConstraint(
+      new TouchConstraint(new ElemRef(elem, index), snap.curve)
+    )
+    addCapturedGuideConstraints(sketch, snap, elem, index)
+    return touch
+  }
+  if(snap && snap.elem && snap.elem != elem && snap.index != -1) {
+    if(snap.elem instanceof SketchPoint && snap.elem.dissolvedTo) {
+      const target = snap.elem.dissolvedTo
+      if(target.elem == elem && target.index == index) return
+      return sketch.addConstraint(
+        new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(target.elem, target.index))
+      )
+    }
+    return constrainCoincidentPoints(sketch, elem, index, snap.elem, snap.index)
+  }
+
+  // Only use another coincident handle as a positional fallback when no
+  // captured target was available. Otherwise an already-connected endpoint
+  // can mask the point the user just snapped to.
+  const positionTarget = positionTargets[0]
+  if(positionTarget) return constrainCoincidentPoints(
+    sketch, elem, index, positionTarget.elem, positionTarget.index
+  )
+}
+
+function addCapturedGuideConstraints(sketch, snap, elem, index) {
+  ;[['x', snap.x], ['y', snap.y]].forEach(([axis, guidePoint]) => {
+    if(!guidePoint) return
+    const ref = new ElemRef(elem, index)
+    let target
+    if(guidePoint.almost(sketch.originPoint())) {
+      target = new ElemRef(sketch.origin())
+    } else {
+      const candidates = [
+        ...sketch.elements,
+        ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+      ]
+      for(const candidate of candidates) {
+        const targetIndex = candidate.handles().findIndex(handle => handle.almost(guidePoint))
+        if(targetIndex == -1) continue
+        if(candidate == elem) {
+          if(elem instanceof Line && targetIndex != index) target = elem
+        } else if(isConstrainablePoint(candidate, targetIndex)) {
+          target = new ElemRef(candidate, targetIndex)
+        }
+        if(target) break
+      }
+    }
+    if(!target) return
+    const constraint = new HorVertConstraint(ref, ...(target instanceof ElemRef ? [target] : []))
+    constraint.isVertical = axis == 'x'
+    sketch.addConstraint(constraint)
+  })
 }
 
 function addInferredTangentConstraint(sketch, line, snap, endpointIndex=1) {
@@ -133,12 +221,7 @@ function addInferredTangentConstraint(sketch, line, snap, endpointIndex=1) {
   const radialAlignment = Math.abs(direction.normalize().dot(radial.normalize()))
   if(radialAlignment > Math.sin(tangentSnapAngle)) return
 
-  const exists = sketch.constraints.some(constraint =>
-    constraint instanceof TangentConstraint &&
-    constraint.items.some(item => item.curve() == line) &&
-    constraint.items.some(item => item.curve() == target)
-  )
-  if(!exists) sketch.addConstraint(new TangentConstraint(line, target))
+  sketch.addConstraint(new TangentConstraint(line, target))
 }
 
 
@@ -149,6 +232,209 @@ export class DummyTool extends Tool {
 
   async click(vec, coords) {
     this.viewport.document.selection.clear()
+  }
+}
+
+
+export class SimulationProbeTool extends Tool {
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.cursor = 'crosshair'
+    this.probesSurface = true
+  }
+
+  mouseMove(_vec, coords) {
+    const simulation = this.viewport.document.activeSimulation
+    const hit = this.viewport.renderer.hitTest(coords).find(intersection => {
+      const face = intersection.object.alcObject
+      return face?.solid?.component && simulation?.result &&
+        simulation.result.componentId == face.solid.component.id &&
+        simulation.result.solidId == face.solid.id
+    })
+    if(!hit) {
+      this.viewport.thermalProbe = null
+      return
+    }
+
+    const component = hit.object.alcObject.solid.component
+    const position = hit.point.clone().applyMatrix4(worldTransform(component).invert())
+    const label = this.label(simulation, position)
+    this.viewport.thermalProbe = label === undefined ? null : {
+      position: coords,
+      label,
+    }
+  }
+
+  dispose() {
+    this.viewport.thermalProbe = null
+  }
+}
+
+
+export class ThermalProbeTool extends SimulationProbeTool {
+  label(simulation, position) {
+    const temperature = simulation.temperatureAt(position)
+    if(temperature !== undefined) return `${temperature.toFixed(1)} °C`
+  }
+}
+
+
+export class StaticProbeTool extends SimulationProbeTool {
+  label(simulation, position) {
+    const stress = simulation.stressAt(position)
+    if(stress !== undefined) return `Relative stress ${(stress * 100).toFixed(0)}%`
+  }
+}
+
+
+export class DiagnosticShadingTool extends Tool {
+  static icon = 'palette'
+  static hasOptions = true
+
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.diagnosticMode = 'zebra'
+    this.draftDirection = 'top'
+    this.zebraFrequency = 16
+    this.probesSurface = true
+    this.settings = {
+      diagnosticMode: {
+        title: 'Analysis',
+        type: 'select',
+        options: {
+          zebra: { title: 'Zebra Stripes', icon: 'bars' },
+          draft: { title: 'Draft Angle', icon: 'angle-double-up' },
+        },
+      },
+      draftDirection: {
+        title: 'Direction',
+        type: 'enum',
+        options: {
+          top: 'Top',
+          front: 'Front',
+          side: 'Side',
+        },
+        visible: tool => tool.diagnosticMode == 'draft',
+      },
+      zebraFrequency: {
+        title: 'Frequency',
+        type: 'integer',
+        min: 1,
+        max: 64,
+        visible: tool => tool.diagnosticMode == 'zebra',
+      },
+    }
+  }
+
+  setOption(key, value) {
+    if(!this.settings[key]) return
+    this[key] = value
+    this.viewport.thermalProbe = null
+    this.viewport.renderer.render()
+  }
+
+  mouseMove(_vec, coords) {
+    if(this.diagnosticMode != 'draft') {
+      this.viewport.thermalProbe = null
+      return
+    }
+    const hit = this.viewport.renderer.hitTest(coords).find(intersection => intersection.object.alcObject?.solid)
+    if(!hit) {
+      this.viewport.thermalProbe = null
+      return
+    }
+
+    const normal = hit.normal.clone().applyNormalMatrix(
+      new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)
+    ).normalize()
+    const direction = new THREE.Vector3(...DRAFT_DIRECTIONS[this.draftDirection])
+    const angle = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(normal.dot(direction), -1, 1)))
+    this.viewport.thermalProbe = {
+      position: coords,
+      label: `Draft ${angle.toFixed(1)}°`,
+    }
+  }
+
+  dispose() {
+    this.viewport.thermalProbe = null
+  }
+}
+
+
+export class InterferenceTool extends Tool {
+  static icon = 'traffic-light'
+  static hasOptions = true
+
+  constructor(component, viewport) {
+    super(component, viewport)
+    this.interferenceMode = true
+    this.collisionVolumes = []
+    this.collisionPreview = markRaw(new THREE.Group())
+    this.settings = {
+      collisionVolumes: {
+        title: 'Collisions',
+        type: 'info-list',
+      },
+    }
+
+    const parts = component.getChildren()
+      .filter(part => part.compound.solids().length)
+      .map(part => ({
+        component: part,
+        bounds: this.worldBounds(part),
+      }))
+    const overlaps = []
+
+    for(let i = 0; i < parts.length; i++) {
+      for(let j = i + 1; j < parts.length; j++) {
+        if(!parts[i].bounds.intersectsBox(parts[j].bounds)) continue
+
+        const first = this.worldCompound(parts[i])
+        const second = this.worldCompound(parts[j])
+        const overlap = first.boolean(second, 'intersect')
+        const volume = overlap.volume()
+        if(!overlap.solids().length || !(volume > 0.000001)) continue
+        overlaps.push({ overlap, volume })
+      }
+    }
+
+    this.collisionVolumes = overlaps.map(({ volume }, index) => ({
+      label: `${index + 1}`,
+      value: `${(volume / 1000).toFixed(2)} cm³`,
+    }))
+    overlaps.forEach(({ overlap }) => this.collisionPreview.add(
+      viewport.renderer.convertMesh(overlap.tesselate(), materials.collisionSurface)
+    ))
+    viewport.renderer.add(this.collisionPreview)
+    viewport.renderer.render()
+  }
+
+  worldBounds(part) {
+    const bounds = new THREE.Box3()
+    const positions = part.compound.tesselate().positions
+    const transform = worldTransform(part)
+    for(let i = 0; i < positions.length; i += 3) {
+      bounds.expandByPoint(
+        new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2])
+          .applyMatrix4(transform)
+      )
+    }
+    // Tessellation is generated with a 0.4 linear deflection. Expanding by
+    // that amount keeps this broad-phase check conservative around curves.
+    return bounds.expandByScalar(0.4)
+  }
+
+  worldCompound(part) {
+    if(!part.worldCompound) {
+      part.worldCompound = part.component.compound.transform(worldTransform(part.component))
+    }
+    return part.worldCompound
+  }
+
+  dispose() {
+    this.viewport.renderer.remove(this.collisionPreview)
+    this.collisionPreview = null
+    this.viewport.renderer.render()
   }
 }
 
@@ -175,7 +461,7 @@ class HighlightTool extends Tool {
   getObject(coords, any) {
     return new Promise(resolve => {
       let items = this.viewport.renderer
-        .objectsAtScreen(coords, this.realSelectors)
+        .objectsAtScreen(coords, this.realSelectors, this.includeInactive)
         .flatMap(obj => {
           if(!obj.alcTypes.some(type => type == 'face')) return obj.alcObject
           const mapped = []
@@ -184,17 +470,15 @@ class HighlightTool extends Tool {
           if(mapped.length) return mapped
           return obj.alcObject
         })
-        .filter(item => {
-          const acceptsInput = this.acceptsInput ||
-            this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
-          return !acceptsInput || acceptsInput(item)
-        })
         // .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
       const handle = this.viewport.hoveredHandle
-      if(handle && this.realSelectors.includes('point')) {
+      if(handle && this.realSelectors.includes('point') && !this.preferPointObjects) {
         items.unshift(new ElemRef(handle.elem, handle.index))
       }
+      const acceptsInput = this.acceptsInput ||
+        this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
+      if(acceptsInput) items = items.filter(item => acceptsInput(item))
       if(items.length > 1 && !any) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({
@@ -214,7 +498,8 @@ export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, [])
     this.localSpace = true
-    this.setSelectors(this.viewport.document.activeSketch ? ['curve'] : ['curve', 'solid'])
+    this.preferPointObjects = true
+    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'solid'])
   }
 
   async click(vec, coords) {
@@ -241,39 +526,157 @@ export class ManipulationTool extends HighlightTool {
       this.object = object
       this.startCoords = coords
       this.startWorld = worldTransform(this.object.component)
-      this.startPoses = new Map(
-        this.viewport.document.top().getChildren().map(component => [
-          component.id,
-          component.transform && component.transform.clone(),
-        ])
+      const hit = this.viewport.renderer.hitTest(coords).find(intersection =>
+        intersection.object.alcObject?.solid == object
       )
+      const dragOrigin = hit?.point || new THREE.Vector3().setFromMatrixPosition(this.startWorld)
+      const cameraDirection = this.viewport.renderer.activeCamera.getWorldDirection(new THREE.Vector3())
+      this.dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDirection, dragOrigin)
+      this.dragStart = this.viewport.renderer.intersectScreenPlane(coords, this.dragPlane)
+      this.dragPoint = hit
+        ? hit.point.clone().applyMatrix4(this.startWorld.clone().invert())
+        : new THREE.Vector3()
+    } else if(
+      !this.viewport.activeHandle &&
+      !this.viewport.activeDimension &&
+      !this.viewport.hoveredHandle &&
+      !this.viewport.hoveredDimension &&
+      (object instanceof Line || object instanceof Circle || object instanceof Arc) &&
+      this.viewport.document.activeSketch?.elements.includes(object) &&
+      !object.projection
+    ) {
+      const selectedElements = this.viewport.document.selection.items.filter(item =>
+        this.viewport.document.activeSketch.elements.includes(item)
+      )
+      const group = selectedElements.includes(object) && selectedElements.length > 1 ?
+        selectedElements.map(elem => ({
+          elem,
+          handles: elem.handles().map(handle => handle.clone()),
+          radius: elem.radius,
+        }))
+        : null
+      this.curveDrag = {
+        elem: object,
+        pointer: vec.clone(),
+        coords: coords.clone(),
+        handles: object.handles().map(handle => handle.clone()),
+        group,
+      }
+      // Reuse the solver's temporary pointer-driving constraint. Lines use
+      // one endpoint while circles and arcs use their center; the remaining
+      // parameters start from the dragged geometry and are then allowed to
+      // respond to the sketch's constraints.
+      this.viewport.activeHandle = {
+        type: 'curve',
+        elem: object,
+        index: 0,
+        curveDrag: true,
+      }
+    } else if(
+      !object &&
+      this.viewport.document.activeSketch &&
+      !this.viewport.activeHandle &&
+      !this.viewport.activeDimension &&
+      !this.viewport.hoveredHandle &&
+      !this.viewport.hoveredDimension
+    ) {
+      this.boxDrag = { start: coords.clone() }
     }
     console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
-    this.snapToPoints = true
+    // A curve body has no single snap handle under the pointer. Snapping it
+    // as though its first handle were being dragged would create surprising
+    // endpoint/center constraints on release.
+    this.snapToPoints = !this.curveDrag
     this.cursor = 'grabbing'
   }
 
   mouseUp(vec, coords) {
     this.pointerDown = false
+    const boxDrag = this.boxDrag
+    const boxSelecting = boxDrag && coords.distanceTo(boxDrag.start) > dragThreshold
     // this.mouseMove(vec, coords)
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'
     delete this.object
+    delete this.dragPoint
+    delete this.dragPlane
+    delete this.dragStart
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
-    if(sketch && handle) {
+    if(sketch && handle && !handle.curveDrag) {
       addCapturedSnapConstraint(sketch, captureSnap(this.viewport.snapper), handle.elem, handle.index)
+      const replacement = handle.elem.dissolvedTo
+      if(replacement && !sketch.elements.includes(handle.elem)) {
+        // Viewport keeps this handle for the post-drag solve. Redirect it so
+        // the solver does not receive the explicit point that was removed.
+        handle.elem = replacement.elem
+        handle.index = replacement.index
+      }
     }
+    if(boxSelecting) this.selectBox(boxDrag.start, coords)
+    this.viewport.selectionBox = null
+    delete this.boxDrag
+    delete this.curveDrag
   }
+
+  cancelPointer() {
+    super.cancelPointer()
+    this.pointerDown = false
+    this.snapToPoints = false
+    this.cursor = 'auto'
+    delete this.object
+    delete this.dragPoint
+    delete this.dragPlane
+    delete this.dragStart
+    delete this.curveDrag
+    delete this.boxDrag
+    this.viewport.selectionBox = null
+  }
+
+  dispose() { this.cancelPointer() }
 
   mouseMove(vec, coords) {
     const handle = this.viewport.activeHandle
     const dimension = this.viewport.activeDimension
 
+    // Drag a line by its body, or change a circle/arc radius from the curve.
+    // Updates are absolute from mouse-down, so solver adjustments between
+    // pointer events cannot build up into drift.
+    if(handle?.curveDrag && this.curveDrag) {
+      if(coords.distanceTo(this.curveDrag.coords) <= dragThreshold) return
+      const originalHandles = this.curveDrag.handles
+      if(this.curveDrag.group) {
+        const delta = vec.clone().sub(this.curveDrag.pointer)
+        this.curveDrag.group.forEach(item => {
+          const handles = item.handles.map(point => point.clone().add(delta))
+          if(item.elem instanceof Arc) {
+            item.elem.setSolvedHandles(handles, item.radius)
+          } else {
+            item.elem.setHandles(handles, false)
+          }
+        })
+      } else if(handle.elem instanceof Line) {
+        const delta = vec.clone().sub(this.curveDrag.pointer)
+        handle.elem.setHandles(originalHandles.map(point => point.clone().add(delta)), false)
+      } else {
+        const center = originalHandles[0].clone()
+        const radius = center.distanceTo(vec)
+        if(radius <= EPSILON) return
+        if(handle.elem instanceof Arc) {
+          const endpoints = originalHandles.slice(1).map(point =>
+            point.clone().sub(center).normalize().multiplyScalar(radius).add(center)
+          )
+          handle.elem.setSolvedHandles([center, ...endpoints], radius)
+        } else {
+          handle.elem.setHandles([center, vec.clone()], false)
+        }
+      }
+      this.viewport.updateSketch(true)
+
     // Drag Handles
-    if(handle) {
+    } else if(handle) {
       if(handle.elem instanceof Arc && handle.index > 0) {
         handle.elem.setEndpoint(handle.index, vec)
       } else {
@@ -291,27 +694,59 @@ export class ManipulationTool extends HighlightTool {
     // Drag Solids
     } else if(this.object) {
       if(coords.distanceTo(this.startCoords) <= dragThreshold) return
-      const cameraMatrix = this.viewport.renderer.camera.matrixWorld
-      const right = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 0)
-      const up = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 1)
-
-      const scale = 0.5
-      const diffX = coords.x - this.startCoords.x
-      const diffY = coords.y - this.startCoords.y
-      const translation = right.multiplyScalar(diffX * scale)
-        .add(up.multiplyScalar(-diffY * scale))
+      const dragEnd = this.viewport.renderer.intersectScreenPlane(coords, this.dragPlane)
+      if(!dragEnd || !this.dragStart) return
+      const translation = dragEnd.sub(this.dragStart)
       const desiredWorld = new THREE.Matrix4().makeTranslation(translation).multiply(this.startWorld)
 
       const comp = this.object.component
-      this.viewport.document.top().getChildren().forEach(component => {
-        const pose = this.startPoses.get(component.id)
-        component.transform = pose && pose.clone()
-      })
-      solveAssembly(this.viewport.document.top(), comp, desiredWorld)
+      const tree = this.viewport.document.top()
+      // The target is absolute relative to mouse-down, but the solve should be
+      // continuous. Keeping the previous solution as the next initial pose
+      // prevents multi-joint chains from jumping to another valid branch.
+      solveAssembly(tree, comp, desiredWorld, 64, this.dragPoint)
+
+    // Drag Empty Sketch Area
+    } else if(this.boxDrag) {
+      if(coords.distanceTo(this.boxDrag.start) <= dragThreshold) return
+      this.viewport.selectionBox = this.screenRect(this.boxDrag.start, coords)
+      this.viewport.$emit('update:highlight', null)
 
     } else {
       super.mouseMove(vec, coords)
     }
+  }
+
+  screenRect(start, end) {
+    return {
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+    }
+  }
+
+  selectBox(start, end) {
+    const rect = this.screenRect(start, end)
+    const sketch = this.viewport.document.activeSketch
+    const transform = this.viewport.snapper.planeTransform
+    const contains = point => {
+      const screen = this.viewport.renderer.toScreen(point.clone().applyMatrix4(transform))
+      return screen.x >= rect.x && screen.x <= rect.x + rect.width &&
+        screen.y >= rect.y && screen.y <= rect.y + rect.height
+    }
+    const selected = sketch.elements.filter(elem => {
+      const vertices = elem instanceof SketchPoint ? elem.handles() : elem.tesselate?.()
+      const points = (vertices || elem.handles?.() || []).map(vertex =>
+        vertex instanceof THREE.Vector3 ? vertex : new THREE.Vector3(...vertex)
+      )
+      return points.length > 0 && points.every(contains)
+    })
+
+    const selection = this.viewport.document.selection
+    if(!this.viewport.bus.isCtrlPressed) selection.clear()
+    selected.forEach(item => this.viewport.bus.isCtrlPressed ? selection.toggle(item) : selection.add(item))
+    this.viewport.renderer.render()
   }
 }
 
@@ -320,9 +755,12 @@ export class ProjectTool extends HighlightTool {
   static icon = 'layer-group'
 
   constructor(component, viewport, sketch) {
-    super(component, viewport, ['point', 'axis', 'edge'])
+    super(component, viewport, ['point', 'edge'])
     this.sketch = sketch
     this.localSpace = true
+    this.includeInactive = true
+    this.acceptsInput = item =>
+      item instanceof Edge || item instanceof PointHelper || item instanceof ElemRef
     this.cursor = 'copy'
   }
 
@@ -464,12 +902,18 @@ export class AxisPickTool extends PickTool {
 export class PlanePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['plane'], callback)
+    // Planar faces on inactive components are ghosted and live outside the
+    // normal raycast tree, but they can still support a new sketch.
+    this.includeInactive = true
   }
 }
 
 export class SolidPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['solid'], callback)
+    // Feature-level input predicates still decide whether an inactive solid is
+    // valid. Boolean features use this to accept tools from other components.
+    this.includeInactive = true
   }
 }
 
@@ -483,6 +927,16 @@ export class ComponentPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['component'], callback)
   }
+}
+
+export class JointPickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    // Joint markers are projected DOM controls, so canvas raycasting is only
+    // used to keep hover clearing and picker lifecycle consistent.
+    super(component, viewport, ['joint'], callback)
+  }
+
+  pick(joint, repick = false) { this.callback(joint, repick) }
 }
 
 export class PatternInputPickTool extends PickTool {
@@ -503,11 +957,18 @@ export class SketchTool extends Tool {
     this.cursor = 'crosshair'
   }
 
-  originSnapConstraint(elem, index) {
+  constrainPoint(elem, index, snap) {
+    if(arguments.length < 3) snap = captureSnap(this.viewport.snapper)
+    const captured = addCapturedSnapConstraint(this.sketch, snap, elem, index)
+    const origin = this.originSnapConstraint(elem, index, snap)
+    return captured || origin
+  }
+
+  originSnapConstraint(elem, index, snap) {
     const origin = this.sketch.origin()
     const originPoint = this.sketch.originPoint()
     if(!origin || !originPoint) return
-    const { x, y } = this.viewport.snapper.snapped || {}
+    const { x, y } = snap || {}
     const snapX = x && x.almost(originPoint)
     const snapY = y && y.almost(originPoint)
     if(!snapX && !snapY) return
@@ -537,10 +998,9 @@ export class LineTool extends SketchTool {
   }
 
   constrainCompletedLine(line, endSnap) {
-    addCapturedSnapConstraint(this.sketch, endSnap, line, 1)
+    this.constrainPoint(line, 1, endSnap)
     addInferredTangentConstraint(this.sketch, line, endSnap)
     addInferredTangentConstraint(this.sketch, line, this.startSnap, 0)
-    this.originSnapConstraint(line, 1)
   }
 
   mouseDown(vec, coords) {
@@ -552,12 +1012,9 @@ export class LineTool extends SketchTool {
     const elems = [...this.sketch.elements]
     if(this.curve) elems.pop()
     const touchesExisting = elems.find(elem => elem.endpoints().some(p => p.equals(vec) ) )
-    const endpoints = touchesExisting && touchesExisting.endpoints()
-    const endpointIndex = touchesExisting && endpoints.indexOf(endpoints.find(sp => sp.equals(vec) ))
-    const index = touchesExisting && touchesExisting.endpointHandleIndex(endpointIndex)
 
     // Restart the tool when the segment ends on existing geometry.
-    if((touchesExisting || this.snappedDirectlyToOrigin() || (snap && (snap.curve || snap.elem))) && this.curve) {
+    if((touchesExisting || this.snappedDirectlyToOrigin() || (snap && (snap.curve || snap.elem || snap.intersection))) && this.curve) {
       this.sketch.add(this.curve)
       this.constrainCompletedLine(this.curve, snap)
       this.curve = null
@@ -565,11 +1022,13 @@ export class LineTool extends SketchTool {
     } else {
       this.curve = new Line(vec, vec)
       this.sketch.add(this.curve)
-      const other = touchesExisting || old
-      const otherIndex = touchesExisting ? index : 1
-      if(old || touchesExisting) this.sketch.addConstraint(
-        new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(other, otherIndex))
-      )
+      if(old) {
+        this.sketch.addConstraint(
+          new CoincidentConstraint(new ElemRef(this.curve, 0), new ElemRef(old, 1))
+        )
+      } else {
+        this.constrainPoint(this.curve, 0, snap)
+      }
       if(old) {
         this.constrainCompletedLine(old, snap)
         const ySnapped = old.endpoints()[0].x.almost(vec.x)
@@ -579,9 +1038,6 @@ export class LineTool extends SketchTool {
           const type = HorVertConstraint
           this.sketch.addConstraint(new type(old))
         }
-      } else {
-        addCapturedSnapConstraint(this.sketch, snap, this.curve, 0)
-        this.originSnapConstraint(this.curve, 0)
       }
       this.startSnap = snap
     }
@@ -605,6 +1061,26 @@ export class LineTool extends SketchTool {
 }
 
 
+export class PointTool extends SketchTool {
+  static icon = 'asterisk'
+
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
+    if(snap && snap.elem instanceof SketchPoint) return
+
+    if(snap && snap.intersection) {
+      this.sketch.findOrCreateIntersectionPoint(snap.intersection, snap.point, new SketchPoint(vec))
+    } else {
+      const point = new SketchPoint(vec)
+      this.sketch.add(point)
+      this.constrainPoint(point, 0, snap)
+    }
+    this.viewport.elementChanged()
+  }
+}
+
+
 export class SplineTool extends SketchTool {
   static icon = 'route'
 
@@ -618,6 +1094,16 @@ export class SplineTool extends SketchTool {
     if(this.curve) {
       let points = this.curve.handles()
       points[points.length - 1] = vec//.toArray()
+      const completesSpline = this.snappedDirectlyToOrigin() ||
+        (snap && (snap.curve || snap.elem || snap.intersection))
+      if(completesSpline) {
+        this.curve.setHandles(points)
+        this.constrainPoint(this.curve, points.length - 1, snap)
+        this.curve = null
+        this.endSnap = null
+        this.viewport.elementChanged()
+        return
+      }
       // points.push(vec.toArray())
       points.push(vec)
       this.curve.setHandles(points)
@@ -625,8 +1111,7 @@ export class SplineTool extends SketchTool {
     } else {
       this.curve = new Spline([vec, vec])
       this.sketch.add(this.curve)
-      addCapturedSnapConstraint(this.sketch, snap, this.curve, 0)
-      this.originSnapConstraint(this.curve, 0)
+      this.constrainPoint(this.curve, 0, snap)
       // this.curve = this.sketch.add_spline([vec.toArray(), vec.toArray()])
       // this.curve.sketch = this.sketch
     }
@@ -645,8 +1130,14 @@ export class SplineTool extends SketchTool {
     if(!this.curve) return
     let points = this.curve.handles()
     points.pop()
+    if(points.length < 2) {
+      this.curve.remove()
+      this.curve = null
+      this.viewport.elementChanged()
+      return
+    }
     this.curve.setHandles(points)
-    addCapturedSnapConstraint(this.sketch, this.endSnap, this.curve, points.length - 1)
+    this.constrainPoint(this.curve, points.length - 1, this.endSnap)
     this.viewport.elementChanged()
   }
 }
@@ -670,9 +1161,7 @@ export class CircleTool extends SketchTool {
       // this.curve = this.sketch.add_circle(vec, 1)
       this.curve = new Circle(vec, 1.0)
       this.sketch.add(this.curve)
-      addCapturedSnapConstraint(this.sketch, captureSnap(this.viewport.snapper), this.curve, 0) ||
-        addCoincidentAtPosition(this.sketch, this.curve, 0, vec)
-      this.originSnapConstraint(this.curve, 0)
+      this.constrainPoint(this.curve, 0)
       // this.curve.sketch = this.sketch
     }
   }
@@ -682,6 +1171,318 @@ export class CircleTool extends SketchTool {
     // this.curve.setHandles([this.center.toArray(), vec.toArray()], false)
     this.curve.setHandles([this.center, vec], false)
     this.viewport.elementChanged()
+  }
+}
+
+
+export class RectangleTool extends SketchTool {
+  static icon = 'vector-square'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
+    this.lines = []
+  }
+
+  snapExclusions() { return this.lines }
+
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
+
+    if(!this.corner) {
+      this.corner = vec.clone()
+      this.startSnap = snap
+      this.lines.push(
+        new Line(this.corner.clone(), this.corner.clone()),
+        new Line(this.corner.clone(), this.corner.clone()),
+        new Line(this.corner.clone(), this.corner.clone()),
+        new Line(this.corner.clone(), this.corner.clone()),
+      )
+      this.lines.forEach(line => this.sketch.add(line))
+    } else {
+      this.mouseMove(vec)
+      this.commit(snap)
+      this.corner = null
+      this.startSnap = null
+      this.lines.length = 0
+    }
+    this.viewport.elementChanged()
+  }
+
+  mouseMove(vec) {
+    if(!this.corner) return
+
+    const [x, y] = [vec.x, vec.y]
+    const [cornerX, cornerY] = [this.corner.x, this.corner.y]
+    const points = [
+      this.corner,
+      new THREE.Vector3(x, cornerY, vec.z),
+      vec,
+      new THREE.Vector3(cornerX, y, vec.z),
+    ]
+    this.lines.forEach((line, index) => {
+      line.setHandles([points[index], points[(index + 1) % points.length]])
+    })
+    this.viewport.elementChanged()
+  }
+
+  commit(endSnap) {
+    const [bottom, right, top, left] = this.lines
+
+    // Keep the four corners topologically connected even though each side is
+    // represented by an ordinary line element.
+    ;[[bottom, 1, right, 0], [right, 1, top, 0],
+      [top, 1, left, 0], [left, 1, bottom, 0]].forEach(([first, firstIndex, second, secondIndex]) => {
+      this.sketch.addConstraint(new CoincidentConstraint(
+        new ElemRef(first, firstIndex), new ElemRef(second, secondIndex)
+      ))
+    })
+    ;[bottom, right, top, left].forEach(line => {
+      this.sketch.addConstraint(new HorVertConstraint(line))
+    })
+
+    this.constrainPoint(bottom, 0, this.startSnap)
+    this.constrainPoint(top, 0, endSnap)
+  }
+
+  dispose() {
+    this.lines.forEach(line => line.remove())
+    this.lines.length = 0
+    this.corner = null
+  }
+}
+
+
+export class SlotTool extends SketchTool {
+  static icon = 'capsules'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
+    this.elements = []
+  }
+
+  snapExclusions() { return this.elements }
+
+  guideSnapPoints() {
+    return this.firstCenter && !this.secondCenter ? [this.firstCenter] : []
+  }
+
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
+
+    if(!this.firstCenter) {
+      this.firstCenter = vec.clone()
+      this.firstCenterSnap = snap
+    } else if(!this.secondCenter) {
+      if(vec.distanceToSquared(this.firstCenter) < 1e-12) return
+      this.secondCenter = vec.clone()
+      this.secondCenterSnap = snap
+    } else {
+      if(!this.updateShape(vec)) return
+      this.commit()
+      this.firstCenter = null
+      this.secondCenter = null
+      this.firstCenterSnap = null
+      this.secondCenterSnap = null
+      this.elements = []
+    }
+    this.viewport.elementChanged()
+  }
+
+  mouseMove(vec) {
+    if(!this.firstCenter || !this.secondCenter) return
+    if(this.updateShape(vec)) this.viewport.elementChanged()
+  }
+
+  slotPoints(sizePoint) {
+    const axis = this.secondCenter.clone().sub(this.firstCenter)
+    if(axis.lengthSq() < 1e-12) return
+    axis.normalize()
+    const normal = new THREE.Vector3(-axis.y, axis.x, 0)
+    const radius = Math.abs(sizePoint.clone().sub(this.firstCenter).dot(normal))
+    if(radius < 1e-6) return
+    const offset = normal.multiplyScalar(radius)
+    return {
+      topFirst: this.firstCenter.clone().add(offset),
+      topSecond: this.secondCenter.clone().add(offset),
+      bottomFirst: this.firstCenter.clone().sub(offset),
+      bottomSecond: this.secondCenter.clone().sub(offset),
+      outerFirst: this.firstCenter.clone().sub(axis.clone().multiplyScalar(radius)),
+      outerSecond: this.secondCenter.clone().add(axis.multiplyScalar(radius)),
+    }
+  }
+
+  updateShape(sizePoint) {
+    const points = this.slotPoints(sizePoint)
+    if(!points) return false
+
+    const {
+      topFirst, topSecond, bottomFirst, bottomSecond, outerFirst, outerSecond,
+    } = points
+    if(!this.elements.length) {
+      const firstArc = Arc.fromPoints([bottomFirst, outerFirst, topFirst])
+      const secondArc = Arc.fromPoints([topSecond, outerSecond, bottomSecond])
+      if(!firstArc || !secondArc) return false
+      this.elements = [
+        new Line(topFirst, topSecond),
+        secondArc,
+        new Line(bottomSecond, bottomFirst),
+        firstArc,
+      ]
+      this.elements.forEach(element => this.sketch.add(element))
+    } else {
+      const [top, secondArc, bottom, firstArc] = this.elements
+      top.setHandles([topFirst, topSecond])
+      bottom.setHandles([bottomSecond, bottomFirst])
+      if(!firstArc.setPoints([bottomFirst, outerFirst, topFirst])) return false
+      if(!secondArc.setPoints([topSecond, outerSecond, bottomSecond])) return false
+    }
+    return true
+  }
+
+  commit() {
+    const [top, secondArc, bottom, firstArc] = this.elements
+    ;[
+      [top, 0, firstArc, 2],
+      [top, 1, secondArc, 1],
+      [bottom, 0, secondArc, 2],
+      [bottom, 1, firstArc, 1],
+    ].forEach(([line, lineIndex, arc, arcIndex]) => {
+      this.sketch.addConstraint(new CoincidentConstraint(
+        new ElemRef(line, lineIndex), new ElemRef(arc, arcIndex)
+      ))
+    })
+    this.sketch.addConstraint(new EqualConstraint(firstArc, secondArc))
+    ;[top, bottom].forEach(line => {
+      this.sketch.addConstraint(new TangentConstraint(line, firstArc))
+      this.sketch.addConstraint(new TangentConstraint(line, secondArc))
+    })
+    if(this.firstCenter.x.almost(this.secondCenter.x) ||
+      this.firstCenter.y.almost(this.secondCenter.y)) {
+      this.sketch.addConstraint(new HorVertConstraint(
+        new ElemRef(firstArc, 0), new ElemRef(secondArc, 0)
+      ))
+    }
+    this.constrainPoint(firstArc, 0, this.firstCenterSnap)
+    this.constrainPoint(secondArc, 0, this.secondCenterSnap)
+  }
+
+  dispose() {
+    this.elements.forEach(element => element.remove())
+    this.elements = []
+    this.firstCenter = null
+    this.secondCenter = null
+  }
+}
+
+
+export class PolygonTool extends SketchTool {
+  static icon = 'draw-polygon'
+  static hasOptions = true
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
+    this.sides = 6
+    this.lines = []
+    this.settings = {
+      sides: {
+        title: 'Sides',
+        type: 'integer',
+        min: 3,
+        max: 64,
+      },
+    }
+  }
+
+  snapExclusions() { return this.lines }
+
+  setOption(key, value) {
+    if(key != 'sides') return
+    this.sides = Math.min(64, Math.max(3, Number(value)))
+    if(!this.center || !this.radiusPoint) return
+    this.rebuildLines()
+    this.updatePolygon(this.radiusPoint)
+    this.viewport.elementChanged()
+  }
+
+  mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    const snap = captureSnap(this.viewport.snapper)
+
+    if(!this.center) {
+      this.center = vec.clone()
+    } else {
+      if(!this.updatePolygon(vec)) return
+      this.commit(snap)
+      this.center = null
+      this.radiusPoint = null
+      this.lines = []
+    }
+    this.viewport.elementChanged()
+  }
+
+  mouseMove(vec) {
+    if(!this.center) return
+    if(this.updatePolygon(vec)) this.viewport.elementChanged()
+  }
+
+  rebuildLines() {
+    this.lines.forEach(line => line.remove())
+    this.lines = Array.from({ length: this.sides }, () =>
+      new Line(this.center.clone(), this.center.clone())
+    )
+    this.lines.forEach(line => this.sketch.add(line))
+  }
+
+  updatePolygon(radiusPoint) {
+    if(radiusPoint.distanceToSquared(this.center) < 1e-12) return false
+    this.radiusPoint = radiusPoint.clone()
+    if(this.lines.length != this.sides) this.rebuildLines()
+
+    const radius = radiusPoint.distanceTo(this.center)
+    const startAngle = Math.atan2(
+      radiusPoint.y - this.center.y,
+      radiusPoint.x - this.center.x,
+    )
+    const vertices = Array.from({ length: this.sides }, (_value, index) => {
+      const angle = startAngle + index * Math.PI * 2 / this.sides
+      return new THREE.Vector3(
+        this.center.x + Math.cos(angle) * radius,
+        this.center.y + Math.sin(angle) * radius,
+        this.center.z,
+      )
+    })
+    this.lines.forEach((line, index) => line.setHandles([
+      vertices[index], vertices[(index + 1) % vertices.length],
+    ]))
+    return true
+  }
+
+  commit(vertexSnap) {
+    this.lines.forEach((line, index) => {
+      const next = this.lines[(index + 1) % this.lines.length]
+      this.sketch.addConstraint(new CoincidentConstraint(
+        new ElemRef(line, 1), new ElemRef(next, 0)
+      ))
+      if(index) this.sketch.addConstraint(new EqualConstraint(this.lines[0], line))
+    })
+    if(this.lines.length % 2 == 0) {
+      const oppositeOffset = this.lines.length / 2
+      this.lines.slice(0, oppositeOffset).forEach((line, index) => {
+        this.sketch.addConstraint(new ParallelConstraint(
+          line, this.lines[index + oppositeOffset]
+        ))
+      })
+    }
+    this.constrainPoint(this.lines[0], 0, vertexSnap)
+  }
+
+  dispose() {
+    this.lines.forEach(line => line.remove())
+    this.lines = []
+    this.center = null
+    this.radiusPoint = null
   }
 }
 
@@ -698,8 +1499,8 @@ export class ArcTool extends SketchTool {
     const snap = captureSnap(this.viewport.snapper)
     if(this.start && this.end) {
       if(this.curve) {
-        addCapturedSnapConstraint(this.sketch, this.startSnap, this.curve, 1)
-        addCapturedSnapConstraint(this.sketch, this.endSnap, this.curve, 2)
+        this.constrainPoint(this.curve, 1, this.startSnap)
+        this.constrainPoint(this.curve, 2, this.endSnap)
       }
       this.start = null
       this.end = null
@@ -734,6 +1535,7 @@ export class ConstraintTool extends HighlightTool {
     super(component, viewport, [])
     this.setSelectors(this.constructor.selectors)
     this.sketch = sketch
+    this.acceptsInput = item => this.acceptsItem(item)
     this.items = []
     this.cursor = 'crosshair'
   }
@@ -852,11 +1654,17 @@ export class TangentConstraintTool extends ConstraintTool {
 
   isComplete(counts) { return counts.curve == 2 }
 
-  acceptsItem(item) { return item instanceof Line || item instanceof Circle || item instanceof Arc }
+  acceptsItem(item) {
+    return item instanceof Line || item instanceof Circle || item instanceof Arc || item instanceof Spline
+  }
 
   canConstrain(items) {
-    return items.filter(item => item instanceof Line).length == 1 &&
-      items.filter(item => item instanceof Circle || item instanceof Arc).length == 1
+    return (items.filter(item => item instanceof Line).length == 1 &&
+      items.filter(item => item instanceof Circle || item instanceof Arc || item instanceof Spline).length == 1) ||
+      (items.filter(item => item instanceof Circle).length == 2) ||
+      (items.filter(item => item instanceof Circle || item instanceof Arc || item instanceof Spline).length == 2 &&
+        items.some(item => item instanceof Spline) &&
+        items.some(item => item instanceof Circle || item instanceof Arc))
   }
 }
 
@@ -873,7 +1681,8 @@ export class DimensionTool extends HighlightTool {
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
 
-    if(!this.isReadyToPlace()) {
+    if(this.items.length == 0 ||
+      (!this.isReadyToPlace() && !(this.items.length == 1 && this.items[0] instanceof Circle))) {
       const curve = await this.getObject(coords)
       // if(!curve || !(curve instanceof Line)) {
       //   this.items = []
@@ -881,11 +1690,21 @@ export class DimensionTool extends HighlightTool {
       // }
       if(!curve) return
       this.items.push(curve)
-      if(this.isReadyToPlace()) this.updatePreview(vec)
+      if(this.canPlaceDimension()) this.updatePreview(vec)
 
     } else if(this.items.length == 1 && this.items[0] instanceof Line) {
       const curve = await this.getObject(coords)
       if(curve instanceof Line && curve != this.items[0]) {
+        this.items.push(curve)
+        this.updatePreview(vec)
+      } else {
+        this.placeDimension(vec)
+      }
+
+    } else if(this.items.length == 1 && this.items[0] instanceof Circle) {
+      const curve = await this.getObject(coords)
+      if(curve && curve != this.items[0] &&
+        (curve instanceof Circle || (curve instanceof ElemRef && curve.curve() != this.items[0]))) {
         this.items.push(curve)
         this.updatePreview(vec)
       } else {
@@ -898,16 +1717,23 @@ export class DimensionTool extends HighlightTool {
   }
 
   async mouseMove(vec, coords) {
-    if(!this.isReadyToPlace()) return super.mouseMove(vec, coords)
-    if(this.items.length == 1 && this.items[0] instanceof Line) await super.mouseMove(vec, coords)
+    if(!this.canPlaceDimension()) return super.mouseMove(vec, coords)
+    if(this.items.length == 1 &&
+      (this.items[0] instanceof Line || this.items[0] instanceof Circle)) {
+      await super.mouseMove(vec, coords)
+    }
     this.updatePreview(vec)
+  }
+
+  canPlaceDimension() {
+    return this.isReadyToPlace() ||
+      (this.items.length == 1 && this.items[0] instanceof Circle)
   }
 
   isReadyToPlace() {
     return (
       this.items.length == 2 ||
       this.items[0] instanceof Line ||
-      this.items[0] instanceof Circle ||
       this.items[0] instanceof Arc
     )
   }

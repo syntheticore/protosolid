@@ -1,8 +1,10 @@
-const path = require('path')
 const electron = require('electron')
 
-electron.contextBridge.exposeInMainWorld('platform', require('os').platform())
-electron.contextBridge.exposeInMainWorld('platformVersion', require('os').release())
+electron.contextBridge.exposeInMainWorld('platform', process.platform)
+electron.contextBridge.exposeInMainWorld(
+  'platformVersion',
+  process.getSystemVersion?.() || '',
+)
 
 electron.contextBridge.exposeInMainWorld('ipc', {
   on(...args) {
@@ -23,7 +25,10 @@ electron.contextBridge.exposeInMainWorld('ipc', {
   },
 })
 
-electron.contextBridge.exposeInMainWorld('appPath', __dirname)
+electron.contextBridge.exposeInMainWorld(
+  'appPath',
+  electron.ipcRenderer.sendSync('get-app-path'),
+)
 
 // electron.webFrame.setVisualZoomLevelLimits(1, 1)
 // electron.webFrame.setLayoutZoomLevelLimits(0, 0)

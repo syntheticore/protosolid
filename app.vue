@@ -1,7 +1,10 @@
 <template lang="pug">
 
+  #preferences-app(v-if="isPreferencesWindow")
+    PreferencesView
+
   #app(
-    v-if="activeDocument"
+    v-else-if="activeDocument"
     :class="{ fullscreen, maximized, blurry }"
   )
 
@@ -24,6 +27,7 @@
 <style lang="stylus" scoped>
 
   #app
+  #preferences-app
     width: 100%
     height: 100%
     user-select: none
@@ -65,22 +69,30 @@
 
   import { provide } from 'vue'
 
-  import { default as preferences, loadPreferences, emitter as prefEmitter } from './js/preferences.js'
+  import {
+    default as preferences,
+    loadPreferences,
+    applyPreferences,
+    emitter as prefEmitter,
+  } from './js/preferences.js'
   import Document from './js/core/document.js'
   import Emitter from './js/emitter.js'
   // const wasmP = import('../../rust/pkg/wasm-index.js')
 
   loadPreferences()
+  const isPreferencesWindow = new URLSearchParams(window.location.search).get('window') === 'preferences'
   const blurry = ref(preferences.blurredOverlays)
   prefEmitter.on('updated', () => blurry.value = preferences.blurredOverlays )
 
   document.body.setAttribute('data-platform', window.platform || 'browser')
 
-  const kernel = await useKernel()
-  window.kernel = kernel
-  // Temporary compatibility name for 2D sketch geometry and PlaneGCS. New 3D
-  // code must use window.kernel.modeling rather than this alias.
-  window.oc = kernel
+  if(!isPreferencesWindow) {
+    const kernel = await useKernel()
+    window.kernel = kernel
+    // Temporary compatibility name for 2D sketch geometry and PlaneGCS. New 3D
+    // code must use window.kernel.modeling rather than this alias.
+    window.oc = kernel
+  }
 
   const bus = new Emitter()
   bus.isShiftPressed = false
@@ -112,22 +124,27 @@
     bus.emit('resize')
   }, false)
 
-  createDocument()
+  if(!isPreferencesWindow) createDocument()
 
   if(window.ipc) {
-    window.ipc.on('fullscreen-changed', (e, value) => {
-      fullscreen.value = value
-    })
+    window.ipc.on('preferences-updated', (e, value) => applyPreferences(value))
+    window.ipc.send('set-theme', preferences.theme)
 
-    window.ipc.on('maximize-changed', (e, value) => {
-      maximized.value = value
-    })
+    if(!isPreferencesWindow) {
+      window.ipc.on('fullscreen-changed', (e, value) => {
+        fullscreen.value = value
+      })
 
-    window.ipc.on('createFile', createDocument)
-    window.ipc.on('openFile', loadDocument)
-    window.ipc.on('saveFile', saveDocument)
-    window.ipc.on('saveFileAs', saveDocumentAs)
-    window.ipc.on('closeFile', () => closeDocument(activeDocument.value) )
+      window.ipc.on('maximize-changed', (e, value) => {
+        maximized.value = value
+      })
+
+      window.ipc.on('createFile', createDocument)
+      window.ipc.on('openFile', loadDocument)
+      window.ipc.on('saveFile', saveDocument)
+      window.ipc.on('saveFileAs', saveDocumentAs)
+      window.ipc.on('closeFile', () => closeDocument(activeDocument.value) )
+    }
 
     window.ipc.on('dark-mode', (e, darkMode) => {
       if(darkMode) {
@@ -140,6 +157,8 @@
   }
 
   onMounted(() => {
+    if(isPreferencesWindow) return
+
     const setModifier = (property, event, pressed) => {
       if(bus[property] === pressed) return
       bus[property] = pressed
@@ -201,7 +220,10 @@
       if(activeDocument.value.isFresh) deleteDocument(activeDocument.value)
       activeDocument.value = doc
       documents.value.push(doc)
-      nextTick().then(() => bus.emit('zoom-all') )
+      nextTick().then(() => {
+        doc.treeletsExpandedByDefault = true
+        bus.emit('zoom-all')
+      })
     })
   }
 

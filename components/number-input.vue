@@ -3,6 +3,7 @@
   NumericInput.number-input(
     ref="input"
     icon="tape"
+    :parameterized="parameterized"
     :value="inner.expression"
     :auto-focus="autoFocus"
     :focus-on-mount="focusOnMount"
@@ -27,22 +28,33 @@
 
     props: {
       component: Object,
+      value: Number,
+      expression: String,
       dimension: {
         type: String,
         default: 'length',
       },
-      value: Number,
+      allowNegative: Boolean,
       autoFocus: Boolean,
       focusOnMount: Boolean,
     },
 
-    emits: ['update:value', 'enter', 'error'],
+    emits: ['update:value', 'expression', 'enter', 'error'],
 
     data() {
       return {
-        inner: new Expression(this.value, this.component.getParameters(), this.dimension),
+        inner: new Expression(this.expression ?? this.value, this.component.getParameters(), this.dimension),
         problem: false,
       }
+    },
+
+    computed: {
+      parameterized() {
+        if(!this.expression) return false
+        const names = this.component.getParameters().map(parameter => parameter.name)
+        const identifiers = this.expression.match(/[A-Za-z_]\w*/g) || []
+        return identifiers.some(identifier => names.includes(identifier))
+      },
     },
 
     watch: {
@@ -58,6 +70,7 @@
         this.problem = false
         try {
           this.inner.set(value)
+          this.$emit('expression', this.inner.expression)
           this.update(noFocus)
           this.$emit('enter')
         } catch(e) {
@@ -75,13 +88,17 @@
       increase() {
         const number = this.inner.parse()
         this.inner.set(truncate(number.value + 1) + number.unit)
+        this.$emit('expression', this.inner.expression)
         this.update()
       },
 
       decrease() {
         const number = this.inner.parse()
         const newValue = number.value - 1
-        if(newValue >= 0) this.inner.set(truncate(newValue) + number.unit)
+        if(this.allowNegative || newValue >= 0) {
+          this.inner.set(truncate(newValue) + number.unit)
+          this.$emit('expression', this.inner.expression)
+        }
         this.update()
       },
     },

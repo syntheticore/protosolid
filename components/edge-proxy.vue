@@ -28,15 +28,17 @@
   renderNeeded.value = true
 
   watch(() => [highlight.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
+    edgeMesh.visible = props.displayMode != 'exportPreview' && props.colorMode != 'interference'
     edgeMesh.material = getMaterial()
     nextTick().then(() => renderNeeded.value = true )
-  })
+  }, { immediate: true })
 
   function getMaterial() {
+    if(props.displayMode == 'exportPreview' || props.colorMode == 'interference') return materials.invisibleLine
     return props.edge == highlight.value ?
       materials.highlightLine
       :
-      props.displayMode == 'shaded' ?
+      ['shaded', 'pathTraced'].includes(props.displayMode) ?
         materials.invisibleLine
         :
         props.parentHighlighted || props.parentSelected ?

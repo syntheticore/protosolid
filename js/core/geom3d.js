@@ -11,6 +11,8 @@ import {
   isClockwise,
   arrayFromOcList,
   arrayFromOcVec,
+  ocVecFromVec,
+  ocDirFromVec,
   ocAx1FromMatrix,
   ocPlnFromMatrix,
   ocListOfShapeFromArray,
@@ -106,6 +108,7 @@ export class Wire {
   tesselate() {
     let polyline = this.segments.flatMap(curve => {
       let poly = curve.tesselate()
+      if(!poly) return []
       poly.pop()
       return poly
     })
@@ -196,10 +199,10 @@ export class Profile {
     return face.Face()
   }
 
-  makeCompound(componentId, shape, featureId) {
+  makeCompound(componentId, shape, featureId, originals) {
     const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
 
-    const originals = this.rings.flatMap(ring => ring.segments )
+    originals ||= this.rings.flatMap(ring => ring.segments )
     const solid = compound.solids()[0]
 
     // Name faces
@@ -207,8 +210,14 @@ export class Profile {
     originals.forEach((seg, i) => {
       faces[i].id = '/' + featureId + '/swept/' + this.getBaseId(seg)
     })
-    faces[faces.length - 2].id = '/' + featureId + '/bottom'
-    faces[faces.length - 1].id = '/' + featureId + '/top'
+
+    // Full-turn revolutions of closed profiles can produce a periodic solid
+    // with no separate bottom/top cap faces (e.g. a circle becomes a torus).
+    // Only name caps when the result actually contains them.
+    if(faces.length >= originals.length + 2) {
+      faces[faces.length - 2].id = '/' + featureId + '/bottom'
+      faces[faces.length - 1].id = '/' + featureId + '/top'
+    }
 
     // Name all edges in new solid according to their connected faces
     solid.edges().forEach(edge => {
@@ -239,7 +248,19 @@ export class Profile {
     const face = this.makeFace()
     const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true) //XXX BRepFeat_MakeRevol
-    return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId)
+
+    // A profile segment lying on the revolution axis collapses instead of
+    // producing a swept face. Exclude it from the positional face-name map.
+    const axisOrigin = new THREE.Vector3().setFromMatrixPosition(axis)
+    const axisDirection = normalFromMatrix(axis)
+    const originals = this.rings
+      .flatMap(ring => ring.segments )
+      .filter(segment => ![0.0, 0.5, 1.0].every(u => {
+        const point = segment.sample(u).applyMatrix4(this.sketch.workplane)
+        return point.sub(axisOrigin).cross(axisDirection).length() < EPSILON
+      }))
+
+    return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId, originals)
   }
 
   loft(componentId, others, untwist, featureId) {
@@ -265,9 +286,56 @@ export class Profile {
     return new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
   }
 
+  sweep(componentId, rail, bounds) {
+    try {
+      if(this.rings.length != 1) {
+        throw { type: 'error', msg: 'Sweeps with holes are not supported' }
+      }
+      if(bounds[0] != 0.0 || bounds[1] != 1.0) {
+        throw { type: 'error', msg: 'Partial rail sweeps are not supported' }
+      }
+
+      // A wire profile produces a shell. Use the filled face so MakePipe
+      // returns a solid that can participate in the feature boolean.
+      const profile = this.makeFace()
+      const plane = new window.oc.oc.gp_Pln_1()
+      const curve = window.oc.oc.GeomAPI.To3d(rail.geom(), plane)
+      const edge = new window.oc.oc.BRepBuilderAPI_MakeEdge_24(curve).Edge()
+      const pathBuilder = new window.oc.oc.BRepBuilderAPI_MakeWire_1()
+      pathBuilder.Add_1(edge)
+      const path = window.oc.oc.TopoDS.Wire_1(
+        transformGeometry(pathBuilder.Wire(), rail.sketch.workplane).Shape()
+      )
+      const pipe = new window.oc.oc.BRepOffsetAPI_MakePipe_1(path, profile)
+      pipe.Build(new window.oc.oc.Message_ProgressRange_1())
+      if(!pipe.IsDone()) throw { type: 'error', msg: 'Sweep could not be built' }
+
+      return new Compound(componentId, window.oc.oc.TopoDS.Solid_1(pipe.Shape()))
+    } catch(err) {
+      if(typeof err == 'number') {
+        const data = window.oc.oc.OCJS.getStandard_FailureData(err)
+        throw { type: 'error', msg: data.GetMessageString() || 'OpenCascade sweep failed' }
+      }
+      throw err
+    }
+  }
+
   update() {
-    const cutElements = this.sketch.elements.flatMap(elem => elem.split(this.sketch.elements) )
+    const elements = this.sketch.profileElements()
+    const cutElements = elements.flatMap(elem => elem.split(elements) )
     const newWires = this.sketch.getWires(cutElements, false)
+
+    if(this.serializedRingIds) {
+      const rings = this.serializedRingIds.map(ring =>
+        ring.map(segId => cutElements.find(elem => elem.id == segId))
+      )
+      if(rings.some(ring => ring.some(seg => !seg))) {
+        return { type: 'error', msg: "Profile was lost" }
+      }
+      this.rings = rings.map(ring => new Wire(ring))
+      this.serializedRingIds = null
+    }
+
     let wasRepairNeeded = false
     let error
     this.rings = this.rings.map(wire => {
@@ -301,6 +369,7 @@ export class Profile {
   clone() {
     const clone = new Profile(this.sketch, [...this.rings])
     clone.id = this.id
+    clone.serializedRingIds = this.serializedRingIds
     return clone
   }
 }
@@ -994,13 +1063,21 @@ export class Compound extends Volumetric {
   repair() {
     if(!this.geom) return this
     if(this.isShapex) return this
+
+    const originallyValid = this.validate()
     let out
     try {
       out = this.unifyFaces().fixShape()
     } catch(_) {
+      // Some valid periodic solids cannot be tracked through face unification.
+      // Keep those solids as-is, but do not mask failures to repair invalid input.
+      if(originallyValid) return this
       throw { type: 'error', msg: "Geometry could not be repaired" }
     }
-    if(!out.validate()) throw { type: 'error', msg: "Operation produced invalid geometry" }
+    if(!out.validate()) {
+      if(originallyValid) return this
+      throw { type: 'error', msg: "Operation produced invalid geometry" }
+    }
     return out
   }
 
@@ -1087,6 +1164,21 @@ export class Compound extends Volumetric {
     }
   }
 
+  chamfer(edges, distance) {
+    const chamfer = new window.oc.oc.BRepFilletAPI_MakeChamfer(this.geom())
+    edges.forEach(edge => {
+      chamfer.Add_2(distance, edge.geom())
+    })
+    try {
+      chamfer.Build(new window.oc.oc.Message_ProgressRange_1())
+      if(!chamfer.IsDone()) throw null
+      return this.track(chamfer, 'chamfer')
+
+    } catch(_) {
+      throw { type: 'error', msg: "Chamfer could not be built" }
+    }
+  }
+
   offset(openFaces, distance) {
     openFaces ||= []
     if(this.isShapex) {
@@ -1126,6 +1218,39 @@ export class Compound extends Volumetric {
 
     } catch(_) {
       throw { type: 'error', msg: "Offset could not be built" }
+    }
+  }
+
+  draft(faces, plane, angle) {
+    try {
+      const draft = new window.oc.oc.BRepOffsetAPI_DraftAngle_1()
+      draft.Init(this.geom())
+      const direction = ocDirFromVec(normalFromMatrix(plane))
+      const neutralPlane = ocPlnFromMatrix(plane)
+
+      faces.forEach(face => {
+        draft.Add(face.geom(), direction, angle, neutralPlane, true)
+        if(!draft.AddDone()) throw null
+      })
+
+      draft.Build(new window.oc.oc.Message_ProgressRange_1())
+      if(!draft.IsDone()) throw null
+      return this.track(draft, 'draft')
+    } catch(_) {
+      throw { type: 'error', msg: "Draft could not be built" }
+    }
+  }
+
+  dissolveFaces(faces) {
+    try {
+      const remove = new window.oc.oc.BOPAlgo_RemoveFeatures()
+      remove.SetShape(this.geom())
+      remove.AddFacesToRemove(ocListOfShapeFromArray(faces.map(face => face.geom())))
+      remove.Perform(new window.oc.oc.Message_ProgressRange_1())
+      if(remove.HasErrors()) throw null
+      return this.track(remove, 'remove-faces')
+    } catch(_) {
+      throw { type: 'error', msg: "Faces could not be deleted" }
     }
   }
 

@@ -19,13 +19,49 @@ export class ComponentDefinition {
     this.cog = false
     this.sectionViews = []
     this.parameters = []
+    this.variant = null
     this.exportConfigs = []
+    this.simulations = []
     this.canvases = []
     this.itemsHidden = {}
     this.color = color
     this.compMaterial = materials.surface.clone()
     this.compLineMaterial = materials.wire.clone()
     this.updateMaterials()
+  }
+
+  addParameter(parameter) {
+    parameter.id ||= makeID()
+    this.parameters.push(parameter)
+    this.variant?.options.forEach(option => {
+      option.values[parameter.id] = parameter.value
+    })
+  }
+
+  removeParameter(parameter) {
+    this.parameters = this.parameters.filter(item => item !== parameter)
+    this.variant?.options.forEach(option => delete option.values[parameter.id])
+  }
+
+  syncActiveVariantOption() {
+    const variant = this.variant
+    const option = variant?.options[variant.activeOption] || variant?.options[0]
+    if(!option) return
+    option.values = Object.fromEntries(this.parameters.map(parameter =>
+      [parameter.id, parameter.value]
+    ))
+  }
+
+  selectVariantOption(index, syncCurrent=true) {
+    const variant = this.variant
+    if(!variant) return
+    if(syncCurrent) this.syncActiveVariantOption()
+    const option = variant.options[index] || variant.options[0]
+    if(!option) return
+    variant.activeOption = variant.options.indexOf(option)
+    this.parameters.forEach(parameter => {
+      if(option.values[parameter.id] !== undefined) parameter.value = option.values[parameter.id]
+    })
   }
 
   updateMaterials() {
@@ -39,6 +75,8 @@ export class ComponentDefinition {
 
   static undump(dump) {
     const def = Object.assign(new ComponentDefinition(), dump)
+    def.parameters ||= []
+    def.simulations ||= []
     def.updateMaterials()
     return def
   }
@@ -47,34 +85,53 @@ Serialize.register(ComponentDefinition, 'ComponentDefinition')
 
 
 export class SectionView {
-  constructor(id, orientation) {
+  constructor(id, orientation, position) {
     this.id = id || makeID()
     this.orientation = orientation || {
       x: 0,
       y: 0,
+    }
+    this.position = position || {
+      x: 0,
+      y: 0,
+      z: 0,
     }
     this.side = false
   }
 
   getTransform() {
     const euler = new THREE.Euler(rad(this.orientation.x), rad(this.orientation.y), 0)
-    return new THREE.Matrix4().makeRotationFromEuler(euler)
+    return new THREE.Matrix4()
+      .makeRotationFromEuler(euler)
+      .setPosition(this.position.x, this.position.y, this.position.z)
   }
 
-  static undump(dump) { return new this(dump.id, dump.orientation) }
+  static undump(dump) { return new this(dump.id, dump.orientation, dump.position) }
 }
 Serialize.register(SectionView, 'SectionView')
 
 
 export class Canvas {
-  constructor(id, src, scale, hidden) {
+  constructor(id, src, scale, hidden, x, y, plane) {
     this.id = id || makeID()
     this.src = src
-    this.scale = 1.0
+    this.scale = scale ?? 1.0
     this.hidden = hidden
+    this.x = x ?? 0
+    this.y = y ?? 0
+    this.plane = plane || 'side'
   }
 
-  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden) }
+  getTransform() {
+    const rotations = {
+      top: new THREE.Matrix4().makeRotationX(Math.PI / 2),
+      front: new THREE.Matrix4(),
+      side: new THREE.Matrix4().makeRotationY(Math.PI / 2),
+    }
+    return rotations[this.plane] || rotations.top
+  }
+
+  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden, dump.x, dump.y, dump.plane) }
 }
 Serialize.register(Canvas, 'Canvas')
 
@@ -102,6 +159,7 @@ export class Component {
     ]
     this.children = []
     this.assemblyJoints = []
+    this.motionLinks = []
   }
 
   typename() { return 'Component' }
@@ -129,6 +187,11 @@ export class Component {
         frameA: joint.frameA && joint.frameA.clone(),
         frameB: joint.frameB && joint.frameB.clone(),
         fixedWorld: joint.fixedWorld && joint.fixedWorld.clone(),
+      })),
+      motionLinks: this.motionLinks && this.motionLinks.map(link => ({
+        ...link,
+        // Unwrapped motion is runtime drag state, never timeline state.
+        state: undefined,
       })),
     })
     return clone
@@ -189,7 +252,11 @@ export class Component {
   }
 
   getVolume() {
-    return this.compound.volume() + this.children.reduce((acc, child) => { acc + child.getVolume() }, 0.0)
+    return this.compound.volume() + this.children.reduce((acc, child) => acc + child.getVolume(), 0.0)
+  }
+
+  getArea() {
+    return this.compound.area() + this.children.reduce((acc, child) => acc + child.getArea(), 0.0)
   }
 
   hasAncestor(parent) {

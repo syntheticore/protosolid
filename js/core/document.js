@@ -8,6 +8,13 @@ import { Component } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
 import { makeID, lastId, setLastId } from './id.js'
+import Expression from './expression.js'
+import preferences from '../preferences.js'
+import { autoExportComponents } from './export.js'
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 export default class Document extends Emitter {
   constructor() {
@@ -16,10 +23,16 @@ export default class Document extends Emitter {
     this.filePath = null
     this.timeline = new Timeline()
     this.materials = []
+    this.treeletsExpandedByDefault = true
+    this.treeletExpansion = new Map()
 
     this.activeComponent = this.top()
     this.activeSketch = null
     this.activeFeature = null
+    this.activeSimulation = null
+    this.activeSimulationPicker = false
+    this.activeExportConfig = null
+    this.activeExportComponentId = null
     this.selection = new Selection()
 
     this.hasChanges = false
@@ -69,6 +82,17 @@ export default class Document extends Emitter {
     return this.timeline.tree(at)
   }
 
+  isTreeletExpanded(key, defaultValue = this.treeletsExpandedByDefault) {
+    if(!this.treeletExpansion.has(key)) {
+      this.treeletExpansion.set(key, defaultValue)
+    }
+    return this.treeletExpansion.get(key)
+  }
+
+  setTreeletExpanded(key, expanded) {
+    this.treeletExpansion.set(key, expanded)
+  }
+
   createComponent(parent) {
     const feature = new CreateComponentFeature(this, parent.sourceId())
     this.addFeature(feature)
@@ -97,7 +121,8 @@ export default class Document extends Emitter {
     this.addFeature(feature)
   }
 
-  activateComponent(comp) {
+  activateComponent(comp, closeSimulation = true) {
+    if(closeSimulation) this.activateSimulation(null)
     if(comp) comp.creator.hidden = false
     this.activeComponent = comp
     this.selection.clear()
@@ -109,6 +134,7 @@ export default class Document extends Emitter {
   }
 
   addFeature(feature) {
+    this.activateSimulation(null)
     this.activateFeature(null, true, false)
     if(!(feature instanceof PoseFeature)) this.top().resetPose()
     this.timeline.insertFeature(feature)
@@ -140,12 +166,115 @@ export default class Document extends Emitter {
     const compIds = this.timeline.evaluate()
     this.reactivateActiveComponent()
     this.selection.clear()
+    this.emit('regenerated')
+  }
+
+  activateSimulation(simulation) {
+    this.activateExport(null)
+    this.activeSimulation = simulation
+    this.activeSimulationPicker = false
+    if(simulation) this.selection.clear()
+  }
+
+  activateExport(config, component) {
+    if(config) {
+      this.activeSimulation = null
+      this.activeSimulationPicker = false
+    }
+    this.activeExportConfig = config
+    this.activeExportComponentId = config && component ? component.id : null
+  }
+
+  // Parameter values live on component definitions, which are shared by the
+  // cached timeline trees. Invalidate the timeline before regenerating so
+  // every feature that may consume an expression referencing a parameter is
+  // evaluated again.
+  regenerateParameters() {
+    const activeFeature = this.activeFeature
+    const activeSketch = this.activeSketch
+    const firstFeature = this.timeline.features[0]
+    if(firstFeature) this.timeline.invalidateFeature(firstFeature)
+    this.regenerate()
+
+    // regenerate() reactivates the active component, which intentionally
+    // clears sketch-editing state. Parameter edits must not close an active
+    // sketch or switch the toolbar back to non-sketch tools.
+    if(activeFeature) {
+      this.activeFeature = activeFeature
+      this.activeComponent = this.getComponent(activeFeature.componentOccurrenceId) ||
+        this.getComponent(activeFeature.componentId) || this.activeComponent
+      this.activeSketch = activeFeature.sketch || activeSketch
+    }
+
+    // Profiles are cached by the sketch proxies. Mark all current sketches
+    // dirty so closed regions are rebuilt from the regenerated geometry.
+    this.top().getChildren().flatMap(component => component.sketches)
+      .forEach(sketch => { sketch.profileUpdateNeeded = true })
+    this.hasChanges = true
+    this.isFresh = false
+  }
+
+  renameParameterReferences(oldName, newName) {
+    if(oldName == newName) return
+    this.rewriteParameterReferences(oldName, newName)
+  }
+
+  removeParameterReferences(parameter, component) {
+    let replacement = parameter.value
+    try {
+      replacement = new Expression(parameter.value, component.getParameters())
+        .format(preferences.preferredUnit)
+    } catch(error) {}
+    this.rewriteParameterReferences(parameter.name, replacement)
+  }
+
+  rewriteParameterReferences(oldName, replacement) {
+    if(!oldName || oldName == replacement) return
+    const identifier = new RegExp(`\\b${escapeRegExp(oldName)}\\b`, 'g')
+    const rewrite = expression => typeof expression == 'string' ?
+      expression.replace(identifier, replacement) : expression
+
+    const definitions = [this.timeline.baseCompDef]
+    this.timeline.features.forEach(feature => {
+      if(feature.definition) definitions.push(feature.definition)
+    })
+    this.top().getChildren().forEach(component => definitions.push(component.creator))
+
+    definitions
+      .filter((definition, index, all) => definition && all.indexOf(definition) == index)
+      .forEach(definition => {
+        definition.parameters?.forEach(parameter => {
+          parameter.value = rewrite(parameter.value)
+        })
+        definition.variant?.options?.forEach(option => {
+          Object.keys(option.values || {}).forEach(key => {
+            option.values[key] = rewrite(option.values[key])
+          })
+        })
+      })
+
+    this.timeline.features.forEach(feature => {
+      Object.keys(feature.expressions || {}).forEach(key => {
+        feature.expressions[key] = rewrite(feature.expressions[key])
+      })
+    })
+
+    const sketches = new Set()
+    this.timeline.features.forEach(feature => {
+      if(feature.sketch) sketches.add(feature.sketch)
+    })
+    this.top().getChildren().forEach(component =>
+      component.sketches.forEach(sketch => sketches.add(sketch))
+    )
+    sketches.forEach(sketch => sketch.constraints.forEach(constraint => {
+      constraint.expression = rewrite(constraint.expression)
+    }))
   }
 
   reactivateActiveComponent(comp = this.activeComponent) {
     const updated = this.getComponent(comp.id)
     if(updated) {
-      this.activateComponent(updated)
+      this.activateComponent(updated, false)
     } else {
       this.reactivateActiveComponent(comp.parent)
     }
@@ -158,6 +287,7 @@ export default class Document extends Emitter {
 
   activateFeature(feature, doReset, resetMarker) {
     if(feature) {
+      this.activateSimulation(null)
 
       // Deactivate old active feature
       if(this.activeFeature) this.activateFeature(null, true, false)
@@ -276,6 +406,7 @@ export default class Document extends Emitter {
     try {
       this.filePath = await saveFile(json, 'cad', as ? null : this.filePath)
       this.hasChanges = false
+      await autoExportComponents(this.top())
     } catch(error) {
       if(error != 'canceled') alert(error)
       throw error
@@ -292,6 +423,7 @@ export default class Document extends Emitter {
     }
     this.filePath = file.path
     this.isFresh = false
+    this.treeletsExpandedByDefault = false
     const dump = Serialize.parse(file.data, { document: this, sketches: {} })
     setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
     this.timeline = dump.timeline

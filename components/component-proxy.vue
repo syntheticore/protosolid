@@ -16,6 +16,7 @@
       :parent-highlighted="highlighted"
       :parent-selected="selected"
       :parent-transform="transform"
+      :project-inactive="projecting"
     )
 
   //- Sketches
@@ -37,6 +38,8 @@
       @handleMouseDown="handleMouseDown"
       @handleMouseMove="handleMouseMove"
       @handleMouseLeave="handleMouseLeave"
+      @handlePointerDown="handlePointerDown"
+      @handleWheel="handleWheel"
       @dimensionMouseUp="dimensionMouseUp"
       @dimensionMouseDown="dimensionMouseDown"
       @dimensionMouseMove="dimensionMouseMove"
@@ -44,17 +47,18 @@
 
   //- Helpers
 
-  HelperProxy(
-    v-if="component === document.activeComponent || document.activeFeature instanceof JointFeature"
-    v-for="helper in component.helpers"
-    :key="helper.id"
-    :document="document"
-    :component="component"
-    :helper="helper"
-    :parent-transform="transform"
-    :parent-highlighted="highlighted"
-    :parent-selected="selected"
-  )
+  template(v-for="helper in component.helpers")
+
+    HelperProxy(
+      v-if="!component.isItemHidden(helper.id) && (component === document.activeComponent || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper))"
+      :key="helper.id"
+      :document="document"
+      :component="component"
+      :helper="helper"
+      :parent-transform="transform"
+      :parent-highlighted="highlighted"
+      :parent-selected="selected"
+    )
 
   //- Canvases
 
@@ -89,6 +93,8 @@
       @handleMouseDown="handleMouseDown"
       @handleMouseMove="handleMouseMove"
       @handleMouseLeave="handleMouseLeave"
+      @handlePointerDown="handlePointerDown"
+      @handleWheel="handleWheel"
       @dimensionMouseUp="dimensionMouseUp"
       @dimensionMouseDown="dimensionMouseDown"
       @dimensionMouseMove="dimensionMouseMove"
@@ -101,9 +107,11 @@
 
   import * as THREE from 'three'
   import { JointFeature } from '../js/core/features.js'
+  import { PointHelper } from '../js/core/helpers.js'
+  import { ProjectTool } from '../js/tools.js'
 
   const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
-  const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
+  const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
   const highlight = inject('highlight')
@@ -111,6 +119,7 @@
   const active = computed(() => props.parentActive || props.component == props.document.activeComponent || props.document.activeFeature instanceof JointFeature )
   const highlighted = computed(() => props.parentHighlighted || props.component == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.component) )
+  const projecting = computed(() => props.activeTool instanceof ProjectTool )
 
   const transform = computed(() => {
     return (props.parentTransform || new THREE.Matrix4())
@@ -136,6 +145,8 @@
   const handleMouseDown = (...args) => emit('handleMouseDown', ...args)
   const handleMouseMove = (...args) => emit('handleMouseMove', ...args)
   const handleMouseLeave = (...args) => emit('handleMouseLeave', ...args)
+  const handlePointerDown = (...args) => emit('handlePointerDown', ...args)
+  const handleWheel = (...args) => emit('handleWheel', ...args)
 
   const dimensionMouseUp = (...args) => emit('dimensionMouseUp', ...args)
   const dimensionMouseDown = (...args) => emit('dimensionMouseDown', ...args)

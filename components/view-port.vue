@@ -78,7 +78,7 @@
       )
 
       JointProxy(
-        v-if="isReady"
+        v-if="isReady && displayMode != 'pathTraced'"
         v-for="joint in visibleJoints"
         :key="joint.id"
         :document="document"

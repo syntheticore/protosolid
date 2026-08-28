@@ -10,6 +10,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 import materials from './materials.js'
 import DualCamera from './three/dual-camera.js'
+import PathTracingViewport from './three/path-tracing-viewport.js'
 import SketchPlane from './three/sketch-plane.js'
 import ShadowCatcher from './three/shadow-catcher.js'
 // import ArrowControls from './arrow-controls.js'
@@ -41,6 +42,8 @@ export default class Renderer {
     this.renderer.shadowMap.autoUpdate = false
     this.renderer.shadowMap.enabled = preferences.shadowMaps
 
+    this.pathTracingViewport = new PathTracingViewport(this.renderer)
+
     // this.renderer.shadowMap.type = THREE.VSMShadowMap
     // this.renderer.toneMapping = THREE.ReinhardToneMapping
     // this.renderer.toneMapping = THREE.LinearToneMapping
@@ -64,7 +67,8 @@ export default class Renderer {
       var pmremGenerator = new THREE.PMREMGenerator(this.renderer)
       pmremGenerator.compileCubemapShader()
       this.scene.environment = pmremGenerator.fromCubemap(texture).texture
-      texture.dispose()
+      // texture.dispose()
+      this.pathTracingViewport.setEnvironment(texture)
       pmremGenerator.dispose()
       this.render()
     })
@@ -350,7 +354,10 @@ export default class Renderer {
   }
 
   setDisplayMode(mode) {
+    if(this.displayMode == mode) return
     this.displayMode = mode
+    this.pathTracingViewport.invalidate()
+    this.render()
   }
 
   updateSplineDashScale() {
@@ -379,7 +386,12 @@ export default class Renderer {
   render() {
     this.sketchPlane.update(this.activeCamera)
     this.updateSplineDashScale()
-    this.renderer.render(this.scene, this.activeCamera)
+    const pathTraced = this.displayMode == 'pathTraced' &&
+      this.pathTracingViewport.render(this.scene, this.activeCamera)
+    if(!pathTraced) {
+      this.pathTracingViewport.stop()
+      this.renderer.render(this.scene, this.activeCamera)
+    }
     this.emitter.emit('render')
   }
 
@@ -637,9 +649,10 @@ export default class Renderer {
   }
 
   dispose() {
+    this.pathTracingViewport.dispose()
     this.viewControls.dispose()
     this.gizmos.forEach(gizmo => gizmo.dispose() )
-    this.scene.environment.dispose()
+    this.scene.environment?.dispose()
     this.dropResources(this.scene)
   }
 }

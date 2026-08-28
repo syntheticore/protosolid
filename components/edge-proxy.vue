@@ -38,7 +38,7 @@
     return props.edge == highlight.value ?
       materials.highlightLine
       :
-      props.displayMode == 'shaded' ?
+      ['shaded', 'pathTraced'].includes(props.displayMode) ?
         materials.invisibleLine
         :
         props.parentHighlighted || props.parentSelected ?

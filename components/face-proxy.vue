@@ -47,6 +47,7 @@
   watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.creator.material, props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
     updateAnalysisGeometry()
     faceMesh.visible = props.displayMode != 'exportPreview'
+    faceMesh.alcPathTracingMaterial = getSurfaceMaterial()
     const material = getMaterial()
     faceMesh.material = material
     renderNeeded.value = true
@@ -121,6 +122,7 @@
 
   function getMaterial() {
     if(props.displayMode == 'exportPreview') return materials.invisibleSurface
+    if(props.displayMode == 'pathTraced') return getSurfaceMaterial()
     if((props.colorMode == 'thermal' || props.colorMode == 'static') && !props.document.activeSimulationPicker) {
       return props.parentActive ? materials.thermalSurface : materials.ghostSurface
     }

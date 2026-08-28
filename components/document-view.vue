@@ -313,6 +313,10 @@
             title: 'Shaded',
             icon: 'umbrella-beach',
           },
+          pathTraced: {
+            title: 'Path traced',
+            icon: 'camera-retro',
+          },
         },
         colorModes: {
           component: {

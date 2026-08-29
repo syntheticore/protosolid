@@ -14,6 +14,7 @@ mod features;
 mod geometry;
 mod history;
 mod identity;
+mod integration;
 mod intersection;
 mod mass_properties;
 mod modeling;

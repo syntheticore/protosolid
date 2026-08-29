@@ -373,9 +373,8 @@ fn insert_homogeneous_knot(
     let multiplicity = knots.iter().filter(|candidate| **candidate == knot).count();
     let mut inserted = vec![Vec3::new(0.0, 0.0, 0.0); old_count + 1];
     inserted[..=span - degree].copy_from_slice(&controls[..=span - degree]);
-    for index in span - multiplicity..old_count {
-        inserted[index + 1] = controls[index];
-    }
+    inserted[(span - multiplicity + 1)..(old_count + 1)]
+        .copy_from_slice(&controls[(span - multiplicity)..old_count]);
     for index in span - degree + 1..=span - multiplicity {
         let denominator = knots[index + degree] - knots[index];
         let alpha = if denominator == 0.0 {

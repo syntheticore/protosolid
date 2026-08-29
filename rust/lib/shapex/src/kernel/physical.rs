@@ -4,15 +4,84 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec3};
 
-use super::mass_properties::mass_properties_from_mesh;
+use super::integration::adaptive_simpson;
 use super::{
     BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, FaceId, Kernel, KernelError, KernelResult,
-    MassProperties, ModelTolerance, ShellId, Surface3, TessellationOptions, Topology, TriangleMesh,
+    MassProperties, ModelTolerance, ShellId, Surface3, Topology,
 };
 
 #[derive(Debug, Clone)]
 pub(crate) struct PhysicalCertificate {
     pub properties: MassProperties,
+}
+
+pub(crate) fn validate_supplied_properties(
+    properties: MassProperties,
+    tolerance: ModelTolerance,
+    scale: f64,
+) -> KernelResult<()> {
+    let minimum_volume = tolerance.linear_at_scale(scale).powi(3);
+    if !properties.volume.is_finite()
+        || !properties.signed_volume.is_finite()
+        || properties.volume <= minimum_volume
+        || properties.signed_volume <= minimum_volume
+        || (properties.volume - properties.signed_volume).abs()
+            > minimum_volume.max(properties.volume * f64::EPSILON * 4096.0)
+    {
+        return Err(KernelError::new(
+            DiagnosticKind::GeometryInvariant,
+            "analytical certificate has invalid volume",
+        ));
+    }
+    if !properties.surface_area.is_finite()
+        || properties.surface_area <= tolerance.linear_at_scale(scale).powi(2)
+    {
+        return Err(KernelError::new(
+            DiagnosticKind::GeometryInvariant,
+            "analytical certificate has invalid surface area",
+        ));
+    }
+    if !properties.centroid.x.is_finite()
+        || !properties.centroid.y.is_finite()
+        || !properties.centroid.z.is_finite()
+    {
+        return Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "analytical certificate has a non-finite centroid",
+        ));
+    }
+    let inertia_tolerance = minimum_volume * scale.powi(2);
+    for row in 0..3 {
+        for column in 0..3 {
+            if !properties.inertia[row][column].is_finite() {
+                return Err(KernelError::new(
+                    DiagnosticKind::NumericalFailure,
+                    "analytical certificate has non-finite inertia",
+                ));
+            }
+            if (properties.inertia[row][column] - properties.inertia[column][row]).abs()
+                > inertia_tolerance.max(
+                    properties.inertia[row][column]
+                        .abs()
+                        .max(properties.inertia[column][row].abs())
+                        * f64::EPSILON
+                        * 4096.0,
+                )
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "analytical certificate inertia is not symmetric",
+                ));
+            }
+        }
+        if properties.inertia[row][row] < -inertia_tolerance {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "analytical certificate has negative principal-axis inertia",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn certify_topology(
@@ -53,9 +122,9 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
             "a physical body needs at least one shell",
         ));
     }
-    // The first certifier is restricted to polyhedral BREPs and certifies them at
-    // the model's scale-aware tolerance. Curved certification is deliberately
-    // rejected rather than inferred from an approximate mesh.
+    // Curved bodies are handled by structural analytical recognizers above.
+    // The remaining polyhedral path integrates the exact planar BREP boundary;
+    // publication never depends on rendering tessellation.
     let shell_ids: BTreeSet<_> = body.shells().iter().copied().collect();
     let face_ids: BTreeSet<_> = shell_ids
         .iter()
@@ -164,27 +233,24 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
         validate_planar_trim(topology, face_id, physical_tolerance)?;
     }
 
-    let options =
-        TessellationOptions::new(physical_tolerance.linear, physical_tolerance.angular, 8)?;
-    let mut shell_meshes = Vec::new();
+    let mut shell_properties = Vec::new();
     for shell_id in body.shells() {
         validate_shell_connected(topology, *shell_id)?;
-        let mesh = kernel.tessellate_shell(*shell_id, options)?;
-        validate_no_self_intersections(topology, &mesh, physical_tolerance)?;
-        let properties = mass_properties_from_mesh(&mesh)?;
+        validate_polyhedral_shell_intersections(topology, *shell_id, physical_tolerance)?;
+        let properties = polyhedral_shell_properties(topology, *shell_id, physical_tolerance)?;
         if properties.volume <= physical_tolerance.linear.powi(3) {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
                 "shell volume does not exceed the model tolerance volume",
             ));
         }
-        shell_meshes.push((*shell_id, mesh, properties));
+        shell_properties.push((*shell_id, properties));
     }
 
     // One connected positive outer shell; all other shells are negatively oriented cavities.
-    let positive: Vec<_> = shell_meshes
+    let positive: Vec<_> = shell_properties
         .iter()
-        .filter(|(_, _, properties)| properties.signed_volume > 0.0)
+        .filter(|(_, properties)| properties.signed_volume > 0.0)
         .collect();
     if positive.len() != 1 {
         return Err(KernelError::new(
@@ -193,8 +259,7 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
         ));
     }
     let outer_shell = positive[0].0;
-    let outer_mesh = &positive[0].1;
-    for (shell_id, mesh, properties) in &shell_meshes {
+    for (shell_id, properties) in &shell_properties {
         if *shell_id == outer_shell {
             continue;
         }
@@ -204,30 +269,44 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
                 "inner shells must be oriented as cavities",
             ));
         }
-        validate_meshes_disjoint(topology, outer_mesh, mesh, physical_tolerance)?;
-        if !point_inside_mesh(properties.centroid, outer_mesh, physical_tolerance)? {
+        validate_polyhedral_shells_disjoint(topology, outer_shell, *shell_id, physical_tolerance)?;
+        if !point_inside_polyhedral_shell(
+            topology,
+            outer_shell,
+            properties.centroid,
+            physical_tolerance,
+        )? {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
                 "cavity shell is not contained by the outer shell",
             ));
         }
     }
-    for first in 0..shell_meshes.len() {
-        for second in first + 1..shell_meshes.len() {
-            if shell_meshes[first].0 == outer_shell || shell_meshes[second].0 == outer_shell {
+    for first in 0..shell_properties.len() {
+        for second in first + 1..shell_properties.len() {
+            if shell_properties[first].0 == outer_shell || shell_properties[second].0 == outer_shell
+            {
                 continue;
             }
-            validate_meshes_disjoint(
+            validate_polyhedral_shells_disjoint(
                 topology,
-                &shell_meshes[first].1,
-                &shell_meshes[second].1,
+                shell_properties[first].0,
+                shell_properties[second].0,
                 physical_tolerance,
             )?;
-            let first_center = shell_meshes[first].2.centroid;
-            let second_center = shell_meshes[second].2.centroid;
-            if point_inside_mesh(first_center, &shell_meshes[second].1, physical_tolerance)?
-                || point_inside_mesh(second_center, &shell_meshes[first].1, physical_tolerance)?
-            {
+            let first_center = shell_properties[first].1.centroid;
+            let second_center = shell_properties[second].1.centroid;
+            if point_inside_polyhedral_shell(
+                topology,
+                shell_properties[second].0,
+                first_center,
+                physical_tolerance,
+            )? || point_inside_polyhedral_shell(
+                topology,
+                shell_properties[first].0,
+                second_center,
+                physical_tolerance,
+            )? {
                 return Err(KernelError::new(
                     DiagnosticKind::GeometryInvariant,
                     "cavity shells may not contain or overlap one another",
@@ -236,11 +315,12 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
         }
     }
 
-    let mut combined = TriangleMesh::default();
-    for (_, mesh, _) in shell_meshes {
-        combined.append(mesh);
-    }
-    let properties = mass_properties_from_mesh(&combined)?;
+    let properties = combine_signed_shell_properties(
+        shell_properties
+            .into_iter()
+            .map(|(_, properties)| properties),
+        physical_tolerance,
+    )?;
     if properties.signed_volume <= physical_tolerance.linear.powi(3) {
         return Err(KernelError::new(
             DiagnosticKind::GeometryInvariant,
@@ -248,6 +328,191 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
         ));
     }
     Ok(PhysicalCertificate { properties })
+}
+
+fn polyhedral_shell_properties(
+    topology: &Topology,
+    shell_id: ShellId,
+    tolerance: ModelTolerance,
+) -> KernelResult<MassProperties> {
+    let shell = topology.shell(shell_id)?;
+    let mut signed_volume = 0.0;
+    let mut surface_area = 0.0;
+    let mut first_moment = Vec3::new(0.0, 0.0, 0.0);
+    let mut second_moment = [[0.0; 3]; 3];
+    for face_id in shell.faces() {
+        let face = topology.face(*face_id)?;
+        let Surface3::Plane(plane) = face.surface() else {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "analytical polyhedral integration requires planar faces",
+            ));
+        };
+        let effective_normal = match face.orientation() {
+            super::FaceOrientation::Forward => plane.normal(),
+            super::FaceOrientation::Reversed => -plane.normal(),
+        };
+        let mut face_area = 0.0;
+        for loop_id in face.loops() {
+            let points = loop_points3(topology, *loop_id)?;
+            if points.len() < 3 {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "polyhedral face loop needs at least three vertices",
+                ));
+            }
+            let anchor = points[0];
+            for index in 1..points.len() - 1 {
+                let a = anchor;
+                let b = points[index];
+                let c = points[index + 1];
+                let cross = (b - a).cross(c - a);
+                face_area += cross.dot(effective_normal) * 0.5;
+                let tetrahedron = a.to_vec().dot(b.to_vec().cross(c.to_vec())) / 6.0;
+                signed_volume += tetrahedron;
+                first_moment += (a.to_vec() + b.to_vec() + c.to_vec()) * (tetrahedron / 4.0);
+                let coordinates = [[a.x, a.y, a.z], [b.x, b.y, b.z], [c.x, c.y, c.z]];
+                for (axis, moments) in second_moment.iter_mut().enumerate() {
+                    let values = [
+                        coordinates[0][axis],
+                        coordinates[1][axis],
+                        coordinates[2][axis],
+                    ];
+                    moments[axis] += tetrahedron / 10.0
+                        * (values[0] * values[0]
+                            + values[1] * values[1]
+                            + values[2] * values[2]
+                            + values[0] * values[1]
+                            + values[0] * values[2]
+                            + values[1] * values[2]);
+                }
+                for first in 0..3 {
+                    for second in first + 1..3 {
+                        let diagonal_products = (0..3)
+                            .map(|vertex| coordinates[vertex][first] * coordinates[vertex][second])
+                            .sum::<f64>();
+                        let cross_products = coordinates[0][first] * coordinates[1][second]
+                            + coordinates[0][second] * coordinates[1][first]
+                            + coordinates[0][first] * coordinates[2][second]
+                            + coordinates[0][second] * coordinates[2][first]
+                            + coordinates[1][first] * coordinates[2][second]
+                            + coordinates[1][second] * coordinates[2][first];
+                        let value = tetrahedron / 20.0 * (2.0 * diagonal_products + cross_products);
+                        second_moment[first][second] += value;
+                        second_moment[second][first] += value;
+                    }
+                }
+            }
+        }
+        if face_area <= tolerance.linear.powi(2) {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "polyhedral face has zero or inconsistent oriented area",
+            ));
+        }
+        surface_area += face_area;
+    }
+    if !signed_volume.is_finite() || signed_volume.abs() <= tolerance.linear.powi(3) {
+        return Err(KernelError::new(
+            DiagnosticKind::GeometryInvariant,
+            "polyhedral shell has zero or non-finite signed volume",
+        ));
+    }
+    let centroid = Point3::from_vec(first_moment / signed_volume);
+    let inertia_origin = [
+        [
+            second_moment[1][1] + second_moment[2][2],
+            -second_moment[0][1],
+            -second_moment[0][2],
+        ],
+        [
+            -second_moment[1][0],
+            second_moment[0][0] + second_moment[2][2],
+            -second_moment[1][2],
+        ],
+        [
+            -second_moment[2][0],
+            -second_moment[2][1],
+            second_moment[0][0] + second_moment[1][1],
+        ],
+    ];
+    let center = [centroid.x, centroid.y, centroid.z];
+    let center_squared = center.iter().map(|value| value * value).sum::<f64>();
+    let mut inertia = inertia_origin;
+    for row in 0..3 {
+        for column in 0..3 {
+            inertia[row][column] -= signed_volume
+                * (if row == column { center_squared } else { 0.0 } - center[row] * center[column]);
+        }
+    }
+    Ok(MassProperties {
+        volume: signed_volume.abs(),
+        signed_volume,
+        surface_area,
+        centroid,
+        inertia,
+    })
+}
+
+fn combine_signed_shell_properties(
+    components: impl IntoIterator<Item = MassProperties>,
+    tolerance: ModelTolerance,
+) -> KernelResult<MassProperties> {
+    let components = components.into_iter().collect::<Vec<_>>();
+    let signed_volume = components
+        .iter()
+        .map(|properties| properties.signed_volume)
+        .sum::<f64>();
+    if signed_volume <= tolerance.linear.powi(3) {
+        return Err(KernelError::new(
+            DiagnosticKind::GeometryInvariant,
+            "body has no positive analytical volume after subtracting cavities",
+        ));
+    }
+    let centroid = Point3::from_vec(
+        components
+            .iter()
+            .fold(Vec3::new(0.0, 0.0, 0.0), |sum, properties| {
+                sum + properties.centroid.to_vec() * properties.signed_volume
+            })
+            / signed_volume,
+    );
+    let mut inertia = [[0.0; 3]; 3];
+    for properties in &components {
+        let offset = properties.centroid - centroid;
+        for row in 0..3 {
+            for column in 0..3 {
+                inertia[row][column] += properties.inertia[row][column]
+                    + properties.signed_volume
+                        * (if row == column {
+                            offset.magnitude2()
+                        } else {
+                            0.0
+                        } - offset[row] * offset[column]);
+            }
+        }
+    }
+    Ok(MassProperties {
+        volume: signed_volume,
+        signed_volume,
+        surface_area: components
+            .iter()
+            .map(|properties| properties.surface_area)
+            .sum(),
+        centroid,
+        inertia,
+    })
+}
+
+fn loop_points3(topology: &Topology, loop_id: super::LoopId) -> KernelResult<Vec<Point3>> {
+    topology
+        .loop_coedges(loop_id)?
+        .into_iter()
+        .map(|coedge| {
+            let vertex = topology.coedge_vertices(coedge)?[0];
+            Ok(topology.vertex(vertex)?.point())
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -361,10 +626,14 @@ fn try_certify_right_prism(
             if !validate_prism_side_incidence(
                 topology,
                 face_ids,
-                first_id,
-                second_id,
-                &first_edges,
-                &second_edges,
+                PrismCap {
+                    face: first_id,
+                    edges: &first_edges,
+                },
+                PrismCap {
+                    face: second_id,
+                    edges: &second_edges,
+                },
                 axis * height,
                 tolerance,
             )? {
@@ -566,11 +835,7 @@ fn adaptive_curve_integrals(
     tolerance: ModelTolerance,
 ) -> KernelResult<[f64; 6]> {
     let terms = |parameter| curve_integral_terms(curve, parameter, plane);
-    let middle = (start + end) * 0.5;
-    let start_value = terms(start)?;
-    let middle_value = terms(middle)?;
-    let end_value = terms(end)?;
-    let scale = [start_value, middle_value, end_value]
+    let scale = [terms(start)?, terms((start + end) * 0.5)?, terms(end)?]
         .iter()
         .flat_map(|values| values.iter().copied())
         .map(f64::abs)
@@ -579,100 +844,14 @@ fn adaptive_curve_integrals(
         .linear_at_scale(scale)
         .max(f64::EPSILON * scale * 256.0);
     let targets = [absolute; 6];
-    let whole = simpson_values(start, end, start_value, middle_value, end_value);
-    adaptive_curve_integrals_interval(
-        &terms,
+    adaptive_simpson(
         start,
         end,
-        start_value,
-        middle_value,
-        end_value,
-        whole,
+        terms,
         targets,
-        0,
         24,
+        "certified NURBS boundary integration did not converge",
     )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn adaptive_curve_integrals_interval<F>(
-    terms: &F,
-    start: f64,
-    end: f64,
-    start_value: [f64; 6],
-    middle_value: [f64; 6],
-    end_value: [f64; 6],
-    whole: [f64; 6],
-    targets: [f64; 6],
-    depth: u8,
-    maximum_depth: u8,
-) -> KernelResult<[f64; 6]>
-where
-    F: Fn(f64) -> KernelResult<[f64; 6]>,
-{
-    let middle = (start + end) * 0.5;
-    let left_middle = (start + middle) * 0.5;
-    let right_middle = (middle + end) * 0.5;
-    let left_middle_value = terms(left_middle)?;
-    let right_middle_value = terms(right_middle)?;
-    let left = simpson_values(start, middle, start_value, left_middle_value, middle_value);
-    let right = simpson_values(middle, end, middle_value, right_middle_value, end_value);
-    let converged = (0..6).all(|component| {
-        (left[component] + right[component] - whole[component]).abs() / 15.0 <= targets[component]
-    });
-    if converged {
-        return Ok(std::array::from_fn(|component| {
-            left[component]
-                + right[component]
-                + (left[component] + right[component] - whole[component]) / 15.0
-        }));
-    }
-    if depth >= maximum_depth {
-        return Err(KernelError::new(
-            DiagnosticKind::NumericalFailure,
-            "certified NURBS boundary integration did not converge",
-        ));
-    }
-    let next_targets = targets.map(|target| target * 0.5);
-    let first = adaptive_curve_integrals_interval(
-        terms,
-        start,
-        middle,
-        start_value,
-        left_middle_value,
-        middle_value,
-        left,
-        next_targets,
-        depth + 1,
-        maximum_depth,
-    )?;
-    let second = adaptive_curve_integrals_interval(
-        terms,
-        middle,
-        end,
-        middle_value,
-        right_middle_value,
-        end_value,
-        right,
-        next_targets,
-        depth + 1,
-        maximum_depth,
-    )?;
-    Ok(std::array::from_fn(|component| {
-        first[component] + second[component]
-    }))
-}
-
-fn simpson_values(
-    start: f64,
-    end: f64,
-    first: [f64; 6],
-    middle: [f64; 6],
-    last: [f64; 6],
-) -> [f64; 6] {
-    std::array::from_fn(|component| {
-        (end - start) * (first[component] + 4.0 * middle[component] + last[component]) / 6.0
-    })
 }
 
 fn curve_integral_terms(
@@ -748,20 +927,24 @@ fn face_edges(topology: &Topology, face_id: FaceId) -> KernelResult<BTreeSet<sup
     Ok(result)
 }
 
+#[derive(Clone, Copy)]
+struct PrismCap<'a> {
+    face: FaceId,
+    edges: &'a BTreeSet<super::EdgeId>,
+}
+
 fn validate_prism_side_incidence(
     topology: &Topology,
     face_ids: &BTreeSet<FaceId>,
-    first_cap: FaceId,
-    second_cap: FaceId,
-    first_edges: &BTreeSet<super::EdgeId>,
-    second_edges: &BTreeSet<super::EdgeId>,
+    first_cap: PrismCap<'_>,
+    second_cap: PrismCap<'_>,
     sweep: Vec3,
     tolerance: ModelTolerance,
 ) -> KernelResult<bool> {
     let mut first_incidence = 0usize;
     let mut second_incidence = 0usize;
     for face_id in face_ids {
-        if *face_id == first_cap || *face_id == second_cap {
+        if *face_id == first_cap.face || *face_id == second_cap.face {
             continue;
         }
         let face = topology.face(*face_id)?;
@@ -798,15 +981,15 @@ fn validate_prism_side_incidence(
             return Ok(false);
         }
         let edges = face_edges(topology, *face_id)?;
-        let on_first = edges.intersection(first_edges).count();
-        let on_second = edges.intersection(second_edges).count();
+        let on_first = edges.intersection(first_cap.edges).count();
+        let on_second = edges.intersection(second_cap.edges).count();
         if on_first == 0 || on_second == 0 {
             return Ok(false);
         }
         first_incidence += on_first;
         second_incidence += on_second;
     }
-    Ok(first_incidence == first_edges.len() && second_incidence == second_edges.len())
+    Ok(first_incidence == first_cap.edges.len() && second_incidence == second_cap.edges.len())
 }
 
 fn try_certify_prism_with_bosses(
@@ -2174,6 +2357,247 @@ fn point_in_polygon2(point: Point2, polygon: &[Point2], tolerance: f64) -> bool 
     inside
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrimLocation {
+    Outside,
+    Boundary,
+    Inside,
+}
+
+fn face_trim_location(
+    topology: &Topology,
+    face_id: FaceId,
+    point: Point3,
+    tolerance: ModelTolerance,
+) -> KernelResult<TrimLocation> {
+    let face = topology.face(face_id)?;
+    let Surface3::Plane(plane) = face.surface() else {
+        return Err(KernelError::new(
+            DiagnosticKind::UnsupportedGeometry,
+            "polyhedral containment requires planar faces",
+        ));
+    };
+    let projection = plane.project(point)?;
+    if projection.distance > tolerance.linear {
+        return Ok(TrimLocation::Outside);
+    }
+    let uv = Point2::new(projection.parameters.0, projection.parameters.1);
+    let mut inside_outer = false;
+    for loop_id in face.loops() {
+        let loop_value = topology.loop_(*loop_id)?;
+        let polygon = topology
+            .loop_coedges(*loop_id)?
+            .into_iter()
+            .map(|coedge| {
+                let value = topology.coedge(coedge)?;
+                Ok(value.pcurve().evaluate(value.range().start)?.point)
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        if (0..polygon.len()).any(|index| {
+            on_segment2(
+                uv,
+                polygon[index],
+                polygon[(index + 1) % polygon.len()],
+                tolerance.parameter.max(tolerance.linear),
+            )
+        }) {
+            return Ok(TrimLocation::Boundary);
+        }
+        let inside = point_in_polygon2(uv, &polygon, tolerance.parameter.max(tolerance.linear));
+        match loop_value.kind() {
+            super::LoopKind::Outer => inside_outer = inside,
+            super::LoopKind::Inner if inside => return Ok(TrimLocation::Outside),
+            super::LoopKind::Inner => {}
+        }
+    }
+    Ok(if inside_outer {
+        TrimLocation::Inside
+    } else {
+        TrimLocation::Outside
+    })
+}
+
+fn point_inside_polyhedral_shell(
+    topology: &Topology,
+    shell_id: ShellId,
+    point: Point3,
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
+    let directions = [
+        Vec3::new(1.0, std::f64::consts::SQRT_2, std::f64::consts::PI).normalize(),
+        Vec3::new(std::f64::consts::E, 1.0, std::f64::consts::SQRT_2).normalize(),
+        Vec3::new(std::f64::consts::PI, std::f64::consts::E, 1.0).normalize(),
+    ];
+    for direction in directions {
+        let mut parameters = Vec::new();
+        let mut ambiguous = false;
+        for face_id in topology.shell(shell_id)?.faces() {
+            let face = topology.face(*face_id)?;
+            let Surface3::Plane(plane) = face.surface() else {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "polyhedral containment requires planar faces",
+                ));
+            };
+            let denominator = direction.dot(plane.normal());
+            if denominator.abs() <= tolerance.angular {
+                continue;
+            }
+            let parameter = (plane.origin() - point).dot(plane.normal()) / denominator;
+            if parameter <= tolerance.linear {
+                continue;
+            }
+            let hit = point + direction * parameter;
+            match face_trim_location(topology, *face_id, hit, tolerance)? {
+                TrimLocation::Inside => parameters.push(parameter),
+                TrimLocation::Boundary => {
+                    ambiguous = true;
+                    break;
+                }
+                TrimLocation::Outside => {}
+            }
+        }
+        if !ambiguous {
+            parameters.sort_by(f64::total_cmp);
+            parameters.dedup_by(|first, second| (*first - *second).abs() <= tolerance.linear);
+            return Ok(parameters.len() % 2 == 1);
+        }
+    }
+    Err(KernelError::new(
+        DiagnosticKind::NumericalFailure,
+        "analytical shell containment ray repeatedly hit boundary topology",
+    ))
+}
+
+fn validate_polyhedral_shell_intersections(
+    topology: &Topology,
+    shell_id: ShellId,
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    let faces = topology.shell(shell_id)?.faces();
+    for first in 0..faces.len() {
+        for second in first + 1..faces.len() {
+            validate_polyhedral_face_pair(topology, faces[first], faces[second], tolerance)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_polyhedral_shells_disjoint(
+    topology: &Topology,
+    first: ShellId,
+    second: ShellId,
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    for first_face in topology.shell(first)?.faces() {
+        for second_face in topology.shell(second)?.faces() {
+            validate_polyhedral_face_pair(topology, *first_face, *second_face, tolerance)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_polyhedral_face_pair(
+    topology: &Topology,
+    first: FaceId,
+    second: FaceId,
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    let first_face = topology.face(first)?;
+    let second_face = topology.face(second)?;
+    let (Surface3::Plane(first_plane), Surface3::Plane(second_plane)) =
+        (first_face.surface(), second_face.surface())
+    else {
+        return Err(KernelError::new(
+            DiagnosticKind::UnsupportedGeometry,
+            "polyhedral intersection validation requires planar faces",
+        ));
+    };
+    let first_edges = topology
+        .face_edges(first)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let second_edges = topology
+        .face_edges(second)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let first_vertices = face_vertices(topology, first);
+    let second_vertices = face_vertices(topology, second);
+    let parallel = first_plane
+        .normal()
+        .cross(second_plane.normal())
+        .magnitude()
+        <= tolerance.angular;
+    if parallel {
+        if (second_plane.origin() - first_plane.origin())
+            .dot(first_plane.normal())
+            .abs()
+            > tolerance.linear
+        {
+            return Ok(());
+        }
+        for vertex in first_vertices.iter().copied() {
+            let point = topology.vertex(vertex)?.point();
+            if face_trim_location(topology, second, point, tolerance)? == TrimLocation::Inside {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "distinct coplanar BREP faces overlap",
+                ));
+            }
+        }
+        for vertex in second_vertices.iter().copied() {
+            let point = topology.vertex(vertex)?.point();
+            if face_trim_location(topology, first, point, tolerance)? == TrimLocation::Inside {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "distinct coplanar BREP faces overlap",
+                ));
+            }
+        }
+        return Ok(());
+    }
+    for (source, target, target_plane) in [
+        (first, second, *second_plane),
+        (second, first, *first_plane),
+    ] {
+        for edge_id in topology.face_edges(source)? {
+            let edge = topology.edge(edge_id)?;
+            let [start_id, end_id] = edge.vertices();
+            let start = topology.vertex(start_id)?.point();
+            let end = topology.vertex(end_id)?.point();
+            let direction = end - start;
+            let denominator = direction.dot(target_plane.normal());
+            if denominator.abs() <= tolerance.angular {
+                continue;
+            }
+            let parameter =
+                (target_plane.origin() - start).dot(target_plane.normal()) / denominator;
+            if parameter < -tolerance.parameter || parameter > 1.0 + tolerance.parameter {
+                continue;
+            }
+            let point = start + direction * parameter.clamp(0.0, 1.0);
+            let location = face_trim_location(topology, target, point, tolerance)?;
+            if location != TrimLocation::Outside
+                && !allowed_face_contact(
+                    topology,
+                    &first_edges,
+                    &second_edges,
+                    &first_vertices,
+                    &second_vertices,
+                    point,
+                    tolerance.linear,
+                )
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "polyhedral BREP faces intersect away from shared topology",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_shell_connected(topology: &Topology, shell_id: ShellId) -> KernelResult<()> {
     let shell = topology.shell(shell_id)?;
     let faces: BTreeSet<_> = shell.faces().iter().copied().collect();
@@ -2217,401 +2641,6 @@ fn validate_shell_connected(topology: &Topology, shell_id: ShellId) -> KernelRes
         ));
     }
     Ok(())
-}
-
-fn validate_no_self_intersections(
-    topology: &Topology,
-    mesh: &TriangleMesh,
-    tolerance: ModelTolerance,
-) -> KernelResult<()> {
-    validate_triangle_pairs(topology, mesh, mesh, tolerance, true)
-}
-
-fn validate_meshes_disjoint(
-    topology: &Topology,
-    first: &TriangleMesh,
-    second: &TriangleMesh,
-    tolerance: ModelTolerance,
-) -> KernelResult<()> {
-    validate_triangle_pairs(topology, first, second, tolerance, false)
-}
-
-fn validate_triangle_pairs(
-    topology: &Topology,
-    first: &TriangleMesh,
-    second: &TriangleMesh,
-    tolerance: ModelTolerance,
-    same_mesh: bool,
-) -> KernelResult<()> {
-    let faces = first
-        .triangle_faces
-        .iter()
-        .chain(&second.triangle_faces)
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let face_edges = faces
-        .iter()
-        .map(|face| {
-            topology
-                .face_edges(*face)
-                .map(|edges| (*face, edges.into_iter().collect::<BTreeSet<_>>()))
-        })
-        .collect::<KernelResult<BTreeMap<_, _>>>()?;
-    let face_vertices = faces
-        .iter()
-        .map(|face| (*face, face_vertices(topology, *face)))
-        .collect::<BTreeMap<_, _>>();
-    let bounds = |mesh: &TriangleMesh| {
-        mesh.triangles
-            .iter()
-            .map(|triangle| triangle_bounds(triangle_points(mesh, *triangle)))
-            .collect::<Vec<_>>()
-    };
-    let first_bounds = bounds(first);
-    let second_bounds = bounds(second);
-    let mut second_order = (0..second.triangles.len()).collect::<Vec<_>>();
-    second_order.sort_by(|first, second| {
-        second_bounds[*first].0[0].total_cmp(&second_bounds[*second].0[0])
-    });
-    let mut pairs = Vec::new();
-    if same_mesh {
-        for (position, first_index) in second_order.iter().copied().enumerate() {
-            let maximum = first_bounds[first_index].1[0] + tolerance.linear;
-            for second_index in second_order.iter().copied().skip(position + 1) {
-                if second_bounds[second_index].0[0] > maximum {
-                    break;
-                }
-                pairs.push((first_index, second_index));
-            }
-        }
-    } else {
-        let mut first_order = (0..first.triangles.len()).collect::<Vec<_>>();
-        first_order.sort_by(|a, b| first_bounds[*a].0[0].total_cmp(&first_bounds[*b].0[0]));
-        let mut lower = 0usize;
-        for first_index in first_order {
-            let minimum = first_bounds[first_index].0[0] - tolerance.linear;
-            let maximum = first_bounds[first_index].1[0] + tolerance.linear;
-            while lower < second_order.len() && second_bounds[second_order[lower]].1[0] < minimum {
-                lower += 1;
-            }
-            for second_index in second_order.iter().copied().skip(lower) {
-                if second_bounds[second_index].0[0] > maximum {
-                    break;
-                }
-                pairs.push((first_index, second_index));
-            }
-        }
-    }
-    for (first_index, second_index) in pairs {
-        let first_triangle = &first.triangles[first_index];
-        if same_mesh && first.triangle_faces[first_index] == second.triangle_faces[second_index] {
-            continue;
-        }
-        if !bounds_overlap(
-            first_bounds[first_index],
-            second_bounds[second_index],
-            tolerance.linear,
-        ) {
-            continue;
-        }
-        let a = triangle_points(first, *first_triangle);
-        let b = triangle_points(second, second.triangles[second_index]);
-        match triangle_intersection(a, b, tolerance)? {
-            TriangleIntersection::None => {}
-            TriangleIntersection::CoplanarArea => {
-                let first_face = first.triangle_faces[first_index];
-                let second_face = second.triangle_faces[second_index];
-                if face_edges[&second_face]
-                    .iter()
-                    .any(|edge| face_edges[&first_face].contains(edge))
-                {
-                    continue;
-                }
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "distinct BREP faces overlap over a coplanar area",
-                ));
-            }
-            TriangleIntersection::Boundary(points) => {
-                let first_face = first.triangle_faces[first_index];
-                let second_face = second.triangle_faces[second_index];
-                if let Some(point) = points.iter().find(|point| {
-                    !allowed_face_contact(
-                        topology,
-                        &face_edges[&first_face],
-                        &face_edges[&second_face],
-                        &face_vertices[&first_face],
-                        &face_vertices[&second_face],
-                        **point,
-                        tolerance.linear,
-                    )
-                }) {
-                    return Err(KernelError::new(
-                            DiagnosticKind::GeometryInvariant,
-                            format!(
-                                "shell faces {first_face:?} and {second_face:?} intersect away from shared topology near {point:?}",
-                            ),
-                        ));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn triangle_points(mesh: &TriangleMesh, triangle: [usize; 3]) -> [Point3; 3] {
-    [
-        mesh.positions[triangle[0]],
-        mesh.positions[triangle[1]],
-        mesh.positions[triangle[2]],
-    ]
-}
-
-fn triangle_bounds(triangle: [Point3; 3]) -> ([f64; 3], [f64; 3]) {
-    let mut minimum = [f64::INFINITY; 3];
-    let mut maximum = [f64::NEG_INFINITY; 3];
-    for point in triangle {
-        for (axis, value) in [point.x, point.y, point.z].into_iter().enumerate() {
-            minimum[axis] = minimum[axis].min(value);
-            maximum[axis] = maximum[axis].max(value);
-        }
-    }
-    (minimum, maximum)
-}
-
-fn bounds_overlap(
-    first: ([f64; 3], [f64; 3]),
-    second: ([f64; 3], [f64; 3]),
-    tolerance: f64,
-) -> bool {
-    (0..3).all(|axis| {
-        first.0[axis] <= second.1[axis] + tolerance && second.0[axis] <= first.1[axis] + tolerance
-    })
-}
-
-enum TriangleIntersection {
-    None,
-    Boundary(Vec<Point3>),
-    CoplanarArea,
-}
-
-fn triangle_intersection(
-    first: [Point3; 3],
-    second: [Point3; 3],
-    tolerance: ModelTolerance,
-) -> KernelResult<TriangleIntersection> {
-    let first_normal = (first[1] - first[0]).cross(first[2] - first[0]);
-    let second_normal = (second[1] - second[0]).cross(second[2] - second[0]);
-    if first_normal.magnitude() <= tolerance.linear.powi(2)
-        || second_normal.magnitude() <= tolerance.linear.powi(2)
-    {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "tessellation contains a degenerate triangle",
-        ));
-    }
-    let first_unit = first_normal.normalize();
-    let second_unit = second_normal.normalize();
-    let parallel = first_unit.cross(second_unit).magnitude() <= tolerance.angular;
-    if parallel {
-        let plane_distance = (second[0] - first[0]).dot(first_unit).abs();
-        if plane_distance > tolerance.linear {
-            return Ok(TriangleIntersection::None);
-        }
-        return coplanar_triangle_intersection(first, second, first_unit, tolerance.linear);
-    }
-    let first_distances = first.map(|point| (point - second[0]).dot(second_unit));
-    let second_distances = second.map(|point| (point - first[0]).dot(first_unit));
-    if strictly_one_side(first_distances, tolerance.linear)
-        || strictly_one_side(second_distances, tolerance.linear)
-    {
-        return Ok(TriangleIntersection::None);
-    }
-    let mut points = Vec::new();
-    collect_plane_crossings(first, second, second_unit, tolerance.linear, &mut points);
-    collect_plane_crossings(second, first, first_unit, tolerance.linear, &mut points);
-    deduplicate_points(&mut points, tolerance.linear);
-    if points.is_empty() {
-        Ok(TriangleIntersection::None)
-    } else {
-        Ok(TriangleIntersection::Boundary(points))
-    }
-}
-
-fn strictly_one_side(distances: [f64; 3], tolerance: f64) -> bool {
-    distances.iter().all(|distance| *distance > tolerance)
-        || distances.iter().all(|distance| *distance < -tolerance)
-}
-
-fn collect_plane_crossings(
-    triangle: [Point3; 3],
-    other: [Point3; 3],
-    other_normal: Vec3,
-    tolerance: f64,
-    output: &mut Vec<Point3>,
-) {
-    for edge in [[0, 1], [1, 2], [2, 0]] {
-        let start = triangle[edge[0]];
-        let end = triangle[edge[1]];
-        let start_distance = (start - other[0]).dot(other_normal);
-        let end_distance = (end - other[0]).dot(other_normal);
-        if start_distance.abs() <= tolerance && point_in_triangle(start, other, tolerance) {
-            output.push(start);
-        }
-        if end_distance.abs() <= tolerance && point_in_triangle(end, other, tolerance) {
-            output.push(end);
-        }
-        if start_distance * end_distance < 0.0 {
-            let parameter = start_distance / (start_distance - end_distance);
-            let point = start + (end - start) * parameter;
-            if point_in_triangle(point, other, tolerance) {
-                output.push(point);
-            }
-        }
-    }
-}
-
-fn point_in_triangle(point: Point3, triangle: [Point3; 3], tolerance: f64) -> bool {
-    let v0 = triangle[1] - triangle[0];
-    let v1 = triangle[2] - triangle[0];
-    let v2 = point - triangle[0];
-    let d00 = v0.dot(v0);
-    let d01 = v0.dot(v1);
-    let d11 = v1.dot(v1);
-    let d20 = v2.dot(v0);
-    let d21 = v2.dot(v1);
-    let denominator = d00 * d11 - d01 * d01;
-    if denominator == 0.0 {
-        return false;
-    }
-    let v = (d11 * d20 - d01 * d21) / denominator;
-    let w = (d00 * d21 - d01 * d20) / denominator;
-    let u = 1.0 - v - w;
-    let scaled = tolerance / d00.sqrt().max(d11.sqrt()).max(tolerance);
-    u >= -scaled && v >= -scaled && w >= -scaled
-}
-
-fn coplanar_triangle_intersection(
-    first: [Point3; 3],
-    second: [Point3; 3],
-    normal: Vec3,
-    tolerance: f64,
-) -> KernelResult<TriangleIntersection> {
-    let drop_axis = if normal.x.abs() >= normal.y.abs() && normal.x.abs() >= normal.z.abs() {
-        0
-    } else if normal.y.abs() >= normal.z.abs() {
-        1
-    } else {
-        2
-    };
-    let project = |point: Point3| -> [f64; 2] {
-        match drop_axis {
-            0 => [point.y, point.z],
-            1 => [point.x, point.z],
-            _ => [point.x, point.y],
-        }
-    };
-    let a = first.map(project);
-    let b = second.map(project);
-    let overlap = clip_convex_polygon(a.to_vec(), b);
-    if overlap.len() >= 3 {
-        let twice_area = overlap
-            .iter()
-            .zip(overlap.iter().cycle().skip(1))
-            .map(|(first, second)| first[0] * second[1] - first[1] * second[0])
-            .sum::<f64>()
-            .abs();
-        let scale = a
-            .iter()
-            .chain(&b)
-            .map(|point| point[0].abs().max(point[1].abs()))
-            .fold(1.0_f64, f64::max);
-        if twice_area > 2.0 * tolerance * scale {
-            return Ok(TriangleIntersection::CoplanarArea);
-        }
-    }
-    let mut boundary = Vec::new();
-    for point in first {
-        if point_in_triangle2_inclusive(project(point), b, tolerance) {
-            boundary.push(point);
-        }
-    }
-    for point in second {
-        if point_in_triangle2_inclusive(project(point), a, tolerance) {
-            boundary.push(point);
-        }
-    }
-    deduplicate_points(&mut boundary, tolerance);
-    if boundary.is_empty() {
-        Ok(TriangleIntersection::None)
-    } else {
-        Ok(TriangleIntersection::Boundary(boundary))
-    }
-}
-
-fn orient2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-}
-
-fn clip_convex_polygon(mut subject: Vec<[f64; 2]>, clip: [[f64; 2]; 3]) -> Vec<[f64; 2]> {
-    let clip_orientation = orient2(clip[0], clip[1], clip[2]).signum();
-    for index in 0..3 {
-        let start = clip[index];
-        let end = clip[(index + 1) % 3];
-        let input = std::mem::take(&mut subject);
-        if input.is_empty() {
-            break;
-        }
-        let inside = |point| orient2(start, end, point) * clip_orientation >= 0.0;
-        let mut previous = *input.last().expect("nonempty clipped polygon");
-        let mut previous_inside = inside(previous);
-        for current in input {
-            let current_inside = inside(current);
-            if current_inside != previous_inside {
-                let direction = [current[0] - previous[0], current[1] - previous[1]];
-                let edge = [end[0] - start[0], end[1] - start[1]];
-                let denominator = direction[0] * edge[1] - direction[1] * edge[0];
-                if denominator.abs() > f64::EPSILON {
-                    let relative = [start[0] - previous[0], start[1] - previous[1]];
-                    let parameter = (relative[0] * edge[1] - relative[1] * edge[0]) / denominator;
-                    subject.push([
-                        previous[0] + direction[0] * parameter,
-                        previous[1] + direction[1] * parameter,
-                    ]);
-                }
-            }
-            if current_inside {
-                subject.push(current);
-            }
-            previous = current;
-            previous_inside = current_inside;
-        }
-    }
-    subject
-}
-
-fn point_in_triangle2_inclusive(point: [f64; 2], triangle: [[f64; 2]; 3], tolerance: f64) -> bool {
-    let values = [
-        orient2(triangle[0], triangle[1], point),
-        orient2(triangle[1], triangle[2], point),
-        orient2(triangle[2], triangle[0], point),
-    ];
-    let area_tolerance = tolerance * tolerance;
-    values.iter().all(|value| *value >= -area_tolerance)
-        || values.iter().all(|value| *value <= area_tolerance)
-}
-
-fn deduplicate_points(points: &mut Vec<Point3>, tolerance: f64) {
-    let mut unique = Vec::new();
-    for point in points.drain(..) {
-        if unique
-            .iter()
-            .all(|existing: &Point3| existing.distance(point) > tolerance)
-        {
-            unique.push(point);
-        }
-    }
-    *points = unique;
 }
 
 fn allowed_face_contact(
@@ -2683,59 +2712,4 @@ fn point_segment_distance(point: Point3, start: Point3, end: Point3) -> f64 {
     }
     .clamp(0.0, 1.0);
     point.distance(start + segment * parameter)
-}
-
-fn point_inside_mesh(
-    point: Point3,
-    mesh: &TriangleMesh,
-    tolerance: ModelTolerance,
-) -> KernelResult<bool> {
-    let direction = Vec3::new(1.0, std::f64::consts::SQRT_2, std::f64::consts::PI).normalize();
-    let mut parameters = Vec::new();
-    for triangle in &mesh.triangles {
-        let vertices = triangle_points(mesh, *triangle);
-        if let Some(parameter) =
-            ray_triangle_parameter(point, direction, vertices, tolerance.linear)
-        {
-            if parameter.abs() <= tolerance.linear {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "containment point lies on shell boundary",
-                ));
-            }
-            if parameter > 0.0 {
-                parameters.push(parameter);
-            }
-        }
-    }
-    parameters.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    parameters.dedup_by(|a, b| (*a - *b).abs() <= tolerance.linear);
-    Ok(parameters.len() % 2 == 1)
-}
-
-fn ray_triangle_parameter(
-    origin: Point3,
-    direction: Vec3,
-    triangle: [Point3; 3],
-    tolerance: f64,
-) -> Option<f64> {
-    let edge1 = triangle[1] - triangle[0];
-    let edge2 = triangle[2] - triangle[0];
-    let p = direction.cross(edge2);
-    let determinant = edge1.dot(p);
-    if determinant.abs() <= tolerance {
-        return None;
-    }
-    let inverse = 1.0 / determinant;
-    let t = origin - triangle[0];
-    let u = t.dot(p) * inverse;
-    if u < -tolerance || u > 1.0 + tolerance {
-        return None;
-    }
-    let q = t.cross(edge1);
-    let v = direction.dot(q) * inverse;
-    if v < -tolerance || u + v > 1.0 + tolerance {
-        return None;
-    }
-    Some(edge2.dot(q) * inverse)
 }

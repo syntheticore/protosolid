@@ -5,8 +5,8 @@ use cgmath::prelude::*;
 use crate::{Point2, Point3};
 
 use super::{
-    Axis3, Compound, Curve2, Curve3, DiagnosticKind, EdgeHandle, FaceHandle, Kernel, KernelError,
-    KernelResult, ModelTolerance, PersistentId, Plane3, PolyhedralMesh, Profile, RigidTransform3,
+    Axis3, Compound, Curve2, DiagnosticKind, FaceHandle, Kernel, KernelError, KernelResult,
+    ModelTolerance, PersistentId, Plane3, PolyhedralMesh, Profile, RigidTransform3,
     TessellationOptions, TrimmedCurve2, Wire2,
 };
 
@@ -717,115 +717,6 @@ fn clip_soup(
         }
     }
     Ok(output)
-}
-
-pub(crate) fn fillet(
-    source: &Compound,
-    edges: &[EdgeHandle],
-    radius: f64,
-) -> KernelResult<Compound> {
-    let tolerance = source.tolerance();
-    if !radius.is_finite() || radius <= tolerance.linear {
-        return Err(invalid(
-            "fillet radius must be finite and exceed model tolerance",
-        ));
-    }
-    if source.solids().len() != 1 || edges.is_empty() {
-        return Err(invalid("fillet needs one solid and at least one edge"));
-    }
-    let mesh = source
-        .solids()
-        .next()
-        .ok_or_else(|| invalid("missing solid"))?
-        .tessellate(construction_tessellation(tolerance)?)?;
-    let mut soup = mesh
-        .triangles
-        .iter()
-        .zip(&mesh.triangle_faces)
-        .map(|(triangle, face)| {
-            source.face_name(*face).map(|name| {
-                (
-                    [
-                        mesh.positions[triangle[0]],
-                        mesh.positions[triangle[1]],
-                        mesh.positions[triangle[2]],
-                    ],
-                    vec![name],
-                )
-            })
-        })
-        .collect::<KernelResult<Vec<_>>>()?;
-    for edge in edges {
-        let faces = edge.connected_faces()?;
-        if faces.len() != 2 {
-            return Err(invalid("fillet edge must have exactly two adjacent faces"));
-        }
-        let samples = if matches!(edge.curve(), Curve3::Line(_)) {
-            vec![edge.endpoints()?[0]]
-        } else {
-            edge.tessellate(construction_tessellation(tolerance)?)?
-                .points
-        };
-        let mut unique_samples = Vec::<Point3>::new();
-        for point in samples {
-            if unique_samples
-                .iter()
-                .all(|candidate| candidate.distance(point) > tolerance.linear)
-            {
-                unique_samples.push(point);
-            }
-        }
-        if unique_samples.len() > 8 {
-            let stride = unique_samples.len().div_ceil(8);
-            unique_samples = unique_samples.into_iter().step_by(stride).collect();
-        }
-        for point in unique_samples {
-            let mut normals = Vec::new();
-            for face in &faces {
-                let projection = face.surface().project(point, tolerance)?;
-                let mut normal = face
-                    .surface()
-                    .normal(projection.parameters.0, projection.parameters.1)?
-                    .normalize();
-                let face_mesh = face.tessellate(construction_tessellation(tolerance)?)?;
-                let reference = face_mesh
-                    .positions
-                    .iter()
-                    .enumerate()
-                    .min_by(|(_, first), (_, second)| {
-                        first.distance(point).total_cmp(&second.distance(point))
-                    })
-                    .and_then(|(index, _)| face_mesh.normals.get(index));
-                if let Some(reference) = reference {
-                    if normal.dot(*reference) < 0.0 {
-                        normal = -normal;
-                    }
-                }
-                normals.push(normal);
-            }
-            let denominator = 1.0 + normals[0].dot(normals[1]);
-            if denominator <= tolerance.parameter {
-                return Err(invalid(
-                    "fillet adjacent faces have no finite interior bisector",
-                ));
-            }
-            let center = point - (normals[0] + normals[1]) * (radius / denominator);
-            let steps = 4usize;
-            for step in 1..steps {
-                let parameter = step as f64 / steps as f64;
-                let normal = (normals[0] * (1.0 - parameter) + normals[1] * parameter).normalize();
-                soup = clip_soup(soup, normal, center + normal * radius, tolerance.linear)?;
-                if soup.is_empty() {
-                    return Err(invalid("fillet removed the entire solid"));
-                }
-            }
-        }
-    }
-    publish_from(
-        PolyhedralMesh::from_tagged_triangle_soup(soup, tolerance)?,
-        tolerance,
-        source,
-    )
 }
 
 pub(crate) fn split(source: &Compound, plane: Plane3, keep: &str) -> KernelResult<Compound> {

@@ -98,7 +98,7 @@ export class ShapexBackend {
       tessellate: true,
       revolve: false,
       loft: false,
-      fillet: false,
+      fillet: true,
       offset: false,
       split: false,
       compoundMerge: true,
@@ -160,8 +160,17 @@ export class ShapexBackend {
     unsupported('analytical shelling yet')
   }
 
-  fillet() {
-    unsupported('analytical fillets yet')
+  fillet(geometry, selected, radius) {
+    const edges = new this.api.EdgeList()
+    selected.forEach(edge => edges.add(edge))
+    try {
+      return new ShapexGeometry(geometry.raw.fillet(edges, radius))
+    } catch(error) {
+      throw {
+        type: 'error',
+        msg: `Shapex fillet failed: ${error?.message || error}`,
+      }
+    }
   }
 
   split() {

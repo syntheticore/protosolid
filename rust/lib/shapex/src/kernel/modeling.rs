@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use cgmath::prelude::*;
 
-use crate::{Point2, Point3, Vec3};
+use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::euler::CommittedOperation;
+use super::integration::adaptive_simpson;
 use super::physical::PhysicalCertificate;
 use super::{
     BodyId, BooleanKind, ChangeKind, Circle2, Curve2, Curve3, DiagnosticKind, EdgeId, FaceId,
@@ -200,7 +201,13 @@ fn semantic_edge(history: &OperationHistory, edge: &EdgeHandle) -> bool {
         {
             first.normal().cross(second.normal()).magnitude() > edge.state.tolerance().angular
         }
-        _ => false,
+        // Faceted feature reconstructions deliberately share planar ancestry,
+        // so their internal triangle edges remain hidden. Curved analytical
+        // patches, however, can have the same surface representation while
+        // lying on different supports (for example two adjacent NURBS patches
+        // in a rolling blend). Their shared boundary is a semantic BREP edge.
+        (Surface3::Plane(_), Surface3::Plane(_)) => false,
+        (first, second) => !same_surface_support(first, second, edge.state.tolerance()),
     }
 }
 
@@ -230,6 +237,62 @@ fn same_curve_support(
                     .acos()
                     <= tolerance.angular
         }
+        (super::Curve3::Nurbs(first), super::Curve3::Nurbs(second)) => {
+            let compatible = first.degree() == second.degree()
+                && first.control_points().len() == second.control_points().len()
+                && first.weights().len() == second.weights().len()
+                && first.knots().len() == second.knots().len();
+            if !compatible {
+                return false;
+            }
+            let normalized_knots = |knots: &[f64]| {
+                let start = knots[0];
+                let span = knots[knots.len() - 1] - start;
+                knots
+                    .iter()
+                    .map(|value| (value - start) / span)
+                    .collect::<Vec<_>>()
+            };
+            let first_knots = normalized_knots(first.knots());
+            let second_knots = normalized_knots(second.knots());
+            let same = |reversed: bool| {
+                let point = |index| {
+                    if reversed {
+                        second.control_points()[second.control_points().len() - 1 - index]
+                    } else {
+                        second.control_points()[index]
+                    }
+                };
+                let weight = |index| {
+                    if reversed {
+                        second.weights()[second.weights().len() - 1 - index]
+                    } else {
+                        second.weights()[index]
+                    }
+                };
+                let knot = |index| {
+                    if reversed {
+                        1.0 - second_knots[second_knots.len() - 1 - index]
+                    } else {
+                        second_knots[index]
+                    }
+                };
+                let weight_scale = weight(0) / first.weights()[0];
+                first
+                    .control_points()
+                    .iter()
+                    .enumerate()
+                    .all(|(index, value)| value.distance(point(index)) <= tolerance.linear)
+                    && first.weights().iter().enumerate().all(|(index, value)| {
+                        (value * weight_scale - weight(index)).abs() <= tolerance.parameter
+                    })
+                    && first_knots
+                        .iter()
+                        .enumerate()
+                        .all(|(index, value)| (value - knot(index)).abs() <= tolerance.parameter)
+            };
+            same(false) || same(true)
+        }
         _ => first == second,
     }
 }
@@ -258,6 +321,394 @@ fn same_surface_support(
         }
         _ => first == second,
     }
+}
+
+fn same_surface_support_set(
+    first: &[Surface3],
+    second: &[Surface3],
+    tolerance: ModelTolerance,
+) -> bool {
+    if first.len() != second.len() {
+        return false;
+    }
+    let mut used = vec![false; second.len()];
+    first.iter().all(|surface| {
+        second
+            .iter()
+            .enumerate()
+            .find(|(index, candidate)| {
+                !used[*index] && same_surface_support(surface, candidate, tolerance)
+            })
+            .map(|(index, _)| used[index] = true)
+            .is_some()
+    })
+}
+
+fn add_origins(
+    origins: &mut BTreeMap<PersistentId, Vec<PersistentId>>,
+    name: PersistentId,
+    sources: impl IntoIterator<Item = PersistentId>,
+) {
+    let entry = origins.entry(name).or_default();
+    for source in sources {
+        if !entry.contains(&source) {
+            entry.push(source);
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RoundedProfileCorner {
+    source: PersistentId,
+    center: Point2,
+    incoming_tangent: Point2,
+    outgoing_tangent: Point2,
+}
+
+fn round_profile_outer_corners(
+    profile: &Profile,
+    selected: &[(PersistentId, Point2)],
+    radius: f64,
+) -> KernelResult<(Profile, Vec<RoundedProfileCorner>)> {
+    let tolerance = profile.tolerance();
+    let segments = profile.outer().segments();
+    if segments.len() < 3 {
+        return Err(KernelError::new(
+            DiagnosticKind::UnsupportedGeometry,
+            "analytical prism fillets need a profile with at least three boundary segments",
+        ));
+    }
+    let vertices = segments
+        .iter()
+        .map(TrimmedCurve2::start)
+        .collect::<KernelResult<Vec<_>>>()?;
+    let mut corners = vec![None; segments.len()];
+    for (source, point) in selected {
+        let matches = vertices
+            .iter()
+            .enumerate()
+            .filter_map(|(index, vertex)| {
+                (vertex.distance(*point) <= tolerance.linear_at_scale(vertex.to_vec().magnitude()))
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if matches.len() != 1 || corners[matches[0]].is_some() {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "selected fillet edges must map uniquely to outer profile corners",
+            ));
+        }
+        let index = matches[0];
+        let previous = (index + segments.len() - 1) % segments.len();
+        if !matches!(segments[previous].curve(), Curve2::Line(_))
+            || !matches!(segments[index].curve(), Curve2::Line(_))
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "analytical prism fillets currently require two straight profile sides",
+            ));
+        }
+        let vertex = vertices[index];
+        let previous_start = segments[previous].start()?;
+        let next_end = segments[index].end()?;
+        let incoming = (vertex - previous_start).normalize();
+        let outgoing = (next_end - vertex).normalize();
+        let turn =
+            (incoming.x * outgoing.y - incoming.y * outgoing.x).atan2(incoming.dot(outgoing));
+        if turn <= tolerance.angular || std::f64::consts::PI - turn <= tolerance.angular {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "analytical prism fillets currently require a convex outer profile corner",
+            ));
+        }
+        let tangent_distance = radius * (turn * 0.5).tan();
+        if !tangent_distance.is_finite() || tangent_distance <= tolerance.linear {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "fillet radius is too small or large for the selected corner",
+            ));
+        }
+        let incoming_tangent = vertex - incoming * tangent_distance;
+        let outgoing_tangent = vertex + outgoing * tangent_distance;
+        let inward = Vec2::new(-incoming.y, incoming.x);
+        corners[index] = Some(RoundedProfileCorner {
+            source: *source,
+            center: incoming_tangent + inward * radius,
+            incoming_tangent,
+            outgoing_tangent,
+        });
+    }
+
+    let mut rounded_segments = Vec::with_capacity(segments.len() + selected.len());
+    for index in 0..segments.len() {
+        let next = (index + 1) % segments.len();
+        let start = corners[index]
+            .as_ref()
+            .map(|corner| corner.outgoing_tangent)
+            .unwrap_or(segments[index].start()?);
+        let end = corners[next]
+            .as_ref()
+            .map(|corner| corner.incoming_tangent)
+            .unwrap_or(segments[index].end()?);
+        if start.distance(end) <= tolerance.linear_at_scale(start.to_vec().magnitude()) {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "fillet radius consumes an adjacent profile edge",
+            ));
+        }
+        if corners[index].is_some() || corners[next].is_some() {
+            rounded_segments.push(TrimmedCurve2::line(start, end)?);
+        } else {
+            rounded_segments.push(segments[index].clone());
+        }
+        if let Some(corner) = &corners[next] {
+            let first_radial = (corner.incoming_tangent - corner.center).normalize();
+            let second_radial = (corner.outgoing_tangent - corner.center).normalize();
+            let middle_direction = (first_radial + second_radial).normalize();
+            rounded_segments.push(TrimmedCurve2::arc_through(
+                corner.incoming_tangent,
+                corner.center + middle_direction * radius,
+                corner.outgoing_tangent,
+            )?);
+        }
+    }
+    let rounded = Wire2::new(rounded_segments, tolerance)?;
+    let rounded_profile = Profile::new(rounded, profile.holes().iter().cloned(), tolerance)?;
+    Ok((
+        rounded_profile,
+        corners.into_iter().flatten().collect::<Vec<_>>(),
+    ))
+}
+
+fn end_fillet_mass_properties(
+    source: MassProperties,
+    plane: Plane3,
+    profile: &Profile,
+    chosen: &[bool],
+    axis: Vec3,
+    height: f64,
+    radius: f64,
+) -> KernelResult<MassProperties> {
+    let segments = profile.outer().segments();
+    if chosen.len() != segments.len() || chosen.iter().all(|value| !*value) {
+        return Err(KernelError::new(
+            DiagnosticKind::InvalidInput,
+            "analytical end-fillet certificate has no valid rail chain",
+        ));
+    }
+    let tolerance = profile.tolerance();
+    let coordinate_scale = segments
+        .iter()
+        .flat_map(|segment| [segment.start(), segment.end()])
+        .collect::<KernelResult<Vec<_>>>()?
+        .into_iter()
+        .map(|point| point.to_vec().magnitude())
+        .fold(
+            plane
+                .origin()
+                .to_vec()
+                .magnitude()
+                .max(height)
+                .max(radius)
+                .max(1.0),
+            f64::max,
+        );
+    let volume_target = tolerance
+        .linear
+        .powi(3)
+        .max(f64::EPSILON * source.volume.abs().max(1.0) * 4096.0);
+    let area_target = tolerance
+        .linear
+        .powi(2)
+        .max(f64::EPSILON * source.surface_area.abs().max(1.0) * 4096.0);
+    let targets = [
+        volume_target,
+        volume_target * coordinate_scale,
+        volume_target * coordinate_scale,
+        volume_target * coordinate_scale,
+        volume_target * coordinate_scale.powi(2),
+        volume_target * coordinate_scale.powi(2),
+        volume_target * coordinate_scale.powi(2),
+        volume_target * coordinate_scale.powi(2),
+        volume_target * coordinate_scale.powi(2),
+        volume_target * coordinate_scale.powi(2),
+        area_target,
+        area_target,
+        area_target,
+    ];
+    let selected_count = chosen.iter().filter(|value| **value).count() as f64;
+    let mut removed_volume = 0.0;
+    let mut removed_first = Vec3::new(0.0, 0.0, 0.0);
+    let mut removed_second = [[0.0; 3]; 3];
+    let mut top_strip = 0.0;
+    let mut side_strip = 0.0;
+    let mut blend_area = 0.0;
+    for (index, segment) in segments.iter().enumerate() {
+        if !chosen[index] {
+            continue;
+        }
+        let range = segment.range();
+        let per_segment_targets = targets.map(|target| target / selected_count);
+        let values = adaptive_simpson(
+            0.0,
+            1.0,
+            |unit_parameter| {
+                let parameter = range.start + range.span() * unit_parameter;
+                let evaluation = segment.curve().evaluate(parameter)?;
+                let traversal = range.span().signum();
+                let derivative = evaluation.first_derivative;
+                let speed = derivative.magnitude();
+                if speed <= tolerance.parameter {
+                    return Err(KernelError::new(
+                        DiagnosticKind::GeometryInvariant,
+                        "end-fillet rail has a singular tangent",
+                    ));
+                }
+                let tangent = derivative / speed * traversal;
+                let inward = Vec2::new(-tangent.y, tangent.x);
+                let normalized_derivative = evaluation.second_derivative / speed
+                    - derivative * derivative.dot(evaluation.second_derivative) / speed.powi(3);
+                let inward_derivative = Vec2::new(
+                    -normalized_derivative.y * traversal,
+                    normalized_derivative.x * traversal,
+                );
+                let inner_targets = per_segment_targets.map(|target| target * 0.01);
+                let mut integrated = adaptive_simpson(
+                    0.0,
+                    std::f64::consts::FRAC_PI_2,
+                    |angle| {
+                        let (sin, cos) = angle.sin_cos();
+                        let s = radius * (1.0 - cos);
+                        let ds = radius * sin;
+                        let offset_derivative = derivative + inward_derivative * s;
+                        if offset_derivative.dot(derivative) <= tolerance.parameter * speed.powi(2)
+                        {
+                            return Err(KernelError::new(
+                                DiagnosticKind::InvalidInput,
+                                "end fillet radius folds a circular offset rail",
+                            ));
+                        }
+                        let offset_speed = offset_derivative.magnitude();
+                        let lower_q = radius * sin;
+                        let q0 = radius - lower_q;
+                        let q1 = (radius.powi(2) - lower_q.powi(2)) * 0.5;
+                        let q2 = (radius.powi(3) - lower_q.powi(3)) / 3.0;
+                        let uv = evaluation.point + inward * s;
+                        let base = plane.evaluate(uv.x, uv.y)?.point + axis * (height - radius);
+                        let base_coordinates = [base.x, base.y, base.z];
+                        let axis_coordinates = [axis.x, axis.y, axis.z];
+                        let measure = offset_speed * ds;
+                        let first = base.to_vec() * q0 + axis * q1;
+                        let mut terms = [0.0; 13];
+                        terms[0] = q0 * measure;
+                        terms[1] = first.x * measure;
+                        terms[2] = first.y * measure;
+                        terms[3] = first.z * measure;
+                        let pairs = [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)];
+                        for (slot, (row, column)) in pairs.into_iter().enumerate() {
+                            terms[4 + slot] =
+                                (base_coordinates[row] * base_coordinates[column] * q0
+                                    + (base_coordinates[row] * axis_coordinates[column]
+                                        + axis_coordinates[row] * base_coordinates[column])
+                                        * q1
+                                    + axis_coordinates[row] * axis_coordinates[column] * q2)
+                                    * measure;
+                        }
+                        terms[10] = offset_speed * ds;
+                        terms[11] = offset_speed * radius;
+                        Ok(terms)
+                    },
+                    inner_targets,
+                    24,
+                    "analytical end-fillet cross-section integration did not converge",
+                )?;
+                for value in &mut integrated {
+                    *value *= range.span().abs();
+                }
+                integrated[12] = speed * radius * range.span().abs();
+                Ok(integrated)
+            },
+            per_segment_targets,
+            24,
+            "analytical end-fillet rail integration did not converge",
+        )?;
+        removed_volume += values[0];
+        removed_first += Vec3::new(values[1], values[2], values[3]);
+        removed_second[0][0] += values[4];
+        removed_second[1][1] += values[5];
+        removed_second[2][2] += values[6];
+        removed_second[0][1] += values[7];
+        removed_second[1][0] += values[7];
+        removed_second[0][2] += values[8];
+        removed_second[2][0] += values[8];
+        removed_second[1][2] += values[9];
+        removed_second[2][1] += values[9];
+        top_strip += values[10];
+        blend_area += values[11];
+        side_strip += values[12];
+    }
+    let mass = source.volume - removed_volume;
+    if !mass.is_finite() || mass <= tolerance.linear.powi(3) {
+        return Err(KernelError::new(
+            DiagnosticKind::InvalidInput,
+            "end fillet removes all or an uncertifiable amount of material",
+        ));
+    }
+    let source_center = source.centroid.to_vec();
+    let mut inertia_origin = source.inertia;
+    let center_squared = source_center.magnitude2();
+    for row in 0..3 {
+        for column in 0..3 {
+            inertia_origin[row][column] += source.volume
+                * (if row == column { center_squared } else { 0.0 }
+                    - source_center[row] * source_center[column]);
+        }
+    }
+    let trace = inertia_origin[0][0] + inertia_origin[1][1] + inertia_origin[2][2];
+    let mut source_second = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for column in 0..3 {
+            source_second[row][column] =
+                if row == column { trace * 0.5 } else { 0.0 } - inertia_origin[row][column];
+        }
+    }
+    let first = source_center * source.volume - removed_first;
+    let centroid = Point3::from_vec(first / mass);
+    let mut second = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for column in 0..3 {
+            second[row][column] = source_second[row][column] - removed_second[row][column];
+        }
+    }
+    let second_trace = second[0][0] + second[1][1] + second[2][2];
+    let center = centroid.to_vec();
+    let mut inertia = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for column in 0..3 {
+            let origin_value = if row == column { second_trace } else { 0.0 } - second[row][column];
+            inertia[row][column] = origin_value
+                - mass
+                    * (if row == column {
+                        center.magnitude2()
+                    } else {
+                        0.0
+                    } - center[row] * center[column]);
+        }
+    }
+    let chain_starts = (0..chosen.len())
+        .filter(|index| chosen[*index] && !chosen[(*index + chosen.len() - 1) % chosen.len()])
+        .count();
+    let endpoint_loss =
+        chain_starts as f64 * 2.0 * radius.powi(2) * (1.0 - std::f64::consts::FRAC_PI_4);
+    let properties = MassProperties {
+        volume: mass,
+        signed_volume: mass,
+        surface_area: source.surface_area - top_strip - side_strip - endpoint_loss + blend_area,
+        centroid,
+        inertia,
+    };
+    super::physical::validate_supplied_properties(properties, tolerance, coordinate_scale)?;
+    Ok(properties)
 }
 
 fn direct_descendants(
@@ -642,6 +1093,205 @@ pub struct Compound {
 }
 
 impl Compound {
+    fn fillet_prism_end_edges(
+        &self,
+        edges: &[EdgeHandle],
+        radius: f64,
+    ) -> KernelResult<Option<Self>> {
+        let Some(first) = edges.first() else {
+            return Ok(None);
+        };
+        let mut candidate = None;
+        for face in first.connected_faces()? {
+            let Surface3::Plane(plane) = face.surface() else {
+                continue;
+            };
+            let axis = plane.normal().normalize();
+            let endpoints = first.endpoints()?;
+            if (endpoints[1] - endpoints[0]).dot(axis).abs()
+                > self
+                    .tolerance()
+                    .linear_at_scale((endpoints[1] - endpoints[0]).magnitude())
+            {
+                continue;
+            }
+            if self.is_prism_along(axis)? {
+                candidate = Some((face.clone(), *plane, axis));
+                break;
+            }
+        }
+        let Some((selected_cap_face, selected_cap, mut axis)) = candidate else {
+            return Ok(None);
+        };
+        let mut bounds = self
+            .vertices()
+            .map(|vertex| axis.dot(vertex.point().to_vec()))
+            .fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
+            );
+        let selected_level = axis.dot(selected_cap.origin().to_vec());
+        if (selected_level - bounds.0).abs() < (selected_level - bounds.1).abs() {
+            axis = -axis;
+            bounds = (-bounds.1, -bounds.0);
+        }
+        let height = bounds.1 - bounds.0;
+        let base_plane = Plane3::from_origin_normal(Point3::from_vec(axis * bounds.0), axis)?;
+        let profile = self
+            .profile_on_parallel_cap(axis, bounds.0, base_plane)?
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "analytical fillet could not recover the prism section",
+                )
+            })?;
+        let tolerance = self.tolerance();
+        let cap_edges = selected_cap_face.boundary_edges()?;
+        let segment_sources = profile
+            .outer()
+            .segments()
+            .iter()
+            .map(|segment| {
+                let segment_endpoints = [segment.start()?, segment.end()?];
+                let matching = cap_edges
+                    .iter()
+                    .filter_map(|edge| {
+                        let endpoints = edge.endpoints().ok()?;
+                        let projected = endpoints.map(|point| {
+                            let value = base_plane.project(point).ok()?.parameters;
+                            Some(Point2::new(value.0, value.1))
+                        });
+                        let [Some(first), Some(second)] = projected else {
+                            return None;
+                        };
+                        ((first.distance(segment_endpoints[0]) <= tolerance.linear
+                            && second.distance(segment_endpoints[1]) <= tolerance.linear)
+                            || (first.distance(segment_endpoints[1]) <= tolerance.linear
+                                && second.distance(segment_endpoints[0]) <= tolerance.linear))
+                            .then_some(edge)
+                    })
+                    .collect::<Vec<_>>();
+                if matching.len() != 1 {
+                    return Err(KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "prism cap segment does not map uniquely to a source edge",
+                    ));
+                }
+                let edge = matching[0];
+                let lateral_faces = edge
+                    .connected_faces()?
+                    .into_iter()
+                    .filter(|face| face.persistent_id() != selected_cap_face.persistent_id())
+                    .collect::<Vec<_>>();
+                if lateral_faces.len() != 1 {
+                    return Err(KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "prism cap edge does not have one lateral source face",
+                    ));
+                }
+                Ok((edge.persistent_id(), lateral_faces[0].persistent_id()))
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        let mut selected_segments = Vec::new();
+        for edge in edges {
+            let endpoints = edge.endpoints()?;
+            let projected = endpoints
+                .into_iter()
+                .map(|point| {
+                    let value = base_plane.project(point)?.parameters;
+                    Ok(Point2::new(value.0, value.1))
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            let matches = profile
+                .outer()
+                .segments()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, segment)| {
+                    let start = segment.start().ok()?;
+                    let end = segment.end().ok()?;
+                    ((start.distance(projected[0]) <= tolerance.linear
+                        && end.distance(projected[1]) <= tolerance.linear)
+                        || (start.distance(projected[1]) <= tolerance.linear
+                            && end.distance(projected[0]) <= tolerance.linear))
+                        .then_some(index)
+                })
+                .collect::<Vec<_>>();
+            if matches.len() != 1 {
+                return Ok(None);
+            }
+            selected_segments.push(matches[0]);
+        }
+        let mut kernel = Kernel::new(tolerance)?;
+        let mut transaction = kernel.begin_operation();
+        let topology = transaction.extrude_profile_with_end_fillet(
+            base_plane,
+            &profile,
+            axis * height,
+            &selected_segments,
+            radius,
+        )?;
+        let properties = end_fillet_mass_properties(
+            self.properties,
+            base_plane,
+            &profile,
+            &topology.chosen,
+            axis,
+            height,
+            radius,
+        )?;
+        let committed = transaction.finish_with_certificate(properties)?;
+        let rebuilt = Self::from_operation(kernel, committed, [])?;
+        let mut extra_origins = BTreeMap::<PersistentId, Vec<PersistentId>>::new();
+        let edge_name = |edge: EdgeId| -> KernelResult<PersistentId> {
+            Ok(rebuilt.state.topology().edge(edge)?.name())
+        };
+        let face_name = |face: FaceId| -> KernelResult<PersistentId> {
+            Ok(rebuilt.state.topology().face(face)?.name())
+        };
+        for index in 0..segment_sources.len() {
+            let (source_edge, source_face) = segment_sources[index];
+            add_origins(
+                &mut extra_origins,
+                edge_name(topology.lower_edges[index])?,
+                [source_edge],
+            );
+            add_origins(
+                &mut extra_origins,
+                edge_name(topology.top_edges[index])?,
+                [source_edge],
+            );
+            add_origins(
+                &mut extra_origins,
+                face_name(topology.lower_faces[index])?,
+                [source_face],
+            );
+            if topology.chosen[index] {
+                add_origins(
+                    &mut extra_origins,
+                    face_name(topology.blend_faces[index])?,
+                    [source_edge, source_face],
+                );
+            }
+            let previous = (index + segment_sources.len() - 1) % segment_sources.len();
+            let path_sources = [index, previous]
+                .into_iter()
+                .filter(|source| topology.chosen[*source])
+                .map(|source| segment_sources[source].0)
+                .collect::<Vec<_>>();
+            if !path_sources.is_empty() {
+                add_origins(
+                    &mut extra_origins,
+                    edge_name(topology.path_edges[index])?,
+                    path_sources,
+                );
+            }
+        }
+        rebuilt
+            .with_geometric_parents(&[self], "fillet", &extra_origins)
+            .map(Some)
+    }
+
     pub(crate) fn from_operation<'a>(
         kernel: Kernel,
         committed: CommittedOperation,
@@ -1281,21 +1931,36 @@ impl Compound {
         Profile::new(outer, holes, tolerance).map(Some)
     }
 
-    fn with_boolean_parents(&self, first: &Self, second: &Self, role: &str) -> KernelResult<Self> {
+    fn with_geometric_parents(
+        &self,
+        parents: &[&Self],
+        role: &str,
+        extra_origins: &BTreeMap<PersistentId, Vec<PersistentId>>,
+    ) -> KernelResult<Self> {
         let tolerance = self.tolerance();
-        let source_vertices = first
-            .vertices()
-            .chain(second.vertices())
+        let source_vertices = parents
+            .iter()
+            .flat_map(|parent| parent.vertices())
             .map(|vertex| (vertex.persistent_id(), vertex.point()))
             .collect::<BTreeMap<_, _>>();
-        let source_edges = first
-            .edges()
-            .chain(second.edges())
-            .map(|edge| (edge.persistent_id(), edge.curve().clone()))
-            .collect::<BTreeMap<_, _>>();
-        let source_faces = first
-            .faces()
-            .chain(second.faces())
+        let mut source_edges = BTreeMap::new();
+        for parent in parents {
+            for edge in parent.edges() {
+                source_edges.insert(
+                    edge.persistent_id(),
+                    (
+                        edge.curve().clone(),
+                        edge.connected_faces()?
+                            .into_iter()
+                            .map(|face| face.surface().clone())
+                            .collect::<Vec<_>>(),
+                    ),
+                );
+            }
+        }
+        let source_faces = parents
+            .iter()
+            .flat_map(|parent| parent.faces())
             .map(|face| (face.persistent_id(), face.surface().clone()))
             .collect::<BTreeMap<_, _>>();
         let output_vertices = self
@@ -1304,8 +1969,19 @@ impl Compound {
             .collect::<BTreeMap<_, _>>();
         let output_edges = self
             .edges()
-            .map(|edge| (edge.persistent_id(), edge.curve().clone()))
-            .collect::<BTreeMap<_, _>>();
+            .map(|edge| {
+                Ok((
+                    edge.persistent_id(),
+                    (
+                        edge.curve().clone(),
+                        edge.connected_faces()?
+                            .into_iter()
+                            .map(|face| face.surface().clone())
+                            .collect::<Vec<_>>(),
+                    ),
+                ))
+            })
+            .collect::<KernelResult<BTreeMap<_, _>>>()?;
         let output_faces = self
             .faces()
             .map(|face| (face.persistent_id(), face.surface().clone()))
@@ -1321,22 +1997,17 @@ impl Compound {
             })
             .collect::<KernelResult<Vec<_>>>()?;
         let outputs = body_entities(&kernel, &bodies)?;
-        let mut sources = body_entities(
-            &first.state,
-            &first
-                .solids
-                .iter()
-                .map(|solid| solid.body)
-                .collect::<Vec<_>>(),
-        )?;
-        sources.extend(body_entities(
-            &second.state,
-            &second
-                .solids
-                .iter()
-                .map(|solid| solid.body)
-                .collect::<Vec<_>>(),
-        )?);
+        let mut sources = BTreeMap::new();
+        for parent in parents {
+            sources.extend(body_entities(
+                &parent.state,
+                &parent
+                    .solids
+                    .iter()
+                    .map(|solid| solid.body)
+                    .collect::<Vec<_>>(),
+            )?);
+        }
         let related = |kind: EntityKind, source: PersistentId, output: PersistentId| match kind {
             EntityKind::Vertex => source_vertices
                 .get(&source)
@@ -1345,7 +2016,10 @@ impl Compound {
             EntityKind::Edge => source_edges
                 .get(&source)
                 .zip(output_edges.get(&output))
-                .is_some_and(|(first, second)| same_curve_support(first, second, tolerance)),
+                .is_some_and(|(first, second)| {
+                    same_curve_support(&first.0, &second.0, tolerance)
+                        && same_surface_support_set(&first.1, &second.1, tolerance)
+                }),
             EntityKind::Face => source_faces
                 .get(&source)
                 .zip(output_faces.get(&output))
@@ -1360,7 +2034,11 @@ impl Compound {
                 })
                 .collect::<Vec<_>>();
             if contributors.is_empty() {
-                history.created(*output);
+                if let Some(sources) = extra_origins.get(output) {
+                    history.derived(*output, sources.iter().copied(), role);
+                } else {
+                    history.created(*output);
+                }
             } else {
                 history.derived(*output, contributors.drain(..), role);
             }
@@ -1369,7 +2047,12 @@ impl Compound {
             let descendants = outputs
                 .iter()
                 .filter_map(|(output, output_kind)| {
-                    (output_kind == &kind && related(kind, source, *output)).then_some(*output)
+                    (output_kind == &kind
+                        && (related(kind, source, *output)
+                            || extra_origins
+                                .get(output)
+                                .is_some_and(|origins| origins.contains(&source))))
+                    .then_some(*output)
                 })
                 .collect::<Vec<_>>();
             history.changed(
@@ -1382,15 +2065,29 @@ impl Compound {
                 descendants,
             );
         }
-        let certificates = certify_bodies(&kernel, &bodies)?;
+        // This operation only rebuilds stable names and lineage around an
+        // unchanged, already-published exact BREP. Preserve its analytical
+        // certificates instead of asking the primitive recognizers to
+        // reclassify a composite rational blend.
+        let certificates = bodies
+            .iter()
+            .copied()
+            .zip(self.solids.iter().map(|solid| PhysicalCertificate {
+                properties: solid.mass_properties(),
+            }))
+            .collect::<BTreeMap<_, _>>();
         Self::from_parts(
             kernel,
             super::identity::fresh_uuid(),
             bodies,
             history,
             certificates,
-            [first, second],
+            parents.iter().copied(),
         )
+    }
+
+    fn with_boolean_parents(&self, first: &Self, second: &Self, role: &str) -> KernelResult<Self> {
+        self.with_geometric_parents(&[first, second], role, &BTreeMap::new())
     }
 
     fn union_adjacent_exact(&self, other: &Self) -> KernelResult<Option<Self>> {
@@ -1486,6 +2183,41 @@ impl Compound {
     }
 
     pub fn fillet(&self, edges: &[EdgeHandle], radius: f64) -> KernelResult<Self> {
+        if !radius.is_finite() || radius <= self.tolerance().linear {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "fillet radius must be finite and exceed model tolerance",
+            ));
+        }
+        if edges.is_empty() {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "fillet needs at least one edge",
+            ));
+        }
+        let mut expanded = Vec::new();
+        for edge in edges {
+            match self.resolve(edge) {
+                Resolution::Preserved(edge)
+                | Resolution::Modified(edge)
+                | Resolution::Merged(edge) => expanded.push(edge),
+                Resolution::Split(descendants) => expanded.extend(descendants),
+                Resolution::Deleted => {
+                    return Err(KernelError::new(
+                        DiagnosticKind::MissingEntity,
+                        "selected fillet edge was deleted by an earlier operation",
+                    ))
+                }
+                Resolution::Unrelated => {
+                    return Err(KernelError::new(
+                        DiagnosticKind::MissingEntity,
+                        "selected fillet edge is unrelated to this compound",
+                    ))
+                }
+            }
+        }
+        expanded.sort_by_key(EdgeHandle::persistent_id);
+        expanded.dedup_by_key(|edge| edge.persistent_id());
         if self.solids.len() > 1 {
             let mut results = Vec::new();
             for solid in &self.solids {
@@ -1493,7 +2225,7 @@ impl Compound {
                     .edges()
                     .map(EdgeHandle::persistent_id)
                     .collect::<BTreeSet<_>>();
-                let local = edges
+                let local = expanded
                     .iter()
                     .filter(|edge| names.contains(&edge.persistent_id()))
                     .cloned()
@@ -1506,42 +2238,131 @@ impl Compound {
             }
             return combine_compounds(results, self.state.tolerance());
         }
-        let selected_supports = edges
+        if expanded.is_empty() {
+            return Err(KernelError::new(
+                DiagnosticKind::MissingEntity,
+                "selected fillet edges do not belong to this compound",
+            ));
+        }
+
+        let follows_prism_axis = if matches!(expanded[0].curve(), Curve3::Line(_)) {
+            let endpoints = expanded[0].endpoints()?;
+            let vector = endpoints[1] - endpoints[0];
+            vector.magnitude() > self.tolerance().linear
+                && self.is_prism_along(vector.normalize())?
+        } else {
+            false
+        };
+        if !follows_prism_axis {
+            if let Some(result) = self.fillet_prism_end_edges(&expanded, radius)? {
+                return Ok(result);
+            }
+        }
+
+        let first_endpoints = expanded[0].endpoints()?;
+        let first_vector = first_endpoints[1] - first_endpoints[0];
+        if !matches!(expanded[0].curve(), Curve3::Line(_))
+            || first_vector.magnitude() <= self.tolerance().linear
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "analytical fillets currently support straight prism edges",
+            ));
+        }
+        let axis = first_vector.normalize();
+        let tolerance = self.tolerance();
+        for edge in &expanded {
+            let endpoints = edge.endpoints()?;
+            let vector = endpoints[1] - endpoints[0];
+            if !matches!(edge.curve(), Curve3::Line(_))
+                || vector.magnitude() <= tolerance.linear
+                || vector
+                    .normalize()
+                    .angle(axis)
+                    .0
+                    .min(vector.normalize().angle(-axis).0)
+                    > tolerance.angular
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "one analytical fillet operation currently requires parallel straight edges",
+                ));
+            }
+        }
+        if !self.is_prism_along(axis)? {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "selected straight edges do not define a uniform analytical prism",
+            ));
+        }
+        let (minimum, maximum) = self
+            .vertices()
+            .map(|vertex| axis.dot(vertex.point().to_vec()))
+            .fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
+            );
+        let height = maximum - minimum;
+        let span_tolerance = tolerance.linear_at_scale(height.abs().max(1.0)) * 8.0;
+        for edge in &expanded {
+            let mut parameters = edge
+                .endpoints()?
+                .into_iter()
+                .map(|point| axis.dot(point.to_vec()))
+                .collect::<Vec<_>>();
+            parameters.sort_by(f64::total_cmp);
+            if (parameters[0] - minimum).abs() > span_tolerance
+                || (parameters[1] - maximum).abs() > span_tolerance
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "analytical prism fillets currently require full-length sweep edges",
+                ));
+            }
+        }
+        let plane = Plane3::from_origin_normal(Point3::from_vec(axis * minimum), axis)?;
+        let profile = self
+            .profile_on_parallel_cap(axis, minimum, plane)?
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "analytical fillet could not recover the prism section",
+                )
+            })?;
+        let selected = expanded
             .iter()
             .map(|edge| {
-                edge.connected_faces().map(|faces| {
-                    (
-                        edge.curve().clone(),
-                        faces
-                            .into_iter()
-                            .map(|face| face.persistent_id())
-                            .collect::<BTreeSet<_>>(),
-                    )
-                })
+                let point = edge.endpoints()?[0];
+                let projected = plane.project(point)?.parameters;
+                Ok((edge.persistent_id(), Point2::new(projected.0, projected.1)))
             })
             .collect::<KernelResult<Vec<_>>>()?;
-        let expanded = self
-            .edges()
-            .filter_map(|candidate| {
-                let faces = candidate
-                    .connected_faces()
-                    .ok()?
-                    .into_iter()
-                    .map(|face| face.persistent_id())
-                    .collect::<BTreeSet<_>>();
-                selected_supports
-                    .iter()
-                    .any(|(curve, selected_faces)| {
-                        same_curve_support(candidate.curve(), curve, self.state.tolerance())
-                            && (matches!(
-                                (candidate.curve(), curve),
-                                (super::Curve3::Circle(_), super::Curve3::Circle(_))
-                            ) || &faces == selected_faces)
-                    })
-                    .then(|| candidate.clone())
-            })
-            .collect::<Vec<_>>();
-        super::features::fillet(self, &expanded, radius)
+        let (rounded_profile, rounded_corners) =
+            round_profile_outer_corners(&profile, &selected, radius)?;
+        let rebuilt = rounded_profile.extrude(plane, axis * height)?;
+        let mut extra_origins = BTreeMap::<PersistentId, Vec<PersistentId>>::new();
+        for face in rebuilt.faces() {
+            let Surface3::Cylinder(cylinder) = face.surface() else {
+                continue;
+            };
+            for corner in &rounded_corners {
+                let center = plane.evaluate(corner.center.x, corner.center.y)?.point;
+                let parallel = cylinder
+                    .axis()
+                    .normalize()
+                    .angle(axis)
+                    .0
+                    .min(cylinder.axis().normalize().angle(-axis).0)
+                    <= tolerance.angular;
+                if parallel
+                    && (cylinder.radius() - radius).abs() <= span_tolerance
+                    && (cylinder.origin() - center).cross(axis).magnitude() <= span_tolerance
+                {
+                    extra_origins.insert(face.persistent_id(), vec![corner.source]);
+                }
+            }
+        }
+        rebuilt.with_geometric_parents(&[self], "fillet", &extra_origins)
     }
 
     pub fn combined(&self, others: &[Self]) -> KernelResult<Self> {

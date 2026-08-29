@@ -14,6 +14,15 @@ pub enum ValidationMode {
     Construction,
     /// Published model: every body must bound a closed, geometrically consistent volume.
     Published,
+    /// Published topology accompanied by a separately validated analytical
+    /// physical certificate.
+    PublishedWithCertificate,
+}
+
+impl ValidationMode {
+    fn is_published(self) -> bool {
+        matches!(self, Self::Published | Self::PublishedWithCertificate)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -60,7 +69,7 @@ pub(crate) fn validate(
     validate_loops(topology, mode, &mut report);
     validate_edges(topology, mode, &mut report);
     validate_vertices(topology, mode, &mut report);
-    if mode == ValidationMode::Published {
+    if mode.is_published() {
         validate_manifold_vertices(topology, &mut report);
         validate_shell_euler_characteristic(topology, &mut report);
     }
@@ -129,7 +138,7 @@ fn validate_ownership(topology: &Topology, mode: ValidationMode, report: &mut Va
     let mut face_owners = BTreeMap::new();
     let mut loop_owners = BTreeMap::new();
     for (body_id, body) in topology.bodies() {
-        if mode == ValidationMode::Published && body.shells.is_empty() {
+        if mode.is_published() && body.shells.is_empty() {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -173,7 +182,7 @@ fn validate_ownership(topology: &Topology, mode: ValidationMode, report: &mut Va
                 .with_entity(shell.name),
             );
         }
-        if mode == ValidationMode::Published && shell.kind != ShellKind::Closed {
+        if mode.is_published() && shell.kind != ShellKind::Closed {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -275,7 +284,7 @@ fn validate_loops(topology: &Topology, mode: ValidationMode, report: &mut Valida
     let mut globally_reached = BTreeSet::new();
     for (loop_id, loop_) in topology.loops() {
         let Some(first) = loop_.first else {
-            if mode == ValidationMode::Published {
+            if mode.is_published() {
                 report.error(
                     Diagnostic::new(
                         DiagnosticKind::TopologyInvariant,
@@ -372,7 +381,7 @@ fn validate_loops(topology: &Topology, mode: ValidationMode, report: &mut Valida
                 break;
             }
         }
-        if mode == ValidationMode::Published && visited.len() < 2 {
+        if mode.is_published() && visited.len() < 2 {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -425,7 +434,7 @@ fn validate_edges(topology: &Topology, mode: ValidationMode, report: &mut Valida
                 .with_entity(edge.name),
             );
         }
-        if mode == ValidationMode::Published && edge.coedges.len() != 2 {
+        if mode.is_published() && edge.coedges.len() != 2 {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -534,7 +543,7 @@ fn validate_vertices(topology: &Topology, mode: ValidationMode, report: &mut Val
                 .with_entity(vertex.name),
             );
         }
-        if mode == ValidationMode::Published && outgoing_uses.is_empty() {
+        if mode.is_published() && outgoing_uses.is_empty() {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -999,7 +1008,7 @@ fn validate_face_parameter_loops(
                 LoopKind::Outer => oriented_area > tolerance.parameter.powi(2),
                 LoopKind::Inner => oriented_area < -tolerance.parameter.powi(2),
             };
-            if mode == ValidationMode::Published && !correct_winding {
+            if mode.is_published() && !correct_winding {
                 report.error(
                     Diagnostic::new(
                         DiagnosticKind::GeometryInvariant,

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use uuid::Uuid;
 
 use cgmath::prelude::*;
@@ -12,8 +14,8 @@ use super::validation::{validate, ValidationMode};
 use super::{
     BodyId, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, DiagnosticKind, EdgeId,
     FaceId, FaceOrientation, Kernel, KernelError, KernelResult, Line2, Line3, LoopId, LoopKind,
-    NurbsCurve2, NurbsCurve3, NurbsSurface3, OperationHistory, ParameterRange, Plane3,
-    PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3, Topology, Torus3,
+    ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, OperationHistory, ParameterRange,
+    Plane3, PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3, Topology, Torus3,
     TrimmedCurve2, VertexId, Wire2,
 };
 
@@ -72,6 +74,175 @@ pub struct MefInput {
     pub new_face_pcurve: Curve2,
     pub old_face_pcurve: Curve2,
     pub pcurve_range: ParameterRange,
+}
+
+#[derive(Debug, Clone)]
+struct SweepPath {
+    curve: Curve3,
+    range: ParameterRange,
+}
+
+#[derive(Debug, Clone)]
+struct SweepTopEdge {
+    curve: Curve3,
+    range: ParameterRange,
+    pcurve: Curve2,
+    pcurve_range: ParameterRange,
+}
+
+#[derive(Debug, Clone)]
+struct SweepSide {
+    surface: Surface3,
+    orientation: FaceOrientation,
+}
+
+#[derive(Debug)]
+struct VariableSweepResult {
+    faces: Vec<FaceId>,
+    path_edges: Vec<EdgeId>,
+    top_edges: Vec<EdgeId>,
+}
+
+#[derive(Debug)]
+pub(crate) struct EndFilletResult {
+    pub chosen: Vec<bool>,
+    pub lower_edges: Vec<EdgeId>,
+    pub lower_faces: Vec<FaceId>,
+    pub blend_faces: Vec<FaceId>,
+    pub path_edges: Vec<EdgeId>,
+    pub top_edges: Vec<EdgeId>,
+}
+
+fn oriented_tangent(segment: &TrimmedCurve2, parameter: f64) -> KernelResult<Vec2> {
+    Ok(segment
+        .curve()
+        .evaluate(parameter)?
+        .first_derivative
+        .normalize()
+        * segment.range().span().signum())
+}
+
+pub(super) fn expand_g1_selection(
+    segments: &[TrimmedCurve2],
+    selected: &[usize],
+    tolerance: ModelTolerance,
+) -> KernelResult<Vec<bool>> {
+    if segments.len() < 2
+        || selected.is_empty()
+        || selected.iter().any(|index| *index >= segments.len())
+    {
+        return Err(KernelError::new(
+            DiagnosticKind::InvalidInput,
+            "invalid end fillet chain",
+        ));
+    }
+    let mut chosen = vec![false; segments.len()];
+    for index in selected {
+        chosen[*index] = true;
+    }
+    loop {
+        let mut changed = false;
+        for index in 0..segments.len() {
+            let next = (index + 1) % segments.len();
+            if chosen[index] == chosen[next] {
+                continue;
+            }
+            let first = oriented_tangent(&segments[index], segments[index].range().end)?;
+            let second = oriented_tangent(&segments[next], segments[next].range().start)?;
+            if first.angle(second).0 <= tolerance.angular {
+                chosen[index] = true;
+                chosen[next] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(chosen);
+        }
+    }
+}
+
+fn rational_quadratic_arc_2(segment: &TrimmedCurve2) -> KernelResult<TrimmedCurve2> {
+    let range = segment.range();
+    let first = segment.curve().evaluate(range.start)?.point;
+    let middle = segment
+        .curve()
+        .evaluate((range.start + range.end) * 0.5)?
+        .point;
+    let last = segment.curve().evaluate(range.end)?.point;
+    let weight = (range.span().abs() * 0.5).cos();
+    if weight <= 0.0 {
+        return Err(KernelError::new(
+            DiagnosticKind::UnsupportedGeometry,
+            "one rational quadratic arc must span less than a semicircle",
+        ));
+    }
+    let control = rational_quadratic_control_2(first, middle, last, weight)?;
+    TrimmedCurve2::new(
+        NurbsCurve2::new(
+            2,
+            vec![first, control, last],
+            vec![1.0, weight, 1.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )?,
+        ParameterRange::new(0.0, 1.0)?,
+    )
+}
+
+fn rational_quadratic_control_2(
+    first: Point2,
+    middle: Point2,
+    last: Point2,
+    weight: f64,
+) -> KernelResult<Point2> {
+    if !weight.is_finite() || weight <= 0.0 {
+        return Err(KernelError::new(
+            DiagnosticKind::InvalidInput,
+            "rational quadratic control weight must be positive",
+        ));
+    }
+    Ok(Point2::from_vec(
+        (middle.to_vec() * (2.0 + 2.0 * weight) - first.to_vec() - last.to_vec()) / (2.0 * weight),
+    ))
+}
+
+fn rational_quadratic_arc_3_controls(
+    curve: &Curve3,
+    range: ParameterRange,
+) -> KernelResult<(Vec<Point3>, Vec<f64>)> {
+    if let Curve3::Nurbs(curve) = curve {
+        if curve.degree() == 2 && curve.control_points().len() == 3 {
+            return Ok((curve.control_points().to_vec(), curve.weights().to_vec()));
+        }
+    }
+    let first = curve.evaluate(range.start)?.point;
+    let middle = curve.evaluate((range.start + range.end) * 0.5)?.point;
+    let last = curve.evaluate(range.end)?.point;
+    let weight = (range.span().abs() * 0.5).cos();
+    if weight <= 0.0 {
+        return Err(KernelError::new(
+            DiagnosticKind::UnsupportedGeometry,
+            "one rational quadratic arc must span less than a semicircle",
+        ));
+    }
+    let control = rational_quadratic_control_3(first, middle, last, weight)?;
+    Ok((vec![first, control, last], vec![1.0, weight, 1.0]))
+}
+
+fn rational_quadratic_control_3(
+    first: Point3,
+    middle: Point3,
+    last: Point3,
+    weight: f64,
+) -> KernelResult<Point3> {
+    if !weight.is_finite() || weight <= 0.0 {
+        return Err(KernelError::new(
+            DiagnosticKind::InvalidInput,
+            "rational quadratic control weight must be positive",
+        ));
+    }
+    Ok(Point3::from_vec(
+        (middle.to_vec() * (2.0 + 2.0 * weight) - first.to_vec() - last.to_vec()) / (2.0 * weight),
+    ))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -4591,6 +4762,667 @@ impl<'kernel> EulerTransaction<'kernel> {
         Ok(())
     }
 
+    /// Construct an exact end-cap rolling blend. The first sweep stops one
+    /// radius below the cap; this second Euler sweep follows quarter-circle
+    /// vertex paths. Line rails produce cylinders and circular rails tori.
+    pub(crate) fn extrude_profile_with_end_fillet(
+        &mut self,
+        plane: Plane3,
+        profile: &Profile,
+        vector: Vec3,
+        selected: &[usize],
+        radius: f64,
+    ) -> KernelResult<EndFilletResult> {
+        let height = vector.dot(plane.normal());
+        if height <= radius + self.kernel.tolerance.linear {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "end fillet radius must be smaller than the extrusion height",
+            ));
+        }
+        let axis = vector.normalize();
+        let lower = vector - axis * radius;
+        let segments = prepared_wire_segments(profile.outer())?;
+        let chosen = expand_g1_selection(&segments, selected, self.kernel.tolerance)?;
+        if chosen.iter().all(|value| *value) {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "a completely smooth closed rim needs a periodic toroidal sweep",
+            ));
+        }
+        let construction_segments = segments
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| {
+                if chosen[index] && matches!(segment.curve(), Curve2::Circle(_)) {
+                    rational_quadratic_arc_2(segment)
+                } else {
+                    Ok(segment.clone())
+                }
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        let construction_profile = Profile::new(
+            Wire2::new(construction_segments.clone(), self.kernel.tolerance)?,
+            profile.holes().iter().cloned(),
+            self.kernel.tolerance,
+        )?;
+        let body = self.extrude_curve_profile_unchecked(plane, &construction_profile, lower)?;
+        let end_level = axis.dot((plane.origin() + lower).to_vec());
+        let end_face = self
+            .working
+            .body(body)?
+            .shells
+            .iter()
+            .flat_map(|shell| {
+                self.working
+                    .shell(*shell)
+                    .map(|value| value.faces.clone())
+                    .unwrap_or_default()
+            })
+            .find(
+                |face| match self.working.face(*face).map(|value| value.surface()) {
+                    Ok(Surface3::Plane(candidate)) => {
+                        candidate.normal().dot(axis).abs() > 1.0 - self.kernel.tolerance.angular
+                            && (axis.dot(candidate.origin().to_vec()) - end_level).abs()
+                                <= self
+                                    .kernel
+                                    .tolerance
+                                    .linear_at_scale(end_level.abs().max(1.0))
+                                    * 8.0
+                    }
+                    _ => false,
+                },
+            )
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "fillet extrusion lost its end cap",
+                )
+            })?;
+        let outer_loop = self
+            .working
+            .face(end_face)?
+            .loops
+            .iter()
+            .copied()
+            .find(|loop_id| {
+                self.working
+                    .loop_(*loop_id)
+                    .is_ok_and(|value| value.kind == LoopKind::Outer)
+            })
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "fillet extrusion end cap has no outer loop",
+                )
+            })?;
+
+        let mut top_segments = segments.clone();
+        for index in 0..segments.len() {
+            if !chosen[index] {
+                continue;
+            }
+            let segment = &segments[index];
+            let at = |parameter| -> KernelResult<(Point2, Vec2)> {
+                let value = segment.curve().evaluate(parameter)?;
+                let derivative = value.first_derivative * segment.range().span().signum();
+                let inward = Vec2::new(-derivative.y, derivative.x).normalize();
+                Ok((value.point, inward))
+            };
+            let (start, start_inward) = at(segment.range().start)?;
+            let (middle, middle_inward) = at((segment.range().start + segment.range().end) * 0.5)?;
+            let (end, end_inward) = at(segment.range().end)?;
+            top_segments[index] = match segment.curve() {
+                Curve2::Line(_) => {
+                    TrimmedCurve2::line(start + start_inward * radius, end + end_inward * radius)?
+                }
+                Curve2::Circle(_) => rational_quadratic_arc_2(&TrimmedCurve2::arc_through(
+                    start + start_inward * radius,
+                    middle + middle_inward * radius,
+                    end + end_inward * radius,
+                )?)?,
+                Curve2::Nurbs(_) => {
+                    return Err(KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "end fillet chains currently require analytical line and circle rails",
+                    ))
+                }
+            };
+        }
+        for index in 0..segments.len() {
+            if chosen[index] {
+                continue;
+            }
+            let previous = (index + segments.len() - 1) % segments.len();
+            let next = (index + 1) % segments.len();
+            if !chosen[previous] && !chosen[next] {
+                continue;
+            }
+            if !matches!(segments[index].curve(), Curve2::Line(_)) {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "an end fillet chain must terminate against straight profile sides",
+                ));
+            }
+            let start = if chosen[previous] {
+                top_segments[previous].end()?
+            } else {
+                segments[index].start()?
+            };
+            let end = if chosen[next] {
+                top_segments[next].start()?
+            } else {
+                segments[index].end()?
+            };
+            top_segments[index] = TrimmedCurve2::line(start, end)?;
+        }
+        for index in 0..top_segments.len() {
+            let next = (index + 1) % top_segments.len();
+            let gap = top_segments[index]
+                .end()?
+                .distance(top_segments[next].start()?);
+            if gap > self.kernel.tolerance.linear {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    format!("end fillet offset chain has gap {gap} after segment {index}"),
+                ));
+            }
+        }
+        let top_wire = Wire2::new(top_segments.clone(), self.kernel.tolerance)?;
+        Profile::new(
+            top_wire,
+            profile.holes().iter().cloned(),
+            self.kernel.tolerance,
+        )?;
+
+        let boundary = self.collect_loop(outer_loop)?;
+        if boundary.len() != segments.len() {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "fillet profile and end-cap topology disagree",
+            ));
+        }
+        let lower_edges = boundary
+            .iter()
+            .map(|coedge| self.working.coedge(*coedge).map(|value| value.edge))
+            .collect::<KernelResult<Vec<_>>>()?;
+        let lower_faces = lower_edges
+            .iter()
+            .map(|edge| {
+                self.working
+                    .edge_faces(*edge)?
+                    .into_iter()
+                    .find(|face| *face != end_face)
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::TopologyInvariant,
+                            "fillet lower rail has no lateral face",
+                        )
+                    })
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        let top_plane = Plane3::new(
+            plane.origin() + vector,
+            plane.u(),
+            plane.v(),
+            self.kernel.tolerance,
+        )?;
+        let lower_plane = Plane3::new(
+            plane.origin() + lower,
+            plane.u(),
+            plane.v(),
+            self.kernel.tolerance,
+        )?;
+        let unit = ParameterRange::new(0.0, 1.0)?;
+        let mut top_points = Vec::with_capacity(segments.len());
+        let mut paths = Vec::with_capacity(segments.len());
+        for index in 0..segments.len() {
+            let bottom_uv = segments[index].start()?;
+            let top_uv = top_segments[index].start()?;
+            let bottom = lower_plane.evaluate(bottom_uv.x, bottom_uv.y)?.point;
+            let top = top_plane.evaluate(top_uv.x, top_uv.y)?.point;
+            top_points.push(top);
+            if chosen[index] || chosen[(index + segments.len() - 1) % segments.len()] {
+                let weight = std::f64::consts::FRAC_1_SQRT_2;
+                paths.push(SweepPath {
+                    curve: Curve3::Nurbs(NurbsCurve3::new(
+                        2,
+                        vec![bottom, bottom + axis * radius, top],
+                        vec![1.0, weight, 1.0],
+                        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                    )?),
+                    range: unit,
+                });
+            } else {
+                paths.push(SweepPath {
+                    curve: Curve3::Line(Line3::through(bottom, top)?),
+                    range: unit,
+                });
+            }
+        }
+
+        let mut top_curves = Vec::with_capacity(segments.len());
+        let mut side_surfaces = Vec::with_capacity(segments.len());
+        for index in 0..segments.len() {
+            let top = &top_segments[index];
+            top_curves.push(SweepTopEdge {
+                curve: self.curve2_on_plane(top_plane, top.curve())?,
+                range: top.range(),
+                pcurve: top.curve().clone(),
+                pcurve_range: top.range(),
+            });
+            let lower_curve =
+                self.curve2_on_plane(lower_plane, construction_segments[index].curve())?;
+            if chosen[index] {
+                let weight = std::f64::consts::FRAC_1_SQRT_2;
+                let bottom = [segments[index].start()?, segments[index].end()?]
+                    .into_iter()
+                    .map(|point| {
+                        lower_plane
+                            .evaluate(point.x, point.y)
+                            .map(|value| value.point)
+                    })
+                    .collect::<KernelResult<Vec<_>>>()?;
+                let top_row = [top_segments[index].start()?, top_segments[index].end()?]
+                    .into_iter()
+                    .map(|point| {
+                        top_plane
+                            .evaluate(point.x, point.y)
+                            .map(|value| value.point)
+                    })
+                    .collect::<KernelResult<Vec<_>>>()?;
+                let surface = match segments[index].curve() {
+                    Curve2::Line(_) => NurbsSurface3::new(
+                        (1, 2),
+                        vec![
+                            bottom.clone(),
+                            bottom.iter().map(|point| *point + axis * radius).collect(),
+                            top_row,
+                        ],
+                        vec![vec![1.0, 1.0], vec![weight, weight], vec![1.0, 1.0]],
+                        (vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
+                    )?,
+                    Curve2::Circle(_) => {
+                        let (bottom_controls, rail_weights) = rational_quadratic_arc_3_controls(
+                            &lower_curve,
+                            segments[index].range(),
+                        )?;
+                        let translated =
+                            translate_curve(&lower_curve, axis * radius, self.kernel.tolerance)?;
+                        let (middle_controls, _) = rational_quadratic_arc_3_controls(
+                            &translated,
+                            segments[index].range(),
+                        )?;
+                        let (top_controls, _) = rational_quadratic_arc_3_controls(
+                            &top_curves[index].curve,
+                            top_curves[index].range,
+                        )?;
+                        NurbsSurface3::new(
+                            (2, 2),
+                            vec![bottom_controls, middle_controls, top_controls],
+                            vec![
+                                rail_weights.clone(),
+                                rail_weights.iter().map(|value| value * weight).collect(),
+                                rail_weights,
+                            ],
+                            (
+                                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                            ),
+                        )?
+                    }
+                    Curve2::Nurbs(_) => unreachable!(),
+                };
+                side_surfaces.push(SweepSide {
+                    surface: Surface3::Nurbs(surface),
+                    orientation: FaceOrientation::Reversed,
+                });
+            } else {
+                side_surfaces.push(SweepSide {
+                    surface: extrusion_surface(&lower_curve, axis * radius, self.kernel.tolerance)?,
+                    orientation: if segments[index].range().span() < 0.0 {
+                        FaceOrientation::Reversed
+                    } else {
+                        FaceOrientation::Forward
+                    },
+                });
+            }
+        }
+        self.names.push_scope("end_fillet")?;
+        let sweep = self.sweep_curve_loop_to_unchecked(
+            outer_loop,
+            &top_points,
+            &paths,
+            &top_curves,
+            &side_surfaces,
+        )?;
+        self.names.pop_scope()?;
+        let hole_loops = self.working.face(end_face)?.loops.clone();
+        for loop_id in hole_loops
+            .into_iter()
+            .filter(|loop_id| *loop_id != outer_loop)
+        {
+            self.extend_extruded_loop_unchecked(loop_id, lower, vector, axis * radius)?;
+        }
+        self.working.faces.get_mut(end_face)?.surface = top_plane.into();
+        let shell = self.working.face(end_face)?.shell;
+        self.seal_shell_unchecked(shell)?;
+        Ok(EndFilletResult {
+            chosen,
+            lower_edges,
+            lower_faces,
+            blend_faces: sweep.faces,
+            path_edges: sweep.path_edges,
+            top_edges: sweep.top_edges,
+        })
+    }
+
+    /// Extend an already swept cap loop without inserting another ring of
+    /// faces. This keeps through-hole walls topologically whole when only the
+    /// outer rim receives an end fillet.
+    fn extend_extruded_loop_unchecked(
+        &mut self,
+        cap_loop: LoopId,
+        existing_vector: Vec3,
+        full_vector: Vec3,
+        extension: Vec3,
+    ) -> KernelResult<()> {
+        let boundary = self.collect_loop(cap_loop)?;
+        if boundary.is_empty() {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "cannot extend an empty cap loop",
+            ));
+        }
+        let cap_face = self.working.loop_(cap_loop)?.face;
+        let boundary_edges = boundary
+            .iter()
+            .map(|coedge| self.working.coedge(*coedge).map(|value| value.edge))
+            .collect::<KernelResult<BTreeSet<_>>>()?;
+        let top_vertices = boundary
+            .iter()
+            .map(|coedge| {
+                self.working
+                    .coedge_vertices(*coedge)
+                    .map(|vertices| vertices[0])
+            })
+            .collect::<KernelResult<BTreeSet<_>>>()?;
+
+        for coedge_id in &boundary {
+            let edge_id = self.working.coedge(*coedge_id)?.edge;
+            let top_curve = self.working.edge(edge_id)?.curve.clone();
+            let base_curve = translate_curve(&top_curve, -existing_vector, self.kernel.tolerance)?;
+            let lateral_faces = self
+                .working
+                .edge_faces(edge_id)?
+                .into_iter()
+                .filter(|face| *face != cap_face)
+                .collect::<Vec<_>>();
+            if lateral_faces.len() != 1 {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "an extruded cap-loop edge must have one lateral face",
+                ));
+            }
+            self.working.faces.get_mut(lateral_faces[0])?.surface =
+                extrusion_surface(&base_curve, full_vector, self.kernel.tolerance)?;
+            self.working.edges.get_mut(edge_id)?.curve =
+                translate_curve(&top_curve, extension, self.kernel.tolerance)?;
+        }
+
+        for vertex_id in top_vertices {
+            let path_edges = self
+                .working
+                .vertex_edges(vertex_id)?
+                .into_iter()
+                .filter(|edge| !boundary_edges.contains(edge))
+                .collect::<Vec<_>>();
+            if path_edges.len() != 1 {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "an extruded cap-loop vertex must have one sweep-path edge",
+                ));
+            }
+            let path_edge = path_edges[0];
+            let endpoints = self.working.edge(path_edge)?.vertices;
+            let base_vertex = endpoints
+                .into_iter()
+                .find(|candidate| *candidate != vertex_id)
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "a sweep-path edge lost its base vertex",
+                    )
+                })?;
+            let base = self.working.vertex(base_vertex)?.point;
+            self.working.edges.get_mut(path_edge)?.curve = Line3::new(base, full_vector)?.into();
+            let extended = self.working.vertex(vertex_id)?.point + extension;
+            self.working.vertices.get_mut(vertex_id)?.point = extended;
+        }
+        Ok(())
+    }
+
+    fn sweep_curve_loop_to_unchecked(
+        &mut self,
+        sweep_loop: LoopId,
+        top_points: &[Point3],
+        paths: &[SweepPath],
+        top_curves: &[SweepTopEdge],
+        side_surfaces: &[SweepSide],
+    ) -> KernelResult<VariableSweepResult> {
+        let boundary = self.collect_loop(sweep_loop)?;
+        let count = boundary.len();
+        if count < 2
+            || top_points.len() != count
+            || paths.len() != count
+            || top_curves.len() != count
+            || side_surfaces.len() != count
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "invalid variable loop sweep",
+            ));
+        }
+        let unit = ParameterRange::new(0.0, 1.0)?;
+        let placeholder: Curve2 = Line2::new(Point2::new(0.0, 0.0), Vec2::new(0.0, 1.0))?.into();
+        let mut up = Vec::with_capacity(count);
+        let mut down = Vec::with_capacity(count);
+        for index in 0..count {
+            let vertex = self.working.coedge_vertices(boundary[index])?[0];
+            let made = self.mev_unchecked(
+                sweep_loop,
+                Some(boundary[(index + count - 1) % count]),
+                vertex,
+                top_points[index],
+                paths[index].curve.clone(),
+                paths[index].range,
+                placeholder.clone(),
+                placeholder.clone(),
+                unit,
+            )?;
+            self.name_mev(made, &format!("top{index}"), &format!("path{index}"))?;
+            up.push(made.forward);
+            down.push(made.reverse);
+        }
+        let mut anchor = None;
+        let mut faces = Vec::with_capacity(count);
+        let mut top_edges = Vec::with_capacity(count);
+        for index in 0..count {
+            let next = (index + 1) % count;
+            let first = if next == 0 {
+                anchor.ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "variable sweep lost its first top edge",
+                    )
+                })?
+            } else {
+                down[next]
+            };
+            let side = self.mef_unchecked(
+                first,
+                down[index],
+                top_curves[index].curve.clone(),
+                top_curves[index].range.reversed(),
+                side_surfaces[index].surface.clone(),
+                side_surfaces[index].orientation,
+                placeholder.clone(),
+                top_curves[index].pcurve.clone(),
+                top_curves[index].pcurve_range.reversed(),
+            )?;
+            self.name_mef(side, &format!("top{index}"), Some(&format!("blend{index}")))?;
+            let surface = self.working.face(side.face)?.surface.clone();
+            let side_loop = self.collect_loop(side.loop_id)?;
+            for coedge_id in &side_loop {
+                self.assign_projected_pcurve(*coedge_id, &surface)?;
+            }
+            let signed_area = side_loop.iter().try_fold(0.0, |area, coedge_id| {
+                let coedge = self.working.coedge(*coedge_id)?;
+                coedge
+                    .pcurve
+                    .signed_area_contribution(coedge.range, self.kernel.tolerance.parameter)
+                    .map(|contribution| area + contribution)
+            })?;
+            if signed_area.abs() <= self.kernel.tolerance.parameter.powi(2) {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    format!("variable sweep face {index} has zero parameter-space area"),
+                ));
+            }
+            self.working.faces.get_mut(side.face)?.orientation = if signed_area > 0.0 {
+                FaceOrientation::Forward
+            } else {
+                FaceOrientation::Reversed
+            };
+            faces.push(side.face);
+            top_edges.push(side.edge);
+            if index == 0 {
+                anchor = Some(side.reverse);
+            }
+        }
+        Ok(VariableSweepResult {
+            faces,
+            path_edges: up
+                .into_iter()
+                .map(|coedge| self.working.coedge(coedge).map(|value| value.edge))
+                .collect::<KernelResult<Vec<_>>>()?,
+            top_edges,
+        })
+    }
+
+    fn assign_projected_pcurve(
+        &mut self,
+        coedge_id: CoedgeId,
+        surface: &Surface3,
+    ) -> KernelResult<()> {
+        let coedge = self.working.coedge(coedge_id)?;
+        let edge = self.working.edge(coedge.edge)?;
+        let edge_curve = edge.curve.clone();
+        let range = if coedge.forward {
+            edge.range
+        } else {
+            edge.range.reversed()
+        };
+        let samples = [range.start, (range.start + range.end) * 0.5, range.end]
+            .into_iter()
+            .map(|parameter| {
+                edge_curve
+                    .evaluate(parameter)
+                    .and_then(|value| surface.project(value.point, self.kernel.tolerance))
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        let mut points = samples
+            .iter()
+            .map(|sample| Point2::new(sample.parameters.0, sample.parameters.1))
+            .collect::<Vec<_>>();
+        for axis in 0..2 {
+            if let Some(period) = surface.domains()[axis].period {
+                for index in 1..points.len() {
+                    let previous = if axis == 0 {
+                        points[index - 1].x
+                    } else {
+                        points[index - 1].y
+                    };
+                    let mut value = if axis == 0 {
+                        points[index].x
+                    } else {
+                        points[index].y
+                    };
+                    while value - previous > period * 0.5 {
+                        value -= period;
+                    }
+                    while value - previous < -period * 0.5 {
+                        value += period;
+                    }
+                    if axis == 0 {
+                        points[index].x = value;
+                    } else {
+                        points[index].y = value;
+                    }
+                }
+            }
+        }
+        let straight = (points[1] - (points[0] + (points[2] - points[0]) * 0.5)).magnitude()
+            <= self.kernel.tolerance.parameter * 32.0;
+        let (pcurve, pcurve_range) = if straight {
+            (
+                Curve2::Line(Line2::new(points[0], points[2] - points[0])?),
+                ParameterRange::new(0.0, 1.0)?,
+            )
+        } else {
+            let weight = match &edge_curve {
+                Curve3::Circle(_) => (range.span().abs() * 0.5).cos(),
+                Curve3::Nurbs(curve)
+                    if curve.degree() == 2
+                        && curve.control_points().len() == 3
+                        && curve.weights().len() == 3 =>
+                {
+                    curve.weights()[1]
+                }
+                _ => {
+                    return Err(KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "a projected non-parametric boundary must be circular",
+                    ))
+                }
+            };
+            if weight <= self.kernel.tolerance.parameter {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "projected circular boundaries may not span a semicircle in one face",
+                ));
+            }
+            let control = rational_quadratic_control_2(points[0], points[1], points[2], weight)?;
+            (
+                Curve2::Nurbs(NurbsCurve2::new(
+                    2,
+                    vec![points[0], control, points[2]],
+                    vec![1.0, weight, 1.0],
+                    vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                )?),
+                ParameterRange::new(0.0, 1.0)?,
+            )
+        };
+        let value = self.working.coedges.get_mut(coedge_id)?;
+        value.pcurve = pcurve;
+        value.range = pcurve_range;
+        let check = value
+            .pcurve
+            .evaluate(value.range.start + value.range.span() * 0.25)?;
+        let lifted = surface.evaluate(check.point.x, check.point.y)?.point;
+        let edge_point = edge_curve
+            .evaluate(range.start + range.span() * 0.25)?
+            .point;
+        let error = lifted.distance(edge_point);
+        if error > self.kernel.tolerance.linear * 8.0 {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                format!("projected p-curve fit error {error}"),
+            ));
+        }
+        Ok(())
+    }
+
     fn sweep_curve_loop_unchecked(
         &mut self,
         sweep_loop: LoopId,
@@ -4805,6 +5637,57 @@ impl<'kernel> EulerTransaction<'kernel> {
         for body in &self.touched_bodies {
             current_names.extend(self.working.body_entity_names(*body)?);
         }
+        if !self.composes_imported_topology
+            && current_names
+                .iter()
+                .any(|name| name.namespace != self.namespace)
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "a transaction may publish only topology owned by its operation namespace",
+            ));
+        }
+        self.kernel.topology = self.working;
+        Ok(CommittedOperation {
+            operation: self.namespace,
+            bodies: self.touched_bodies,
+            history: self.history,
+            certificates,
+        })
+    }
+
+    /// Finish a constructor with physical properties integrated over its exact
+    /// analytical parameterization using explicit error bounds.
+    pub(crate) fn finish_with_certificate(
+        self,
+        properties: super::MassProperties,
+    ) -> KernelResult<CommittedOperation> {
+        validate(
+            &self.working,
+            self.kernel.tolerance,
+            ValidationMode::PublishedWithCertificate,
+        )
+        .into_result()?;
+        if self.touched_bodies.len() != 1 {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "analytical constructor did not produce exactly one certified body",
+            ));
+        }
+        let body = self.touched_bodies[0];
+        let scale = properties
+            .centroid
+            .to_vec()
+            .magnitude()
+            .max(properties.volume.abs().cbrt())
+            .max(1.0);
+        super::physical::validate_supplied_properties(properties, self.kernel.tolerance, scale)?;
+        let certificates = std::collections::BTreeMap::from([(
+            body,
+            super::physical::PhysicalCertificate { properties },
+        )]);
+        let mut current_names = std::collections::BTreeSet::new();
+        current_names.extend(self.working.body_entity_names(body)?);
         if !self.composes_imported_topology
             && current_names
                 .iter()

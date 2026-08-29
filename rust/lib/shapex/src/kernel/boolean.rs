@@ -6,8 +6,8 @@ use crate::{Point3, Vec3};
 
 use super::polyhedron::{PolyhedralShellOrientation, PolyhedralTriangle, PolyhedralVertex};
 use super::{
-    BodyId, DiagnosticKind, Kernel, KernelError, KernelResult, ModelTolerance, PersistentId,
-    PolyhedralMesh, Surface3, TessellationOptions, Topology,
+    BodyId, Curve3, DiagnosticKind, FaceOrientation, KernelError, KernelResult, LoopKind,
+    ModelTolerance, PersistentId, PolyhedralMesh, Surface3, Topology,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +52,10 @@ pub(crate) struct BooleanBodyMesh {
     pub cavities: Vec<PolyhedralMesh>,
 }
 
-pub(crate) fn boolean_polyhedron(
+/// Boolean two straight-edged planar BREPs directly from their analytical face
+/// loops. The returned polyhedral carrier is an exact topological subdivision
+/// of those planes and lines; no tessellation or geometric perturbation occurs.
+pub(crate) fn boolean_planar_brep(
     topology: &Topology,
     tolerance: ModelTolerance,
     first: BodyId,
@@ -66,21 +69,10 @@ pub(crate) fn boolean_polyhedron(
         ));
     }
     let first_polygons = body_polygons(topology, tolerance, first)?;
-    let mut second_polygons = body_polygons(topology, tolerance, second)?;
+    let second_polygons = body_polygons(topology, tolerance, second)?;
     let linear = body_scale(&first_polygons, &second_polygons)
         .map(|scale| tolerance.linear_at_scale(scale))
         .unwrap_or(tolerance.linear);
-    let attempt = boolean_polygon_set(
-        first_polygons.clone(),
-        second_polygons.clone(),
-        kind,
-        linear,
-    )
-    .and_then(|polygons| publish_boolean_polygons(polygons, tolerance));
-    if attempt.is_ok() {
-        return attempt;
-    }
-    separate_coincident_operand(&mut second_polygons, linear * 8.0)?;
     boolean_polygon_set(first_polygons, second_polygons, kind, linear)
         .and_then(|polygons| publish_boolean_polygons(polygons, tolerance))
 }
@@ -114,47 +106,11 @@ fn publish_boolean_polygons(
     if polygons.is_empty() {
         Ok(Vec::new())
     } else {
-        group_material_bodies(polygons_to_mesh(polygons, tolerance)?, tolerance)
+        group_material_bodies(
+            polygons_to_shelling_carriers(polygons, tolerance)?,
+            tolerance,
+        )
     }
-}
-
-fn separate_coincident_operand(polygons: &mut [CsgPolygon], distance: f64) -> KernelResult<()> {
-    let points = polygons
-        .iter()
-        .flat_map(|polygon| polygon.vertices.iter().map(|vertex| vertex.point))
-        .collect::<Vec<_>>();
-    if points.is_empty() {
-        return Ok(());
-    }
-    let center = Point3::from_vec(
-        points
-            .iter()
-            .fold(Vec3::new(0.0, 0.0, 0.0), |sum, point| sum + point.to_vec())
-            / points.len() as f64,
-    );
-    let radius = points
-        .iter()
-        .map(|point| point.distance(center))
-        .fold(0.0_f64, f64::max);
-    if radius <= distance {
-        return Err(KernelError::new(
-            DiagnosticKind::NumericalFailure,
-            "Boolean operand is too small to separate coincident faces",
-        ));
-    }
-    let factor = 1.0 + distance / radius;
-    for polygon in polygons {
-        for vertex in &mut polygon.vertices {
-            vertex.point = center + (vertex.point - center) * factor;
-        }
-        let rebuilt = CsgPolygon::new(
-            polygon.vertices.clone(),
-            polygon.source,
-            ModelTolerance::default(),
-        )?;
-        polygon.plane = rebuilt.plane;
-    }
-    Ok(())
 }
 
 fn classify_material_boundary(
@@ -301,40 +257,60 @@ fn body_polygons(
     body_id: BodyId,
 ) -> KernelResult<Vec<CsgPolygon>> {
     let body = topology.body(body_id)?;
-    let kernel = Kernel {
-        tolerance,
-        topology: topology.clone(),
-    };
-    let options = TessellationOptions::new(tolerance.linear, 0.25, 8)?;
     let mut polygons = Vec::new();
     for shell_id in body.shells() {
         for face_id in topology.shell(*shell_id)?.faces() {
             let face = topology.face(*face_id)?;
-            if !matches!(face.surface(), Surface3::Plane(_)) {
+            let Surface3::Plane(surface) = face.surface() else {
                 return Err(KernelError::new(
                     DiagnosticKind::UnsupportedGeometry,
                     "certified Boolean operations currently require planar input faces",
                 ));
+            };
+            if face.loops().len() != 1 || topology.loop_(face.loops()[0])?.kind() != LoopKind::Outer
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "exact planar BSP currently requires one outer loop per input face",
+                ));
             }
-            let mesh = kernel.tessellate_face(*face_id, options)?;
-            let topology_vertices = topology.face_vertices(*face_id)?;
-            for triangle in mesh.triangles {
-                let points = [
-                    mesh.positions[triangle[0]],
-                    mesh.positions[triangle[1]],
-                    mesh.positions[triangle[2]],
-                ];
-                let mut values = Vec::with_capacity(3);
-                for point in points {
-                    let source =
-                        nearest_vertex_name(topology, &topology_vertices, point, tolerance)?;
-                    values.push(CsgVertex {
-                        point,
-                        sources: BTreeSet::from([source]),
-                    });
+            let mut vertices = Vec::new();
+            for coedge in topology.loop_coedges(face.loops()[0])? {
+                let edge = topology.edge(topology.coedge(coedge)?.edge())?;
+                if !matches!(edge.curve(), Curve3::Line(_)) {
+                    return Err(KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "exact planar BSP requires analytical line boundaries",
+                    ));
                 }
-                polygons.push(CsgPolygon::new(values, face.name(), tolerance)?);
+                let vertex = topology.coedge_vertices(coedge)?[0];
+                let vertex = topology.vertex(vertex)?;
+                vertices.push(CsgVertex {
+                    point: vertex.point(),
+                    sources: BTreeSet::from([vertex.name()]),
+                });
             }
+            let vertices = clean_polygon(vertices, tolerance.linear);
+            let mut polygon = CsgPolygon::new(vertices, face.name(), tolerance)?;
+            let outward = match face.orientation() {
+                FaceOrientation::Forward => surface.normal(),
+                FaceOrientation::Reversed => -surface.normal(),
+            };
+            if polygon.plane.normal.dot(outward) < 0.0 {
+                polygon = polygon.flipped();
+            }
+            if !(0..polygon.vertices.len()).all(|index| {
+                let current = polygon.vertices[index].point;
+                let next = polygon.vertices[(index + 1) % polygon.vertices.len()].point;
+                let following = polygon.vertices[(index + 2) % polygon.vertices.len()].point;
+                (next - current).cross(following - next).dot(outward) >= -tolerance.linear.powi(2)
+            }) {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "exact planar BSP currently requires convex input face loops",
+                ));
+            }
+            polygons.push(polygon);
         }
     }
     if polygons.is_empty() {
@@ -344,38 +320,6 @@ fn body_polygons(
         ));
     }
     Ok(polygons)
-}
-
-fn nearest_vertex_name(
-    topology: &Topology,
-    candidates: &[super::VertexId],
-    point: Point3,
-    tolerance: ModelTolerance,
-) -> KernelResult<PersistentId> {
-    let mut nearest = None;
-    for vertex_id in candidates {
-        let vertex = topology.vertex(*vertex_id)?;
-        let distance = vertex.point().distance(point);
-        if nearest
-            .map(|(_, current)| distance < current)
-            .unwrap_or(true)
-        {
-            nearest = Some((vertex.name(), distance));
-        }
-    }
-    let (name, distance) = nearest.ok_or_else(|| {
-        KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "Boolean face has no topological vertices",
-        )
-    })?;
-    if distance > tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "Boolean triangulation introduced a vertex without topological provenance",
-        ));
-    }
-    Ok(name)
 }
 
 impl CsgPolygon {
@@ -691,7 +635,7 @@ fn bsp_intersection(
     Ok(a.all_polygons())
 }
 
-fn polygons_to_mesh(
+fn polygons_to_shelling_carriers(
     polygons: Vec<CsgPolygon>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<PolyhedralMesh>> {

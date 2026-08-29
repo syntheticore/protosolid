@@ -1489,7 +1489,10 @@ fn circular_edge_fillet_is_euler_built_and_certified() {
         .edges()
         .filter(|edge| fillet.is_semantic_edge(edge))
         .count();
-    assert!(semantic_count > 0 && semantic_count < edge_count);
+    assert!(
+        semantic_count > 0 && semantic_count < edge_count,
+        "semantic edges: {semantic_count}/{edge_count}"
+    );
 }
 
 #[test]
@@ -1536,7 +1539,7 @@ fn moving_a_face_rebuilds_and_certifies_the_changed_solid() {
 }
 
 #[test]
-fn unsupported_curved_boolean_never_falls_back_to_facets() {
+fn contained_nurbs_prism_difference_is_analytical_and_empty() {
     let tolerance = ModelTolerance::default();
     let curved_top = TrimmedCurve2::new(
         NurbsCurve2::new(
@@ -1568,13 +1571,11 @@ fn unsupported_curved_boolean_never_falls_back_to_facets() {
         .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
         .expect("spline prism");
     let tool = owned_cuboid(Point3::new(0.0, -4.0, -1.0), Point3::new(4.0, 4.0, 11.0));
-    let error = spline_prism
+    let result = spline_prism
         .difference(&tool)
-        .expect_err("an unimplemented analytic Boolean must be rejected");
-    assert!(error
-        .diagnostics()
-        .iter()
-        .any(|diagnostic| diagnostic.kind == super::DiagnosticKind::UnsupportedGeometry));
+        .expect("the exact profile arrangement proves complete removal");
+    assert_eq!(result.solids().count(), 0);
+    assert!(result.volume().abs() < tolerance.linear.powi(3));
 }
 
 #[test]
@@ -1607,6 +1608,411 @@ fn circular_prism_can_join_partially_across_a_planar_face() {
         "unexpected joined volume {}",
         joined.volume()
     );
+}
+
+#[test]
+fn circular_prism_can_join_a_planar_face_with_an_existing_hole() {
+    let tolerance = ModelTolerance::default();
+    let rectangle = |minimum: f64, maximum: f64| {
+        Wire2::polygon(
+            [
+                Point2::new(minimum, minimum),
+                Point2::new(maximum, minimum),
+                Point2::new(maximum, maximum),
+                Point2::new(minimum, maximum),
+            ],
+            tolerance,
+        )
+        .expect("rectangle")
+    };
+    let frame = Profile::new(rectangle(0.0, 20.0), [rectangle(7.0, 13.0)], tolerance)
+        .expect("frame profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("frame");
+    let circle = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(3.5, 3.5), 2.0).expect("circle")],
+        tolerance,
+    )
+    .expect("circle wire");
+    let boss = Profile::new(circle, [], tolerance)
+        .expect("circle profile")
+        .extrude(
+            Plane3::new(
+                Point3::new(0.0, 0.0, 20.0),
+                Vec3::unit_x(),
+                Vec3::unit_y(),
+                tolerance,
+            )
+            .expect("top plane"),
+            Vec3::new(0.0, 0.0, 5.0),
+        )
+        .expect("boss");
+
+    assert!(
+        super::features::coincident_opposite_face_patch_names(&frame, &boss)
+            .expect("face-patch detection")
+            .is_some(),
+        "the circular base must be detected inside the holed planar cap"
+    );
+    let joined = frame.union(&boss).expect("circular boss on frame");
+    assert_eq!(joined.solids().len(), 1);
+    let expected = (20.0 * 20.0 - 6.0 * 6.0) * 20.0 + 4.0 * std::f64::consts::PI * 5.0;
+    assert!((joined.volume() - expected).abs() < 0.1);
+}
+
+#[test]
+fn circular_prism_can_cut_a_planar_face_with_an_existing_hole() {
+    let tolerance = ModelTolerance::default();
+    let rectangle = |minimum: f64, maximum: f64| {
+        Wire2::polygon(
+            [
+                Point2::new(minimum, minimum),
+                Point2::new(maximum, minimum),
+                Point2::new(maximum, maximum),
+                Point2::new(minimum, maximum),
+            ],
+            tolerance,
+        )
+        .expect("rectangle")
+    };
+    let frame = Profile::new(rectangle(0.0, 20.0), [rectangle(7.0, 13.0)], tolerance)
+        .expect("frame profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("frame");
+    let circle_profile = || {
+        Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(Point2::new(3.5, 3.5), 2.0).expect("circle")],
+                tolerance,
+            )
+            .expect("circle wire"),
+            [],
+            tolerance,
+        )
+        .expect("circle profile")
+    };
+    let top_plane = Plane3::new(
+        Point3::new(0.0, 0.0, 20.0),
+        Vec3::unit_x(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("top plane");
+
+    let outward = circle_profile()
+        .extrude(top_plane, Vec3::new(0.0, 0.0, 7.0))
+        .expect("outward tool");
+    let unchanged = frame
+        .difference(&outward)
+        .expect("non-overlapping outward cut");
+    assert!((unchanged.volume() - frame.volume()).abs() < 1.0e-6);
+    assert!(
+        unchanged
+            .edges()
+            .any(|edge| unchanged.is_semantic_edge(edge)),
+        "no-op Boolean edge classification must terminate and retain physical creases"
+    );
+
+    let inward = circle_profile()
+        .extrude(top_plane, Vec3::new(0.0, 0.0, -7.0))
+        .expect("inward tool");
+    let cut = frame.difference(&inward).expect("circular pocket in frame");
+    let expected = frame.volume() - 4.0 * std::f64::consts::PI * 7.0;
+    assert!((cut.volume() - expected).abs() < 0.1);
+}
+
+#[test]
+fn rectangular_prism_can_join_partially_across_a_planar_face() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 20.0));
+    let boss = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(4.0, -16.0),
+                Point2::new(16.0, -16.0),
+                Point2::new(16.0, -4.0),
+                Point2::new(4.0, -4.0),
+            ],
+            tolerance,
+        )
+        .expect("boss wire"),
+        [],
+        tolerance,
+    )
+    .expect("boss profile")
+    .extrude(
+        Plane3::new(
+            Point3::new(0.0, 0.0, 20.0),
+            Vec3::unit_y(),
+            -Vec3::unit_x(),
+            tolerance,
+        )
+        .expect("top plane"),
+        Vec3::new(0.0, 0.0, 11.0),
+    )
+    .expect("boss");
+
+    let joined = block.union(&boss).expect("rectangular face-patch union");
+    assert_eq!(joined.solids().len(), 1);
+    assert!((joined.volume() - (8_000.0 + 12.0 * 12.0 * 11.0)).abs() < 1.0e-6);
+}
+
+#[test]
+fn rectangular_prism_can_join_through_a_body_and_extend_below_it() {
+    let tolerance = ModelTolerance::default();
+    let rectangle = |minimum: f64, maximum: f64| {
+        Wire2::polygon(
+            [
+                Point2::new(minimum, minimum),
+                Point2::new(maximum, minimum),
+                Point2::new(maximum, maximum),
+                Point2::new(minimum, maximum),
+            ],
+            tolerance,
+        )
+        .expect("rectangle")
+    };
+    let frame = Profile::new(rectangle(0.0, 20.0), [rectangle(7.0, 13.0)], tolerance)
+        .expect("frame profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("frame");
+    let post = Profile::new(rectangle(2.0, 5.0), [], tolerance)
+        .expect("post profile")
+        .extrude(
+            Plane3::new(
+                Point3::new(0.0, 0.0, 20.0),
+                Vec3::unit_x(),
+                Vec3::unit_y(),
+                tolerance,
+            )
+            .expect("top plane"),
+            Vec3::new(0.0, 0.0, -32.0),
+        )
+        .expect("post");
+
+    let joined = frame.union(&post).expect("post through and below frame");
+    assert_eq!(joined.solids().len(), 1);
+    let expected = (20.0 * 20.0 - 6.0 * 6.0) * 20.0 + 3.0 * 3.0 * 12.0;
+    assert!((joined.volume() - expected).abs() < 1.0e-6);
+
+    let reversed = post.union(&frame).expect("reversed through union");
+    assert_eq!(reversed.solids().len(), 1);
+    assert!((reversed.volume() - expected).abs() < 1.0e-6);
+}
+
+#[test]
+fn disconnected_prisms_can_join_through_a_body_and_extend_below_it_together() {
+    let tolerance = ModelTolerance::default();
+    let rectangle = |minimum: f64, maximum: f64| {
+        Wire2::polygon(
+            [
+                Point2::new(minimum, minimum),
+                Point2::new(maximum, minimum),
+                Point2::new(maximum, maximum),
+                Point2::new(minimum, maximum),
+            ],
+            tolerance,
+        )
+        .expect("rectangle")
+    };
+    let frame = Profile::new(rectangle(0.0, 20.0), [rectangle(7.0, 13.0)], tolerance)
+        .expect("frame profile")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("frame");
+    let top_plane = Plane3::new(
+        Point3::new(0.0, 0.0, 20.0),
+        Vec3::unit_x(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("top plane");
+    let post = Profile::new(rectangle(2.0, 5.0), [], tolerance)
+        .expect("post profile")
+        .extrude(top_plane, Vec3::new(0.0, 0.0, -32.0))
+        .expect("post");
+    let cylinder = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(16.0, 4.0), 1.5).expect("circle")],
+            tolerance,
+        )
+        .expect("circle wire"),
+        [],
+        tolerance,
+    )
+    .expect("circle profile")
+    .extrude(top_plane, Vec3::new(0.0, 0.0, -32.0))
+    .expect("cylinder");
+    let tools = post.combined(&[cylinder]).expect("disconnected tools");
+
+    let joined = frame.union(&tools).expect("two posts through frame");
+    assert_eq!(joined.solids().len(), 1);
+    let expected = (20.0 * 20.0 - 6.0 * 6.0) * 20.0
+        + (3.0 * 3.0 + 1.5_f64.powi(2) * std::f64::consts::PI) * 12.0;
+    assert!(
+        (joined.volume() - expected).abs() < 0.1,
+        "unexpected joined volume {} instead of {expected}",
+        joined.volume()
+    );
+
+    let reversed = tools.union(&frame).expect("reversed two-post union");
+    assert_eq!(reversed.solids().len(), 1);
+    assert!((reversed.volume() - expected).abs() < 0.1);
+}
+
+#[test]
+fn rectangular_blind_pocket_in_block_uses_valid_analytic_topology() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 20.0));
+    let cutter = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(4.0, -16.0),
+                Point2::new(16.0, -16.0),
+                Point2::new(16.0, -4.0),
+                Point2::new(4.0, -4.0),
+            ],
+            tolerance,
+        )
+        .expect("cutter wire"),
+        [],
+        tolerance,
+    )
+    .expect("cutter profile")
+    .extrude(
+        Plane3::new(
+            Point3::new(0.0, 0.0, 20.0),
+            Vec3::unit_y(),
+            -Vec3::unit_x(),
+            tolerance,
+        )
+        .expect("top plane"),
+        Vec3::new(0.0, 0.0, -17.0),
+    )
+    .expect("cutter");
+
+    let pocket = block.difference(&cutter).expect("rectangular blind pocket");
+    assert!((pocket.volume() - (8_000.0 - 12.0 * 12.0 * 17.0)).abs() < 1.0e-6);
+    let edge_count = pocket.edges().count();
+    assert_eq!(
+        pocket
+            .edges()
+            .filter(|edge| pocket.is_semantic_edge(edge))
+            .count(),
+        edge_count,
+        "every edge of an analytical rectangular pocket is a physical crease"
+    );
+}
+
+#[test]
+fn circular_blind_pocket_in_cylinder_uses_valid_analytic_topology() {
+    let tolerance = ModelTolerance::default();
+    let circle_profile = |radius| {
+        Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(Point2::new(0.0, 0.0), radius).expect("circle")],
+                tolerance,
+            )
+            .expect("circle wire"),
+            [],
+            tolerance,
+        )
+        .expect("circle profile")
+    };
+    let cylinder = circle_profile(10.0)
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("cylinder");
+    let cutter = circle_profile(7.0)
+        .extrude(
+            Plane3::new(
+                Point3::new(0.0, 0.0, 20.0),
+                Vec3::unit_y(),
+                -Vec3::unit_x(),
+                tolerance,
+            )
+            .expect("top plane"),
+            Vec3::new(0.0, 0.0, -17.0),
+        )
+        .expect("cutter");
+
+    let pocket = cylinder.difference(&cutter).expect("circular blind pocket");
+    let expected = std::f64::consts::PI * (10.0_f64.powi(2) * 20.0 - 7.0_f64.powi(2) * 17.0);
+    assert!((pocket.volume() - expected).abs() < 1.0e-6);
+    assert!(
+        pocket
+            .edges()
+            .filter(|edge| pocket.is_semantic_edge(edge))
+            .count()
+            >= 4
+    );
+}
+
+#[test]
+fn disconnected_profiles_cut_two_blind_pockets_in_one_operation() {
+    let tolerance = ModelTolerance::default();
+    let rectangle = |minimum: Point2, maximum: Point2| {
+        Wire2::polygon(
+            [
+                minimum,
+                Point2::new(maximum.x, minimum.y),
+                maximum,
+                Point2::new(minimum.x, maximum.y),
+            ],
+            tolerance,
+        )
+        .expect("rectangle wire")
+    };
+    let existing_circle = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(25.0, 5.0), 2.0).expect("existing circle")],
+        tolerance,
+    )
+    .expect("existing circle wire");
+    let block = Profile::new(
+        rectangle(Point2::new(0.0, 0.0), Point2::new(30.0, 20.0)),
+        [
+            rectangle(Point2::new(10.0, 5.0), Point2::new(22.0, 15.0)),
+            existing_circle,
+        ],
+        tolerance,
+    )
+    .expect("multiply perforated block profile")
+    .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+    .expect("multiply perforated block");
+    let top_plane = Plane3::new(
+        Point3::new(0.0, 0.0, 20.0),
+        Vec3::unit_x(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("top plane");
+    let rectangle = Profile::new(
+        rectangle(Point2::new(2.0, 2.0), Point2::new(5.0, 5.0)),
+        [],
+        tolerance,
+    )
+    .expect("rectangle profile")
+    .extrude(top_plane, Vec3::new(0.0, 0.0, -12.0))
+    .expect("rectangular cutter");
+    let circle = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(7.0, 4.0), 1.5).expect("circle")],
+            tolerance,
+        )
+        .expect("circle wire"),
+        [],
+        tolerance,
+    )
+    .expect("circle profile")
+    .extrude(top_plane, Vec3::new(0.0, 0.0, -12.0))
+    .expect("circular cutter");
+    let cutters = rectangle.combined(&[circle]).expect("disconnected cutters");
+
+    let pocketed = block
+        .difference(&cutters)
+        .expect("two simultaneous blind pockets");
+    assert_eq!(pocketed.solids().len(), 1);
+    let base_area = 30.0 * 20.0 - 12.0 * 10.0 - 2.0_f64.powi(2) * std::f64::consts::PI;
+    let expected = base_area * 20.0 - (3.0 * 3.0 + 1.5_f64.powi(2) * std::f64::consts::PI) * 12.0;
+    assert!((pocketed.volume() - expected).abs() < 0.1);
 }
 
 #[test]

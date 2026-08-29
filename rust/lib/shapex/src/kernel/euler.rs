@@ -1713,44 +1713,111 @@ impl<'kernel> EulerTransaction<'kernel> {
         }
         let target_loops = self.working.face(target_face)?.loops.clone();
         let source_loops = self.working.face(source_face)?.loops.clone();
-        let preserve_inner_patch = target_loops.len() == 1 && source_loops.len() > 1;
-        if target_loops.len() != 1 || (source_loops.len() != 1 && !preserve_inner_patch) {
+        if target_loops.is_empty() || source_loops.len() < target_loops.len() {
             return Err(KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "adjacent face sewing requires a simple target and at most one source outer loop",
+                "adjacent face sewing requires every target loop to occur on the source patch",
             ));
         }
-        let target_loop = target_loops[0];
-        let source_loop = source_loops
-            .iter()
-            .copied()
-            .find(|loop_id| {
-                self.working
-                    .loop_(*loop_id)
-                    .map(|loop_value| loop_value.kind == LoopKind::Outer)
-                    .unwrap_or(false)
-            })
-            .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "the source face has no outer loop",
-                )
-            })?;
+        let linear = self.kernel.tolerance.linear;
+        let loops_match = |first: LoopId, second: LoopId| -> KernelResult<bool> {
+            let first_boundary = self.collect_loop(first)?;
+            let second_boundary = self.collect_loop(second)?;
+            if first_boundary.len() != second_boundary.len() {
+                return Ok(false);
+            }
+            let mut used = std::collections::BTreeSet::new();
+            for first_use in first_boundary {
+                let first_edge = self.working.coedge(first_use)?.edge;
+                let first_value = self.working.edge(first_edge)?;
+                let first_points = [
+                    self.working.vertex(first_value.vertices[0])?.point,
+                    self.working.vertex(first_value.vertices[1])?.point,
+                ];
+                let first_middle = first_value
+                    .curve
+                    .evaluate(first_value.range.start + first_value.range.span() * 0.5)?
+                    .point;
+                let Some(second_edge) = second_boundary.iter().find_map(|second_use| {
+                    let edge = self.working.coedge(*second_use).ok()?.edge;
+                    if used.contains(&edge) {
+                        return None;
+                    }
+                    let value = self.working.edge(edge).ok()?;
+                    let second_points = [
+                        self.working.vertex(value.vertices[0]).ok()?.point,
+                        self.working.vertex(value.vertices[1]).ok()?.point,
+                    ];
+                    let middle = value
+                        .curve
+                        .evaluate(value.range.start + value.range.span() * 0.5)
+                        .ok()?
+                        .point;
+                    (first_middle.distance(middle) <= linear
+                        && ((first_points[0].distance(second_points[0]) <= linear
+                            && first_points[1].distance(second_points[1]) <= linear)
+                            || (first_points[0].distance(second_points[1]) <= linear
+                                && first_points[1].distance(second_points[0]) <= linear)))
+                        .then_some(edge)
+                }) else {
+                    return Ok(false);
+                };
+                used.insert(second_edge);
+            }
+            Ok(true)
+        };
+        let mut used_source_loops = std::collections::BTreeSet::new();
+        let mut loop_pairs = Vec::new();
+        for target_loop in &target_loops {
+            let mut matched = None;
+            for source_loop in &source_loops {
+                if !used_source_loops.contains(source_loop)
+                    && loops_match(*target_loop, *source_loop)?
+                {
+                    matched = Some(*source_loop);
+                    break;
+                }
+            }
+            let Some(source_loop) = matched else {
+                return Err(KernelError::new(
+                    DiagnosticKind::InvalidInput,
+                    "coincident sewn face patches do not have matching boundary loops",
+                ));
+            };
+            used_source_loops.insert(source_loop);
+            loop_pairs.push((*target_loop, source_loop));
+        }
         let source_inner_loops = source_loops
             .iter()
             .copied()
-            .filter(|loop_id| *loop_id != source_loop)
+            .filter(|loop_id| !used_source_loops.contains(loop_id))
             .collect::<Vec<_>>();
-        let target_boundary = self.collect_loop(target_loop)?;
-        let source_boundary = self.collect_loop(source_loop)?;
-        if target_boundary.len() != source_boundary.len() {
+        if source_inner_loops.iter().any(|loop_id| {
+            self.working
+                .loop_(*loop_id)
+                .map(|loop_value| loop_value.kind != LoopKind::Inner)
+                .unwrap_or(true)
+        }) {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
-                "coincident sewn faces have different boundary sizes",
+                "only unmatched source inner loops can survive face-patch sewing",
             ));
         }
+        let (patch_surface, patch_orientation) = {
+            let face = self.working.face(target_face)?;
+            (face.surface.clone(), face.orientation)
+        };
+        for loop_id in &source_inner_loops {
+            let patch = self.mfkrh_unchecked(*loop_id, patch_surface.clone(), patch_orientation)?;
+            self.reparameterize_planar_face(patch.face)?;
+        }
+        let mut target_boundary = Vec::new();
+        let mut source_boundary = Vec::new();
+        for (target_loop, source_loop) in &loop_pairs {
+            target_boundary.extend(self.collect_loop(*target_loop)?);
+            source_boundary.extend(self.collect_loop(*source_loop)?);
+        }
 
-        let linear = self.kernel.tolerance.linear;
         let mut used_target_edges = std::collections::BTreeSet::new();
         let mut vertex_welds = std::collections::BTreeMap::<VertexId, VertexId>::new();
         let mut edge_welds = Vec::new();
@@ -1782,10 +1849,33 @@ impl<'kernel> EulerTransaction<'kernel> {
                     else {
                         return false;
                     };
-                    (first.distance(source_points[0]) <= linear
-                        && second.distance(source_points[1]) <= linear)
-                        || (first.distance(source_points[1]) <= linear
-                            && second.distance(source_points[0]) <= linear)
+                    let Ok(target_midpoint) = self
+                        .working
+                        .edge(edge)
+                        .and_then(|edge| {
+                            edge.curve
+                                .evaluate(edge.range.start + edge.range.span() * 0.5)
+                        })
+                        .map(|evaluation| evaluation.point)
+                    else {
+                        return false;
+                    };
+                    let Ok(source_midpoint) = self
+                        .working
+                        .edge(source_edge)
+                        .and_then(|edge| {
+                            edge.curve
+                                .evaluate(edge.range.start + edge.range.span() * 0.5)
+                        })
+                        .map(|evaluation| evaluation.point)
+                    else {
+                        return false;
+                    };
+                    target_midpoint.distance(source_midpoint) <= linear
+                        && ((first.distance(source_points[0]) <= linear
+                            && second.distance(source_points[1]) <= linear)
+                            || (first.distance(source_points[1]) <= linear
+                                && second.distance(source_points[0]) <= linear))
                 })
                 .ok_or_else(|| {
                     KernelError::new(
@@ -1860,19 +1950,46 @@ impl<'kernel> EulerTransaction<'kernel> {
         }
         for (target_edge, target_mate, source_edge, source_mate) in &edge_welds {
             let target_vertices = self.working.edge(*target_edge)?.vertices;
-            let source_start = {
-                let coedge = self.working.coedge(*source_mate)?;
-                let vertices = self.working.edge(*source_edge)?.vertices;
-                if coedge.forward {
-                    vertices[0]
+            let source_vertices = self.working.edge(*source_edge)?.vertices;
+            let circular = matches!(self.working.edge(*target_edge)?.curve, Curve3::Circle(_))
+                && matches!(self.working.edge(*source_edge)?.curve, Curve3::Circle(_));
+            let source_mate_face = self
+                .working
+                .loop_(self.working.coedge(*source_mate)?.loop_id)?
+                .face;
+            let cylindrical = circular
+                && matches!(
+                    self.working.face(source_mate_face)?.surface,
+                    Surface3::Cylinder(_)
+                );
+            let forward = if cylindrical {
+                !self.working.coedge(*target_mate)?.forward
+            } else {
+                let source_start = if self.working.coedge(*source_mate)?.forward {
+                    source_vertices[0]
                 } else {
-                    vertices[1]
-                }
+                    source_vertices[1]
+                };
+                source_start == target_vertices[0]
             };
-            let forward = source_start == target_vertices[0];
+            let replacement_pcurve = cylindrical
+                .then(|| self.pcurve_for_welded_circular_edge(*target_edge, *source_mate))
+                .transpose()?;
             let source_name = self.working.edge(*source_edge)?.name;
-            self.working.coedges.get_mut(*source_mate)?.edge = *target_edge;
-            self.working.coedges.get_mut(*source_mate)?.forward = forward;
+            {
+                let target_range = self.working.edge(*target_edge)?.range;
+                let source_use = self.working.coedges.get_mut(*source_mate)?;
+                source_use.edge = *target_edge;
+                source_use.forward = forward;
+                if let Some(pcurve) = replacement_pcurve {
+                    source_use.pcurve = pcurve;
+                    source_use.range = if forward {
+                        target_range
+                    } else {
+                        target_range.reversed()
+                    };
+                }
+            }
             self.working.edges.get_mut(*target_edge)?.coedges = vec![*target_mate, *source_mate];
             self.working.edges.remove(*source_edge)?;
             self.history.changed(
@@ -1894,27 +2011,27 @@ impl<'kernel> EulerTransaction<'kernel> {
         for coedge in removed_coedges {
             self.working.coedges.remove(coedge)?;
         }
-        let target_loop_name = self.working.loop_(target_loop)?.name;
-        let source_loop_name = self.working.loop_(source_loop)?.name;
+        let removed_loop_names = loop_pairs
+            .iter()
+            .flat_map(|(target_loop, source_loop)| [*target_loop, *source_loop])
+            .map(|loop_id| {
+                self.working
+                    .loop_(loop_id)
+                    .map(|loop_value| loop_value.name)
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
         let target_face_name = self.working.face(target_face)?.name;
         let source_face_name = self.working.face(source_face)?.name;
-        self.working.loops.remove(target_loop)?;
-        self.working.loops.remove(source_loop)?;
-        if preserve_inner_patch {
-            self.working.faces.get_mut(target_face)?.loops = source_inner_loops.clone();
-            for loop_id in &source_inner_loops {
-                let loop_value = self.working.loops.get_mut(*loop_id)?;
-                loop_value.face = target_face;
-                loop_value.kind = LoopKind::Outer;
-            }
-        } else {
-            self.working.faces.remove(target_face)?;
-            self.working
-                .shells
-                .get_mut(target_shell)?
-                .faces
-                .retain(|face| *face != target_face);
+        for (target_loop, source_loop) in &loop_pairs {
+            self.working.loops.remove(*target_loop)?;
+            self.working.loops.remove(*source_loop)?;
         }
+        self.working.faces.remove(target_face)?;
+        self.working
+            .shells
+            .get_mut(target_shell)?
+            .faces
+            .retain(|face| *face != target_face);
         self.working.faces.remove(source_face)?;
         let source_faces = self.working.shell(source_shell)?.faces.clone();
         for face in source_faces.into_iter().filter(|face| *face != source_face) {
@@ -1961,6 +2078,11 @@ impl<'kernel> EulerTransaction<'kernel> {
                             <= self.kernel.tolerance.linear;
                         (same_orientation && normals_parallel && coplanar, true)
                     }
+                    (Surface3::Cylinder(first_cylinder), Surface3::Cylinder(second_cylinder)) => (
+                        same_orientation
+                            && self.coincident_cylinders(*first_cylinder, *second_cylinder),
+                        true,
+                    ),
                     _ => (first.surface == second.surface && same_orientation, false),
                 }
             };
@@ -1972,7 +2094,13 @@ impl<'kernel> EulerTransaction<'kernel> {
                 };
                 self.kef_unchecked(*edge, source_face)?;
                 if reparameterize {
-                    self.reparameterize_planar_face(remaining_face)?;
+                    match self.working.face(remaining_face)?.surface {
+                        Surface3::Plane(_) => self.reparameterize_planar_face(remaining_face)?,
+                        Surface3::Cylinder(_) => {
+                            self.reparameterize_cylindrical_face(remaining_face)?
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -1985,20 +2113,13 @@ impl<'kernel> EulerTransaction<'kernel> {
             self.history
                 .changed(source_name, ChangeKind::Merged, [target_name]);
         }
-        let mut deleted_names = vec![
-            target_loop_name,
-            source_loop_name,
+        let mut deleted_names = removed_loop_names;
+        deleted_names.extend([
+            target_face_name,
             source_face_name,
             source_shell_name,
             source_body_name,
-        ];
-        if !preserve_inner_patch {
-            deleted_names.push(target_face_name);
-        } else {
-            self.history
-                .changed(target_face_name, ChangeKind::Modified, [target_face_name]);
-            self.reparameterize_planar_face(target_face)?;
-        }
+        ]);
         for name in removed_names.into_iter().chain(deleted_names) {
             self.history
                 .changed(name, ChangeKind::Deleted, std::iter::empty());
@@ -2015,6 +2136,146 @@ impl<'kernel> EulerTransaction<'kernel> {
         }
         self.composes_imported_topology = true;
         Ok(target)
+    }
+
+    /// Re-express a circular edge in the parameter space of the face that
+    /// survives sewing. Endpoint matching is insufficient for circles because
+    /// the discarded edge may use a different angular frame even when both
+    /// curves describe the same geometric arc.
+    fn pcurve_for_welded_circular_edge(
+        &self,
+        edge_id: EdgeId,
+        coedge_id: CoedgeId,
+    ) -> KernelResult<Curve2> {
+        let edge = self.working.edge(edge_id)?;
+        let Curve3::Circle(_) = &edge.curve else {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "circular edge reparameterization requires a circular edge",
+            ));
+        };
+        let loop_id = self.working.coedge(coedge_id)?.loop_id;
+        let face_id = self.working.loop_(loop_id)?.face;
+        let surface = &self.working.face(face_id)?.surface;
+        let Surface3::Cylinder(_) = surface else {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "circular edge reparameterization requires a cylindrical adjacent face",
+            ));
+        };
+
+        let parameter = edge.range.start;
+        let curve_evaluation = edge.curve.evaluate(parameter)?;
+        let projection = surface.project(curve_evaluation.point, self.kernel.tolerance)?;
+        let surface_evaluation =
+            surface.evaluate(projection.parameters.0, projection.parameters.1)?;
+        let direction = if curve_evaluation.first_derivative.dot(surface_evaluation.du) >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let origin = Point2::new(
+            projection.parameters.0 - direction * parameter,
+            projection.parameters.1,
+        );
+        Ok(Line2::new(origin, Vec2::new(direction, 0.0))?.into())
+    }
+
+    fn coincident_cylinders(&self, first: Cylinder3, second: Cylinder3) -> bool {
+        let first_axis = first.axis().normalize();
+        let second_axis = second.axis().normalize();
+        let axes_parallel =
+            first_axis.cross(second_axis).magnitude() <= self.kernel.tolerance.angular;
+        let origins_coaxial = (second.origin() - first.origin())
+            .cross(first_axis)
+            .magnitude()
+            <= self.kernel.tolerance.linear;
+        let radii_equal = (first.x_radius().magnitude() - second.x_radius().magnitude()).abs()
+            <= self.kernel.tolerance.linear
+            && (first.y_radius().magnitude() - second.y_radius().magnitude()).abs()
+                <= self.kernel.tolerance.linear;
+        axes_parallel && origins_coaxial && radii_equal
+    }
+
+    fn reparameterize_cylindrical_face(&mut self, face_id: FaceId) -> KernelResult<()> {
+        let surface = self.working.face(face_id)?.surface.clone();
+        let Surface3::Cylinder(_) = surface else {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "cylindrical reparameterization requires a cylindrical face",
+            ));
+        };
+        let loops = self.working.face(face_id)?.loops.clone();
+        for loop_id in loops {
+            let coedges = self.collect_loop(loop_id)?;
+            for coedge_id in &coedges {
+                let edge_id = self.working.coedge(*coedge_id)?.edge;
+                let edge = self.working.edge(edge_id)?.clone();
+                let pcurve = match edge.curve {
+                    Curve3::Circle(_) => {
+                        self.pcurve_for_welded_circular_edge(edge_id, *coedge_id)?
+                    }
+                    Curve3::Line(_) => {
+                        let start = edge.curve.evaluate(edge.range.start)?.point;
+                        let end = edge.curve.evaluate(edge.range.end)?.point;
+                        let start_uv = surface.project(start, self.kernel.tolerance)?.parameters;
+                        let mut end_uv = surface.project(end, self.kernel.tolerance)?.parameters;
+                        while end_uv.0 - start_uv.0 > std::f64::consts::PI {
+                            end_uv.0 -= std::f64::consts::TAU;
+                        }
+                        while end_uv.0 - start_uv.0 < -std::f64::consts::PI {
+                            end_uv.0 += std::f64::consts::TAU;
+                        }
+                        let direction = Vec2::new(end_uv.0 - start_uv.0, end_uv.1 - start_uv.1)
+                            / edge.range.span();
+                        let origin =
+                            Point2::new(start_uv.0, start_uv.1) - direction * edge.range.start;
+                        Line2::new(origin, direction)?.into()
+                    }
+                    Curve3::Nurbs(_) => {
+                        return Err(KernelError::new(
+                            DiagnosticKind::UnsupportedGeometry,
+                            "a cylindrical face currently requires line or circle boundary edges",
+                        ));
+                    }
+                };
+                let coedge = self.working.coedges.get_mut(*coedge_id)?;
+                coedge.pcurve = pcurve;
+                coedge.range = if coedge.forward {
+                    edge.range
+                } else {
+                    edge.range.reversed()
+                };
+            }
+
+            // Cylinder u is periodic. Choose one continuous lift of the loop
+            // into parameter space so area and winding are evaluated on the
+            // intended strip instead of cancelling across the 2π seam.
+            let mut previous_end = None;
+            for coedge_id in coedges {
+                let coedge = self.working.coedge(coedge_id)?;
+                let start = coedge.pcurve.evaluate(coedge.range.start)?.point;
+                let end = coedge.pcurve.evaluate(coedge.range.end)?.point;
+                let shift = previous_end
+                    .map(|previous: Point2| {
+                        ((previous.x - start.x) / std::f64::consts::TAU).round()
+                            * std::f64::consts::TAU
+                    })
+                    .unwrap_or(0.0);
+                if shift != 0.0 {
+                    let Curve2::Line(line) = self.working.coedge(coedge_id)?.pcurve else {
+                        return Err(KernelError::new(
+                            DiagnosticKind::UnsupportedGeometry,
+                            "cylindrical boundary reparameterization requires linear p-curves",
+                        ));
+                    };
+                    self.working.coedges.get_mut(coedge_id)?.pcurve =
+                        Line2::new(line.origin() + Vec2::new(shift, 0.0), line.direction())?.into();
+                }
+                previous_end = Some(end + Vec2::new(shift, 0.0));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn sew_body_across_face_patch(
@@ -2349,7 +2610,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         let names_snapshot = self.names.clone();
         let touched_snapshot = self.touched_bodies.clone();
         let prism_axis = self.boolean_prism_axis(first, second)?;
-        let result = super::boolean::boolean_polyhedron(
+        let result = super::boolean::boolean_planar_brep(
             &self.working,
             self.kernel.tolerance,
             first,

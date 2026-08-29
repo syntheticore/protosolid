@@ -840,21 +840,6 @@ fn try_certify_prism_with_bosses(
             continue;
         }
 
-        let mut boss_components = Vec::new();
-        let mut boss_faces = BTreeSet::new();
-        let mut failed = false;
-        for inner_loop in &inner_loops {
-            let component = faces_across_loop(topology, *target_face, *inner_loop)?;
-            if component.is_empty() || component.iter().any(|face| boss_faces.contains(face)) {
-                failed = true;
-                break;
-            }
-            boss_faces.extend(component.iter().copied());
-            boss_components.push((*inner_loop, component));
-        }
-        if failed || boss_faces.iter().any(|face| !face_ids.contains(face)) {
-            continue;
-        }
         let Surface3::Plane(target_plane) = target.surface() else {
             unreachable!()
         };
@@ -862,15 +847,40 @@ fn try_certify_prism_with_bosses(
             super::FaceOrientation::Forward => target_plane.normal(),
             super::FaceOrientation::Reversed => -target_plane.normal(),
         };
-        if boss_components.iter().any(|(_, faces)| {
-            component_centroid(topology, faces)
-                .map(|centroid| {
-                    (centroid - target_plane.origin()).dot(target_normal) <= tolerance.linear
-                })
-                .unwrap_or(true)
-        }) {
+
+        let mut boss_components = Vec::new();
+        let mut boss_faces = BTreeSet::new();
+        let mut failed = false;
+        for inner_loop in &inner_loops {
+            let component = faces_across_loop(topology, *target_face, *inner_loop)?;
+            if component.is_empty() {
+                failed = true;
+                break;
+            }
+            // A target cap may already contain through-holes or pockets. Only
+            // the components extending through its outward half-space are
+            // additive bosses; the others remain part of the base prism.
+            let centroid = component_centroid(topology, &component)?;
+            if (centroid - target_plane.origin()).dot(target_normal) <= tolerance.linear {
+                continue;
+            }
+            if component.iter().any(|face| boss_faces.contains(face)) {
+                failed = true;
+                break;
+            }
+            boss_faces.extend(component.iter().copied());
+            boss_components.push((*inner_loop, component));
+        }
+        if failed
+            || boss_components.is_empty()
+            || boss_faces.iter().any(|face| !face_ids.contains(face))
+        {
             continue;
         }
+        let boss_loops = boss_components
+            .iter()
+            .map(|(loop_id, _)| *loop_id)
+            .collect::<BTreeSet<_>>();
 
         let mut base_topology = topology.clone();
         base_topology
@@ -882,7 +892,7 @@ fn try_certify_prism_with_bosses(
             .faces
             .get_mut(*target_face)?
             .loops
-            .retain(|loop_id| !inner_loops.contains(loop_id));
+            .retain(|loop_id| !boss_loops.contains(loop_id));
         let base_faces = face_ids
             .iter()
             .copied()
@@ -973,21 +983,6 @@ fn try_certify_prism_with_pockets(
             continue;
         }
 
-        let mut pocket_components = Vec::new();
-        let mut pocket_faces = BTreeSet::new();
-        let mut failed = false;
-        for inner_loop in &inner_loops {
-            let component = faces_across_loop(topology, *opening_face, *inner_loop)?;
-            if component.is_empty() || component.iter().any(|face| pocket_faces.contains(face)) {
-                failed = true;
-                break;
-            }
-            pocket_faces.extend(component.iter().copied());
-            pocket_components.push((*inner_loop, component));
-        }
-        if failed || pocket_faces.iter().any(|face| !face_ids.contains(face)) {
-            continue;
-        }
         let Surface3::Plane(opening_plane) = opening.surface() else {
             unreachable!()
         };
@@ -995,15 +990,58 @@ fn try_certify_prism_with_pockets(
             super::FaceOrientation::Forward => opening_plane.normal(),
             super::FaceOrientation::Reversed => -opening_plane.normal(),
         };
-        if pocket_components.iter().any(|(_, faces)| {
-            component_centroid(topology, faces)
-                .map(|centroid| {
-                    (centroid - opening_plane.origin()).dot(opening_normal) >= -tolerance.linear
-                })
-                .unwrap_or(true)
-        }) {
+
+        let mut pocket_components = Vec::new();
+        let mut pocket_faces = BTreeSet::new();
+        let mut failed = false;
+        for inner_loop in &inner_loops {
+            let component = faces_across_loop(topology, *opening_face, *inner_loop)?;
+            if component.is_empty() {
+                failed = true;
+                break;
+            }
+            let closes_inside = component.iter().any(|face_id| {
+                let Ok(face) = topology.face(*face_id) else {
+                    return false;
+                };
+                let Surface3::Plane(plane) = face.surface() else {
+                    return false;
+                };
+                face.loops().len() == 1
+                    && plane.normal().cross(opening_normal).magnitude() <= tolerance.angular
+                    && (plane.origin() - opening_plane.origin()).dot(opening_normal)
+                        < -tolerance.linear
+                    && parallel_loops_match(
+                        topology,
+                        *inner_loop,
+                        face.loops()[0],
+                        opening_normal,
+                        tolerance,
+                    )
+                    .unwrap_or(false)
+            });
+            // A through-hole connects this loop to the rest of the base shell;
+            // a blind pocket instead closes on one matching inward planar face.
+            if !closes_inside {
+                continue;
+            }
+            if component.iter().any(|face| pocket_faces.contains(face)) {
+                failed = true;
+                break;
+            }
+            pocket_faces.extend(component.iter().copied());
+            pocket_components.push((*inner_loop, component));
+        }
+        if failed
+            || pocket_components.is_empty()
+            || pocket_faces.iter().any(|face| !face_ids.contains(face))
+        {
             continue;
         }
+        let pocket_loops = pocket_components
+            .iter()
+            .map(|(loop_id, _)| *loop_id)
+            .collect::<BTreeSet<_>>();
 
         let mut base_topology = topology.clone();
         base_topology
@@ -1015,7 +1053,7 @@ fn try_certify_prism_with_pockets(
             .faces
             .get_mut(*opening_face)?
             .loops
-            .retain(|loop_id| !inner_loops.contains(loop_id));
+            .retain(|loop_id| !pocket_loops.contains(loop_id));
         let base_faces = face_ids
             .iter()
             .copied()
@@ -1162,6 +1200,73 @@ fn subtract_properties(
         centroid,
         inertia,
     })
+}
+
+fn parallel_loops_match(
+    topology: &Topology,
+    first: super::LoopId,
+    second: super::LoopId,
+    axis: Vec3,
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
+    let first = topology.loop_coedges(first)?;
+    let second = topology.loop_coedges(second)?;
+    if first.len() != second.len() {
+        return Ok(false);
+    }
+    let transverse = |delta: Vec3| delta - axis * delta.dot(axis);
+    let mut used = BTreeSet::new();
+    for first_use in first {
+        let first_edge = topology.edge(topology.coedge(first_use)?.edge())?;
+        let first_vertices = [
+            topology.vertex(first_edge.vertices()[0])?.point(),
+            topology.vertex(first_edge.vertices()[1])?.point(),
+        ];
+        let first_middle = first_edge
+            .curve()
+            .evaluate(first_edge.range().start + first_edge.range().span() * 0.5)?
+            .point;
+        let mut matched = None;
+        for second_use in &second {
+            let second_edge_id = topology.coedge(*second_use)?.edge();
+            if used.contains(&second_edge_id) {
+                continue;
+            }
+            let second_edge = topology.edge(second_edge_id)?;
+            if std::mem::discriminant(first_edge.curve())
+                != std::mem::discriminant(second_edge.curve())
+            {
+                continue;
+            }
+            let second_vertices = [
+                topology.vertex(second_edge.vertices()[0])?.point(),
+                topology.vertex(second_edge.vertices()[1])?.point(),
+            ];
+            let second_middle = second_edge
+                .curve()
+                .evaluate(second_edge.range().start + second_edge.range().span() * 0.5)?
+                .point;
+            let endpoints_match = (transverse(first_vertices[0] - second_vertices[0]).magnitude()
+                <= tolerance.linear
+                && transverse(first_vertices[1] - second_vertices[1]).magnitude()
+                    <= tolerance.linear)
+                || (transverse(first_vertices[0] - second_vertices[1]).magnitude()
+                    <= tolerance.linear
+                    && transverse(first_vertices[1] - second_vertices[0]).magnitude()
+                        <= tolerance.linear);
+            if endpoints_match
+                && transverse(first_middle - second_middle).magnitude() <= tolerance.linear
+            {
+                matched = Some(second_edge_id);
+                break;
+            }
+        }
+        let Some(edge) = matched else {
+            return Ok(false);
+        };
+        used.insert(edge);
+    }
+    Ok(true)
 }
 
 fn faces_across_loop(

@@ -117,10 +117,14 @@ impl Profile {
                         let intersection =
                             curve_pair_intersection(first_segment, second_segment, self.tolerance)?;
                         if intersection.coincident {
-                            return Err(KernelError::new(
-                                DiagnosticKind::UnsupportedGeometry,
-                                "analytical planar Booleans do not yet support coincident curve intervals",
-                            ));
+                            split_coincident_segments(
+                                first_segment,
+                                second_segment,
+                                &mut first_splits[first_wire_index][first_segment_index],
+                                &mut second_splits[second_wire_index][second_segment_index],
+                                self.tolerance,
+                            )?;
+                            continue;
                         }
                         for hit in intersection.hits {
                             first_splits[first_wire_index][first_segment_index]
@@ -136,32 +140,117 @@ impl Profile {
         let first_fragments = split_boundaries(&first_boundaries, first_splits, self.tolerance)?;
         let second_fragments = split_boundaries(&second_boundaries, second_splits, self.tolerance)?;
         let mut selected = Vec::new();
-        for fragment in first_fragments {
-            let inside = profile_contains(other, fragment_midpoint(&fragment)?)?;
-            let keep = match kind {
-                BooleanKind::Union | BooleanKind::Difference => !inside,
-                BooleanKind::Intersection => inside,
-            };
-            if keep {
-                selected.push(fragment);
+        for fragment in first_fragments.into_iter().chain(second_fragments) {
+            let evaluation = fragment
+                .curve()
+                .evaluate(fragment.range().start + fragment.range().span() * 0.5)?;
+            let tangent = evaluation.first_derivative * fragment.range().span().signum();
+            if tangent.magnitude() <= self.tolerance.linear {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "analytical planar Boolean encountered a singular boundary fragment",
+                ));
             }
-        }
-        for fragment in second_fragments {
-            let inside = profile_contains(self, fragment_midpoint(&fragment)?)?;
-            let keep = match kind {
-                BooleanKind::Union => !inside,
-                BooleanKind::Difference | BooleanKind::Intersection => inside,
+            let left = crate::Vec2::new(-tangent.y, tangent.x).normalize();
+            let scale = evaluation.point.to_vec().magnitude().max(1.0);
+            let offset = self.tolerance.linear_at_scale(scale) * 16.0;
+            let left_point = evaluation.point + left * offset;
+            let right_point = evaluation.point - left * offset;
+            let result_contains = |point| -> KernelResult<bool> {
+                let first = profile_contains(self, point)?;
+                let second = profile_contains(other, point)?;
+                Ok(match kind {
+                    BooleanKind::Union => first || second,
+                    BooleanKind::Intersection => first && second,
+                    BooleanKind::Difference => first && !second,
+                })
             };
-            if keep {
-                selected.push(if kind == BooleanKind::Difference {
-                    fragment.reversed()
-                } else {
-                    fragment
-                });
+            let left_inside = result_contains(left_point)?;
+            let right_inside = result_contains(right_point)?;
+            let fragment = match (left_inside, right_inside) {
+                (true, false) => fragment,
+                (false, true) => fragment.reversed(),
+                _ => continue,
+            };
+            if !selected.iter().try_fold(false, |same, existing| {
+                Ok::<_, KernelError>(same || fragments_match(existing, &fragment, self.tolerance)?)
+            })? {
+                selected.push(fragment);
             }
         }
         profiles_from_fragments(selected, self.tolerance)
     }
+}
+
+fn split_coincident_segments(
+    first: &TrimmedCurve2,
+    second: &TrimmedCurve2,
+    first_splits: &mut Vec<f64>,
+    second_splits: &mut Vec<f64>,
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    for parameter in [second.range().start, second.range().end] {
+        let point = second.curve().evaluate(parameter)?.point;
+        if let Some(parameter) = parameter_on_segment(first, point, tolerance)? {
+            first_splits.push(parameter);
+        }
+    }
+    for parameter in [first.range().start, first.range().end] {
+        let point = first.curve().evaluate(parameter)?.point;
+        if let Some(parameter) = parameter_on_segment(second, point, tolerance)? {
+            second_splits.push(parameter);
+        }
+    }
+    Ok(())
+}
+
+fn parameter_on_segment(
+    segment: &TrimmedCurve2,
+    point: crate::Point2,
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<f64>> {
+    let parameter = match segment.curve() {
+        Curve2::Line(line) => {
+            let direction = line.direction();
+            (point - line.origin()).dot(direction) / direction.magnitude2()
+        }
+        Curve2::Circle(circle) => {
+            let radial = point - circle.center();
+            if (radial.magnitude() - circle.radius()).abs() > tolerance.linear {
+                return Ok(None);
+            }
+            trim_parameter(segment, radial.y.atan2(radial.x))
+        }
+        Curve2::Nurbs(_) => {
+            return Ok(None);
+        }
+    };
+    let low = segment.range().start.min(segment.range().end) - tolerance.parameter;
+    let high = segment.range().start.max(segment.range().end) + tolerance.parameter;
+    if parameter < low || parameter > high {
+        return Ok(None);
+    }
+    let evaluated = segment.curve().evaluate(parameter)?.point;
+    Ok((evaluated.distance(point) <= tolerance.linear).then_some(parameter))
+}
+
+fn fragments_match(
+    first: &TrimmedCurve2,
+    second: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
+    let first_start = first.start()?;
+    let first_end = first.end()?;
+    let second_start = second.start()?;
+    let second_end = second.end()?;
+    if !((first_start.distance(second_start) <= tolerance.linear
+        && first_end.distance(second_end) <= tolerance.linear)
+        || (first_start.distance(second_end) <= tolerance.linear
+            && first_end.distance(second_start) <= tolerance.linear))
+    {
+        return Ok(false);
+    }
+    Ok(fragment_midpoint(first)?.distance(fragment_midpoint(second)?) <= tolerance.linear)
 }
 
 fn split_boundaries(
@@ -257,7 +346,10 @@ fn profiles_from_fragments(
             end = next.end()?;
             loop_segments.push(next);
         }
-        wires.push(Wire2::new(loop_segments, tolerance)?);
+        wires.push(Wire2::new(
+            merge_adjacent_fragments(loop_segments, tolerance)?,
+            tolerance,
+        )?);
     }
     let mut outers = wires
         .iter()
@@ -290,6 +382,66 @@ fn profiles_from_fragments(
         .into_iter()
         .map(|(outer, holes)| Profile::new(outer, holes, tolerance))
         .collect()
+}
+
+fn merge_adjacent_fragments(
+    mut segments: Vec<TrimmedCurve2>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Vec<TrimmedCurve2>> {
+    let mut changed = true;
+    while changed && segments.len() > 1 {
+        changed = false;
+        for index in 0..segments.len() {
+            let next = (index + 1) % segments.len();
+            let (Curve2::Line(_), Curve2::Line(_)) =
+                (segments[index].curve(), segments[next].curve())
+            else {
+                continue;
+            };
+            let first_direction = segments[index]
+                .curve()
+                .evaluate(segments[index].range().start + segments[index].range().span() * 0.5)?
+                .first_derivative
+                * segments[index].range().span().signum();
+            let second_direction = segments[next]
+                .curve()
+                .evaluate(segments[next].range().start + segments[next].range().span() * 0.5)?
+                .first_derivative
+                * segments[next].range().span().signum();
+            let first_direction = first_direction.normalize();
+            let second_direction = second_direction.normalize();
+            if (first_direction.x * second_direction.y - first_direction.y * second_direction.x)
+                .abs()
+                > tolerance.angular
+                || first_direction.dot(second_direction) < 1.0 - tolerance.angular
+            {
+                continue;
+            }
+            let start = segments[index].start()?;
+            let join = segments[index].end()?;
+            let next_start = segments[next].start()?;
+            let end = segments[next].end()?;
+            if join.distance(next_start) > tolerance.linear
+                || ((next_start - start).x * first_direction.y
+                    - (next_start - start).y * first_direction.x)
+                    .abs()
+                    > tolerance.linear
+            {
+                continue;
+            }
+            let merged = TrimmedCurve2::line(start, end)?;
+            if next == 0 {
+                segments[index] = merged;
+                segments.remove(0);
+            } else {
+                segments[index] = merged;
+                segments.remove(next);
+            }
+            changed = true;
+            break;
+        }
+    }
+    Ok(segments)
 }
 
 fn invalid(message: impl Into<String>) -> KernelError {

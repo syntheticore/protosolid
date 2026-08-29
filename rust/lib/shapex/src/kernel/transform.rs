@@ -7,8 +7,8 @@ use crate::{Matrix3, Point3, Quaternion, Vec3};
 use super::validation::ValidationMode;
 use super::{
     ChangeKind, Cone3, Curve3, Cylinder3, DiagnosticKind, FaceId, Kernel, KernelError,
-    KernelResult, Line3, ModelTolerance, NurbsCurve3, NurbsSurface3, OperationHistory, Plane3,
-    Sphere3, Surface3, Torus3,
+    KernelResult, Line3, ModelTolerance, NurbsCurve3, NurbsSurface3, OffsetSurface3,
+    OperationHistory, Plane3, Sphere3, Surface3, SurfaceIntersectionCurve, Torus3,
 };
 
 /// A validated orientation-preserving Euclidean transform.
@@ -194,6 +194,16 @@ fn transform_curve(
             curve.knots().to_vec(),
         )?
         .into(),
+        Curve3::SurfaceIntersection(curve) => SurfaceIntersectionCurve::new(
+            transform_surface(curve.first_surface().clone(), transform, tolerance)?,
+            transform_surface(curve.second_surface().clone(), transform, tolerance)?,
+            curve.first_pcurve().clone(),
+            curve.second_pcurve().clone(),
+            curve.range(),
+            tolerance,
+            curve.achieved_error(),
+        )?
+        .into(),
     })
 }
 
@@ -256,6 +266,12 @@ fn transform_surface(
                 .collect(),
             surface.weights().to_vec(),
             (surface.knots().0.to_vec(), surface.knots().1.to_vec()),
+        )?
+        .into(),
+        Surface3::Offset(surface) => OffsetSurface3::new(
+            transform_surface(surface.base().clone(), transform, tolerance)?,
+            surface.distance(),
+            tolerance,
         )?
         .into(),
     })

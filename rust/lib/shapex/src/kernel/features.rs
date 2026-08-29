@@ -282,7 +282,7 @@ fn welded_index(points: &mut Vec<Point3>, point: Point3, tolerance: f64) -> usiz
 }
 
 fn construction_tessellation(tolerance: ModelTolerance) -> KernelResult<TessellationOptions> {
-    TessellationOptions::new(tolerance.linear.max(0.5), 0.8, 4)
+    TessellationOptions::new(tolerance.linear.max(0.5), 0.8, 5)
 }
 
 fn construction_curve_tolerance(tolerance: ModelTolerance) -> ModelTolerance {

@@ -1784,7 +1784,7 @@ fn try_certify_cone(
                     return Ok(None);
                 }
             }
-            Curve3::Nurbs(_) => return Ok(None),
+            Curve3::Nurbs(_) | Curve3::SurfaceIntersection(_) => return Ok(None),
         }
     }
     if circular_edges != 2 || generators != 2 || vertices.len() != 3 {
@@ -2085,7 +2085,7 @@ fn try_certify_cylinder(
                     return Ok(None);
                 }
             }
-            Curve3::Nurbs(_) => return Ok(None),
+            Curve3::Nurbs(_) | Curve3::SurfaceIntersection(_) => return Ok(None),
         }
     }
     if circular_edges != 4 || linear_edges != 2 {

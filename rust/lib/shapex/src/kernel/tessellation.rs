@@ -174,20 +174,27 @@ impl Kernel {
         cache: &mut BTreeMap<EdgeId, EdgePolyline>,
     ) -> KernelResult<TriangleMesh> {
         let face = self.topology().face(face_id)?;
-        let mut loop_ids = face.loops().to_vec();
-        loop_ids.sort_by_key(|loop_id| {
-            self.topology()
-                .loop_(*loop_id)
-                .map(|loop_| match loop_.kind() {
-                    super::LoopKind::Outer => 0,
-                    super::LoopKind::Inner => 1,
-                })
-                .unwrap_or(2)
-        });
-        let mut rings: Vec<Vec<BoundaryVertex>> = Vec::new();
-        for loop_id in loop_ids {
-            rings.push(self.sample_loop(loop_id, options, cache)?);
-        }
+        let rings = if let Some(ring) = self.sample_full_periodic_cylinder_band(face_id, options)? {
+            vec![ring]
+        } else {
+            let mut loop_ids = face.loops().to_vec();
+            loop_ids.sort_by_key(|loop_id| {
+                self.topology()
+                    .loop_(*loop_id)
+                    .map(|loop_| match loop_.kind() {
+                        super::LoopKind::Outer => 0,
+                        super::LoopKind::Inner => 1,
+                    })
+                    .unwrap_or(2)
+            });
+            let mut rings = Vec::new();
+            for loop_id in loop_ids {
+                let mut ring = self.sample_loop(loop_id, options, cache)?;
+                unwrap_periodic_ring(face.surface(), self.tolerance(), &mut ring)?;
+                rings.push(ring);
+            }
+            rings
+        };
         if rings.is_empty() || rings[0].len() < 3 {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
@@ -359,6 +366,145 @@ impl Kernel {
         }
         Ok(output)
     }
+
+    /// Sample the canonical trim of a complete periodic cylinder band.
+    ///
+    /// An exact circle is partitioned into arcs while Euler construction is in
+    /// progress. After adjacent bands are sewn, the remaining same-face seam
+    /// edges are topological parameter seams rather than trim boundaries. A
+    /// planar triangulator cannot consume that seam-spiked loop directly, so
+    /// derive the equivalent rectangle in the cylinder's exact `(u, v)`
+    /// domain. Partial cylinders and cylinders with non-circular trims fall
+    /// through to ordinary p-curve tessellation.
+    fn sample_full_periodic_cylinder_band(
+        &self,
+        face_id: FaceId,
+        options: TessellationOptions,
+    ) -> KernelResult<Option<Vec<BoundaryVertex>>> {
+        let face = self.topology().face(face_id)?;
+        let super::Surface3::Cylinder(cylinder) = face.surface() else {
+            return Ok(None);
+        };
+        let mut levels = Vec::new();
+        let mut has_parameter_seam = false;
+        for edge_id in self.topology().face_edges(face_id)? {
+            let edge = self.topology().edge(edge_id)?;
+            let adjacent = self.topology().edge_faces(edge_id)?;
+            if adjacent.len() == 1 {
+                // The intrinsic cylinder seam is longitudinal. Sewing two
+                // complete bands can additionally leave a circular same-face
+                // seam at the former interface; neither trims the face.
+                has_parameter_seam = true;
+                continue;
+            }
+            if !matches!(edge.curve(), super::Curve3::Circle(_)) {
+                return Ok(None);
+            }
+            let point = edge.curve().evaluate(edge.range().start)?.point;
+            let projection = face.surface().project(point, self.tolerance())?;
+            if !levels.iter().any(|level: &f64| {
+                (*level - projection.parameters.1).abs() <= self.tolerance().parameter * 8.0
+            }) {
+                levels.push(projection.parameters.1);
+            }
+        }
+        if !has_parameter_seam || levels.len() != 2 {
+            return Ok(None);
+        }
+        levels.sort_by(f64::total_cmp);
+
+        let radius = cylinder.radius();
+        let chord_angle = if options.chord_tolerance >= radius * 2.0 {
+            std::f64::consts::PI
+        } else {
+            2.0 * (1.0 - options.chord_tolerance / radius)
+                .clamp(-1.0, 1.0)
+                .acos()
+        };
+        let maximum_angle = options.angular_tolerance.min(chord_angle);
+        let segments = (std::f64::consts::TAU / maximum_angle).ceil().max(8.0) as usize;
+        let mut ring = Vec::with_capacity((segments + 1) * 2);
+        for index in 0..=segments {
+            let u = std::f64::consts::TAU * index as f64 / segments as f64;
+            let point = face.surface().evaluate(u, levels[0])?.point;
+            ring.push(BoundaryVertex {
+                uv: Point2::new(u, levels[0]),
+                point,
+            });
+        }
+        for index in (0..=segments).rev() {
+            let u = std::f64::consts::TAU * index as f64 / segments as f64;
+            let point = face.surface().evaluate(u, levels[1])?.point;
+            ring.push(BoundaryVertex {
+                uv: Point2::new(u, levels[1]),
+                point,
+            });
+        }
+        Ok(Some(ring))
+    }
+}
+
+/// Lift periodic surface parameters onto one continuous sheet before planar
+/// triangulation.  P-curves are allowed to use different representatives of
+/// the same periodic coordinate (for example `0` and `2π` on a cylinder),
+/// especially after exact Euler sewing.  Earcut needs a continuous planar
+/// polygon, so choose the equivalent representative nearest the preceding
+/// boundary sample.  This changes only the rendering parameter lift; every
+/// lifted value evaluates to the same exact surface point.
+fn unwrap_periodic_ring(
+    surface: &super::Surface3,
+    tolerance: ModelTolerance,
+    ring: &mut [BoundaryVertex],
+) -> KernelResult<()> {
+    let domains = surface.domains();
+    if !domains.iter().any(|domain| domain.period.is_some()) {
+        return Ok(());
+    }
+    // Re-project the exact 3D boundary point before choosing a lift. Sewn
+    // p-curves can legitimately inherit different angular frames from their
+    // source faces; projection supplies one canonical representative on the
+    // surviving surface and the loop order supplies the winding.
+    for vertex in ring.iter_mut() {
+        let projection = surface.project(vertex.point, tolerance)?;
+        if projection.distance
+            > tolerance.linear_at_scale(vertex.point.to_vec().magnitude().max(1.0))
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "periodic face boundary does not lie on its retained surface",
+            ));
+        }
+        if domains[0].period.is_some() {
+            vertex.uv.x = projection.parameters.0;
+        }
+        if domains[1].period.is_some() {
+            vertex.uv.y = projection.parameters.1;
+        }
+    }
+    for (coordinate, period) in domains
+        .iter()
+        .enumerate()
+        .filter_map(|(coordinate, domain)| domain.period.map(|period| (coordinate, period)))
+    {
+        let Some(first) = ring.first() else {
+            continue;
+        };
+        let mut previous = if coordinate == 0 {
+            first.uv.x
+        } else {
+            first.uv.y
+        };
+        for vertex in ring.iter_mut().skip(1) {
+            let value = if coordinate == 0 {
+                &mut vertex.uv.x
+            } else {
+                &mut vertex.uv.y
+            };
+            *value += ((previous - *value) / period).round() * period;
+            previous = *value;
+        }
+    }
+    Ok(())
 }
 
 fn ordered_edge(first: usize, second: usize) -> (usize, usize) {

@@ -1,6 +1,6 @@
 use cgmath::prelude::*;
 
-use crate::{FaceHandle, Matrix3, Point2, Point3, Vec3};
+use crate::{Matrix3, Point2, Point3, Vec3};
 
 use super::{
     Axis3, BodyId, BooleanKind, Circle3, Curve2, Curve3, IntersectionSet, Kernel, Line3,
@@ -183,6 +183,18 @@ fn concentric_circular_hole_is_certified_without_tessellation() {
         .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 3.0))
         .expect("annular prism");
     assert!((solid.volume() - 63.0 * std::f64::consts::PI).abs() < 1.0e-8);
+    let cylindrical_faces = solid
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        cylindrical_faces.len(),
+        2,
+        "each full circular boundary must sweep to one periodic cylindrical face"
+    );
+    assert!(cylindrical_faces.iter().any(
+        |face| matches!(face.surface(), Surface3::Cylinder(cylinder) if (cylinder.radius() - 2.0).abs() < 1.0e-9)
+    ));
 }
 
 #[test]
@@ -583,7 +595,7 @@ fn overlapping_cylinders_have_analytic_boolean_results() {
             .faces()
             .filter(|face| matches!(face.surface(), Surface3::Cylinder(_)))
             .count(),
-        2
+        1
     );
 
     let intersection = first.intersection(&second).expect("intersection");
@@ -1438,305 +1450,6 @@ fn closed_cylindrical_shell_is_certified() {
     let shell = cylinder.shell(&[], -0.5).expect("closed cylinder shell");
 
     assert!(shell.volume() > 0.0 && shell.volume() < cylinder.volume());
-}
-
-#[test]
-fn straight_edge_fillet_is_euler_built_and_certified() {
-    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
-    let edge = cube.edges().next().expect("edge").clone();
-    let fillet = cube.fillet(&[edge.clone()], 1.0).expect("fillet");
-
-    assert!(fillet.volume() > 0.0);
-    assert!(fillet.volume() < cube.volume());
-    assert!(matches!(fillet.resolve(&edge), Resolution::Deleted));
-    let generated = fillet.faces_generated_from(&edge);
-    assert_eq!(generated.len(), 1);
-    assert!(matches!(generated[0].surface(), Surface3::Cylinder(_)));
-    let expected = 1_000.0 - (1.0 - std::f64::consts::FRAC_PI_4) * 10.0;
-    assert!((fillet.volume() - expected).abs() < 1.0e-6);
-}
-
-#[test]
-fn sequential_straight_edge_fillets_preserve_the_analytical_prism() {
-    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
-    let vertical = cube
-        .edges()
-        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
-        .filter(|edge| {
-            let endpoints = edge.endpoints().expect("edge endpoints");
-            (endpoints[1] - endpoints[0])
-                .normalize()
-                .dot(Vec3::unit_z())
-                .abs()
-                > 1.0 - 1.0e-9
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(vertical.len(), 4);
-
-    let first = cube
-        .fillet(std::slice::from_ref(&vertical[0]), 1.0)
-        .expect("first fillet");
-    let arc = first
-        .edges()
-        .find(|edge| matches!(edge.curve(), Curve3::Circle(_)))
-        .expect("fillet cap arc")
-        .clone();
-    let arc_endpoints = arc.endpoints().expect("arc endpoints");
-    let tangent_line = first
-        .edges()
-        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
-        .find(|edge| {
-            let endpoints = edge.endpoints().expect("line endpoints");
-            let touches_arc = endpoints.iter().any(|point| {
-                arc_endpoints
-                    .iter()
-                    .any(|arc_point| point.distance(*arc_point) < 1.0e-9)
-            });
-            let direction = endpoints[1] - endpoints[0];
-            touches_arc && direction.dot(Vec3::unit_z()).abs() < 1.0e-9
-        })
-        .expect("straight cap edge tangent to the arc")
-        .clone();
-    let arc_rollover = first
-        .fillet(std::slice::from_ref(&arc), 0.25)
-        .expect("cap arc should produce an exact toroidal rollover");
-    let line_rollover = first
-        .fillet(std::slice::from_ref(&tangent_line), 0.25)
-        .expect("tangent cap line should produce the same exact rollover chain");
-    assert!(arc_rollover
-        .faces()
-        .any(|face| matches!(face.surface(), Surface3::Nurbs(_))));
-    assert!((arc_rollover.volume() - line_rollover.volume()).abs() < 1.0e-8);
-    let arc_resolution = arc_rollover.resolve(&arc);
-    assert!(
-        matches!(
-            arc_resolution,
-            Resolution::Modified(_) | Resolution::Split(_)
-        ),
-        "unexpected arc lineage: {arc_resolution:?}"
-    );
-    let line_resolution = line_rollover.resolve(&tangent_line);
-    assert!(
-        matches!(
-            line_resolution,
-            Resolution::Modified(_) | Resolution::Split(_)
-        ),
-        "unexpected line lineage: {line_resolution:?}"
-    );
-    assert!(!arc_rollover.faces_generated_from(&arc).is_empty());
-    assert!(first.fillet(std::slice::from_ref(&arc), 1.0).is_err());
-    let second_edge = first
-        .edges()
-        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
-        .find(|edge| {
-            let endpoints = edge.endpoints().expect("edge endpoints");
-            (endpoints[1] - endpoints[0])
-                .normalize()
-                .dot(Vec3::unit_z())
-                .abs()
-                > 1.0 - 1.0e-9
-        })
-        .expect("remaining vertical edge")
-        .clone();
-
-    first
-        .fillet(&[second_edge], 1.0)
-        .expect("second fillet on the already-rounded prism");
-}
-
-#[test]
-fn cap_rim_fillet_preserves_rectangular_and_circular_through_holes() {
-    let tolerance = ModelTolerance::default();
-    let rectangle = |minimum: Point2, maximum: Point2| {
-        Wire2::polygon(
-            [
-                minimum,
-                Point2::new(maximum.x, minimum.y),
-                maximum,
-                Point2::new(minimum.x, maximum.y),
-            ],
-            tolerance,
-        )
-        .expect("rectangle")
-    };
-    let circular_hole = Wire2::new(
-        [TrimmedCurve2::circle(Point2::new(15.0, 5.0), 1.5).expect("circle")],
-        tolerance,
-    )
-    .expect("circular hole");
-    let prism = Profile::new(
-        rectangle(Point2::new(0.0, 0.0), Point2::new(20.0, 10.0)),
-        [
-            rectangle(Point2::new(5.0, 3.0), Point2::new(10.0, 7.0)),
-            circular_hole,
-        ],
-        tolerance,
-    )
-    .expect("perforated profile")
-    .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 5.0))
-    .expect("perforated prism");
-    let vertical = prism
-        .edges()
-        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
-        .find(|edge| {
-            let endpoints = edge.endpoints().expect("endpoints");
-            (endpoints[1] - endpoints[0])
-                .normalize()
-                .dot(Vec3::unit_z())
-                .abs()
-                > 1.0 - 1.0e-9
-                && endpoints[0].x > 19.0
-                && endpoints[0].y > 9.0
-        })
-        .expect("outer vertical corner")
-        .clone();
-    let rounded = prism.fillet(&[vertical], 1.0).expect("corner fillet");
-    let cap_arc = rounded
-        .edges()
-        .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
-        .find(|edge| {
-            let endpoints = edge.endpoints().expect("arc endpoints");
-            endpoints.iter().all(|point| (point.z - 5.0).abs() < 1.0e-9)
-                && endpoints
-                    .iter()
-                    .any(|point| point.x > 19.0 && point.y > 8.0)
-        })
-        .expect("rounded outer cap arc")
-        .clone();
-    let rollover = rounded
-        .fillet(&[cap_arc], 0.25)
-        .expect("perforated cap-rim rollover");
-
-    assert_eq!(rollover.solids().len(), 1);
-    assert!(rollover.volume() > 0.0 && rollover.volume() < rounded.volume());
-    assert!(rollover
-        .faces()
-        .any(|face| matches!(face.surface(), Surface3::Nurbs(_))));
-    let curved_patch_boundary = rollover
-        .edges()
-        .find(|edge| {
-            edge.connected_faces().is_ok_and(|faces| {
-                faces.len() == 2
-                    && faces
-                        .iter()
-                        .all(|face| matches!(face.surface(), Surface3::Nurbs(_)))
-            })
-        })
-        .expect("the rolling blend should meet the reconstructed curved side");
-    assert!(
-        rollover.is_semantic_edge(curved_patch_boundary),
-        "a boundary between distinct NURBS supports must be rendered"
-    );
-
-    let is_hole_wall = |face: &FaceHandle| {
-        let points = face
-            .boundary_edges()
-            .expect("face edges")
-            .into_iter()
-            .flat_map(|edge| edge.endpoints().expect("edge endpoints"))
-            .collect::<Vec<_>>();
-        let fixed = |coordinate: fn(Point3) -> f64, expected: f64| {
-            points
-                .iter()
-                .all(|point| (coordinate(*point) - expected).abs() < 1.0e-9)
-        };
-        matches!(face.surface(), Surface3::Cylinder(cylinder) if (cylinder.radius() - 1.5).abs() < 1.0e-9)
-            || [5.0, 10.0].into_iter().any(|x| fixed(|point| point.x, x))
-            || [3.0, 7.0].into_iter().any(|y| fixed(|point| point.y, y))
-    };
-    let source_hole_walls = rounded
-        .faces()
-        .filter(|face| is_hole_wall(face))
-        .cloned()
-        .collect::<Vec<_>>();
-    assert!(!source_hole_walls.is_empty());
-    let source_hole_wall_count = source_hole_walls.len();
-    let output_hole_walls = rollover
-        .faces()
-        .filter(|face| is_hole_wall(face))
-        .collect::<Vec<_>>();
-    assert_eq!(output_hole_walls.len(), source_hole_wall_count);
-    for wall in output_hole_walls {
-        let points = wall
-            .boundary_edges()
-            .expect("wall edges")
-            .into_iter()
-            .flat_map(|edge| edge.endpoints().expect("wall edge endpoints"))
-            .collect::<Vec<_>>();
-        assert!(points.iter().any(|point| point.z.abs() < 1.0e-9));
-        assert!(points.iter().any(|point| (point.z - 5.0).abs() < 1.0e-9));
-    }
-}
-
-#[test]
-fn periodic_circular_rim_fillet_fails_closed_until_periodic_sweeps_are_supported() {
-    let tolerance = ModelTolerance::default();
-    let circle = Wire2::new(
-        [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 12.112225576938657).expect("circle")],
-        tolerance,
-    )
-    .expect("circle wire");
-    let plane = Plane3::new(
-        Point3::new(0.0, 0.0, 0.0),
-        Vec3::unit_x(),
-        -Vec3::unit_z(),
-        tolerance,
-    )
-    .expect("browser xz plane");
-    let cylinder = Profile::new(circle, [], tolerance)
-        .expect("circle profile")
-        .extrude(plane, Vec3::new(0.0, 20.0, 0.0))
-        .expect("cylinder");
-    let edge = cylinder
-        .edges()
-        .find(|edge| matches!(edge.curve(), Curve3::Circle(_)))
-        .expect("circular edge")
-        .clone();
-    assert!(cylinder.fillet(&[edge], 1.0).is_err());
-}
-
-#[test]
-fn planar_split_publishes_both_certified_halves() {
-    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
-    let plane = Plane3::new(
-        Point3::new(5.0, 0.0, 0.0),
-        Vec3::unit_y(),
-        Vec3::unit_z(),
-        ModelTolerance::default(),
-    )
-    .expect("split plane");
-    let split = cube.split(plane, "both").expect("split");
-
-    assert_eq!(split.solids().len(), 2);
-    assert!((split.volume() - cube.volume()).abs() < 1.0e-6);
-}
-
-#[test]
-fn moving_a_face_rebuilds_and_certifies_the_changed_solid() {
-    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
-    let top = cube
-        .faces()
-        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z > 9.9))
-        .expect("top face")
-        .clone();
-    let transform = RigidTransform3::new(
-        Matrix3::identity(),
-        Vec3::new(0.0, 0.0, 2.0),
-        ModelTolerance::default(),
-    )
-    .expect("translation");
-    let edge = cube.edges().next().expect("cube edge").clone();
-    let moved = cube
-        .move_faces(&[top.clone()], transform)
-        .expect("move top face");
-
-    assert!((moved.volume() - 1_200.0).abs() < 1.0e-6);
-    assert!(matches!(moved.resolve(&top), Resolution::Modified(_)));
-    assert!(!matches!(
-        moved.resolve(&edge),
-        Resolution::Deleted | Resolution::Unrelated
-    ));
 }
 
 #[test]

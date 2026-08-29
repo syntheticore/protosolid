@@ -12,11 +12,11 @@ use super::polyhedron::{PolyhedralShellOrientation, PolyhedralTriangle};
 use super::topology::{Body, Coedge, Edge, Face, Loop, Shell, Vertex};
 use super::validation::{validate, ValidationMode};
 use super::{
-    BodyId, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, DiagnosticKind, EdgeId,
-    FaceId, FaceOrientation, Kernel, KernelError, KernelResult, Line2, Line3, LoopId, LoopKind,
-    ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, OperationHistory, ParameterRange,
-    Plane3, PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3, Topology, Torus3,
-    TrimmedCurve2, VertexId, Wire2,
+    BodyId, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, DiagnosticKind,
+    DomainBounds, EdgeId, FaceId, FaceOrientation, Kernel, KernelError, KernelResult, Line2, Line3,
+    LoopId, LoopKind, ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, OperationHistory,
+    ParameterRange, Plane3, PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3,
+    Topology, Torus3, TrimmedCurve2, VertexId, Wire2,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -74,175 +74,6 @@ pub struct MefInput {
     pub new_face_pcurve: Curve2,
     pub old_face_pcurve: Curve2,
     pub pcurve_range: ParameterRange,
-}
-
-#[derive(Debug, Clone)]
-struct SweepPath {
-    curve: Curve3,
-    range: ParameterRange,
-}
-
-#[derive(Debug, Clone)]
-struct SweepTopEdge {
-    curve: Curve3,
-    range: ParameterRange,
-    pcurve: Curve2,
-    pcurve_range: ParameterRange,
-}
-
-#[derive(Debug, Clone)]
-struct SweepSide {
-    surface: Surface3,
-    orientation: FaceOrientation,
-}
-
-#[derive(Debug)]
-struct VariableSweepResult {
-    faces: Vec<FaceId>,
-    path_edges: Vec<EdgeId>,
-    top_edges: Vec<EdgeId>,
-}
-
-#[derive(Debug)]
-pub(crate) struct EndFilletResult {
-    pub chosen: Vec<bool>,
-    pub lower_edges: Vec<EdgeId>,
-    pub lower_faces: Vec<FaceId>,
-    pub blend_faces: Vec<FaceId>,
-    pub path_edges: Vec<EdgeId>,
-    pub top_edges: Vec<EdgeId>,
-}
-
-fn oriented_tangent(segment: &TrimmedCurve2, parameter: f64) -> KernelResult<Vec2> {
-    Ok(segment
-        .curve()
-        .evaluate(parameter)?
-        .first_derivative
-        .normalize()
-        * segment.range().span().signum())
-}
-
-pub(super) fn expand_g1_selection(
-    segments: &[TrimmedCurve2],
-    selected: &[usize],
-    tolerance: ModelTolerance,
-) -> KernelResult<Vec<bool>> {
-    if segments.len() < 2
-        || selected.is_empty()
-        || selected.iter().any(|index| *index >= segments.len())
-    {
-        return Err(KernelError::new(
-            DiagnosticKind::InvalidInput,
-            "invalid end fillet chain",
-        ));
-    }
-    let mut chosen = vec![false; segments.len()];
-    for index in selected {
-        chosen[*index] = true;
-    }
-    loop {
-        let mut changed = false;
-        for index in 0..segments.len() {
-            let next = (index + 1) % segments.len();
-            if chosen[index] == chosen[next] {
-                continue;
-            }
-            let first = oriented_tangent(&segments[index], segments[index].range().end)?;
-            let second = oriented_tangent(&segments[next], segments[next].range().start)?;
-            if first.angle(second).0 <= tolerance.angular {
-                chosen[index] = true;
-                chosen[next] = true;
-                changed = true;
-            }
-        }
-        if !changed {
-            return Ok(chosen);
-        }
-    }
-}
-
-fn rational_quadratic_arc_2(segment: &TrimmedCurve2) -> KernelResult<TrimmedCurve2> {
-    let range = segment.range();
-    let first = segment.curve().evaluate(range.start)?.point;
-    let middle = segment
-        .curve()
-        .evaluate((range.start + range.end) * 0.5)?
-        .point;
-    let last = segment.curve().evaluate(range.end)?.point;
-    let weight = (range.span().abs() * 0.5).cos();
-    if weight <= 0.0 {
-        return Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "one rational quadratic arc must span less than a semicircle",
-        ));
-    }
-    let control = rational_quadratic_control_2(first, middle, last, weight)?;
-    TrimmedCurve2::new(
-        NurbsCurve2::new(
-            2,
-            vec![first, control, last],
-            vec![1.0, weight, 1.0],
-            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-        )?,
-        ParameterRange::new(0.0, 1.0)?,
-    )
-}
-
-fn rational_quadratic_control_2(
-    first: Point2,
-    middle: Point2,
-    last: Point2,
-    weight: f64,
-) -> KernelResult<Point2> {
-    if !weight.is_finite() || weight <= 0.0 {
-        return Err(KernelError::new(
-            DiagnosticKind::InvalidInput,
-            "rational quadratic control weight must be positive",
-        ));
-    }
-    Ok(Point2::from_vec(
-        (middle.to_vec() * (2.0 + 2.0 * weight) - first.to_vec() - last.to_vec()) / (2.0 * weight),
-    ))
-}
-
-fn rational_quadratic_arc_3_controls(
-    curve: &Curve3,
-    range: ParameterRange,
-) -> KernelResult<(Vec<Point3>, Vec<f64>)> {
-    if let Curve3::Nurbs(curve) = curve {
-        if curve.degree() == 2 && curve.control_points().len() == 3 {
-            return Ok((curve.control_points().to_vec(), curve.weights().to_vec()));
-        }
-    }
-    let first = curve.evaluate(range.start)?.point;
-    let middle = curve.evaluate((range.start + range.end) * 0.5)?.point;
-    let last = curve.evaluate(range.end)?.point;
-    let weight = (range.span().abs() * 0.5).cos();
-    if weight <= 0.0 {
-        return Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "one rational quadratic arc must span less than a semicircle",
-        ));
-    }
-    let control = rational_quadratic_control_3(first, middle, last, weight)?;
-    Ok((vec![first, control, last], vec![1.0, weight, 1.0]))
-}
-
-fn rational_quadratic_control_3(
-    first: Point3,
-    middle: Point3,
-    last: Point3,
-    weight: f64,
-) -> KernelResult<Point3> {
-    if !weight.is_finite() || weight <= 0.0 {
-        return Err(KernelError::new(
-            DiagnosticKind::InvalidInput,
-            "rational quadratic control weight must be positive",
-        ));
-    }
-    Ok(Point3::from_vec(
-        (middle.to_vec() * (2.0 + 2.0 * weight) - first.to_vec() - last.to_vec()) / (2.0 * weight),
-    ))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2247,22 +2078,36 @@ impl<'kernel> EulerTransaction<'kernel> {
                             .dot(first_plane.normal())
                             .abs()
                             <= self.kernel.tolerance.linear;
-                        (same_orientation && normals_parallel && coplanar, true)
+                        // As with reversed cylinders below, the two analytical
+                        // sweeps can carry opposite raw face flags while their
+                        // parameter planes still describe one physical support.
+                        // The sewn manifold supplies the orientation proof.
+                        (normals_parallel && coplanar, true)
                     }
                     (Surface3::Cylinder(first_cylinder), Surface3::Cylinder(second_cylinder)) => (
-                        same_orientation
-                            && self.coincident_cylinders(*first_cylinder, *second_cylinder),
+                        // A reversed analytical sweep reverses the cylinder's
+                        // parameter axis as well as its topological face flag.
+                        // Coincident adjacent patches therefore have the same
+                        // physical shell orientation even when the raw flags
+                        // differ. The sewn manifold already proves adjacency.
+                        self.coincident_cylinders(*first_cylinder, *second_cylinder),
                         true,
                     ),
+                    (Surface3::Nurbs(_), Surface3::Nurbs(_)) => (false, false),
                     _ => (first.surface == second.surface && same_orientation, false),
                 }
             };
-            if same_surface {
-                let remaining_face = if source_face == first_face {
-                    second_face
-                } else {
-                    first_face
-                };
+            let remaining_face = if source_face == first_face {
+                second_face
+            } else {
+                first_face
+            };
+            let joined_nurbs = if same_surface {
+                false
+            } else {
+                self.join_adjacent_ruled_nurbs_faces(*edge, remaining_face, source_face)?
+            };
+            if same_surface || joined_nurbs {
                 self.kef_unchecked(*edge, source_face)?;
                 if reparameterize {
                     match self.working.face(remaining_face)?.surface {
@@ -2307,6 +2152,287 @@ impl<'kernel> EulerTransaction<'kernel> {
         }
         self.composes_imported_topology = true;
         Ok(target)
+    }
+
+    /// Join the two degree-one sweep directions of adjacent rational ruled
+    /// patches into one exact tensor-product surface. This removes a sewing
+    /// artifact without approximating either rail: the shared control row is
+    /// retained once and an internal degree-one knot records its exact height.
+    fn join_adjacent_ruled_nurbs_faces(
+        &mut self,
+        edge: EdgeId,
+        keep_face: FaceId,
+        remove_face: FaceId,
+    ) -> KernelResult<bool> {
+        let (keep, remove) = match (
+            &self.working.face(keep_face)?.surface,
+            &self.working.face(remove_face)?.surface,
+        ) {
+            (Surface3::Nurbs(keep), Surface3::Nurbs(remove)) => (keep.clone(), remove.clone()),
+            _ => return Ok(false),
+        };
+        if keep.degrees().1 != 1
+            || remove.degrees().1 != 1
+            || keep.control_points().len() != 2
+            || remove.control_points().len() != 2
+            || keep.degrees().0 != remove.degrees().0
+            || keep.control_points()[0].len() != remove.control_points()[0].len()
+        {
+            return Ok(false);
+        }
+
+        let normalized_knots = |knots: &[f64]| -> Option<Vec<f64>> {
+            let start = *knots.first()?;
+            let span = knots.last()? - start;
+            (span.abs() > self.kernel.tolerance.parameter)
+                .then(|| knots.iter().map(|value| (value - start) / span).collect())
+        };
+        let Some(keep_u_knots) = normalized_knots(keep.knots().0) else {
+            return Ok(false);
+        };
+        let Some(remove_u_knots) = normalized_knots(remove.knots().0) else {
+            return Ok(false);
+        };
+        if keep_u_knots.len() != remove_u_knots.len() {
+            return Ok(false);
+        }
+
+        let seam_use = |face: FaceId| -> KernelResult<CoedgeId> {
+            self.working
+                .edge(edge)?
+                .coedges
+                .iter()
+                .copied()
+                .find(|coedge| {
+                    self.working
+                        .coedge(*coedge)
+                        .and_then(|value| self.working.loop_(value.loop_id))
+                        .map(|loop_value| loop_value.face == face)
+                        .unwrap_or(false)
+                })
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "joined NURBS face has no use of its shared edge",
+                    )
+                })
+        };
+        let seam_at_start = |surface: &NurbsSurface3, coedge: CoedgeId| -> KernelResult<bool> {
+            let value = self.working.coedge(coedge)?;
+            let parameter = value.range.start + value.range.span() * 0.5;
+            let v = value.pcurve.evaluate(parameter)?.point.y;
+            let domain = surface.domains()[1];
+            let DomainBounds::Bounded(range) = domain.bounds else {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "a ruled NURBS surface must have a bounded sweep domain",
+                ));
+            };
+            let start_distance = (v - range.start).abs();
+            let end_distance = (v - range.end).abs();
+            let scale = range.span().abs().max(1.0);
+            if start_distance.min(end_distance) > self.kernel.tolerance.parameter * scale * 8.0 {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "shared ruled-surface edge is not isoparametric",
+                ));
+            }
+            Ok(start_distance < end_distance)
+        };
+        let keep_seam_start = seam_at_start(&keep, seam_use(keep_face)?)?;
+        let remove_seam_start = seam_at_start(&remove, seam_use(remove_face)?)?;
+        let keep_seam_index = usize::from(!keep_seam_start);
+        let remove_seam_index = usize::from(!remove_seam_start);
+
+        let rows_match = |reversed: bool| {
+            let remove_index = |index: usize| {
+                if reversed {
+                    keep.control_points()[0].len() - 1 - index
+                } else {
+                    index
+                }
+            };
+            let weight_scale = keep.weights()[keep_seam_index][0]
+                / remove.weights()[remove_seam_index][remove_index(0)];
+            let points_match = keep.control_points()[keep_seam_index]
+                .iter()
+                .enumerate()
+                .all(|(index, point)| {
+                    point.distance(remove.control_points()[remove_seam_index][remove_index(index)])
+                        <= self.kernel.tolerance.linear
+                });
+            let weights_match =
+                keep.weights()[keep_seam_index]
+                    .iter()
+                    .enumerate()
+                    .all(|(index, weight)| {
+                        (weight
+                            - remove.weights()[remove_seam_index][remove_index(index)]
+                                * weight_scale)
+                            .abs()
+                            <= self.kernel.tolerance.parameter * weight.abs().max(1.0) * 8.0
+                    });
+            let knots_match = keep_u_knots.iter().enumerate().all(|(index, knot)| {
+                let candidate = if reversed {
+                    1.0 - remove_u_knots[remove_u_knots.len() - 1 - index]
+                } else {
+                    remove_u_knots[index]
+                };
+                (knot - candidate).abs() <= self.kernel.tolerance.parameter * 8.0
+            });
+            (points_match && weights_match && knots_match).then_some(weight_scale)
+        };
+        let Some((remove_u_reversed, remove_weight_scale)) = rows_match(false)
+            .map(|scale| (false, scale))
+            .or_else(|| rows_match(true).map(|scale| (true, scale)))
+        else {
+            return Ok(false);
+        };
+
+        let row_distance = |surface: &NurbsSurface3, reversed: bool| {
+            let width = surface.control_points()[0].len();
+            (0..width)
+                .map(|index| {
+                    let index = if reversed { width - 1 - index } else { index };
+                    surface.control_points()[0][index].distance(surface.control_points()[1][index])
+                })
+                .sum::<f64>()
+                / width as f64
+        };
+        let keep_length = row_distance(&keep, false);
+        let remove_length = row_distance(&remove, remove_u_reversed);
+        if keep_length <= self.kernel.tolerance.linear
+            || remove_length <= self.kernel.tolerance.linear
+        {
+            return Ok(false);
+        }
+        let low_length = if keep_seam_start {
+            remove_length
+        } else {
+            keep_length
+        };
+        let middle = low_length / (keep_length + remove_length);
+
+        let oriented_remove_row = |row: usize| {
+            let mut points = remove.control_points()[row].clone();
+            let mut weights = remove.weights()[row]
+                .iter()
+                .map(|weight| weight * remove_weight_scale)
+                .collect::<Vec<_>>();
+            if remove_u_reversed {
+                points.reverse();
+                weights.reverse();
+            }
+            (points, weights)
+        };
+        let remove_outer = usize::from(remove_seam_start);
+        let (remove_outer_points, remove_outer_weights) = oriented_remove_row(remove_outer);
+        let (control_points, weights) = if keep_seam_start {
+            (
+                vec![
+                    remove_outer_points,
+                    keep.control_points()[0].clone(),
+                    keep.control_points()[1].clone(),
+                ],
+                vec![
+                    remove_outer_weights,
+                    keep.weights()[0].clone(),
+                    keep.weights()[1].clone(),
+                ],
+            )
+        } else {
+            (
+                vec![
+                    keep.control_points()[0].clone(),
+                    keep.control_points()[1].clone(),
+                    remove_outer_points,
+                ],
+                vec![
+                    keep.weights()[0].clone(),
+                    keep.weights()[1].clone(),
+                    remove_outer_weights,
+                ],
+            )
+        };
+        let joined = NurbsSurface3::new(
+            keep.degrees(),
+            control_points,
+            weights,
+            (keep_u_knots, vec![0.0, 0.0, middle, 1.0, 1.0]),
+        )?;
+
+        let affine = |surface: &NurbsSurface3,
+                      seam_start: bool,
+                      is_keep: bool,
+                      reverse_u: bool|
+         -> KernelResult<(f64, f64, f64, f64)> {
+            let domains = surface.domains();
+            let DomainBounds::Bounded(u) = domains[0].bounds else {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "bounded NURBS u domain required",
+                ));
+            };
+            let DomainBounds::Bounded(v) = domains[1].bounds else {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "bounded NURBS v domain required",
+                ));
+            };
+            let (u_offset, u_scale) = if reverse_u {
+                (u.end / u.span(), -1.0 / u.span())
+            } else {
+                (-u.start / u.span(), 1.0 / u.span())
+            };
+            let (v_low, v_high, reversed_v) = if is_keep {
+                if seam_start {
+                    (middle, 1.0, false)
+                } else {
+                    (0.0, middle, false)
+                }
+            } else if keep_seam_start {
+                (0.0, middle, seam_start)
+            } else {
+                (middle, 1.0, !seam_start)
+            };
+            let span = v_high - v_low;
+            let (v_offset, v_scale) = if reversed_v {
+                (v_high + span * v.start / v.span(), -span / v.span())
+            } else {
+                (v_low - span * v.start / v.span(), span / v.span())
+            };
+            Ok((u_offset, u_scale, v_offset, v_scale))
+        };
+        for (face, surface, seam_start, is_keep, reverse_u) in [
+            (keep_face, &keep, keep_seam_start, true, false),
+            (
+                remove_face,
+                &remove,
+                remove_seam_start,
+                false,
+                remove_u_reversed,
+            ),
+        ] {
+            let (u_offset, u_scale, v_offset, v_scale) =
+                affine(surface, seam_start, is_keep, reverse_u)?;
+            let loops = self.working.face(face)?.loops.clone();
+            for loop_id in loops {
+                for coedge in self.collect_loop(loop_id)? {
+                    let Curve2::Line(line) = self.working.coedge(coedge)?.pcurve else {
+                        return Ok(false);
+                    };
+                    let origin = line.origin();
+                    let direction = line.direction();
+                    self.working.coedges.get_mut(coedge)?.pcurve = Line2::new(
+                        Point2::new(u_offset + u_scale * origin.x, v_offset + v_scale * origin.y),
+                        Vec2::new(u_scale * direction.x, v_scale * direction.y),
+                    )?
+                    .into();
+                }
+            }
+        }
+        self.working.faces.get_mut(keep_face)?.surface = joined.into();
+        Ok(true)
     }
 
     /// Re-express a circular edge in the parameter space of the face that
@@ -2408,6 +2534,14 @@ impl<'kernel> EulerTransaction<'kernel> {
                             DiagnosticKind::UnsupportedGeometry,
                             "a cylindrical face currently requires line or circle boundary edges",
                         ));
+                    }
+                    Curve3::SurfaceIntersection(curve) => {
+                        curve.pcurve_for_surface(&surface).cloned().ok_or_else(|| {
+                            KernelError::new(
+                                DiagnosticKind::GeometryInvariant,
+                                "implicit intersection edge does not retain the cylindrical face",
+                            )
+                        })?
                     }
                 };
                 let coedge = self.working.coedges.get_mut(*coedge_id)?;
@@ -3241,6 +3375,15 @@ impl<'kernel> EulerTransaction<'kernel> {
                         curve.knots().to_vec(),
                     )?
                     .into(),
+                    Curve3::SurfaceIntersection(curve) => curve
+                        .pcurve_for_surface(&Surface3::Plane(plane))
+                        .cloned()
+                        .ok_or_else(|| {
+                            KernelError::new(
+                                DiagnosticKind::GeometryInvariant,
+                                "implicit intersection edge does not retain the planar face",
+                            )
+                        })?,
                 };
             }
         }
@@ -4595,7 +4738,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             } else {
                 &profile.holes()[index - 1]
             });
-            for (face, (segment, part)) in side_faces.into_iter().zip(source_parts) {
+            for (face, (segment, part)) in side_faces.iter().copied().zip(source_parts) {
                 let name = self.working.face(face)?.name;
                 self.history.created_as(
                     name,
@@ -4605,6 +4748,14 @@ impl<'kernel> EulerTransaction<'kernel> {
                         part,
                     },
                 );
+            }
+            let source_wire = if index == 0 {
+                profile.outer()
+            } else {
+                &profile.holes()[index - 1]
+            };
+            if is_periodic_circle_wire(source_wire, self.kernel.tolerance) {
+                self.merge_periodic_cylinder_sides_unchecked(&side_faces)?;
             }
             self.names.pop_scope()?;
         }
@@ -4646,6 +4797,80 @@ impl<'kernel> EulerTransaction<'kernel> {
         Ok(seed.body)
     }
 
+    /// A full circular profile is temporarily partitioned into arcs so the
+    /// elementary Euler sweep can seed distinct vertices. Remove the internal
+    /// joins afterwards, leaving one periodic cylinder face and one remaining
+    /// join as its topological seam.
+    fn merge_periodic_cylinder_sides_unchecked(
+        &mut self,
+        side_faces: &[FaceId],
+    ) -> KernelResult<()> {
+        if side_faces.len() < 2 {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "a periodic circular sweep must initially have multiple side faces",
+            ));
+        }
+        let first = side_faces[0];
+        let Surface3::Cylinder(first_surface) = self.working.face(first)?.surface.clone() else {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "a periodic circular sweep did not produce cylindrical sides",
+            ));
+        };
+        let first_axis = first_surface.axis().normalize();
+        let mut survivor = first;
+        for face in side_faces.iter().copied().skip(1) {
+            let Surface3::Cylinder(surface) = self.working.face(face)?.surface.clone() else {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "a periodic circular sweep did not produce cylindrical sides",
+                ));
+            };
+            if first_axis.cross(surface.axis().normalize()).magnitude()
+                > self.kernel.tolerance.angular
+                || (surface.origin() - first_surface.origin())
+                    .cross(first_axis)
+                    .magnitude()
+                    > self.kernel.tolerance.linear
+                || (first_surface.radius() - surface.radius()).abs() > self.kernel.tolerance.linear
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "periodic circular sweep sides do not share one cylinder",
+                ));
+            }
+            let survivor_edges = self
+                .working
+                .face_edges(survivor)?
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            let join = self
+                .working
+                .face_edges(face)?
+                .into_iter()
+                .find(|edge| {
+                    survivor_edges.contains(edge)
+                        && self
+                            .working
+                            .edge(*edge)
+                            .is_ok_and(|value| matches!(value.curve(), Curve3::Line(_)))
+                })
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "periodic cylinder patches have no shared sweep edge",
+                    )
+                })?;
+            survivor = self.kef_unchecked(join, face)?.surviving_face;
+            self.working.faces.get_mut(survivor)?.surface = Surface3::Cylinder(first_surface);
+        }
+        self.reparameterize_cylindrical_face(survivor)?;
+        Ok(())
+    }
+
+    /// Merge an exact periodic rolling sweep into one toroidal BREP face. The
+    /// remaining meridian is a one-face parameter seam, not a geometric split.
     fn add_curve_lamina_hole_unchecked(
         &mut self,
         sweep_face: FaceId,
@@ -4765,664 +4990,6 @@ impl<'kernel> EulerTransaction<'kernel> {
     /// Construct an exact end-cap rolling blend. The first sweep stops one
     /// radius below the cap; this second Euler sweep follows quarter-circle
     /// vertex paths. Line rails produce cylinders and circular rails tori.
-    pub(crate) fn extrude_profile_with_end_fillet(
-        &mut self,
-        plane: Plane3,
-        profile: &Profile,
-        vector: Vec3,
-        selected: &[usize],
-        radius: f64,
-    ) -> KernelResult<EndFilletResult> {
-        let height = vector.dot(plane.normal());
-        if height <= radius + self.kernel.tolerance.linear {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "end fillet radius must be smaller than the extrusion height",
-            ));
-        }
-        let axis = vector.normalize();
-        let lower = vector - axis * radius;
-        let segments = prepared_wire_segments(profile.outer())?;
-        let chosen = expand_g1_selection(&segments, selected, self.kernel.tolerance)?;
-        if chosen.iter().all(|value| *value) {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "a completely smooth closed rim needs a periodic toroidal sweep",
-            ));
-        }
-        let construction_segments = segments
-            .iter()
-            .enumerate()
-            .map(|(index, segment)| {
-                if chosen[index] && matches!(segment.curve(), Curve2::Circle(_)) {
-                    rational_quadratic_arc_2(segment)
-                } else {
-                    Ok(segment.clone())
-                }
-            })
-            .collect::<KernelResult<Vec<_>>>()?;
-        let construction_profile = Profile::new(
-            Wire2::new(construction_segments.clone(), self.kernel.tolerance)?,
-            profile.holes().iter().cloned(),
-            self.kernel.tolerance,
-        )?;
-        let body = self.extrude_curve_profile_unchecked(plane, &construction_profile, lower)?;
-        let end_level = axis.dot((plane.origin() + lower).to_vec());
-        let end_face = self
-            .working
-            .body(body)?
-            .shells
-            .iter()
-            .flat_map(|shell| {
-                self.working
-                    .shell(*shell)
-                    .map(|value| value.faces.clone())
-                    .unwrap_or_default()
-            })
-            .find(
-                |face| match self.working.face(*face).map(|value| value.surface()) {
-                    Ok(Surface3::Plane(candidate)) => {
-                        candidate.normal().dot(axis).abs() > 1.0 - self.kernel.tolerance.angular
-                            && (axis.dot(candidate.origin().to_vec()) - end_level).abs()
-                                <= self
-                                    .kernel
-                                    .tolerance
-                                    .linear_at_scale(end_level.abs().max(1.0))
-                                    * 8.0
-                    }
-                    _ => false,
-                },
-            )
-            .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "fillet extrusion lost its end cap",
-                )
-            })?;
-        let outer_loop = self
-            .working
-            .face(end_face)?
-            .loops
-            .iter()
-            .copied()
-            .find(|loop_id| {
-                self.working
-                    .loop_(*loop_id)
-                    .is_ok_and(|value| value.kind == LoopKind::Outer)
-            })
-            .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "fillet extrusion end cap has no outer loop",
-                )
-            })?;
-
-        let mut top_segments = segments.clone();
-        for index in 0..segments.len() {
-            if !chosen[index] {
-                continue;
-            }
-            let segment = &segments[index];
-            let at = |parameter| -> KernelResult<(Point2, Vec2)> {
-                let value = segment.curve().evaluate(parameter)?;
-                let derivative = value.first_derivative * segment.range().span().signum();
-                let inward = Vec2::new(-derivative.y, derivative.x).normalize();
-                Ok((value.point, inward))
-            };
-            let (start, start_inward) = at(segment.range().start)?;
-            let (middle, middle_inward) = at((segment.range().start + segment.range().end) * 0.5)?;
-            let (end, end_inward) = at(segment.range().end)?;
-            top_segments[index] = match segment.curve() {
-                Curve2::Line(_) => {
-                    TrimmedCurve2::line(start + start_inward * radius, end + end_inward * radius)?
-                }
-                Curve2::Circle(_) => rational_quadratic_arc_2(&TrimmedCurve2::arc_through(
-                    start + start_inward * radius,
-                    middle + middle_inward * radius,
-                    end + end_inward * radius,
-                )?)?,
-                Curve2::Nurbs(_) => {
-                    return Err(KernelError::new(
-                        DiagnosticKind::UnsupportedGeometry,
-                        "end fillet chains currently require analytical line and circle rails",
-                    ))
-                }
-            };
-        }
-        for index in 0..segments.len() {
-            if chosen[index] {
-                continue;
-            }
-            let previous = (index + segments.len() - 1) % segments.len();
-            let next = (index + 1) % segments.len();
-            if !chosen[previous] && !chosen[next] {
-                continue;
-            }
-            if !matches!(segments[index].curve(), Curve2::Line(_)) {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "an end fillet chain must terminate against straight profile sides",
-                ));
-            }
-            let start = if chosen[previous] {
-                top_segments[previous].end()?
-            } else {
-                segments[index].start()?
-            };
-            let end = if chosen[next] {
-                top_segments[next].start()?
-            } else {
-                segments[index].end()?
-            };
-            top_segments[index] = TrimmedCurve2::line(start, end)?;
-        }
-        for index in 0..top_segments.len() {
-            let next = (index + 1) % top_segments.len();
-            let gap = top_segments[index]
-                .end()?
-                .distance(top_segments[next].start()?);
-            if gap > self.kernel.tolerance.linear {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    format!("end fillet offset chain has gap {gap} after segment {index}"),
-                ));
-            }
-        }
-        let top_wire = Wire2::new(top_segments.clone(), self.kernel.tolerance)?;
-        Profile::new(
-            top_wire,
-            profile.holes().iter().cloned(),
-            self.kernel.tolerance,
-        )?;
-
-        let boundary = self.collect_loop(outer_loop)?;
-        if boundary.len() != segments.len() {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "fillet profile and end-cap topology disagree",
-            ));
-        }
-        let lower_edges = boundary
-            .iter()
-            .map(|coedge| self.working.coedge(*coedge).map(|value| value.edge))
-            .collect::<KernelResult<Vec<_>>>()?;
-        let lower_faces = lower_edges
-            .iter()
-            .map(|edge| {
-                self.working
-                    .edge_faces(*edge)?
-                    .into_iter()
-                    .find(|face| *face != end_face)
-                    .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "fillet lower rail has no lateral face",
-                        )
-                    })
-            })
-            .collect::<KernelResult<Vec<_>>>()?;
-        let top_plane = Plane3::new(
-            plane.origin() + vector,
-            plane.u(),
-            plane.v(),
-            self.kernel.tolerance,
-        )?;
-        let lower_plane = Plane3::new(
-            plane.origin() + lower,
-            plane.u(),
-            plane.v(),
-            self.kernel.tolerance,
-        )?;
-        let unit = ParameterRange::new(0.0, 1.0)?;
-        let mut top_points = Vec::with_capacity(segments.len());
-        let mut paths = Vec::with_capacity(segments.len());
-        for index in 0..segments.len() {
-            let bottom_uv = segments[index].start()?;
-            let top_uv = top_segments[index].start()?;
-            let bottom = lower_plane.evaluate(bottom_uv.x, bottom_uv.y)?.point;
-            let top = top_plane.evaluate(top_uv.x, top_uv.y)?.point;
-            top_points.push(top);
-            if chosen[index] || chosen[(index + segments.len() - 1) % segments.len()] {
-                let weight = std::f64::consts::FRAC_1_SQRT_2;
-                paths.push(SweepPath {
-                    curve: Curve3::Nurbs(NurbsCurve3::new(
-                        2,
-                        vec![bottom, bottom + axis * radius, top],
-                        vec![1.0, weight, 1.0],
-                        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                    )?),
-                    range: unit,
-                });
-            } else {
-                paths.push(SweepPath {
-                    curve: Curve3::Line(Line3::through(bottom, top)?),
-                    range: unit,
-                });
-            }
-        }
-
-        let mut top_curves = Vec::with_capacity(segments.len());
-        let mut side_surfaces = Vec::with_capacity(segments.len());
-        for index in 0..segments.len() {
-            let top = &top_segments[index];
-            top_curves.push(SweepTopEdge {
-                curve: self.curve2_on_plane(top_plane, top.curve())?,
-                range: top.range(),
-                pcurve: top.curve().clone(),
-                pcurve_range: top.range(),
-            });
-            let lower_curve =
-                self.curve2_on_plane(lower_plane, construction_segments[index].curve())?;
-            if chosen[index] {
-                let weight = std::f64::consts::FRAC_1_SQRT_2;
-                let bottom = [segments[index].start()?, segments[index].end()?]
-                    .into_iter()
-                    .map(|point| {
-                        lower_plane
-                            .evaluate(point.x, point.y)
-                            .map(|value| value.point)
-                    })
-                    .collect::<KernelResult<Vec<_>>>()?;
-                let top_row = [top_segments[index].start()?, top_segments[index].end()?]
-                    .into_iter()
-                    .map(|point| {
-                        top_plane
-                            .evaluate(point.x, point.y)
-                            .map(|value| value.point)
-                    })
-                    .collect::<KernelResult<Vec<_>>>()?;
-                let surface = match segments[index].curve() {
-                    Curve2::Line(_) => NurbsSurface3::new(
-                        (1, 2),
-                        vec![
-                            bottom.clone(),
-                            bottom.iter().map(|point| *point + axis * radius).collect(),
-                            top_row,
-                        ],
-                        vec![vec![1.0, 1.0], vec![weight, weight], vec![1.0, 1.0]],
-                        (vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
-                    )?,
-                    Curve2::Circle(_) => {
-                        let (bottom_controls, rail_weights) = rational_quadratic_arc_3_controls(
-                            &lower_curve,
-                            segments[index].range(),
-                        )?;
-                        let translated =
-                            translate_curve(&lower_curve, axis * radius, self.kernel.tolerance)?;
-                        let (middle_controls, _) = rational_quadratic_arc_3_controls(
-                            &translated,
-                            segments[index].range(),
-                        )?;
-                        let (top_controls, _) = rational_quadratic_arc_3_controls(
-                            &top_curves[index].curve,
-                            top_curves[index].range,
-                        )?;
-                        NurbsSurface3::new(
-                            (2, 2),
-                            vec![bottom_controls, middle_controls, top_controls],
-                            vec![
-                                rail_weights.clone(),
-                                rail_weights.iter().map(|value| value * weight).collect(),
-                                rail_weights,
-                            ],
-                            (
-                                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                            ),
-                        )?
-                    }
-                    Curve2::Nurbs(_) => unreachable!(),
-                };
-                side_surfaces.push(SweepSide {
-                    surface: Surface3::Nurbs(surface),
-                    orientation: FaceOrientation::Reversed,
-                });
-            } else {
-                side_surfaces.push(SweepSide {
-                    surface: extrusion_surface(&lower_curve, axis * radius, self.kernel.tolerance)?,
-                    orientation: if segments[index].range().span() < 0.0 {
-                        FaceOrientation::Reversed
-                    } else {
-                        FaceOrientation::Forward
-                    },
-                });
-            }
-        }
-        self.names.push_scope("end_fillet")?;
-        let sweep = self.sweep_curve_loop_to_unchecked(
-            outer_loop,
-            &top_points,
-            &paths,
-            &top_curves,
-            &side_surfaces,
-        )?;
-        self.names.pop_scope()?;
-        let hole_loops = self.working.face(end_face)?.loops.clone();
-        for loop_id in hole_loops
-            .into_iter()
-            .filter(|loop_id| *loop_id != outer_loop)
-        {
-            self.extend_extruded_loop_unchecked(loop_id, lower, vector, axis * radius)?;
-        }
-        self.working.faces.get_mut(end_face)?.surface = top_plane.into();
-        let shell = self.working.face(end_face)?.shell;
-        self.seal_shell_unchecked(shell)?;
-        Ok(EndFilletResult {
-            chosen,
-            lower_edges,
-            lower_faces,
-            blend_faces: sweep.faces,
-            path_edges: sweep.path_edges,
-            top_edges: sweep.top_edges,
-        })
-    }
-
-    /// Extend an already swept cap loop without inserting another ring of
-    /// faces. This keeps through-hole walls topologically whole when only the
-    /// outer rim receives an end fillet.
-    fn extend_extruded_loop_unchecked(
-        &mut self,
-        cap_loop: LoopId,
-        existing_vector: Vec3,
-        full_vector: Vec3,
-        extension: Vec3,
-    ) -> KernelResult<()> {
-        let boundary = self.collect_loop(cap_loop)?;
-        if boundary.is_empty() {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "cannot extend an empty cap loop",
-            ));
-        }
-        let cap_face = self.working.loop_(cap_loop)?.face;
-        let boundary_edges = boundary
-            .iter()
-            .map(|coedge| self.working.coedge(*coedge).map(|value| value.edge))
-            .collect::<KernelResult<BTreeSet<_>>>()?;
-        let top_vertices = boundary
-            .iter()
-            .map(|coedge| {
-                self.working
-                    .coedge_vertices(*coedge)
-                    .map(|vertices| vertices[0])
-            })
-            .collect::<KernelResult<BTreeSet<_>>>()?;
-
-        for coedge_id in &boundary {
-            let edge_id = self.working.coedge(*coedge_id)?.edge;
-            let top_curve = self.working.edge(edge_id)?.curve.clone();
-            let base_curve = translate_curve(&top_curve, -existing_vector, self.kernel.tolerance)?;
-            let lateral_faces = self
-                .working
-                .edge_faces(edge_id)?
-                .into_iter()
-                .filter(|face| *face != cap_face)
-                .collect::<Vec<_>>();
-            if lateral_faces.len() != 1 {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "an extruded cap-loop edge must have one lateral face",
-                ));
-            }
-            self.working.faces.get_mut(lateral_faces[0])?.surface =
-                extrusion_surface(&base_curve, full_vector, self.kernel.tolerance)?;
-            self.working.edges.get_mut(edge_id)?.curve =
-                translate_curve(&top_curve, extension, self.kernel.tolerance)?;
-        }
-
-        for vertex_id in top_vertices {
-            let path_edges = self
-                .working
-                .vertex_edges(vertex_id)?
-                .into_iter()
-                .filter(|edge| !boundary_edges.contains(edge))
-                .collect::<Vec<_>>();
-            if path_edges.len() != 1 {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "an extruded cap-loop vertex must have one sweep-path edge",
-                ));
-            }
-            let path_edge = path_edges[0];
-            let endpoints = self.working.edge(path_edge)?.vertices;
-            let base_vertex = endpoints
-                .into_iter()
-                .find(|candidate| *candidate != vertex_id)
-                .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "a sweep-path edge lost its base vertex",
-                    )
-                })?;
-            let base = self.working.vertex(base_vertex)?.point;
-            self.working.edges.get_mut(path_edge)?.curve = Line3::new(base, full_vector)?.into();
-            let extended = self.working.vertex(vertex_id)?.point + extension;
-            self.working.vertices.get_mut(vertex_id)?.point = extended;
-        }
-        Ok(())
-    }
-
-    fn sweep_curve_loop_to_unchecked(
-        &mut self,
-        sweep_loop: LoopId,
-        top_points: &[Point3],
-        paths: &[SweepPath],
-        top_curves: &[SweepTopEdge],
-        side_surfaces: &[SweepSide],
-    ) -> KernelResult<VariableSweepResult> {
-        let boundary = self.collect_loop(sweep_loop)?;
-        let count = boundary.len();
-        if count < 2
-            || top_points.len() != count
-            || paths.len() != count
-            || top_curves.len() != count
-            || side_surfaces.len() != count
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "invalid variable loop sweep",
-            ));
-        }
-        let unit = ParameterRange::new(0.0, 1.0)?;
-        let placeholder: Curve2 = Line2::new(Point2::new(0.0, 0.0), Vec2::new(0.0, 1.0))?.into();
-        let mut up = Vec::with_capacity(count);
-        let mut down = Vec::with_capacity(count);
-        for index in 0..count {
-            let vertex = self.working.coedge_vertices(boundary[index])?[0];
-            let made = self.mev_unchecked(
-                sweep_loop,
-                Some(boundary[(index + count - 1) % count]),
-                vertex,
-                top_points[index],
-                paths[index].curve.clone(),
-                paths[index].range,
-                placeholder.clone(),
-                placeholder.clone(),
-                unit,
-            )?;
-            self.name_mev(made, &format!("top{index}"), &format!("path{index}"))?;
-            up.push(made.forward);
-            down.push(made.reverse);
-        }
-        let mut anchor = None;
-        let mut faces = Vec::with_capacity(count);
-        let mut top_edges = Vec::with_capacity(count);
-        for index in 0..count {
-            let next = (index + 1) % count;
-            let first = if next == 0 {
-                anchor.ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "variable sweep lost its first top edge",
-                    )
-                })?
-            } else {
-                down[next]
-            };
-            let side = self.mef_unchecked(
-                first,
-                down[index],
-                top_curves[index].curve.clone(),
-                top_curves[index].range.reversed(),
-                side_surfaces[index].surface.clone(),
-                side_surfaces[index].orientation,
-                placeholder.clone(),
-                top_curves[index].pcurve.clone(),
-                top_curves[index].pcurve_range.reversed(),
-            )?;
-            self.name_mef(side, &format!("top{index}"), Some(&format!("blend{index}")))?;
-            let surface = self.working.face(side.face)?.surface.clone();
-            let side_loop = self.collect_loop(side.loop_id)?;
-            for coedge_id in &side_loop {
-                self.assign_projected_pcurve(*coedge_id, &surface)?;
-            }
-            let signed_area = side_loop.iter().try_fold(0.0, |area, coedge_id| {
-                let coedge = self.working.coedge(*coedge_id)?;
-                coedge
-                    .pcurve
-                    .signed_area_contribution(coedge.range, self.kernel.tolerance.parameter)
-                    .map(|contribution| area + contribution)
-            })?;
-            if signed_area.abs() <= self.kernel.tolerance.parameter.powi(2) {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    format!("variable sweep face {index} has zero parameter-space area"),
-                ));
-            }
-            self.working.faces.get_mut(side.face)?.orientation = if signed_area > 0.0 {
-                FaceOrientation::Forward
-            } else {
-                FaceOrientation::Reversed
-            };
-            faces.push(side.face);
-            top_edges.push(side.edge);
-            if index == 0 {
-                anchor = Some(side.reverse);
-            }
-        }
-        Ok(VariableSweepResult {
-            faces,
-            path_edges: up
-                .into_iter()
-                .map(|coedge| self.working.coedge(coedge).map(|value| value.edge))
-                .collect::<KernelResult<Vec<_>>>()?,
-            top_edges,
-        })
-    }
-
-    fn assign_projected_pcurve(
-        &mut self,
-        coedge_id: CoedgeId,
-        surface: &Surface3,
-    ) -> KernelResult<()> {
-        let coedge = self.working.coedge(coedge_id)?;
-        let edge = self.working.edge(coedge.edge)?;
-        let edge_curve = edge.curve.clone();
-        let range = if coedge.forward {
-            edge.range
-        } else {
-            edge.range.reversed()
-        };
-        let samples = [range.start, (range.start + range.end) * 0.5, range.end]
-            .into_iter()
-            .map(|parameter| {
-                edge_curve
-                    .evaluate(parameter)
-                    .and_then(|value| surface.project(value.point, self.kernel.tolerance))
-            })
-            .collect::<KernelResult<Vec<_>>>()?;
-        let mut points = samples
-            .iter()
-            .map(|sample| Point2::new(sample.parameters.0, sample.parameters.1))
-            .collect::<Vec<_>>();
-        for axis in 0..2 {
-            if let Some(period) = surface.domains()[axis].period {
-                for index in 1..points.len() {
-                    let previous = if axis == 0 {
-                        points[index - 1].x
-                    } else {
-                        points[index - 1].y
-                    };
-                    let mut value = if axis == 0 {
-                        points[index].x
-                    } else {
-                        points[index].y
-                    };
-                    while value - previous > period * 0.5 {
-                        value -= period;
-                    }
-                    while value - previous < -period * 0.5 {
-                        value += period;
-                    }
-                    if axis == 0 {
-                        points[index].x = value;
-                    } else {
-                        points[index].y = value;
-                    }
-                }
-            }
-        }
-        let straight = (points[1] - (points[0] + (points[2] - points[0]) * 0.5)).magnitude()
-            <= self.kernel.tolerance.parameter * 32.0;
-        let (pcurve, pcurve_range) = if straight {
-            (
-                Curve2::Line(Line2::new(points[0], points[2] - points[0])?),
-                ParameterRange::new(0.0, 1.0)?,
-            )
-        } else {
-            let weight = match &edge_curve {
-                Curve3::Circle(_) => (range.span().abs() * 0.5).cos(),
-                Curve3::Nurbs(curve)
-                    if curve.degree() == 2
-                        && curve.control_points().len() == 3
-                        && curve.weights().len() == 3 =>
-                {
-                    curve.weights()[1]
-                }
-                _ => {
-                    return Err(KernelError::new(
-                        DiagnosticKind::UnsupportedGeometry,
-                        "a projected non-parametric boundary must be circular",
-                    ))
-                }
-            };
-            if weight <= self.kernel.tolerance.parameter {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "projected circular boundaries may not span a semicircle in one face",
-                ));
-            }
-            let control = rational_quadratic_control_2(points[0], points[1], points[2], weight)?;
-            (
-                Curve2::Nurbs(NurbsCurve2::new(
-                    2,
-                    vec![points[0], control, points[2]],
-                    vec![1.0, weight, 1.0],
-                    vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                )?),
-                ParameterRange::new(0.0, 1.0)?,
-            )
-        };
-        let value = self.working.coedges.get_mut(coedge_id)?;
-        value.pcurve = pcurve;
-        value.range = pcurve_range;
-        let check = value
-            .pcurve
-            .evaluate(value.range.start + value.range.span() * 0.25)?;
-        let lifted = surface.evaluate(check.point.x, check.point.y)?.point;
-        let edge_point = edge_curve
-            .evaluate(range.start + range.span() * 0.25)?
-            .point;
-        let error = lifted.distance(edge_point);
-        if error > self.kernel.tolerance.linear * 8.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                format!("projected p-curve fit error {error}"),
-            ));
-        }
-        Ok(())
-    }
-
     fn sweep_curve_loop_unchecked(
         &mut self,
         sweep_loop: LoopId,
@@ -5708,27 +5275,58 @@ impl<'kernel> EulerTransaction<'kernel> {
     }
 }
 
-fn prepared_wire_segments(wire: &Wire2) -> KernelResult<Vec<TrimmedCurve2>> {
+pub(super) fn prepared_wire_segments(wire: &Wire2) -> KernelResult<Vec<TrimmedCurve2>> {
     if wire.segments().len() != 1 {
         return Ok(wire.segments().to_vec());
     }
     let segment = &wire.segments()[0];
-    let middle = (segment.range().start + segment.range().end) * 0.5;
-    Ok(vec![
-        TrimmedCurve2::new(
-            segment.curve().clone(),
-            ParameterRange::new(segment.range().start, middle)?,
-        )?,
-        TrimmedCurve2::new(
-            segment.curve().clone(),
-            ParameterRange::new(middle, segment.range().end)?,
-        )?,
-    ])
+    let part_count = if matches!(segment.curve(), Curve2::Circle(_))
+        && (segment.range().span().abs() - std::f64::consts::TAU).abs()
+            <= f64::EPSILON * std::f64::consts::TAU * 128.0
+    {
+        4
+    } else {
+        2
+    };
+    (0..part_count)
+        .map(|part| {
+            let start =
+                segment.range().start + segment.range().span() * part as f64 / part_count as f64;
+            let end = segment.range().start
+                + segment.range().span() * (part + 1) as f64 / part_count as f64;
+            TrimmedCurve2::new(segment.curve().clone(), ParameterRange::new(start, end)?)
+        })
+        .collect()
 }
 
-fn prepared_wire_segment_sources(wire: &Wire2) -> Vec<(usize, usize)> {
+fn is_periodic_circle_wire(wire: &Wire2, tolerance: ModelTolerance) -> bool {
+    let Some(Curve2::Circle(reference)) = wire.segments().first().map(TrimmedCurve2::curve) else {
+        return false;
+    };
+    let total_turn = wire
+        .segments()
+        .iter()
+        .map(|segment| segment.range().span())
+        .sum::<f64>();
+    wire.segments().iter().all(|segment| {
+        matches!(segment.curve(), Curve2::Circle(circle)
+            if circle.center().distance(reference.center()) <= tolerance.linear
+                && (circle.radius() - reference.radius()).abs() <= tolerance.linear
+                && segment.range().span().signum() == total_turn.signum())
+    }) && (total_turn.abs() - std::f64::consts::TAU).abs() <= tolerance.parameter
+}
+
+pub(super) fn prepared_wire_segment_sources(wire: &Wire2) -> Vec<(usize, usize)> {
     if wire.segments().len() == 1 {
-        vec![(0, 0), (0, 1)]
+        let part_count = if matches!(wire.segments()[0].curve(), Curve2::Circle(_))
+            && (wire.segments()[0].range().span().abs() - std::f64::consts::TAU).abs()
+                <= f64::EPSILON * std::f64::consts::TAU * 128.0
+        {
+            4
+        } else {
+            2
+        };
+        (0..part_count).map(|part| (0, part)).collect()
     } else {
         wire.segments()
             .iter()
@@ -5763,6 +5361,12 @@ fn translate_curve(
             curve.knots().to_vec(),
         )?
         .into(),
+        Curve3::SurfaceIntersection(_) => {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "translation of an implicit surface-intersection curve requires transforming both retained supports",
+            ));
+        }
     })
 }
 
@@ -5793,6 +5397,12 @@ fn extrusion_surface(
                 (curve.knots().to_vec(), vec![0.0, 0.0, 1.0, 1.0]),
             )?
             .into()
+        }
+        Curve3::SurfaceIntersection(_) => {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "an implicit surface-intersection curve has no exact translational sweep representation",
+            ));
         }
     })
 }

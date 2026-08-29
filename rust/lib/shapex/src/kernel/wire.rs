@@ -317,6 +317,64 @@ fn validate_no_self_intersection(
             return Ok(());
         }
     }
+    let rational_circle_arcs = segments
+        .iter()
+        .map(|segment| {
+            let Curve2::Nurbs(curve) = segment.curve() else {
+                return Ok(None);
+            };
+            if curve.degree() != 2
+                || curve.control_points().len() != 3
+                || curve.weights().len() != 3
+            {
+                return Ok(None);
+            }
+            let range = segment.range();
+            let start = segment.curve().evaluate(range.start)?.point;
+            let middle = segment
+                .curve()
+                .evaluate(range.start + range.span() * 0.5)?
+                .point;
+            let end = segment.curve().evaluate(range.end)?.point;
+            let arc = TrimmedCurve2::arc_through(start, middle, end)?;
+            let Curve2::Circle(circle) = arc.curve() else {
+                unreachable!()
+            };
+            let weight_ratio =
+                curve.weights()[1] / (curve.weights()[0] * curve.weights()[2]).sqrt();
+            let expected_weight = (arc.range().span().abs() * 0.5).cos();
+            if (weight_ratio - expected_weight).abs() > tolerance.parameter * 32.0 {
+                return Ok(None);
+            }
+            for unit in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let evaluation = segment
+                    .curve()
+                    .evaluate(range.start + range.span() * unit)?;
+                let radial = evaluation.point - circle.center();
+                if (radial.magnitude() - circle.radius()).abs()
+                    > tolerance.linear_at_scale(circle.radius()) * 8.0
+                {
+                    return Ok(None);
+                }
+            }
+            Ok(Some((*circle, arc.range().span())))
+        })
+        .collect::<KernelResult<Option<Vec<_>>>>()?;
+    if let Some(arcs) = rational_circle_arcs {
+        if let Some((reference, _)) = arcs.first() {
+            let total_turn = arcs.iter().map(|(_, turn)| *turn).sum::<f64>();
+            let same_circle = arcs.iter().all(|(circle, turn)| {
+                circle.center().distance(reference.center()) <= tolerance.linear
+                    && (circle.radius() - reference.radius()).abs() <= tolerance.linear
+                    && turn.signum() == total_turn.signum()
+            });
+            if same_circle
+                && (total_turn.abs() - std::f64::consts::TAU).abs() <= tolerance.parameter * 32.0
+            {
+                return Ok(());
+            }
+        }
+    }
     for segment in segments {
         validate_segment_is_simple(segment, tolerance)?;
     }

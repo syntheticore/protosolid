@@ -42,8 +42,9 @@ pub use euler::{
 };
 pub use geometry::{
     Axis3, Circle2, Circle3, Cone3, Curve2, Curve2Evaluation, Curve3, CurveEvaluation, Cylinder3,
-    Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3, Plane3, Projection1,
-    Projection2, Sphere3, Surface3, SurfaceCurvature, SurfaceEvaluation, Torus3,
+    Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3, OffsetSurface3, Plane3,
+    Projection1, Projection2, Sphere3, Surface3, SurfaceCurvature, SurfaceEvaluation,
+    SurfaceIntersectionCurve, Torus3,
 };
 pub use history::{ChangeKind, CreationRole, OperationHistory, Origin, ProfileBoundary};
 pub use intersection::{

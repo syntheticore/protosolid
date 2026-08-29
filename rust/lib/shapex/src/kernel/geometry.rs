@@ -389,6 +389,39 @@ fn insert_homogeneous_knot(
     Ok(())
 }
 
+fn insert_homogeneous_knot4(
+    degree: usize,
+    knot: f64,
+    knots: &mut Vec<f64>,
+    controls: &mut Vec<Vec4>,
+) -> KernelResult<()> {
+    let old_count = controls.len();
+    let span = if knot >= knots[old_count] {
+        old_count - 1
+    } else {
+        (degree..old_count)
+            .find(|index| knot >= knots[*index] && knot < knots[*index + 1])
+            .ok_or_else(|| invalid("NURBS knot insertion parameter is outside the domain"))?
+    };
+    let multiplicity = knots.iter().filter(|candidate| **candidate == knot).count();
+    let mut inserted = vec![Vec4::new(0.0, 0.0, 0.0, 0.0); old_count + 1];
+    inserted[..=span - degree].copy_from_slice(&controls[..=span - degree]);
+    inserted[(span - multiplicity + 1)..(old_count + 1)]
+        .copy_from_slice(&controls[(span - multiplicity)..old_count]);
+    for index in span - degree + 1..=span - multiplicity {
+        let denominator = knots[index + degree] - knots[index];
+        let alpha = if denominator == 0.0 {
+            0.0
+        } else {
+            (knot - knots[index]) / denominator
+        };
+        inserted[index] = controls[index] * alpha + controls[index - 1] * (1.0 - alpha);
+    }
+    knots.insert(span + 1, knot);
+    *controls = inserted;
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Curve2 {
     Line(Line2),
@@ -1224,11 +1257,319 @@ impl Circle3 {
     }
 }
 
+/// A general regular intersection of two parametric surfaces.
+///
+/// The dual parameter-space guides provide a stable global parameterization;
+/// evaluation corrects their four parameters against the two retained parent
+/// surfaces. Consequently the modeling curve is the implicit common zero set,
+/// rather than a polyline or a sampled 3D replacement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceIntersectionCurve {
+    first_surface: Box<Surface3>,
+    second_surface: Box<Surface3>,
+    first_pcurve: Curve2,
+    second_pcurve: Curve2,
+    range: ParameterRange,
+    tolerance: ModelTolerance,
+    achieved_error: f64,
+}
+
+impl SurfaceIntersectionCurve {
+    pub fn new(
+        first_surface: Surface3,
+        second_surface: Surface3,
+        first_pcurve: Curve2,
+        second_pcurve: Curve2,
+        range: ParameterRange,
+        tolerance: ModelTolerance,
+        achieved_error: f64,
+    ) -> KernelResult<Self> {
+        tolerance.validate()?;
+        if !achieved_error.is_finite() || achieved_error < 0.0 {
+            return Err(invalid(
+                "surface-intersection certification error must be finite and nonnegative",
+            ));
+        }
+        if !first_pcurve
+            .domain()
+            .contains_range(range, tolerance.parameter)
+            || !second_pcurve
+                .domain()
+                .contains_range(range, tolerance.parameter)
+        {
+            return Err(invalid(
+                "surface-intersection p-curves must cover the certified curve range",
+            ));
+        }
+        let curve = Self {
+            first_surface: Box::new(first_surface),
+            second_surface: Box::new(second_surface),
+            first_pcurve,
+            second_pcurve,
+            range,
+            tolerance,
+            achieved_error,
+        };
+        for parameter in [range.start, (range.start + range.end) * 0.5, range.end] {
+            curve.corrected_parameters(parameter)?;
+        }
+        Ok(curve)
+    }
+
+    pub fn first_surface(&self) -> &Surface3 {
+        &self.first_surface
+    }
+
+    pub fn second_surface(&self) -> &Surface3 {
+        &self.second_surface
+    }
+
+    pub fn first_pcurve(&self) -> &Curve2 {
+        &self.first_pcurve
+    }
+
+    pub fn second_pcurve(&self) -> &Curve2 {
+        &self.second_pcurve
+    }
+
+    pub fn range(&self) -> ParameterRange {
+        self.range
+    }
+
+    pub fn achieved_error(&self) -> f64 {
+        self.achieved_error
+    }
+
+    pub fn pcurve_for_surface(&self, surface: &Surface3) -> Option<&Curve2> {
+        if self.first_surface.as_ref() == surface {
+            Some(&self.first_pcurve)
+        } else if self.second_surface.as_ref() == surface {
+            Some(&self.second_pcurve)
+        } else {
+            None
+        }
+    }
+
+    fn corrected_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
+        if !self.range.contains(parameter, self.tolerance) {
+            return Err(invalid(
+                "surface-intersection parameter lies outside its certified range",
+            ));
+        }
+        let first_guide = self.first_pcurve.evaluate(parameter)?;
+        let second_guide = self.second_pcurve.evaluate(parameter)?;
+        let guide = [
+            first_guide.point.x,
+            first_guide.point.y,
+            second_guide.point.x,
+            second_guide.point.y,
+        ];
+        let tangent = [
+            first_guide.first_derivative.x,
+            first_guide.first_derivative.y,
+            second_guide.first_derivative.x,
+            second_guide.first_derivative.y,
+        ];
+        let tangent_norm = tangent
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        if tangent_norm <= self.tolerance.parameter {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "surface-intersection guide has a singular tangent",
+            ));
+        }
+        let tangent = tangent.map(|value| value / tangent_norm);
+        let mut parameters = guide;
+        for _ in 0..24 {
+            let first = self.first_surface.evaluate(parameters[0], parameters[1])?;
+            let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
+            let residual = first.point - second.point;
+            let gauge = parameters
+                .iter()
+                .zip(guide)
+                .zip(tangent)
+                .map(|((value, guide), tangent)| (value - guide) * tangent)
+                .sum::<f64>();
+            if residual.magnitude()
+                <= self
+                    .tolerance
+                    .linear_at_scale(first.point.to_vec().magnitude().max(1.0))
+                && gauge.abs() <= self.tolerance.parameter * 8.0
+            {
+                return Ok(parameters);
+            }
+            let matrix = [
+                [first.du.x, first.dv.x, -second.du.x, -second.dv.x],
+                [first.du.y, first.dv.y, -second.du.y, -second.dv.y],
+                [first.du.z, first.dv.z, -second.du.z, -second.dv.z],
+                tangent,
+            ];
+            let Some(delta) =
+                solve_linear_4(matrix, [-residual.x, -residual.y, -residual.z, -gauge])
+            else {
+                return Err(KernelError::new(
+                    DiagnosticKind::NumericalFailure,
+                    "surface-intersection corrector is singular",
+                ));
+            };
+            let mut accepted = false;
+            let previous = residual.magnitude2() + gauge * gauge;
+            let mut damping = 1.0;
+            for _ in 0..12 {
+                let candidate =
+                    std::array::from_fn(|index| parameters[index] + delta[index] * damping);
+                if parameters_in_surface_domains(
+                    &self.first_surface,
+                    [candidate[0], candidate[1]],
+                    self.tolerance,
+                ) && parameters_in_surface_domains(
+                    &self.second_surface,
+                    [candidate[2], candidate[3]],
+                    self.tolerance,
+                ) {
+                    let first = self.first_surface.evaluate(candidate[0], candidate[1])?;
+                    let second = self.second_surface.evaluate(candidate[2], candidate[3])?;
+                    let residual = first.point - second.point;
+                    let gauge = candidate
+                        .iter()
+                        .zip(guide)
+                        .zip(tangent)
+                        .map(|((value, guide), tangent)| (value - guide) * tangent)
+                        .sum::<f64>();
+                    if residual.magnitude2() + gauge * gauge < previous {
+                        parameters = candidate;
+                        accepted = true;
+                        break;
+                    }
+                }
+                damping *= 0.5;
+            }
+            if !accepted {
+                break;
+            }
+        }
+        Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "surface-intersection corrector did not converge",
+        ))
+    }
+
+    fn evaluate(&self, parameter: f64) -> KernelResult<CurveEvaluation> {
+        let parameters = self.corrected_parameters(parameter)?;
+        let first = self.first_surface.evaluate(parameters[0], parameters[1])?;
+        let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
+        let guide = self.first_pcurve.evaluate(parameter)?;
+        let first_derivative =
+            first.du * guide.first_derivative.x + first.dv * guide.first_derivative.y;
+        let second_derivative = first.duu * guide.first_derivative.x.powi(2)
+            + first.duv * (2.0 * guide.first_derivative.x * guide.first_derivative.y)
+            + first.dvv * guide.first_derivative.y.powi(2)
+            + first.du * guide.second_derivative.x
+            + first.dv * guide.second_derivative.y;
+        Ok(CurveEvaluation {
+            point: Point3::from_vec((first.point.to_vec() + second.point.to_vec()) * 0.5),
+            first_derivative,
+            second_derivative,
+        })
+    }
+
+    fn project(&self, point: Point3) -> KernelResult<Projection1> {
+        if !finite_point(point) {
+            return Err(invalid("projection point must be finite"));
+        }
+        let mut parameter = (0..=32)
+            .map(|index| self.range.start + self.range.span() * index as f64 / 32.0)
+            .map(|parameter| {
+                self.evaluate(parameter)
+                    .map(|value| (parameter, value.point.distance2(point)))
+            })
+            .collect::<KernelResult<Vec<_>>>()?
+            .into_iter()
+            .min_by(|first, second| first.1.total_cmp(&second.1))
+            .map(|value| value.0)
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::NumericalFailure,
+                    "surface-intersection projection has no seed",
+                )
+            })?;
+        for _ in 0..32 {
+            let value = self.evaluate(parameter)?;
+            let residual = value.point - point;
+            let function = residual.dot(value.first_derivative);
+            let derivative =
+                value.first_derivative.magnitude2() + residual.dot(value.second_derivative);
+            if derivative.abs() <= f64::EPSILON {
+                break;
+            }
+            let next = (parameter - function / derivative).clamp(
+                self.range.start.min(self.range.end),
+                self.range.start.max(self.range.end),
+            );
+            if (next - parameter).abs() <= self.tolerance.parameter {
+                parameter = next;
+                break;
+            }
+            parameter = next;
+        }
+        let projected = self.evaluate(parameter)?.point;
+        Ok(Projection1 {
+            parameter,
+            point: projected,
+            distance: projected.distance(point),
+        })
+    }
+}
+
+fn parameters_in_surface_domains(
+    surface: &Surface3,
+    parameters: [f64; 2],
+    tolerance: ModelTolerance,
+) -> bool {
+    surface.domains()[0].contains(parameters[0], tolerance.parameter)
+        && surface.domains()[1].contains(parameters[1], tolerance.parameter)
+}
+
+fn solve_linear_4(mut matrix: [[f64; 4]; 4], mut right: [f64; 4]) -> Option<[f64; 4]> {
+    for column in 0..4 {
+        let pivot = (column..4).max_by(|first, second| {
+            matrix[*first][column]
+                .abs()
+                .total_cmp(&matrix[*second][column].abs())
+        })?;
+        if matrix[pivot][column].abs() <= f64::EPSILON * 256.0 {
+            return None;
+        }
+        matrix.swap(column, pivot);
+        right.swap(column, pivot);
+        let divisor = matrix[column][column];
+        for value in &mut matrix[column][column..] {
+            *value /= divisor;
+        }
+        right[column] /= divisor;
+        for row in 0..4 {
+            if row == column {
+                continue;
+            }
+            let factor = matrix[row][column];
+            for index in column..4 {
+                matrix[row][index] -= factor * matrix[column][index];
+            }
+            right[row] -= factor * right[column];
+        }
+    }
+    Some(right)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Curve3 {
     Line(Line3),
     Circle(Circle3),
     Nurbs(NurbsCurve3),
+    SurfaceIntersection(SurfaceIntersectionCurve),
 }
 
 impl Curve3 {
@@ -1243,6 +1584,10 @@ impl Curve3 {
                 period: Some(std::f64::consts::TAU),
             },
             Self::Nurbs(curve) => curve.domain(),
+            Self::SurfaceIntersection(curve) => ParameterDomain {
+                bounds: DomainBounds::Bounded(curve.range()),
+                period: None,
+            },
         }
     }
 
@@ -1251,6 +1596,7 @@ impl Curve3 {
             Self::Line(line) => line.evaluate(parameter),
             Self::Circle(circle) => circle.evaluate(parameter),
             Self::Nurbs(curve) => curve.evaluate(parameter),
+            Self::SurfaceIntersection(curve) => curve.evaluate(parameter),
         }
     }
 
@@ -1259,6 +1605,7 @@ impl Curve3 {
             Self::Line(line) => line.project(point),
             Self::Circle(circle) => circle.project(point),
             Self::Nurbs(curve) => curve.project(point, tolerance),
+            Self::SurfaceIntersection(curve) => curve.project(point),
         }
     }
 }
@@ -1276,6 +1623,11 @@ impl From<Circle3> for Curve3 {
 impl From<NurbsCurve3> for Curve3 {
     fn from(value: NurbsCurve3) -> Self {
         Self::Nurbs(value)
+    }
+}
+impl From<SurfaceIntersectionCurve> for Curve3 {
+    fn from(value: SurfaceIntersectionCurve) -> Self {
+        Self::SurfaceIntersection(value)
     }
 }
 
@@ -1436,6 +1788,13 @@ pub struct NurbsSurface3 {
     knots: (Vec<f64>, Vec<f64>),
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct BezierSurfacePatch {
+    pub(crate) u_range: ParameterRange,
+    pub(crate) v_range: ParameterRange,
+    pub(crate) controls: Vec<Vec<Vec4>>,
+}
+
 impl NurbsSurface3 {
     pub fn new(
         degrees: (usize, usize),
@@ -1535,6 +1894,109 @@ impl NurbsSurface3 {
                     .collect()
             })
             .collect()
+    }
+
+    /// Extract exact rational Bézier patches by knot insertion in both
+    /// parameter directions. This changes representation only; it is used for
+    /// convex-hull intersection isolation and never tessellates the surface.
+    pub(crate) fn bezier_patches(&self) -> KernelResult<Vec<BezierSurfacePatch>> {
+        let mut controls = self.homogeneous_rows();
+        let mut u_knots = self.knots.0.clone();
+        let mut v_knots = self.knots.1.clone();
+        let (u_degree, v_degree) = self.degrees;
+
+        let u_start = u_knots[u_degree];
+        let u_end = u_knots[controls[0].len()];
+        let u_internal = u_knots
+            .iter()
+            .copied()
+            .filter(|knot| *knot > u_start && *knot < u_end)
+            .fold(Vec::<f64>::new(), |mut unique, knot| {
+                if unique.last().is_none_or(|last| *last != knot) {
+                    unique.push(knot);
+                }
+                unique
+            });
+        for knot in u_internal {
+            while u_knots
+                .iter()
+                .filter(|candidate| **candidate == knot)
+                .count()
+                < u_degree
+            {
+                let old_knots = u_knots.clone();
+                let mut next_knots = None;
+                let mut next_rows = Vec::with_capacity(controls.len());
+                for row in controls {
+                    let mut row_knots = old_knots.clone();
+                    let mut row = row;
+                    insert_homogeneous_knot4(u_degree, knot, &mut row_knots, &mut row)?;
+                    next_knots.get_or_insert(row_knots);
+                    next_rows.push(row);
+                }
+                controls = next_rows;
+                u_knots = next_knots.expect("a NURBS surface has at least one row");
+            }
+        }
+
+        let v_start = v_knots[v_degree];
+        let v_end = v_knots[controls.len()];
+        let v_internal = v_knots
+            .iter()
+            .copied()
+            .filter(|knot| *knot > v_start && *knot < v_end)
+            .fold(Vec::<f64>::new(), |mut unique, knot| {
+                if unique.last().is_none_or(|last| *last != knot) {
+                    unique.push(knot);
+                }
+                unique
+            });
+        for knot in v_internal {
+            while v_knots
+                .iter()
+                .filter(|candidate| **candidate == knot)
+                .count()
+                < v_degree
+            {
+                let old_knots = v_knots.clone();
+                let width = controls[0].len();
+                let mut columns = Vec::with_capacity(width);
+                let mut next_knots = None;
+                for u in 0..width {
+                    let mut column = controls.iter().map(|row| row[u]).collect::<Vec<_>>();
+                    let mut column_knots = old_knots.clone();
+                    insert_homogeneous_knot4(v_degree, knot, &mut column_knots, &mut column)?;
+                    next_knots.get_or_insert(column_knots);
+                    columns.push(column);
+                }
+                let height = columns[0].len();
+                controls = (0..height)
+                    .map(|v| columns.iter().map(|column| column[v]).collect())
+                    .collect();
+                v_knots = next_knots.expect("a NURBS surface has at least one column");
+            }
+        }
+
+        let u_spans = (u_degree..controls[0].len())
+            .filter(|index| u_knots[*index + 1] > u_knots[*index])
+            .collect::<Vec<_>>();
+        let v_spans = (v_degree..controls.len())
+            .filter(|index| v_knots[*index + 1] > v_knots[*index])
+            .collect::<Vec<_>>();
+        let mut patches = Vec::new();
+        for v in v_spans {
+            for u in &u_spans {
+                patches.push(BezierSurfacePatch {
+                    u_range: ParameterRange::new(u_knots[*u], u_knots[*u + 1])?,
+                    v_range: ParameterRange::new(v_knots[v], v_knots[v + 1])?,
+                    controls: controls[v - v_degree..=v]
+                        .iter()
+                        .map(|row| row[*u - u_degree..=*u].to_vec())
+                        .collect(),
+                });
+            }
+        }
+        Ok(patches)
     }
 
     fn evaluate(&self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {
@@ -2172,6 +2634,202 @@ impl Torus3 {
     }
 }
 
+/// Exact normal-offset definition for a regular parent surface. General NURBS
+/// offsets are not NURBS in closed form, so retaining the parent and signed
+/// distance is the non-approximating representation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OffsetSurface3 {
+    base: Box<Surface3>,
+    distance: f64,
+    tolerance: ModelTolerance,
+}
+
+impl OffsetSurface3 {
+    pub fn new(base: Surface3, distance: f64, tolerance: ModelTolerance) -> KernelResult<Self> {
+        tolerance.validate()?;
+        if !distance.is_finite() || distance.abs() <= tolerance.linear {
+            return Err(invalid(
+                "surface offset distance must be finite and exceed model tolerance",
+            ));
+        }
+        Ok(Self {
+            base: Box::new(base),
+            distance,
+            tolerance,
+        })
+    }
+
+    pub fn base(&self) -> &Surface3 {
+        &self.base
+    }
+
+    pub fn distance(&self) -> f64 {
+        self.distance
+    }
+
+    fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
+        let value = self.base.evaluate(u, v)?;
+        let cross = value.du.cross(value.dv);
+        let magnitude = cross.magnitude();
+        if magnitude
+            <= self
+                .tolerance
+                .linear_at_scale(value.du.magnitude().max(value.dv.magnitude()).max(1.0))
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "offset surface parent has a singular parameterization",
+            ));
+        }
+        let normal = cross / magnitude;
+        let project_tangent = |derivative: Vec3| derivative - normal * normal.dot(derivative);
+        let cross_u = value.duu.cross(value.dv) + value.du.cross(value.duv);
+        let cross_v = value.duv.cross(value.dv) + value.du.cross(value.dvv);
+        let normal_u = project_tangent(cross_u) / magnitude;
+        let normal_v = project_tangent(cross_v) / magnitude;
+        Ok((
+            value.point + normal * self.distance,
+            value.du + normal_u * self.distance,
+            value.dv + normal_v * self.distance,
+        ))
+    }
+
+    fn shifted_parameter(&self, direction: usize, parameter: f64, delta: f64) -> f64 {
+        let domain = self.base.domains()[direction];
+        let shifted = parameter + delta;
+        if domain.period.is_some() {
+            domain.normalize(shifted)
+        } else if let DomainBounds::Bounded(range) = domain.bounds {
+            shifted.clamp(range.start.min(range.end), range.start.max(range.end))
+        } else {
+            shifted
+        }
+    }
+
+    fn evaluate(&self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {
+        let (point, du, dv) = self.first_order(u, v)?;
+        let domains = self.base.domains();
+        let parameter_scale = domains
+            .iter()
+            .filter_map(|domain| match domain.bounds {
+                DomainBounds::Bounded(range) => Some(range.span().abs()),
+                _ => None,
+            })
+            .fold(1.0_f64, f64::max);
+        let step = (self.tolerance.parameter.sqrt() * parameter_scale)
+            .max(f64::EPSILON.sqrt() * parameter_scale);
+        let u_minus = self.shifted_parameter(0, u, -step);
+        let u_plus = self.shifted_parameter(0, u, step);
+        let v_minus = self.shifted_parameter(1, v, -step);
+        let v_plus = self.shifted_parameter(1, v, step);
+        let (_, du_minus, dv_u_minus) = self.first_order(u_minus, v)?;
+        let (_, du_plus, dv_u_plus) = self.first_order(u_plus, v)?;
+        let (_, du_v_minus, dv_minus) = self.first_order(u, v_minus)?;
+        let (_, du_v_plus, dv_plus) = self.first_order(u, v_plus)?;
+        let u_span = u_plus - u_minus;
+        let v_span = v_plus - v_minus;
+        if u_span.abs() <= self.tolerance.parameter || v_span.abs() <= self.tolerance.parameter {
+            return Err(KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                "offset surface derivative stencil collapsed at a parameter boundary",
+            ));
+        }
+        let duu = (du_plus - du_minus) / u_span;
+        let dvv = (dv_plus - dv_minus) / v_span;
+        let duv = ((dv_u_plus - dv_u_minus) / u_span + (du_v_plus - du_v_minus) / v_span) * 0.5;
+        Ok(SurfaceEvaluation {
+            point,
+            du,
+            dv,
+            duu,
+            duv,
+            dvv,
+        })
+    }
+
+    fn project(&self, point: Point3) -> KernelResult<Projection2> {
+        let domains = self.base.domains();
+        let (DomainBounds::Bounded(u_range), DomainBounds::Bounded(v_range)) =
+            (domains[0].bounds, domains[1].bounds)
+        else {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "projection onto a general offset requires bounded parent parameters",
+            ));
+        };
+        let mut parameters = (0..=8)
+            .flat_map(|u_index| {
+                (0..=8).map(move |v_index| {
+                    (
+                        u_range.start + u_range.span() * u_index as f64 / 8.0,
+                        v_range.start + v_range.span() * v_index as f64 / 8.0,
+                    )
+                })
+            })
+            .map(|parameters| {
+                self.evaluate(parameters.0, parameters.1)
+                    .map(|value| (parameters, value.point.distance2(point)))
+            })
+            .collect::<KernelResult<Vec<_>>>()?
+            .into_iter()
+            .min_by(|first, second| first.1.total_cmp(&second.1))
+            .map(|candidate| candidate.0)
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::NumericalFailure,
+                    "offset surface projection has no seed",
+                )
+            })?;
+        for _ in 0..48 {
+            let value = self.evaluate(parameters.0, parameters.1)?;
+            let residual = value.point - point;
+            let first = residual.dot(value.du);
+            let second = residual.dot(value.dv);
+            let matrix = [
+                [
+                    value.du.magnitude2() + residual.dot(value.duu),
+                    value.du.dot(value.dv) + residual.dot(value.duv),
+                ],
+                [
+                    value.du.dot(value.dv) + residual.dot(value.duv),
+                    value.dv.magnitude2() + residual.dot(value.dvv),
+                ],
+            ];
+            let determinant = matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
+            if determinant.abs() <= f64::EPSILON * 256.0 {
+                break;
+            }
+            let delta_u = (-first * matrix[1][1] + second * matrix[0][1]) / determinant;
+            let delta_v = (-second * matrix[0][0] + first * matrix[1][0]) / determinant;
+            let next = (
+                (parameters.0 + delta_u).clamp(
+                    u_range.start.min(u_range.end),
+                    u_range.start.max(u_range.end),
+                ),
+                (parameters.1 + delta_v).clamp(
+                    v_range.start.min(v_range.end),
+                    v_range.start.max(v_range.end),
+                ),
+            );
+            if (next.0 - parameters.0)
+                .abs()
+                .max((next.1 - parameters.1).abs())
+                <= self.tolerance.parameter
+            {
+                parameters = next;
+                break;
+            }
+            parameters = next;
+        }
+        let projected = self.evaluate(parameters.0, parameters.1)?.point;
+        Ok(Projection2 {
+            parameters,
+            point: projected,
+            distance: projected.distance(point),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Surface3 {
     Plane(Plane3),
@@ -2180,6 +2838,7 @@ pub enum Surface3 {
     Sphere(Sphere3),
     Torus(Torus3),
     Nurbs(NurbsSurface3),
+    Offset(OffsetSurface3),
 }
 
 impl Surface3 {
@@ -2239,6 +2898,7 @@ impl Surface3 {
                 },
             ],
             Self::Nurbs(surface) => surface.domains(),
+            Self::Offset(surface) => surface.base.domains(),
         }
     }
 
@@ -2250,6 +2910,7 @@ impl Surface3 {
             Self::Sphere(sphere) => sphere.evaluate(u, v),
             Self::Torus(torus) => torus.evaluate(u, v),
             Self::Nurbs(surface) => surface.evaluate(u, v),
+            Self::Offset(surface) => surface.evaluate(u, v),
         }
     }
 
@@ -2277,6 +2938,20 @@ impl Surface3 {
             Self::Sphere(sphere) => sphere.project(point),
             Self::Torus(torus) => torus.project(point),
             Self::Nurbs(surface) => surface.project(point, tolerance),
+            Self::Offset(surface) => surface.project(point),
+        }
+    }
+
+    pub fn offset(&self, distance: f64, tolerance: ModelTolerance) -> KernelResult<Self> {
+        match self {
+            Self::Plane(plane) => Ok(Plane3::new(
+                plane.origin() + plane.normal() * distance,
+                plane.u(),
+                plane.v(),
+                tolerance,
+            )?
+            .into()),
+            _ => OffsetSurface3::new(self.clone(), distance, tolerance).map(Self::Offset),
         }
     }
 }
@@ -2309,5 +2984,10 @@ impl From<Torus3> for Surface3 {
 impl From<NurbsSurface3> for Surface3 {
     fn from(value: NurbsSurface3) -> Self {
         Self::Nurbs(value)
+    }
+}
+impl From<OffsetSurface3> for Surface3 {
+    fn from(value: OffsetSurface3) -> Self {
+        Self::Offset(value)
     }
 }

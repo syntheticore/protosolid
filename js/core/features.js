@@ -1186,10 +1186,17 @@ export class PlaceFeature extends Feature {
         filetype: '.cad',
         autoActivate: true,
       },
+      variantOption: {
+        title: 'Variant',
+        type: 'enum',
+        options: {},
+        when: feature => !!feature.sourceVariant()?.options?.length,
+      },
     })
 
     this.filePath = null
     this.cachedData = null
+    this.variantOption = null
     this.importTransform = new THREE.Matrix4()
     this.sourceTree = null
     this.pendingData = null
@@ -1212,6 +1219,7 @@ export class PlaceFeature extends Feature {
     this.filePath = file.path
     this.cachedData = file.data
     this.sourceTree = sourceTree
+    this.variantOption = this.normalizedVariantOption(sourceTree)
     this.sourceRevision = this.snapshotRevision(file.data)
     this.pendingData = null
     this.pendingTree = null
@@ -1233,7 +1241,7 @@ export class PlaceFeature extends Feature {
       const file = await loadFile('.cad', 'text', this.filePath)
       if(linkCheck != this.linkCheck) return
       if(file.data == this.cachedData) return
-      this.pendingTree = this.parseSource(file.data)
+      this.pendingTree = this.parseSource(file.data, this.variantOption)
       this.pendingData = file.data
       this.activationError = {
         type: 'warning',
@@ -1253,7 +1261,8 @@ export class PlaceFeature extends Feature {
   commit() {
     if(!this.pendingData || !this.pendingTree) return
     this.cachedData = this.pendingData
-    this.sourceTree = this.pendingTree
+    this.sourceTree = this.parseSource(this.cachedData, this.variantOption)
+    this.variantOption = this.normalizedVariantOption(this.sourceTree, this.variantOption)
     this.sourceRevision = this.snapshotRevision(this.cachedData)
     this.pendingData = null
     this.pendingTree = null
@@ -1265,7 +1274,35 @@ export class PlaceFeature extends Feature {
   execute(tree) {
     if(this.suppressUpdate || !this.isComplete()) return
     this.error = null
+    this.updateSourceVariant()
     this.updateFeature(tree)
+  }
+
+  sourceVariant() {
+    return this.sourceTree?.creator.variant || null
+  }
+
+  settingOptions(key) {
+    if(key != 'variantOption') return this.settings[key].options
+    return Object.fromEntries(
+      (this.sourceVariant()?.options || []).map((option, index) => [index, option.title])
+    )
+  }
+
+  normalizedVariantOption(source, requested=this.variantOption) {
+    const variant = source?.creator?.variant || source?.variant
+    if(!variant?.options?.length) return null
+    let index = requested === null || requested === undefined ?
+      Number(variant.activeOption) : Number(requested)
+    if(!Number.isInteger(index) || !variant.options[index]) index = 0
+    return String(index)
+  }
+
+  updateSourceVariant() {
+    const selected = this.normalizedVariantOption(this.sourceTree)
+    this.variantOption = selected
+    if(selected === null || Number(selected) == this.sourceVariant().activeOption) return
+    this.sourceTree = this.parseSource(this.cachedData, selected)
   }
 
   updateFeature(tree) {
@@ -1339,6 +1376,7 @@ export class PlaceFeature extends Feature {
   }
 
   identifyImportedShapes(compound, sourceCompound) {
+    const geometryRevision = `${this.sourceRevision}/variant-${this.variantOption ?? 'default'}`
     const sourceSolids = sourceCompound.solids()
     compound.solids().forEach((solid, solidIndex) => {
       const sourceSolid = sourceSolids[solidIndex]
@@ -1346,13 +1384,13 @@ export class PlaceFeature extends Feature {
       solid.faces().forEach((face, faceIndex) => {
         const sourceFace = sourceFaces[faceIndex]
         face.id = `${this.id}/import/face/${sourceFace?.id || faceIndex}`
-        face.tessId = `${this.id}/${this.sourceRevision}/face/${sourceFace?.tessId || faceIndex}`
+        face.tessId = `${this.id}/${geometryRevision}/face/${sourceFace?.tessId || faceIndex}`
       })
       const sourceEdges = sourceSolid?.edges() || []
       solid.edges().forEach((edge, edgeIndex) => {
         const sourceEdge = sourceEdges[edgeIndex]
         edge.id = `${this.id}/import/edge/${sourceEdge?.id || edgeIndex}`
-        edge.tessId = `${this.id}/${this.sourceRevision}/edge/${sourceEdge?.tessId || edgeIndex}`
+        edge.tessId = `${this.id}/${geometryRevision}/edge/${sourceEdge?.tessId || edgeIndex}`
       })
     })
   }
@@ -1384,11 +1422,14 @@ export class PlaceFeature extends Feature {
     return `${data.length}-${(hash >>> 0).toString(36)}`
   }
 
-  parseSource(data) {
+  parseSource(data, variantOption=null) {
     const previousLastId = lastId
     try {
       const dump = Serialize.parse(data, { document: this.document, sketches: {} })
       if(!dump.timeline?.evaluate) throw new Error('Not a ProtoSolid document')
+
+      const selected = this.normalizedVariantOption(dump.timeline.baseCompDef, variantOption)
+      if(selected !== null) dump.timeline.baseCompDef.selectVariantOption(Number(selected), false)
 
       const sourceDocument = {
         timeline: dump.timeline,
@@ -1408,18 +1449,22 @@ export class PlaceFeature extends Feature {
     return {
       filePath: this.filePath,
       cachedData: this.cachedData,
+      variantOption: this.variantOption,
       importTransform: this.importTransform,
     }
   }
 
   setValues(values) {
     const cachedDataChanged = values.cachedData !== this.cachedData
+    const variantChanged = values.variantOption !== this.variantOption
     this.filePath = values.filePath || null
     this.cachedData = values.cachedData || null
+    this.variantOption = values.variantOption ?? null
     this.sourceRevision = this.cachedData ? this.snapshotRevision(this.cachedData) : null
     this.importTransform = values.importTransform || new THREE.Matrix4()
-    if(cachedDataChanged) {
-      this.sourceTree = this.cachedData ? this.parseSource(this.cachedData) : null
+    if(cachedDataChanged || variantChanged) {
+      this.sourceTree = this.cachedData ? this.parseSource(this.cachedData, this.variantOption) : null
+      this.variantOption = this.normalizedVariantOption(this.sourceTree, this.variantOption)
     }
   }
 

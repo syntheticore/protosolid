@@ -98,7 +98,8 @@ export class LengthGizmo extends ArrowControls {
     this.set(startValue, startSide)
 
     this.addEventListener('translation', (e) => {
-      cb(e.value.length(), e.value.dot(direction) > 0)
+      const value = Math.round(e.value.length() / this.translationSnap) * this.translationSnap
+      cb(value, e.value.dot(direction) > 0)
     })
 
     this.addEventListener('mouseUp', this.updateOrientation)

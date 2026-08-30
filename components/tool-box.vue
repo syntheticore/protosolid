@@ -426,7 +426,12 @@
           {
             title: 'Simulate',
             tools: [
-              { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
+              {
+                title: 'Material',
+                action: this.addMaterial,
+                icon: 'volleyball-ball',
+                isDisabled: () => !!this.document.activeComponent.creator.material,
+              },
               { title: 'Joint', feature: JointFeature },
               { title: 'Group', feature: GroupFeature },
               { title: 'Motion Link', feature: MotionLinkFeature },

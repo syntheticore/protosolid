@@ -17,6 +17,7 @@ import ShadowCatcher from './three/shadow-catcher.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
 
 const SKETCH_RENDER_OFFSET = 0.0001
+const LINE_PICKING_THRESHOLD = 4
 
 
 export default class Renderer {
@@ -118,7 +119,12 @@ export default class Renderer {
     this.setActiveCamera(this.cameraOrtho)
 
     const setPixelRatio = () => {
-      this.renderer.setPixelRatio(this.getPixelRatio())
+      const pixelRatio = this.getPixelRatio()
+      this.renderer.setPixelRatio(pixelRatio)
+      // Line2 raycasting accepts an additional screen-space width that is
+      // independent of the rendered material linewidth. Keep it in CSS-pixel
+      // terms so edge and sketch-curve picking feels the same on HiDPI screens.
+      this.raycaster.params.Line2 = { threshold: LINE_PICKING_THRESHOLD * pixelRatio }
       this.render()
     }
 

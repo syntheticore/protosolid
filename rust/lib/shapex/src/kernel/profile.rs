@@ -221,7 +221,7 @@ fn parameter_on_segment(
             }
             trim_parameter(segment, radial.y.atan2(radial.x))
         }
-        Curve2::Nurbs(_) => {
+        Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => {
             return Ok(None);
         }
     };

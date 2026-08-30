@@ -160,11 +160,11 @@ export class ShapexBackend {
     unsupported('analytical shelling yet')
   }
 
-  fillet(geometry, selected, radius) {
+  fillet(geometry, selected, radius, followTangentEdges=true) {
     const edges = new this.api.EdgeList()
     selected.forEach(edge => edges.add(edge))
     try {
-      return new ShapexGeometry(geometry.raw.fillet(edges, radius))
+      return new ShapexGeometry(geometry.raw.fillet(edges, radius, followTangentEdges))
     } catch(error) {
       throw {
         type: 'error',

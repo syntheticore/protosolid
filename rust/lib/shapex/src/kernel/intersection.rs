@@ -69,6 +69,93 @@ impl Curve3 {
         }
     }
 
+    pub(crate) fn intersect_curve_near(
+        &self,
+        other: &Self,
+        first_parameter: f64,
+        second_parameter: f64,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<CurveCurveHit> {
+        let mut parameters = [first_parameter, second_parameter];
+        for _ in 0..48 {
+            parameters[0] = normalize_parameter(self.domain(), parameters[0]);
+            parameters[1] = normalize_parameter(other.domain(), parameters[1]);
+            let first = self.evaluate(parameters[0])?;
+            let second = other.evaluate(parameters[1])?;
+            let residual = first.point - second.point;
+            let scale = first
+                .point
+                .to_vec()
+                .magnitude()
+                .max(second.point.to_vec().magnitude())
+                .max(1.0);
+            if residual.magnitude() <= tolerance.linear_at_scale(scale) {
+                let transverse = first
+                    .first_derivative
+                    .normalize()
+                    .cross(second.first_derivative.normalize())
+                    .magnitude()
+                    > tolerance.angular * 8.0;
+                return Ok(CurveCurveHit {
+                    point: Point3::from_vec((first.point.to_vec() + second.point.to_vec()) * 0.5),
+                    first_parameter: parameters[0],
+                    second_parameter: parameters[1],
+                    kind: if transverse {
+                        IntersectionKind::Transverse
+                    } else {
+                        IntersectionKind::Tangent
+                    },
+                    multiplicity: if transverse { 1 } else { 2 },
+                    achieved_error: residual.magnitude(),
+                });
+            }
+            let first_tangent = first.first_derivative;
+            let second_tangent = -second.first_derivative;
+            let normal = [
+                [
+                    first_tangent.dot(first_tangent),
+                    first_tangent.dot(second_tangent),
+                ],
+                [
+                    second_tangent.dot(first_tangent),
+                    second_tangent.dot(second_tangent),
+                ],
+            ];
+            let right = [-first_tangent.dot(residual), -second_tangent.dot(residual)];
+            let determinant = normal[0][0] * normal[1][1] - normal[0][1] * normal[1][0];
+            if determinant.abs() <= f64::EPSILON * 256.0 {
+                break;
+            }
+            let delta = [
+                (right[0] * normal[1][1] - normal[0][1] * right[1]) / determinant,
+                (normal[0][0] * right[1] - right[0] * normal[1][0]) / determinant,
+            ];
+            let mut damping = 1.0;
+            let mut accepted = false;
+            for _ in 0..16 {
+                let candidate = [
+                    normalize_parameter(self.domain(), parameters[0] + delta[0] * damping),
+                    normalize_parameter(other.domain(), parameters[1] + delta[1] * damping),
+                ];
+                let candidate_residual =
+                    self.evaluate(candidate[0])?.point - other.evaluate(candidate[1])?.point;
+                if candidate_residual.magnitude2() < residual.magnitude2() {
+                    parameters = candidate;
+                    accepted = true;
+                    break;
+                }
+                damping *= 0.5;
+            }
+            if !accepted {
+                break;
+            }
+        }
+        Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "local curve/curve intersection correction did not converge",
+        ))
+    }
+
     pub fn intersect_surface(
         &self,
         surface: &Surface3,
@@ -92,6 +179,360 @@ impl Curve3 {
             )),
         }
     }
+
+    /// Correct a topologically supplied curve/surface intersection seed.
+    ///
+    /// BREP operations already know which endpoint neighborhood is intended;
+    /// retaining that seed avoids ambiguous global root selection while this
+    /// Newton corrector keeps the resulting point on both exact supports.
+    pub(crate) fn intersect_surface_near(
+        &self,
+        surface: &Surface3,
+        curve_parameter: f64,
+        surface_parameters: (f64, f64),
+        tolerance: ModelTolerance,
+    ) -> KernelResult<CurveSurfaceHit> {
+        let topological_parameter = curve_parameter;
+        let mut parameters = [curve_parameter, surface_parameters.0, surface_parameters.1];
+        for _ in 0..48 {
+            parameters[0] = normalize_parameter(self.domain(), parameters[0]);
+            let domains = surface.domains();
+            parameters[1] = normalize_parameter(domains[0], parameters[1]);
+            parameters[2] = normalize_parameter(domains[1], parameters[2]);
+            let curve = self.evaluate(parameters[0])?;
+            let surface_value = surface.evaluate(parameters[1], parameters[2])?;
+            let residual = curve.point - surface_value.point;
+            let scale = curve
+                .point
+                .to_vec()
+                .magnitude()
+                .max(surface_value.point.to_vec().magnitude())
+                .max(1.0);
+            let allowed = tolerance.linear_at_scale(scale);
+            if residual.magnitude() <= allowed {
+                let tangent = curve.first_derivative.normalize();
+                let normal = surface_value.normal()?;
+                let transverse = tangent.dot(normal).abs() > tolerance.angular * 8.0;
+                return Ok(CurveSurfaceHit {
+                    point: Point3::from_vec(
+                        (curve.point.to_vec() + surface_value.point.to_vec()) * 0.5,
+                    ),
+                    curve_parameter: parameters[0],
+                    surface_parameters: (parameters[1], parameters[2]),
+                    kind: if transverse {
+                        IntersectionKind::Transverse
+                    } else {
+                        IntersectionKind::Tangent
+                    },
+                    multiplicity: if transverse { 1 } else { 2 },
+                    achieved_error: residual.magnitude(),
+                });
+            }
+            let matrix = [
+                [
+                    curve.first_derivative.x,
+                    -surface_value.du.x,
+                    -surface_value.dv.x,
+                ],
+                [
+                    curve.first_derivative.y,
+                    -surface_value.du.y,
+                    -surface_value.dv.y,
+                ],
+                [
+                    curve.first_derivative.z,
+                    -surface_value.du.z,
+                    -surface_value.dv.z,
+                ],
+            ];
+            let Some(delta) = solve_linear_3(matrix, [-residual.x, -residual.y, -residual.z])
+            else {
+                break;
+            };
+            let previous = residual.magnitude2();
+            let mut damping = 1.0;
+            let mut accepted = false;
+            for _ in 0..12 {
+                let candidate = [
+                    normalize_parameter(self.domain(), parameters[0] + delta[0] * damping),
+                    normalize_parameter(domains[0], parameters[1] + delta[1] * damping),
+                    normalize_parameter(domains[1], parameters[2] + delta[2] * damping),
+                ];
+                let curve = self.evaluate(candidate[0])?;
+                let surface_value = surface.evaluate(candidate[1], candidate[2])?;
+                if (curve.point - surface_value.point).magnitude2() < previous {
+                    parameters = candidate;
+                    accepted = true;
+                    break;
+                }
+                damping *= 0.5;
+            }
+            if !accepted {
+                break;
+            }
+        }
+        if let Surface3::Plane(plane) = surface {
+            let range = match self.domain().bounds {
+                DomainBounds::Bounded(range) => range,
+                _ => super::ParameterRange::new(
+                    topological_parameter - 1.0,
+                    topological_parameter + 1.0,
+                )?,
+            };
+            let signed_distance = |parameter: f64| -> KernelResult<f64> {
+                Ok(plane
+                    .normal()
+                    .dot(self.evaluate(parameter)?.point - plane.origin()))
+            };
+            let mut roots = Vec::new();
+            let mut previous_parameter = range.start;
+            let mut previous_value = signed_distance(previous_parameter)?;
+            let mut previous_derivative = plane
+                .normal()
+                .dot(self.evaluate(previous_parameter)?.first_derivative);
+            let mut closest = (previous_parameter, previous_value.abs());
+            for index in 1..=128 {
+                let parameter = range.start + range.span() * index as f64 / 128.0;
+                let value = signed_distance(parameter)?;
+                let derivative = plane
+                    .normal()
+                    .dot(self.evaluate(parameter)?.first_derivative);
+                if value.abs() < closest.1 {
+                    closest = (parameter, value.abs());
+                }
+                if previous_value == 0.0
+                    || value == 0.0
+                    || previous_value.signum() != value.signum()
+                {
+                    let mut first = previous_parameter;
+                    let mut second = parameter;
+                    let mut first_value = previous_value;
+                    for _ in 0..64 {
+                        let middle = (first + second) * 0.5;
+                        let middle_value = signed_distance(middle)?;
+                        if middle_value.abs()
+                            <= tolerance.linear_at_scale(
+                                self.evaluate(middle)?.point.to_vec().magnitude().max(1.0),
+                            )
+                        {
+                            first = middle;
+                            second = middle;
+                            break;
+                        }
+                        if first_value.signum() == middle_value.signum() {
+                            first = middle;
+                            first_value = middle_value;
+                        } else {
+                            second = middle;
+                        }
+                    }
+                    roots.push((first + second) * 0.5);
+                }
+                if previous_derivative == 0.0
+                    || derivative == 0.0
+                    || previous_derivative.signum() != derivative.signum()
+                {
+                    let mut first = previous_parameter;
+                    let mut second = parameter;
+                    let mut first_derivative = previous_derivative;
+                    for _ in 0..64 {
+                        let middle = (first + second) * 0.5;
+                        let middle_derivative =
+                            plane.normal().dot(self.evaluate(middle)?.first_derivative);
+                        if middle_derivative.abs() <= tolerance.parameter * 32.0 {
+                            first = middle;
+                            second = middle;
+                            break;
+                        }
+                        if first_derivative.signum() == middle_derivative.signum() {
+                            first = middle;
+                            first_derivative = middle_derivative;
+                        } else {
+                            second = middle;
+                        }
+                    }
+                    let stationary = (first + second) * 0.5;
+                    let stationary_distance = signed_distance(stationary)?.abs();
+                    if stationary_distance < closest.1 {
+                        closest = (stationary, stationary_distance);
+                    }
+                }
+                previous_parameter = parameter;
+                previous_value = value;
+                previous_derivative = derivative;
+            }
+            if roots.is_empty() {
+                let mut parameter = closest.0;
+                for _ in 0..32 {
+                    let value = self.evaluate(parameter)?;
+                    let residual = plane.normal().dot(value.point - plane.origin());
+                    let derivative = plane.normal().dot(value.first_derivative);
+                    if derivative.abs() <= f64::EPSILON * 256.0 {
+                        break;
+                    }
+                    let next = (parameter - residual / derivative)
+                        .clamp(range.start.min(range.end), range.start.max(range.end));
+                    if (next - parameter).abs() <= tolerance.parameter {
+                        parameter = next;
+                        break;
+                    }
+                    parameter = next;
+                }
+                roots.push(parameter);
+            }
+            if let Some(parameter) = roots.into_iter().min_by(|first, second| {
+                (first - topological_parameter)
+                    .abs()
+                    .total_cmp(&(second - topological_parameter).abs())
+            }) {
+                let curve = self.evaluate(parameter)?;
+                let projection = plane.project(curve.point)?;
+                let error = curve.point.distance(projection.point);
+                let scale = curve.point.to_vec().magnitude().max(1.0);
+                if error <= tolerance.linear_at_scale(scale) * 8.0 {
+                    let transverse = curve.first_derivative.normalize().dot(plane.normal()).abs()
+                        > tolerance.angular * 8.0;
+                    return Ok(CurveSurfaceHit {
+                        point: Point3::from_vec(
+                            (curve.point.to_vec() + projection.point.to_vec()) * 0.5,
+                        ),
+                        curve_parameter: parameter,
+                        surface_parameters: projection.parameters,
+                        kind: if transverse {
+                            IntersectionKind::Transverse
+                        } else {
+                            IntersectionKind::Tangent
+                        },
+                        multiplicity: if transverse { 1 } else { 2 },
+                        achieved_error: error,
+                    });
+                }
+            }
+            return Err(KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                format!(
+                    "curve/plane intersection has no root in the retained support range; closest signed distance is {}",
+                    closest.1
+                ),
+            ));
+        }
+        Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "curve/surface intersection corrector did not converge",
+        ))
+    }
+}
+
+fn normalize_parameter(domain: super::ParameterDomain, parameter: f64) -> f64 {
+    if domain.period.is_some() {
+        domain.normalize(parameter)
+    } else if let DomainBounds::Bounded(range) = domain.bounds {
+        parameter.clamp(range.start.min(range.end), range.start.max(range.end))
+    } else {
+        parameter
+    }
+}
+
+/// Least-norm correction of a topologically supplied local surface/surface
+/// seed.  Unlike the global tracer this accepts unbounded analytical supports;
+/// the BREP edge neighborhood already identifies the intended branch.
+pub(crate) fn correct_surface_pair_near(
+    first: &Surface3,
+    second: &Surface3,
+    mut parameters: [f64; 4],
+    tolerance: ModelTolerance,
+) -> KernelResult<[f64; 4]> {
+    let first_domains = first.domains();
+    let second_domains = second.domains();
+    let normalize = |values: [f64; 4]| {
+        [
+            normalize_parameter(first_domains[0], values[0]),
+            normalize_parameter(first_domains[1], values[1]),
+            normalize_parameter(second_domains[0], values[2]),
+            normalize_parameter(second_domains[1], values[3]),
+        ]
+    };
+    parameters = normalize(parameters);
+    for _ in 0..48 {
+        let first_value = first.evaluate(parameters[0], parameters[1])?;
+        let second_value = second.evaluate(parameters[2], parameters[3])?;
+        let residual = first_value.point - second_value.point;
+        let scale = first_value
+            .point
+            .to_vec()
+            .magnitude()
+            .max(second_value.point.to_vec().magnitude())
+            .max(1.0);
+        if residual.magnitude() <= tolerance.linear_at_scale(scale) {
+            if first_value
+                .normal()?
+                .cross(second_value.normal()?)
+                .magnitude()
+                <= tolerance.angular * 8.0
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "local surface intersection is tangential or singular",
+                ));
+            }
+            return Ok(parameters);
+        }
+        let jacobian = [
+            [
+                first_value.du.x,
+                first_value.dv.x,
+                -second_value.du.x,
+                -second_value.dv.x,
+            ],
+            [
+                first_value.du.y,
+                first_value.dv.y,
+                -second_value.du.y,
+                -second_value.dv.y,
+            ],
+            [
+                first_value.du.z,
+                first_value.dv.z,
+                -second_value.du.z,
+                -second_value.dv.z,
+            ],
+        ];
+        let normal = multiply_3x4_by_transpose(jacobian);
+        let lambda =
+            solve_linear_3(normal, [-residual.x, -residual.y, -residual.z]).ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::NumericalFailure,
+                    "local surface-intersection correction is singular",
+                )
+            })?;
+        let delta: [f64; 4] = std::array::from_fn(|column| {
+            (0..3)
+                .map(|row| jacobian[row][column] * lambda[row])
+                .sum::<f64>()
+        });
+        let mut damping = 1.0;
+        let mut accepted = false;
+        for _ in 0..16 {
+            let candidate = normalize(std::array::from_fn(|index| {
+                parameters[index] + delta[index] * damping
+            }));
+            let candidate_residual = first.evaluate(candidate[0], candidate[1])?.point
+                - second.evaluate(candidate[2], candidate[3])?.point;
+            if candidate_residual.magnitude2() < residual.magnitude2() {
+                parameters = candidate;
+                accepted = true;
+                break;
+            }
+            damping *= 0.5;
+        }
+        if !accepted {
+            break;
+        }
+    }
+    Err(KernelError::new(
+        DiagnosticKind::NumericalFailure,
+        "local surface-intersection correction did not converge",
+    ))
 }
 
 fn circle_sphere(
@@ -296,6 +737,12 @@ impl Surface3 {
     ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
         match (self, other) {
             (Self::Plane(first), Self::Plane(second)) => plane_plane(*first, *second, tolerance),
+            (Self::Plane(first), Self::Cylinder(second)) => {
+                plane_cylinder(*first, *second, tolerance)
+            }
+            (Self::Cylinder(first), Self::Plane(second)) => Ok(swap_surface_curves(
+                plane_cylinder(*second, *first, tolerance)?,
+            )),
             (Self::Nurbs(_) | Self::Offset(_), Self::Nurbs(_) | Self::Offset(_)) => {
                 trace_regular_surface_intersections(self, other, tolerance)
             }
@@ -304,6 +751,68 @@ impl Surface3 {
             )),
         }
     }
+}
+
+fn swap_surface_curves(
+    curves: IntersectionSet<SurfaceSurfaceCurve>,
+) -> IntersectionSet<SurfaceSurfaceCurve> {
+    match curves {
+        IntersectionSet::Isolated(curves) => IntersectionSet::Isolated(
+            curves
+                .into_iter()
+                .map(|curve| SurfaceSurfaceCurve {
+                    curve: curve.curve,
+                    first_pcurve: curve.second_pcurve,
+                    second_pcurve: curve.first_pcurve,
+                    achieved_error: curve.achieved_error,
+                })
+                .collect(),
+        ),
+        IntersectionSet::Empty => IntersectionSet::Empty,
+        IntersectionSet::Coincident => IntersectionSet::Coincident,
+    }
+}
+
+fn plane_cylinder(
+    plane: Plane3,
+    cylinder: super::Cylinder3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let axis = cylinder.axis().normalize();
+    let alignment = plane.normal().dot(axis).abs();
+    if alignment < 1.0 - tolerance.angular {
+        return Err(unsupported(
+            "oblique plane/cylinder intersection requires bounded general surface tracing",
+        ));
+    }
+    let denominator = plane.normal().dot(cylinder.axis());
+    let v = plane.normal().dot(plane.origin() - cylinder.origin()) / denominator;
+    let center = cylinder.origin() + cylinder.axis() * v;
+    let x_radius = plane.u() * cylinder.radius();
+    let y_radius = plane.v() * cylinder.radius();
+    let curve = Circle3::new(center, x_radius, y_radius, tolerance)?;
+    let cylinder_projection = Surface3::Cylinder(cylinder).project(center + x_radius, tolerance)?;
+    let cylinder_tangent = cylinder.evaluate(cylinder_projection.parameters.0, v)?.du;
+    let direction = if cylinder_tangent.dot(y_radius) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let plane_center = plane.project(center)?.parameters;
+    Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
+        curve: curve.into(),
+        first_pcurve: super::Circle2::new(
+            Point2::new(plane_center.0, plane_center.1),
+            cylinder.radius(),
+        )?
+        .into(),
+        second_pcurve: Line2::new(
+            Point2::new(cylinder_projection.parameters.0, v),
+            crate::Vec2::new(direction, 0.0),
+        )?
+        .into(),
+        achieved_error: 0.0,
+    }]))
 }
 
 fn trace_regular_surface_intersections(
@@ -429,9 +938,9 @@ fn trace_regular_surface_intersections(
                 .iter()
                 .map(|value| Point2::new(value[2], value[3]))
                 .collect::<Vec<_>>();
-            let first_pcurve = linear_nurbs_guide(&first_points)?;
-            let second_pcurve = linear_nurbs_guide(&second_points)?;
             let range = super::ParameterRange::new(0.0, 1.0)?;
+            let first_pcurve = smooth_nurbs_guide(&first_points, range)?;
+            let second_pcurve = smooth_nurbs_guide(&second_points, range)?;
             let achieved_error = parameters.iter().try_fold(0.0_f64, |error, value| {
                 let first = first.evaluate(value[0], value[1])?.point;
                 let second = second.evaluate(value[2], value[3])?.point;
@@ -945,16 +1454,30 @@ fn correct_surface_pair_with_gauge(
     Ok(None)
 }
 
-fn linear_nurbs_guide(points: &[Point2]) -> KernelResult<NurbsCurve2> {
+/// Builds a smooth parameter-space guide for an exact implicit intersection.
+///
+/// The guide selects the local Newton branch; it is never used as the modeled
+/// intersection itself. A clamped cubic guide is important here because a
+/// piecewise-linear parameterization injects artificial tangent jumps into an
+/// otherwise regular intersection, preventing certified boundary integration.
+pub(crate) fn smooth_nurbs_guide(
+    points: &[Point2],
+    range: super::ParameterRange,
+) -> KernelResult<NurbsCurve2> {
     if points.len() < 2 {
         return Err(unsupported(
             "surface-intersection guide needs at least two points",
         ));
     }
-    let mut knots = vec![0.0, 0.0];
-    knots.extend((1..points.len() - 1).map(|index| index as f64 / (points.len() - 1) as f64));
-    knots.extend([1.0, 1.0]);
-    NurbsCurve2::new(1, points.to_vec(), vec![1.0; points.len()], knots)
+    let degree = 3.min(points.len() - 1);
+    let mut knots = vec![range.start; degree + 1];
+    let internal_count = points.len() - degree - 1;
+    knots.extend(
+        (1..=internal_count)
+            .map(|index| range.start + range.span() * index as f64 / (internal_count + 1) as f64),
+    );
+    knots.extend(vec![range.end; degree + 1]);
+    NurbsCurve2::new(degree, points.to_vec(), vec![1.0; points.len()], knots)
 }
 
 fn multiply_3x4_by_transpose(matrix: [[f64; 4]; 3]) -> [[f64; 3]; 3] {
@@ -967,7 +1490,7 @@ fn multiply_3x4_by_transpose(matrix: [[f64; 4]; 3]) -> [[f64; 3]; 3] {
     })
 }
 
-fn solve_linear_3(mut matrix: [[f64; 3]; 3], mut right: [f64; 3]) -> Option<[f64; 3]> {
+pub(crate) fn solve_linear_3(mut matrix: [[f64; 3]; 3], mut right: [f64; 3]) -> Option<[f64; 3]> {
     for column in 0..3 {
         let pivot = (column..3).max_by(|first, second| {
             matrix[*first][column]

@@ -4,10 +4,10 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec3};
 
-use super::integration::adaptive_simpson;
+use super::integration::{adaptive_gauss_kronrod, adaptive_simpson};
 use super::{
-    BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, FaceId, Kernel, KernelError, KernelResult,
-    MassProperties, ModelTolerance, ShellId, Surface3, Topology,
+    BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, DomainBounds, FaceId, Kernel, KernelError,
+    KernelResult, MassProperties, ModelTolerance, ShellId, Surface3, Topology,
 };
 
 #[derive(Debug, Clone)]
@@ -169,40 +169,79 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
         linear: kernel.tolerance().linear_at_scale(body_scale),
         ..kernel.tolerance()
     };
-    if let Some(certificate) =
-        try_certify_torus(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
-    {
-        return Ok(certificate);
+    let has_general_surface = face_ids.iter().any(|face_id| {
+        topology
+            .face(*face_id)
+            .map(|face| {
+                matches!(
+                    face.surface(),
+                    Surface3::Nurbs(_) | Surface3::Offset(_) | Surface3::RollingBall(_)
+                )
+            })
+            .unwrap_or(true)
+    });
+    if !has_general_surface {
+        if let Some(certificate) =
+            try_certify_torus(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
+        {
+            return Ok(certificate);
+        }
+        if let Some(certificate) =
+            try_certify_sphere(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
+        {
+            return Ok(certificate);
+        }
+        if let Some(certificate) =
+            try_certify_cone(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
+        {
+            return Ok(certificate);
+        }
+        if let Some(certificate) =
+            try_certify_cylinder(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
+        {
+            return Ok(certificate);
+        }
+        if let Some(certificate) =
+            try_certify_right_prism(topology, body_id, &face_ids, physical_tolerance)?
+        {
+            return Ok(certificate);
+        }
+        if let Some(certificate) =
+            try_certify_prism_with_bosses(topology, body_id, &face_ids, physical_tolerance)?
+        {
+            return Ok(certificate);
+        }
+        if let Some(certificate) =
+            try_certify_prism_with_pockets(topology, body_id, &face_ids, physical_tolerance)?
+        {
+            return Ok(certificate);
+        }
     }
-    if let Some(certificate) =
-        try_certify_sphere(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
-    {
-        return Ok(certificate);
-    }
-    if let Some(certificate) =
-        try_certify_cone(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
-    {
-        return Ok(certificate);
-    }
-    if let Some(certificate) =
-        try_certify_cylinder(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
-    {
-        return Ok(certificate);
-    }
-    if let Some(certificate) =
-        try_certify_right_prism(topology, body_id, &face_ids, physical_tolerance)?
-    {
-        return Ok(certificate);
-    }
-    if let Some(certificate) =
-        try_certify_prism_with_bosses(topology, body_id, &face_ids, physical_tolerance)?
-    {
-        return Ok(certificate);
-    }
-    if let Some(certificate) =
-        try_certify_prism_with_pockets(topology, body_id, &face_ids, physical_tolerance)?
-    {
-        return Ok(certificate);
+    let requires_general_integration = edge_ids.iter().any(|edge_id| {
+        topology
+            .edge(*edge_id)
+            .map(|edge| !matches!(edge.curve(), Curve3::Line(_)))
+            .unwrap_or(true)
+    }) || face_ids.iter().any(|face_id| {
+        topology
+            .face(*face_id)
+            .map(|face| !matches!(face.surface(), Surface3::Plane(_)))
+            .unwrap_or(true)
+    });
+    if requires_general_integration {
+        let mut shell_properties = Vec::new();
+        for shell_id in body.shells() {
+            validate_shell_connected(topology, *shell_id)?;
+            shell_properties.push(brep_shell_properties(
+                topology,
+                *shell_id,
+                physical_tolerance,
+                body_scale,
+            )?);
+        }
+        let properties = combine_signed_shell_properties(shell_properties, physical_tolerance)?;
+        validate_supplied_properties(properties, physical_tolerance, body_scale)?;
+        return Ok(PhysicalCertificate { properties });
     }
     for edge_id in &edge_ids {
         let edge = topology.edge(*edge_id)?;
@@ -328,6 +367,210 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
         ));
     }
     Ok(PhysicalCertificate { properties })
+}
+
+/// Direct divergence-theorem integration over exact trimmed parametric faces.
+///
+/// For each surface quantity `h(u,v)`, Green's theorem converts the UV-domain
+/// integral to `integral Q dv` around the exact p-curves, where
+/// `Q(u,v) = integral(0..u) h(s,v) ds`.  Both integrations are adaptive and
+/// evaluate the retained analytical/implicit supports; rendering meshes never
+/// participate in physical certification.
+fn brep_shell_properties(
+    topology: &Topology,
+    shell_id: ShellId,
+    tolerance: ModelTolerance,
+    scale: f64,
+) -> KernelResult<MassProperties> {
+    const TERMS: usize = 11;
+    let dimensional_target = |power: i32| {
+        (tolerance.linear * scale.powi(power - 1))
+            .max(f64::EPSILON.sqrt() * scale.powi(power) * 64.0)
+    };
+    let targets = [
+        dimensional_target(2),
+        dimensional_target(3),
+        dimensional_target(4),
+        dimensional_target(4),
+        dimensional_target(4),
+        dimensional_target(5),
+        dimensional_target(5),
+        dimensional_target(5),
+        dimensional_target(5),
+        dimensional_target(5),
+        dimensional_target(5),
+    ];
+    let mut totals = [0.0; TERMS];
+    let shell = topology.shell(shell_id)?;
+    for face_id in shell.faces() {
+        let face = topology.face(*face_id)?;
+        let orientation = match face.orientation() {
+            super::FaceOrientation::Forward => 1.0,
+            super::FaceOrientation::Reversed => -1.0,
+        };
+        let surface_terms = |u: f64, v: f64| -> KernelResult<[f64; TERMS]> {
+            let (point, du, dv) = face.surface().first_order(u, v)?;
+            let parametric_normal = du.cross(dv);
+            let jacobian = parametric_normal.magnitude();
+            if jacobian <= f64::EPSILON * scale.powi(2) {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "physical integration encountered a singular surface point",
+                ));
+            }
+            let normal = parametric_normal * orientation;
+            Ok([
+                jacobian,
+                point.to_vec().dot(normal) / 3.0,
+                point.x.powi(2) * normal.x / 2.0,
+                point.y.powi(2) * normal.y / 2.0,
+                point.z.powi(2) * normal.z / 2.0,
+                point.x.powi(3) * normal.x / 3.0,
+                point.y.powi(3) * normal.y / 3.0,
+                point.z.powi(3) * normal.z / 3.0,
+                point.x.powi(2) * point.y * normal.x / 2.0,
+                point.x.powi(2) * point.z * normal.x / 2.0,
+                point.y.powi(2) * point.z * normal.y / 2.0,
+            ])
+        };
+        let domain_origin = match face.surface().domains()[0].bounds {
+            DomainBounds::Bounded(range) => range.start,
+            DomainBounds::LowerBounded(start) => start,
+            DomainBounds::UpperBounded(end) => end,
+            DomainBounds::Unbounded => 0.0,
+        };
+        let u_domain = face.surface().domains()[0];
+        let primitive_origin = if u_domain.contains(0.0, tolerance.parameter) {
+            0.0
+        } else {
+            face.loops()
+                .first()
+                .and_then(|loop_id| topology.loop_coedges(*loop_id).ok())
+                .and_then(|coedges| coedges.first().copied())
+                .and_then(|coedge_id| topology.coedge(coedge_id).ok())
+                .and_then(|coedge| {
+                    coedge
+                        .pcurve()
+                        .evaluate(coedge.range().start)
+                        .ok()
+                        .map(|value| value.point.x)
+                })
+                .unwrap_or(domain_origin)
+        };
+        for loop_id in face.loops() {
+            for coedge_id in topology.loop_coedges(*loop_id)? {
+                let coedge = topology.coedge(coedge_id)?;
+                let range = coedge.range();
+                let outer = adaptive_gauss_kronrod(
+                    range.start,
+                    range.end,
+                    |parameter| {
+                        let (point, derivative) = coedge.pcurve().first_order(parameter)?;
+                        let inner = adaptive_simpson(
+                            primitive_origin,
+                            point.x,
+                            |u| surface_terms(u, point.y),
+                            targets,
+                            14,
+                            "exact BREP surface primitive did not converge",
+                        )?;
+                        Ok(inner.map(|value| value * derivative.y * orientation))
+                    },
+                    targets,
+                    14,
+                    "exact BREP boundary integration did not converge",
+                )
+                .map_err(|error| {
+                    KernelError::new(
+                        DiagnosticKind::NumericalFailure,
+                        format!(
+                            "{error} (face support {}, boundary p-curve {}, parameter range [{}, {}])",
+                            surface_kind(face.surface()),
+                            curve2_kind(coedge.pcurve()),
+                            range.start,
+                            range.end,
+                        ),
+                    )
+                })?;
+                for index in 0..TERMS {
+                    totals[index] += outer[index];
+                }
+            }
+        }
+    }
+    let signed_volume = totals[1];
+    if !signed_volume.is_finite() || signed_volume.abs() <= tolerance.linear.powi(3) {
+        return Err(KernelError::new(
+            DiagnosticKind::GeometryInvariant,
+            "exact BREP shell integration produced zero or non-finite volume",
+        ));
+    }
+    let centroid = Point3::new(
+        totals[2] / signed_volume,
+        totals[3] / signed_volume,
+        totals[4] / signed_volume,
+    );
+    let second_moment = [
+        [totals[5], totals[8], totals[9]],
+        [totals[8], totals[6], totals[10]],
+        [totals[9], totals[10], totals[7]],
+    ];
+    let inertia_origin = [
+        [
+            second_moment[1][1] + second_moment[2][2],
+            -second_moment[0][1],
+            -second_moment[0][2],
+        ],
+        [
+            -second_moment[1][0],
+            second_moment[0][0] + second_moment[2][2],
+            -second_moment[1][2],
+        ],
+        [
+            -second_moment[2][0],
+            -second_moment[2][1],
+            second_moment[0][0] + second_moment[1][1],
+        ],
+    ];
+    let center = [centroid.x, centroid.y, centroid.z];
+    let center_squared = center.iter().map(|value| value * value).sum::<f64>();
+    let mut inertia = inertia_origin;
+    for row in 0..3 {
+        for column in 0..3 {
+            inertia[row][column] -= signed_volume
+                * (if row == column { center_squared } else { 0.0 } - center[row] * center[column]);
+        }
+    }
+    Ok(MassProperties {
+        volume: signed_volume.abs(),
+        signed_volume,
+        surface_area: totals[0],
+        centroid,
+        inertia,
+    })
+}
+
+fn surface_kind(surface: &super::Surface3) -> &'static str {
+    match surface {
+        super::Surface3::Plane(_) => "plane",
+        super::Surface3::Cylinder(_) => "cylinder",
+        super::Surface3::Cone(_) => "cone",
+        super::Surface3::Sphere(_) => "sphere",
+        super::Surface3::Torus(_) => "torus",
+        super::Surface3::Nurbs(_) => "NURBS",
+        super::Surface3::Offset(_) => "offset",
+        super::Surface3::RollingBall(_) => "rolling-ball",
+    }
+}
+
+fn curve2_kind(curve: &super::Curve2) -> &'static str {
+    match curve {
+        super::Curve2::Line(_) => "line",
+        super::Curve2::Circle(_) => "circle",
+        super::Curve2::Nurbs(_) => "NURBS",
+        super::Curve2::SurfaceIntersection(_) => "surface intersection",
+        super::Curve2::SurfaceProjection(_) => "surface projection",
+    }
 }
 
 fn polyhedral_shell_properties(
@@ -1784,7 +2027,9 @@ fn try_certify_cone(
                     return Ok(None);
                 }
             }
-            Curve3::Nurbs(_) | Curve3::SurfaceIntersection(_) => return Ok(None),
+            Curve3::Nurbs(_) | Curve3::SurfaceIntersection(_) | Curve3::SurfaceCurve(_) => {
+                return Ok(None)
+            }
         }
     }
     if circular_edges != 2 || generators != 2 || vertices.len() != 3 {
@@ -2085,7 +2330,9 @@ fn try_certify_cylinder(
                     return Ok(None);
                 }
             }
-            Curve3::Nurbs(_) | Curve3::SurfaceIntersection(_) => return Ok(None),
+            Curve3::Nurbs(_) | Curve3::SurfaceIntersection(_) | Curve3::SurfaceCurve(_) => {
+                return Ok(None)
+            }
         }
     }
     if circular_edges != 4 || linear_edges != 2 {

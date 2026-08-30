@@ -108,6 +108,91 @@ struct BoundaryVertex {
     point: Point3,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CurveSample {
+    point: Point3,
+    first_derivative: Vec3,
+}
+
+fn curve_sample(curve: &super::Curve3, parameter: f64) -> KernelResult<CurveSample> {
+    let (point, first_derivative) = curve.first_order(parameter)?;
+    Ok(CurveSample {
+        point,
+        first_derivative,
+    })
+}
+
+/// Choose a regular local parameter chart for a trimmed spherical face.
+///
+/// A sphere's stored longitude/latitude frame is intrinsic geometry metadata,
+/// not a mandatory rendering chart. A small exact face may contain one of
+/// that frame's poles, where longitude is undefined and planar trim
+/// triangulation produces a spurious wraparound. Reorient an equivalent exact
+/// sphere for this tessellation only, placing the boundary's mean direction on
+/// the chart equator and choosing the pole farthest from all boundary samples.
+fn sphere_tessellation_chart(
+    surface: &super::Surface3,
+    rings: &[Vec<BoundaryVertex>],
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<super::Surface3>> {
+    let super::Surface3::Sphere(sphere) = surface else {
+        return Ok(None);
+    };
+    let directions = rings
+        .iter()
+        .flatten()
+        .map(|vertex| vertex.point - sphere.center())
+        .filter(|direction| direction.magnitude2() > 0.0)
+        .map(|direction| direction.normalize())
+        .collect::<Vec<_>>();
+    let Some(first) = directions.first().copied() else {
+        return Ok(None);
+    };
+    let mean = directions
+        .iter()
+        .copied()
+        .fold(Vec3::new(0.0, 0.0, 0.0), |sum, direction| sum + direction);
+    let x = if mean.magnitude2() > f64::EPSILON {
+        mean.normalize()
+    } else {
+        first
+    };
+    let z = [Vec3::unit_x(), Vec3::unit_y(), Vec3::unit_z()]
+        .into_iter()
+        .map(|axis| x.cross(axis))
+        .filter(|candidate| candidate.magnitude2() > f64::EPSILON)
+        .map(|candidate| candidate.normalize())
+        .min_by(|first, second| {
+            let first_proximity = directions
+                .iter()
+                .map(|direction| direction.dot(*first).abs())
+                .fold(0.0_f64, f64::max);
+            let second_proximity = directions
+                .iter()
+                .map(|direction| direction.dot(*second).abs())
+                .fold(0.0_f64, f64::max);
+            first_proximity.total_cmp(&second_proximity)
+        })
+        .ok_or_else(|| {
+            KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "spherical face has no regular local tessellation chart",
+            )
+        })?;
+    let y = z.cross(x).normalize();
+    let radius = sphere.radius();
+    Ok(Some(
+        super::Sphere3::new(
+            sphere.center(),
+            x * radius,
+            y * radius,
+            z * radius,
+            tolerance,
+        )?
+        .into(),
+    ))
+}
+
 impl Kernel {
     pub fn tessellate_edge(
         &self,
@@ -174,27 +259,33 @@ impl Kernel {
         cache: &mut BTreeMap<EdgeId, EdgePolyline>,
     ) -> KernelResult<TriangleMesh> {
         let face = self.topology().face(face_id)?;
-        let rings = if let Some(ring) = self.sample_full_periodic_cylinder_band(face_id, options)? {
-            vec![ring]
-        } else {
-            let mut loop_ids = face.loops().to_vec();
-            loop_ids.sort_by_key(|loop_id| {
-                self.topology()
-                    .loop_(*loop_id)
-                    .map(|loop_| match loop_.kind() {
-                        super::LoopKind::Outer => 0,
-                        super::LoopKind::Inner => 1,
-                    })
-                    .unwrap_or(2)
-            });
-            let mut rings = Vec::new();
-            for loop_id in loop_ids {
-                let mut ring = self.sample_loop(loop_id, options, cache)?;
-                unwrap_periodic_ring(face.surface(), self.tolerance(), &mut ring)?;
-                rings.push(ring);
+        let (mut rings, parameters_are_continuous) =
+            if let Some(ring) = self.sample_full_periodic_cylinder_band(face_id, options)? {
+                (vec![ring], true)
+            } else {
+                let mut loop_ids = face.loops().to_vec();
+                loop_ids.sort_by_key(|loop_id| {
+                    self.topology()
+                        .loop_(*loop_id)
+                        .map(|loop_| match loop_.kind() {
+                            super::LoopKind::Outer => 0,
+                            super::LoopKind::Inner => 1,
+                        })
+                        .unwrap_or(2)
+                });
+                let mut rings = Vec::new();
+                for loop_id in loop_ids {
+                    rings.push(self.sample_loop(loop_id, options, cache)?);
+                }
+                (rings, false)
+            };
+        let chart = sphere_tessellation_chart(face.surface(), &rings, self.tolerance())?;
+        let tessellation_surface = chart.as_ref().unwrap_or_else(|| face.surface());
+        if !parameters_are_continuous {
+            for ring in &mut rings {
+                unwrap_periodic_ring(tessellation_surface, self.tolerance(), ring)?;
             }
-            rings
-        };
+        }
         if rings.is_empty() || rings[0].len() < 3 {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
@@ -237,7 +328,17 @@ impl Kernel {
         let mut normals = Vec::with_capacity(positions.len());
         for ring in &rings {
             for vertex in ring {
-                let mut normal = face.surface().normal(vertex.uv.x, vertex.uv.y)?;
+                let (lifted, mut normal) =
+                    surface_point_normal(tessellation_surface, vertex.uv.x, vertex.uv.y)?;
+                let allowed = self
+                    .tolerance()
+                    .linear_at_scale(vertex.point.to_vec().magnitude());
+                if lifted.distance(vertex.point) > allowed {
+                    return Err(KernelError::new(
+                        DiagnosticKind::GeometryInvariant,
+                        "tessellation chart does not lift its exact BREP boundary",
+                    ));
+                }
                 if face.orientation() == FaceOrientation::Reversed {
                     normal = -normal;
                 }
@@ -247,6 +348,9 @@ impl Kernel {
         let mut triangles = Vec::with_capacity(indices.len() / 3);
         for values in indices.chunks_exact(3) {
             let mut triangle = [values[0], values[1], values[2]];
+            if uv_triangle_is_degenerate(triangle, &uvs) {
+                continue;
+            }
             let geometric_normal = (positions[triangle[1]] - positions[triangle[0]])
                 .cross(positions[triangle[2]] - positions[triangle[0]]);
             if geometric_normal.magnitude()
@@ -267,7 +371,7 @@ impl Kernel {
             triangles.push(triangle);
         }
         refine_surface_triangles(
-            face.surface(),
+            tessellation_surface,
             face.orientation(),
             options,
             &boundary_edges,
@@ -303,7 +407,7 @@ impl Kernel {
         loop {
             let coedge = self.topology().coedge(current)?;
             if let std::collections::btree_map::Entry::Vacant(entry) = cache.entry(coedge.edge()) {
-                let polyline = sample_edge(self.topology().edge(coedge.edge())?, options)?;
+                let polyline = self.sample_edge_for_faces(coedge.edge(), options)?;
                 entry.insert(polyline);
             }
             let polyline = cache.get(&coedge.edge()).ok_or_else(|| {
@@ -333,7 +437,7 @@ impl Kernel {
                 };
                 let pcurve_parameter = coedge.range().start + alpha * coedge.range().span();
                 let uv = coedge.pcurve().evaluate(pcurve_parameter)?.point;
-                let surface_point = face.surface().evaluate(uv.x, uv.y)?.point;
+                let surface_point = face.surface().first_order(uv.x, uv.y)?.0;
                 let allowed = self
                     .tolerance()
                     .linear_at_scale(edge_point.to_vec().magnitude())
@@ -365,6 +469,34 @@ impl Kernel {
             }
         }
         Ok(output)
+    }
+
+    fn sample_edge_for_faces(
+        &self,
+        edge_id: EdgeId,
+        options: TessellationOptions,
+    ) -> KernelResult<EdgePolyline> {
+        let edge = self.topology().edge(edge_id)?;
+        sample_edge_with_normal_constraint(edge, options, &|first, last| {
+            let mut largest = 0.0_f64;
+            for coedge_id in edge.coedges() {
+                let coedge = self.topology().coedge(*coedge_id)?;
+                let loop_value = self.topology().loop_(coedge.loop_id())?;
+                let face = self.topology().face(loop_value.face())?;
+                let normal_at = |parameter: f64| -> KernelResult<Vec3> {
+                    let alpha = if coedge.is_forward() {
+                        (parameter - edge.range().start) / edge.range().span()
+                    } else {
+                        (edge.range().end - parameter) / edge.range().span()
+                    };
+                    let pcurve_parameter = coedge.range().start + alpha * coedge.range().span();
+                    let uv = coedge.pcurve().evaluate(pcurve_parameter)?.point;
+                    surface_point_normal(face.surface(), uv.x, uv.y).map(|value| value.1)
+                };
+                largest = largest.max(normal_at(first)?.angle(normal_at(last)?).0);
+            }
+            Ok(largest)
+        })
     }
 
     /// Sample the canonical trim of a complete periodic cylinder band.
@@ -426,7 +558,7 @@ impl Kernel {
         let mut ring = Vec::with_capacity((segments + 1) * 2);
         for index in 0..=segments {
             let u = std::f64::consts::TAU * index as f64 / segments as f64;
-            let point = face.surface().evaluate(u, levels[0])?.point;
+            let point = face.surface().first_order(u, levels[0])?.0;
             ring.push(BoundaryVertex {
                 uv: Point2::new(u, levels[0]),
                 point,
@@ -434,7 +566,7 @@ impl Kernel {
         }
         for index in (0..=segments).rev() {
             let u = std::f64::consts::TAU * index as f64 / segments as f64;
-            let point = face.surface().evaluate(u, levels[1])?.point;
+            let point = face.surface().first_order(u, levels[1])?.0;
             ring.push(BoundaryVertex {
                 uv: Point2::new(u, levels[1]),
                 point,
@@ -474,12 +606,7 @@ fn unwrap_periodic_ring(
                 "periodic face boundary does not lie on its retained surface",
             ));
         }
-        if domains[0].period.is_some() {
-            vertex.uv.x = projection.parameters.0;
-        }
-        if domains[1].period.is_some() {
-            vertex.uv.y = projection.parameters.1;
-        }
+        vertex.uv = Point2::new(projection.parameters.0, projection.parameters.1);
     }
     for (coordinate, period) in domains
         .iter()
@@ -528,6 +655,7 @@ fn refine_surface_triangles(
 ) -> KernelResult<()> {
     for depth in 0..=options.maximum_depth {
         let mut marked_edges = BTreeSet::new();
+        let mut edge_scores = BTreeMap::new();
         let mut centroid_splits = BTreeSet::new();
         let mut unique_edges = BTreeSet::new();
         for triangle in triangles.iter() {
@@ -536,30 +664,26 @@ fn refine_surface_triangles(
             }
         }
         for edge in unique_edges {
-            if !boundary_edges.contains(&edge)
-                && surface_edge_exceeds_tolerance(
-                    surface,
-                    orientation,
+            if !boundary_edges.contains(&edge) {
+                let (chord_error, angular_error) =
+                    surface_edge_error(surface, orientation, edge, uvs, positions)?;
+                edge_scores.insert(
                     edge,
-                    options,
-                    uvs,
-                    positions,
-                    normals,
-                )?
-            {
+                    (chord_error / options.chord_tolerance)
+                        .max(angular_error / options.angular_tolerance),
+                );
+                if chord_error <= options.chord_tolerance
+                    && angular_error <= options.angular_tolerance
+                {
+                    continue;
+                }
                 marked_edges.insert(edge);
             }
         }
         for (index, triangle) in triangles.iter().copied().enumerate() {
-            if surface_triangle_exceeds_tolerance(
-                surface,
-                orientation,
-                triangle,
-                options,
-                uvs,
-                positions,
-                normals,
-            )? {
+            let (chord_error, angular_error) =
+                surface_triangle_error(surface, orientation, triangle, uvs, positions)?;
+            if chord_error > options.chord_tolerance || angular_error > options.angular_tolerance {
                 let interior: Vec<_> = triangle_edges(triangle)
                     .into_iter()
                     .filter(|edge| !boundary_edges.contains(edge))
@@ -567,9 +691,11 @@ fn refine_surface_triangles(
                 if interior.is_empty() {
                     centroid_splits.insert(index);
                 } else if let Some(edge) = interior.into_iter().max_by(|first, second| {
-                    positions[first.0]
-                        .distance2(positions[first.1])
-                        .total_cmp(&positions[second.0].distance2(positions[second.1]))
+                    edge_scores
+                        .get(first)
+                        .copied()
+                        .unwrap_or_default()
+                        .total_cmp(&edge_scores.get(second).copied().unwrap_or_default())
                 }) {
                     marked_edges.insert(edge);
                 }
@@ -579,23 +705,39 @@ fn refine_surface_triangles(
             return Ok(());
         }
         if depth == options.maximum_depth {
+            let mut worst_chord = 0.0_f64;
+            let mut worst_angle = 0.0_f64;
+            for triangle in triangles.iter().copied() {
+                let (chord, angle) =
+                    surface_triangle_error(surface, orientation, triangle, uvs, positions)?;
+                worst_chord = worst_chord.max(chord);
+                worst_angle = worst_angle.max(angle);
+            }
             return Err(KernelError::new(
                 DiagnosticKind::NumericalFailure,
-                "adaptive surface tessellation could not satisfy requested tolerances",
+                format!(
+                    "adaptive {} surface tessellation could not satisfy requested tolerances at depth {} ({} triangles; chord error {}, requested {}; angular error {}, requested {})",
+                    surface_kind(surface),
+                    options.maximum_depth,
+                    triangles.len(),
+                    worst_chord,
+                    options.chord_tolerance,
+                    worst_angle,
+                    options.angular_tolerance,
+                ),
             ));
         }
 
         let mut midpoints = BTreeMap::new();
         for edge in &marked_edges {
             let uv = Point2::from_vec((uvs[edge.0].to_vec() + uvs[edge.1].to_vec()) * 0.5);
-            let evaluation = surface.evaluate(uv.x, uv.y)?;
-            let mut normal = surface.normal(uv.x, uv.y)?;
+            let (point, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
             if orientation == FaceOrientation::Reversed {
                 normal = -normal;
             }
             let index = positions.len();
             uvs.push(uv);
-            positions.push(evaluation.point);
+            positions.push(point);
             normals.push(normal);
             midpoints.insert(*edge, index);
         }
@@ -611,14 +753,13 @@ fn refine_surface_triangles(
                     let uv = Point2::from_vec(
                         (uvs[a].to_vec() + uvs[b].to_vec() + uvs[c].to_vec()) / 3.0,
                     );
-                    let evaluation = surface.evaluate(uv.x, uv.y)?;
-                    let mut normal = surface.normal(uv.x, uv.y)?;
+                    let (point, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
                     if orientation == FaceOrientation::Reversed {
                         normal = -normal;
                     }
                     let center = positions.len();
                     uvs.push(uv);
-                    positions.push(evaluation.point);
+                    positions.push(point);
                     normals.push(normal);
                     triangles.extend([[a, b, center], [b, c, center], [c, a, center]]);
                 }
@@ -640,8 +781,53 @@ fn refine_surface_triangles(
                 }
             }
         }
+        triangles.retain(|triangle| !uv_triangle_is_degenerate(*triangle, uvs));
     }
     Ok(())
+}
+
+fn uv_triangle_is_degenerate(triangle: [usize; 3], uvs: &[Point2]) -> bool {
+    let first = uvs[triangle[1]] - uvs[triangle[0]];
+    let second = uvs[triangle[2]] - uvs[triangle[0]];
+    let positive = first.x * second.y;
+    let negative = first.y * second.x;
+    let determinant = positive - negative;
+    let rounding_bound = (positive.abs() + negative.abs()) * f64::EPSILON * 64.0;
+    determinant.abs() <= rounding_bound
+}
+
+fn surface_kind(surface: &super::Surface3) -> &'static str {
+    match surface {
+        super::Surface3::Plane(_) => "plane",
+        super::Surface3::Cylinder(_) => "cylinder",
+        super::Surface3::Cone(_) => "cone",
+        super::Surface3::Sphere(_) => "sphere",
+        super::Surface3::Torus(_) => "torus",
+        super::Surface3::Nurbs(_) => "NURBS",
+        super::Surface3::Offset(_) => "offset",
+        super::Surface3::RollingBall(_) => "rolling-ball",
+    }
+}
+
+fn surface_point_normal(surface: &super::Surface3, u: f64, v: f64) -> KernelResult<(Point3, Vec3)> {
+    let (point, du, dv) = surface.first_order(u, v)?;
+    let normal = match surface {
+        // Longitude is singular at a sphere's poles even though the exact
+        // surface normal remains well defined there.
+        super::Surface3::Sphere(sphere) => point - sphere.center(),
+        _ => du.cross(dv),
+    };
+    if normal.magnitude2() == 0.0
+        || !normal.x.is_finite()
+        || !normal.y.is_finite()
+        || !normal.z.is_finite()
+    {
+        return Err(KernelError::new(
+            DiagnosticKind::GeometryInvariant,
+            "surface derivatives are singular at the requested parameter",
+        ));
+    }
+    Ok((point, normal.normalize()))
 }
 
 fn triangle_edges(triangle: [usize; 3]) -> [(usize, usize); 3] {
@@ -653,51 +839,75 @@ fn triangle_edges(triangle: [usize; 3]) -> [(usize, usize); 3] {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn surface_edge_exceeds_tolerance(
+fn surface_edge_error(
     surface: &super::Surface3,
     orientation: FaceOrientation,
     edge: (usize, usize),
-    options: TessellationOptions,
     uvs: &[Point2],
     positions: &[Point3],
-    normals: &[Vec3],
-) -> KernelResult<bool> {
-    let uv = Point2::from_vec((uvs[edge.0].to_vec() + uvs[edge.1].to_vec()) * 0.5);
-    let point = surface.evaluate(uv.x, uv.y)?.point;
-    let chord = Point3::from_vec((positions[edge.0].to_vec() + positions[edge.1].to_vec()) * 0.5);
-    let mut normal = surface.normal(uv.x, uv.y)?;
-    if orientation == FaceOrientation::Reversed {
-        normal = -normal;
-    }
-    Ok(point.distance(chord) > options.chord_tolerance
-        || normal.angle(normals[edge.0]).0 > options.angular_tolerance
-        || normal.angle(normals[edge.1]).0 > options.angular_tolerance)
+) -> KernelResult<(f64, f64)> {
+    let evaluate = |fraction: f64| -> KernelResult<(Point3, Point3, Vec3)> {
+        let uv = Point2::from_vec(
+            uvs[edge.0].to_vec() * (1.0 - fraction) + uvs[edge.1].to_vec() * fraction,
+        );
+        let (point, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
+        let chord = Point3::from_vec(
+            positions[edge.0].to_vec() * (1.0 - fraction) + positions[edge.1].to_vec() * fraction,
+        );
+        if orientation == FaceOrientation::Reversed {
+            normal = -normal;
+        }
+        Ok((point, chord, normal))
+    };
+    let first = evaluate(0.25)?;
+    let middle = evaluate(0.5)?;
+    let last = evaluate(0.75)?;
+    let chord_error = first
+        .0
+        .distance(first.1)
+        .max(middle.0.distance(middle.1))
+        .max(last.0.distance(last.1));
+    let angular_error = first.2.angle(last.2).0;
+    Ok((chord_error, angular_error))
 }
 
 #[allow(clippy::too_many_arguments)]
-fn surface_triangle_exceeds_tolerance(
+fn surface_triangle_error(
     surface: &super::Surface3,
     orientation: FaceOrientation,
     triangle: [usize; 3],
-    options: TessellationOptions,
     uvs: &[Point2],
     positions: &[Point3],
-    normals: &[Vec3],
-) -> KernelResult<bool> {
+) -> KernelResult<(f64, f64)> {
     let [a, b, c] = triangle;
-    let uv = Point2::from_vec((uvs[a].to_vec() + uvs[b].to_vec() + uvs[c].to_vec()) / 3.0);
-    let point = surface.evaluate(uv.x, uv.y)?.point;
-    let chord = Point3::from_vec(
+    let center_uv = Point2::from_vec((uvs[a].to_vec() + uvs[b].to_vec() + uvs[c].to_vec()) / 3.0);
+    let center_chord = Point3::from_vec(
         (positions[a].to_vec() + positions[b].to_vec() + positions[c].to_vec()) / 3.0,
     );
-    let mut normal = surface.normal(uv.x, uv.y)?;
-    if orientation == FaceOrientation::Reversed {
-        normal = -normal;
-    }
-    Ok(point.distance(chord) > options.chord_tolerance
-        || normal.angle(normals[a]).0 > options.angular_tolerance
-        || normal.angle(normals[b]).0 > options.angular_tolerance
-        || normal.angle(normals[c]).0 > options.angular_tolerance)
+    let evaluate = |vertex: usize| -> KernelResult<(Point3, Point3, Vec3)> {
+        let uv = Point2::from_vec((uvs[vertex].to_vec() + center_uv.to_vec()) * 0.5);
+        let (point, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
+        let chord = Point3::from_vec((positions[vertex].to_vec() + center_chord.to_vec()) * 0.5);
+        if orientation == FaceOrientation::Reversed {
+            normal = -normal;
+        }
+        Ok((point, chord, normal))
+    };
+    let first = evaluate(a)?;
+    let second = evaluate(b)?;
+    let third = evaluate(c)?;
+    let chord_error = first
+        .0
+        .distance(first.1)
+        .max(second.0.distance(second.1))
+        .max(third.0.distance(third.1));
+    let angular_error = first
+        .2
+        .angle(second.2)
+        .0
+        .max(second.2.angle(third.2).0)
+        .max(third.2.angle(first.2).0);
+    Ok((chord_error, angular_error))
 }
 
 impl TessellationOptions {
@@ -718,8 +928,16 @@ impl TessellationOptions {
 }
 
 fn sample_edge(edge: &Edge, options: TessellationOptions) -> KernelResult<EdgePolyline> {
-    let start = edge.curve().evaluate(edge.range().start)?;
-    let end = edge.curve().evaluate(edge.range().end)?;
+    sample_edge_with_normal_constraint(edge, options, &|_, _| Ok(0.0))
+}
+
+fn sample_edge_with_normal_constraint(
+    edge: &Edge,
+    options: TessellationOptions,
+    normal_angle: &dyn Fn(f64, f64) -> KernelResult<f64>,
+) -> KernelResult<EdgePolyline> {
+    let start = curve_sample(edge.curve(), edge.range().start)?;
+    let end = curve_sample(edge.curve(), edge.range().end)?;
     let mut samples = vec![(edge.range().start, start.point)];
     sample_interval(
         edge,
@@ -729,6 +947,7 @@ fn sample_edge(edge: &Edge, options: TessellationOptions) -> KernelResult<EdgePo
         end,
         0,
         options,
+        normal_angle,
         &mut samples,
     )?;
     let (parameters, points): (Vec<_>, Vec<_>) = samples.into_iter().unzip();
@@ -739,24 +958,51 @@ fn sample_edge(edge: &Edge, options: TessellationOptions) -> KernelResult<EdgePo
 fn sample_interval(
     edge: &Edge,
     start_parameter: f64,
-    start: super::CurveEvaluation,
+    start: CurveSample,
     end_parameter: f64,
-    end: super::CurveEvaluation,
+    end: CurveSample,
     depth: u8,
     options: TessellationOptions,
+    normal_angle: &dyn Fn(f64, f64) -> KernelResult<f64>,
     output: &mut Vec<(f64, Point3)>,
 ) -> KernelResult<()> {
     let middle_parameter = (start_parameter + end_parameter) * 0.5;
-    let middle = edge.curve().evaluate(middle_parameter)?;
+    let middle = curve_sample(edge.curve(), middle_parameter)?;
+    let first_quarter_parameter = (start_parameter + middle_parameter) * 0.5;
+    let third_quarter_parameter = (middle_parameter + end_parameter) * 0.5;
+    let first_quarter = curve_sample(edge.curve(), first_quarter_parameter)?;
+    let third_quarter = curve_sample(edge.curve(), third_quarter_parameter)?;
     let chord_middle = start.point + (end.point - start.point) * 0.5;
-    let deviation = middle.point.distance(chord_middle);
-    let tangent_angle =
-        if start.first_derivative.magnitude2() == 0.0 || end.first_derivative.magnitude2() == 0.0 {
-            std::f64::consts::PI
-        } else {
-            start.first_derivative.angle(end.first_derivative).0
-        };
-    if deviation <= options.chord_tolerance && tangent_angle <= options.angular_tolerance {
+    let chord_first_quarter = start.point + (end.point - start.point) * 0.25;
+    let chord_third_quarter = start.point + (end.point - start.point) * 0.75;
+    let deviation = middle
+        .point
+        .distance(chord_middle)
+        .max(first_quarter.point.distance(chord_first_quarter))
+        .max(third_quarter.point.distance(chord_third_quarter));
+    // Implicit support intersections can have no unique two-sided tangent at a
+    // trim endpoint even though the retained one-sided edge is regular. Use
+    // interior tangent samples for the angular error test; the three chord
+    // samples still constrain the complete closed interval geometrically.
+    let tangent_angle = if first_quarter.first_derivative.magnitude2() == 0.0
+        || third_quarter.first_derivative.magnitude2() == 0.0
+    {
+        std::f64::consts::PI
+    } else {
+        first_quarter
+            .first_derivative
+            .angle(third_quarter.first_derivative)
+            .0
+    };
+    let adjacent_normal_angle = normal_angle(first_quarter_parameter, third_quarter_parameter)?;
+    // The interior samples span the middle half of the interval. Limiting
+    // their turn to half the requested angle bounds the complete segment
+    // without evaluating potentially ambiguous two-sided endpoint tangents.
+    let interior_angular_tolerance = options.angular_tolerance * 0.5;
+    if deviation <= options.chord_tolerance
+        && tangent_angle <= interior_angular_tolerance
+        && adjacent_normal_angle <= interior_angular_tolerance
+    {
         output.push((end_parameter, end.point));
         return Ok(());
     }
@@ -774,6 +1020,7 @@ fn sample_interval(
         middle,
         depth + 1,
         options,
+        normal_angle,
         output,
     )?;
     sample_interval(
@@ -784,6 +1031,7 @@ fn sample_interval(
         end,
         depth + 1,
         options,
+        normal_angle,
         output,
     )
 }

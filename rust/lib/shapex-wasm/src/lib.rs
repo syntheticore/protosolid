@@ -5,13 +5,12 @@
 
 use js_sys::Float64Array;
 use shapex::kernel::{
-    Axis3, BooleanKind, Curve3, NurbsCurve2, Origin, ParameterRange, RigidTransform3,
-    Surface3,
+    Axis3, BooleanKind, Curve3, NurbsCurve2, Origin, ParameterRange, RigidTransform3, Surface3,
 };
 use shapex::{
-    Compound, CreationRole, EdgeHandle, FaceHandle, Matrix3, ModelTolerance, Plane3, Point2,
-    Profile, ProfileBoundary, Resolution, Solid, TessellationOptions, TriangleMesh, TrimmedCurve2,
-    Vec3, Wire2,
+    Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3, ModelTolerance, Plane3,
+    Point2, Profile, ProfileBoundary, Resolution, Solid, TessellationOptions, TriangleMesh,
+    TrimmedCurve2, Vec3, Wire2,
 };
 use wasm_bindgen::prelude::*;
 
@@ -103,14 +102,16 @@ impl WasmWire2 {
             .map(|point| Point2::new(point[0], point[1]))
             .collect::<Vec<_>>();
         let range = ParameterRange::new(
-            *knots.get(degree).ok_or_else(|| JsValue::from_str("invalid NURBS knots"))?,
+            *knots
+                .get(degree)
+                .ok_or_else(|| JsValue::from_str("invalid NURBS knots"))?,
             *knots
                 .get(points.len())
                 .ok_or_else(|| JsValue::from_str("invalid NURBS knots"))?,
         )
         .map_err(js_error)?;
-        let curve = NurbsCurve2::new(degree, points, weights.to_vec(), knots.to_vec())
-            .map_err(js_error)?;
+        let curve =
+            NurbsCurve2::new(degree, points, weights.to_vec(), knots.to_vec()).map_err(js_error)?;
         self.segments
             .push(TrimmedCurve2::new(curve, range).map_err(js_error)?);
         Ok(())
@@ -288,7 +289,10 @@ impl WasmLoft {
         let compound = first
             .loft_with_alignment(
                 *plane,
-                sections.iter().skip(1).map(|(plane, profile)| (*plane, profile)),
+                sections
+                    .iter()
+                    .skip(1)
+                    .map(|(plane, profile)| (*plane, profile)),
                 align_sections,
             )
             .map_err(js_error)?;
@@ -725,9 +729,18 @@ impl WasmCompound {
             .map_err(js_error)
     }
 
-    pub fn fillet(&self, edges: &WasmEdgeList, radius: f64) -> Result<Self, JsValue> {
+    pub fn fillet(
+        &self,
+        edges: &WasmEdgeList,
+        radius: f64,
+        follow_tangent_edges: Option<bool>,
+    ) -> Result<Self, JsValue> {
         self.inner
-            .fillet(&edges.edges, radius)
+            .fillet_with_options(
+                &edges.edges,
+                FilletOptions::new(radius)
+                    .with_tangent_propagation(follow_tangent_edges.unwrap_or(true)),
+            )
             .map(|inner| Self { inner })
             .map_err(js_error)
     }
@@ -751,8 +764,12 @@ impl WasmCompound {
             Vec3::new(u_x, u_y, u_z),
             Vec3::new(v_x, v_y, v_z),
             ModelTolerance::default(),
-        ).map_err(js_error)?;
-        self.inner.split(plane, keep).map(|inner| Self { inner }).map_err(js_error)
+        )
+        .map_err(js_error)?;
+        self.inner
+            .split(plane, keep)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = withoutSolids)]
@@ -768,10 +785,18 @@ impl WasmCompound {
     pub fn move_faces(
         &self,
         faces: &WasmFaceList,
-        x_x: f64, x_y: f64, x_z: f64,
-        y_x: f64, y_y: f64, y_z: f64,
-        z_x: f64, z_y: f64, z_z: f64,
-        t_x: f64, t_y: f64, t_z: f64,
+        x_x: f64,
+        x_y: f64,
+        x_z: f64,
+        y_x: f64,
+        y_y: f64,
+        y_z: f64,
+        z_x: f64,
+        z_y: f64,
+        z_z: f64,
+        t_x: f64,
+        t_y: f64,
+        t_z: f64,
     ) -> Result<Self, JsValue> {
         let transform = RigidTransform3::new(
             Matrix3::from_cols(
@@ -781,17 +806,16 @@ impl WasmCompound {
             ),
             Vec3::new(t_x, t_y, t_z),
             ModelTolerance::default(),
-        ).map_err(js_error)?;
-        self.inner.move_faces(&faces.faces, transform)
-            .map(|inner| Self { inner }).map_err(js_error)
+        )
+        .map_err(js_error)?;
+        self.inner
+            .move_faces(&faces.faces, transform)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = replaceFace)]
-    pub fn replace_face(
-        &self,
-        target: &WasmFace,
-        replacement: &WasmFace,
-    ) -> Result<Self, JsValue> {
+    pub fn replace_face(&self, target: &WasmFace, replacement: &WasmFace) -> Result<Self, JsValue> {
         self.inner
             .replace_face(&target.inner, &replacement.inner)
             .map(|inner| Self { inner })

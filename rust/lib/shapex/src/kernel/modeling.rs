@@ -8,10 +8,10 @@ use crate::{Point2, Point3, Vec3};
 use super::euler::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
-    BodyId, BooleanKind, ChangeKind, Circle2, Curve2, Curve3, DiagnosticKind, EdgeId, FaceId,
-    Kernel, KernelError, KernelResult, LoopKind, MassProperties, ModelTolerance, NurbsCurve2,
-    OperationHistory, Origin, ParameterRange, PersistentId, Plane3, Profile, RigidTransform3,
-    Surface3, Tessellate, TessellationOptions, TriangleMesh, TrimmedCurve2, Wire2,
+    BodyId, BooleanKind, ChangeKind, Circle2, Curve2, Curve3, DiagnosticKind, EdgeId, EntityId,
+    FaceId, Kernel, KernelError, KernelResult, LoopKind, MassProperties, ModelTolerance,
+    NurbsCurve2, OperationHistory, Origin, ParameterRange, PersistentId, Plane3, Profile,
+    RigidTransform3, Surface3, Tessellate, TessellationOptions, TriangleMesh, TrimmedCurve2, Wire2,
 };
 
 #[derive(Clone, Copy)]
@@ -427,15 +427,16 @@ impl FaceHandle {
     pub fn tessellate(&self, options: TessellationOptions) -> KernelResult<TriangleMesh> {
         <Self as Tessellate>::tessellate(self, options)
     }
-    pub(crate) fn normal_at(
-        &self,
-        point: Point3,
-        tolerance: ModelTolerance,
-    ) -> KernelResult<crate::Vec3> {
-        let projection = self.surface.project(point, tolerance)?;
-        let normal = self
-            .surface
-            .normal(projection.parameters.0, projection.parameters.1)?;
+    pub(crate) fn effective_normal(&self) -> KernelResult<crate::Vec3> {
+        let normal = match self.surface() {
+            Surface3::Plane(plane) => plane.normal(),
+            _ => {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "exact face comparison currently requires planar faces",
+                ))
+            }
+        };
         Ok(match self.state.topology().face(self.face)?.orientation() {
             super::FaceOrientation::Forward => normal,
             super::FaceOrientation::Reversed => -normal,
@@ -624,6 +625,27 @@ pub struct Solid {
     revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
 }
 
+/// Controls rolling-ball edge fillet construction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilletOptions {
+    pub radius: f64,
+    pub follow_tangent_edges: bool,
+}
+
+impl FilletOptions {
+    pub fn new(radius: f64) -> Self {
+        Self {
+            radius,
+            follow_tangent_edges: true,
+        }
+    }
+
+    pub fn with_tangent_propagation(mut self, enabled: bool) -> Self {
+        self.follow_tangent_edges = enabled;
+        self
+    }
+}
+
 impl Solid {
     pub fn volume(&self) -> f64 {
         self.properties.volume
@@ -795,9 +817,6 @@ impl Compound {
     }
     pub(crate) fn tolerance(&self) -> ModelTolerance {
         self.state.tolerance()
-    }
-    pub(crate) fn face_name(&self, face: FaceId) -> KernelResult<PersistentId> {
-        Ok(self.state.topology().face(face)?.name())
     }
     pub fn volume(&self) -> f64 {
         self.properties.volume
@@ -982,7 +1001,8 @@ impl Compound {
                     Surface3::Cone(_)
                     | Surface3::Sphere(_)
                     | Surface3::Torus(_)
-                    | Surface3::Offset(_) => None,
+                    | Surface3::Offset(_)
+                    | Surface3::RollingBall(_) => None,
                 };
                 if let Some(candidate) = candidate {
                     let candidate = candidate.normalize();
@@ -1132,9 +1152,8 @@ impl Compound {
             return result.with_boolean_parents(self, other, role);
         }
         // Shared analytical faces are sewn directly with Euler operators for
-        // both planar and curved prisms. Besides preserving the source BREP,
-        // this avoids routing a simple attached boss through the general
-        // polyhedral Boolean reconstruction.
+        // both planar and curved prisms, preserving the source BREP and entity
+        // lineage without invoking a general intersection solve.
         if kind == BooleanKind::Union {
             if let Some(result) = self.union_adjacent_exact(other)? {
                 return Ok(result);
@@ -1146,27 +1165,10 @@ impl Compound {
         if let Some(result) = self.boolean_parallel_prisms_exact(other, kind)? {
             return Ok(result);
         }
-        let curved = self
-            .faces()
-            .chain(other.faces())
-            .any(|face| !matches!(face.surface(), Surface3::Plane(_)));
-        if curved {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "this curved Boolean does not yet have an analytic construction",
-            ));
-        }
-        let mut kernel = Kernel::new(self.state.tolerance())?;
-        let first = kernel
-            .topology
-            .import_body(self.state.topology(), self.solids[0].body)?;
-        let second = kernel
-            .topology
-            .import_body(other.state.topology(), other.solids[0].body)?;
-        let mut transaction = kernel.begin_operation();
-        transaction.boolean(first, second, kind)?;
-        let committed = transaction.finish()?;
-        Self::from_operation(kernel, committed, [self, other])
+        Err(KernelError::new(
+            DiagnosticKind::UnsupportedGeometry,
+            "this Boolean does not yet have an exact analytical BREP construction; polyhedral reconstruction has been removed",
+        ))
     }
 
     /// A conservative analytic enclosure used only to prove separation. Circle
@@ -1192,7 +1194,7 @@ impl Compound {
                         bounds.include(*point);
                     }
                 }
-                Curve3::SurfaceIntersection(_) => {
+                Curve3::SurfaceIntersection(_) | Curve3::SurfaceCurve(_) => {
                     // The curve is bounded by its trimmed range, but deriving a
                     // tight interval enclosure from two retained supports is a
                     // separate certified operation. An infinite enclosure is
@@ -1252,7 +1254,8 @@ impl Compound {
                 Surface3::Cone(_)
                 | Surface3::Sphere(_)
                 | Surface3::Torus(_)
-                | Surface3::Offset(_) => return Ok(false),
+                | Surface3::Offset(_)
+                | Surface3::RollingBall(_) => return Ok(false),
             }
         }
         let (minimum, maximum) = self
@@ -1307,8 +1310,17 @@ impl Compound {
         let Some(cap) = cap else {
             return Ok(None);
         };
+        self.profile_on_planar_face(cap, target_plane)
+    }
+
+    pub(crate) fn profile_on_planar_face(
+        &self,
+        cap: &FaceHandle,
+        target_plane: Plane3,
+    ) -> KernelResult<Option<Profile>> {
+        let tolerance = self.tolerance();
         let Surface3::Plane(cap_plane) = cap.surface() else {
-            unreachable!()
+            return Ok(None);
         };
         let map = |point: Point2| -> KernelResult<Point2> {
             let world = cap_plane.evaluate(point.x, point.y)?.point;
@@ -1369,6 +1381,9 @@ impl Compound {
                         )?,
                         range,
                     )?,
+                    Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => {
+                        return Ok(None)
+                    }
                 };
                 segments.push(segment);
             }
@@ -1552,9 +1567,9 @@ impl Compound {
         other: &Self,
         properties: Option<MassProperties>,
     ) -> KernelResult<Option<Self>> {
-        let equal_faces = super::features::coincident_opposite_face_names(self, other)?;
+        let equal_faces = super::boolean::coincident_opposite_face_names(self, other)?;
         let patch_faces = if equal_faces.is_none() {
-            super::features::coincident_opposite_face_patch_names(self, other)?
+            super::boolean::coincident_opposite_face_patch_names(self, other)?
         } else {
             None
         };
@@ -1648,6 +1663,15 @@ impl Compound {
     }
 
     pub fn fillet(&self, edges: &[EdgeHandle], radius: f64) -> KernelResult<Self> {
+        self.fillet_with_options(edges, FilletOptions::new(radius))
+    }
+
+    pub fn fillet_with_options(
+        &self,
+        edges: &[EdgeHandle],
+        options: FilletOptions,
+    ) -> KernelResult<Self> {
+        let radius = options.radius;
         if !radius.is_finite() || radius <= self.tolerance().linear {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
@@ -1660,10 +1684,62 @@ impl Compound {
                 "fillet needs at least one edge",
             ));
         }
-        Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "general BREP filleting is not implemented",
-        ))
+        let selected = edges
+            .iter()
+            .map(EdgeHandle::persistent_id)
+            .collect::<BTreeSet<_>>();
+        if selected.len() != edges.len() {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "fillet edge selection contains duplicates",
+            ));
+        }
+        let available = self
+            .edges()
+            .map(|edge| edge.persistent_id())
+            .collect::<BTreeSet<_>>();
+        if !selected.is_subset(&available) {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "fillet edges do not belong to this compound revision",
+            ));
+        }
+        if self.solids.len() > 1 {
+            let mut results = Vec::with_capacity(self.solids.len());
+            for solid in &self.solids {
+                let local = solid
+                    .edges()
+                    .filter(|edge| selected.contains(&edge.persistent_id()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let local_compound = solid.to_compound();
+                results.push(if local.is_empty() {
+                    local_compound
+                } else {
+                    local_compound.fillet_with_options(&local, options)?
+                });
+            }
+            return combine_compounds(results, self.tolerance());
+        }
+
+        let mut kernel = Kernel::new(self.tolerance())?;
+        kernel
+            .topology
+            .import_body(self.state.topology(), self.solids[0].body)?;
+        let imported_edges = selected
+            .iter()
+            .map(|name| match kernel.topology.entity(*name) {
+                Some(EntityId::Edge(edge)) => Ok(edge),
+                _ => Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "imported fillet edge could not be reidentified",
+                )),
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        let mut transaction = kernel.begin_operation();
+        transaction.fillet_edges(&imported_edges, radius, options.follow_tangent_edges)?;
+        let committed = transaction.finish()?;
+        Self::from_operation(kernel, committed, [self])
     }
 
     pub fn combined(&self, others: &[Self]) -> KernelResult<Self> {

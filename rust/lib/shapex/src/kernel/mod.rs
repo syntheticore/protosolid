@@ -11,6 +11,7 @@ mod domain;
 mod error;
 mod euler;
 mod features;
+mod fillet;
 mod geometry;
 mod history;
 mod identity;
@@ -43,8 +44,8 @@ pub use euler::{
 pub use geometry::{
     Axis3, Circle2, Circle3, Cone3, Curve2, Curve2Evaluation, Curve3, CurveEvaluation, Cylinder3,
     Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3, OffsetSurface3, Plane3,
-    Projection1, Projection2, Sphere3, Surface3, SurfaceCurvature, SurfaceEvaluation,
-    SurfaceIntersectionCurve, Torus3,
+    Projection1, Projection2, RollingBallSurface3, Sphere3, Surface3, SurfaceCurvature,
+    SurfaceCurve3, SurfaceEvaluation, SurfaceIntersectionCurve, SurfaceProjectionPcurve2, Torus3,
 };
 pub use history::{ChangeKind, CreationRole, OperationHistory, Origin, ProfileBoundary};
 pub use intersection::{
@@ -52,7 +53,8 @@ pub use intersection::{
 };
 pub use mass_properties::MassProperties;
 pub use modeling::{
-    Compound, EdgeHandle, FaceHandle, Resolution, ResolvableEntity, Solid, VertexHandle,
+    Compound, EdgeHandle, FaceHandle, FilletOptions, Resolution, ResolvableEntity, Solid,
+    VertexHandle,
 };
 pub use naming::PersistentId;
 pub use polyhedron::PolyhedralMesh;

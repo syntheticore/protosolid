@@ -1525,16 +1525,29 @@ export class FilletFeature extends Feature {
         type: 'length',
         gizmo: true,
       },
+      propagation: {
+        title: 'Propagation',
+        type: 'enum',
+        options: {
+          tangent: 'Tangent edges',
+          selected: 'Selected edges only',
+        },
+      },
     })
 
     this.edges = null
     this.radius = 1.0
+    this.propagation = 'tangent'
   }
 
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      comp.compound = comp.compound.fillet(references.edges, this.radius)
+      comp.compound = comp.compound.fillet(
+        references.edges,
+        this.radius,
+        this.propagation === 'tangent',
+      )
     } catch(err) { this.error = err || this.error }
   }
 

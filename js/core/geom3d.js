@@ -1140,12 +1140,13 @@ export class Compound extends Volumetric {
     return this.track(algo, op, other)
   }
 
-  fillet(edges, radius) {
+  fillet(edges, radius, followTangentEdges=true) {
     if(this.isShapex) {
       const geometry = window.kernel.modeling.fillet(
         this.kernelGeometry,
         edges.map(edge => edge.geom()),
         radius,
+        followTangentEdges,
       )
       return new Compound(this.componentId, geometry)
         .inheritShapexTopology([this], 'fillet')

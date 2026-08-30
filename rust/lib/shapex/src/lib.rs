@@ -11,7 +11,7 @@
 //! or physically invalid result.
 
 #![forbid(unsafe_code)]
-#![doc = include_str!("../README.md")]
+#![cfg_attr(not(feature = "legacy"), doc = include_str!("../README.md"))]
 
 pub mod kernel;
 #[cfg(not(feature = "legacy"))]
@@ -19,9 +19,9 @@ mod math;
 
 #[cfg(not(feature = "legacy"))]
 pub use kernel::{
-    Circle2, Compound, CreationRole, Curve2, EdgeHandle, FaceHandle, Frame3, Line2, MassProperties,
-    Plane3, Polyline, Profile, ProfileBoundary, Resolution, Solid, Tessellate, TessellationOptions,
-    TriangleMesh, TrimmedCurve2, VertexHandle, Wire2,
+    Circle2, Compound, CreationRole, Curve2, EdgeHandle, FaceHandle, FilletOptions, Frame3, Line2,
+    MassProperties, Plane3, Polyline, Profile, ProfileBoundary, Resolution, Solid, Tessellate,
+    TessellationOptions, TriangleMesh, TrimmedCurve2, VertexHandle, Wire2,
 };
 pub use kernel::{Kernel, KernelError, KernelResult, ModelTolerance};
 #[cfg(not(feature = "legacy"))]

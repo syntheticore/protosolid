@@ -8,7 +8,8 @@ use super::validation::ValidationMode;
 use super::{
     ChangeKind, Cone3, Curve3, Cylinder3, DiagnosticKind, FaceId, Kernel, KernelError,
     KernelResult, Line3, ModelTolerance, NurbsCurve3, NurbsSurface3, OffsetSurface3,
-    OperationHistory, Plane3, Sphere3, Surface3, SurfaceIntersectionCurve, Torus3,
+    OperationHistory, Plane3, RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3,
+    SurfaceIntersectionCurve, Torus3,
 };
 
 /// A validated orientation-preserving Euclidean transform.
@@ -204,6 +205,13 @@ fn transform_curve(
             curve.achieved_error(),
         )?
         .into(),
+        Curve3::SurfaceCurve(curve) => SurfaceCurve3::new(
+            transform_surface(curve.surface().clone(), transform, tolerance)?,
+            curve.pcurve().clone(),
+            curve.range(),
+            tolerance,
+        )?
+        .into(),
     })
 }
 
@@ -271,6 +279,17 @@ fn transform_surface(
         Surface3::Offset(surface) => OffsetSurface3::new(
             transform_surface(surface.base().clone(), transform, tolerance)?,
             surface.distance(),
+            tolerance,
+        )?
+        .into(),
+        Surface3::RollingBall(surface) => RollingBallSurface3::new(
+            transform_curve(surface.center_curve().clone(), transform, tolerance)?,
+            transform_surface(surface.first_surface().clone(), transform, tolerance)?,
+            transform_surface(surface.second_surface().clone(), transform, tolerance)?,
+            surface.first_pcurve().clone(),
+            surface.second_pcurve().clone(),
+            surface.center_range(),
+            surface.radius(),
             tolerance,
         )?
         .into(),

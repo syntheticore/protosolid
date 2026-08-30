@@ -117,23 +117,6 @@ impl TrimmedCurve2 {
         self.curve
             .signed_area_contribution(self.range, tolerance.parameter)
     }
-
-    fn polyline(&self, tolerance: ModelTolerance) -> KernelResult<Vec<Point2>> {
-        let start = self.curve.evaluate(self.range.start)?.point;
-        let end = self.curve.evaluate(self.range.end)?.point;
-        let mut output = vec![start];
-        subdivide_curve(
-            &self.curve,
-            self.range.start,
-            self.range.end,
-            start,
-            end,
-            tolerance.linear,
-            0,
-            &mut output,
-        )?;
-        Ok(output)
-    }
 }
 
 /// A validated closed sequence of oriented 2D curve uses.
@@ -227,70 +210,6 @@ impl Wire2 {
             signed_area: -self.signed_area,
         }
     }
-
-    pub(crate) fn polyline(&self, tolerance: ModelTolerance) -> KernelResult<Vec<Point2>> {
-        let mut output = Vec::new();
-        for segment in &self.segments {
-            let mut points = segment.polyline(tolerance)?;
-            if !output.is_empty() {
-                points.remove(0);
-            }
-            output.extend(points);
-        }
-        if output.len() > 1
-            && output[0].distance(*output.last().unwrap_or(&output[0])) <= tolerance.linear
-        {
-            output.pop();
-        }
-        Ok(output)
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn subdivide_curve(
-    curve: &Curve2,
-    start_parameter: f64,
-    end_parameter: f64,
-    start: Point2,
-    end: Point2,
-    tolerance: f64,
-    depth: u8,
-    output: &mut Vec<Point2>,
-) -> KernelResult<()> {
-    let middle_parameter = (start_parameter + end_parameter) * 0.5;
-    let middle = curve.evaluate(middle_parameter)?.point;
-    let chord = end - start;
-    let distance = if chord.magnitude2() == 0.0 {
-        middle.distance(start)
-    } else {
-        let parameter = (middle - start).dot(chord) / chord.magnitude2();
-        middle.distance(start + chord * parameter.clamp(0.0, 1.0))
-    };
-    if distance > tolerance * 0.25 && depth < 24 {
-        subdivide_curve(
-            curve,
-            start_parameter,
-            middle_parameter,
-            start,
-            middle,
-            tolerance,
-            depth + 1,
-            output,
-        )?;
-        subdivide_curve(
-            curve,
-            middle_parameter,
-            end_parameter,
-            middle,
-            end,
-            tolerance,
-            depth + 1,
-            output,
-        )?;
-    } else {
-        output.push(end);
-    }
-    Ok(())
 }
 
 fn validate_no_self_intersection(
@@ -551,6 +470,18 @@ pub(crate) fn wire_contains_point(
                 .iter()
                 .map(|control| control.x)
                 .fold(f64::NEG_INFINITY, f64::max)),
+            Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => (0..=32)
+                .map(|index| {
+                    let parameter =
+                        segment.range().start + segment.range().span() * index as f64 / 32.0;
+                    segment
+                        .curve()
+                        .evaluate(parameter)
+                        .map(|value| value.point.x)
+                })
+                .try_fold(f64::NEG_INFINITY, |maximum, value| {
+                    value.map(|value| maximum.max(value))
+                }),
         })
         .collect::<KernelResult<Vec<_>>>()?
         .into_iter()
@@ -626,7 +557,7 @@ pub(crate) fn wire_contains_point(
                     }
                 }
             }
-            Curve2::Nurbs(_) => {
+            Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => {
                 let boundary_ray = TrimmedCurve2::line(
                     Point2::new(point.x - tolerance.linear * 2.0, point.y),
                     Point2::new(point.x + tolerance.linear * 2.0, point.y),
@@ -704,6 +635,10 @@ pub(crate) fn curve_pair_intersection(
     tolerance: ModelTolerance,
 ) -> KernelResult<CurvePairIntersection> {
     match (first.curve(), second.curve()) {
+        (Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_), _)
+        | (_, Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)) => {
+            general_parametric_pair(first, second, tolerance)
+        }
         (Curve2::Line(_), Curve2::Line(_)) => line_line_intersection(first, second, tolerance),
         (Curve2::Line(_), Curve2::Circle(_)) => line_circle_intersection(first, second, tolerance),
         (Curve2::Circle(_), Curve2::Line(_)) => {
@@ -725,6 +660,85 @@ pub(crate) fn curve_pair_intersection(
             Ok(intersection)
         }
     }
+}
+
+fn general_parametric_pair(
+    first: &TrimmedCurve2,
+    second: &TrimmedCurve2,
+    tolerance: ModelTolerance,
+) -> KernelResult<CurvePairIntersection> {
+    let mut seeds = Vec::new();
+    let divisions = 32;
+    for first_index in 0..=divisions {
+        let first_parameter =
+            first.range().start + first.range().span() * first_index as f64 / divisions as f64;
+        let first_point = first.curve().evaluate(first_parameter)?.point;
+        for second_index in 0..=divisions {
+            let second_parameter = second.range().start
+                + second.range().span() * second_index as f64 / divisions as f64;
+            let second_point = second.curve().evaluate(second_parameter)?.point;
+            let local_scale = first_point
+                .to_vec()
+                .magnitude()
+                .max(second_point.to_vec().magnitude())
+                .max(1.0);
+            let cell_size = first.range().span().abs() / divisions as f64
+                + second.range().span().abs() / divisions as f64;
+            if first_point.distance(second_point)
+                <= cell_size.max(tolerance.linear_at_scale(local_scale) * 32.0)
+            {
+                seeds.push((first_parameter, second_parameter));
+            }
+        }
+    }
+    let mut hits = Vec::new();
+    for (mut first_parameter, mut second_parameter) in seeds {
+        for _ in 0..32 {
+            let first_value = first.curve().evaluate(first_parameter)?;
+            let second_value = second.curve().evaluate(second_parameter)?;
+            let residual = first_value.point - second_value.point;
+            let determinant = first_value.first_derivative.x * -second_value.first_derivative.y
+                - first_value.first_derivative.y * -second_value.first_derivative.x;
+            if determinant.abs() <= f64::EPSILON * 256.0 {
+                break;
+            }
+            let first_delta = (-residual.x * -second_value.first_derivative.y
+                + residual.y * -second_value.first_derivative.x)
+                / determinant;
+            let second_delta = (first_value.first_derivative.x * -residual.y
+                + first_value.first_derivative.y * residual.x)
+                / determinant;
+            first_parameter = (first_parameter + first_delta).clamp(
+                first.range().start.min(first.range().end),
+                first.range().start.max(first.range().end),
+            );
+            second_parameter = (second_parameter + second_delta).clamp(
+                second.range().start.min(second.range().end),
+                second.range().start.max(second.range().end),
+            );
+            if first_delta.abs().max(second_delta.abs()) <= tolerance.parameter {
+                break;
+            }
+        }
+        let first_point = first.curve().evaluate(first_parameter)?.point;
+        let second_point = second.curve().evaluate(second_parameter)?.point;
+        if first_point.distance(second_point) <= tolerance.linear * 8.0
+            && !hits.iter().any(|hit: &CurvePairHit| {
+                (hit.first_parameter - first_parameter).abs() <= tolerance.parameter * 16.0
+                    && (hit.second_parameter - second_parameter).abs() <= tolerance.parameter * 16.0
+            })
+        {
+            hits.push(CurvePairHit {
+                point: Point2::from_vec((first_point.to_vec() + second_point.to_vec()) * 0.5),
+                first_parameter,
+                second_parameter,
+            });
+        }
+    }
+    Ok(CurvePairIntersection {
+        hits,
+        coincident: false,
+    })
 }
 
 fn line_line_intersection(
@@ -948,6 +962,8 @@ fn certified_nurbs_pair(
                     .collect()
             }
             Curve2::Nurbs(_) => unreachable!(),
+            Curve2::SurfaceIntersection(_) => unreachable!(),
+            Curve2::SurfaceProjection(_) => unreachable!(),
         };
         isolate_bernstein_roots(&coefficients, span, 0, tolerance.parameter, &mut parameters);
     }
@@ -974,6 +990,8 @@ fn certified_nurbs_pair(
                 )
             }
             Curve2::Nurbs(_) => unreachable!(),
+            Curve2::SurfaceIntersection(_) => unreachable!(),
+            Curve2::SurfaceProjection(_) => unreachable!(),
         };
         let in_other = match other.curve() {
             Curve2::Circle(_) => {
@@ -1153,6 +1171,8 @@ fn refine_implicit_root(
                 )
             }
             Curve2::Nurbs(_) => unreachable!(),
+            Curve2::SurfaceIntersection(_) => unreachable!(),
+            Curve2::SurfaceProjection(_) => unreachable!(),
         };
         if derivative.abs() <= f64::EPSILON {
             break;

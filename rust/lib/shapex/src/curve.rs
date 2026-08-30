@@ -533,7 +533,7 @@ impl Transformable for Line {
 /// use shapex::*;
 ///
 /// let arc = Arc::new(Point3::origin(), 1.0, 0.25, 0.75);
-/// assert_eq!(arc.midpoint(), Point3::new(0.0, 1.0, 0.0));
+/// assert!(arc.midpoint().almost(Point3::new(-1.0, 0.0, 0.0)));
 /// ```
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -706,7 +706,7 @@ impl Transformable for Arc {
 ///
 /// let circle = Circle::new(Point3::origin(), 1.0);
 /// assert_eq!(circle.diameter(), 2.0);
-/// assert_eq!(circle.sample(0.5), circle.sample(1.5));
+/// assert!(circle.sample(0.5).almost(circle.sample(1.5)));
 /// ```
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

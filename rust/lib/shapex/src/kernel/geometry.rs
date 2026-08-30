@@ -318,9 +318,13 @@ impl NurbsCurve2 {
         }
         let start = self.knots[self.degree];
         let end = self.knots[self.control_points.len()];
-        if parameter < start || parameter > end {
-            return Err(invalid("NURBS parameter lies outside its natural domain"));
+        let endpoint_envelope = f64::EPSILON * start.abs().max(end.abs()).max(1.0) * 64.0;
+        if parameter < start - endpoint_envelope || parameter > end + endpoint_envelope {
+            return Err(invalid(format!(
+                "2D NURBS parameter {parameter} lies outside its natural domain [{start}, {end}]",
+            )));
         }
+        let parameter = parameter.clamp(start, end);
         let controls = self.homogeneous_controls();
         let value = de_boor_vec3(self.degree, &self.knots, &controls, parameter)?;
         if value.z == 0.0 {
@@ -427,6 +431,8 @@ pub enum Curve2 {
     Line(Line2),
     Circle(Circle2),
     Nurbs(NurbsCurve2),
+    SurfaceIntersection(SurfaceIntersectionPcurve2),
+    SurfaceProjection(SurfaceProjectionPcurve2),
 }
 
 impl Curve2 {
@@ -441,6 +447,14 @@ impl Curve2 {
                 period: Some(std::f64::consts::TAU),
             },
             Self::Nurbs(curve) => curve.domain(),
+            Self::SurfaceIntersection(curve) => ParameterDomain {
+                bounds: DomainBounds::Bounded(curve.curve.range()),
+                period: None,
+            },
+            Self::SurfaceProjection(curve) => ParameterDomain {
+                bounds: DomainBounds::Bounded(curve.range),
+                period: None,
+            },
         }
     }
 
@@ -449,6 +463,17 @@ impl Curve2 {
             Self::Line(line) => line.evaluate(parameter),
             Self::Circle(circle) => circle.evaluate(parameter),
             Self::Nurbs(curve) => curve.evaluate(parameter),
+            Self::SurfaceIntersection(curve) => curve.evaluate(parameter),
+            Self::SurfaceProjection(curve) => curve.evaluate(parameter),
+        }
+    }
+
+    pub(crate) fn first_order(&self, parameter: f64) -> KernelResult<(Point2, Vec2)> {
+        match self {
+            Self::SurfaceProjection(curve) => curve.first_order(parameter),
+            _ => self
+                .evaluate(parameter)
+                .map(|value| (value.point, value.first_derivative)),
         }
     }
 
@@ -473,10 +498,8 @@ impl Curve2 {
             }
             Self::Nurbs(curve) => {
                 let integrand = |parameter: f64| -> KernelResult<f64> {
-                    let evaluation = self.evaluate(parameter)?;
-                    Ok(0.5
-                        * (evaluation.point.x * evaluation.first_derivative.y
-                            - evaluation.point.y * evaluation.first_derivative.x))
+                    let (point, derivative) = self.first_order(parameter)?;
+                    Ok(0.5 * (point.x * derivative.y - point.y * derivative.x))
                 };
                 let coordinate_scale = curve
                     .control_points()
@@ -484,7 +507,7 @@ impl Curve2 {
                     .map(|point| point.x.abs().max(point.y.abs()))
                     .fold(1.0_f64, f64::max);
                 let absolute_tolerance =
-                    tolerance.max(f64::EPSILON * coordinate_scale.powi(2) * 4096.0);
+                    tolerance.max(f64::EPSILON.sqrt() * coordinate_scale.powi(2) * 64.0);
                 let mut breaks = curve
                     .knots()
                     .iter()
@@ -514,6 +537,31 @@ impl Curve2 {
                             )?)
                     }
                 })
+            }
+            Self::SurfaceIntersection(_) | Self::SurfaceProjection(_) => {
+                let integrand = |parameter: f64| -> KernelResult<f64> {
+                    let (point, derivative) = self.first_order(parameter)?;
+                    Ok(0.5 * (point.x * derivative.y - point.y * derivative.x))
+                };
+                let coordinate_scale = [0.25, 0.5, 0.75]
+                    .into_iter()
+                    .map(|fraction| range.start + range.span() * fraction)
+                    .map(|parameter| self.first_order(parameter))
+                    .collect::<KernelResult<Vec<_>>>()?
+                    .into_iter()
+                    .map(|value| value.0.x.abs().max(value.0.y.abs()))
+                    .fold(1.0_f64, f64::max);
+                let absolute_tolerance =
+                    tolerance.max(f64::EPSILON.sqrt() * coordinate_scale.powi(2) * 64.0);
+                super::integration::adaptive_gauss_kronrod(
+                    range.start,
+                    range.end,
+                    |parameter| Ok([integrand(parameter)?]),
+                    [absolute_tolerance],
+                    16,
+                    "adaptive exact p-curve area integration did not converge",
+                )
+                .map(|value| value[0])
             }
         }
     }
@@ -863,9 +911,16 @@ impl NurbsCurve3 {
         }
         let domain_start = self.knots[self.degree];
         let domain_end = self.knots[self.control_points.len()];
-        if parameter < domain_start || parameter > domain_end {
-            return Err(invalid("NURBS parameter lies outside its natural domain"));
+        let endpoint_envelope =
+            f64::EPSILON * domain_start.abs().max(domain_end.abs()).max(1.0) * 64.0;
+        if parameter < domain_start - endpoint_envelope
+            || parameter > domain_end + endpoint_envelope
+        {
+            return Err(invalid(format!(
+                "3D NURBS parameter {parameter} lies outside its natural domain [{domain_start}, {domain_end}]",
+            )));
         }
+        let parameter = parameter.clamp(domain_start, domain_end);
         let controls = self.homogeneous_controls();
         let value = de_boor_vec4(self.degree, &self.knots, &controls, parameter)?;
         if value.w == 0.0 {
@@ -1274,6 +1329,397 @@ pub struct SurfaceIntersectionCurve {
     achieved_error: f64,
 }
 
+/// Exact curve obtained by evaluating a parameter-space curve on a retained
+/// surface support.  This is the natural representation for a fillet contact
+/// where the parent and blend surfaces are tangent rather than transversely
+/// intersecting.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceCurve3 {
+    surface: Box<Surface3>,
+    pcurve: Curve2,
+    range: ParameterRange,
+    tolerance: ModelTolerance,
+}
+
+impl SurfaceCurve3 {
+    pub fn new(
+        surface: Surface3,
+        pcurve: Curve2,
+        range: ParameterRange,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Self> {
+        if !pcurve.domain().contains_range(range, tolerance.parameter) {
+            return Err(invalid(
+                "surface curve p-curve does not cover its trim range",
+            ));
+        }
+        let curve = Self {
+            surface: Box::new(surface),
+            pcurve,
+            range,
+            tolerance,
+        };
+        for parameter in [range.start, (range.start + range.end) * 0.5, range.end] {
+            curve.evaluate(parameter)?;
+        }
+        Ok(curve)
+    }
+
+    pub fn surface(&self) -> &Surface3 {
+        &self.surface
+    }
+
+    pub fn pcurve(&self) -> &Curve2 {
+        &self.pcurve
+    }
+
+    pub fn range(&self) -> ParameterRange {
+        self.range
+    }
+
+    fn evaluate(&self, parameter: f64) -> KernelResult<CurveEvaluation> {
+        let uv = self.pcurve.evaluate(parameter)?;
+        let surface = self.surface.evaluate(uv.point.x, uv.point.y)?;
+        Ok(CurveEvaluation {
+            point: surface.point,
+            first_derivative: surface.du * uv.first_derivative.x
+                + surface.dv * uv.first_derivative.y,
+            second_derivative: surface.duu * uv.first_derivative.x.powi(2)
+                + surface.duv * (2.0 * uv.first_derivative.x * uv.first_derivative.y)
+                + surface.dvv * uv.first_derivative.y.powi(2)
+                + surface.du * uv.second_derivative.x
+                + surface.dv * uv.second_derivative.y,
+        })
+    }
+
+    fn first_order(&self, parameter: f64) -> KernelResult<(Point3, Vec3)> {
+        let (uv, uv_tangent) = self.pcurve.first_order(parameter)?;
+        let (point, du, dv) = self.surface.first_order(uv.x, uv.y)?;
+        Ok((point, du * uv_tangent.x + dv * uv_tangent.y))
+    }
+
+    fn project(&self, point: Point3) -> KernelResult<Projection1> {
+        let mut parameter = (0..=48)
+            .map(|index| self.range.start + self.range.span() * index as f64 / 48.0)
+            .map(|parameter| {
+                self.evaluate(parameter)
+                    .map(|value| (parameter, value.point.distance2(point)))
+            })
+            .collect::<KernelResult<Vec<_>>>()?
+            .into_iter()
+            .min_by(|first, second| first.1.total_cmp(&second.1))
+            .map(|candidate| candidate.0)
+            .ok_or_else(|| invalid("surface curve projection has no seed"))?;
+        for _ in 0..32 {
+            let value = self.evaluate(parameter)?;
+            let residual = value.point - point;
+            let derivative =
+                value.first_derivative.magnitude2() + residual.dot(value.second_derivative);
+            if derivative.abs() <= f64::EPSILON * 256.0 {
+                break;
+            }
+            let next = (parameter - residual.dot(value.first_derivative) / derivative).clamp(
+                self.range.start.min(self.range.end),
+                self.range.start.max(self.range.end),
+            );
+            if (next - parameter).abs() <= self.tolerance.parameter {
+                parameter = next;
+                break;
+            }
+            parameter = next;
+        }
+        let projected = self.evaluate(parameter)?.point;
+        Ok(Projection1 {
+            parameter,
+            point: projected,
+            distance: projected.distance(point),
+        })
+    }
+}
+
+/// Exact parameter-space representation of one retained side of a regular
+/// surface/surface intersection.  It shares the same Newton-corrected implicit
+/// curve as the 3D edge, so a BREP coedge never stores a fitted UV surrogate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceIntersectionPcurve2 {
+    curve: Box<SurfaceIntersectionCurve>,
+    first: bool,
+}
+
+impl SurfaceIntersectionPcurve2 {
+    fn evaluate(&self, parameter: f64) -> KernelResult<Curve2Evaluation> {
+        let parameters = self.curve.corrected_parameters(parameter)?;
+        let first_guide = self.curve.first_pcurve.evaluate(parameter)?;
+        let second_guide = self.curve.second_pcurve.evaluate(parameter)?;
+        let guide = [
+            first_guide.point.x,
+            first_guide.point.y,
+            second_guide.point.x,
+            second_guide.point.y,
+        ];
+        let guide_derivative = [
+            first_guide.first_derivative.x,
+            first_guide.first_derivative.y,
+            second_guide.first_derivative.x,
+            second_guide.first_derivative.y,
+        ];
+        let guide_second = [
+            first_guide.second_derivative.x,
+            first_guide.second_derivative.y,
+            second_guide.second_derivative.x,
+            second_guide.second_derivative.y,
+        ];
+        let speed = guide_derivative
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        if speed <= self.curve.tolerance.parameter {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "surface-intersection p-curve guide has a singular tangent",
+            ));
+        }
+        let gauge_tangent = guide_derivative.map(|value| value / speed);
+        let speed_derivative = guide_derivative
+            .iter()
+            .zip(guide_second)
+            .map(|(first, second)| first * second)
+            .sum::<f64>()
+            / speed;
+        let gauge_tangent_derivative: [f64; 4] = std::array::from_fn(|index| {
+            guide_second[index] / speed - guide_derivative[index] * speed_derivative / speed.powi(2)
+        });
+        let (_, first_du, first_dv) = self
+            .curve
+            .first_surface
+            .first_order(parameters[0], parameters[1])?;
+        let (_, second_du, second_dv) = self
+            .curve
+            .second_surface
+            .first_order(parameters[2], parameters[3])?;
+        let gauge_rhs = gauge_tangent
+            .iter()
+            .zip(guide_derivative)
+            .map(|(tangent, derivative)| tangent * derivative)
+            .sum::<f64>()
+            - gauge_tangent_derivative
+                .iter()
+                .zip(parameters.iter().zip(guide))
+                .map(|(derivative, (value, guide))| derivative * (value - guide))
+                .sum::<f64>();
+        let matrix = [
+            [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
+            [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
+            [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
+            gauge_tangent,
+        ];
+        let derivative =
+            solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], guide_derivative)?;
+        let (point, first_derivative) = if self.first {
+            (
+                Point2::new(parameters[0], parameters[1]),
+                Vec2::new(derivative[0], derivative[1]),
+            )
+        } else {
+            (
+                Point2::new(parameters[2], parameters[3]),
+                Vec2::new(derivative[2], derivative[3]),
+            )
+        };
+        Ok(Curve2Evaluation {
+            point,
+            first_derivative,
+            second_derivative: Vec2::new(0.0, 0.0),
+        })
+    }
+}
+
+/// Exact parameter-space image of a retained 3D curve on a surface.
+///
+/// The guide is used only to select a local inverse branch. Every evaluation
+/// corrects the parameters against the exact curve and surface and obtains the
+/// derivatives by differentiating that identity. This covers tangential shared
+/// boundaries, where a regular surface/surface intersection is singular.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceProjectionPcurve2 {
+    curve: Box<Curve3>,
+    surface: Box<Surface3>,
+    guide: Box<Curve2>,
+    range: ParameterRange,
+    tolerance: ModelTolerance,
+}
+
+impl SurfaceProjectionPcurve2 {
+    pub fn new(
+        curve: Curve3,
+        surface: Surface3,
+        guide: Curve2,
+        range: ParameterRange,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Self> {
+        tolerance.validate()?;
+        if !curve.domain().contains_range(range, tolerance.parameter)
+            || !guide.domain().contains_range(range, tolerance.parameter)
+        {
+            return Err(invalid(
+                "surface-projection curve and guide must cover the trim range",
+            ));
+        }
+        let value = Self {
+            curve: Box::new(curve),
+            surface: Box::new(surface),
+            guide: Box::new(guide),
+            range,
+            tolerance,
+        };
+        for parameter in [range.start, (range.start + range.end) * 0.5, range.end] {
+            value.evaluate(parameter)?;
+        }
+        Ok(value)
+    }
+
+    pub fn curve(&self) -> &Curve3 {
+        &self.curve
+    }
+
+    pub fn surface(&self) -> &Surface3 {
+        &self.surface
+    }
+
+    pub fn guide(&self) -> &Curve2 {
+        &self.guide
+    }
+
+    pub fn range(&self) -> ParameterRange {
+        self.range
+    }
+
+    fn corrected_parameters(&self, parameter: f64) -> KernelResult<(f64, f64)> {
+        if !self.range.contains(parameter, self.tolerance) {
+            return Err(invalid(
+                "surface-projection parameter lies outside its certified range",
+            ));
+        }
+        let target = self.curve.first_order(parameter)?.0;
+        let guide = self.guide.first_order(parameter)?.0;
+        let domains = self.surface.domains();
+        let constrain = |domain: ParameterDomain, value: f64| {
+            if domain.period.is_some() {
+                value
+            } else if let DomainBounds::Bounded(range) = domain.bounds {
+                value.clamp(range.start.min(range.end), range.start.max(range.end))
+            } else {
+                value
+            }
+        };
+        let mut uv = (guide.x, guide.y);
+        for _ in 0..48 {
+            uv.0 = constrain(domains[0], uv.0);
+            uv.1 = constrain(domains[1], uv.1);
+            let (point, du, dv) = self.surface.first_order(uv.0, uv.1)?;
+            let residual = point - target;
+            let scale = point
+                .to_vec()
+                .magnitude()
+                .max(target.to_vec().magnitude())
+                .max(1.0);
+            if residual.magnitude() <= self.tolerance.linear_at_scale(scale) {
+                return Ok(uv);
+            }
+            let a00 = du.magnitude2();
+            let a01 = du.dot(dv);
+            let a11 = dv.magnitude2();
+            let determinant = a00 * a11 - a01 * a01;
+            if determinant.abs() <= f64::EPSILON * a00.max(a11).powi(2) * 256.0 {
+                break;
+            }
+            let b0 = -du.dot(residual);
+            let b1 = -dv.dot(residual);
+            let delta = (
+                (b0 * a11 - b1 * a01) / determinant,
+                (b1 * a00 - b0 * a01) / determinant,
+            );
+            let previous = residual.magnitude2();
+            let mut damping = 1.0;
+            let mut accepted = false;
+            for _ in 0..12 {
+                let candidate = (
+                    constrain(domains[0], uv.0 + delta.0 * damping),
+                    constrain(domains[1], uv.1 + delta.1 * damping),
+                );
+                if (self.surface.first_order(candidate.0, candidate.1)?.0 - target).magnitude2()
+                    < previous
+                {
+                    uv = candidate;
+                    accepted = true;
+                    break;
+                }
+                damping *= 0.5;
+            }
+            if !accepted {
+                break;
+            }
+        }
+        Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "exact curve-to-surface parameter correction did not converge",
+        ))
+    }
+
+    fn solve_tangent(du: Vec3, dv: Vec3, vector: Vec3) -> KernelResult<Vec2> {
+        let a00 = du.magnitude2();
+        let a01 = du.dot(dv);
+        let a11 = dv.magnitude2();
+        let determinant = a00 * a11 - a01 * a01;
+        if determinant.abs() <= f64::EPSILON * a00.max(a11).powi(2) * 256.0 {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "surface-projection p-curve reached a singular parameterization",
+            ));
+        }
+        let b0 = du.dot(vector);
+        let b1 = dv.dot(vector);
+        Ok(Vec2::new(
+            (b0 * a11 - b1 * a01) / determinant,
+            (b1 * a00 - b0 * a01) / determinant,
+        ))
+    }
+
+    fn evaluate(&self, parameter: f64) -> KernelResult<Curve2Evaluation> {
+        let uv = self.corrected_parameters(parameter)?;
+        let curve = self.curve.evaluate(parameter)?;
+        let surface = self.surface.evaluate(uv.0, uv.1)?;
+        let first = Self::solve_tangent(surface.du, surface.dv, curve.first_derivative)?;
+        let curvature = surface.duu * first.x.powi(2)
+            + surface.duv * (2.0 * first.x * first.y)
+            + surface.dvv * first.y.powi(2);
+        let second =
+            Self::solve_tangent(surface.du, surface.dv, curve.second_derivative - curvature)?;
+        Ok(Curve2Evaluation {
+            point: Point2::new(uv.0, uv.1),
+            first_derivative: first,
+            second_derivative: second,
+        })
+    }
+
+    fn first_order(&self, parameter: f64) -> KernelResult<(Point2, Vec2)> {
+        let uv = self.corrected_parameters(parameter)?;
+        let (_, curve_tangent) = self.curve.first_order(parameter)?;
+        let (_, du, dv) = self.surface.first_order(uv.0, uv.1)?;
+        Ok((
+            Point2::new(uv.0, uv.1),
+            Self::solve_tangent(du, dv, curve_tangent)?,
+        ))
+    }
+}
+
+impl From<SurfaceProjectionPcurve2> for Curve2 {
+    fn from(value: SurfaceProjectionPcurve2) -> Self {
+        Self::SurfaceProjection(value)
+    }
+}
+
 impl SurfaceIntersectionCurve {
     pub fn new(
         first_surface: Surface3,
@@ -1350,6 +1796,19 @@ impl SurfaceIntersectionCurve {
         }
     }
 
+    pub fn exact_pcurves(&self) -> [Curve2; 2] {
+        [
+            Curve2::SurfaceIntersection(SurfaceIntersectionPcurve2 {
+                curve: Box::new(self.clone()),
+                first: true,
+            }),
+            Curve2::SurfaceIntersection(SurfaceIntersectionPcurve2 {
+                curve: Box::new(self.clone()),
+                first: false,
+            }),
+        ]
+    }
+
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
         if !self.range.contains(parameter, self.tolerance) {
             return Err(invalid(
@@ -1393,12 +1852,27 @@ impl SurfaceIntersectionCurve {
                 .zip(tangent)
                 .map(|((value, guide), tangent)| (value - guide) * tangent)
                 .sum::<f64>();
-            if residual.magnitude()
-                <= self
-                    .tolerance
-                    .linear_at_scale(first.point.to_vec().magnitude().max(1.0))
-                && gauge.abs() <= self.tolerance.parameter * 8.0
-            {
+            // The model tolerance certifies that the retained guide selects the
+            // right intersection branch; it must not define curve evaluation.
+            // Stopping at that comparatively coarse threshold switches between
+            // corrected and uncorrected parameterizations along one edge and
+            // creates a false derivative kink. Converge the implicit identity
+            // to floating-point accuracy so position and derivatives describe
+            // one continuous curve.
+            let coordinate_scale = first
+                .point
+                .to_vec()
+                .magnitude()
+                .max(second.point.to_vec().magnitude())
+                .max(1.0);
+            let parameter_scale = parameters
+                .iter()
+                .chain(guide.iter())
+                .map(|value| value.abs())
+                .fold(1.0_f64, f64::max);
+            let linear_target = f64::EPSILON * coordinate_scale * 2048.0;
+            let parameter_target = f64::EPSILON * parameter_scale * 2048.0;
+            if residual.magnitude() <= linear_target && gauge.abs() <= parameter_target {
                 return Ok(parameters);
             }
             let matrix = [
@@ -1461,19 +1935,42 @@ impl SurfaceIntersectionCurve {
         let parameters = self.corrected_parameters(parameter)?;
         let first = self.first_surface.evaluate(parameters[0], parameters[1])?;
         let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
-        let guide = self.first_pcurve.evaluate(parameter)?;
-        let first_derivative =
-            first.du * guide.first_derivative.x + first.dv * guide.first_derivative.y;
-        let second_derivative = first.duu * guide.first_derivative.x.powi(2)
-            + first.duv * (2.0 * guide.first_derivative.x * guide.first_derivative.y)
-            + first.dvv * guide.first_derivative.y.powi(2)
-            + first.du * guide.second_derivative.x
-            + first.dv * guide.second_derivative.y;
+        let exact_parameters = SurfaceIntersectionPcurve2 {
+            curve: Box::new(self.clone()),
+            first: true,
+        }
+        .evaluate(parameter)?;
+        let first_derivative = first.du * exact_parameters.first_derivative.x
+            + first.dv * exact_parameters.first_derivative.y;
+        let second_derivative = first.duu * exact_parameters.first_derivative.x.powi(2)
+            + first.duv
+                * (2.0 * exact_parameters.first_derivative.x * exact_parameters.first_derivative.y)
+            + first.dvv * exact_parameters.first_derivative.y.powi(2);
         Ok(CurveEvaluation {
             point: Point3::from_vec((first.point.to_vec() + second.point.to_vec()) * 0.5),
             first_derivative,
             second_derivative,
         })
+    }
+
+    fn first_order(&self, parameter: f64) -> KernelResult<(Point3, Vec3)> {
+        let parameters = self.corrected_parameters(parameter)?;
+        let (first_point, first_du, first_dv) = self
+            .first_surface
+            .first_order(parameters[0], parameters[1])?;
+        let (second_point, _, _) = self
+            .second_surface
+            .first_order(parameters[2], parameters[3])?;
+        let exact_parameters = SurfaceIntersectionPcurve2 {
+            curve: Box::new(self.clone()),
+            first: true,
+        }
+        .evaluate(parameter)?;
+        Ok((
+            Point3::from_vec((first_point.to_vec() + second_point.to_vec()) * 0.5),
+            first_du * exact_parameters.first_derivative.x
+                + first_dv * exact_parameters.first_derivative.y,
+        ))
     }
 
     fn project(&self, point: Point3) -> KernelResult<Projection1> {
@@ -1564,12 +2061,175 @@ fn solve_linear_4(mut matrix: [[f64; 4]; 4], mut right: [f64; 4]) -> Option<[f64
     Some(right)
 }
 
+/// Solve `matrix * value = right`, choosing the solution closest to
+/// `reference` when the system loses rank at a tangential intersection.
+///
+/// The symmetric Jacobi decomposition computes the Moore-Penrose inverse of
+/// the normal matrix.  Unlike substituting the guide derivative when Gaussian
+/// elimination becomes singular, this preserves every independent exact
+/// surface and gauge constraint and remains well-defined at rank transitions.
+fn solve_affine_least_squares_4(
+    matrix: [[f64; 4]; 4],
+    right: [f64; 4],
+    reference: [f64; 4],
+) -> KernelResult<[f64; 4]> {
+    // A regular surface/surface intersection has four independent tangent
+    // constraints. Solve that system directly: forming A^T A would square its
+    // condition number and can manufacture a discontinuous rank transition
+    // near an otherwise regular endpoint. Only use the affine pseudoinverse
+    // below when the original system is genuinely rank deficient.
+    if let Some(solution) = solve_linear_4(matrix, right) {
+        let achieved = (0..4)
+            .map(|row| {
+                ((0..4)
+                    .map(|column| matrix[row][column] * solution[column])
+                    .sum::<f64>()
+                    - right[row])
+                    .powi(2)
+            })
+            .sum::<f64>()
+            .sqrt();
+        let scale = right
+            .iter()
+            .chain(solution.iter())
+            .map(|value| value.abs())
+            .fold(1.0_f64, f64::max);
+        if achieved.is_finite() && achieved <= f64::EPSILON.sqrt() * scale * 64.0 {
+            return Ok(solution);
+        }
+    }
+    let residual = std::array::from_fn::<_, 4, _>(|row| {
+        right[row]
+            - (0..4)
+                .map(|column| matrix[row][column] * reference[column])
+                .sum::<f64>()
+    });
+    let mut normal: [[f64; 4]; 4] = std::array::from_fn(|row| {
+        std::array::from_fn(|column| {
+            (0..4)
+                .map(|index| matrix[index][row] * matrix[index][column])
+                .sum::<f64>()
+        })
+    });
+    let projected = std::array::from_fn::<_, 4, _>(|column| {
+        (0..4)
+            .map(|row| matrix[row][column] * residual[row])
+            .sum::<f64>()
+    });
+    let mut eigenvectors: [[f64; 4]; 4] = std::array::from_fn(|row| {
+        std::array::from_fn(|column| if row == column { 1.0 } else { 0.0 })
+    });
+    for _ in 0..96 {
+        let mut pivot = (0, 1);
+        let mut largest = normal[0][1].abs();
+        for row in 0..4 {
+            for column in row + 1..4 {
+                if normal[row][column].abs() > largest {
+                    largest = normal[row][column].abs();
+                    pivot = (row, column);
+                }
+            }
+        }
+        let diagonal_scale = (0..4)
+            .map(|index| normal[index][index].abs())
+            .fold(1.0_f64, f64::max);
+        if largest <= f64::EPSILON * diagonal_scale * 64.0 {
+            break;
+        }
+        let (first, second) = pivot;
+        let off_diagonal = normal[first][second];
+        let tau = (normal[second][second] - normal[first][first]) / (2.0 * off_diagonal);
+        let tangent = tau.signum() / (tau.abs() + (1.0 + tau * tau).sqrt());
+        let cosine = 1.0 / (1.0 + tangent * tangent).sqrt();
+        let sine = tangent * cosine;
+        let first_diagonal = normal[first][first];
+        let second_diagonal = normal[second][second];
+        normal[first][first] = cosine * cosine * first_diagonal
+            - 2.0 * sine * cosine * off_diagonal
+            + sine * sine * second_diagonal;
+        normal[second][second] = sine * sine * first_diagonal
+            + 2.0 * sine * cosine * off_diagonal
+            + cosine * cosine * second_diagonal;
+        normal[first][second] = 0.0;
+        normal[second][first] = 0.0;
+        for index in 0..4 {
+            if index == first || index == second {
+                continue;
+            }
+            let first_value = normal[index][first];
+            let second_value = normal[index][second];
+            normal[index][first] = cosine * first_value - sine * second_value;
+            normal[first][index] = normal[index][first];
+            normal[index][second] = sine * first_value + cosine * second_value;
+            normal[second][index] = normal[index][second];
+        }
+        for row in &mut eigenvectors {
+            let first_value = row[first];
+            let second_value = row[second];
+            row[first] = cosine * first_value - sine * second_value;
+            row[second] = sine * first_value + cosine * second_value;
+        }
+    }
+    let maximum_eigenvalue = (0..4)
+        .map(|index| normal[index][index].abs())
+        .fold(0.0_f64, f64::max);
+    if !maximum_eigenvalue.is_finite() || maximum_eigenvalue <= f64::MIN_POSITIVE {
+        return Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "surface-intersection tangent constraints have zero rank",
+        ));
+    }
+    let eigenvalue_tolerance = maximum_eigenvalue * f64::EPSILON * 4096.0;
+    let mut correction = [0.0; 4];
+    for eigenvector in 0..4 {
+        let eigenvalue = normal[eigenvector][eigenvector];
+        if eigenvalue <= eigenvalue_tolerance {
+            continue;
+        }
+        let coefficient = (0..4)
+            .map(|row| eigenvectors[row][eigenvector] * projected[row])
+            .sum::<f64>()
+            / eigenvalue;
+        for row in 0..4 {
+            correction[row] += eigenvectors[row][eigenvector] * coefficient;
+        }
+    }
+    let solution = std::array::from_fn(|index| reference[index] + correction[index]);
+    let achieved = (0..4)
+        .map(|row| {
+            ((0..4)
+                .map(|column| matrix[row][column] * solution[column])
+                .sum::<f64>()
+                - right[row])
+                .powi(2)
+        })
+        .sum::<f64>()
+        .sqrt();
+    let scale = right
+        .iter()
+        .chain(solution.iter())
+        .map(|value| value.abs())
+        .fold(1.0_f64, f64::max);
+    let allowed = f64::EPSILON.sqrt() * scale * 256.0;
+    if !achieved.is_finite() || achieved > allowed {
+        return Err(KernelError::from_diagnostic(
+            super::Diagnostic::new(
+                DiagnosticKind::NumericalFailure,
+                "surface-intersection tangent constraints are inconsistent",
+            )
+            .with_accuracy(allowed, achieved),
+        ));
+    }
+    Ok(solution)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Curve3 {
     Line(Line3),
     Circle(Circle3),
     Nurbs(NurbsCurve3),
     SurfaceIntersection(SurfaceIntersectionCurve),
+    SurfaceCurve(SurfaceCurve3),
 }
 
 impl Curve3 {
@@ -1588,6 +2248,10 @@ impl Curve3 {
                 bounds: DomainBounds::Bounded(curve.range()),
                 period: None,
             },
+            Self::SurfaceCurve(curve) => ParameterDomain {
+                bounds: DomainBounds::Bounded(curve.range()),
+                period: None,
+            },
         }
     }
 
@@ -1597,6 +2261,17 @@ impl Curve3 {
             Self::Circle(circle) => circle.evaluate(parameter),
             Self::Nurbs(curve) => curve.evaluate(parameter),
             Self::SurfaceIntersection(curve) => curve.evaluate(parameter),
+            Self::SurfaceCurve(curve) => curve.evaluate(parameter),
+        }
+    }
+
+    pub(crate) fn first_order(&self, parameter: f64) -> KernelResult<(Point3, Vec3)> {
+        match self {
+            Self::SurfaceIntersection(curve) => curve.first_order(parameter),
+            Self::SurfaceCurve(curve) => curve.first_order(parameter),
+            _ => self
+                .evaluate(parameter)
+                .map(|value| (value.point, value.first_derivative)),
         }
     }
 
@@ -1606,6 +2281,7 @@ impl Curve3 {
             Self::Circle(circle) => circle.project(point),
             Self::Nurbs(curve) => curve.project(point, tolerance),
             Self::SurfaceIntersection(curve) => curve.project(point),
+            Self::SurfaceCurve(curve) => curve.project(point),
         }
     }
 }
@@ -1628,6 +2304,11 @@ impl From<NurbsCurve3> for Curve3 {
 impl From<SurfaceIntersectionCurve> for Curve3 {
     fn from(value: SurfaceIntersectionCurve) -> Self {
         Self::SurfaceIntersection(value)
+    }
+}
+impl From<SurfaceCurve3> for Curve3 {
+    fn from(value: SurfaceCurve3) -> Self {
+        Self::SurfaceCurve(value)
     }
 }
 
@@ -2830,6 +3511,322 @@ impl OffsetSurface3 {
     }
 }
 
+/// Constant-radius rolling-ball envelope between two regular surface supports.
+///
+/// The center curve is the intersection of the two inward offsets. Its two
+/// p-curves retain the corresponding parameters on the un-offset supports.
+/// Consequently this is an analytical/implicit surface definition rather than
+/// a fitted patch: every evaluation is constructed from the exact center and
+/// contact points on the parent surfaces.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RollingBallSurface3 {
+    center_curve: Box<Curve3>,
+    first_surface: Box<Surface3>,
+    second_surface: Box<Surface3>,
+    first_pcurve: Curve2,
+    second_pcurve: Curve2,
+    center_range: ParameterRange,
+    radius: f64,
+    tolerance: ModelTolerance,
+}
+
+impl RollingBallSurface3 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        center_curve: Curve3,
+        first_surface: Surface3,
+        second_surface: Surface3,
+        first_pcurve: Curve2,
+        second_pcurve: Curve2,
+        center_range: ParameterRange,
+        radius: f64,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Self> {
+        tolerance.validate()?;
+        if !radius.is_finite() || radius <= tolerance.linear {
+            return Err(invalid(
+                "rolling-ball radius must be finite and exceed model tolerance",
+            ));
+        }
+        if !center_curve
+            .domain()
+            .contains_range(center_range, tolerance.parameter)
+            || !first_pcurve
+                .domain()
+                .contains_range(center_range, tolerance.parameter)
+            || !second_pcurve
+                .domain()
+                .contains_range(center_range, tolerance.parameter)
+        {
+            return Err(invalid(
+                "rolling-ball center and contact guides must cover the trim range",
+            ));
+        }
+        let surface = Self {
+            center_curve: Box::new(center_curve),
+            first_surface: Box::new(first_surface),
+            second_surface: Box::new(second_surface),
+            first_pcurve,
+            second_pcurve,
+            center_range,
+            radius,
+            tolerance,
+        };
+        for parameter in [
+            center_range.start,
+            (center_range.start + center_range.end) * 0.5,
+            center_range.end,
+        ] {
+            for blend in [0.0, 0.5, 1.0] {
+                surface.point(parameter, blend)?;
+            }
+        }
+        Ok(surface)
+    }
+
+    pub fn center_curve(&self) -> &Curve3 {
+        &self.center_curve
+    }
+
+    pub fn first_surface(&self) -> &Surface3 {
+        &self.first_surface
+    }
+
+    pub fn second_surface(&self) -> &Surface3 {
+        &self.second_surface
+    }
+
+    pub fn first_pcurve(&self) -> &Curve2 {
+        &self.first_pcurve
+    }
+
+    pub fn second_pcurve(&self) -> &Curve2 {
+        &self.second_pcurve
+    }
+
+    pub fn center_range(&self) -> ParameterRange {
+        self.center_range
+    }
+
+    pub fn radius(&self) -> f64 {
+        self.radius
+    }
+
+    fn contact(
+        surface: &Surface3,
+        pcurve: &Curve2,
+        parameter: f64,
+    ) -> KernelResult<(Point3, Vec3)> {
+        let (parameters, parameter_tangent) = pcurve.first_order(parameter)?;
+        let (point, du, dv) = surface.first_order(parameters.x, parameters.y)?;
+        Ok((point, du * parameter_tangent.x + dv * parameter_tangent.y))
+    }
+
+    fn first_order(&self, parameter: f64, blend: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
+        if !self.center_range.contains(parameter, self.tolerance) || !blend.is_finite() {
+            return Err(invalid("rolling-ball parameter lies outside its domain"));
+        }
+        let (center_point, center_tangent) = self.center_curve.first_order(parameter)?;
+        let first = Self::contact(&self.first_surface, &self.first_pcurve, parameter)?;
+        let second = Self::contact(&self.second_surface, &self.second_pcurve, parameter)?;
+        let first_radial = first.0 - center_point;
+        let second_radial = second.0 - center_point;
+        let scale = center_point
+            .to_vec()
+            .magnitude()
+            .max(first.0.to_vec().magnitude())
+            .max(second.0.to_vec().magnitude())
+            .max(self.radius)
+            .max(1.0);
+        let allowed = self.tolerance.linear_at_scale(scale) * 32.0;
+        if (first_radial.magnitude() - self.radius).abs() > allowed
+            || (second_radial.magnitude() - self.radius).abs() > allowed
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                format!(
+                    "rolling-ball contact does not lie at the requested radius (requested {}, first {}, second {}, allowed {})",
+                    self.radius,
+                    first_radial.magnitude(),
+                    second_radial.magnitude(),
+                    allowed,
+                ),
+            ));
+        }
+        let first_unit = first_radial.normalize();
+        let second_unit = second_radial.normalize();
+        let cosine = first_unit.dot(second_unit).clamp(-1.0, 1.0);
+        let angle = cosine.acos();
+        if angle <= self.tolerance.angular || std::f64::consts::PI - angle <= self.tolerance.angular
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "rolling-ball contact normals do not define a regular circular span",
+            ));
+        }
+        let sine = angle.sin();
+        let first_derivative = (first.1 - center_tangent) / self.radius;
+        let second_derivative = (second.1 - center_tangent) / self.radius;
+        let cosine_derivative =
+            first_derivative.dot(second_unit) + first_unit.dot(second_derivative);
+        let angle_derivative = -cosine_derivative / sine;
+        let weight = |fraction: f64, fraction_derivative: f64| {
+            let numerator = (fraction * angle).sin();
+            let numerator_theta = fraction * (fraction * angle).cos();
+            let value = numerator / sine;
+            let theta_derivative =
+                (numerator_theta * sine - numerator * angle.cos()) / sine.powi(2);
+            let blend_derivative = fraction_derivative * angle * (fraction * angle).cos() / sine;
+            (value, theta_derivative, blend_derivative)
+        };
+        let first_weight = weight(1.0 - blend, -1.0);
+        let second_weight = weight(blend, 1.0);
+        let radial = first_unit * first_weight.0 + second_unit * second_weight.0;
+        let radial_u = first_unit * (first_weight.1 * angle_derivative)
+            + first_derivative * first_weight.0
+            + second_unit * (second_weight.1 * angle_derivative)
+            + second_derivative * second_weight.0;
+        let radial_v = first_unit * first_weight.2 + second_unit * second_weight.2;
+        Ok((
+            center_point + radial * self.radius,
+            center_tangent + radial_u * self.radius,
+            radial_v * self.radius,
+        ))
+    }
+
+    fn point(&self, parameter: f64, blend: f64) -> KernelResult<Point3> {
+        self.first_order(parameter, blend).map(|value| value.0)
+    }
+
+    fn shifted(&self, parameter: f64, delta: f64) -> f64 {
+        (parameter + delta).clamp(
+            self.center_range.start.min(self.center_range.end),
+            self.center_range.start.max(self.center_range.end),
+        )
+    }
+
+    fn evaluate(&self, parameter: f64, blend: f64) -> KernelResult<SurfaceEvaluation> {
+        let (point, du, dv) = self.first_order(parameter, blend)?;
+        let parameter_step = (self.center_range.span().abs()
+            * self.tolerance.parameter.sqrt().max(f64::EPSILON.sqrt()))
+        .max(self.tolerance.parameter * 32.0);
+        let blend_step = self
+            .tolerance
+            .parameter
+            .sqrt()
+            .max(f64::EPSILON.sqrt())
+            .max(1.0e-6);
+        let parameter_minimum = self.center_range.start.min(self.center_range.end);
+        let parameter_maximum = self.center_range.start.max(self.center_range.end);
+        let duu = if parameter - parameter_step >= parameter_minimum
+            && parameter + parameter_step <= parameter_maximum
+        {
+            let first = self.first_order(parameter - parameter_step, blend)?.1;
+            let last = self.first_order(parameter + parameter_step, blend)?.1;
+            (last - first) / (2.0 * parameter_step)
+        } else if parameter + parameter_step * 2.0 <= parameter_maximum {
+            let first = self.first_order(parameter + parameter_step, blend)?.1;
+            let second = self.first_order(parameter + parameter_step * 2.0, blend)?.1;
+            (du * -3.0 + first * 4.0 - second) / (2.0 * parameter_step)
+        } else {
+            let first = self.first_order(parameter - parameter_step, blend)?.1;
+            let second = self.first_order(parameter - parameter_step * 2.0, blend)?.1;
+            (du * 3.0 - first * 4.0 + second) / (2.0 * parameter_step)
+        };
+        let blend_before = self.first_order(parameter, blend - blend_step)?;
+        let blend_after = self.first_order(parameter, blend + blend_step)?;
+        let dvv = (blend_after.2 - blend_before.2) / (2.0 * blend_step);
+        let parameter_minus = self.shifted(parameter, -parameter_step);
+        let parameter_plus = self.shifted(parameter, parameter_step);
+        let blend_minus = blend - blend_step;
+        let blend_plus = blend + blend_step;
+        let parameter_span = parameter_plus - parameter_minus;
+        let blend_span = blend_plus - blend_minus;
+        let parameter_before = self.first_order(parameter_minus, blend)?;
+        let parameter_after = self.first_order(parameter_plus, blend)?;
+        let duv = ((parameter_after.2 - parameter_before.2) / parameter_span
+            + (blend_after.1 - blend_before.1) / blend_span)
+            * 0.5;
+        Ok(SurfaceEvaluation {
+            point,
+            du,
+            dv,
+            duu,
+            duv,
+            dvv,
+        })
+    }
+
+    fn project(&self, point: Point3) -> KernelResult<Projection2> {
+        let mut parameters = (0..=16)
+            .flat_map(|first| {
+                (0..=24).map(move |second| {
+                    (
+                        self.center_range.start + self.center_range.span() * first as f64 / 16.0,
+                        -1.0 + second as f64 / 8.0,
+                    )
+                })
+            })
+            .map(|parameters| {
+                self.point(parameters.0, parameters.1)
+                    .map(|value| (parameters, value.distance2(point)))
+            })
+            .collect::<KernelResult<Vec<_>>>()?
+            .into_iter()
+            .min_by(|first, second| first.1.total_cmp(&second.1))
+            .map(|candidate| candidate.0)
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::NumericalFailure,
+                    "rolling-ball projection has no seed",
+                )
+            })?;
+        for _ in 0..48 {
+            let value = self.evaluate(parameters.0, parameters.1)?;
+            let residual = value.point - point;
+            let matrix = [
+                [
+                    value.du.magnitude2() + residual.dot(value.duu),
+                    value.du.dot(value.dv) + residual.dot(value.duv),
+                ],
+                [
+                    value.du.dot(value.dv) + residual.dot(value.duv),
+                    value.dv.magnitude2() + residual.dot(value.dvv),
+                ],
+            ];
+            let determinant = matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
+            if determinant.abs() <= f64::EPSILON * 256.0 {
+                break;
+            }
+            let first = residual.dot(value.du);
+            let second = residual.dot(value.dv);
+            let next = (
+                (parameters.0 + (-first * matrix[1][1] + second * matrix[0][1]) / determinant)
+                    .clamp(
+                        self.center_range.start.min(self.center_range.end),
+                        self.center_range.start.max(self.center_range.end),
+                    ),
+                parameters.1 + (-second * matrix[0][0] + first * matrix[1][0]) / determinant,
+            );
+            if (next.0 - parameters.0)
+                .abs()
+                .max((next.1 - parameters.1).abs())
+                <= self.tolerance.parameter
+            {
+                parameters = next;
+                break;
+            }
+            parameters = next;
+        }
+        let projected = self.point(parameters.0, parameters.1)?;
+        Ok(Projection2 {
+            parameters,
+            point: projected,
+            distance: projected.distance(point),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Surface3 {
     Plane(Plane3),
@@ -2839,9 +3836,20 @@ pub enum Surface3 {
     Torus(Torus3),
     Nurbs(NurbsSurface3),
     Offset(OffsetSurface3),
+    RollingBall(RollingBallSurface3),
 }
 
 impl Surface3 {
+    pub(crate) fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
+        match self {
+            Self::Offset(surface) => surface.first_order(u, v),
+            Self::RollingBall(surface) => surface.first_order(u, v),
+            _ => self
+                .evaluate(u, v)
+                .map(|value| (value.point, value.du, value.dv)),
+        }
+    }
+
     pub fn domains(&self) -> [ParameterDomain; 2] {
         match self {
             Self::Plane(_) => [ParameterDomain::unbounded(), ParameterDomain::unbounded()],
@@ -2899,6 +3907,13 @@ impl Surface3 {
             ],
             Self::Nurbs(surface) => surface.domains(),
             Self::Offset(surface) => surface.base.domains(),
+            Self::RollingBall(surface) => [
+                ParameterDomain {
+                    bounds: DomainBounds::Bounded(surface.center_range()),
+                    period: None,
+                },
+                ParameterDomain::unbounded(),
+            ],
         }
     }
 
@@ -2911,6 +3926,7 @@ impl Surface3 {
             Self::Torus(torus) => torus.evaluate(u, v),
             Self::Nurbs(surface) => surface.evaluate(u, v),
             Self::Offset(surface) => surface.evaluate(u, v),
+            Self::RollingBall(surface) => surface.evaluate(u, v),
         }
     }
 
@@ -2926,7 +3942,17 @@ impl Surface3 {
                 }
                 Ok(radial.normalize())
             }
-            _ => self.evaluate(u, v)?.normal(),
+            _ => {
+                let (_, du, dv) = self.first_order(u, v)?;
+                let normal = du.cross(dv);
+                if normal.magnitude2() == 0.0 || !finite_vector(normal) {
+                    return Err(KernelError::new(
+                        DiagnosticKind::GeometryInvariant,
+                        "surface derivatives are singular at the requested parameter",
+                    ));
+                }
+                Ok(normal.normalize())
+            }
         }
     }
 
@@ -2939,6 +3965,7 @@ impl Surface3 {
             Self::Torus(torus) => torus.project(point),
             Self::Nurbs(surface) => surface.project(point, tolerance),
             Self::Offset(surface) => surface.project(point),
+            Self::RollingBall(surface) => surface.project(point),
         }
     }
 
@@ -2951,6 +3978,48 @@ impl Surface3 {
                 tolerance,
             )?
             .into()),
+            Self::Cylinder(cylinder) => {
+                let radius = cylinder.radius() + distance;
+                if radius <= tolerance.linear_at_scale(cylinder.radius()) {
+                    return Err(invalid("cylinder offset collapses its radius"));
+                }
+                let scale = radius / cylinder.radius();
+                Ok(Cylinder3::new(
+                    cylinder.origin(),
+                    cylinder.axis(),
+                    cylinder.x_radius() * scale,
+                    cylinder.y_radius() * scale,
+                    tolerance,
+                )?
+                .into())
+            }
+            Self::Sphere(sphere) => {
+                let source_radius = sphere.radius();
+                let radius = source_radius + distance;
+                if radius <= tolerance.linear_at_scale(source_radius) {
+                    return Err(invalid("sphere offset collapses its radius"));
+                }
+                let scale = radius / source_radius;
+                Ok(Sphere3::new(
+                    sphere.center(),
+                    sphere.x_radius() * scale,
+                    sphere.y_radius() * scale,
+                    sphere.z_radius() * scale,
+                    tolerance,
+                )?
+                .into())
+            }
+            Self::Torus(torus) => {
+                let minor_radius = torus.minor_radius() + distance;
+                Ok(Torus3::new(
+                    torus.center(),
+                    torus.x_major(),
+                    torus.y_major(),
+                    minor_radius,
+                    tolerance,
+                )?
+                .into())
+            }
             _ => OffsetSurface3::new(self.clone(), distance, tolerance).map(Self::Offset),
         }
     }
@@ -2989,5 +4058,10 @@ impl From<NurbsSurface3> for Surface3 {
 impl From<OffsetSurface3> for Surface3 {
     fn from(value: OffsetSurface3) -> Self {
         Self::Offset(value)
+    }
+}
+impl From<RollingBallSurface3> for Surface3 {
+    fn from(value: RollingBallSurface3) -> Self {
+        Self::RollingBall(value)
     }
 }

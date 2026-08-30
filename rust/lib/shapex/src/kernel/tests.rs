@@ -15,29 +15,6 @@ fn certified_properties(kernel: &Kernel, body: BodyId) -> MassProperties {
         .properties
 }
 
-fn cuboid(kernel: &mut Kernel, minimum: Point3, maximum: Point3) -> BodyId {
-    let size = maximum - minimum;
-    let tolerance = kernel.tolerance();
-    let wire = Wire2::polygon(
-        [
-            Point2::new(0.0, 0.0),
-            Point2::new(size.x, 0.0),
-            Point2::new(size.x, size.y),
-            Point2::new(0.0, size.y),
-        ],
-        tolerance,
-    )
-    .expect("cuboid wire");
-    let profile = Profile::new(wire, [], tolerance).expect("cuboid profile");
-    let plane = Plane3::new(minimum, Vec3::unit_x(), Vec3::unit_y(), tolerance).expect("plane");
-    let mut transaction = kernel.begin_operation();
-    let body = transaction
-        .extrude_curve_profile(plane, &profile, Vec3::new(0.0, 0.0, size.z))
-        .expect("cuboid extrusion");
-    transaction.commit().expect("cuboid publication");
-    body
-}
-
 fn owned_cuboid(minimum: Point3, maximum: Point3) -> super::Compound {
     let tolerance = ModelTolerance::default();
     let size = maximum - minimum;
@@ -58,18 +35,148 @@ fn owned_cuboid(minimum: Point3, maximum: Point3) -> super::Compound {
         .expect("owned cuboid")
 }
 
-fn boolean(
-    kernel: &mut Kernel,
-    first: BodyId,
-    second: BodyId,
-    kind: BooleanKind,
-) -> (Vec<BodyId>, super::OperationHistory) {
-    let mut transaction = kernel.begin_operation();
-    transaction
-        .boolean(first, second, kind)
-        .expect("boolean construction");
-    let committed = transaction.finish().expect("boolean publication");
-    (committed.bodies, committed.history)
+#[test]
+fn rolling_ball_fillet_rewrites_only_local_brep() {
+    let cuboid = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let edge = cuboid
+        .edges()
+        .find(|edge| {
+            let endpoints = edge.endpoints().expect("edge endpoints");
+            (endpoints[1].z - endpoints[0].z).abs() > 4.9
+        })
+        .expect("vertical edge")
+        .clone();
+    let filleted = cuboid.fillet(&[edge], 1.0).expect("rolling-ball fillet");
+    assert_eq!(filleted.faces().count(), cuboid.faces().count() + 1);
+    let end_edge = filleted
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::SurfaceIntersection(_)))
+        .find(|edge| {
+            let endpoints = edge.endpoints().expect("fillet edge endpoints");
+            endpoints[0].distance(endpoints[1]) < 2.0
+        })
+        .expect("fillet end edge")
+        .clone();
+    let end_points = end_edge.endpoints().expect("fillet end points");
+    let arc_result = filleted.fillet(&[end_edge.clone()], 0.5);
+    assert!(
+        arc_result.is_ok(),
+        "fillet generated end edge: {arc_result:?}"
+    );
+    assert_eq!(
+        arc_result.unwrap().faces().count(),
+        filleted.faces().count() + 3,
+        "default tangent propagation follows both straight continuations",
+    );
+    let tangent_edge = filleted
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .find(|edge| {
+            let endpoints = edge.endpoints().expect("line endpoints");
+            endpoints
+                .iter()
+                .any(|point| point.distance(end_points[0]) < 1.0e-7)
+        })
+        .expect("straight edge tangent to the fillet end")
+        .clone();
+    let second = filleted
+        .fillet_with_options(
+            &[tangent_edge],
+            super::FilletOptions::new(0.25).with_tangent_propagation(false),
+        )
+        .expect("fillet a straight edge leading into a previous fillet");
+    assert_eq!(second.faces().count(), filleted.faces().count() + 1);
+}
+
+#[test]
+fn rolling_ball_fillet_chain_certifies_at_application_scale() {
+    let cuboid = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(50.0, 25.0, 8.0));
+    let edge = cuboid
+        .edges()
+        .find(|edge| {
+            let endpoints = edge.endpoints().expect("edge endpoints");
+            (endpoints[1].z - endpoints[0].z).abs() > 7.9
+        })
+        .expect("vertical edge")
+        .clone();
+    let first = cuboid.fillet(&[edge], 2.0).expect("first fillet");
+    let end_edge = first
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::SurfaceIntersection(_)))
+        .find(|edge| {
+            let endpoints = edge.endpoints().expect("fillet edge endpoints");
+            endpoints[0].distance(endpoints[1]) < 4.0
+        })
+        .expect("fillet end edge")
+        .clone();
+    let end_points = end_edge.endpoints().expect("fillet end points");
+    let tangent_edges = first
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .filter(|edge| {
+            let endpoints = edge.endpoints().expect("line endpoints");
+            endpoints
+                .iter()
+                .any(|point| end_points.iter().any(|end| point.distance(*end) < 1.0e-7))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        !tangent_edges.is_empty(),
+        "straight edges tangent to first fillet"
+    );
+    for tangent_edge in tangent_edges {
+        let second = first
+            .fillet(&[tangent_edge], 1.0)
+            .expect("tangent continuation fillet");
+        assert!(second.faces().count() > first.faces().count());
+        second
+            .tessellate(
+                TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+            )
+            .expect("tangent continuation display tessellation");
+    }
+}
+
+#[test]
+fn rolling_ball_fillet_batches_disconnected_edges_transactionally() {
+    let cuboid = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let edges = cuboid
+        .edges()
+        .filter(|edge| {
+            let endpoints = edge.endpoints().expect("edge endpoints");
+            (endpoints[1].z - endpoints[0].z).abs() > 4.9
+        })
+        .take(2)
+        .cloned()
+        .collect::<Vec<_>>();
+    let filleted = cuboid
+        .fillet(&edges, 1.0)
+        .expect("batched rolling-ball fillet");
+    assert_eq!(filleted.faces().count(), cuboid.faces().count() + 2);
+}
+
+#[test]
+fn rolling_ball_fillet_builds_exact_trihedral_vertex_transition() {
+    let cuboid = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let corner = Point3::new(0.0, 0.0, 0.0);
+    let edges = cuboid
+        .edges()
+        .filter(|edge| {
+            edge.endpoints()
+                .expect("edge endpoints")
+                .iter()
+                .any(|point| point.distance(corner) < 1.0e-7)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(edges.len(), 3);
+    let filleted = cuboid
+        .fillet(&edges, 0.5)
+        .expect("trihedral rolling-ball fillet");
+    assert!(filleted
+        .faces()
+        .any(|face| matches!(face.surface(), Surface3::Sphere(_))));
 }
 
 #[test]
@@ -195,6 +302,107 @@ fn concentric_circular_hole_is_certified_without_tessellation() {
     assert!(cylindrical_faces.iter().any(
         |face| matches!(face.surface(), Surface3::Cylinder(cylinder) if (cylinder.radius() - 2.0).abs() < 1.0e-9)
     ));
+}
+
+#[test]
+fn rolling_ball_fillet_supports_closed_hole_rims() {
+    let tolerance = ModelTolerance::default();
+    let outer = Wire2::polygon(
+        [
+            Point2::new(0.0, 0.0),
+            Point2::new(12.0, 0.0),
+            Point2::new(12.0, 8.0),
+            Point2::new(0.0, 8.0),
+        ],
+        tolerance,
+    )
+    .expect("outer wire");
+    let hole = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(4.0, 4.0), 1.5).expect("hole circle")],
+        tolerance,
+    )
+    .expect("hole wire");
+    let solid = Profile::new(outer, [hole], tolerance)
+        .expect("profile with hole")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 3.0))
+        .expect("profile extrusion");
+    let rim = solid
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
+        .find(|edge| {
+            let endpoints = edge.endpoints().expect("rim endpoints");
+            let faces = edge.connected_faces().expect("rim faces");
+            endpoints.iter().all(|point| point.z > 2.9)
+                && faces
+                    .iter()
+                    .any(|face| matches!(face.surface(), Surface3::Plane(_)))
+                && faces
+                    .iter()
+                    .any(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+        })
+        .expect("top circular hole rim")
+        .clone();
+    let filleted = solid
+        .fillet(&[rim], 0.25)
+        .expect("closed circular rim fillet");
+    assert!(filleted.faces().count() > solid.faces().count());
+    assert!(filleted
+        .faces()
+        .any(|face| matches!(face.surface(), Surface3::RollingBall(_))));
+    filleted
+        .tessellate(
+            TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+        )
+        .expect("closed-rim fillet display tessellation");
+}
+
+#[test]
+fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
+    let tolerance = ModelTolerance::default();
+    let outer = Wire2::polygon(
+        [
+            Point2::new(0.0, 0.0),
+            Point2::new(12.0, 0.0),
+            Point2::new(12.0, 8.0),
+            Point2::new(0.0, 8.0),
+        ],
+        tolerance,
+    )
+    .expect("outer wire");
+    let hole = Wire2::polygon(
+        [
+            Point2::new(3.0, 2.0),
+            Point2::new(3.0, 6.0),
+            Point2::new(7.0, 6.0),
+            Point2::new(7.0, 2.0),
+        ],
+        tolerance,
+    )
+    .expect("rectangular hole");
+    let solid = Profile::new(outer, [hole], tolerance)
+        .expect("profile with hole")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 3.0))
+        .expect("profile extrusion");
+    let edge = solid
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .find(|edge| {
+            let endpoints = edge.endpoints().expect("edge endpoints");
+            endpoints.iter().all(|point| point.z > 2.9)
+                && endpoints.iter().all(|point| point.x > 2.9 && point.x < 7.1)
+                && endpoints.iter().all(|point| point.y > 1.9 && point.y < 6.1)
+        })
+        .expect("top rectangular hole edge")
+        .clone();
+    let filleted = solid
+        .fillet(&[edge], 0.25)
+        .expect("concave straight hole-edge fillet");
+    assert!(filleted.faces().count() > solid.faces().count());
+    filleted
+        .tessellate(
+            TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+        )
+        .expect("concave hole-edge fillet display tessellation");
 }
 
 #[test]
@@ -1056,78 +1264,6 @@ fn arbitrary_triangle_polyhedron_is_euler_shelled_and_certified() {
 }
 
 #[test]
-fn planar_boolean_is_rebuilt_and_physically_certified() {
-    let mut kernel = Kernel::new(ModelTolerance::default()).expect("kernel");
-    let first = cuboid(
-        &mut kernel,
-        Point3::new(0.0, 0.0, 0.0),
-        Point3::new(1.0, 1.0, 1.0),
-    );
-    let second = cuboid(
-        &mut kernel,
-        Point3::new(0.5, 0.0, 0.0),
-        Point3::new(1.5, 1.0, 1.0),
-    );
-
-    let (intersection, history) = boolean(&mut kernel, first, second, BooleanKind::Intersection);
-    assert!((certified_properties(&kernel, intersection[0]).volume - 0.5).abs() < 1.0e-8);
-    assert!(history.origins().values().any(|origin| {
-        matches!(origin, super::Origin::Derived { sources, .. } if !sources.is_empty())
-    }));
-
-    let (union, _) = boolean(&mut kernel, first, second, BooleanKind::Union);
-    assert!((certified_properties(&kernel, union[0]).volume - 1.5).abs() < 1.0e-8);
-
-    let (difference, _) = boolean(&mut kernel, first, second, BooleanKind::Difference);
-    assert!((certified_properties(&kernel, difference[0]).volume - 0.5).abs() < 1.0e-8);
-
-    let distant = cuboid(
-        &mut kernel,
-        Point3::new(5.0, 5.0, 5.0),
-        Point3::new(6.0, 6.0, 6.0),
-    );
-    let (empty, _) = boolean(&mut kernel, first, distant, BooleanKind::Intersection);
-    assert!(empty.is_empty());
-
-    let (disconnected, _) = boolean(&mut kernel, first, distant, BooleanKind::Union);
-    assert_eq!(disconnected.len(), 2);
-    assert!(
-        (disconnected
-            .iter()
-            .map(|body| certified_properties(&kernel, *body).volume)
-            .sum::<f64>()
-            - 2.0)
-            .abs()
-            < 1.0e-8
-    );
-    assert!(kernel.validate().is_valid());
-}
-
-#[test]
-fn planar_boolean_difference_preserves_a_closed_cavity_shell() {
-    let mut kernel = Kernel::new(ModelTolerance::default()).expect("kernel");
-    let outer = cuboid(
-        &mut kernel,
-        Point3::new(0.0, 0.0, 0.0),
-        Point3::new(3.0, 3.0, 3.0),
-    );
-    let void = cuboid(
-        &mut kernel,
-        Point3::new(1.0, 1.0, 1.0),
-        Point3::new(2.0, 2.0, 2.0),
-    );
-    let (difference, _) = boolean(&mut kernel, outer, void, BooleanKind::Difference);
-    assert_eq!(difference.len(), 1);
-    let body = difference[0];
-    assert_eq!(
-        kernel.topology().body(body).expect("body").shells().len(),
-        2
-    );
-    assert!((certified_properties(&kernel, body).volume - 26.0).abs() < 1.0e-8);
-    assert!(kernel.validate().is_valid());
-}
-
-#[test]
 fn low_level_euler_commit_is_atomic_and_needs_no_identity() {
     let tolerance = ModelTolerance::default();
     let mut kernel = Kernel::new(tolerance).expect("kernel");
@@ -1284,38 +1420,19 @@ fn full_off_axis_revolutions_publish_exact_genus_one_solids() {
 }
 
 #[test]
-fn high_level_profile_loft_is_euler_built_and_certified() {
+fn approximation_only_features_report_unsupported_geometry() {
     let tolerance = ModelTolerance::default();
-    let lower = Profile::new(
-        Wire2::polygon(
-            [
-                Point2::new(-1.0, -1.0),
-                Point2::new(1.0, -1.0),
-                Point2::new(1.0, 1.0),
-                Point2::new(-1.0, 1.0),
-            ],
-            tolerance,
-        )
-        .expect("lower wire"),
-        [],
+    let wire = Wire2::polygon(
+        [
+            Point2::new(-1.0, -1.0),
+            Point2::new(1.0, -1.0),
+            Point2::new(1.0, 1.0),
+            Point2::new(-1.0, 1.0),
+        ],
         tolerance,
     )
-    .expect("lower profile");
-    let upper = Profile::new(
-        Wire2::polygon(
-            [
-                Point2::new(-0.5, -0.5),
-                Point2::new(0.5, -0.5),
-                Point2::new(0.5, 0.5),
-                Point2::new(-0.5, 0.5),
-            ],
-            tolerance,
-        )
-        .expect("upper wire"),
-        [],
-        tolerance,
-    )
-    .expect("upper profile");
+    .expect("profile wire");
+    let profile = Profile::new(wire, [], tolerance).expect("profile");
     let upper_plane = Plane3::new(
         Point3::new(0.0, 0.0, 3.0),
         Vec3::unit_x(),
@@ -1323,133 +1440,22 @@ fn high_level_profile_loft_is_euler_built_and_certified() {
         tolerance,
     )
     .expect("upper plane");
-    let loft = lower
-        .loft(Plane3::xy(), [(upper_plane, &upper)])
-        .expect("loft");
+    let loft_error = profile
+        .loft(Plane3::xy(), [(upper_plane, &profile)])
+        .expect_err("loft must not fall back to a faceted BREP");
+    assert_eq!(
+        loft_error.diagnostics()[0].kind,
+        super::DiagnosticKind::UnsupportedGeometry
+    );
 
-    assert!(loft.volume() > 3.0 && loft.volume() < 12.0);
-}
-
-#[test]
-fn circular_loft_uses_bounded_construction_sampling() {
-    let tolerance = ModelTolerance::default();
-    let circle_profile = |radius| {
-        Profile::new(
-            Wire2::new(
-                [TrimmedCurve2::circle(Point2::new(0.0, 0.0), radius).expect("circle")],
-                tolerance,
-            )
-            .expect("circle wire"),
-            [],
-            tolerance,
-        )
-        .expect("circle profile")
-    };
-    let lower = circle_profile(8.0);
-    let upper = circle_profile(5.0);
-    let upper_plane = Plane3::new(
-        Point3::new(0.0, 0.0, 30.0),
-        Vec3::unit_x(),
-        Vec3::unit_y(),
-        tolerance,
-    )
-    .expect("upper plane");
-    let loft = lower
-        .loft(Plane3::xy(), [(upper_plane, &upper)])
-        .expect("circular loft");
-    let analytic = 10.0 * std::f64::consts::PI * (64.0 + 40.0 + 25.0);
-    assert!((loft.volume() - analytic).abs() / analytic < 0.01);
-
-    for (u, v, offset) in [
-        (Vec3::unit_z(), Vec3::unit_y(), Vec3::new(-30.0, 0.0, 0.0)),
-        (Vec3::unit_z(), -Vec3::unit_y(), Vec3::new(30.0, 0.0, 0.0)),
-        (-Vec3::unit_z(), Vec3::unit_y(), Vec3::new(30.0, 0.0, 0.0)),
-        (Vec3::unit_x(), -Vec3::unit_z(), Vec3::new(0.0, 30.0, 0.0)),
-    ] {
-        let first_plane =
-            Plane3::new(Point3::new(0.0, 0.0, 0.0), u, v, tolerance).expect("oriented first plane");
-        let second_plane =
-            Plane3::new(Point3::from_vec(offset), u, v, tolerance).expect("oriented second plane");
-        lower
-            .loft(first_plane, [(second_plane, &upper)])
-            .expect("orientation-independent circular loft");
-    }
-    let first_plane = Plane3::new(
-        Point3::new(0.0, 0.0, 0.0),
-        Vec3::unit_z(),
-        Vec3::unit_y(),
-        tolerance,
-    )
-    .expect("first plane");
-    let reversed_plane = Plane3::new(
-        Point3::new(-30.0, 0.0, 0.0),
-        -Vec3::unit_z(),
-        Vec3::unit_y(),
-        tolerance,
-    )
-    .expect("oppositely oriented plane");
-    lower
-        .loft(first_plane, [(reversed_plane, &upper)])
-        .expect("loft across oppositely oriented section frames");
-
-    let browser_lower = circle_profile(13.867620046437446);
-    let browser_upper = circle_profile(5.734290145784257);
-    let browser_first = Plane3::new(
-        Point3::new(0.0, 0.0, 0.0),
-        -Vec3::unit_z(),
-        Vec3::unit_y(),
-        tolerance,
-    )
-    .expect("browser first plane");
-    let browser_second = Plane3::new(
-        Point3::new(30.0, 0.0, 0.0),
-        -Vec3::unit_z(),
-        Vec3::unit_y(),
-        tolerance,
-    )
-    .expect("browser second plane");
-    browser_lower
-        .loft(browser_first, [(browser_second, &browser_upper)])
-        .expect("browser circular loft fixture");
-}
-
-#[test]
-fn shell_with_opening_is_euler_built_and_certified() {
     let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
-    let top = cube
-        .faces()
-        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z > 9.9))
-        .expect("top face")
-        .clone();
-    let shell = cube.shell(&[top], -0.5).expect("open shell");
-
-    assert!((shell.volume() - 230.5).abs() < 1.0e-6);
-}
-
-#[test]
-fn closed_shell_is_a_certified_body_with_a_cavity() {
-    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
-    let shell = cube.shell(&[], -1.0).expect("closed shell");
-
-    assert_eq!(shell.solids().len(), 1);
-    assert!((shell.volume() - 488.0).abs() < 1.0e-6);
-}
-
-#[test]
-fn closed_cylindrical_shell_is_certified() {
-    let tolerance = ModelTolerance::default();
-    let circle = Wire2::new(
-        [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 5.0).expect("circle")],
-        tolerance,
-    )
-    .expect("circle wire");
-    let cylinder = Profile::new(circle, [], tolerance)
-        .expect("circle profile")
-        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
-        .expect("cylinder");
-    let shell = cylinder.shell(&[], -0.5).expect("closed cylinder shell");
-
-    assert!(shell.volume() > 0.0 && shell.volume() < cylinder.volume());
+    let shell_error = cube
+        .shell(&[], -1.0)
+        .expect_err("shell must not fall back to a faceted BREP");
+    assert_eq!(
+        shell_error.diagnostics()[0].kind,
+        super::DiagnosticKind::UnsupportedGeometry
+    );
 }
 
 #[test]
@@ -1563,7 +1569,7 @@ fn circular_prism_can_join_a_planar_face_with_an_existing_hole() {
         .expect("boss");
 
     assert!(
-        super::features::coincident_opposite_face_patch_names(&frame, &boss)
+        super::boolean::coincident_opposite_face_patch_names(&frame, &boss)
             .expect("face-patch detection")
             .is_some(),
         "the circular base must be detected inside the holed planar cap"

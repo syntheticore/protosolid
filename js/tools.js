@@ -20,7 +20,7 @@ import {
   Edge,
   Solid,
 } from './core/geom3d.js'
-import { PointHelper } from './core/helpers.js'
+import { PlaneHelper, PointHelper } from './core/helpers.js'
 
 import {
   CoincidentConstraint,
@@ -450,6 +450,8 @@ class HighlightTool extends Tool {
     this.realSelectors = selectors.map(selector => ['solid', 'component'].includes(selector) ? 'face' : selector )
   }
 
+  orderItems(items) { return items }
+
   async mouseMove(vec, coords) {
     if(this.viewport.hoveredHandle || this.viewport.hoveredDimension) return this.viewport.renderer.render()
     if(this.viewport.pickingPath) this.viewport.updatePath(this.viewport.pickingPath)
@@ -479,6 +481,7 @@ class HighlightTool extends Tool {
       const acceptsInput = this.acceptsInput ||
         this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
       if(acceptsInput) items = items.filter(item => acceptsInput(item))
+      items = this.orderItems(items)
       if(items.length > 1 && !any) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({
@@ -905,6 +908,14 @@ export class PlanePickTool extends PickTool {
     // Planar faces on inactive components are ghosted and live outside the
     // normal raycast tree, but they can still support a new sketch.
     this.includeInactive = true
+  }
+
+  // Construction planes should remain directly pickable when planar model
+  // faces cover them. Preserve raycast order within both candidate groups.
+  orderItems(items) {
+    return items.filter(item => item instanceof PlaneHelper).concat(
+      items.filter(item => !(item instanceof PlaneHelper))
+    )
   }
 }
 

@@ -85,7 +85,7 @@ Serialize.register(ComponentDefinition, 'ComponentDefinition')
 
 
 export class SectionView {
-  constructor(id, orientation, position) {
+  constructor(id, orientation, position, side, hidden) {
     this.id = id || makeID()
     this.orientation = orientation || {
       x: 0,
@@ -96,7 +96,8 @@ export class SectionView {
       y: 0,
       z: 0,
     }
-    this.side = false
+    this.side = side ?? false
+    this.hidden = hidden ?? false
   }
 
   getTransform() {
@@ -106,7 +107,9 @@ export class SectionView {
       .setPosition(this.position.x, this.position.y, this.position.z)
   }
 
-  static undump(dump) { return new this(dump.id, dump.orientation, dump.position) }
+  static undump(dump) {
+    return new this(dump.id, dump.orientation, dump.position, dump.side, dump.hidden)
+  }
 }
 Serialize.register(SectionView, 'SectionView')
 

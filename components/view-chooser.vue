@@ -12,7 +12,7 @@
         :key="view.id",
         :class="{ active: document.activeView?.id == view.id, editing: view.editing }"
         @click="clickView(view, i, $event)"
-        @mouseenter="document.previewView = modifiedView(view, i, $event)"
+        @mouseenter="previewView(view, i, $event)"
       )
 
         .anchor
@@ -23,6 +23,7 @@
             type="text"
             ref="input"
             v-model="view.title"
+            @input="document.markChanged()"
             :class="{ hidden: !view.editing }"
             @keydown.enter.esc="delete view.editing"
             @keydown.stop
@@ -35,7 +36,6 @@
     transition(name="fade" mode="out-in")
 
       .controls(
-        v-show="!!document.dirtyView"
         :class="{ settingsOpen, saveCamera: saveCamera && settingsOpen }"
         @mouseenter="unhover"
       )
@@ -73,6 +73,10 @@
           label
             input(type="checkbox" v-model="saveExpansion")
             | Tree Expansion
+
+          label
+            input(type="checkbox" v-model="saveDisplay")
+            | Display Settings
 
           .cam-settings
 
@@ -201,10 +205,10 @@
       border: none
 
     &.settingsOpen
-      height: 198px
+      height: 218px
 
     &.saveCamera
-      height: 266px
+      height: 286px
 
       .cam-settings
         opacity: 1
@@ -281,7 +285,7 @@
 
   import { makeID } from './../js/core/id.js'
 
-  const props = defineProps(['document'])
+  const props = defineProps(['document', 'projectionMode', 'displayMode', 'colorMode'])
 
   const settingsOpen = ref(false)
 
@@ -291,6 +295,7 @@
   const saveActiveComp = ref(false)
   const saveMarker = ref(false)
   const saveExpansion = ref(false)
+  const saveDisplay = ref(true)
 
   const zoomToFit = ref(false)
   const rotationOnly = ref(false)
@@ -299,14 +304,16 @@
 
   function createView() {
     const allComps = props.document.top().getChildren()
+    const cameraView = props.document.dirtyView || props.document.currentCameraView ||
+      (props.document.activeView?.position && props.document.activeView)
     const id = makeID()
     const view = {
       id,
       title: 'Custom ' + id.replace('id-', ''),
     }
-    if(saveCamera.value) {
-      view.position = props.document.dirtyView.position.clone()
-      view.target = props.document.dirtyView.target.clone()
+    if(saveCamera.value && cameraView) {
+      view.position = cameraView.position.clone()
+      view.target = cameraView.target.clone()
       view.zoomToFit = zoomToFit.value
       view.rotationOnly = rotationOnly.value
     }
@@ -319,13 +326,30 @@
         }
       })
     }
+    if(saveSections.value) {
+      view.sections = {}
+      allComps.forEach(comp => {
+        view.sections[comp.id] = comp.creator.sectionViews.map(section => ({
+          id: section.id,
+          orientation: { ...section.orientation },
+          position: { ...section.position },
+          side: section.side ?? false,
+          hidden: section.hidden ?? false,
+        }))
+      })
+    }
     if(saveActiveComp.value) view.activeComponentId = props.document.activeComponent.id
     if(saveMarker.value) view.marker = props.document.timeline.marker
     if(saveExpansion.value) {
-      view.expansions = {}
-      allComps.forEach(comp => {
-        view.expansions[comp.id] = true
-      })
+      view.expansions = Object.fromEntries(props.document.treeletExpansion)
+      view.expansionDefault = props.document.treeletsExpandedByDefault
+    }
+    if(saveDisplay.value) {
+      view.displaySettings = {
+        projectionMode: props.projectionMode,
+        displayMode: props.displayMode,
+        colorMode: props.colorMode,
+      }
     }
     props.document.addView(view)
   }
@@ -350,13 +374,17 @@
     }
   }
 
+  function previewView(view, i, event) {
+    props.document.previewSavedView(modifiedView(view, i, event))
+  }
+
   function deleteView(index) {
     unhover()
-    props.document.views.splice(index, 1)
+    props.document.removeView(index)
   }
 
   function unhover() {
-    props.document.previewView = props.document.dirtyView
+    props.document.clearViewPreview()
   }
 
 </script>

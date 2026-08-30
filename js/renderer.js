@@ -275,6 +275,7 @@ export default class Renderer {
     if(!vec) return
     const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.activeCamera.position)
     this.setView(cameraTarget, vec)
+    this.reportViewChange()
   }
 
   lookAt(plane, report=true) {
@@ -320,6 +321,7 @@ export default class Renderer {
     const polePosition = this.poleSafePosition(position, target)
     this.cameraTarget = polePosition || position
     this.viewControlsTarget = target
+    this.dualCamera.retarget(target, this.cameraTarget)
     if(polePosition) {
       camera.updateMatrixWorld()
       this.cameraTransitionUp = new THREE.Vector3()

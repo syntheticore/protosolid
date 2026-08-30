@@ -32,7 +32,12 @@
 
         h1 View
 
-        ViewChooser(:document="document")
+        ViewChooser(
+          :document="document"
+          :projection-mode="projectionMode"
+          :display-mode="displayMode"
+          :color-mode="colorMode"
+        )
 
         .buttons
 
@@ -343,12 +348,23 @@
       document: {
         immediate: true,
         handler: function(document, oldDocument) {
-          if(oldDocument) oldDocument.activeView = oldDocument.activeView || oldDocument.dirtyView
+          if(oldDocument) {
+            oldDocument.clearViewPreview()
+            oldDocument.activeView = oldDocument.activeView || oldDocument.dirtyView
+          }
           if(!document.activeView) {
             document.activeView = document.views[3]
           }
           this.highlight = null
         },
+      },
+
+      'document.activeView': function(view) {
+        const settings = view?.displaySettings
+        if(!settings) return
+        if(this.projectionModes[settings.projectionMode]) this.projectionMode = settings.projectionMode
+        if(this.displayModes[settings.displayMode]) this.displayMode = settings.displayMode
+        if(this.colorModes[settings.colorMode]) this.colorMode = settings.colorMode
       },
     },
 
@@ -360,22 +376,25 @@
       effectiveColorMode: function() {
         if(this.document.activeSimulation) return this.document.activeSimulation.mode
         if(this.activeTool?.interferenceMode) return 'interference'
+        const savedMode = this.document.previewView?.displaySettings?.colorMode
         return this.activeTool?.diagnosticMode
           ? `diagnostic:${this.activeTool.diagnosticMode}:${this.activeTool.draftDirection}:${this.activeTool.zebraFrequency}`
-          : this.previewColorMode || this.colorMode
+          : this.previewColorMode || (this.colorModes[savedMode] && savedMode) || this.colorMode
       },
 
       effectiveProjectionMode: function() {
-        return this.previewProjectionMode || this.projectionMode
+        const savedMode = this.document.previewView?.displaySettings?.projectionMode
+        return this.previewProjectionMode || (this.projectionModes[savedMode] && savedMode) || this.projectionMode
       },
 
       effectiveDisplayMode: function() {
         if(this.document.activeSimulation) return 'shaded'
         const exportConfig = this.document.activeExportConfig
         if(exportConfig && exportConfig.format != 'STEP') return 'exportPreview'
+        const savedMode = this.document.previewView?.displaySettings?.displayMode
         return this.activeTool?.diagnosticMode || this.activeTool?.interferenceMode
           ? 'shaded'
-          : this.previewDisplayMode || this.displayMode
+          : this.previewDisplayMode || (this.displayModes[savedMode] && savedMode) || this.displayMode
       },
     },
 

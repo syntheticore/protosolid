@@ -71,7 +71,6 @@ class Tool {
     this.snapToPoints = false
     this.localSpace = false
     this.cursor = 'auto'
-    this.acceptsEmptySpace = false
   }
 
   click(vec, coords) {}
@@ -83,7 +82,7 @@ class Tool {
   mouseUp(vec, coords) {
     const lastCoords = this.lastCoords
     this.lastCoords = null
-    if((!vec && !this.acceptsEmptySpace) || !lastCoords ||
+    if(!vec || !lastCoords ||
       coords.distanceTo(lastCoords) > dragThreshold) return this.viewport.renderer.render()
     this.click(vec, coords)
     // window.gc && window.gc()
@@ -457,8 +456,6 @@ export class InterferenceTool extends Tool {
 class HighlightTool extends Tool {
   constructor(component, viewport, selectors) {
     super(component, viewport)
-    // Screen-space picking must also run on a miss so an old highlight clears.
-    this.probesSurface = true
     this.setSelectors(selectors)
   }
 
@@ -517,8 +514,6 @@ class HighlightTool extends Tool {
 export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, [])
-    // Selection clearing does not require a projectable point under the cursor.
-    this.acceptsEmptySpace = true
     this.localSpace = true
     this.preferPointObjects = true
     this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'solid'])

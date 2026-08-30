@@ -784,7 +784,7 @@
           try { e.currentTarget.setPointerCapture(e.pointerId) } catch(_) {}
         }
         const [vec, coords] = this.snap(e)
-        if(vec || this.activeTool.acceptsEmptySpace) this.activeTool.mouseDown(vec, coords, e)
+        if(vec) this.activeTool.mouseDown(vec, coords, e)
       },
 
       handleMouseDown: function(e, handle) {
@@ -908,7 +908,6 @@
 
       mouseLeave: function() {
         this.thermalProbe = null
-        this.$emit('update:highlight', null)
       },
 
       keyDown: function(key) {

@@ -271,7 +271,7 @@ export default class Renderer {
   }
 
   setPivot(coords) {
-    const vec = this.fromScreen(coords)
+    const vec = this.fromScreen(coords, true)
     if(!vec) return
     const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.activeCamera.position)
     this.setView(cameraTarget, vec)
@@ -546,12 +546,7 @@ export default class Renderer {
     return this.raycaster.intersectObjects(
       includeInactive ? this.scene.children : this.traceables.children,
       true,
-    ).filter(({ object }) => {
-      for(let current = object; current; current = current.parent) {
-        if(!current.visible) return false
-      }
-      return true
-    })
+    )
   }
 
   intersectScreenPlane(coords, plane) {
@@ -560,8 +555,15 @@ export default class Renderer {
     return this.raycaster.ray.intersectPlane(plane, new THREE.Vector3())
   }
 
-  fromScreen(coords) {
-    const intersects = this.hitTest(coords).filter(obj => obj.object.alcProjectable )
+  fromScreen(coords, visibleOnly=false) {
+    const intersects = this.hitTest(coords).filter(({ object }) => {
+      if(!object.alcProjectable) return false
+      if(!visibleOnly) return true
+      for(let current = object; current; current = current.parent) {
+        if(!current.visible) return false
+      }
+      return true
+    })
     const hit = intersects[0]
     return hit && hit.point
   }

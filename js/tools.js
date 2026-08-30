@@ -47,6 +47,18 @@ import materials, { DRAFT_DIRECTIONS } from './materials.js'
 
 const dragThreshold = 2
 const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
+const immediateSelectionVolumeRatio = 8
+
+function boundingBoxVolume(solid) {
+  const bounds = new THREE.Box3()
+  solid.faces().forEach(face => {
+    const mesh = face.mesh?.()
+    if(mesh) bounds.expandByObject(mesh)
+  })
+  if(bounds.isEmpty()) return
+  const size = bounds.getSize(new THREE.Vector3())
+  return size.x * size.y * size.z
+}
 
 
 class Tool {
@@ -452,12 +464,13 @@ class HighlightTool extends Tool {
 
   orderItems(items) { return items }
 
+  shouldPickImmediately(_items) { return false }
+
   async mouseMove(vec, coords) {
     if(this.viewport.hoveredHandle || this.viewport.hoveredDimension) return this.viewport.renderer.render()
     if(this.viewport.pickingPath) this.viewport.updatePath(this.viewport.pickingPath)
     const object = await this.getObject(coords, true)
     this.viewport.$emit('update:highlight', object)
-    if(object && object.id) console.log(object.id)
   }
 
   getObject(coords, any) {
@@ -472,7 +485,6 @@ class HighlightTool extends Tool {
           if(mapped.length) return mapped
           return obj.alcObject
         })
-        // .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
       const handle = this.viewport.hoveredHandle
       if(handle && this.realSelectors.includes('point') && !this.preferPointObjects) {
@@ -482,7 +494,7 @@ class HighlightTool extends Tool {
         this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
       if(acceptsInput) items = items.filter(item => acceptsInput(item))
       items = this.orderItems(items)
-      if(items.length > 1 && !any) {
+      if(items.length > 1 && !any && !this.shouldPickImmediately(items)) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({
           items,
@@ -503,6 +515,19 @@ export class ManipulationTool extends HighlightTool {
     this.localSpace = true
     this.preferPointObjects = true
     this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'solid'])
+  }
+
+  shouldPickImmediately(items) {
+    // Items retain raycast order, so the first solid has the nearest hit.
+    const [closest, ...others] = items
+    if(!(closest instanceof Solid) || others.some(item => !(item instanceof Solid))) return false
+
+    const closestVolume = boundingBoxVolume(closest)
+    if(!Number.isFinite(closestVolume) || closestVolume <= EPSILON) return false
+    return others.every(item => {
+      const volume = boundingBoxVolume(item)
+      return Number.isFinite(volume) && volume >= closestVolume * immediateSelectionVolumeRatio
+    })
   }
 
   async click(vec, coords) {
@@ -585,7 +610,6 @@ export class ManipulationTool extends HighlightTool {
     ) {
       this.boxDrag = { start: coords.clone() }
     }
-    console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
     // A curve body has no single snap handle under the pointer. Snapping it
     // as though its first handle were being dragged would create surprising

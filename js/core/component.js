@@ -234,21 +234,20 @@ export class Component {
     return this.creator.material || (this.parent && this.parent.getMaterial())
   }
 
-  // Returns zero for empty components,
-  // but undefined when weight could not be determined
+  // Returns zero when the component subtree has no solids,
+  // but undefined when any solid has no effective material.
   getWeight() {
-    if(!this.compound.solids().length) return 0.0
-    if(!this.creator.material) return
-    try {
-      let weight = this.children.reduce((acc, child) => {
-        const childWeight = child.getWeight()
-        if(childWeight === undefined) throw 'no weight'
-        return acc + childWeight
-      }, 0.0)
-      return weight + this.compound.volume() * this.creator.material.density
-    } catch(e) {
-      if(e !== 'no weight') throw e
+    let weight = 0.0
+    for(const child of this.children) {
+      const childWeight = child.getWeight()
+      if(childWeight === undefined) return
+      weight += childWeight
     }
+
+    if(!this.compound.solids().length) return weight
+    const material = this.getMaterial()
+    if(!material) return
+    return weight + this.compound.volume() * material.density
   }
 
   getVolume() {

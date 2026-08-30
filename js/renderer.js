@@ -289,6 +289,7 @@ export default class Renderer {
   }
 
   zoomToFit(objects, report=true, view=null) {
+    const fitPadding = 0.9
     objects ||= [this.world]
     const box = new THREE.Box3()
     objects.forEach(obj => box.expandByObject(obj) )
@@ -301,7 +302,7 @@ export default class Renderer {
 
     if(this.activeCamera == this.cameraOrtho) {
       const vFOV = this.camera.getEffectiveFOV() * THREE.MathUtils.DEG2RAD
-      const distanceToFit = radius / Math.sin(vFOV * 0.5) * 1.6
+      const distanceToFit = radius / Math.sin(vFOV * 0.5) * fitPadding
       this.setView(target.clone().addScaledVector(direction, distanceToFit), target)
 
     } else {
@@ -309,7 +310,7 @@ export default class Renderer {
       const hFOV = Math.atan(Math.tan(vFOV * 0.5) * this.camera.aspect) * 2.0
       const fov = this.camera.aspect > 1.0 ? vFOV : hFOV
       const distanceToFit = radius / (Math.sin(fov * 0.5))
-      const dir = direction.multiplyScalar(distanceToFit * 1.6)
+      const dir = direction.multiplyScalar(distanceToFit * fitPadding)
       const position = target.clone().add(dir)
       this.setView(position, target)
     }

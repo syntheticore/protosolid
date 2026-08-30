@@ -86,6 +86,14 @@
             @update:chosen="update"
           )
 
+          button.button.file-input(
+            v-if="setting.type == 'file'"
+            :title="activeFeature[key] || 'Choose a ProtoSolid document'"
+            @click="chooseFile(key)"
+          )
+            Icon(icon="file-import")
+            span {{ activeFeature.fileLabel?.(key) || 'Choose file…' }}
+
           //- MaterialSelector(
           //-   v-if="setting.type == 'material'"
           //-   v-model:chosen="activeFeature[key]"
@@ -120,6 +128,7 @@
   .feature-box
     font-size: 12px
     display: flex
+
     &::before
       left: 24px
 
@@ -131,11 +140,13 @@
     background: $dark1
     padding: 0 10px
     min-width: 60px
+
     svg
       font-size: 21px
       color: $bright1
       // transition: all 0.15s
       filter: none
+
     .title
       color: $bright1
       font-size: 11px
@@ -155,27 +166,36 @@
     color: $bright1
     font-weight: bold
     white-space: nowrap
+
     & + .setting
       margin-left: 12px
+
     &:nth-of-type(1) .picker
       background: $blue
       border-color: lighten($blue, 75%)
+
     &:nth-of-type(2) .picker
       background: $purple
       border-color: lighten($purple, 75%)
+
     &:nth-of-type(3) .picker
       background: $pink
       border-color: lighten($pink, 75%)
+
     &:nth-of-type(4) .picker
       background: $orange
       border-color: lighten($orange, 75%)
+
     &:nth-of-type(5) .picker
       background: $green
       border-color: lighten($green, 75%)
+
     > :not(span)
       margin-top: 6px
+
     .has-header &
       flex-direction: column-reverse
+
       > :not(span)
         margin-top: 0
         margin-bottom: 8px
@@ -184,20 +204,35 @@
     .icon-toggle
       flex: 1 1 auto
 
+  .file-input
+    align-items: center
+    display: flex
+    max-width: 180px
+    min-height: 28px
+
+    span
+      overflow: hidden
+      text-overflow: ellipsis
+      white-space: nowrap
+
   .picker
     width: 24px
     height: 24px
     border: 7px solid white
     border-radius: 99px
     transition: all 0.06s
+
     &:hover
       border-width: 0px
+
     &.active
       animation: 2s infinite linear rotate
       border-style: dotted
       border-width: 2px !important
+
     &.filled
       border-width: 2px
+
     @keyframes rotate
       100%
         transform: rotate(360deg)
@@ -219,17 +254,24 @@
       padding: 0px 9px
       padding-left: 11px
       transition: all 0.15s
+
       &:hover
+
         &.ok
           color: $confirm
+
         &.cancel
           color: $cancel
+
       &:active
+
         &.ok
           color: darken($confirm, 40%)
+
         &.cancel
           color: darken($cancel, 15%)
         transition: none
+
       &:disabled
         color: $bright1 * 0.5 !important
 
@@ -241,12 +283,15 @@
     transition: all 0.25s
     text-align: center
     white-space: nowrap
+
     &:not(.has-header)
       margin-left: 0
       border-bottom-left-radius: 4px
+
     &.error
       color: lighten($red, 65%)
       background: darken($red, 50%)
+
     &.warning
       color: lighten($warn, 65%)
       background: darken($warn, 50%)
@@ -323,13 +368,17 @@
       this.startValues = this.activeFeature.getValues()
       this.startExpressions = { ...this.activeFeature.expressions }
       this.activateBaseTool()
-      setTimeout(() => {
+      setTimeout(async () => {
+        const activation = this.activeFeature.activate?.()
         this.updatePaths()
         // if(this.activeFeature.error) this.update()
-        this.error = this.activeFeature.error
+        this.refreshError()
         this.activeFeature.updateGizmos()
         this.previewFeature()
         this.pickAll()
+        await activation
+        if(this.destroyed) return
+        this.refreshError()
       }, 0)
     },
 
@@ -352,18 +401,41 @@
 
     methods: {
       pickAll: function() {
-        const pickerKeys = Object.keys(this.activeFeature.settings).filter(key =>
-          !this.activeFeature[key] && this.activeFeature.needsPicker(key)
+        const inputs = Object.entries(this.activeFeature.settings).filter(([key, setting]) =>
+          !this.activeFeature[key] && (
+            this.activeFeature.needsPicker(key) ||
+            (!this.showHeader && setting.type == 'file' && setting.autoActivate)
+          )
         )
         let chain = Promise.resolve()
-        for(const key of pickerKeys) {
-          const setting = this.activeFeature.settings[key]
-          chain = chain.then(() => this.pick(setting.type, key) )
+        for(const [key, setting] of inputs) {
+          chain = chain.then(() => setting.type == 'file' ?
+            this.chooseFile(key) : this.pick(setting.type, key)
+          )
         }
       },
 
       settingOptions: function(key, setting) {
         return this.activeFeature.settingOptions?.(key) || setting.options
+      },
+
+      chooseFile: async function(key) {
+        try {
+          await this.activeFeature.chooseFile?.(key)
+          this.update()
+        } catch(error) {
+          if(error == 'canceled') return
+          this.activeFeature.activationError = {
+            type: 'error',
+            msg: error?.message || error?.msg || String(error),
+          }
+          this.refreshError()
+        }
+      },
+
+      refreshError: function() {
+        const errors = [this.activeFeature.error, this.activeFeature.activationError].filter(Boolean)
+        this.error = errors.find(error => error.type == 'error') || errors[0] || null
       },
 
       pick: function(type, key, restart) {
@@ -530,7 +602,7 @@
         this.document.timeline.invalidateFeature(this.activeFeature)
         this.document.regenerate()
         this.activeFeature.updateGizmos()
-        this.error = this.activeFeature.error
+        this.refreshError()
         this.previewFeature()
       },
 
@@ -553,6 +625,7 @@
         this.status = 'confirmed'
         if(this.error) this.activeFeature.repair()
         if(!this.showHeader) this.activeFeature.confirm()
+        this.activeFeature.commit?.()
         this.close()
       },
 

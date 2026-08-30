@@ -427,7 +427,8 @@
           [...this.document.selection.items].forEach(item => {
             const type = item.typename()
             if(type == 'Solid') {
-              this.document.deleteSolid(item)
+              const component = item.component || this.document.getComponent(item.compound?.componentId)
+              if(!component?.readOnly) this.document.deleteSolid(item)
             }
           })
         }

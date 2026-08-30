@@ -240,6 +240,7 @@
 
   import {
     CreateSketchFeature,
+    PlaceFeature,
     PlaneFeature,
     ExtrudeFeature,
     FilletFeature,
@@ -348,6 +349,7 @@
                 icon: 'calculator',
                 isDisabled: () => !!this.document.activeComponent.creator.variant,
               },
+              { title: 'Place', feature: PlaceFeature },
             ]
           },
           {

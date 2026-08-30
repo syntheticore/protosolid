@@ -144,6 +144,7 @@ export class Component {
     // produced by assembly manipulation and is intentionally not serialized.
     this.designTransform = null
     this.transform = null
+    this.readOnly = false
     this.compound = new Compound(this.id)
     this.sketches = []
     this.helpers = [
@@ -175,6 +176,7 @@ export class Component {
     Object.assign(clone, {
       designTransform: this.designTransform && this.designTransform.clone(),
       transform: null,
+      readOnly: this.readOnly,
       compound: this.compound.cloneCached(),
       sketches: [...this.sketches],
       helpers: [...this.helpers],
@@ -308,6 +310,7 @@ export function createComponentInstance(parent, source, id, designTransform) {
   const component = new Component(parent, id)
   component.instanceOf = source.sourceId()
   component.sourceOccurrence = source.id
+  component.readOnly = source.readOnly
   component.creator = occurrenceDefinition(source.creator)
   component.designTransform = designTransform ? designTransform.clone() : source.localTransform()
   component.compound = source.compound.cloneForComponent(component.id)

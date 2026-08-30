@@ -192,6 +192,8 @@ export class Timeline {
             createStructuralInstance(parent, source, `${feature.id}/instance/${transformIndex}/${sourceIndex}`)
           }
         })
+      } else if(feature.addStructuralComponents) {
+        feature.addStructuralComponents(tree)
       }
     })
     return tree

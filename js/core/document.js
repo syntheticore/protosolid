@@ -94,6 +94,7 @@ export default class Document extends Emitter {
   }
 
   createComponent(parent) {
+    if(parent.readOnly) return
     const feature = new CreateComponentFeature(this, parent.sourceId())
     this.addFeature(feature)
     const newComp = this.top().findChild(feature.id)
@@ -101,12 +102,13 @@ export default class Document extends Emitter {
   }
 
   createComponentInstance(component) {
-    if(!component.parent) return
+    if(!component.parent || component.readOnly) return
     const feature = new CreateComponentInstanceFeature(this, component.sourceId(), component.parent.id)
     this.addFeature(feature)
   }
 
   convertBodyToComponent(component, body) {
+    if(component.readOnly) return
     const feature = new ConvertBodyToComponentFeature(this)
     feature.componentId = component.sourceId()
     feature.body = () => body.reference()
@@ -122,6 +124,7 @@ export default class Document extends Emitter {
   }
 
   activateComponent(comp, closeSimulation = true) {
+    if(comp?.readOnly) return
     if(closeSimulation) this.activateSimulation(null)
     if(comp) comp.creator.hidden = false
     this.activeComponent = comp

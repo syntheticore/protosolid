@@ -20,7 +20,7 @@
 
         h2 Solid {{ index + 1 }}
 
-        .controls.wide
+        .controls.wide(v-if="!component.readOnly")
 
           Icon(
             icon="box" fixed-width
@@ -58,6 +58,7 @@
   }
 
   function removeSolid() {
+    if(props.component.readOnly) return
     const feature = new RemoveSolidsFeature(props.document)
     feature.solids = () => [props.solid.reference()]
     props.document.addFeature(feature)
@@ -65,6 +66,7 @@
   }
 
   function convertToComponent() {
+    if(props.component.readOnly) return
     props.document.convertBodyToComponent(props.component, props.solid)
   }
 

@@ -702,8 +702,8 @@
       },
 
       getMouseCoords: function(e) {
-        var rect = this.$refs.canvas.getBoundingClientRect()
-        return new THREE.Vector2(e.clientX, e.clientY - rect.top)
+        const rect = this.$refs.canvas.getBoundingClientRect()
+        return new THREE.Vector2(e.clientX - rect.left, e.clientY - rect.top)
       },
 
       doubleClick: function(e) {

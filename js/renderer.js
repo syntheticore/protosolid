@@ -535,8 +535,8 @@ export default class Renderer {
   getCanvasCoords(mouseCoords) {
     const canvas = this.renderer.domElement
     return new THREE.Vector2(
-      (mouseCoords.x - 2) / canvas.offsetWidth * 2 - 1,
-      (-mouseCoords.y + 2) / canvas.offsetHeight * 2 + 1,
+      mouseCoords.x / canvas.offsetWidth * 2 - 1,
+      -mouseCoords.y / canvas.offsetHeight * 2 + 1,
     )
   }
 
@@ -546,7 +546,12 @@ export default class Renderer {
     return this.raycaster.intersectObjects(
       includeInactive ? this.scene.children : this.traceables.children,
       true,
-    )
+    ).filter(({ object }) => {
+      for(let current = object; current; current = current.parent) {
+        if(!current.visible) return false
+      }
+      return true
+    })
   }
 
   intersectScreenPlane(coords, plane) {

@@ -20,8 +20,8 @@ mod math;
 #[cfg(not(feature = "legacy"))]
 pub use kernel::{
     Circle2, Compound, CreationRole, Curve2, EdgeHandle, FaceHandle, FilletOptions, Frame3, Line2,
-    MassProperties, Plane3, Polyline, Profile, ProfileBoundary, Resolution, Solid, Tessellate,
-    TessellationOptions, TriangleMesh, TrimmedCurve2, VertexHandle, Wire2,
+    MassProperties, Plane3, Polyline, Profile, ProfileBoundary, Resolution, RevolvedSurface3,
+    Solid, Tessellate, TessellationOptions, TriangleMesh, TrimmedCurve2, VertexHandle, Wire2,
 };
 pub use kernel::{Kernel, KernelError, KernelResult, ModelTolerance};
 #[cfg(not(feature = "legacy"))]

@@ -5,6 +5,7 @@ use crate::{Point2, Point3, Vec4};
 use super::{
     Circle3, Curve2, Curve3, DiagnosticKind, DomainBounds, KernelError, KernelResult, Line2, Line3,
     ModelTolerance, NurbsCurve2, Plane3, Surface3, SurfaceIntersectionCurve,
+    SurfaceProjectionPcurve2,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -788,29 +789,37 @@ fn plane_cylinder(
     let denominator = plane.normal().dot(cylinder.axis());
     let v = plane.normal().dot(plane.origin() - cylinder.origin()) / denominator;
     let center = cylinder.origin() + cylinder.axis() * v;
-    let x_radius = plane.u() * cylinder.radius();
-    let y_radius = plane.v() * cylinder.radius();
-    let curve = Circle3::new(center, x_radius, y_radius, tolerance)?;
-    let cylinder_projection = Surface3::Cylinder(cylinder).project(center + x_radius, tolerance)?;
-    let cylinder_tangent = cylinder.evaluate(cylinder_projection.parameters.0, v)?.du;
-    let direction = if cylinder_tangent.dot(y_radius) >= 0.0 {
-        1.0
-    } else {
-        -1.0
-    };
+    // Plane parameter axes retain application-scale lengths (for example, an
+    // extruded side face commonly uses the profile edge and extrusion vector
+    // directly).  The spatial section must therefore use the cylinder's
+    // orthonormal radial frame, not `plane.u/v * radius`.
+    let curve: Curve3 =
+        Circle3::new(center, cylinder.x_radius(), cylinder.y_radius(), tolerance)?.into();
+    let range = super::ParameterRange::new(0.0, std::f64::consts::TAU)?;
     let plane_center = plane.project(center)?.parameters;
+    let plane_x = plane.project(center + cylinder.x_radius())?.parameters;
+    let plane_y = plane.project(center + cylinder.y_radius())?.parameters;
+    let guide_radius = [
+        (plane_x.0 - plane_center.0).hypot(plane_x.1 - plane_center.1),
+        (plane_y.0 - plane_center.0).hypot(plane_y.1 - plane_center.1),
+    ]
+    .into_iter()
+    .fold(tolerance.parameter.max(f64::EPSILON), f64::max);
+    // A scaled plane maps the spatial circle to an ellipse in UV.  Retain the
+    // exact 3D circle and obtain its exact affine inverse on the plane; the
+    // circle below is only the local branch guide for that inverse.
+    let plane_pcurve: Curve2 = SurfaceProjectionPcurve2::new(
+        curve.clone(),
+        Surface3::Plane(plane),
+        super::Circle2::new(Point2::new(plane_center.0, plane_center.1), guide_radius)?.into(),
+        range,
+        tolerance,
+    )?
+    .into();
     Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
-        curve: curve.into(),
-        first_pcurve: super::Circle2::new(
-            Point2::new(plane_center.0, plane_center.1),
-            cylinder.radius(),
-        )?
-        .into(),
-        second_pcurve: Line2::new(
-            Point2::new(cylinder_projection.parameters.0, v),
-            crate::Vec2::new(direction, 0.0),
-        )?
-        .into(),
+        curve,
+        first_pcurve: plane_pcurve,
+        second_pcurve: Line2::new(Point2::new(0.0, v), crate::Vec2::new(1.0, 0.0))?.into(),
         achieved_error: 0.0,
     }]))
 }
@@ -1478,6 +1487,32 @@ pub(crate) fn smooth_nurbs_guide(
     );
     knots.extend(vec![range.end; degree + 1]);
     NurbsCurve2::new(degree, points.to_vec(), vec![1.0; points.len()], knots)
+}
+
+/// Builds an interpolating piecewise-linear guide for difficult local inverse
+/// branches. The guide is not modeled geometry; exact evaluation is still
+/// corrected against both retained surfaces.
+pub(crate) fn interpolating_nurbs_guide(
+    points: &[Point2],
+    parameters: &[f64],
+) -> KernelResult<NurbsCurve2> {
+    if points.len() < 2 {
+        return Err(unsupported(
+            "surface-intersection guide needs at least two points",
+        ));
+    }
+    if parameters.len() != points.len()
+        || parameters.iter().any(|parameter| !parameter.is_finite())
+        || parameters.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(unsupported(
+            "interpolating surface guide parameters must strictly increase",
+        ));
+    }
+    let mut knots = vec![parameters[0]; 2];
+    knots.extend(parameters[1..parameters.len() - 1].iter().copied());
+    knots.extend(vec![parameters[parameters.len() - 1]; 2]);
+    NurbsCurve2::new(1, points.to_vec(), vec![1.0; points.len()], knots)
 }
 
 fn multiply_3x4_by_transpose(matrix: [[f64; 4]; 3]) -> [[f64; 3]; 3] {

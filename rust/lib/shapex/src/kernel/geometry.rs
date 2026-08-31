@@ -451,10 +451,7 @@ impl Curve2 {
                 bounds: DomainBounds::Bounded(curve.curve.range()),
                 period: None,
             },
-            Self::SurfaceProjection(curve) => ParameterDomain {
-                bounds: DomainBounds::Bounded(curve.range),
-                period: None,
-            },
+            Self::SurfaceProjection(curve) => curve.domain(),
         }
     }
 
@@ -553,7 +550,7 @@ impl Curve2 {
                     .fold(1.0_f64, f64::max);
                 let absolute_tolerance =
                     tolerance.max(f64::EPSILON.sqrt() * coordinate_scale.powi(2) * 64.0);
-                super::integration::adaptive_gauss_kronrod(
+                let exact = super::integration::adaptive_gauss_kronrod(
                     range.start,
                     range.end,
                     |parameter| Ok([integrand(parameter)?]),
@@ -561,7 +558,34 @@ impl Curve2 {
                     16,
                     "adaptive exact p-curve area integration did not converge",
                 )
-                .map(|value| value[0])
+                .map(|value| value[0]);
+                exact.or_else(|error| {
+                    // Signed area is used only to establish loop winding. At a
+                    // tangential trim endpoint the exact inverse derivative can
+                    // be singular even though the retained branch guide has an
+                    // unambiguous winding; integrate that guide geometrically
+                    // without substituting it for the modeled p-curve.
+                    let guide = match self {
+                        Self::SurfaceIntersection(pcurve) if pcurve.first => {
+                            &pcurve.curve.first_pcurve
+                        }
+                        Self::SurfaceIntersection(pcurve) => &pcurve.curve.second_pcurve,
+                        Self::SurfaceProjection(pcurve) => &pcurve.guide,
+                        _ => unreachable!(),
+                    };
+                    let mut previous = guide
+                        .evaluate(range.start)
+                        .map_err(|_| error.clone())?
+                        .point;
+                    let mut area = 0.0;
+                    for index in 1..=64 {
+                        let parameter = range.start + range.span() * index as f64 / 64.0;
+                        let next = guide.evaluate(parameter).map_err(|_| error.clone())?.point;
+                        area += 0.5 * (previous.x * next.y - previous.y * next.x);
+                        previous = next;
+                    }
+                    Ok(area)
+                })
             }
         }
     }
@@ -1595,7 +1619,20 @@ impl SurfaceProjectionPcurve2 {
         self.range
     }
 
+    fn domain(&self) -> ParameterDomain {
+        let period = self
+            .curve
+            .domain()
+            .period
+            .filter(|period| self.range.span().abs() + self.tolerance.parameter >= *period);
+        ParameterDomain {
+            bounds: DomainBounds::Bounded(self.range),
+            period,
+        }
+    }
+
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<(f64, f64)> {
+        let parameter = self.domain().normalize(parameter);
         if !self.range.contains(parameter, self.tolerance) {
             return Err(invalid(
                 "surface-projection parameter lies outside its certified range",
@@ -1884,10 +1921,7 @@ impl SurfaceIntersectionCurve {
             let Some(delta) =
                 solve_linear_4(matrix, [-residual.x, -residual.y, -residual.z, -gauge])
             else {
-                return Err(KernelError::new(
-                    DiagnosticKind::NumericalFailure,
-                    "surface-intersection corrector is singular",
-                ));
+                break;
             };
             let mut accepted = false;
             let previous = residual.magnitude2() + gauge * gauge;
@@ -1925,9 +1959,31 @@ impl SurfaceIntersectionCurve {
                 break;
             }
         }
+        let first = self.first_surface.evaluate(parameters[0], parameters[1])?;
+        let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
+        let scale = first
+            .point
+            .to_vec()
+            .magnitude()
+            .max(second.point.to_vec().magnitude())
+            .max(1.0);
+        if first.point.distance(second.point)
+            <= self
+                .achieved_error
+                .max(self.tolerance.linear_at_scale(scale))
+        {
+            return Ok(parameters);
+        }
         Err(KernelError::new(
             DiagnosticKind::NumericalFailure,
-            "surface-intersection corrector did not converge",
+            format!(
+                "surface-intersection corrector did not converge at parameter {parameter} (guide residual {}, corrected residual {})",
+                self.first_surface
+                    .evaluate(guide[0], guide[1])?
+                    .point
+                    .distance(self.second_surface.evaluate(guide[2], guide[3])?.point),
+                first.point.distance(second.point),
+            ),
         ))
     }
 
@@ -2458,6 +2514,21 @@ pub struct Torus3 {
     x_major: Vec3,
     y_major: Vec3,
     minor_radius: f64,
+}
+
+/// An exact surface of revolution whose meridian is retained as a 2D curve.
+///
+/// The profile uses `(radius, axial_distance)` coordinates in `frame`; the
+/// first surface parameter is the revolution angle and the second is the
+/// profile-curve parameter. Canonical cylinders, cones, spheres, and tori are
+/// represented by their dedicated types instead, while this type preserves
+/// rotational structure for more general analytical or rational profiles.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevolvedSurface3 {
+    frame: Frame3,
+    profile: Curve2,
+    profile_range: ParameterRange,
+    tolerance: ModelTolerance,
 }
 
 /// Validated tensor-product rational B-spline surface.
@@ -3315,6 +3386,145 @@ impl Torus3 {
     }
 }
 
+impl RevolvedSurface3 {
+    pub fn new(
+        frame: Frame3,
+        profile: Curve2,
+        profile_range: ParameterRange,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Self> {
+        tolerance.validate()?;
+        if !profile
+            .domain()
+            .contains_range(profile_range, tolerance.parameter)
+        {
+            return Err(invalid(
+                "revolved-surface profile does not cover its trim range",
+            ));
+        }
+        let surface = Self {
+            frame,
+            profile,
+            profile_range,
+            tolerance,
+        };
+        for index in 0..=8 {
+            let parameter = profile_range.start + profile_range.span() * index as f64 / 8.0;
+            let profile = surface.profile.evaluate(parameter)?;
+            let scale = profile.point.x.abs().max(profile.point.y.abs()).max(1.0);
+            if profile.point.x <= tolerance.linear_at_scale(scale)
+                || profile.first_derivative.magnitude() <= tolerance.linear_at_scale(scale)
+            {
+                return Err(invalid(
+                    "revolved-surface profile must remain regular and clear of its axis",
+                ));
+            }
+        }
+        Ok(surface)
+    }
+
+    pub fn frame(&self) -> Frame3 {
+        self.frame
+    }
+
+    pub fn axis(&self) -> Axis3 {
+        self.frame.axis()
+    }
+
+    pub fn profile(&self) -> &Curve2 {
+        &self.profile
+    }
+
+    pub fn profile_range(&self) -> ParameterRange {
+        self.profile_range
+    }
+
+    fn profile_domain(&self) -> ParameterDomain {
+        ParameterDomain {
+            bounds: DomainBounds::Bounded(self.profile_range),
+            period: self.profile.domain().period.filter(|period| {
+                self.profile_range.span().abs() + self.tolerance.parameter >= *period
+            }),
+        }
+    }
+
+    fn evaluate(&self, angle: f64, parameter: f64) -> KernelResult<SurfaceEvaluation> {
+        let parameter = self.profile_domain().normalize(parameter);
+        if !angle.is_finite() || !self.profile_range.contains(parameter, self.tolerance) {
+            return Err(invalid(
+                "revolved-surface parameter lies outside its domain",
+            ));
+        }
+        let profile = self.profile.evaluate(parameter)?;
+        let (sin, cos) = angle.sin_cos();
+        let radial = self.frame.x() * cos + self.frame.y() * sin;
+        let tangent = -self.frame.x() * sin + self.frame.y() * cos;
+        Ok(SurfaceEvaluation {
+            point: self.frame.origin()
+                + radial * profile.point.x
+                + self.frame.z() * profile.point.y,
+            du: tangent * profile.point.x,
+            dv: radial * profile.first_derivative.x + self.frame.z() * profile.first_derivative.y,
+            duu: -radial * profile.point.x,
+            duv: tangent * profile.first_derivative.x,
+            dvv: radial * profile.second_derivative.x
+                + self.frame.z() * profile.second_derivative.y,
+        })
+    }
+
+    fn project(&self, point: Point3) -> KernelResult<Projection2> {
+        if !finite_point(point) {
+            return Err(invalid("projection point must be finite"));
+        }
+        let delta = point - self.frame.origin();
+        let x = delta.dot(self.frame.x());
+        let y = delta.dot(self.frame.y());
+        let axial = delta.dot(self.frame.z());
+        let angle = if x == 0.0 && y == 0.0 {
+            0.0
+        } else {
+            y.atan2(x).rem_euclid(std::f64::consts::TAU)
+        };
+        let target = Point2::new((x * x + y * y).sqrt(), axial);
+        let mut parameter = (0..=32)
+            .map(|index| self.profile_range.start + self.profile_range.span() * index as f64 / 32.0)
+            .map(|parameter| {
+                self.profile
+                    .evaluate(parameter)
+                    .map(|value| (parameter, value.point.distance2(target)))
+            })
+            .collect::<KernelResult<Vec<_>>>()?
+            .into_iter()
+            .min_by(|first, second| first.1.total_cmp(&second.1))
+            .map(|candidate| candidate.0)
+            .ok_or_else(|| invalid("revolved-surface projection has no seed"))?;
+        for _ in 0..32 {
+            let value = self.profile.evaluate(parameter)?;
+            let residual = value.point - target;
+            let derivative =
+                value.first_derivative.magnitude2() + residual.dot(value.second_derivative);
+            if derivative.abs() <= f64::EPSILON * 256.0 {
+                break;
+            }
+            let next = (parameter - residual.dot(value.first_derivative) / derivative).clamp(
+                self.profile_range.start.min(self.profile_range.end),
+                self.profile_range.start.max(self.profile_range.end),
+            );
+            if (next - parameter).abs() <= self.tolerance.parameter {
+                parameter = next;
+                break;
+            }
+            parameter = next;
+        }
+        let projected = self.evaluate(angle, parameter)?.point;
+        Ok(Projection2 {
+            parameters: (angle, parameter),
+            point: projected,
+            distance: projected.distance(point),
+        })
+    }
+}
+
 /// Exact normal-offset definition for a regular parent surface. General NURBS
 /// offsets are not NURBS in closed form, so retaining the parent and signed
 /// distance is the non-approximating representation.
@@ -3834,6 +4044,7 @@ pub enum Surface3 {
     Cone(Cone3),
     Sphere(Sphere3),
     Torus(Torus3),
+    Revolved(RevolvedSurface3),
     Nurbs(NurbsSurface3),
     Offset(OffsetSurface3),
     RollingBall(RollingBallSurface3),
@@ -3905,6 +4116,16 @@ impl Surface3 {
                     period: Some(std::f64::consts::TAU),
                 },
             ],
+            Self::Revolved(surface) => [
+                ParameterDomain {
+                    bounds: DomainBounds::Bounded(ParameterRange {
+                        start: 0.0,
+                        end: std::f64::consts::TAU,
+                    }),
+                    period: Some(std::f64::consts::TAU),
+                },
+                surface.profile_domain(),
+            ],
             Self::Nurbs(surface) => surface.domains(),
             Self::Offset(surface) => surface.base.domains(),
             Self::RollingBall(surface) => [
@@ -3924,6 +4145,7 @@ impl Surface3 {
             Self::Cone(cone) => cone.evaluate(u, v),
             Self::Sphere(sphere) => sphere.evaluate(u, v),
             Self::Torus(torus) => torus.evaluate(u, v),
+            Self::Revolved(surface) => surface.evaluate(u, v),
             Self::Nurbs(surface) => surface.evaluate(u, v),
             Self::Offset(surface) => surface.evaluate(u, v),
             Self::RollingBall(surface) => surface.evaluate(u, v),
@@ -3963,6 +4185,7 @@ impl Surface3 {
             Self::Cone(cone) => cone.project(point),
             Self::Sphere(sphere) => sphere.project(point),
             Self::Torus(torus) => torus.project(point),
+            Self::Revolved(surface) => surface.project(point),
             Self::Nurbs(surface) => surface.project(point, tolerance),
             Self::Offset(surface) => surface.project(point),
             Self::RollingBall(surface) => surface.project(point),
@@ -4048,6 +4271,11 @@ impl From<Sphere3> for Surface3 {
 impl From<Torus3> for Surface3 {
     fn from(value: Torus3) -> Self {
         Self::Torus(value)
+    }
+}
+impl From<RevolvedSurface3> for Surface3 {
+    fn from(value: RevolvedSurface3) -> Self {
+        Self::Revolved(value)
     }
 }
 impl From<NurbsSurface3> for Surface3 {

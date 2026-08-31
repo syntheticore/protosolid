@@ -1001,6 +1001,7 @@ impl Compound {
                     Surface3::Cone(_)
                     | Surface3::Sphere(_)
                     | Surface3::Torus(_)
+                    | Surface3::Revolved(_)
                     | Surface3::Offset(_)
                     | Surface3::RollingBall(_) => None,
                 };
@@ -1254,6 +1255,7 @@ impl Compound {
                 Surface3::Cone(_)
                 | Surface3::Sphere(_)
                 | Surface3::Torus(_)
+                | Surface3::Revolved(_)
                 | Surface3::Offset(_)
                 | Surface3::RollingBall(_) => return Ok(false),
             }

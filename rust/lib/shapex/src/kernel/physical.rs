@@ -175,7 +175,10 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
             .map(|face| {
                 matches!(
                     face.surface(),
-                    Surface3::Nurbs(_) | Surface3::Offset(_) | Surface3::RollingBall(_)
+                    Surface3::Nurbs(_)
+                        | Surface3::Revolved(_)
+                        | Surface3::Offset(_)
+                        | Surface3::RollingBall(_)
                 )
             })
             .unwrap_or(true)
@@ -557,6 +560,7 @@ fn surface_kind(surface: &super::Surface3) -> &'static str {
         super::Surface3::Cone(_) => "cone",
         super::Surface3::Sphere(_) => "sphere",
         super::Surface3::Torus(_) => "torus",
+        super::Surface3::Revolved(_) => "revolved",
         super::Surface3::Nurbs(_) => "NURBS",
         super::Surface3::Offset(_) => "offset",
         super::Surface3::RollingBall(_) => "rolling-ball",

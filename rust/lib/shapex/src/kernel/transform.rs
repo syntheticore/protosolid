@@ -6,7 +6,7 @@ use crate::{Matrix3, Point3, Quaternion, Vec3};
 
 use super::validation::ValidationMode;
 use super::{
-    ChangeKind, Cone3, Curve3, Cylinder3, DiagnosticKind, FaceId, Kernel, KernelError,
+    ChangeKind, Cone3, Curve3, Cylinder3, DiagnosticKind, FaceId, Frame3, Kernel, KernelError,
     KernelResult, Line3, ModelTolerance, NurbsCurve3, NurbsSurface3, OffsetSurface3,
     OperationHistory, Plane3, RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3,
     SurfaceIntersectionCurve, Torus3,
@@ -260,6 +260,21 @@ fn transform_surface(
             tolerance,
         )?
         .into(),
+        Surface3::Revolved(surface) => {
+            let frame = surface.frame();
+            super::RevolvedSurface3::new(
+                Frame3::new(
+                    transform.transform_point(frame.origin()),
+                    transform.transform_vector(frame.x()),
+                    transform.transform_vector(frame.y()),
+                    tolerance,
+                )?,
+                surface.profile().clone(),
+                surface.profile_range(),
+                tolerance,
+            )?
+            .into()
+        }
         Surface3::Nurbs(surface) => NurbsSurface3::new(
             surface.degrees(),
             surface

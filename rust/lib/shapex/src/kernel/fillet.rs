@@ -9,11 +9,15 @@ use super::history::ChangeKind;
 use super::topology::Edge;
 use super::validation::{validate, ValidationMode};
 use super::{
-    CoedgeId, Curve2, Curve3, DiagnosticKind, DomainBounds, EdgeId, FaceId, FaceOrientation,
-    Frame3, IntersectionSet, KernelError, KernelResult, Line2, ModelTolerance, ParameterRange,
-    RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3, SurfaceIntersectionCurve,
-    SurfaceProjectionPcurve2, SurfaceSurfaceCurve, VertexId,
+    Circle2, CoedgeId, Curve2, Curve3, Cylinder3, DiagnosticKind, DomainBounds, EdgeId, FaceId,
+    FaceOrientation, Frame3, IntersectionSet, KernelError, KernelResult, Line2, ModelTolerance,
+    ParameterRange, RevolvedSurface3, RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3,
+    SurfaceIntersectionCurve, SurfaceProjectionPcurve2, SurfaceSurfaceCurve, Torus3, VertexId,
 };
+
+fn signed_periodic_delta(start: f64, end: f64) -> f64 {
+    (end - start + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+}
 
 #[derive(Debug, Clone)]
 struct FilletEndpoint {
@@ -79,6 +83,51 @@ struct FilletPatch {
     contact_boundaries: [FilletBoundary; 2],
     end_boundaries: [FilletBoundary; 2],
     blend_surface: Surface3,
+    blend_parameterization: FilletSurfaceParameterization,
+}
+
+/// Affine map from rolling coordinates `(center_parameter, blend_fraction)`
+/// into a selected support surface's native parameters.
+#[derive(Debug, Clone, Copy)]
+struct FilletSurfaceParameterization {
+    origin: Point2,
+    center_direction: Vec2,
+    blend_direction: Vec2,
+}
+
+impl FilletSurfaceParameterization {
+    const ROLLING_BALL: Self = Self {
+        origin: Point2::new(0.0, 0.0),
+        center_direction: Vec2::new(1.0, 0.0),
+        blend_direction: Vec2::new(0.0, 1.0),
+    };
+
+    fn contact_pcurve(self, parent_index: usize) -> KernelResult<Curve2> {
+        Line2::new(
+            self.origin + self.blend_direction * parent_index as f64,
+            self.center_direction,
+        )
+        .map(Curve2::from)
+    }
+
+    fn end_pcurve(self, first: f64, second: f64) -> KernelResult<Curve2> {
+        Line2::new(
+            self.origin + self.center_direction * first,
+            self.center_direction * (second - first) + self.blend_direction,
+        )
+        .map(Curve2::from)
+    }
+
+    fn oriented_end_pcurve(self, first: f64, second: f64, forward: bool) -> KernelResult<Curve2> {
+        if forward {
+            return self.end_pcurve(first, second);
+        }
+        Line2::new(
+            self.origin + self.center_direction * second + self.blend_direction,
+            self.center_direction * (first - second) - self.blend_direction,
+        )
+        .map(Curve2::from)
+    }
 }
 
 impl EulerTransaction<'_> {
@@ -122,15 +171,17 @@ impl EulerTransaction<'_> {
     ) -> KernelResult<()> {
         let mut junction_kinds = BTreeMap::<VertexId, FilletJunctionKind>::new();
         let mut junction_sources = BTreeMap::<VertexId, EdgeId>::new();
+        let mut spines = BTreeMap::<EdgeId, FilletSpine>::new();
+        let mut regular_endpoints = BTreeMap::<(EdgeId, usize), Option<FilletEndpoint>>::new();
         loop {
-            let spines = selected
+            let missing = selected
                 .iter()
                 .copied()
-                .map(|edge| {
-                    self.prepare_fillet_spine(edge, radius)
-                        .map(|spine| (edge, spine))
-                })
-                .collect::<KernelResult<BTreeMap<_, _>>>()?;
+                .filter(|edge| !spines.contains_key(edge))
+                .collect::<Vec<_>>();
+            for edge in missing {
+                spines.insert(edge, self.prepare_fillet_spine(edge, radius)?);
+            }
             let mut additions = BTreeSet::new();
             for spine in spines.values() {
                 for endpoint_index in 0..2 {
@@ -144,8 +195,16 @@ impl EulerTransaction<'_> {
                         .into_iter()
                         .filter(|edge| selected.contains(edge))
                         .count();
-                    let endpoint_requires_junction = selected_degree > 1
-                        || self.prepare_fillet_endpoint(spine, endpoint_index).is_err();
+                    let endpoint_requires_junction = if selected_degree > 1 {
+                        true
+                    } else {
+                        regular_endpoints
+                            .entry((spine.edge_id, endpoint_index))
+                            .or_insert_with(|| {
+                                self.prepare_fillet_endpoint(spine, endpoint_index).ok()
+                            })
+                            .is_none()
+                    };
                     if follow_tangent_edges || endpoint_requires_junction {
                         if let Some((continuation, tangent_faces)) =
                             self.tangent_chain_continuation(spine, endpoint_index, &selected)?
@@ -257,7 +316,13 @@ impl EulerTransaction<'_> {
                 let patches = spines
                     .into_values()
                     .map(|spine| {
-                        self.prepare_fillet_patch(spine, &junctions, &sphere_surfaces, radius)
+                        self.prepare_fillet_patch(
+                            spine,
+                            &junctions,
+                            &sphere_surfaces,
+                            &regular_endpoints,
+                            radius,
+                        )
                     })
                     .collect::<KernelResult<Vec<_>>>()?;
                 return self.rewrite_fillet_network(&patches, &junctions, &sphere_surfaces);
@@ -981,11 +1046,276 @@ impl EulerTransaction<'_> {
         Ok(None)
     }
 
+    fn most_implicit_fillet_surface(
+        &self,
+        spine: &FilletSpine,
+        center_range: ParameterRange,
+        radius: f64,
+    ) -> KernelResult<(Surface3, FilletSurfaceParameterization)> {
+        let tolerance = self.kernel.tolerance;
+        if matches!(
+            spine.parent_surfaces,
+            [Surface3::Plane(_), Surface3::Plane(_)]
+        ) {
+            if let Curve3::Line(line) = &spine.center.curve {
+                let reference = (center_range.start + center_range.end) * 0.5;
+                let center = line.evaluate(reference)?.point;
+                let mut radials = [Vec3::new(0.0, 0.0, 0.0); 2];
+                for (index, radial) in radials.iter_mut().enumerate() {
+                    let pcurve = if index == 0 {
+                        &spine.center.first_pcurve
+                    } else {
+                        &spine.center.second_pcurve
+                    };
+                    let uv = pcurve.evaluate(reference)?.point;
+                    *radial = spine.parent_surfaces[index].evaluate(uv.x, uv.y)?.point - center;
+                }
+                let axis = line.direction().normalize();
+                let scale = center.to_vec().magnitude().max(radius).max(1.0);
+                let allowed = tolerance.linear_at_scale(scale) * 32.0;
+                if radials.iter().all(|radial| {
+                    (radial.magnitude() - radius).abs() <= allowed
+                        && radial.dot(axis).abs() <= allowed
+                }) {
+                    let x = radials[0].normalize();
+                    let y = axis.cross(x).normalize();
+                    let angle = radials[1].dot(y).atan2(radials[1].dot(x));
+                    if angle.abs() > tolerance.angular
+                        && std::f64::consts::PI - angle.abs() > tolerance.angular
+                    {
+                        let surface: Surface3 = Cylinder3::new(
+                            line.origin(),
+                            line.direction(),
+                            x * radius,
+                            y * radius,
+                            tolerance,
+                        )?
+                        .into();
+                        let parameterization = FilletSurfaceParameterization {
+                            origin: Point2::new(0.0, 0.0),
+                            center_direction: Vec2::new(0.0, 1.0),
+                            blend_direction: Vec2::new(angle, 0.0),
+                        };
+                        if self.fillet_surface_matches(
+                            spine,
+                            center_range,
+                            &surface,
+                            parameterization,
+                            radius,
+                        )? {
+                            return Ok((surface, parameterization));
+                        }
+                    }
+                }
+            }
+        }
+
+        let rotational_parents = matches!(
+            &spine.parent_surfaces,
+            [Surface3::Plane(_), Surface3::Cylinder(_)]
+                | [Surface3::Cylinder(_), Surface3::Plane(_)]
+        );
+        if rotational_parents {
+            if let Curve3::Circle(circle) = &spine.center.curve {
+                let reference = (center_range.start + center_range.end) * 0.5;
+                let center = circle.evaluate(reference)?.point;
+                let major_radial = (center - circle.center()).normalize();
+                let normal = circle.normal();
+                let mut angles = [0.0; 2];
+                let mut valid = true;
+                for (index, angle) in angles.iter_mut().enumerate() {
+                    let pcurve = if index == 0 {
+                        &spine.center.first_pcurve
+                    } else {
+                        &spine.center.second_pcurve
+                    };
+                    let uv = pcurve.evaluate(reference)?.point;
+                    let radial = spine.parent_surfaces[index].evaluate(uv.x, uv.y)?.point - center;
+                    let scale = center.to_vec().magnitude().max(radius).max(1.0);
+                    let allowed = tolerance.linear_at_scale(scale) * 32.0;
+                    valid &= (radial.magnitude() - radius).abs() <= allowed
+                        && radial.dot(major_radial.cross(normal)).abs() <= allowed;
+                    *angle = radial.dot(normal).atan2(radial.dot(major_radial));
+                }
+                let delta = signed_periodic_delta(angles[0], angles[1]);
+                if valid
+                    && delta.abs() > tolerance.angular
+                    && std::f64::consts::PI - delta.abs() > tolerance.angular
+                {
+                    let parameterization = FilletSurfaceParameterization {
+                        origin: Point2::new(0.0, angles[0]),
+                        center_direction: Vec2::new(1.0, 0.0),
+                        blend_direction: Vec2::new(0.0, delta),
+                    };
+                    let canonical = Torus3::new(
+                        circle.center(),
+                        circle.x_radius(),
+                        circle.y_radius(),
+                        radius,
+                        tolerance,
+                    )
+                    .map(Surface3::from)
+                    .or_else(|_| {
+                        let frame = Frame3::new(
+                            circle.center(),
+                            circle.x_radius(),
+                            circle.y_radius(),
+                            tolerance,
+                        )?;
+                        let profile: Curve2 =
+                            Circle2::new(Point2::new(circle.radius(), 0.0), radius)?.into();
+                        RevolvedSurface3::new(
+                            frame,
+                            profile,
+                            ParameterRange::new(angles[0], angles[0] + delta)?,
+                            tolerance,
+                        )
+                        .map(Surface3::from)
+                    });
+                    if let Ok(surface) = canonical {
+                        if self.fillet_surface_matches(
+                            spine,
+                            center_range,
+                            &surface,
+                            parameterization,
+                            radius,
+                        )? {
+                            return Ok((surface, parameterization));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((
+            RollingBallSurface3::new(
+                spine.center.curve.clone(),
+                spine.parent_surfaces[0].clone(),
+                spine.parent_surfaces[1].clone(),
+                spine.center.first_pcurve.clone(),
+                spine.center.second_pcurve.clone(),
+                center_range,
+                radius,
+                tolerance,
+            )?
+            .into(),
+            FilletSurfaceParameterization::ROLLING_BALL,
+        ))
+    }
+
+    fn fillet_surface_matches(
+        &self,
+        spine: &FilletSpine,
+        center_range: ParameterRange,
+        surface: &Surface3,
+        parameterization: FilletSurfaceParameterization,
+        radius: f64,
+    ) -> KernelResult<bool> {
+        for sample in 0..=2 {
+            let parameter = center_range.start + center_range.span() * sample as f64 / 2.0;
+            let center = spine.center.curve.evaluate(parameter)?.point;
+            for parent_index in 0..2 {
+                let parent_pcurve = if parent_index == 0 {
+                    &spine.center.first_pcurve
+                } else {
+                    &spine.center.second_pcurve
+                };
+                let parent_uv = parent_pcurve.evaluate(parameter)?.point;
+                let expected = spine.parent_surfaces[parent_index]
+                    .evaluate(parent_uv.x, parent_uv.y)?
+                    .point;
+                let native = parameterization.origin
+                    + parameterization.center_direction * parameter
+                    + parameterization.blend_direction * parent_index as f64;
+                let achieved = surface.evaluate(native.x, native.y)?.point;
+                let scale = expected
+                    .to_vec()
+                    .magnitude()
+                    .max(center.to_vec().magnitude())
+                    .max(radius)
+                    .max(1.0);
+                if expected.distance(achieved) > self.kernel.tolerance.linear_at_scale(scale) * 32.0
+                    || (expected.distance(center) - radius).abs()
+                        > self.kernel.tolerance.linear_at_scale(scale) * 32.0
+                {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    fn implicit_end_boundary(
+        &self,
+        blend_surface: &Surface3,
+        terminating_surface: &Surface3,
+        blend_guide: &Curve2,
+        contact_points: [Point3; 2],
+    ) -> KernelResult<Option<FilletBoundary>> {
+        let tolerance = self.kernel.tolerance;
+        let IntersectionSet::Isolated(candidates) =
+            (match blend_surface.intersect_surface(terminating_surface, tolerance) {
+                Ok(intersection) => intersection,
+                Err(_) => return Ok(None),
+            })
+        else {
+            return Ok(None);
+        };
+        let desired_middle_uv = blend_guide.evaluate(0.5)?.point;
+        let desired_middle = blend_surface
+            .evaluate(desired_middle_uv.x, desired_middle_uv.y)?
+            .point;
+        let Some((candidate, middle_projection)) = candidates
+            .into_iter()
+            .filter_map(|candidate| {
+                candidate
+                    .curve
+                    .project(desired_middle, tolerance)
+                    .ok()
+                    .map(|projection| (candidate, projection))
+            })
+            .min_by(|first, second| first.1.distance.total_cmp(&second.1.distance))
+        else {
+            return Ok(None);
+        };
+        let first = candidate.curve.project(contact_points[0], tolerance)?;
+        let mut second = candidate.curve.project(contact_points[1], tolerance)?;
+        let mut middle_parameter = middle_projection.parameter;
+        if let Some(period) = candidate.curve.domain().period {
+            middle_parameter += ((first.parameter - middle_parameter) / period).round() * period;
+            second.parameter +=
+                ((middle_parameter * 2.0 - first.parameter - second.parameter) / period).round()
+                    * period;
+        }
+        let scale = contact_points
+            .iter()
+            .chain(std::iter::once(&desired_middle))
+            .map(|point| point.to_vec().magnitude())
+            .fold(1.0_f64, f64::max);
+        let allowed = tolerance.linear_at_scale(scale) * 32.0;
+        if first.distance > allowed
+            || second.distance > allowed
+            || middle_projection.distance > allowed
+        {
+            return Ok(None);
+        }
+        let Ok(range) = ParameterRange::new(first.parameter, second.parameter) else {
+            return Ok(None);
+        };
+        Ok(Some(FilletBoundary {
+            curve: candidate.curve,
+            parent_pcurve: candidate.second_pcurve,
+            blend_pcurve: candidate.first_pcurve,
+            range,
+        }))
+    }
+
     fn prepare_fillet_patch(
         &self,
         spine: FilletSpine,
         junctions: &BTreeMap<VertexId, FilletJunction>,
         sphere_surfaces: &BTreeMap<VertexId, Surface3>,
+        regular_endpoints: &BTreeMap<(EdgeId, usize), Option<FilletEndpoint>>,
         radius: f64,
     ) -> KernelResult<FilletPatch> {
         let tolerance = self.kernel.tolerance;
@@ -1013,9 +1343,9 @@ impl EulerTransaction<'_> {
                     .evaluate(parameter)?
                     .point
                     .distance(junction.center);
-                if achieved
-                    > tolerance.linear_at_scale(junction.center.to_vec().magnitude().max(1.0)) * 8.0
-                {
+                let allowed =
+                    tolerance.linear_at_scale(junction.center.to_vec().magnitude().max(1.0)) * 8.0;
+                if achieved > allowed {
                     return Err(KernelError::new(
                         DiagnosticKind::GeometryInvariant,
                         "fillet junction center does not lie on every incident offset intersection",
@@ -1035,7 +1365,15 @@ impl EulerTransaction<'_> {
                 }
                 ends.push(FilletPatchEnd::Junction(vertex));
             } else {
-                let endpoint = self.prepare_fillet_endpoint(&spine, endpoint_index)?;
+                let endpoint = regular_endpoints
+                    .get(&(spine.edge_id, endpoint_index))
+                    .and_then(Clone::clone)
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::TopologyInvariant,
+                            "regular fillet endpoint was not retained during network discovery",
+                        )
+                    })?;
                 contact_parameters[endpoint_index] = endpoint.contact_parameters;
                 contact_points[endpoint_index] = endpoint.contact_points;
                 ends.push(FilletPatchEnd::Boundary(endpoint));
@@ -1067,17 +1405,8 @@ impl EulerTransaction<'_> {
                 ParameterRange::new(minimum - span, maximum + span)?
             }
         };
-        let blend_surface: Surface3 = RollingBallSurface3::new(
-            spine.center.curve.clone(),
-            spine.parent_surfaces[0].clone(),
-            spine.parent_surfaces[1].clone(),
-            spine.center.first_pcurve.clone(),
-            spine.center.second_pcurve.clone(),
-            blend_support_range,
-            radius,
-            tolerance,
-        )?
-        .into();
+        let (blend_surface, blend_parameterization) =
+            self.most_implicit_fillet_surface(&spine, blend_support_range, radius)?;
         let contact_boundaries = (0..2)
             .map(|parent_index| {
                 let range = ParameterRange::new(
@@ -1099,6 +1428,7 @@ impl EulerTransaction<'_> {
                 } else {
                     spine.center.second_pcurve.clone()
                 };
+                let blend_pcurve = blend_parameterization.contact_pcurve(parent_index)?;
                 Ok(FilletBoundary {
                     curve: SurfaceCurve3::new(
                         spine.parent_surfaces[parent_index].clone(),
@@ -1108,11 +1438,7 @@ impl EulerTransaction<'_> {
                     )?
                     .into(),
                     parent_pcurve,
-                    blend_pcurve: Line2::new(
-                        Point2::new(0.0, parent_index as f64),
-                        Vec2::new(1.0, 0.0),
-                    )?
-                    .into(),
+                    blend_pcurve,
                     range,
                 })
             })
@@ -1125,13 +1451,10 @@ impl EulerTransaction<'_> {
         let unit = ParameterRange::new(0.0, 1.0)?;
         let end_boundaries = (0..2)
             .map(|endpoint_index| {
-                let delta =
-                    contact_parameters[endpoint_index][1] - contact_parameters[endpoint_index][0];
-                let blend_pcurve: Curve2 = Line2::new(
-                    Point2::new(contact_parameters[endpoint_index][0], 0.0),
-                    Vec2::new(delta, 1.0),
-                )?
-                .into();
+                let blend_pcurve = blend_parameterization.end_pcurve(
+                    contact_parameters[endpoint_index][0],
+                    contact_parameters[endpoint_index][1],
+                )?;
                 match &ends[endpoint_index] {
                     FilletPatchEnd::Boundary(endpoint) => {
                         let terminating_surface = self
@@ -1139,26 +1462,80 @@ impl EulerTransaction<'_> {
                             .face(endpoint.terminating_face)?
                             .surface
                             .clone();
-                        let mut parameters: Vec<Point2> = Vec::with_capacity(17);
-                        for index in 0..=16 {
-                            let parameter = index as f64 / 16.0;
+                        if let Some(boundary) = self.implicit_end_boundary(
+                            &blend_surface,
+                            &terminating_surface,
+                            &blend_pcurve,
+                            contact_points[endpoint_index],
+                        )? {
+                            return Ok(boundary);
+                        }
+                        let mut guide_parameters = Vec::with_capacity(65);
+                        let mut blend_parameters: Vec<Point2> = Vec::with_capacity(65);
+                        let mut parent_parameters: Vec<Point2> = Vec::with_capacity(65);
+                        for index in 0..=64 {
+                            let parameter = 0.5
+                                - 0.5
+                                    * (std::f64::consts::PI * index as f64 / 64.0).cos();
+                            guide_parameters.push(parameter);
                             let blend_uv = blend_pcurve.evaluate(parameter)?.point;
                             let point = blend_surface.evaluate(blend_uv.x, blend_uv.y)?.point;
                             let projected = terminating_surface.project(point, tolerance)?;
-                            parameters
-                                .push(Point2::new(projected.parameters.0, projected.parameters.1));
+                            let seed = [
+                                blend_uv.x,
+                                blend_uv.y,
+                                projected.parameters.0,
+                                projected.parameters.1,
+                            ];
+                            let corrected = match super::intersection::correct_surface_pair_near(
+                                &blend_surface,
+                                &terminating_surface,
+                                seed,
+                                tolerance,
+                            ) {
+                                Ok(corrected) => corrected,
+                                Err(_) if index == 0 || index == 64 => seed,
+                                Err(error) => {
+                                    return Err(KernelError::new(
+                                        DiagnosticKind::NumericalFailure,
+                                        format!(
+                                            "fillet end-boundary guide correction failed at sample {index}: {error}"
+                                        ),
+                                    ))
+                                }
+                            };
+                            blend_parameters.push(Point2::new(corrected[0], corrected[1]));
+                            parent_parameters.push(Point2::new(corrected[2], corrected[3]));
                         }
-                        let guide: Curve2 =
-                            super::intersection::smooth_nurbs_guide(&parameters, unit)?.into();
+                        let blend_guide: Curve2 =
+                            super::intersection::interpolating_nurbs_guide(
+                                &blend_parameters,
+                                &guide_parameters,
+                            )?
+                            .into();
+                        let parent_guide: Curve2 =
+                            super::intersection::interpolating_nurbs_guide(
+                                &parent_parameters,
+                                &guide_parameters,
+                            )?
+                            .into();
                         let intersection = SurfaceIntersectionCurve::new(
                             blend_surface.clone(),
                             terminating_surface,
-                            blend_pcurve,
-                            guide,
+                            blend_guide,
+                            parent_guide,
                             unit,
                             tolerance,
                             tolerance.linear,
-                        )?;
+                        )
+                        .map_err(|error| {
+                            KernelError::new(
+                                DiagnosticKind::NumericalFailure,
+                                format!(
+                                    "fillet end boundary {endpoint_index} exact intersection failed: {error}"
+                                ),
+                            )
+                        })?;
                         let exact = intersection.exact_pcurves();
                         Ok(FilletBoundary {
                             curve: intersection.into(),
@@ -1231,6 +1608,7 @@ impl EulerTransaction<'_> {
             contact_boundaries,
             end_boundaries,
             blend_surface,
+            blend_parameterization,
         })
     }
 
@@ -1590,16 +1968,11 @@ impl EulerTransaction<'_> {
                             };
                             let first = patch.contact_parameters[endpoint_index][0];
                             let second = patch.contact_parameters[endpoint_index][1];
-                            let guide: Curve2 = if same_direction {
-                                Line2::new(Point2::new(first, 0.0), Vec2::new(second - first, 1.0))?
-                                    .into()
-                            } else {
-                                Line2::new(
-                                    Point2::new(second, 1.0),
-                                    Vec2::new(first - second, -1.0),
-                                )?
-                                .into()
-                            };
+                            let guide = patch.blend_parameterization.oriented_end_pcurve(
+                                first,
+                                second,
+                                same_direction,
+                            )?;
                             let pcurve: Curve2 = SurfaceProjectionPcurve2::new(
                                 curve.clone(),
                                 patch.blend_surface.clone(),

@@ -5,8 +5,8 @@ use crate::{Matrix3, Point2, Point3, Vec3};
 use super::{
     Axis3, BodyId, BooleanKind, Circle3, Curve2, Curve3, IntersectionSet, Kernel, Line3,
     MassProperties, ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, ParameterRange,
-    Plane3, PolyhedralMesh, Profile, Resolution, RigidTransform3, Sphere3, Surface3,
-    TessellationOptions, TrimmedCurve2, Wire2,
+    Plane3, PolyhedralMesh, Profile, Resolution, RevolvedSurface3, RigidTransform3, Sphere3,
+    Surface3, TessellationOptions, TrimmedCurve2, Wire2,
 };
 
 fn certified_properties(kernel: &Kernel, body: BodyId) -> MassProperties {
@@ -48,9 +48,12 @@ fn rolling_ball_fillet_rewrites_only_local_brep() {
         .clone();
     let filleted = cuboid.fillet(&[edge], 1.0).expect("rolling-ball fillet");
     assert_eq!(filleted.faces().count(), cuboid.faces().count() + 1);
+    assert!(filleted
+        .faces()
+        .any(|face| matches!(face.surface(), Surface3::Cylinder(cylinder) if (cylinder.radius() - 1.0).abs() < 1.0e-10)));
     let end_edge = filleted
         .edges()
-        .filter(|edge| matches!(edge.curve(), Curve3::SurfaceIntersection(_)))
+        .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
         .find(|edge| {
             let endpoints = edge.endpoints().expect("fillet edge endpoints");
             endpoints[0].distance(endpoints[1]) < 2.0
@@ -102,7 +105,7 @@ fn rolling_ball_fillet_chain_certifies_at_application_scale() {
     let first = cuboid.fillet(&[edge], 2.0).expect("first fillet");
     let end_edge = first
         .edges()
-        .filter(|edge| matches!(edge.curve(), Curve3::SurfaceIntersection(_)))
+        .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
         .find(|edge| {
             let endpoints = edge.endpoints().expect("fillet edge endpoints");
             endpoints[0].distance(endpoints[1]) < 4.0
@@ -136,6 +139,40 @@ fn rolling_ball_fillet_chain_certifies_at_application_scale() {
             )
             .expect("tangent continuation display tessellation");
     }
+}
+
+#[test]
+fn rolling_ball_fillet_supports_three_consecutive_perimeter_operations() {
+    let cuboid = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(50.0, 25.0, 8.0));
+    let top_edge_near = |solid: &super::Compound, target: Point3, direction: Vec3| {
+        solid
+            .edges()
+            .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+            .filter_map(|edge| {
+                let endpoints = edge.endpoints().ok()?;
+                let midpoint =
+                    Point3::from_vec((endpoints[0].to_vec() + endpoints[1].to_vec()) * 0.5);
+                let tangent = (endpoints[1] - endpoints[0]).normalize();
+                ((midpoint.z - 8.0).abs() < 1.0e-7 && tangent.dot(direction).abs() > 1.0 - 1.0e-10)
+                    .then_some((midpoint.distance(target), edge.clone()))
+            })
+            .min_by(|first, second| first.0.total_cmp(&second.0))
+            .map(|(_, edge)| edge)
+            .expect("matching top perimeter edge")
+    };
+
+    let first_edge = top_edge_near(&cuboid, Point3::new(25.0, 0.0, 8.0), Vec3::unit_x());
+    let first = cuboid
+        .fillet(&[first_edge], 2.0)
+        .expect("first perimeter fillet");
+    let second_edge = top_edge_near(&first, Point3::new(50.0, 12.5, 8.0), Vec3::unit_y());
+    let second = first
+        .fillet(&[second_edge], 1.0)
+        .expect("second perimeter fillet");
+    let third_edge = top_edge_near(&second, Point3::new(25.0, 25.0, 8.0), Vec3::unit_x());
+    second
+        .fillet(&[third_edge], 0.5)
+        .expect("third perimeter fillet");
 }
 
 #[test]
@@ -214,6 +251,60 @@ fn exact_sphere_is_published_and_certified() {
     assert!(kernel.validate().is_valid());
     let properties = certified_properties(&kernel, body);
     assert!((properties.volume - 36.0 * std::f64::consts::PI).abs() < 1.0e-10);
+}
+
+#[test]
+fn revolved_surface_retains_its_axis_and_exact_meridian() {
+    let tolerance = ModelTolerance::default();
+    let frame = super::Frame3::new(
+        Point3::new(1.0, 2.0, 3.0),
+        Vec3::unit_x(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("revolution frame");
+    let profile: Curve2 = super::Circle2::new(Point2::new(4.0, 0.0), 1.0)
+        .expect("circular meridian")
+        .into();
+    let surface: Surface3 = RevolvedSurface3::new(
+        frame,
+        profile,
+        ParameterRange::new(-1.0, 1.0).expect("profile range"),
+        tolerance,
+    )
+    .expect("regular revolved surface")
+    .into();
+    let point = surface
+        .evaluate(std::f64::consts::FRAC_PI_2, 0.0)
+        .expect("revolved evaluation")
+        .point;
+    assert!(point.distance(Point3::new(1.0, 7.0, 3.0)) < 1.0e-12);
+    let projection = surface
+        .project(Point3::new(1.0, 7.25, 3.0), tolerance)
+        .expect("revolved projection");
+    assert!(projection.point.distance(point) < 1.0e-12);
+    assert!((projection.parameters.0 - std::f64::consts::FRAC_PI_2).abs() < 1.0e-12);
+
+    let periodic: Surface3 = RevolvedSurface3::new(
+        frame,
+        super::Circle2::new(Point2::new(4.0, 0.0), 1.0)
+            .expect("periodic circular meridian")
+            .into(),
+        ParameterRange::new(0.0, std::f64::consts::TAU).expect("full profile period"),
+        tolerance,
+    )
+    .expect("periodic revolved surface")
+    .into();
+    assert_eq!(periodic.domains()[1].period, Some(std::f64::consts::TAU));
+    let first = periodic
+        .evaluate(0.25, 0.5)
+        .expect("base periodic evaluation")
+        .point;
+    let wrapped = periodic
+        .evaluate(0.25, std::f64::consts::TAU + 0.5)
+        .expect("wrapped periodic evaluation")
+        .point;
+    assert!(first.distance(wrapped) < 1.0e-12);
 }
 
 #[test]
@@ -348,7 +439,7 @@ fn rolling_ball_fillet_supports_closed_hole_rims() {
     assert!(filleted.faces().count() > solid.faces().count());
     assert!(filleted
         .faces()
-        .any(|face| matches!(face.surface(), Surface3::RollingBall(_))));
+        .any(|face| matches!(face.surface(), Surface3::Torus(_))));
     filleted
         .tessellate(
             TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),

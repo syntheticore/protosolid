@@ -3,8 +3,8 @@ use cgmath::prelude::*;
 use crate::{Matrix3, Point2, Point3, Vec3};
 
 use super::{
-    Axis3, BodyId, BooleanKind, Circle3, Curve2, Curve3, IntersectionSet, Kernel, Line3,
-    MassProperties, ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, ParameterRange,
+    Axis3, BodyId, BooleanKind, Circle3, Curve2, Curve3, FilletOptions, IntersectionSet, Kernel,
+    Line3, MassProperties, ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, ParameterRange,
     Plane3, PolyhedralMesh, Profile, Resolution, RevolvedSurface3, RigidTransform3, Sphere3,
     Surface3, TessellationOptions, TrimmedCurve2, Wire2,
 };
@@ -401,29 +401,37 @@ fn rolling_ball_fillet_supports_closed_hole_rims() {
     let outer = Wire2::polygon(
         [
             Point2::new(0.0, 0.0),
-            Point2::new(12.0, 0.0),
-            Point2::new(12.0, 8.0),
-            Point2::new(0.0, 8.0),
+            Point2::new(60.0, 0.0),
+            Point2::new(60.0, 30.0),
+            Point2::new(0.0, 30.0),
         ],
         tolerance,
     )
     .expect("outer wire");
     let hole = Wire2::new(
-        [TrimmedCurve2::circle(Point2::new(4.0, 4.0), 1.5).expect("hole circle")],
+        [TrimmedCurve2::circle(Point2::new(10.0, 15.0), 6.0).expect("hole circle")],
         tolerance,
     )
     .expect("hole wire");
     let solid = Profile::new(outer, [hole], tolerance)
         .expect("profile with hole")
-        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 3.0))
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
         .expect("profile extrusion");
+    assert_eq!(
+        solid
+            .edges()
+            .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
+            .count(),
+        2,
+        "one sketch circle must produce one circular edge on each cap",
+    );
     let rim = solid
         .edges()
         .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
         .find(|edge| {
             let endpoints = edge.endpoints().expect("rim endpoints");
             let faces = edge.connected_faces().expect("rim faces");
-            endpoints.iter().all(|point| point.z > 2.9)
+            endpoints.iter().all(|point| point.z > 19.9)
                 && faces
                     .iter()
                     .any(|face| matches!(face.surface(), Surface3::Plane(_)))
@@ -433,6 +441,13 @@ fn rolling_ball_fillet_supports_closed_hole_rims() {
         })
         .expect("top circular hole rim")
         .clone();
+    let oversized = solid
+        .fillet(&[rim.clone()], 8.0)
+        .expect_err("a circular-rim fillet must not overlap the body's outer boundary");
+    assert!(
+        oversized.to_string().contains("fillet contact boundary"),
+        "unexpected oversized-fillet diagnostic: {oversized}",
+    );
     let filleted = solid
         .fillet(&[rim], 0.25)
         .expect("closed circular rim fillet");
@@ -445,6 +460,96 @@ fn rolling_ball_fillet_supports_closed_hole_rims() {
             TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
         )
         .expect("closed-rim fillet display tessellation");
+}
+
+#[test]
+fn rolling_ball_fillet_certifies_curved_and_post_fillet_face_loops() {
+    let tolerance = ModelTolerance::default();
+    let outer = Wire2::new(
+        [
+            TrimmedCurve2::line(Point2::new(0.0, 0.0), Point2::new(25.0, 0.0))
+                .expect("lower outer edge"),
+            TrimmedCurve2::arc_through(
+                Point2::new(25.0, 0.0),
+                Point2::new(30.0, 5.0),
+                Point2::new(25.0, 10.0),
+            )
+            .expect("rounded outer end"),
+            TrimmedCurve2::line(Point2::new(25.0, 10.0), Point2::new(0.0, 10.0))
+                .expect("upper outer edge"),
+            TrimmedCurve2::line(Point2::new(0.0, 10.0), Point2::new(0.0, 0.0))
+                .expect("left outer edge"),
+        ],
+        tolerance,
+    )
+    .expect("curved outer wire");
+    let circular_hole = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(7.0, 5.0), 2.0).expect("circular hole")],
+        tolerance,
+    )
+    .expect("circular hole wire");
+    let rectangular_hole = Wire2::polygon(
+        [
+            Point2::new(14.0, 3.0),
+            Point2::new(20.0, 3.0),
+            Point2::new(20.0, 7.0),
+            Point2::new(14.0, 7.0),
+        ],
+        tolerance,
+    )
+    .expect("rectangular hole wire");
+    let solid = Profile::new(outer, [circular_hole, rectangular_hole], tolerance)
+        .expect("curved profile with holes")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 4.0))
+        .expect("curved profile extrusion");
+
+    let top_circle = solid
+        .edges()
+        .filter(|edge| {
+            matches!(edge.curve(), Curve3::Circle(circle) if (circle.radius() - 2.0).abs() < 1.0e-9)
+        })
+        .find(|edge| {
+            edge.endpoints()
+                .is_ok_and(|points| points.iter().all(|point| point.z > 3.9))
+        })
+        .expect("top circular-hole rim")
+        .clone();
+    solid
+        .fillet(&[top_circle], 0.5)
+        .expect("circular-hole fillet on a curved multi-loop face");
+
+    let upper_edge = solid
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .find(|edge| {
+            edge.endpoints()
+                .is_ok_and(|points| points.iter().all(|point| point.z > 3.9 && point.y > 9.9))
+        })
+        .expect("upper top perimeter edge")
+        .clone();
+    let first = solid
+        .fillet_with_options(
+            &[upper_edge],
+            FilletOptions::new(1.0).with_tangent_propagation(false),
+        )
+        .expect("first curved-perimeter fillet");
+    let slot_edge = first
+        .edges()
+        .find(|edge| {
+            edge.endpoints().is_ok_and(|points| {
+                points
+                    .iter()
+                    .all(|point| point.z > 3.9 && point.y > 6.9 && point.x > 13.9 && point.x < 20.1)
+            })
+        })
+        .expect("top rectangular-slot edge")
+        .clone();
+    first
+        .fillet_with_options(
+            &[slot_edge],
+            FilletOptions::new(0.5).with_tangent_propagation(false),
+        )
+        .expect("second fillet on an existing post-fillet face loop");
 }
 
 #[test]

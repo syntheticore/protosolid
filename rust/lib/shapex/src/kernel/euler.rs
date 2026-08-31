@@ -4209,8 +4209,242 @@ impl<'kernel> EulerTransaction<'kernel> {
             survivor = self.kef_unchecked(join, face)?.surviving_face;
             self.working.faces.get_mut(survivor)?.surface = Surface3::Cylinder(first_surface);
         }
+        let mut circle_groups = Vec::<Vec<EdgeId>>::new();
+        for edge_id in self.working.face_edges(survivor)? {
+            let Curve3::Circle(circle) = self.working.edge(edge_id)?.curve.clone() else {
+                continue;
+            };
+            if let Some(group) = circle_groups.iter_mut().find(|group| {
+                matches!(
+                    self.working.edge(group[0]).map(Edge::curve),
+                    Ok(Curve3::Circle(candidate)) if *candidate == circle
+                )
+            }) {
+                group.push(edge_id);
+            } else {
+                circle_groups.push(vec![edge_id]);
+            }
+        }
+        for group in circle_groups {
+            if group.len() > 1 {
+                self.merge_periodic_circle_edge_cycle_unchecked(&group)?;
+            }
+        }
         self.reparameterize_cylindrical_face(survivor)?;
         Ok(())
+    }
+
+    /// Collapse the temporary arc cycle of a full circle into one periodic
+    /// edge. This is the inverse Euler simplification of splitting an edge with
+    /// degree-two vertices: one edge and one vertex are removed per join while
+    /// both incident face loops retain their exact p-curves.
+    fn merge_periodic_circle_edge_cycle_unchecked(
+        &mut self,
+        edges: &[EdgeId],
+    ) -> KernelResult<EdgeId> {
+        if edges.len() < 2 {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "a periodic edge cycle needs at least two arcs",
+            ));
+        }
+        let edge_set = edges.iter().copied().collect::<BTreeSet<_>>();
+        let reference = self.working.edge(edges[0])?.clone();
+        let Curve3::Circle(reference_circle) = reference.curve else {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "periodic edge consolidation requires circular arcs",
+            ));
+        };
+        let mut incidence = BTreeMap::<VertexId, Vec<EdgeId>>::new();
+        for edge_id in edges {
+            let edge = self.working.edge(*edge_id)?;
+            if !matches!(&edge.curve, Curve3::Circle(circle) if *circle == reference_circle)
+                || edge.coedges.len() != 2
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "periodic edge cycle does not share one exact circle and two face uses",
+                ));
+            }
+            for vertex in edge.vertices {
+                incidence.entry(vertex).or_default().push(*edge_id);
+            }
+        }
+        if incidence.values().any(|incident| incident.len() != 2) {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "periodic circular arcs do not form a closed degree-two cycle",
+            ));
+        }
+        let seam = incidence
+            .keys()
+            .copied()
+            .find(|vertex| {
+                self.working
+                    .vertex_edges(*vertex)
+                    .is_ok_and(|incident| incident.iter().any(|edge| !edge_set.contains(edge)))
+            })
+            .or_else(|| incidence.keys().copied().next())
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "periodic edge cycle has no seam vertex",
+                )
+            })?;
+
+        let mut ordered = Vec::<(EdgeId, bool)>::with_capacity(edges.len());
+        let mut used = BTreeSet::new();
+        let mut vertex = seam;
+        let mut edge_id = incidence[&seam][0];
+        loop {
+            let edge = self.working.edge(edge_id)?;
+            let forward = if edge.vertices[0] == vertex {
+                true
+            } else if edge.vertices[1] == vertex {
+                false
+            } else {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "ordered circular arc is disconnected from its predecessor",
+                ));
+            };
+            vertex = if forward {
+                edge.vertices[1]
+            } else {
+                edge.vertices[0]
+            };
+            ordered.push((edge_id, forward));
+            used.insert(edge_id);
+            if vertex == seam {
+                break;
+            }
+            edge_id = incidence[&vertex]
+                .iter()
+                .copied()
+                .find(|candidate| !used.contains(candidate))
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "periodic circular arc cycle terminates before its seam",
+                    )
+                })?;
+            if ordered.len() >= edges.len() {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "periodic circular arc ordering does not close",
+                ));
+            }
+        }
+        if ordered.len() != edges.len() {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "periodic circular arc cycle has disconnected components",
+            ));
+        }
+
+        let survivor = ordered[0].0;
+        let first = self.working.edge(survivor)?.clone();
+        let start = if ordered[0].1 {
+            first.range.start
+        } else {
+            first.range.end
+        };
+        let span = ordered.iter().try_fold(0.0, |span, (edge_id, forward)| {
+            let range = self.working.edge(*edge_id)?.range;
+            Ok::<_, KernelError>(
+                span + if *forward {
+                    range.span()
+                } else {
+                    -range.span()
+                },
+            )
+        })?;
+        if (span.abs() - std::f64::consts::TAU).abs() > self.kernel.tolerance.parameter * 32.0 {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "periodic circular arc cycle does not cover one full turn",
+            ));
+        }
+        let range = ParameterRange::new(start, start + span)?;
+        let survivor_uses = first.coedges.clone();
+        let mut removed_uses = Vec::new();
+        for survivor_use in &survivor_uses {
+            let loop_id = self.working.coedge(*survivor_use)?.loop_id;
+            let loop_uses = edges
+                .iter()
+                .map(|edge_id| {
+                    self.working
+                        .edge(*edge_id)?
+                        .coedges
+                        .iter()
+                        .copied()
+                        .find(|coedge| {
+                            self.working
+                                .coedge(*coedge)
+                                .is_ok_and(|value| value.loop_id == loop_id)
+                        })
+                        .ok_or_else(|| {
+                            KernelError::new(
+                                DiagnosticKind::TopologyInvariant,
+                                "periodic circular arcs do not share both incident loops",
+                            )
+                        })
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            let original_range = self.working.coedge(*survivor_use)?.range;
+            for use_id in loop_uses
+                .into_iter()
+                .filter(|use_id| use_id != survivor_use)
+            {
+                let use_value = self.working.coedge(use_id)?.clone();
+                self.working.coedges.get_mut(use_value.previous)?.next = use_value.next;
+                self.working.coedges.get_mut(use_value.next)?.previous = use_value.previous;
+                if self.working.loop_(loop_id)?.first == Some(use_id) {
+                    self.working.loops.get_mut(loop_id)?.first = Some(use_value.next);
+                }
+                removed_uses.push((use_id, use_value.name));
+            }
+            let forward = original_range.span().signum() == span.signum();
+            let value = self.working.coedges.get_mut(*survivor_use)?;
+            value.forward = forward;
+            value.range = if forward { range } else { range.reversed() };
+        }
+
+        {
+            let value = self.working.edges.get_mut(survivor)?;
+            value.vertices = [seam, seam];
+            value.curve = reference_circle.into();
+            value.range = range;
+        }
+        for (use_id, name) in removed_uses {
+            self.working.coedges.remove(use_id)?;
+            self.history
+                .changed(name, ChangeKind::Deleted, std::iter::empty());
+        }
+        for edge_id in edges.iter().copied().filter(|edge_id| *edge_id != survivor) {
+            let name = self.working.edge(edge_id)?.name;
+            self.working.edges.remove(edge_id)?;
+            self.history
+                .changed(name, ChangeKind::Deleted, std::iter::empty());
+        }
+        for vertex_id in incidence.keys().copied().filter(|vertex| *vertex != seam) {
+            if !self.working.vertex_edges(vertex_id)?.is_empty() {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "periodic arc split vertex remains incident after edge consolidation",
+                ));
+            }
+            let name = self.working.vertex(vertex_id)?.name;
+            self.working.vertices.remove(vertex_id)?;
+            self.history
+                .changed(name, ChangeKind::Deleted, std::iter::empty());
+        }
+        self.repair_outgoing(seam)?;
+        let survivor_name = self.working.edge(survivor)?.name;
+        self.history
+            .changed(survivor_name, ChangeKind::Modified, [survivor_name]);
+        Ok(survivor)
     }
 
     /// Merge an exact periodic rolling sweep into one toroidal BREP face. The

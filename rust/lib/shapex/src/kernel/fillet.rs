@@ -6,13 +6,15 @@ use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::euler::EulerTransaction;
 use super::history::ChangeKind;
-use super::topology::Edge;
+use super::topology::{Edge, Vertex};
 use super::validation::{validate, ValidationMode};
+use super::wire::{curve_loop_contains_point, curve_pair_intersection};
 use super::{
     Circle2, CoedgeId, Curve2, Curve3, Cylinder3, DiagnosticKind, DomainBounds, EdgeId, FaceId,
     FaceOrientation, Frame3, IntersectionSet, KernelError, KernelResult, Line2, ModelTolerance,
     ParameterRange, RevolvedSurface3, RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3,
-    SurfaceIntersectionCurve, SurfaceProjectionPcurve2, SurfaceSurfaceCurve, Torus3, VertexId,
+    SurfaceIntersectionCurve, SurfaceProjectionPcurve2, SurfaceSurfaceCurve, Torus3, TrimmedCurve2,
+    VertexId,
 };
 
 fn signed_periodic_delta(start: f64, end: f64) -> f64 {
@@ -169,6 +171,7 @@ impl EulerTransaction<'_> {
         radius: f64,
         follow_tangent_edges: bool,
     ) -> KernelResult<()> {
+        selected = self.subdivide_closed_fillet_edges(&selected)?;
         let mut junction_kinds = BTreeMap::<VertexId, FilletJunctionKind>::new();
         let mut junction_sources = BTreeMap::<VertexId, EdgeId>::new();
         let mut spines = BTreeMap::<EdgeId, FilletSpine>::new();
@@ -207,7 +210,7 @@ impl EulerTransaction<'_> {
                     };
                     if follow_tangent_edges || endpoint_requires_junction {
                         if let Some((continuation, tangent_faces)) =
-                            self.tangent_chain_continuation(spine, endpoint_index, &selected)?
+                            self.tangent_chain_continuation(spine, endpoint_index)?
                         {
                             junction_kinds
                                 .insert(vertex, FilletJunctionKind::TangentChain { tangent_faces });
@@ -325,6 +328,7 @@ impl EulerTransaction<'_> {
                         )
                     })
                     .collect::<KernelResult<Vec<_>>>()?;
+                self.certify_fillet_contact_trims(&patches)?;
                 return self.rewrite_fillet_network(&patches, &junctions, &sphere_surfaces);
             }
             if selected.len() > 256 {
@@ -334,6 +338,146 @@ impl EulerTransaction<'_> {
                 ));
             }
         }
+    }
+
+    /// The fillet network represents rolling-patch joins at edge endpoints.
+    /// Published periodic edges correctly have one artificial seam vertex, so
+    /// subdivide them only inside this transaction. The temporary arcs are all
+    /// selected and are consumed by the subsequent fillet rewrite.
+    fn subdivide_closed_fillet_edges(
+        &mut self,
+        selected: &BTreeSet<EdgeId>,
+    ) -> KernelResult<BTreeSet<EdgeId>> {
+        let mut result = BTreeSet::new();
+        for edge_id in selected {
+            let edge = self.working.edge(*edge_id)?.clone();
+            if edge.vertices[0] != edge.vertices[1] {
+                result.insert(*edge_id);
+                continue;
+            }
+            if edge.coedges.len() != 2 {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "a closed fillet edge must have exactly two face uses",
+                ));
+            }
+
+            let source_name = edge.name;
+            let seam = edge.vertices[0];
+            let mut vertices = vec![seam];
+            for part in 1..4 {
+                let parameter = edge.range.start + edge.range.span() * part as f64 / 4.0;
+                let point = edge.curve.evaluate(parameter)?.point;
+                let name = self.names.next_for("fillet.periodic-split.vertex")?;
+                let vertex = self.working.vertices.insert(Vertex::new(
+                    name,
+                    point,
+                    self.kernel.tolerance.linear,
+                ));
+                self.history
+                    .derived(name, [source_name], "fillet.periodic-split.vertex");
+                vertices.push(vertex);
+            }
+            vertices.push(seam);
+
+            let ranges = (0..4)
+                .map(|part| {
+                    ParameterRange::new(
+                        edge.range.start + edge.range.span() * part as f64 / 4.0,
+                        edge.range.start + edge.range.span() * (part + 1) as f64 / 4.0,
+                    )
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            {
+                let survivor = self.working.edges.get_mut(*edge_id)?;
+                survivor.vertices = [vertices[0], vertices[1]];
+                survivor.range = ranges[0];
+                survivor.coedges.clear();
+            }
+            let mut arcs = vec![*edge_id];
+            for part in 1..4 {
+                let name = self.names.next_for("fillet.periodic-split.edge")?;
+                let arc = self.make_edge(
+                    name,
+                    [vertices[part], vertices[part + 1]],
+                    edge.curve.clone(),
+                    ranges[part],
+                )?;
+                self.history
+                    .derived(name, [source_name], "fillet.periodic-split.edge");
+                arcs.push(arc);
+            }
+
+            for old_use_id in edge.coedges {
+                let old_use = self.working.coedge(old_use_id)?.clone();
+                let traversal_arcs = if old_use.forward {
+                    arcs.clone()
+                } else {
+                    arcs.iter().rev().copied().collect()
+                };
+                let mut uses = Vec::with_capacity(4);
+                for (part, arc) in traversal_arcs.into_iter().enumerate() {
+                    let name = self.names.next_for("fillet.periodic-split.use")?;
+                    let range = ParameterRange::new(
+                        old_use.range.start + old_use.range.span() * part as f64 / 4.0,
+                        old_use.range.start + old_use.range.span() * (part + 1) as f64 / 4.0,
+                    )?;
+                    let use_id = self.make_coedge(
+                        name,
+                        arc,
+                        old_use.loop_id,
+                        old_use.forward,
+                        old_use.pcurve.clone(),
+                        range,
+                    )?;
+                    self.history
+                        .derived(name, [source_name], "fillet.periodic-split.use");
+                    uses.push(use_id);
+                }
+                for index in 0..uses.len() {
+                    let previous = if index == 0 {
+                        if old_use.previous == old_use_id {
+                            *uses.last().unwrap()
+                        } else {
+                            old_use.previous
+                        }
+                    } else {
+                        uses[index - 1]
+                    };
+                    let next = if index + 1 == uses.len() {
+                        if old_use.next == old_use_id {
+                            uses[0]
+                        } else {
+                            old_use.next
+                        }
+                    } else {
+                        uses[index + 1]
+                    };
+                    let value = self.working.coedges.get_mut(uses[index])?;
+                    value.previous = previous;
+                    value.next = next;
+                }
+                if old_use.previous != old_use_id {
+                    self.working.coedges.get_mut(old_use.previous)?.next = uses[0];
+                }
+                if old_use.next != old_use_id {
+                    self.working.coedges.get_mut(old_use.next)?.previous = *uses.last().unwrap();
+                }
+                if self.working.loop_(old_use.loop_id)?.first == Some(old_use_id) {
+                    self.working.loops.get_mut(old_use.loop_id)?.first = Some(uses[0]);
+                }
+                self.working.coedges.remove(old_use_id)?;
+                self.history
+                    .changed(old_use.name, ChangeKind::Deleted, std::iter::empty());
+            }
+            for vertex in vertices.into_iter().take(4) {
+                self.repair_outgoing(vertex)?;
+            }
+            self.history
+                .changed(source_name, ChangeKind::Modified, [source_name]);
+            result.extend(arcs);
+        }
+        Ok(result)
     }
 
     fn prepare_fillet_spine(&self, edge_id: EdgeId, radius: f64) -> KernelResult<FilletSpine> {
@@ -907,7 +1051,6 @@ impl EulerTransaction<'_> {
         &self,
         spine: &FilletSpine,
         endpoint_index: usize,
-        selected: &BTreeSet<EdgeId>,
     ) -> KernelResult<Option<(EdgeId, [FaceId; 2])>> {
         let vertex = spine.edge.vertices[endpoint_index];
         let source_parameter = if endpoint_index == 0 {
@@ -928,7 +1071,7 @@ impl EulerTransaction<'_> {
             .working
             .vertex_edges(vertex)?
             .into_iter()
-            .filter(|edge| !selected.contains(edge))
+            .filter(|edge| *edge != spine.edge_id)
         {
             let candidate = self.working.edge(candidate_id)?;
             let same_support = match (&spine.edge.curve, &candidate.curve) {
@@ -1610,6 +1753,113 @@ impl EulerTransaction<'_> {
             blend_surface,
             blend_parameterization,
         })
+    }
+
+    /// Certify that each new contact curve remains in the trimmed domain of
+    /// its planar parent face. Crossing another loop would make the local
+    /// Euler rewrite publish a self-overlapping shell instead of a fillet.
+    fn certify_fillet_contact_trims(&self, patches: &[FilletPatch]) -> KernelResult<()> {
+        let tolerance = self.kernel.tolerance;
+        for patch in patches {
+            for parent_index in 0..2 {
+                let face_id = patch.spine.faces[parent_index];
+                if !matches!(self.working.face(face_id)?.surface, Surface3::Plane(_)) {
+                    continue;
+                }
+                let boundary = &patch.contact_boundaries[parent_index];
+                let contact = TrimmedCurve2::new(boundary.parent_pcurve.clone(), boundary.range)?;
+                let start = contact.curve().evaluate(contact.range().start)?.point;
+                let end = contact.curve().evaluate(contact.range().end)?.point;
+                let closed = start.distance(end) <= tolerance.linear;
+                let parameter_scale = contact
+                    .range()
+                    .start
+                    .abs()
+                    .max(contact.range().end.abs())
+                    .max(1.0);
+                let endpoint_tolerance = tolerance.parameter * parameter_scale * 16.0;
+                let at_contact_endpoint = |parameter: f64| {
+                    (parameter - contact.range().start).abs() <= endpoint_tolerance
+                        || (parameter - contact.range().end).abs() <= endpoint_tolerance
+                };
+
+                let mut outer_contains_middle = false;
+                let mut inside_existing_hole = false;
+                let mut crosses_locally_rewritten_boundary = false;
+                let middle = contact
+                    .curve()
+                    .evaluate((contact.range().start + contact.range().end) * 0.5)?
+                    .point;
+                let locally_rewritten_uses = patch
+                    .ends
+                    .iter()
+                    .map(|end| match end {
+                        FilletPatchEnd::Boundary(endpoint) => {
+                            Ok(endpoint.adjacent_uses[parent_index])
+                        }
+                        FilletPatchEnd::Junction(vertex) => {
+                            self.adjacent_use_at_vertex(patch.spine.uses[parent_index], *vertex)
+                        }
+                    })
+                    .collect::<KernelResult<BTreeSet<_>>>()?;
+                for loop_id in self.working.face(face_id)?.loops.clone() {
+                    let identified_segments = self
+                        .collect_loop(loop_id)?
+                        .into_iter()
+                        .map(|coedge_id| {
+                            let coedge = self.working.coedge(coedge_id)?;
+                            Ok((
+                                coedge_id,
+                                TrimmedCurve2::new(coedge.pcurve.clone(), coedge.range)?,
+                            ))
+                        })
+                        .collect::<KernelResult<Vec<_>>>()?;
+                    for (coedge_id, segment) in &identified_segments {
+                        let intersection = curve_pair_intersection(&contact, segment, tolerance)?;
+                        if locally_rewritten_uses.contains(coedge_id)
+                            && (intersection.coincident || !intersection.hits.is_empty())
+                        {
+                            crosses_locally_rewritten_boundary = true;
+                        }
+                        if !locally_rewritten_uses.contains(coedge_id)
+                            && (intersection.coincident
+                                || intersection
+                                    .hits
+                                    .iter()
+                                    .any(|hit| closed || !at_contact_endpoint(hit.first_parameter)))
+                        {
+                            return Err(KernelError::new(
+                                DiagnosticKind::GeometryInvariant,
+                                "fillet contact boundary crosses an existing face boundary",
+                            ));
+                        }
+                    }
+                    let segments = identified_segments
+                        .into_iter()
+                        .map(|(_, segment)| segment)
+                        .collect::<Vec<_>>();
+                    let contains = curve_loop_contains_point(&segments, middle, tolerance)?;
+                    match self.working.loop_(loop_id)?.kind {
+                        super::LoopKind::Outer => outer_contains_middle |= contains,
+                        super::LoopKind::Inner if contains => inside_existing_hole = true,
+                        super::LoopKind::Inner => {}
+                    }
+                }
+                if closed && inside_existing_hole && !crosses_locally_rewritten_boundary {
+                    return Err(KernelError::new(
+                        DiagnosticKind::GeometryInvariant,
+                        "fillet contact boundary enters an existing face hole",
+                    ));
+                }
+                if closed && !outer_contains_middle && !crosses_locally_rewritten_boundary {
+                    return Err(KernelError::new(
+                        DiagnosticKind::GeometryInvariant,
+                        "fillet contact boundary leaves its incident face trim",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn rewrite_fillet_network(

@@ -450,6 +450,18 @@ pub(crate) fn wire_contains_point(
     point: Point2,
     tolerance: ModelTolerance,
 ) -> KernelResult<bool> {
+    curve_loop_contains_point(wire.segments(), point, tolerance)
+}
+
+/// Classify a point against an existing closed topology loop without treating
+/// that loop as new sketch input. Published BREP loops have already passed the
+/// topology and geometry validators and may contain periodic or post-operation
+/// p-curves that `Wire2::new` deliberately refuses as user-authored wires.
+pub(crate) fn curve_loop_contains_point(
+    segments: &[TrimmedCurve2],
+    point: Point2,
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
     let mut winding = 0_i32;
     // Move the classification ray away from shared vertices. The original
     // point is still used for the exact boundary-distance checks below.
@@ -457,8 +469,7 @@ pub(crate) fn wire_contains_point(
         point.x,
         point.y + tolerance.linear * 0.271_828_182_845_904_5,
     );
-    let ray_end_x = wire
-        .segments()
+    let ray_end_x = segments
         .iter()
         .map(|segment| match segment.curve() {
             Curve2::Line(_) => segment
@@ -487,7 +498,7 @@ pub(crate) fn wire_contains_point(
         .into_iter()
         .fold(point.x + 1.0, f64::max)
         + point.x.abs().max(1.0) * 2.0;
-    for segment in wire.segments() {
+    for segment in segments {
         match segment.curve() {
             Curve2::Line(_) => {
                 let start = segment.start()?;
@@ -672,19 +683,25 @@ fn general_parametric_pair(
     for first_index in 0..=divisions {
         let first_parameter =
             first.range().start + first.range().span() * first_index as f64 / divisions as f64;
-        let first_point = first.curve().evaluate(first_parameter)?.point;
+        let first_value = first.curve().evaluate(first_parameter)?;
         for second_index in 0..=divisions {
             let second_parameter = second.range().start
                 + second.range().span() * second_index as f64 / divisions as f64;
-            let second_point = second.curve().evaluate(second_parameter)?.point;
-            let local_scale = first_point
+            let second_value = second.curve().evaluate(second_parameter)?;
+            let local_scale = first_value
+                .point
                 .to_vec()
                 .magnitude()
-                .max(second_point.to_vec().magnitude())
+                .max(second_value.point.to_vec().magnitude())
                 .max(1.0);
-            let cell_size = first.range().span().abs() / divisions as f64
-                + second.range().span().abs() / divisions as f64;
-            if first_point.distance(second_point)
+            // Convert parameter-cell widths to geometric lengths. Comparing a
+            // spatial distance with raw parameter spans misses intersections
+            // whenever either curve has a non-unit parameterization.
+            let cell_size = first_value.first_derivative.magnitude() * first.range().span().abs()
+                / divisions as f64
+                + second_value.first_derivative.magnitude() * second.range().span().abs()
+                    / divisions as f64;
+            if first_value.point.distance(second_value.point)
                 <= cell_size.max(tolerance.linear_at_scale(local_scale) * 32.0)
             {
                 seeds.push((first_parameter, second_parameter));

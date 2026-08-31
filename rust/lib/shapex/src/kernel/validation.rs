@@ -381,11 +381,16 @@ fn validate_loops(topology: &Topology, mode: ValidationMode, report: &mut Valida
                 break;
             }
         }
-        if mode.is_published() && visited.len() < 2 {
+        let is_closed_single_edge = visited.len() == 1
+            && topology
+                .coedge(first)
+                .and_then(|coedge| topology.edge(coedge.edge))
+                .is_ok_and(|edge| edge.vertices[0] == edge.vertices[1]);
+        if mode.is_published() && visited.len() < 2 && !is_closed_single_edge {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
-                    "a published boundary loop needs at least two coedges",
+                    "a published boundary loop needs at least two coedges unless it is one closed edge",
                 )
                 .with_entity(loop_.name),
             );
@@ -412,15 +417,6 @@ fn validate_edges(topology: &Topology, mode: ValidationMode, report: &mut Valida
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
                     "edge endpoint handles must refer to live vertices",
-                )
-                .with_entity(edge.name),
-            );
-        }
-        if edge.vertices[0] == edge.vertices[1] {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "an edge may not join a vertex to itself",
                 )
                 .with_entity(edge.name),
             );
@@ -558,7 +554,11 @@ fn validate_vertices(topology: &Topology, mode: ValidationMode, report: &mut Val
 fn validate_manifold_vertices(topology: &Topology, report: &mut ValidationReport) {
     for (vertex_id, vertex) in topology.vertices() {
         let mut shell = None;
-        let mut link = BTreeMap::<super::EdgeId, Vec<super::EdgeId>>::new();
+        // Use edge-end darts rather than edge ids as link-graph vertices. A
+        // closed edge has two distinct topological ends at the same vertex;
+        // collapsing those ends to one edge id would incorrectly give its
+        // artificial parameter-seam vertex degree four.
+        let mut link = BTreeMap::<(super::EdgeId, u8), Vec<(super::EdgeId, u8)>>::new();
         for (coedge_id, coedge) in topology.coedges() {
             let Ok([start, _]) = topology.coedge_vertices(coedge_id) else {
                 continue;
@@ -588,8 +588,10 @@ fn validate_manifold_vertices(topology: &Topology, report: &mut ValidationReport
             let Ok(previous) = topology.coedge(coedge.previous) else {
                 continue;
             };
-            link.entry(previous.edge).or_default().push(coedge.edge);
-            link.entry(coedge.edge).or_default().push(previous.edge);
+            let incoming = (previous.edge, if previous.forward { 1 } else { 0 });
+            let outgoing = (coedge.edge, if coedge.forward { 0 } else { 1 });
+            link.entry(incoming).or_default().push(outgoing);
+            link.entry(outgoing).or_default().push(incoming);
         }
         if link.is_empty() {
             continue;

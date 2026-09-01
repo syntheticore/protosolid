@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::prelude::*;
 
+use crate::Point2;
+
 use super::{
     CoedgeId, Diagnostic, DiagnosticKind, FaceOrientation, KernelError, KernelResult, LoopKind,
     ModelTolerance, PersistentId, ShellKind, Topology,
@@ -970,28 +972,48 @@ fn validate_face_parameter_loops(
                                 tolerance.parameter,
                             )
                         {
-                            let geometrically_continuous = face
+                            let collapsed_bridge = face
                                 .surface
                                 .evaluate(end.point.x, end.point.y)
                                 .and_then(|end_value| {
-                                    face.surface.evaluate(start.point.x, start.point.y).map(
-                                        |start_value| {
-                                            end_value.point.distance(start_value.point)
-                                                <= tolerance.linear_at_scale(scale_from_point(
-                                                    end_value.point,
-                                                ))
-                                        },
-                                    )
+                                    face.surface
+                                        .evaluate(start.point.x, start.point.y)
+                                        .and_then(|start_value| {
+                                            let middle = Point2::from_vec(
+                                                (end.point.to_vec() + start.point.to_vec()) * 0.5,
+                                            );
+                                            face.surface.evaluate(middle.x, middle.y).map(
+                                                |middle_value| {
+                                                    let allowed = tolerance.linear_at_scale(
+                                                        scale_from_point(end_value.point),
+                                                    );
+                                                    end_value.point.distance(start_value.point)
+                                                        <= allowed
+                                                        && end_value
+                                                            .point
+                                                            .distance(middle_value.point)
+                                                            <= allowed
+                                                },
+                                            )
+                                        })
                                 })
                                 .unwrap_or(false);
-                            if !geometrically_continuous {
+                            if !collapsed_bridge {
                                 report.error(
                                     Diagnostic::new(
                                         DiagnosticKind::GeometryInvariant,
-                                        "consecutive p-curves are not continuous in parameter or geometric space",
+                                        "consecutive p-curves are not continuous in parameter space or across a collapsed surface interval",
                                     )
                                     .with_entity(coedge.name),
                                 );
+                            } else {
+                                // A surface pole can collapse a finite
+                                // parameter-space interval to one topological
+                                // vertex. Account for that implicit bridge in
+                                // the loop winding without inventing a
+                                // zero-length 3D edge.
+                                signed_area += 0.5
+                                    * (end.point.x * start.point.y - start.point.x * end.point.y);
                             }
                         }
                     }

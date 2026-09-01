@@ -518,6 +518,28 @@ fn rolling_ball_fillet_certifies_curved_and_post_fillet_face_loops() {
         .fillet(&[top_circle], 0.5)
         .expect("circular-hole fillet on a curved multi-loop face");
 
+    let rectangular_rim_edge = solid
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .find(|edge| {
+            edge.endpoints().is_ok_and(|points| {
+                points
+                    .iter()
+                    .all(|point| point.z > 3.9 && point.x > 13.9 && point.x < 20.1)
+            })
+        })
+        .expect("top rectangular-hole rim")
+        .clone();
+    for radius in [1.0, 2.0] {
+        solid
+            .fillet(std::slice::from_ref(&rectangular_rim_edge), radius)
+            .expect("rectangular-hole fillet after changing its radius")
+            .tessellate(
+                TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+            )
+            .expect("changed rectangular-hole fillet display tessellation");
+    }
+
     let upper_edge = solid
         .edges()
         .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
@@ -579,6 +601,23 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
         .expect("profile with hole")
         .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 3.0))
         .expect("profile extrusion");
+    let lower_rim = solid
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .filter(|edge| {
+            edge.endpoints().is_ok_and(|points| {
+                points.iter().all(|point| {
+                    point.z < 0.1
+                        && point.x > 2.9
+                        && point.x < 7.1
+                        && point.y > 1.9
+                        && point.y < 6.1
+                })
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(lower_rim.len(), 4, "rectangular lower hole rim");
     let edge = solid
         .edges()
         .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
@@ -590,15 +629,31 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
         })
         .expect("top rectangular hole edge")
         .clone();
-    let filleted = solid
-        .fillet(&[edge], 0.25)
-        .expect("concave straight hole-edge fillet");
-    assert!(filleted.faces().count() > solid.faces().count());
-    filleted
-        .tessellate(
-            TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
-        )
-        .expect("concave hole-edge fillet display tessellation");
+    for radius in [0.25, 0.5, 1.0] {
+        let filleted = solid
+            .fillet(std::slice::from_ref(&edge), radius)
+            .expect("concave straight hole-edge fillet");
+        for lower_edge in &lower_rim {
+            assert!(
+                matches!(filleted.resolve(lower_edge), Resolution::Preserved(_)),
+                "top-rim propagation must not cross a vertical edge to the lower rim",
+            );
+        }
+        assert_eq!(
+            filleted
+                .faces()
+                .filter(|face| matches!(face.surface(), Surface3::Revolved(_)))
+                .count(),
+            4,
+            "the four concave rim corners should remain analytical revolved surfaces",
+        );
+        assert!(filleted.faces().count() > solid.faces().count());
+        filleted
+            .tessellate(
+                TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+            )
+            .expect("concave hole-edge fillet display tessellation");
+    }
 }
 
 #[test]

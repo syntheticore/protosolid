@@ -10,11 +10,11 @@ use super::topology::{Edge, Vertex};
 use super::validation::{validate, ValidationMode};
 use super::wire::{curve_loop_contains_point, curve_pair_intersection};
 use super::{
-    Circle2, CoedgeId, Curve2, Curve3, Cylinder3, DiagnosticKind, DomainBounds, EdgeId, FaceId,
-    FaceOrientation, Frame3, IntersectionSet, KernelError, KernelResult, Line2, ModelTolerance,
-    ParameterRange, RevolvedSurface3, RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3,
-    SurfaceIntersectionCurve, SurfaceProjectionPcurve2, SurfaceSurfaceCurve, Torus3, TrimmedCurve2,
-    VertexId,
+    Circle2, Circle3, CoedgeId, Curve2, Curve3, Cylinder3, DiagnosticKind, DomainBounds, EdgeId,
+    FaceId, FaceOrientation, Frame3, IntersectionSet, KernelError, KernelResult, Line2,
+    ModelTolerance, ParameterRange, RevolvedSurface3, RollingBallSurface3, Sphere3, Surface3,
+    SurfaceCurve3, SurfaceIntersectionCurve, SurfaceProjectionPcurve2, SurfaceSurfaceCurve, Torus3,
+    TrimmedCurve2, VertexId,
 };
 
 fn signed_periodic_delta(start: f64, end: f64) -> f64 {
@@ -60,6 +60,10 @@ struct FilletJunction {
 
 #[derive(Debug, Clone)]
 enum FilletJunctionKind {
+    RimCorner {
+        carrier_face: FaceId,
+        seam_edge: EdgeId,
+    },
     Smooth {
         seam_edge: EdgeId,
         tangent_faces: [FaceId; 2],
@@ -229,9 +233,23 @@ impl EulerTransaction<'_> {
                             junction_sources.insert(vertex, spine.edge_id);
                             additions.insert(continuation);
                         } else if endpoint_requires_junction {
-                            junction_kinds.insert(vertex, FilletJunctionKind::Trihedral);
-                            junction_sources.insert(vertex, spine.edge_id);
-                            additions.extend(self.working.vertex_edges(vertex)?);
+                            if let Some((continuation, carrier_face, seam_edge)) =
+                                self.inner_rim_corner(spine, vertex)?
+                            {
+                                junction_kinds.insert(
+                                    vertex,
+                                    FilletJunctionKind::RimCorner {
+                                        carrier_face,
+                                        seam_edge,
+                                    },
+                                );
+                                junction_sources.insert(vertex, spine.edge_id);
+                                additions.insert(continuation);
+                            } else {
+                                junction_kinds.insert(vertex, FilletJunctionKind::Trihedral);
+                                junction_sources.insert(vertex, spine.edge_id);
+                                additions.extend(self.working.vertex_edges(vertex)?);
+                            }
                         }
                     }
                 }
@@ -287,33 +305,52 @@ impl EulerTransaction<'_> {
                     }
                     junctions.insert(
                         *vertex,
-                        self.prepare_fillet_junction(spine, endpoint_index, radius, kind.clone())?,
+                        match kind {
+                            FilletJunctionKind::RimCorner { .. } => {
+                                self.prepare_rim_corner_junction(*vertex, kind.clone())?
+                            }
+                            _ => self.prepare_fillet_junction(
+                                spine,
+                                endpoint_index,
+                                radius,
+                                kind.clone(),
+                            )?,
+                        },
                     );
                 }
-                let sphere_surfaces = junctions
+                let junction_surfaces = junctions
                     .iter()
-                    .filter(|(_, junction)| matches!(junction.kind, FilletJunctionKind::Trihedral))
-                    .map(|(vertex, junction)| {
-                        let radials = junction
-                            .faces
-                            .iter()
-                            .map(|face| {
-                                (junction.contact_points[face] - junction.center).normalize()
-                            })
-                            .collect::<Vec<_>>();
-                        let polar = (radials[0]
-                            + radials[1] * std::f64::consts::SQRT_2
-                            + radials[2] * std::f64::consts::PI)
-                            .normalize();
-                        let frame = Frame3::from_z(junction.center, polar)?;
-                        Sphere3::new(
-                            junction.center,
-                            frame.x() * radius,
-                            frame.y() * radius,
-                            frame.z() * radius,
-                            self.kernel.tolerance,
-                        )
-                        .map(|sphere| (*vertex, Surface3::from(sphere)))
+                    .filter_map(|(vertex, junction)| match junction.kind {
+                        FilletJunctionKind::Trihedral => Some((|| {
+                            let radials = junction
+                                .faces
+                                .iter()
+                                .map(|face| {
+                                    (junction.contact_points[face] - junction.center).normalize()
+                                })
+                                .collect::<Vec<_>>();
+                            let polar = (radials[0]
+                                + radials[1] * std::f64::consts::SQRT_2
+                                + radials[2] * std::f64::consts::PI)
+                                .normalize();
+                            let frame = Frame3::from_z(junction.center, polar)?;
+                            Sphere3::new(
+                                junction.center,
+                                frame.x() * radius,
+                                frame.y() * radius,
+                                frame.z() * radius,
+                                self.kernel.tolerance,
+                            )
+                            .map(|sphere| (*vertex, Surface3::from(sphere)))
+                        })()),
+                        FilletJunctionKind::RimCorner {
+                            carrier_face,
+                            seam_edge,
+                        } => Some(
+                            self.rim_corner_surface(*vertex, carrier_face, seam_edge, radius)
+                                .map(|surface| (*vertex, surface)),
+                        ),
+                        _ => None,
                     })
                     .collect::<KernelResult<BTreeMap<_, _>>>()?;
                 let patches = spines
@@ -322,14 +359,14 @@ impl EulerTransaction<'_> {
                         self.prepare_fillet_patch(
                             spine,
                             &junctions,
-                            &sphere_surfaces,
+                            &junction_surfaces,
                             &regular_endpoints,
                             radius,
                         )
                     })
                     .collect::<KernelResult<Vec<_>>>()?;
                 self.certify_fillet_contact_trims(&patches)?;
-                return self.rewrite_fillet_network(&patches, &junctions, &sphere_surfaces);
+                return self.rewrite_fillet_network(&patches, &junctions, &junction_surfaces);
             }
             if selected.len() > 256 {
                 return Err(KernelError::new(
@@ -338,6 +375,52 @@ impl EulerTransaction<'_> {
                 ));
             }
         }
+    }
+
+    /// Identify the continuation and wall seam of a concave inner-rim corner.
+    /// The transition stays on the carrier loop instead of escaping through
+    /// the seam and continuing onto the opposite rim.
+    fn inner_rim_corner(
+        &self,
+        spine: &FilletSpine,
+        vertex: VertexId,
+    ) -> KernelResult<Option<(EdgeId, FaceId, EdgeId)>> {
+        let inner_uses = spine
+            .uses
+            .iter()
+            .copied()
+            .map(|use_id| {
+                let coedge = self.working.coedge(use_id)?;
+                Ok(
+                    (self.working.loop_(coedge.loop_id)?.kind == super::LoopKind::Inner)
+                        .then_some(use_id),
+                )
+            })
+            .collect::<KernelResult<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if inner_uses.len() != 1 {
+            return Ok(None);
+        }
+        let carrier_use = inner_uses[0];
+        let carrier_loop = self
+            .working
+            .loop_(self.working.coedge(carrier_use)?.loop_id)?;
+        let continuation_use = self.adjacent_use_at_vertex(carrier_use, vertex)?;
+        let continuation = self.working.coedge(continuation_use)?.edge;
+        let seam_edge = self
+            .working
+            .vertex_edges(vertex)?
+            .into_iter()
+            .find(|edge| *edge != spine.edge_id && *edge != continuation)
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "an inner-rim corner has no wall seam edge",
+                )
+            })?;
+        Ok(Some((continuation, carrier_loop.face, seam_edge)))
     }
 
     /// The fillet network represents rolling-patch joins at edge endpoints.
@@ -810,6 +893,95 @@ impl EulerTransaction<'_> {
             ]),
             kind,
         })
+    }
+
+    fn prepare_rim_corner_junction(
+        &self,
+        vertex: VertexId,
+        kind: FilletJunctionKind,
+    ) -> KernelResult<FilletJunction> {
+        let FilletJunctionKind::RimCorner {
+            carrier_face,
+            seam_edge,
+        } = kind
+        else {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "rim-corner preparation requires a rim-corner junction",
+            ));
+        };
+        let faces = self.working.vertex_faces(vertex)?;
+        if faces.len() != 3 || self.working.vertex_edges(vertex)?.len() != 3 {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "an inner-rim transition requires a regular valence-three BREP vertex",
+            ));
+        }
+        self.working.face(carrier_face)?;
+        self.working.edge(seam_edge)?;
+        Ok(FilletJunction {
+            faces,
+            center: self.working.vertex(vertex)?.point,
+            contact_points: BTreeMap::new(),
+            kind: FilletJunctionKind::RimCorner {
+                carrier_face,
+                seam_edge,
+            },
+        })
+    }
+
+    fn rim_corner_surface(
+        &self,
+        vertex: VertexId,
+        carrier_face: FaceId,
+        seam_edge: EdgeId,
+        radius: f64,
+    ) -> KernelResult<Surface3> {
+        let tolerance = self.kernel.tolerance;
+        let point = self.working.vertex(vertex)?.point;
+        let face = self.working.face(carrier_face)?;
+        if !matches!(face.surface, Surface3::Plane(_)) {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "inner-rim corner sweeps currently require a planar carrier face",
+            ));
+        }
+        let projection = face.surface.project(point, tolerance)?;
+        let mut outward = face
+            .surface
+            .normal(projection.parameters.0, projection.parameters.1)?
+            .normalize();
+        if face.orientation == FaceOrientation::Reversed {
+            outward = -outward;
+        }
+        let seam = self.working.edge(seam_edge)?;
+        let seam_parameter = if seam.vertices[0] == vertex {
+            seam.range.start
+        } else if seam.vertices[1] == vertex {
+            seam.range.end
+        } else {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "inner-rim seam is not incident to its corner vertex",
+            ));
+        };
+        let seam_tangent = seam.curve.evaluate(seam_parameter)?.first_derivative;
+        if seam_tangent.normalize().cross(outward).magnitude() > tolerance.angular * 32.0 {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "inner-rim seam must be normal to its planar carrier face",
+            ));
+        }
+        let singular = point - outward * radius;
+        let frame = Frame3::from_z(singular, outward)?;
+        let profile: Curve2 = Circle2::new(Point2::new(radius, 0.0), radius)?.into();
+        RevolvedSurface3::new(
+            frame,
+            profile,
+            ParameterRange::new(std::f64::consts::FRAC_PI_2, std::f64::consts::PI)?,
+            tolerance,
+        )
+        .map(Surface3::from)
     }
 
     fn prepare_smooth_fillet_junction(
@@ -1457,7 +1629,7 @@ impl EulerTransaction<'_> {
         &self,
         spine: FilletSpine,
         junctions: &BTreeMap<VertexId, FilletJunction>,
-        sphere_surfaces: &BTreeMap<VertexId, Surface3>,
+        junction_surfaces: &BTreeMap<VertexId, Surface3>,
         regular_endpoints: &BTreeMap<(EdgeId, usize), Option<FilletEndpoint>>,
         radius: f64,
     ) -> KernelResult<FilletPatch> {
@@ -1468,6 +1640,23 @@ impl EulerTransaction<'_> {
         for endpoint_index in 0..2 {
             let vertex = spine.edge.vertices[endpoint_index];
             if let Some(junction) = junctions.get(&vertex) {
+                if matches!(junction.kind, FilletJunctionKind::RimCorner { .. }) {
+                    let parameter = spine.endpoint_seeds[endpoint_index];
+                    for parent_index in 0..2 {
+                        let uv = if parent_index == 0 {
+                            spine.center.first_pcurve.evaluate(parameter)?.point
+                        } else {
+                            spine.center.second_pcurve.evaluate(parameter)?.point
+                        };
+                        contact_parameters[endpoint_index][parent_index] = parameter;
+                        contact_points[endpoint_index][parent_index] = spine.parent_surfaces
+                            [parent_index]
+                            .evaluate(uv.x, uv.y)?
+                            .point;
+                    }
+                    ends.push(FilletPatchEnd::Junction(vertex));
+                    continue;
+                }
                 let projected = spine
                     .center
                     .curve
@@ -1695,7 +1884,7 @@ impl EulerTransaction<'_> {
                             tolerance,
                         )?
                         .into();
-                        let Some(sphere) = sphere_surfaces.get(vertex) else {
+                        let Some(junction_surface) = junction_surfaces.get(vertex) else {
                             return Ok(FilletBoundary {
                                 curve,
                                 parent_pcurve: blend_pcurve.clone(),
@@ -1703,15 +1892,53 @@ impl EulerTransaction<'_> {
                                 range: unit,
                             });
                         };
+                        if let FilletJunctionKind::RimCorner { carrier_face, .. } =
+                            junctions[vertex].kind
+                        {
+                            let carrier_index = spine
+                                .faces
+                                .iter()
+                                .position(|face| *face == carrier_face)
+                                .ok_or_else(|| {
+                                    KernelError::new(
+                                        DiagnosticKind::TopologyInvariant,
+                                        "inner-rim patch lost its carrier face",
+                                    )
+                                })?;
+                            let top = contact_points[endpoint_index][carrier_index];
+                            let angle = junction_surface.project(top, tolerance)?.parameters.0;
+                            let start_v = if carrier_index == 0 {
+                                std::f64::consts::FRAC_PI_2
+                            } else {
+                                std::f64::consts::PI
+                            };
+                            let end_v = if carrier_index == 0 {
+                                std::f64::consts::PI
+                            } else {
+                                std::f64::consts::FRAC_PI_2
+                            };
+                            let parent_pcurve: Curve2 = Line2::new(
+                                Point2::new(angle, start_v),
+                                Vec2::new(0.0, end_v - start_v),
+                            )?
+                            .into();
+                            return Ok(FilletBoundary {
+                                curve,
+                                parent_pcurve,
+                                blend_pcurve,
+                                range: unit,
+                            });
+                        }
                         let mut parameters: Vec<Point2> = Vec::with_capacity(17);
                         for index in 0..=16 {
                             let parameter = index as f64 / 16.0;
                             let projection =
-                                sphere.project(curve.evaluate(parameter)?.point, tolerance)?;
+                                junction_surface
+                                    .project(curve.evaluate(parameter)?.point, tolerance)?;
                             let mut uv =
                                 Point2::new(projection.parameters.0, projection.parameters.1);
                             if let Some(previous) = parameters.last().copied() {
-                                if let Some(period) = sphere.domains()[0].period {
+                                if let Some(period) = junction_surface.domains()[0].period {
                                     uv.x += ((previous.x - uv.x) / period).round() * period;
                                 }
                             }
@@ -1721,7 +1948,7 @@ impl EulerTransaction<'_> {
                             super::intersection::smooth_nurbs_guide(&parameters, unit)?.into();
                         let parent_pcurve: Curve2 = SurfaceProjectionPcurve2::new(
                             curve.clone(),
-                            sphere.clone(),
+                            junction_surface.clone(),
                             guide,
                             unit,
                             tolerance,
@@ -1862,11 +2089,51 @@ impl EulerTransaction<'_> {
         Ok(())
     }
 
+    fn contact_vertex_key(
+        patch: &FilletPatch,
+        endpoint_index: usize,
+        parent_index: usize,
+        junctions: &BTreeMap<VertexId, FilletJunction>,
+    ) -> (VertexId, FaceId, Option<EdgeId>) {
+        let vertex = patch.spine.edge.vertices[endpoint_index];
+        let face = patch.spine.faces[parent_index];
+        match junctions.get(&vertex).map(|junction| &junction.kind) {
+            Some(FilletJunctionKind::RimCorner { carrier_face, .. }) if face == *carrier_face => {
+                (vertex, face, Some(patch.spine.edge_id))
+            }
+            Some(FilletJunctionKind::RimCorner { carrier_face, .. }) => {
+                (vertex, *carrier_face, None)
+            }
+            Some(FilletJunctionKind::Smooth { tangent_faces, .. })
+                if tangent_faces.contains(&face) =>
+            {
+                (vertex, tangent_faces[0], None)
+            }
+            _ => (vertex, face, None),
+        }
+    }
+
+    fn loop_parameter_area(&self, loop_id: super::LoopId) -> KernelResult<f64> {
+        let uses = self.collect_loop(loop_id)?;
+        let mut area = 0.0;
+        for (index, use_id) in uses.iter().enumerate() {
+            let use_value = self.working.coedge(*use_id)?;
+            area += use_value
+                .pcurve
+                .signed_area_contribution(use_value.range, self.kernel.tolerance.parameter)?;
+            let next = self.working.coedge(uses[(index + 1) % uses.len()])?;
+            let end = use_value.pcurve.evaluate(use_value.range.end)?.point;
+            let start = next.pcurve.evaluate(next.range.start)?.point;
+            area += 0.5 * (end.x * start.y - start.x * end.y);
+        }
+        Ok(area)
+    }
+
     fn rewrite_fillet_network(
         &mut self,
         patches: &[FilletPatch],
         junctions: &BTreeMap<VertexId, FilletJunction>,
-        sphere_surfaces: &BTreeMap<VertexId, Surface3>,
+        junction_surfaces: &BTreeMap<VertexId, Surface3>,
     ) -> KernelResult<()> {
         let tolerance = self.kernel.tolerance;
         let first_patch = patches.first().ok_or_else(|| {
@@ -1937,29 +2204,15 @@ impl EulerTransaction<'_> {
             }
         }
 
-        let mut contact_vertices = BTreeMap::<(VertexId, FaceId), VertexId>::new();
+        let mut contact_vertices = BTreeMap::<(VertexId, FaceId, Option<EdgeId>), VertexId>::new();
         for patch in patches {
             for endpoint_index in 0..2 {
                 let old_vertex = patch.spine.edge.vertices[endpoint_index];
                 for parent_index in 0..2 {
                     let face = patch.spine.faces[parent_index];
-                    let key = (old_vertex, face);
+                    let key =
+                        Self::contact_vertex_key(patch, endpoint_index, parent_index, junctions);
                     if contact_vertices.contains_key(&key) {
-                        continue;
-                    }
-                    let canonical_key = junctions
-                        .get(&old_vertex)
-                        .and_then(|junction| match junction.kind {
-                            FilletJunctionKind::Smooth { tangent_faces, .. }
-                                if tangent_faces.contains(&face) =>
-                            {
-                                Some((old_vertex, tangent_faces[0]))
-                            }
-                            _ => None,
-                        })
-                        .unwrap_or(key);
-                    if let Some(vertex) = contact_vertices.get(&canonical_key).copied() {
-                        contact_vertices.insert(key, vertex);
                         continue;
                     }
                     let point = patch.contact_points[endpoint_index][parent_index];
@@ -1973,7 +2226,6 @@ impl EulerTransaction<'_> {
                         ],
                         "fillet.contact.vertex",
                     );
-                    contact_vertices.insert(canonical_key, vertex);
                     contact_vertices.insert(key, vertex);
                 }
             }
@@ -1996,7 +2248,12 @@ impl EulerTransaction<'_> {
                     self.retarget_edge_endpoint(
                         adjacent_edge,
                         endpoint.old_vertex,
-                        contact_vertices[&(endpoint.old_vertex, patch.spine.faces[parent_index])],
+                        contact_vertices[&Self::contact_vertex_key(
+                            patch,
+                            endpoint_index,
+                            parent_index,
+                            junctions,
+                        )],
                         endpoint.contact_points[parent_index],
                     )?;
                 }
@@ -2011,7 +2268,7 @@ impl EulerTransaction<'_> {
             else {
                 continue;
             };
-            let new_vertex = contact_vertices[&(*old_vertex, tangent_faces[0])];
+            let new_vertex = contact_vertices[&(*old_vertex, tangent_faces[0], None)];
             self.retarget_edge_endpoint(
                 seam_edge,
                 *old_vertex,
@@ -2053,20 +2310,36 @@ impl EulerTransaction<'_> {
                 self.retarget_edge_endpoint(
                     seam_edge,
                     *old_vertex,
-                    contact_vertices[&(*old_vertex, seam_face)],
+                    contact_vertices[&(*old_vertex, seam_face, None)],
                     junction.contact_points[&seam_face],
                 )?;
             }
         }
+        for (old_vertex, junction) in junctions {
+            let FilletJunctionKind::RimCorner {
+                carrier_face,
+                seam_edge,
+            } = junction.kind
+            else {
+                continue;
+            };
+            let singular_key = (*old_vertex, carrier_face, None);
+            let singular_vertex = contact_vertices[&singular_key];
+            let singular_point = self.working.vertex(singular_vertex)?.point;
+            self.retarget_edge_endpoint(seam_edge, *old_vertex, singular_vertex, singular_point)?;
+        }
 
-        let mut sphere_faces = BTreeMap::new();
-        let mut sphere_loops = BTreeMap::new();
-        let mut sphere_uses = BTreeMap::<VertexId, Vec<CoedgeId>>::new();
+        let mut junction_faces = BTreeMap::new();
+        let mut junction_loops = BTreeMap::new();
+        let mut junction_uses = BTreeMap::<VertexId, Vec<CoedgeId>>::new();
         for (vertex, junction) in junctions {
-            if !matches!(junction.kind, FilletJunctionKind::Trihedral) {
+            if !matches!(
+                junction.kind,
+                FilletJunctionKind::Trihedral | FilletJunctionKind::RimCorner { .. }
+            ) {
                 continue;
             }
-            let surface = sphere_surfaces[vertex].clone();
+            let surface = junction_surfaces[vertex].clone();
             let face_name = self.names.next_for("fillet.vertex.face")?;
             let loop_name = self.names.next_for("fillet.vertex.loop")?;
             let (face, loop_id) = self.make_face_loop(
@@ -2087,13 +2360,14 @@ impl EulerTransaction<'_> {
             );
             self.history
                 .derived(loop_name, [face_name], "fillet.vertex.loop");
-            sphere_faces.insert(*vertex, face);
-            sphere_loops.insert(*vertex, loop_id);
-            sphere_uses.insert(*vertex, Vec::with_capacity(3));
+            junction_faces.insert(*vertex, face);
+            junction_loops.insert(*vertex, loop_id);
+            junction_uses.insert(*vertex, Vec::with_capacity(3));
         }
 
         let mut blend_cycles = Vec::with_capacity(patches.len());
         let mut smooth_edges = BTreeMap::<VertexId, (EdgeId, Curve3)>::new();
+        let mut contact_parent_uses = BTreeMap::<(EdgeId, usize), CoedgeId>::new();
         for patch in patches {
             let selected_name = patch.spine.edge.name;
             let blend_face_name = self.names.next_for("fillet.blend.face")?;
@@ -2120,14 +2394,10 @@ impl EulerTransaction<'_> {
             let mut blend_uses = Vec::with_capacity(4);
             for parent_index in 0..2 {
                 let boundary = &patch.contact_boundaries[parent_index];
-                let first_vertex = contact_vertices[&(
-                    patch.spine.edge.vertices[0],
-                    patch.spine.faces[parent_index],
-                )];
-                let second_vertex = contact_vertices[&(
-                    patch.spine.edge.vertices[1],
-                    patch.spine.faces[parent_index],
-                )];
+                let first_vertex =
+                    contact_vertices[&Self::contact_vertex_key(patch, 0, parent_index, junctions)];
+                let second_vertex =
+                    contact_vertices[&Self::contact_vertex_key(patch, 1, parent_index, junctions)];
                 let edge_name = self.names.next_for("fillet.contact.edge")?;
                 let parent_use_name = self.names.next_for("fillet.contact.parent-use")?;
                 let blend_use_name = self.names.next_for("fillet.contact.blend-use")?;
@@ -2166,6 +2436,7 @@ impl EulerTransaction<'_> {
                     },
                 )?;
                 self.replace_loop_coedge(old_use, parent_use)?;
+                contact_parent_uses.insert((patch.spine.edge_id, parent_index), parent_use);
                 blend_uses.push(blend_use);
                 self.history.derived(
                     edge_name,
@@ -2189,14 +2460,10 @@ impl EulerTransaction<'_> {
                         FilletJunctionKind::Smooth { .. } | FilletJunctionKind::TangentChain { .. }
                     ) {
                         let vertices = [
-                            contact_vertices[&(
-                                patch.spine.edge.vertices[endpoint_index],
-                                patch.spine.faces[0],
-                            )],
-                            contact_vertices[&(
-                                patch.spine.edge.vertices[endpoint_index],
-                                patch.spine.faces[1],
-                            )],
+                            contact_vertices
+                                [&Self::contact_vertex_key(patch, endpoint_index, 0, junctions)],
+                            contact_vertices
+                                [&Self::contact_vertex_key(patch, endpoint_index, 1, junctions)],
                         ];
                         let contact_vertices_on_use =
                             self.working.coedge_vertices(blend_uses[0])?;
@@ -2274,14 +2541,10 @@ impl EulerTransaction<'_> {
                     }
                 }
                 let vertices = [
-                    contact_vertices[&(
-                        patch.spine.edge.vertices[endpoint_index],
-                        patch.spine.faces[0],
-                    )],
-                    contact_vertices[&(
-                        patch.spine.edge.vertices[endpoint_index],
-                        patch.spine.faces[1],
-                    )],
+                    contact_vertices
+                        [&Self::contact_vertex_key(patch, endpoint_index, 0, junctions)],
+                    contact_vertices
+                        [&Self::contact_vertex_key(patch, endpoint_index, 1, junctions)],
                 ];
                 let edge_name = self.names.next_for("fillet.end.edge")?;
                 let other_use_name = self.names.next_for("fillet.end.other-use")?;
@@ -2293,7 +2556,7 @@ impl EulerTransaction<'_> {
                         let gap = termination_gaps[&(selected_name, endpoint.old_vertex)];
                         (self.working.coedge(gap.0)?.loop_id, gap.2)
                     }
-                    FilletPatchEnd::Junction(vertex) => (sphere_loops[vertex], true),
+                    FilletPatchEnd::Junction(vertex) => (junction_loops[vertex], true),
                 };
                 let other_use = self.make_coedge(
                     other_use_name,
@@ -2326,7 +2589,7 @@ impl EulerTransaction<'_> {
                         self.insert_loop_coedge(gap.0, gap.1, other_use)?;
                     }
                     FilletPatchEnd::Junction(vertex) => {
-                        sphere_uses.get_mut(vertex).unwrap().push(other_use);
+                        junction_uses.get_mut(vertex).unwrap().push(other_use);
                     }
                 }
                 blend_uses.push(blend_use);
@@ -2351,20 +2614,20 @@ impl EulerTransaction<'_> {
                 ));
             }
         }
-        for uses in sphere_uses.values() {
-            for sphere_use in uses {
-                let edge = self.working.coedge(*sphere_use)?.edge;
+        for uses in junction_uses.values() {
+            for junction_use in uses {
+                let edge = self.working.coedge(*junction_use)?.edge;
                 let blend_use = self
                     .working
                     .edge(edge)?
                     .coedges
                     .iter()
                     .copied()
-                    .find(|candidate| candidate != sphere_use)
+                    .find(|candidate| candidate != junction_use)
                     .ok_or_else(|| {
                         KernelError::new(
                             DiagnosticKind::TopologyInvariant,
-                            "trihedral boundary has no paired rolling-patch use",
+                            "fillet junction boundary has no paired rolling-patch use",
                         )
                     })?;
                 let blend_loop = self.working.coedge(blend_use)?.loop_id;
@@ -2374,13 +2637,150 @@ impl EulerTransaction<'_> {
                     .ok_or_else(|| {
                         KernelError::new(
                             DiagnosticKind::TopologyInvariant,
-                            "trihedral boundary lost its rolling-patch cycle",
+                            "fillet junction boundary lost its rolling-patch cycle",
                         )
                     })?;
                 self.orient_closing_coedge(cycle, blend_use)?;
                 let blend_forward = self.working.coedge(blend_use)?.forward;
-                self.orient_coedge(*sphere_use, !blend_forward)?;
+                self.orient_coedge(*junction_use, !blend_forward)?;
             }
+        }
+        for (vertex, junction) in junctions {
+            let FilletJunctionKind::RimCorner { carrier_face, .. } = junction.kind else {
+                continue;
+            };
+            let incidents = patches
+                .iter()
+                .flat_map(|patch| {
+                    (0..2).filter_map(move |endpoint_index| {
+                        (patch.spine.edge.vertices[endpoint_index] == *vertex)
+                            .then_some((patch, endpoint_index))
+                    })
+                })
+                .collect::<Vec<_>>();
+            if incidents.len() != 2 {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "an inner-rim corner must join exactly two rolling patches",
+                ));
+            }
+            let carrier_uses = incidents
+                .iter()
+                .map(|(patch, _)| {
+                    let parent_index = patch
+                        .spine
+                        .faces
+                        .iter()
+                        .position(|face| *face == carrier_face)
+                        .ok_or_else(|| {
+                            KernelError::new(
+                                DiagnosticKind::TopologyInvariant,
+                                "inner-rim patch lost its carrier face",
+                            )
+                        })?;
+                    Ok(contact_parent_uses[&(patch.spine.edge_id, parent_index)])
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            let (previous, next) = if self.working.coedge(carrier_uses[0])?.next == carrier_uses[1]
+            {
+                (carrier_uses[0], carrier_uses[1])
+            } else if self.working.coedge(carrier_uses[1])?.next == carrier_uses[0] {
+                (carrier_uses[1], carrier_uses[0])
+            } else {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "inner-rim carrier uses are not adjacent at their corner",
+                ));
+            };
+            let start_vertex = self.working.coedge_vertices(previous)?[1];
+            let end_vertex = self.working.coedge_vertices(next)?[0];
+            let start = self.working.vertex(start_vertex)?.point;
+            let end = self.working.vertex(end_vertex)?.point;
+            let center = self.working.vertex(*vertex)?.point;
+            let axis = match &junction_surfaces[vertex] {
+                Surface3::Revolved(surface) => surface.axis().direction().normalize(),
+                _ => {
+                    return Err(KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "inner-rim junction lost its revolved surface",
+                    ))
+                }
+            };
+            let x_radius = start - center;
+            let radius = x_radius.magnitude();
+            let y_radius = axis.cross(x_radius).normalize() * radius;
+            let x_unit = x_radius / radius;
+            let y_unit = y_radius / radius;
+            let delta = (end - center).dot(y_unit).atan2((end - center).dot(x_unit));
+            let range = ParameterRange::new(0.0, delta)?;
+            let curve: Curve3 = Circle3::new(center, x_radius, y_radius, tolerance)?.into();
+            let projection_guide = |surface: &Surface3| -> KernelResult<Curve2> {
+                let first = surface.project(start, tolerance)?.parameters;
+                let mut second = surface.project(end, tolerance)?.parameters;
+                if let Some(period) = surface.domains()[0].period {
+                    second.0 += ((first.0 - second.0) / period).round() * period;
+                }
+                Line2::new(
+                    Point2::new(first.0, first.1),
+                    Vec2::new(second.0 - first.0, second.1 - first.1) / range.span(),
+                )
+                .map(Curve2::from)
+            };
+            let carrier_surface = self.working.face(carrier_face)?.surface.clone();
+            let carrier_pcurve: Curve2 = SurfaceProjectionPcurve2::new(
+                curve.clone(),
+                carrier_surface.clone(),
+                projection_guide(&carrier_surface)?,
+                range,
+                tolerance,
+            )?
+            .into();
+            let junction_pcurve: Curve2 = SurfaceProjectionPcurve2::new(
+                curve.clone(),
+                junction_surfaces[vertex].clone(),
+                projection_guide(&junction_surfaces[vertex])?,
+                range,
+                tolerance,
+            )?
+            .into();
+            let edge_name = self.names.next_for("fillet.rim-corner.contact.edge")?;
+            let carrier_use_name = self.names.next_for("fillet.rim-corner.carrier-use")?;
+            let junction_use_name = self.names.next_for("fillet.rim-corner.junction-use")?;
+            let edge = self.make_edge(edge_name, [start_vertex, end_vertex], curve, range)?;
+            let carrier_use = self.make_coedge(
+                carrier_use_name,
+                edge,
+                self.working.coedge(previous)?.loop_id,
+                true,
+                carrier_pcurve,
+                range,
+            )?;
+            let junction_use = self.make_coedge(
+                junction_use_name,
+                edge,
+                junction_loops[vertex],
+                true,
+                junction_pcurve,
+                range,
+            )?;
+            self.insert_loop_coedge(previous, next, carrier_use)?;
+            junction_uses.get_mut(vertex).unwrap().push(junction_use);
+            self.orient_closing_coedge(&junction_uses[vertex], junction_use)?;
+            self.history.derived(
+                edge_name,
+                [self.working.face(carrier_face)?.name],
+                "fillet.rim-corner.contact.edge",
+            );
+            self.history.derived(
+                carrier_use_name,
+                [edge_name],
+                "fillet.rim-corner.carrier-use",
+            );
+            self.history.derived(
+                junction_use_name,
+                [edge_name],
+                "fillet.rim-corner.junction-use",
+            );
         }
         for (loop_id, uses) in blend_cycles {
             self.close_loop_from_coedges(loop_id, &uses)
@@ -2408,30 +2808,23 @@ impl EulerTransaction<'_> {
                 },
             )?;
         }
-        for (vertex, uses) in &sphere_uses {
+        for (vertex, uses) in &junction_uses {
             if uses.len() != 3 {
                 return Err(KernelError::new(
                     DiagnosticKind::TopologyInvariant,
-                    "a regular trihedral fillet junction must have three rolling patches",
+                    "a regular fillet junction must have three boundary patches",
                 ));
             }
-            self.close_loop_from_coedges(sphere_loops[vertex], uses)
+            self.close_loop_from_coedges(junction_loops[vertex], uses)
                 .map_err(|error| {
                     KernelError::new(
                         DiagnosticKind::TopologyInvariant,
-                        format!("trihedral sphere boundary cycle failed: {error}"),
+                        format!("fillet junction boundary cycle failed: {error}"),
                     )
                 })?;
-            let area = uses.iter().try_fold(0.0, |sum, use_id| {
-                let use_value = self.working.coedge(*use_id)?;
-                Ok::<_, KernelError>(
-                    sum + use_value
-                        .pcurve
-                        .signed_area_contribution(use_value.range, tolerance.parameter)?,
-                )
-            })?;
+            let area = self.loop_parameter_area(junction_loops[vertex])?;
             self.orient_face(
-                sphere_faces[vertex],
+                junction_faces[vertex],
                 if area >= 0.0 {
                     FaceOrientation::Forward
                 } else {
@@ -2455,7 +2848,7 @@ impl EulerTransaction<'_> {
         for old_vertex in old_vertices {
             let outputs = contact_vertices
                 .iter()
-                .filter_map(|((vertex, _), replacement)| {
+                .filter_map(|((vertex, _, _), replacement)| {
                     (*vertex == old_vertex).then_some(*replacement)
                 })
                 .map(|vertex| self.working.vertex(vertex).map(|value| value.name))

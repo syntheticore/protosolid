@@ -597,6 +597,33 @@ fn unwrap_periodic_ring(
     // source faces; projection supplies one canonical representative on the
     // surviving surface and the loop order supplies the winding.
     for vertex in ring.iter_mut() {
+        let original_uv = vertex.uv;
+        let (_, du, dv) = surface.first_order(original_uv.x, original_uv.y)?;
+        let singular_periodic_coordinate =
+            domains.iter().enumerate().any(|(coordinate, domain)| {
+                domain.period.is_some()
+                    && if coordinate == 0 {
+                        du.magnitude() <= tolerance.linear
+                    } else {
+                        dv.magnitude() <= tolerance.linear
+                    }
+            });
+        // Projection cannot choose a unique periodic parameter at a collapsed
+        // pole. Preserve the exact p-curve representative there; replacing it
+        // with an arbitrary canonical angle can make a small face appear to
+        // wind almost a full turn in its tessellation chart.
+        if singular_periodic_coordinate {
+            let lifted = surface.evaluate(original_uv.x, original_uv.y)?.point;
+            if lifted.distance(vertex.point)
+                > tolerance.linear_at_scale(vertex.point.to_vec().magnitude().max(1.0))
+            {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "periodic face boundary does not lie on its retained surface",
+                ));
+            }
+            continue;
+        }
         let projection = surface.project(vertex.point, tolerance)?;
         if projection.distance
             > tolerance.linear_at_scale(vertex.point.to_vec().magnitude().max(1.0))
@@ -665,8 +692,15 @@ fn refine_surface_triangles(
         }
         for edge in unique_edges {
             if !boundary_edges.contains(&edge) {
-                let (chord_error, angular_error) =
+                let (chord_error, mut angular_error) =
                     surface_edge_error(surface, orientation, edge, uvs, positions)?;
+                if let Some(resolved_error) = collapsed_periodic_angular_error(
+                    surface,
+                    &[uvs[edge.0], uvs[edge.1]],
+                    options.chord_tolerance,
+                )? {
+                    angular_error = resolved_error;
+                }
                 edge_scores.insert(
                     edge,
                     (chord_error / options.chord_tolerance)
@@ -681,8 +715,16 @@ fn refine_surface_triangles(
             }
         }
         for (index, triangle) in triangles.iter().copied().enumerate() {
-            let (chord_error, angular_error) =
+            let (chord_error, mut angular_error) =
                 surface_triangle_error(surface, orientation, triangle, uvs, positions)?;
+            let [a, b, c] = triangle;
+            if let Some(resolved_error) = collapsed_periodic_angular_error(
+                surface,
+                &[uvs[a], uvs[b], uvs[c]],
+                options.chord_tolerance,
+            )? {
+                angular_error = resolved_error;
+            }
             if chord_error > options.chord_tolerance || angular_error > options.angular_tolerance {
                 let interior: Vec<_> = triangle_edges(triangle)
                     .into_iter()
@@ -708,8 +750,16 @@ fn refine_surface_triangles(
             let mut worst_chord = 0.0_f64;
             let mut worst_angle = 0.0_f64;
             for triangle in triangles.iter().copied() {
-                let (chord, angle) =
+                let (chord, mut angle) =
                     surface_triangle_error(surface, orientation, triangle, uvs, positions)?;
+                let [a, b, c] = triangle;
+                if let Some(resolved_error) = collapsed_periodic_angular_error(
+                    surface,
+                    &[uvs[a], uvs[b], uvs[c]],
+                    options.chord_tolerance,
+                )? {
+                    angle = resolved_error;
+                }
                 worst_chord = worst_chord.max(chord);
                 worst_angle = worst_angle.max(angle);
             }
@@ -810,14 +860,113 @@ fn surface_kind(surface: &super::Surface3) -> &'static str {
     }
 }
 
+fn collapsed_periodic_angular_error(
+    surface: &super::Surface3,
+    uvs: &[Point2],
+    chord_tolerance: f64,
+) -> KernelResult<Option<f64>> {
+    // These periodic analytical surfaces are regular everywhere, so avoid
+    // extra first-order evaluations on their hot tessellation paths.
+    if matches!(
+        surface,
+        super::Surface3::Cylinder(_) | super::Surface3::Torus(_)
+    ) {
+        return Ok(None);
+    }
+
+    let domains = surface.domains();
+    let periodic_coordinates = domains
+        .iter()
+        .enumerate()
+        .filter_map(|(coordinate, domain)| domain.period.map(|period| (coordinate, period)))
+        .collect::<Vec<_>>();
+    if periodic_coordinates.is_empty() {
+        return Ok(None);
+    }
+    let samples = uvs
+        .iter()
+        .map(|uv| surface.first_order(uv.x, uv.y))
+        .collect::<KernelResult<Vec<_>>>()?;
+    for (coordinate, period) in periodic_coordinates {
+        let tangent = |sample: &(Point3, Vec3, Vec3)| {
+            if coordinate == 0 {
+                sample.1
+            } else {
+                sample.2
+            }
+        };
+        let has_pole = samples.iter().any(|sample| {
+            let derivative_scale = sample.1.magnitude().max(sample.2.magnitude()).max(1.0);
+            tangent(sample).magnitude() <= derivative_scale * f64::EPSILON.sqrt()
+        });
+        if !has_pole {
+            continue;
+        }
+        let values = uvs
+            .iter()
+            .map(|uv| if coordinate == 0 { uv.x } else { uv.y });
+        let (minimum, maximum) = values.fold(
+            (f64::INFINITY, f64::NEG_INFINITY),
+            |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
+        );
+        let parameter_span = (maximum - minimum).min(period);
+        let maximum_tangent = samples
+            .iter()
+            .map(|sample| tangent(sample).magnitude())
+            .fold(0.0_f64, f64::max);
+        if maximum_tangent * parameter_span > chord_tolerance {
+            continue;
+        }
+
+        // At a pole, changing the periodic parameter changes the limiting
+        // normal but not the surface point. Once that collapsed-direction
+        // width is below the chord tolerance, retain only the genuine normal
+        // variation along the profile direction. Unlike setting the angular
+        // error to zero, this still refines curved meridians normally.
+        let reference = if coordinate == 0 { uvs[0].x } else { uvs[0].y };
+        let normals = uvs
+            .iter()
+            .map(|uv| {
+                let fixed = if coordinate == 0 {
+                    Point2::new(reference, uv.y)
+                } else {
+                    Point2::new(uv.x, reference)
+                };
+                surface_point_normal(surface, fixed.x, fixed.y).map(|value| value.1)
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        let mut angular_error = 0.0_f64;
+        for first in 0..normals.len() {
+            for second in first + 1..normals.len() {
+                angular_error = angular_error.max(normals[first].angle(normals[second]).0);
+            }
+        }
+        return Ok(Some(angular_error));
+    }
+    Ok(None)
+}
+
 fn surface_point_normal(surface: &super::Surface3, u: f64, v: f64) -> KernelResult<(Point3, Vec3)> {
     let (point, du, dv) = surface.first_order(u, v)?;
-    let normal = match surface {
+    let mut normal = match surface {
         // Longitude is singular at a sphere's poles even though the exact
         // surface normal remains well defined there.
         super::Surface3::Sphere(sphere) => point - sphere.center(),
         _ => du.cross(dv),
     };
+    if normal.magnitude2() == 0.0 {
+        if let super::Surface3::Revolved(revolved) = surface {
+            let range = revolved.profile_range();
+            let inset = range.span().abs().max(1.0) * f64::EPSILON.sqrt();
+            let shifted = if (v - range.start).abs() <= (v - range.end).abs() {
+                range.start + range.span().signum() * inset
+            } else {
+                range.end - range.span().signum() * inset
+            };
+            let (_, shifted_du, shifted_dv) = surface.first_order(u, shifted)?;
+            normal = shifted_du.cross(shifted_dv);
+        }
+    }
     if normal.magnitude2() == 0.0
         || !normal.x.is_finite()
         || !normal.y.is_finite()

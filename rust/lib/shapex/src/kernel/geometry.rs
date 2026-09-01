@@ -3412,11 +3412,16 @@ impl RevolvedSurface3 {
             let parameter = profile_range.start + profile_range.span() * index as f64 / 8.0;
             let profile = surface.profile.evaluate(parameter)?;
             let scale = profile.point.x.abs().max(profile.point.y.abs()).max(1.0);
-            if profile.point.x <= tolerance.linear_at_scale(scale)
-                || profile.first_derivative.magnitude() <= tolerance.linear_at_scale(scale)
+            let linear = tolerance.linear_at_scale(scale);
+            let boundary_pole = (index == 0 || index == 8)
+                && profile.point.x.abs() <= linear
+                && profile.first_derivative.magnitude() > linear;
+            if profile.point.x < -linear
+                || (profile.point.x <= linear && !boundary_pole)
+                || profile.first_derivative.magnitude() <= linear
             {
                 return Err(invalid(
-                    "revolved-surface profile must remain regular and clear of its axis",
+                    "revolved-surface profile must remain regular and may meet its axis only at an isolated boundary pole",
                 ));
             }
         }

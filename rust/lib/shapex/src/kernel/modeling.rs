@@ -1739,9 +1739,108 @@ impl Compound {
             })
             .collect::<KernelResult<Vec<_>>>()?;
         let mut transaction = kernel.begin_operation();
-        transaction.fillet_edges(&imported_edges, radius, options.follow_tangent_edges)?;
+        if let Err(error) =
+            transaction.fillet_edges(&imported_edges, radius, options.follow_tangent_edges)
+        {
+            let mixed_trihedral = (edges.len() == 3)
+                .then(|| {
+                    error.diagnostics().iter().find(|diagnostic| {
+                        diagnostic.operation.as_deref() == Some("fillet.mixed-trihedral-setback")
+                    })
+                })
+                .flatten();
+            if let Some(diagnostic) = mixed_trihedral {
+                return self.fillet_three_edge_setback(edges, options, &diagnostic.entities);
+            }
+            return Err(error);
+        }
         let committed = transaction.finish()?;
         Self::from_operation(kernel, committed, [self])
+    }
+
+    fn fillet_three_edge_setback(
+        &self,
+        edges: &[EdgeHandle],
+        options: FilletOptions,
+        concave_edges: &[PersistentId],
+    ) -> KernelResult<Self> {
+        // Each stage creates smooth continuation edges that the following stage must consume to
+        // enter the already-rounded corner. This is internal continuation, not user-facing
+        // selection propagation: the original sharp-edge selection remains exactly `edges`.
+        let stage_options = options.with_tangent_propagation(true);
+        let fallback_orders = [
+            [[0, 1], [2, usize::MAX]],
+            [[0, 2], [1, usize::MAX]],
+            [[1, 2], [0, usize::MAX]],
+            [[0, usize::MAX], [1, 2]],
+            [[1, usize::MAX], [0, 2]],
+            [[2, usize::MAX], [0, 1]],
+        ];
+        let concave = concave_edges.iter().copied().collect::<BTreeSet<_>>();
+        let concave_indices = edges
+            .iter()
+            .enumerate()
+            .filter_map(|(index, edge)| concave.contains(&edge.persistent_id()).then_some(index))
+            .collect::<Vec<_>>();
+        let minority = match concave_indices.as_slice() {
+            [only] => Some(*only),
+            [first, second] => (0..3).find(|index| index != first && index != second),
+            _ => None,
+        };
+        let mut grouped_orders = Vec::with_capacity(fallback_orders.len());
+        if let Some(singleton) = minority {
+            let pair = (0..3)
+                .filter(|index| *index != singleton)
+                .collect::<Vec<_>>();
+            grouped_orders.push([[singleton, usize::MAX], [pair[0], pair[1]]]);
+        }
+        for order in fallback_orders {
+            if !grouped_orders.contains(&order) {
+                grouped_orders.push(order);
+            }
+        }
+        let mut last_error = None;
+        for groups in grouped_orders {
+            let mut result = self.clone();
+            let mut failed = false;
+            for group in groups {
+                let resolved = group
+                    .into_iter()
+                    .filter(|index| *index != usize::MAX)
+                    .map(|index| match result.resolve(&edges[index]) {
+                        Resolution::Preserved(edge)
+                        | Resolution::Modified(edge)
+                        | Resolution::Merged(edge) => Ok(edge),
+                        Resolution::Split(mut descendants) if descendants.len() == 1 => {
+                            Ok(descendants.remove(0))
+                        }
+                        _ => Err(KernelError::new(
+                            DiagnosticKind::UnsupportedGeometry,
+                            "setback fillet could not reidentify an incident edge after the preceding blend",
+                        )),
+                    })
+                    .collect::<KernelResult<Vec<_>>>();
+                match resolved
+                    .and_then(|resolved| result.fillet_with_options(&resolved, stage_options))
+                {
+                    Ok(next) => result = next,
+                    Err(error) => {
+                        last_error = Some(error);
+                        failed = true;
+                        break;
+                    }
+                }
+            }
+            if !failed {
+                return Ok(result);
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "mixed convex-concave setback fillet has no valid construction order",
+            )
+        }))
     }
 
     pub fn combined(&self, others: &[Self]) -> KernelResult<Self> {

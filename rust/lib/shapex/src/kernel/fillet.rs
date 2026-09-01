@@ -10,11 +10,11 @@ use super::topology::{Edge, Vertex};
 use super::validation::{validate, ValidationMode};
 use super::wire::{curve_loop_contains_point, curve_pair_intersection};
 use super::{
-    Circle2, Circle3, CoedgeId, Curve2, Curve3, Cylinder3, DiagnosticKind, DomainBounds, EdgeId,
-    FaceId, FaceOrientation, Frame3, IntersectionSet, KernelError, KernelResult, Line2,
-    ModelTolerance, ParameterRange, RevolvedSurface3, RollingBallSurface3, Sphere3, Surface3,
-    SurfaceCurve3, SurfaceIntersectionCurve, SurfaceProjectionPcurve2, SurfaceSurfaceCurve, Torus3,
-    TrimmedCurve2, VertexId,
+    Circle2, Circle3, CoedgeId, Curve2, Curve3, Cylinder3, Diagnostic, DiagnosticKind,
+    DomainBounds, EdgeId, FaceId, FaceOrientation, Frame3, IntersectionSet, KernelError,
+    KernelResult, Line2, ModelTolerance, ParameterRange, RevolvedSurface3, RollingBallSurface3,
+    Sphere3, Surface3, SurfaceCurve3, SurfaceIntersectionCurve, SurfaceProjectionPcurve2,
+    SurfaceSurfaceCurve, Torus3, TrimmedCurve2, VertexId,
 };
 
 fn signed_periodic_delta(start: f64, end: f64) -> f64 {
@@ -28,6 +28,7 @@ struct FilletEndpoint {
     adjacent_uses: [CoedgeId; 2],
     contact_parameters: [f64; 2],
     contact_points: [Point3; 2],
+    allow_adjacent_extension: [bool; 2],
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +46,7 @@ struct FilletSpine {
     uses: [CoedgeId; 2],
     faces: [FaceId; 2],
     parent_surfaces: [Surface3; 2],
+    concave: bool,
     center: SurfaceSurfaceCurve,
     endpoint_seeds: [f64; 2],
     provisional_range: ParameterRange,
@@ -202,17 +204,7 @@ impl EulerTransaction<'_> {
                         .into_iter()
                         .filter(|edge| selected.contains(edge))
                         .count();
-                    let endpoint_requires_junction = if selected_degree > 1 {
-                        true
-                    } else {
-                        regular_endpoints
-                            .entry((spine.edge_id, endpoint_index))
-                            .or_insert_with(|| {
-                                self.prepare_fillet_endpoint(spine, endpoint_index).ok()
-                            })
-                            .is_none()
-                    };
-                    if follow_tangent_edges || endpoint_requires_junction {
+                    if selected_degree == 1 && follow_tangent_edges {
                         if let Some((continuation, tangent_faces)) =
                             self.tangent_chain_continuation(spine, endpoint_index)?
                         {
@@ -220,6 +212,7 @@ impl EulerTransaction<'_> {
                                 .insert(vertex, FilletJunctionKind::TangentChain { tangent_faces });
                             junction_sources.insert(vertex, spine.edge_id);
                             additions.insert(continuation);
+                            continue;
                         } else if let Some((seam_edge, continuation, tangent_faces)) =
                             self.smooth_fillet_continuation(vertex, &selected)?
                         {
@@ -232,26 +225,86 @@ impl EulerTransaction<'_> {
                             );
                             junction_sources.insert(vertex, spine.edge_id);
                             additions.insert(continuation);
-                        } else if endpoint_requires_junction {
-                            if let Some((continuation, carrier_face, seam_edge)) =
-                                self.inner_rim_corner(spine, vertex)?
-                            {
-                                junction_kinds.insert(
-                                    vertex,
-                                    FilletJunctionKind::RimCorner {
-                                        carrier_face,
-                                        seam_edge,
-                                    },
-                                );
-                                junction_sources.insert(vertex, spine.edge_id);
-                                additions.insert(continuation);
-                            } else {
-                                junction_kinds.insert(vertex, FilletJunctionKind::Trihedral);
-                                junction_sources.insert(vertex, spine.edge_id);
-                                additions.extend(self.working.vertex_edges(vertex)?);
-                            }
+                            continue;
                         }
                     }
+                    if selected_degree == 1 {
+                        let endpoint = self.prepare_fillet_endpoint(spine, endpoint_index)?;
+                        regular_endpoints.insert((spine.edge_id, endpoint_index), Some(endpoint));
+                        continue;
+                    }
+
+                    if let Some((continuation, tangent_faces)) =
+                        self.tangent_chain_continuation(spine, endpoint_index)?
+                    {
+                        if selected.contains(&continuation) {
+                            junction_kinds
+                                .insert(vertex, FilletJunctionKind::TangentChain { tangent_faces });
+                            junction_sources.insert(vertex, spine.edge_id);
+                            continue;
+                        }
+                    }
+                    if let Some((seam_edge, continuation, tangent_faces)) =
+                        self.smooth_fillet_continuation(vertex, &selected)?
+                    {
+                        if selected.contains(&continuation) {
+                            junction_kinds.insert(
+                                vertex,
+                                FilletJunctionKind::Smooth {
+                                    seam_edge,
+                                    tangent_faces,
+                                },
+                            );
+                            junction_sources.insert(vertex, spine.edge_id);
+                            continue;
+                        }
+                    }
+                    if let Some((continuation, carrier_face, seam_edge)) =
+                        self.inner_rim_corner(spine, vertex)?
+                    {
+                        if selected.contains(&continuation) {
+                            junction_kinds.insert(
+                                vertex,
+                                FilletJunctionKind::RimCorner {
+                                    carrier_face,
+                                    seam_edge,
+                                },
+                            );
+                            junction_sources.insert(vertex, spine.edge_id);
+                            continue;
+                        }
+                    }
+                    let incident_degree = self.working.vertex_edges(vertex)?.len();
+                    if selected_degree == 3 && incident_degree == 3 {
+                        let incident = self.working.vertex_edges(vertex)?;
+                        let first_concavity = spines[&incident[0]].concave;
+                        if incident
+                            .iter()
+                            .any(|edge| spines[edge].concave != first_concavity)
+                        {
+                            let diagnostic = incident
+                                .iter()
+                                .filter(|edge| spines[edge].concave)
+                                .fold(
+                                    Diagnostic::new(
+                                        DiagnosticKind::UnsupportedGeometry,
+                                        "mixed convex-concave three-edge fillets require a setback corner patch",
+                                    )
+                                    .with_operation("fillet.mixed-trihedral-setback"),
+                                    |diagnostic, edge| {
+                                        diagnostic.with_entity(spines[edge].edge.name)
+                                    },
+                                );
+                            return Err(KernelError::from_diagnostic(diagnostic));
+                        }
+                        junction_kinds.insert(vertex, FilletJunctionKind::Trihedral);
+                        junction_sources.insert(vertex, spine.edge_id);
+                        continue;
+                    }
+                    return Err(KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "selected fillet edges do not define a supported local corner transition",
+                    ));
                 }
             }
             let previous = selected.len();
@@ -591,20 +644,23 @@ impl EulerTransaction<'_> {
             self.working.face(faces[0])?.surface.clone(),
             self.working.face(faces[1])?.surface.clone(),
         ];
-        let inward = |face: FaceId| -> KernelResult<f64> {
-            Ok(match self.working.face(face)?.orientation {
-                FaceOrientation::Forward => -radius,
-                FaceOrientation::Reversed => radius,
-            })
-        };
-        let offsets = [
-            parent_surfaces[0].offset(inward(faces[0])?, tolerance)?,
-            parent_surfaces[1].offset(inward(faces[1])?, tolerance)?,
-        ];
         let midpoint = edge
             .curve
             .evaluate((edge.range.start + edge.range.end) * 0.5)?
             .point;
+        let concave =
+            self.fillet_edge_is_concave(&edge, uses, faces, &parent_surfaces, midpoint)?;
+        let offset_distance = |face: FaceId| -> KernelResult<f64> {
+            let outward = match self.working.face(face)?.orientation {
+                FaceOrientation::Forward => radius,
+                FaceOrientation::Reversed => -radius,
+            };
+            Ok(if concave { outward } else { -outward })
+        };
+        let offsets = [
+            parent_surfaces[0].offset(offset_distance(faces[0])?, tolerance)?,
+            parent_surfaces[1].offset(offset_distance(faces[1])?, tolerance)?,
+        ];
         let candidates = match offsets[0].intersect_surface(&offsets[1], tolerance) {
             Ok(IntersectionSet::Isolated(curves)) => curves,
             Ok(IntersectionSet::Empty) => {
@@ -684,10 +740,43 @@ impl EulerTransaction<'_> {
             uses,
             faces,
             parent_surfaces,
+            concave,
             center,
             endpoint_seeds,
             provisional_range,
         })
+    }
+
+    fn fillet_edge_is_concave(
+        &self,
+        edge: &Edge,
+        uses: [CoedgeId; 2],
+        faces: [FaceId; 2],
+        parent_surfaces: &[Surface3; 2],
+        midpoint: Point3,
+    ) -> KernelResult<bool> {
+        let parameter = (edge.range.start + edge.range.end) * 0.5;
+        let traversal = self.working.coedge(uses[0])?.range.span().signum();
+        let tangent = edge.curve.evaluate(parameter)?.first_derivative * traversal;
+        let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
+        for index in 0..2 {
+            let uv = parent_surfaces[index]
+                .project(midpoint, self.kernel.tolerance)?
+                .parameters;
+            normals[index] = parent_surfaces[index].normal(uv.0, uv.1)?;
+            if self.working.face(faces[index])?.orientation == FaceOrientation::Reversed {
+                normals[index] = -normals[index];
+            }
+            normals[index] = normals[index].normalize();
+        }
+        let signed_turn = tangent.normalize().dot(normals[0].cross(normals[1]));
+        if signed_turn.abs() <= self.kernel.tolerance.angular {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "fillet edge has no well-defined convex or concave dihedral",
+            ));
+        }
+        Ok(signed_turn < 0.0)
     }
 
     fn prepare_fillet_endpoint(
@@ -713,6 +802,7 @@ impl EulerTransaction<'_> {
         let mut adjacent_uses = [spine.uses[0]; 2];
         let mut contact_parameters = [0.0; 2];
         let mut contact_points = [Point3::new(0.0, 0.0, 0.0); 2];
+        let mut allow_adjacent_extension = [false; 2];
         for parent_index in 0..2 {
             adjacent_uses[parent_index] =
                 self.adjacent_use_at_vertex(spine.uses[parent_index], old_vertex)?;
@@ -762,13 +852,13 @@ impl EulerTransaction<'_> {
             let seed_point = contact_curve.evaluate(seed)?.point;
             let seed_allowed =
                 tolerance.linear_at_scale(seed_point.to_vec().magnitude().max(1.0)) * 8.0;
-            let (contact_parameter, contact_point, rail_parameter) = if rail_seed.distance
+            let (contact_parameter, rail_parameter, contact_point) = if rail_seed.distance
                 <= seed_allowed
             {
                 (
                     seed,
-                    Point3::from_vec((seed_point.to_vec() + rail_seed.point.to_vec()) * 0.5),
                     rail_seed.parameter,
+                    Point3::from_vec((seed_point.to_vec() + rail_seed.point.to_vec()) * 0.5),
                 )
             } else {
                 let hit = contact_curve
@@ -791,14 +881,16 @@ impl EulerTransaction<'_> {
                             ),
                         )
                     })?;
-                (hit.first_parameter, hit.point, hit.second_parameter)
+                (hit.first_parameter, hit.second_parameter, hit.point)
             };
-            if !adjacent_edge.range.contains(rail_parameter, tolerance) {
+            let needs_extension = !adjacent_edge.range.contains(rail_parameter, tolerance);
+            if spine.concave && needs_extension {
                 return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "fillet endpoint contact falls beyond its adjacent trimmed edge",
+                    DiagnosticKind::InvalidInput,
+                    "fillet radius reaches beyond an adjacent boundary edge",
                 ));
             }
+            allow_adjacent_extension[parent_index] = needs_extension;
             contact_parameters[parent_index] = contact_parameter;
             contact_points[parent_index] = contact_point;
         }
@@ -808,6 +900,7 @@ impl EulerTransaction<'_> {
             adjacent_uses,
             contact_parameters,
             contact_points,
+            allow_adjacent_extension,
         })
     }
 
@@ -838,9 +931,14 @@ impl EulerTransaction<'_> {
                 )
             })?;
         let third_surface = self.working.face(third_face)?.surface.clone();
-        let third_distance = match self.working.face(third_face)?.orientation {
-            FaceOrientation::Forward => -radius,
-            FaceOrientation::Reversed => radius,
+        let third_outward = match self.working.face(third_face)?.orientation {
+            FaceOrientation::Forward => radius,
+            FaceOrientation::Reversed => -radius,
+        };
+        let third_distance = if spine.concave {
+            third_outward
+        } else {
+            -third_outward
         };
         let third_offset = third_surface.offset(third_distance, tolerance)?;
         let old_point = self.working.vertex(old_vertex)?.point;
@@ -2245,17 +2343,23 @@ impl EulerTransaction<'_> {
                     if !trimmed.insert((adjacent_edge, endpoint.old_vertex)) {
                         continue;
                     }
-                    self.retarget_edge_endpoint(
-                        adjacent_edge,
-                        endpoint.old_vertex,
-                        contact_vertices[&Self::contact_vertex_key(
-                            patch,
-                            endpoint_index,
-                            parent_index,
-                            junctions,
-                        )],
-                        endpoint.contact_points[parent_index],
-                    )?;
+                    let contact_vertex = contact_vertices
+                        [&Self::contact_vertex_key(patch, endpoint_index, parent_index, junctions)];
+                    if endpoint.allow_adjacent_extension[parent_index] {
+                        self.retarget_edge_endpoint_allow_extension(
+                            adjacent_edge,
+                            endpoint.old_vertex,
+                            contact_vertex,
+                            endpoint.contact_points[parent_index],
+                        )?;
+                    } else {
+                        self.retarget_edge_endpoint(
+                            adjacent_edge,
+                            endpoint.old_vertex,
+                            contact_vertex,
+                            endpoint.contact_points[parent_index],
+                        )?;
+                    }
                 }
             }
         }

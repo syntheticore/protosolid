@@ -4955,6 +4955,31 @@ impl<'kernel> EulerTransaction<'kernel> {
         new_vertex: VertexId,
         point: Point3,
     ) -> KernelResult<()> {
+        self.retarget_edge_endpoint_impl(edge_id, old_vertex, new_vertex, point, false)
+    }
+
+    /// Retarget one endpoint while permitting its exact curve and pcurves to
+    /// extend beyond their previous trims. Fillet termination on a concave
+    /// corner needs this when the terminating face grows into the removed
+    /// material instead of merely trimming an existing boundary.
+    pub(super) fn retarget_edge_endpoint_allow_extension(
+        &mut self,
+        edge_id: EdgeId,
+        old_vertex: VertexId,
+        new_vertex: VertexId,
+        point: Point3,
+    ) -> KernelResult<()> {
+        self.retarget_edge_endpoint_impl(edge_id, old_vertex, new_vertex, point, true)
+    }
+
+    fn retarget_edge_endpoint_impl(
+        &mut self,
+        edge_id: EdgeId,
+        old_vertex: VertexId,
+        new_vertex: VertexId,
+        point: Point3,
+        allow_extension: bool,
+    ) -> KernelResult<()> {
         let edge = self.working.edge(edge_id)?.clone();
         let endpoint = edge
             .vertices
@@ -4980,9 +5005,23 @@ impl<'kernel> EulerTransaction<'kernel> {
                 ),
             ));
         }
-        if !edge
-            .range
-            .contains(projection.parameter, self.kernel.tolerance)
+        let remaining_span = if endpoint == 0 {
+            edge.range.end - projection.parameter
+        } else {
+            projection.parameter - edge.range.start
+        };
+        let preserves_direction = remaining_span.signum() == edge.range.span().signum()
+            && remaining_span.abs() > self.kernel.tolerance.parameter;
+        if !preserves_direction {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "replacement endpoint would collapse or reverse its exact edge",
+            ));
+        }
+        if !allow_extension
+            && !edge
+                .range
+                .contains(projection.parameter, self.kernel.tolerance)
         {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,

@@ -34,12 +34,12 @@
               @update:active="setSetting(key, $event)"
             )
 
-            select.input.enum-input(
+            EnumInput(
               v-if="setting.type == 'enum'"
               :value="activeTool[key]"
-              @change="setSetting(key, $event.target.value)"
+              :options="setting.options"
+              @update:value="setSetting(key, $event)"
             )
-              option(v-for="(name, option) in setting.options" :key="option" :value="option") {{ name }}
 
             IntegerInput(
               v-if="setting.type == 'integer'"

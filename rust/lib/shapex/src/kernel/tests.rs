@@ -577,6 +577,7 @@ fn rolling_ball_fillet_certifies_curved_and_post_fillet_face_loops() {
 #[test]
 fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
     let tolerance = ModelTolerance::default();
+    let height = 20.0;
     let outer = Wire2::polygon(
         [
             Point2::new(0.0, 0.0),
@@ -599,7 +600,7 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
     .expect("rectangular hole");
     let solid = Profile::new(outer, [hole], tolerance)
         .expect("profile with hole")
-        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 3.0))
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, height))
         .expect("profile extrusion");
     let lower_rim = solid
         .edges()
@@ -618,17 +619,19 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
         .cloned()
         .collect::<Vec<_>>();
     assert_eq!(lower_rim.len(), 4, "rectangular lower hole rim");
-    let edge = solid
+    let top_rim = solid
         .edges()
         .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
-        .find(|edge| {
+        .filter(|edge| {
             let endpoints = edge.endpoints().expect("edge endpoints");
-            endpoints.iter().all(|point| point.z > 2.9)
+            endpoints.iter().all(|point| point.z > height - 0.1)
                 && endpoints.iter().all(|point| point.x > 2.9 && point.x < 7.1)
                 && endpoints.iter().all(|point| point.y > 1.9 && point.y < 6.1)
         })
-        .expect("top rectangular hole edge")
-        .clone();
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(top_rim.len(), 4, "rectangular top hole rim");
+    let edge = top_rim[0].clone();
     for radius in [0.25, 0.5, 1.0] {
         let filleted = solid
             .fillet(std::slice::from_ref(&edge), radius)
@@ -639,20 +642,152 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
                 "top-rim propagation must not cross a vertical edge to the lower rim",
             );
         }
+        for unselected in &top_rim[1..] {
+            assert!(
+                matches!(
+                    filleted.resolve(unselected),
+                    Resolution::Preserved(_) | Resolution::Modified(_)
+                ),
+                "an unselected rim edge may be extended at the endpoint but must not be consumed",
+            );
+        }
         assert_eq!(
             filleted
                 .faces()
-                .filter(|face| matches!(face.surface(), Surface3::Revolved(_)))
+                .filter(|face| matches!(face.surface(), Surface3::Cylinder(_)))
                 .count(),
-            4,
-            "the four concave rim corners should remain analytical revolved surfaces",
+            1,
+            "one straight rim edge should produce one analytical cylinder",
         );
-        assert!(filleted.faces().count() > solid.faces().count());
+        assert_eq!(filleted.faces().count(), solid.faces().count() + 1);
         filleted
             .tessellate(
                 TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
             )
             .expect("concave hole-edge fillet display tessellation");
+    }
+
+    let vertical = solid
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .find(|edge| {
+            let endpoints = edge.endpoints().expect("vertical edge endpoints");
+            let minimum_z = endpoints
+                .iter()
+                .map(|point| point.z)
+                .fold(f64::INFINITY, f64::min);
+            let maximum_z = endpoints
+                .iter()
+                .map(|point| point.z)
+                .fold(f64::NEG_INFINITY, f64::max);
+            minimum_z < 0.1
+                && maximum_z > height - 0.1
+                && endpoints
+                    .iter()
+                    .all(|point| point.x > 2.9 && point.x < 7.1 && point.y > 1.9 && point.y < 6.1)
+        })
+        .expect("vertical rectangular-hole edge")
+        .clone();
+    for follow_tangent_edges in [true, false] {
+        let filleted = solid
+            .fillet_with_options(
+                std::slice::from_ref(&vertical),
+                FilletOptions::new(0.5).with_tangent_propagation(follow_tangent_edges),
+            )
+            .expect("isolated vertical hole-edge fillet");
+        for rim in top_rim.iter().chain(&lower_rim) {
+            assert!(
+                matches!(
+                    filleted.resolve(rim),
+                    Resolution::Preserved(_) | Resolution::Modified(_)
+                ),
+                "a vertical edge may trim adjacent rim endpoints but must not consume their edges",
+            );
+        }
+        assert_eq!(filleted.faces().count(), solid.faces().count() + 1);
+        assert_eq!(
+            filleted
+                .faces()
+                .filter(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+                .count(),
+            1,
+            "one vertical straight edge should produce one analytical cylinder",
+        );
+        let cylinder = filleted
+            .faces()
+            .find(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+            .expect("vertical fillet cylinder");
+        for boundary in cylinder
+            .boundary_edges()
+            .expect("vertical fillet cylinder boundary")
+        {
+            for point in boundary.endpoints().expect("cylinder boundary endpoints") {
+                assert!(
+                    point.x >= 3.0 - 1.0e-7
+                        && point.x <= 7.0 + 1.0e-7
+                        && point.y >= 2.0 - 1.0e-7
+                        && point.y <= 6.0 + 1.0e-7,
+                    "concave fillet contact {point:?} must remain on the rectangular hole boundary side",
+                );
+            }
+        }
+        let expected_added_volume = (1.0 - std::f64::consts::FRAC_PI_4) * 0.5_f64.powi(2) * height;
+        let expected_volume = solid.volume() + expected_added_volume;
+        assert!(
+            (filleted.volume() - expected_volume).abs() < 5.0e-5,
+            "vertical concave fillet volume is {}, expected {expected_volume}",
+            filleted.volume(),
+        );
+        filleted
+            .tessellate(
+                TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+            )
+            .expect("vertical hole-edge fillet display tessellation");
+    }
+    solid
+        .fillet(std::slice::from_ref(&vertical), 5.0)
+        .expect_err("a vertical fillet must not cross the body boundary");
+
+    let top_vertex = vertical
+        .endpoints()
+        .expect("vertical edge endpoints")
+        .into_iter()
+        .max_by(|first, second| first.z.total_cmp(&second.z))
+        .expect("vertical edge top vertex");
+    let mut trihedral = vec![vertical];
+    trihedral.extend(
+        top_rim
+            .iter()
+            .filter(|edge| {
+                edge.endpoints().is_ok_and(|points| {
+                    points
+                        .iter()
+                        .any(|point| point.distance(top_vertex) < 1.0e-7)
+                })
+            })
+            .cloned(),
+    );
+    assert_eq!(trihedral.len(), 3, "three edges at the concave top corner");
+    for radius in [0.5, 1.0] {
+        let setback = solid
+            .fillet_with_options(
+                &trihedral,
+                FilletOptions::new(radius).with_tangent_propagation(false),
+            )
+            .expect("mixed convex-concave three-edge setback fillet");
+        assert!(
+            setback
+                .faces()
+                .filter(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+                .count()
+                >= 3,
+            "the setback must retain analytical cylinders for its straight-edge blends",
+        );
+        setback
+            .tessellate(
+                TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+            )
+            .expect("mixed concave-convex setback display tessellation");
     }
 }
 

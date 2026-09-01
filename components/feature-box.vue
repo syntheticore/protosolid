@@ -72,12 +72,12 @@
             @update:active="update"
           )
 
-          select.input.enum-input(
+          EnumInput(
             v-if="setting.type == 'enum'"
-            v-model="activeFeature[key]"
-            @change="updateSetting"
+            v-model:value="activeFeature[key]"
+            :options="settingOptions(key, setting)"
+            @update:value="updateSetting"
           )
-            option(v-for="(name, option) in settingOptions(key, setting)" :value="option") {{ name }}
 
           RadioBar(
             v-if="setting.type == 'select'"

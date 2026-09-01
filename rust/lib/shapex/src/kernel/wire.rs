@@ -318,7 +318,9 @@ fn validate_no_self_intersection(
                     !adjacent
                         || shared
                             .iter()
-                            .all(|shared| shared.distance(hit.point) > tolerance.linear)
+                            // The generic solver accepts roots within this
+                            // geometric band, including roots at tangencies.
+                            .all(|shared| shared.distance(hit.point) > tolerance.linear * 8.0)
                 })
             {
                 return Err(invalid("wire must not self-intersect"));

@@ -793,18 +793,23 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
 
 #[test]
 fn rolling_ball_fillet_supports_a_boss_base_edge() {
-    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 10.0));
-    let boss = owned_cuboid(Point3::new(4.0, 6.0, 10.0), Point3::new(16.0, 14.0, 18.0));
+    let block = owned_cuboid(
+        Point3::new(-30.227858917765495, -24.574269345846012, 0.0),
+        Point3::new(43.4949491160865, 13.794758559171267, 41.0),
+    );
+    let boss = owned_cuboid(
+        Point3::new(-9.799555260123473, -10.252252426049688, 41.0),
+        Point3::new(29.77557175191365, 5.5777983795566515, 53.0),
+    );
     let joined = block.union(&boss).expect("boss union");
     let base_edge = joined
         .edges()
         .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
         .find(|edge| {
             edge.endpoints().is_ok_and(|points| {
-                points
-                    .iter()
-                    .all(|point| (point.y - 6.0).abs() < 1.0e-7 && (point.z - 10.0).abs() < 1.0e-7)
-                    && (points[0].x - points[1].x).abs() > 11.9
+                points.iter().all(|point| {
+                    (point.y + 10.252252426049688).abs() < 1.0e-7 && (point.z - 41.0).abs() < 1.0e-7
+                }) && (points[0].x - points[1].x).abs() > 39.5
             })
         })
         .expect("straight boss-base edge")
@@ -825,29 +830,33 @@ fn rolling_ball_fillet_supports_a_boss_base_edge() {
         .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
         .find(|edge| {
             edge.endpoints().is_ok_and(|points| {
-                points
-                    .iter()
-                    .all(|point| (point.x - 16.0).abs() < 1.0e-7 && (point.y - 6.0).abs() < 1.0e-7)
-                    && (points[0].z - points[1].z).abs() > 7.9
+                points.iter().all(|point| {
+                    (point.x - 29.77557175191365).abs() < 1.0e-7
+                        && (point.y + 10.252252426049688).abs() < 1.0e-7
+                }) && (points[0].z - points[1].z).abs() > 11.9
             })
         })
         .expect("vertical boss edge")
         .clone();
     let rounded_boss = joined
-        .fillet(std::slice::from_ref(&vertical), 2.0)
+        .fillet(std::slice::from_ref(&vertical), 5.0)
         .expect("vertical boss fillet");
     let modified_base_edge = match rounded_boss.resolve(&base_edge) {
         Resolution::Preserved(edge) | Resolution::Modified(edge) | Resolution::Merged(edge) => edge,
         resolution => panic!("boss-base edge must remain selectable: {resolution:?}"),
     };
-    let final_shape = rounded_boss
-        .fillet(std::slice::from_ref(&modified_base_edge), 1.0)
-        .expect("boss-base fillet after vertical boss fillet");
-    final_shape
-        .tessellate(
-            TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
-        )
-        .expect("post-fillet boss-base display tessellation");
+    for radius in [1.0, 2.0, 3.0] {
+        let final_shape = rounded_boss
+            .fillet(std::slice::from_ref(&modified_base_edge), radius)
+            .unwrap_or_else(|error| {
+                panic!("{radius} mm boss-base fillet after vertical boss fillet: {error}")
+            });
+        final_shape
+            .tessellate(
+                TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+            )
+            .expect("post-fillet boss-base display tessellation");
+    }
 }
 
 #[test]

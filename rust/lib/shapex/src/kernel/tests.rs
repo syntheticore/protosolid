@@ -792,6 +792,65 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
 }
 
 #[test]
+fn rolling_ball_fillet_supports_a_boss_base_edge() {
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 10.0));
+    let boss = owned_cuboid(Point3::new(4.0, 6.0, 10.0), Point3::new(16.0, 14.0, 18.0));
+    let joined = block.union(&boss).expect("boss union");
+    let base_edge = joined
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .find(|edge| {
+            edge.endpoints().is_ok_and(|points| {
+                points
+                    .iter()
+                    .all(|point| (point.y - 6.0).abs() < 1.0e-7 && (point.z - 10.0).abs() < 1.0e-7)
+                    && (points[0].x - points[1].x).abs() > 11.9
+            })
+        })
+        .expect("straight boss-base edge")
+        .clone();
+
+    let filleted = joined
+        .fillet(std::slice::from_ref(&base_edge), 1.0)
+        .expect("boss-base fillet");
+    assert_eq!(filleted.faces().count(), joined.faces().count() + 1);
+    filleted
+        .tessellate(
+            TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+        )
+        .expect("boss-base fillet display tessellation");
+
+    let vertical = joined
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
+        .find(|edge| {
+            edge.endpoints().is_ok_and(|points| {
+                points
+                    .iter()
+                    .all(|point| (point.x - 16.0).abs() < 1.0e-7 && (point.y - 6.0).abs() < 1.0e-7)
+                    && (points[0].z - points[1].z).abs() > 7.9
+            })
+        })
+        .expect("vertical boss edge")
+        .clone();
+    let rounded_boss = joined
+        .fillet(std::slice::from_ref(&vertical), 2.0)
+        .expect("vertical boss fillet");
+    let modified_base_edge = match rounded_boss.resolve(&base_edge) {
+        Resolution::Preserved(edge) | Resolution::Modified(edge) | Resolution::Merged(edge) => edge,
+        resolution => panic!("boss-base edge must remain selectable: {resolution:?}"),
+    };
+    let final_shape = rounded_boss
+        .fillet(std::slice::from_ref(&modified_base_edge), 1.0)
+        .expect("boss-base fillet after vertical boss fillet");
+    final_shape
+        .tessellate(
+            TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+        )
+        .expect("post-fillet boss-base display tessellation");
+}
+
+#[test]
 fn semicircular_profile_extrudes_without_pathological_work() {
     let tolerance = ModelTolerance::default();
     let radius = 5.0;

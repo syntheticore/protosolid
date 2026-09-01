@@ -312,6 +312,12 @@ impl EulerTransaction<'_> {
             if selected.len() == previous {
                 let mut junctions = BTreeMap::new();
                 for (vertex, kind) in &junction_kinds {
+                    let spine = spines.get(&junction_sources[vertex]).ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::TopologyInvariant,
+                            "fillet junction source edge was not retained",
+                        )
+                    })?;
                     if let FilletJunctionKind::Smooth {
                         seam_edge,
                         tangent_faces,
@@ -324,16 +330,11 @@ impl EulerTransaction<'_> {
                                 radius,
                                 *seam_edge,
                                 *tangent_faces,
+                                spine.concave,
                             )?,
                         );
                         continue;
                     }
-                    let spine = spines.get(&junction_sources[vertex]).ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "fillet junction source edge was not retained",
-                        )
-                    })?;
                     let endpoint_index = spine
                         .edge
                         .vertices
@@ -884,15 +885,15 @@ impl EulerTransaction<'_> {
                 (hit.first_parameter, hit.second_parameter, hit.point)
             };
             let needs_extension = !adjacent_edge.range.contains(rail_parameter, tolerance);
-            if spine.concave && needs_extension {
-                return Err(KernelError::new(
-                    DiagnosticKind::InvalidInput,
-                    "fillet radius reaches beyond an adjacent boundary edge",
-                ));
-            }
             allow_adjacent_extension[parent_index] = needs_extension;
             contact_parameters[parent_index] = contact_parameter;
             contact_points[parent_index] = contact_point;
+        }
+        if spine.concave && allow_adjacent_extension.iter().all(|extension| *extension) {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "fillet radius reaches beyond an adjacent boundary edge",
+            ));
         }
         Ok(FilletEndpoint {
             old_vertex,
@@ -1088,6 +1089,7 @@ impl EulerTransaction<'_> {
         radius: f64,
         seam_edge: EdgeId,
         tangent_faces: [FaceId; 2],
+        concave: bool,
     ) -> KernelResult<FilletJunction> {
         let tolerance = self.kernel.tolerance;
         let vertex_faces = self.working.vertex_faces(vertex)?;
@@ -1138,14 +1140,24 @@ impl EulerTransaction<'_> {
                 )
             })?;
         let seam_pcurve = self.working.coedge(tangent_use)?.pcurve.clone();
-        let tangent_distance = match self.working.face(tangent_face)?.orientation {
-            FaceOrientation::Forward => -radius,
-            FaceOrientation::Reversed => radius,
+        let tangent_outward = match self.working.face(tangent_face)?.orientation {
+            FaceOrientation::Forward => radius,
+            FaceOrientation::Reversed => -radius,
+        };
+        let tangent_distance = if concave {
+            tangent_outward
+        } else {
+            -tangent_outward
         };
         let common_surface = self.working.face(common_face)?.surface.clone();
-        let common_distance = match self.working.face(common_face)?.orientation {
-            FaceOrientation::Forward => -radius,
-            FaceOrientation::Reversed => radius,
+        let common_outward = match self.working.face(common_face)?.orientation {
+            FaceOrientation::Forward => radius,
+            FaceOrientation::Reversed => -radius,
+        };
+        let common_distance = if concave {
+            common_outward
+        } else {
+            -common_outward
         };
         let common_offset = common_surface.offset(common_distance, tolerance)?;
         let old_point = self.working.vertex(vertex)?.point;

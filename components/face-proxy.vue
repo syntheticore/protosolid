@@ -44,7 +44,7 @@
 
   renderNeeded.value = true
 
-  watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.creator.material, props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
+  watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
     updateAnalysisGeometry()
     faceMesh.visible = props.displayMode != 'exportPreview'
     faceMesh.alcPathTracingMaterial = getSurfaceMaterial()

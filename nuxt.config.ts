@@ -3,7 +3,7 @@
 // import wasm from 'vite-plugin-wasm';
 
 export default defineNuxtConfig({
-  compatibilityDate: '2024-04-03',
+  compatibilityDate: '2026-08-30',
 
   devtools: {
     enabled: false,

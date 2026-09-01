@@ -28,13 +28,16 @@
           )
 
           Icon.component(
-            :icon="isAssembly ? 'boxes' : 'box'"
+            :icon="componentIcon"
             :style="{'--color': component.creator.color}"
           )
 
           span.name {{ component.creator.title }}{{ isInstance ? ' <Inst>' : '' }}
 
-          .controls.wide(:class="{ 'ultra-wide': !isTop && !isInstance }")
+          .controls.wide(
+            v-if="!component.readOnly"
+            :class="{ 'ultra-wide': !isTop && !isInstance }"
+          )
 
             Icon(
               icon="check-circle" fixed-width
@@ -408,6 +411,12 @@
         return !!this.component.children.length
       },
 
+      componentIcon: function() {
+        const isImportedRoot = this.component.readOnly && !this.component.parent?.readOnly
+        if(isImportedRoot) return 'link'
+        return this.isAssembly ? 'boxes' : 'box'
+      },
+
       canExpand: function() {
         if(this.isInstance) return false
         return this.component.children.length ||
@@ -437,6 +446,7 @@
 
     methods: {
       activateComponent: function() {
+        if(this.component.readOnly) return
         const source = this.document.getComponent(this.component.sourceId())
         this.document.activateComponent(source || this.component)
       },

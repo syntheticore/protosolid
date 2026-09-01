@@ -314,6 +314,17 @@ export class ProfileReference extends Reference {
     return new ProfileReference(this.item.clone())
   }
 
+  matches(item) {
+    if(!this.item || !item || this.item.sketch.id != item.sketch.id) return false
+
+    const ringIds = profile => (profile.serializedRingIds ||
+      profile.rings.map(wire => wire.segments.map(segment => segment.id))
+    ).map(ring => [...ring].sort() )
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+
+    return JSON.stringify(ringIds(this.item)) == JSON.stringify(ringIds(item))
+  }
+
   dump() {
     return {
       id: this.item.id,

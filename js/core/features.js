@@ -7,9 +7,10 @@ import { Compound } from './geom3d.js'
 import { Reference, PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, ocCatch, rad } from './utils.js'
+import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo } from '../three/gizmos.js'
-import { makeID } from './id.js'
+import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
 import {
   alignJointWorld,
@@ -1172,6 +1173,345 @@ export class PlaneFeature extends Feature {
 }
 
 Serialize.register(PlaneFeature, 'PlaneFeature')
+
+
+export class PlaceFeature extends Feature {
+  static icon = 'link'
+
+  constructor(doc) {
+    super(doc, false, 'Place', {
+      filePath: {
+        title: 'Document',
+        type: 'file',
+        filetype: '.cad',
+        autoActivate: true,
+      },
+      variantOption: {
+        title: 'Variant',
+        type: 'enum',
+        options: {},
+        when: feature => !!feature.sourceVariant()?.options?.length,
+      },
+    })
+
+    this.filePath = null
+    this.cachedData = null
+    this.variantOption = null
+    this.importTransform = new THREE.Matrix4()
+    this.sourceTree = null
+    this.pendingData = null
+    this.pendingTree = null
+    this.activationError = null
+    this.sourceRevision = null
+    this.linkCheck = 0
+    this.importGizmo = null
+  }
+
+  isComplete() {
+    return !!this.filePath && !!this.cachedData && !!this.sourceTree
+  }
+
+  async chooseFile() {
+    const linkCheck = ++this.linkCheck
+    const file = await loadFile('.cad', 'text')
+    const sourceTree = this.parseSource(file.data)
+    if(linkCheck != this.linkCheck) return
+    this.filePath = file.path
+    this.cachedData = file.data
+    this.sourceTree = sourceTree
+    this.variantOption = this.normalizedVariantOption(sourceTree)
+    this.sourceRevision = this.snapshotRevision(file.data)
+    this.pendingData = null
+    this.pendingTree = null
+    this.activationError = null
+  }
+
+  fileLabel() {
+    return this.filePath ? this.filePath.split(/[\\/]/).pop() : 'Choose file…'
+  }
+
+  async activate() {
+    const linkCheck = ++this.linkCheck
+    this.pendingData = null
+    this.pendingTree = null
+    this.activationError = null
+    if(!this.filePath || !this.cachedData || !window.ipc) return
+
+    try {
+      const file = await loadFile('.cad', 'text', this.filePath)
+      if(linkCheck != this.linkCheck) return
+      if(file.data == this.cachedData) return
+      this.pendingTree = this.parseSource(file.data, this.variantOption)
+      this.pendingData = file.data
+      this.activationError = {
+        type: 'warning',
+        msg: 'The imported document has changed. Confirm to update it.',
+      }
+    } catch(error) {
+      if(linkCheck != this.linkCheck) return
+      this.pendingData = null
+      this.pendingTree = null
+      this.activationError = {
+        type: 'error',
+        msg: 'The imported document could not be read. Choose a replacement file or cancel.',
+      }
+    }
+  }
+
+  commit() {
+    if(!this.pendingData || !this.pendingTree) return
+    this.cachedData = this.pendingData
+    this.sourceTree = this.parseSource(this.cachedData, this.variantOption)
+    this.variantOption = this.normalizedVariantOption(this.sourceTree, this.variantOption)
+    this.sourceRevision = this.snapshotRevision(this.cachedData)
+    this.pendingData = null
+    this.pendingTree = null
+    this.activationError = null
+    this.document.timeline.invalidateFeature(this)
+    this.document.regenerate()
+  }
+
+  execute(tree) {
+    if(this.suppressUpdate || !this.isComplete()) return
+    this.error = null
+    this.updateSourceVariant()
+    this.updateFeature(tree)
+  }
+
+  sourceVariant() {
+    return this.sourceTree?.creator.variant || null
+  }
+
+  settingOptions(key) {
+    if(key != 'variantOption') return this.settings[key].options
+    return Object.fromEntries(
+      (this.sourceVariant()?.options || []).map((option, index) => [index, option.title])
+    )
+  }
+
+  normalizedVariantOption(source, requested=this.variantOption) {
+    const variant = source?.creator?.variant || source?.variant
+    if(!variant?.options?.length) return null
+    let index = requested === null || requested === undefined ?
+      Number(variant.activeOption) : Number(requested)
+    if(!Number.isInteger(index) || !variant.options[index]) index = 0
+    return String(index)
+  }
+
+  updateSourceVariant() {
+    const selected = this.normalizedVariantOption(this.sourceTree)
+    this.variantOption = selected
+    if(selected === null || Number(selected) == this.sourceVariant().activeOption) return
+    this.sourceTree = this.parseSource(this.cachedData, selected)
+  }
+
+  updateFeature(tree) {
+    const target = tree.findChild(this.componentId)
+    if(!target || !this.sourceTree) return
+
+    try {
+      const { componentIds } = this.createImportedComponents(target, true)
+      this.importJoints(tree, componentIds)
+    } catch(error) {
+      this.error = error || { type: 'error', msg: 'The imported geometry could not be generated' }
+    }
+  }
+
+  addStructuralComponents(tree) {
+    const target = tree.findChild(this.componentId)
+    if(target && this.sourceTree) this.createImportedComponents(target, false)
+  }
+
+  createImportedComponents(target, includeGeometry) {
+    const componentIds = new Map(this.sourceTree.getChildren().map(component => [
+      component.id,
+      `${this.id}/import/component/${component.id}`,
+    ]))
+    const definitions = new Map()
+    this.cloneImportedComponent(
+      this.sourceTree,
+      target,
+      componentIds,
+      definitions,
+      includeGeometry,
+      true,
+    )
+    return { componentIds }
+  }
+
+  cloneImportedComponent(source, parent, componentIds, definitions, includeGeometry, isRoot=false) {
+    const componentId = componentIds.get(source.id)
+    const component = new Component(parent, componentId)
+    component.readOnly = true
+    const sourceDefinitionId = source.sourceId()
+    let definition = definitions.get(sourceDefinitionId)
+    if(!definition) {
+      const canonical = this.sourceTree.findChild(sourceDefinitionId) || source
+      definition = new ComponentDefinition(canonical.creator.title, canonical.creator.color)
+      definition.hidden = !!canonical.creator.hidden
+      definitions.set(sourceDefinitionId, definition)
+    }
+    component.creator = source.instanceOf ? Object.assign(Object.create(definition), {
+      hidden: !!source.creator.hidden,
+    }) : definition
+    component.designTransform = source.localTransform()
+    if(isRoot) {
+      component.designTransform = this.importTransform.clone().multiply(component.designTransform)
+    }
+    if(includeGeometry) {
+      component.compound = source.compound.cloneForComponent(componentId)
+      this.identifyImportedShapes(component.compound, source.compound)
+    }
+    component.instanceOf = source.instanceOf && componentIds.get(source.instanceOf)
+    component.sourceOccurrence = source.sourceOccurrence && componentIds.get(source.sourceOccurrence)
+    parent.children.push(component)
+    source.children.forEach(child => this.cloneImportedComponent(
+      child,
+      component,
+      componentIds,
+      definitions,
+      includeGeometry,
+    ))
+    return component
+  }
+
+  identifyImportedShapes(compound, sourceCompound) {
+    const geometryRevision = `${this.sourceRevision}/variant-${this.variantOption ?? 'default'}`
+    const sourceSolids = sourceCompound.solids()
+    compound.solids().forEach((solid, solidIndex) => {
+      const sourceSolid = sourceSolids[solidIndex]
+      const sourceFaces = sourceSolid?.faces() || []
+      solid.faces().forEach((face, faceIndex) => {
+        const sourceFace = sourceFaces[faceIndex]
+        face.id = `${this.id}/import/face/${sourceFace?.id || faceIndex}`
+        face.tessId = `${this.id}/${geometryRevision}/face/${sourceFace?.tessId || faceIndex}`
+      })
+      const sourceEdges = sourceSolid?.edges() || []
+      solid.edges().forEach((edge, edgeIndex) => {
+        const sourceEdge = sourceEdges[edgeIndex]
+        edge.id = `${this.id}/import/edge/${sourceEdge?.id || edgeIndex}`
+        edge.tessId = `${this.id}/${geometryRevision}/edge/${sourceEdge?.tessId || edgeIndex}`
+      })
+    })
+  }
+
+  importJoints(tree, componentIds) {
+    this.sourceTree.assemblyJoints
+      .filter(joint => joint.type != 'fix')
+      .forEach(joint => {
+        const componentA = componentIds.get(joint.componentA)
+        const componentB = componentIds.get(joint.componentB)
+        if(!componentA || !componentB) return
+        tree.assemblyJoints.push({
+          ...joint,
+          id: `${this.id}/import/joint/${joint.id}`,
+          componentA,
+          componentB,
+          frameA: joint.frameA && joint.frameA.clone(),
+          frameB: joint.frameB && joint.frameB.clone(),
+          fixedWorld: undefined,
+        })
+      })
+  }
+
+  snapshotRevision(data) {
+    let hash = 2166136261
+    for(let index = 0; index < data.length; index++) {
+      hash = Math.imul(hash ^ data.charCodeAt(index), 16777619)
+    }
+    return `${data.length}-${(hash >>> 0).toString(36)}`
+  }
+
+  parseSource(data, variantOption=null) {
+    const previousLastId = lastId
+    try {
+      const dump = Serialize.parse(data, { document: this.document, sketches: {} })
+      if(!dump.timeline?.evaluate) throw new Error('Not a ProtoSolid document')
+
+      const selected = this.normalizedVariantOption(dump.timeline.baseCompDef, variantOption)
+      if(selected !== null) dump.timeline.baseCompDef.selectVariantOption(Number(selected), false)
+
+      const sourceDocument = {
+        timeline: dump.timeline,
+        selection: { items: [] },
+        top(at) { return this.timeline.tree(at) },
+      }
+      sourceDocument.activeComponent = dump.timeline.tree(0)
+      dump.timeline.features.forEach(feature => { feature.document = sourceDocument })
+      dump.timeline.evaluate()
+      return markRaw(dump.timeline.tree())
+    } finally {
+      setLastId(previousLastId)
+    }
+  }
+
+  getValues() {
+    return {
+      filePath: this.filePath,
+      cachedData: this.cachedData,
+      variantOption: this.variantOption,
+      importTransform: this.importTransform,
+    }
+  }
+
+  setValues(values) {
+    const cachedDataChanged = values.cachedData !== this.cachedData
+    const variantChanged = values.variantOption !== this.variantOption
+    this.filePath = values.filePath || null
+    this.cachedData = values.cachedData || null
+    this.variantOption = values.variantOption ?? null
+    this.sourceRevision = this.cachedData ? this.snapshotRevision(this.cachedData) : null
+    this.importTransform = values.importTransform || new THREE.Matrix4()
+    if(cachedDataChanged || variantChanged) {
+      this.sourceTree = this.cachedData ? this.parseSource(this.cachedData, this.variantOption) : null
+      this.variantOption = this.normalizedVariantOption(this.sourceTree, this.variantOption)
+    }
+  }
+
+  updateGizmos() {
+    this.clearImportGizmo()
+    if(!this.isComplete()) return
+    const component = this.document.top().findChild(this.componentOccurrenceId) ||
+      this.document.top().findChild(this.componentId)
+    if(!component) return
+
+    const sourceTransform = this.sourceTree.localTransform()
+    const componentWorld = worldTransform(component)
+    const gizmo = markRaw(new TransformGizmo(
+      componentWorld.clone().multiply(this.importTransform).multiply(sourceTransform),
+      desiredWorld => {
+        const current = this.document.top().findChild(this.componentOccurrenceId) ||
+          this.document.top().findChild(this.componentId)
+        if(!current) return
+        this.importTransform = worldTransform(current).invert()
+          .multiply(desiredWorld)
+          .multiply(this.sourceTree.localTransform().invert())
+        this.document.timeline.invalidateFeature(this)
+        this.document.regenerate()
+      },
+    ))
+    this.importGizmo = () => gizmo
+    window.alcRenderer.addGizmo(gizmo)
+  }
+
+  clearImportGizmo() {
+    if(this.importGizmo) window.alcRenderer?.removeGizmo(this.importGizmo())
+    this.importGizmo = null
+  }
+
+  dispose() {
+    this.linkCheck++
+    this.pendingData = null
+    this.pendingTree = null
+    this.activationError = null
+    this.clearImportGizmo()
+    super.dispose()
+  }
+}
+
+Serialize.register(PlaceFeature, 'PlaceFeature')
+// Load documents saved while this feature was temporarily named ImportFeature.
+Serialize.register(PlaceFeature, 'ImportFeature')
 
 
 export class ExtrudeFeature extends Feature {

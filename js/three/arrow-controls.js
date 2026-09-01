@@ -9,6 +9,7 @@ export default class ArrowControls extends TransformControls {
 
     this.space = 'world'
     this.translationSnap = 1.0
+    this.translationSnapOrigin = startPosition.clone()
     // this.rotationSnap = THREE.MathUtils.degToRad(10)
     // this.setMode('rotate')
 

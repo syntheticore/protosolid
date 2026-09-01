@@ -132,7 +132,6 @@
       },
 
       remove: function() {
-        this.material.dispose()
         this.component.creator.material = null
       },
     },

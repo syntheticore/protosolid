@@ -312,7 +312,9 @@
 
       activeView: function(view) {
         if(!view) return
-        this.renderer.setView(view.position, view.target)
+        this.$nextTick(() => {
+          if(this.activeView === view) this.applyView(view)
+        })
       },
 
       displayMode: function(mode) {
@@ -473,7 +475,7 @@
 
       this.registerDocument(this.document)
       const initialView = this.document.dirtyView || this.document.previewView || this.activeView || this.document.activeView
-      if(initialView) this.renderer.setView(initialView.position, initialView.target)
+      if(initialView) this.applyView(initialView)
 
       // Window Resize
       setTimeout(() => this.onWindowResize(), 1000)
@@ -495,6 +497,39 @@
     },
 
     methods: {
+      applyView: function(view) {
+        const baseView = this.document.dirtyView || this.document.currentCameraView
+        if(!view?.position || !view?.target) {
+          if(this.document.previewView === view && baseView?.position && baseView?.target) {
+            this.renderer.setView(baseView.position, baseView.target)
+          }
+          return
+        }
+
+        let position = view.position.clone()
+        let target = view.target.clone()
+        if(view.rotationOnly) {
+          const currentPosition = baseView?.position?.clone() ||
+            (this.renderer.cameraTarget || this.renderer.activeCamera.position).clone()
+          const currentTarget = baseView?.target?.clone() ||
+            (this.renderer.viewControlsTarget || this.renderer.viewControls.target).clone()
+          const direction = position.sub(target)
+          if(direction.lengthSq()) direction.normalize()
+          target = currentTarget
+          position = target.clone().addScaledVector(direction, currentPosition.distanceTo(currentTarget))
+        }
+
+        this.renderer.setView(position, target)
+        if(view.zoomToFit) this.renderer.zoomToFit(null, false)
+
+        if(!this.document.previewView && this.document.activeView === view) {
+          this.document.cameraViewApplied(
+            this.renderer.cameraTarget || this.renderer.activeCamera.position,
+            this.renderer.viewControlsTarget || this.renderer.viewControls.target,
+          )
+        }
+      },
+
       jointPicked: function(joint) {
         if(this.activeTool instanceof JointPickTool) this.activeTool.pick(joint)
       },
@@ -656,6 +691,7 @@
         }
         doc.on('force-view', (view) => {
           this.renderer.setView(view.position, view.target)
+          doc.cameraViewApplied(view.position, view.target)
         })
         doc.on('look-at', (plane) => setTimeout(() => {
           this.renderer.lookAt(plane)
@@ -666,8 +702,8 @@
       },
 
       getMouseCoords: function(e) {
-        var rect = this.$refs.canvas.getBoundingClientRect()
-        return new THREE.Vector2(e.clientX, e.clientY - rect.top)
+        const rect = this.$refs.canvas.getBoundingClientRect()
+        return new THREE.Vector2(e.clientX - rect.left, e.clientY - rect.top)
       },
 
       doubleClick: function(e) {

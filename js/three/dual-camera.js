@@ -47,6 +47,21 @@ export default class DualCamera {
     return true
   }
 
+  retarget(target, position) {
+    const transition = this.transition
+    if(!transition) return
+
+    const camera = transition.to
+    this.prepare(camera, target, position)
+    camera.position.copy(position)
+    const toProjection = camera.projectionMatrix.clone()
+    if(camera == this.perspective) {
+      this.normalizePerspectiveProjection(toProjection, camera, target)
+    }
+    transition.target.copy(target)
+    transition.toProjection = toProjection
+  }
+
   prepare(camera, target, position) {
     const offset = position.clone().sub(target)
     const distance = offset.length()

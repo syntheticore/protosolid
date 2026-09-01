@@ -193,12 +193,12 @@ export default class Snapper {
 
   getSnapElements(connectedElements) {
     const sketch = this.viewport.document.activeSketch
-    let sketchElements = [...sketch.elements]
-    // Filter out sketch elements actively being drawn
     const tool = this.viewport.activeTool
     const snapExclusions = new Set(tool.snapExclusions())
-    sketchElements = sketchElements.filter(elem => !snapExclusions.has(elem))
-    sketchElements.push(...sketch.projections.map(projection => projection.geometry()).filter(Boolean))
+    let sketchElements = [
+      ...sketch.elements,
+      ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+    ].filter(elem => !snapExclusions.has(elem) && tool.acceptsSnapElement(elem))
     if(this.viewport.activeHandle) {
       sketchElements = sketchElements.filter(elem => !connectedElements.has(elem))
     }
@@ -218,7 +218,9 @@ export default class Snapper {
     const origin = sketch.originPoint()
     const originHelper = sketch.origin()
     const originConstrained = originHelper && connectedElements.has(originHelper)
-    return origin && !originConstrained ? [{ point: origin, elem: originHelper, index: 0 }, ...points] : points
+    const includeOrigin = origin && !originConstrained &&
+      this.viewport.activeTool.acceptsSnapElement(originHelper)
+    return includeOrigin ? [{ point: origin, elem: originHelper, index: 0 }, ...points] : points
   }
 
   catchSnapTargets(localVec, coords, rememberGuides) {

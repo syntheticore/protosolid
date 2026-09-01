@@ -85,7 +85,7 @@ Serialize.register(ComponentDefinition, 'ComponentDefinition')
 
 
 export class SectionView {
-  constructor(id, orientation, position) {
+  constructor(id, orientation, position, side, hidden) {
     this.id = id || makeID()
     this.orientation = orientation || {
       x: 0,
@@ -96,7 +96,8 @@ export class SectionView {
       y: 0,
       z: 0,
     }
-    this.side = false
+    this.side = side ?? false
+    this.hidden = hidden ?? false
   }
 
   getTransform() {
@@ -106,7 +107,9 @@ export class SectionView {
       .setPosition(this.position.x, this.position.y, this.position.z)
   }
 
-  static undump(dump) { return new this(dump.id, dump.orientation, dump.position) }
+  static undump(dump) {
+    return new this(dump.id, dump.orientation, dump.position, dump.side, dump.hidden)
+  }
 }
 Serialize.register(SectionView, 'SectionView')
 
@@ -144,6 +147,7 @@ export class Component {
     // produced by assembly manipulation and is intentionally not serialized.
     this.designTransform = null
     this.transform = null
+    this.readOnly = false
     this.compound = new Compound(this.id)
     this.sketches = []
     this.helpers = [
@@ -175,6 +179,7 @@ export class Component {
     Object.assign(clone, {
       designTransform: this.designTransform && this.designTransform.clone(),
       transform: null,
+      readOnly: this.readOnly,
       compound: this.compound.cloneCached(),
       sketches: [...this.sketches],
       helpers: [...this.helpers],
@@ -234,21 +239,20 @@ export class Component {
     return this.creator.material || (this.parent && this.parent.getMaterial())
   }
 
-  // Returns zero for empty components,
-  // but undefined when weight could not be determined
+  // Returns zero when the component subtree has no solids,
+  // but undefined when any solid has no effective material.
   getWeight() {
-    if(!this.compound.solids().length) return 0.0
-    if(!this.creator.material) return
-    try {
-      let weight = this.children.reduce((acc, child) => {
-        const childWeight = child.getWeight()
-        if(childWeight === undefined) throw 'no weight'
-        return acc + childWeight
-      }, 0.0)
-      return weight + this.compound.volume() * this.creator.material.density
-    } catch(e) {
-      if(e !== 'no weight') throw e
+    let weight = 0.0
+    for(const child of this.children) {
+      const childWeight = child.getWeight()
+      if(childWeight === undefined) return
+      weight += childWeight
     }
+
+    if(!this.compound.solids().length) return weight
+    const material = this.getMaterial()
+    if(!material) return
+    return weight + this.compound.volume() * material.density
   }
 
   getVolume() {
@@ -309,6 +313,7 @@ export function createComponentInstance(parent, source, id, designTransform) {
   const component = new Component(parent, id)
   component.instanceOf = source.sourceId()
   component.sourceOccurrence = source.id
+  component.readOnly = source.readOnly
   component.creator = occurrenceDefinition(source.creator)
   component.designTransform = designTransform ? designTransform.clone() : source.localTransform()
   component.compound = source.compound.cloneForComponent(component.id)

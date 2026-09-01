@@ -183,13 +183,14 @@
         const type = item.typename().split(' ')[0]
         if(type == 'Solid') {
           const volume = item.volume()
-          const weight = item.component.creator.material ? volume * item.component.creator.material.density / 1000 : 'No Material'
+          const material = item.component.getMaterial()
+          const weight = material ? volume * material.density / 1000 : 'No Material'
           return {
             Weight: {
               title: 'Weight',
               unit: 'g',
               value: weight,
-              warn: !item.component.creator.material,
+              warn: !material,
             },
             Volume: {
               title: 'Volume',
@@ -203,13 +204,14 @@
             },
           }
         } else if(item.typename() == 'Component') {
-          const weight = item.getWeight() / 1000
+          const weight = item.getWeight()
+          const hasWeight = weight !== undefined
           return {
             Weight: {
               title: 'Weight',
               unit: 'g',
-              value: weight ? weight : 'No Material',
-              warn: !weight,
+              value: hasWeight ? weight / 1000 : 'No Material',
+              warn: !hasWeight,
             },
             Volume: {
               title: 'Volume',

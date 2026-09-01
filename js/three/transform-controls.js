@@ -111,6 +111,7 @@ class TransformControls extends Object3D {
     defineProperty( 'axis', null );
     defineProperty( 'mode', 'translate' );
     defineProperty( 'translationSnap', null );
+    defineProperty( 'translationSnapOrigin', null );
     defineProperty( 'rotationSnap', null );
     defineProperty( 'scaleSnap', null );
     defineProperty( 'space', 'world' );
@@ -205,7 +206,15 @@ class TransformControls extends Object3D {
     this.camera.updateMatrixWorld();
     this.camera.matrixWorld.decompose( this.cameraPosition, this.cameraQuaternion, this._cameraScale );
 
-    this.eye.copy( this.cameraPosition ).sub( this.worldPosition ).normalize();
+    if ( this.camera.isOrthographicCamera ) {
+
+      this.camera.getWorldDirection( this.eye ).negate();
+
+    } else {
+
+      this.eye.copy( this.cameraPosition ).sub( this.worldPosition ).normalize();
+
+    }
 
     super.updateMatrixWorld( this );
 
@@ -347,6 +356,12 @@ class TransformControls extends Object3D {
 
         if ( space === 'local' ) {
 
+          if ( this.translationSnapOrigin ) {
+
+            object.position.sub( this.translationSnapOrigin );
+
+          }
+
           object.position.applyQuaternion( _tempQuaternion.copy( this._quaternionStart ).invert() );
 
           if ( axis.search( 'X' ) !== - 1 ) {
@@ -369,6 +384,12 @@ class TransformControls extends Object3D {
 
           object.position.applyQuaternion( this._quaternionStart );
 
+          if ( this.translationSnapOrigin ) {
+
+            object.position.add( this.translationSnapOrigin );
+
+          }
+
         }
 
         if ( space === 'world' ) {
@@ -376,6 +397,14 @@ class TransformControls extends Object3D {
           if ( object.parent ) {
 
             object.position.add( _tempVector.setFromMatrixPosition( object.parent.matrixWorld ) );
+
+          }
+
+          if ( this.translationSnapOrigin ) {
+
+            _tempVector2.copy( this.translationSnapOrigin );
+            if ( object.parent ) _tempVector2.add( _tempVector );
+            object.position.sub( _tempVector2 );
 
           }
 
@@ -400,6 +429,12 @@ class TransformControls extends Object3D {
           if ( object.parent ) {
 
             object.position.sub( _tempVector.setFromMatrixPosition( object.parent.matrixWorld ) );
+
+          }
+
+          if ( this.translationSnapOrigin ) {
+
+            object.position.add( _tempVector2 );
 
           }
 

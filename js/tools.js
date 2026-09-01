@@ -20,7 +20,7 @@ import {
   Edge,
   Solid,
 } from './core/geom3d.js'
-import { PointHelper } from './core/helpers.js'
+import { PlaneHelper, PointHelper } from './core/helpers.js'
 
 import {
   CoincidentConstraint,
@@ -47,6 +47,18 @@ import materials, { DRAFT_DIRECTIONS } from './materials.js'
 
 const dragThreshold = 2
 const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
+const immediateSelectionVolumeRatio = 8
+
+function boundingBoxVolume(solid) {
+  const bounds = new THREE.Box3()
+  solid.faces().forEach(face => {
+    const mesh = face.mesh?.()
+    if(mesh) bounds.expandByObject(mesh)
+  })
+  if(bounds.isEmpty()) return
+  const size = bounds.getSize(new THREE.Vector3())
+  return size.x * size.y * size.z
+}
 
 
 class Tool {
@@ -83,6 +95,8 @@ class Tool {
   guideSnapPoints() { return [] }
 
   snapExclusions() { return this.curve ? [this.curve] : [] }
+
+  acceptsSnapElement(_elem) { return true }
 
   dispose() {}
 }
@@ -450,12 +464,15 @@ class HighlightTool extends Tool {
     this.realSelectors = selectors.map(selector => ['solid', 'component'].includes(selector) ? 'face' : selector )
   }
 
+  orderItems(items) { return items }
+
+  shouldPickImmediately(_items) { return false }
+
   async mouseMove(vec, coords) {
     if(this.viewport.hoveredHandle || this.viewport.hoveredDimension) return this.viewport.renderer.render()
     if(this.viewport.pickingPath) this.viewport.updatePath(this.viewport.pickingPath)
     const object = await this.getObject(coords, true)
     this.viewport.$emit('update:highlight', object)
-    if(object && object.id) console.log(object.id)
   }
 
   getObject(coords, any) {
@@ -470,7 +487,6 @@ class HighlightTool extends Tool {
           if(mapped.length) return mapped
           return obj.alcObject
         })
-        // .filter(obj => this.viewport.transloader.isActive(obj) )
       items = Array.from(new Set(items))
       const handle = this.viewport.hoveredHandle
       if(handle && this.realSelectors.includes('point') && !this.preferPointObjects) {
@@ -479,7 +495,8 @@ class HighlightTool extends Tool {
       const acceptsInput = this.acceptsInput ||
         this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
       if(acceptsInput) items = items.filter(item => acceptsInput(item))
-      if(items.length > 1 && !any) {
+      items = this.orderItems(items)
+      if(items.length > 1 && !any && !this.shouldPickImmediately(items)) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({
           items,
@@ -500,6 +517,19 @@ export class ManipulationTool extends HighlightTool {
     this.localSpace = true
     this.preferPointObjects = true
     this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'solid'])
+  }
+
+  shouldPickImmediately(items) {
+    // Items retain raycast order, so the first solid has the nearest hit.
+    const [closest, ...others] = items
+    if(!(closest instanceof Solid) || others.some(item => !(item instanceof Solid))) return false
+
+    const closestVolume = boundingBoxVolume(closest)
+    if(!Number.isFinite(closestVolume) || closestVolume <= EPSILON) return false
+    return others.every(item => {
+      const volume = boundingBoxVolume(item)
+      return Number.isFinite(volume) && volume >= closestVolume * immediateSelectionVolumeRatio
+    })
   }
 
   async click(vec, coords) {
@@ -582,7 +612,6 @@ export class ManipulationTool extends HighlightTool {
     ) {
       this.boxDrag = { start: coords.clone() }
     }
-    console.log(this.object)
     if(!this.viewport.activeHandle && !this.viewport.activeDimension) return
     // A curve body has no single snap handle under the pointer. Snapping it
     // as though its first handle were being dragged would create surprising
@@ -906,6 +935,14 @@ export class PlanePickTool extends PickTool {
     // normal raycast tree, but they can still support a new sketch.
     this.includeInactive = true
   }
+
+  // Construction planes should remain directly pickable when planar model
+  // faces cover them. Preserve raycast order within both candidate groups.
+  orderItems(items) {
+    return items.filter(item => item instanceof PlaneHelper).concat(
+      items.filter(item => !(item instanceof PlaneHelper))
+    )
+  }
 }
 
 export class SolidPickTool extends PickTool {
@@ -1083,14 +1120,128 @@ export class PointTool extends SketchTool {
 
 export class SplineTool extends SketchTool {
   static icon = 'route'
+  static hasOptions = true
 
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
+    this.mode = 'draw'
+    this.settings = {
+      mode: {
+        title: 'Mode',
+        type: 'select',
+        options: {
+          draw: { title: 'Draw spline', icon: 'pen' },
+          insert: { title: 'Insert point', icon: 'plus-circle' },
+          remove: { title: 'Remove point', icon: 'minus-circle' },
+        },
+      },
+    }
+  }
+
+  setOption(key, value) {
+    if(key != 'mode' || !this.settings.mode.options[value] || value == this.mode) return
+    if(this.finishCurve()) this.viewport.updateRegions(true)
+    this.mode = value
+    this.snapToGuides = value == 'draw'
+    this.snapToPoints = value != 'remove'
+    this.viewport.$emit('update:highlight', null)
+    this.viewport.snapper.reset()
+  }
+
+  curveAt(coords) {
+    const object = this.viewport.renderer.objectsAtScreen(coords, ['curve'])[0]
+    const curve = object && object.alcObject
+    return curve instanceof Spline && curve.sketch == this.sketch && !curve.projection ? curve : null
+  }
+
+  splineAt(coords, snap = captureSnap(this.viewport.snapper)) {
+    const snapped = [snap?.curve, snap?.elem, ...(snap?.intersection || [])].find(curve =>
+      curve instanceof Spline && curve.sketch == this.sketch && !curve.projection
+    )
+    return snapped || this.curveAt(coords)
+  }
+
+  acceptsSnapElement(elem) {
+    return this.mode != 'insert' ||
+      (elem instanceof Spline && elem.sketch == this.sketch && !elem.projection)
+  }
+
+  shiftConstraintIndices(spline, fromIndex, offset) {
+    this.sketch.constraints.forEach(constraint => constraint.items.forEach(item => {
+      if(item.curve() == spline && item.index !== undefined && item.index >= fromIndex) {
+        item.index += offset
+      }
+    }))
+  }
+
+  insertPoint(spline, vec) {
+    const points = spline.handles()
+    let segmentIndex = 0
+    let closestDistance = Infinity
+    points.slice(0, -1).forEach((start, index) => {
+      const segment = points[index + 1].clone().sub(start)
+      const lengthSquared = segment.lengthSq()
+      const position = lengthSquared > EPSILON
+        ? THREE.MathUtils.clamp(vec.clone().sub(start).dot(segment) / lengthSquared, 0.0, 1.0)
+        : 0.0
+      const distance = start.clone().addScaledVector(segment, position).distanceToSquared(vec)
+      if(distance >= closestDistance) return
+      closestDistance = distance
+      segmentIndex = index
+    })
+
+    const index = segmentIndex + 1
+    const point = points[segmentIndex].clone().lerp(points[index], 0.5)
+
+    this.shiftConstraintIndices(spline, index, 1)
+    points.splice(index, 0, point)
+    spline.preserveGeometry = false
+    spline.setHandles(points)
+    this.sketch.elements.forEach(element => element.fullyConstrained = false)
+    this.viewport.elementChanged()
+  }
+
+  removePoint(handle) {
+    const spline = handle && handle.elem
+    if(!(spline instanceof Spline) || spline.sketch != this.sketch || spline.projection) return
+
+    const points = spline.handles()
+    if(!Number.isInteger(handle.index) || handle.index < 0 || handle.index >= points.length) return
+    if(points.length <= 2) {
+      window.bus.emit('toast', 'Splines need at least two points')
+      this.viewport.activeHandle = null
+      this.viewport.hoveredHandle = null
+      return
+    }
+
+    const removedConstraints = new Set(this.sketch.constraints.filter(constraint =>
+      constraint.items.some(item => item.curve() == spline && item.index == handle.index)
+    ))
+    this.sketch.constraints = this.sketch.constraints.filter(constraint =>
+      !removedConstraints.has(constraint)
+    )
+    this.shiftConstraintIndices(spline, handle.index + 1, -1)
+    points.splice(handle.index, 1)
+    spline.preserveGeometry = false
+    spline.setHandles(points)
+    this.sketch.elements.forEach(element => element.fullyConstrained = false)
+    this.viewport.activeHandle = null
+    this.viewport.hoveredHandle = null
+    this.viewport.elementChanged()
   }
 
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
     const snap = captureSnap(this.viewport.snapper)
+    if(this.mode == 'insert') {
+      const spline = this.splineAt(coords, snap)
+      if(spline) this.insertPoint(spline, vec)
+      return
+    }
+    if(this.mode == 'remove') {
+      this.removePoint(this.viewport.activeHandle)
+      return
+    }
     if(this.curve) {
       let points = this.curve.handles()
       points[points.length - 1] = vec//.toArray()
@@ -1118,7 +1269,19 @@ export class SplineTool extends SketchTool {
     this.viewport.elementChanged()
   }
 
-  mouseMove(vec) {
+  mouseMove(vec, coords) {
+    if(this.mode == 'insert') {
+      this.viewport.$emit('update:highlight', this.splineAt(coords))
+      return
+    }
+    if(this.mode == 'remove') {
+      const handle = this.viewport.hoveredHandle
+      const spline = handle?.elem instanceof Spline && handle.elem.sketch == this.sketch
+        ? handle.elem
+        : null
+      this.viewport.$emit('update:highlight', spline)
+      return
+    }
     if(!this.curve) return
     let points = this.curve.handles()
     points[points.length - 1] = vec//.toArray()
@@ -1126,19 +1289,28 @@ export class SplineTool extends SketchTool {
     this.viewport.elementChanged()
   }
 
-  dispose() {
-    if(!this.curve) return
+  finishCurve() {
+    if(!this.curve) return false
     let points = this.curve.handles()
     points.pop()
     if(points.length < 2) {
       this.curve.remove()
       this.curve = null
+      this.endSnap = null
       this.viewport.elementChanged()
-      return
+      return true
     }
     this.curve.setHandles(points)
     this.constrainPoint(this.curve, points.length - 1, this.endSnap)
+    this.curve = null
+    this.endSnap = null
     this.viewport.elementChanged()
+    return true
+  }
+
+  dispose() {
+    if(this.finishCurve()) this.viewport.updateRegions(true)
+    this.viewport.$emit('update:highlight', null)
   }
 }
 

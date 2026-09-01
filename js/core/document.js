@@ -4,7 +4,7 @@ import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
 import { Feature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature } from './features.js'
 import { Selection } from '../selection.js'
-import { Component } from './component.js'
+import { Component, SectionView } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
 import { makeID, lastId, setLastId } from './id.js'
@@ -71,6 +71,8 @@ export default class Document extends Emitter {
     this.activeView = null
     this.previewView = null
     this.dirtyView = null
+    this.currentCameraView = cloneCameraView(this.views[3])
+    this.viewPreviewSnapshot = null
 
     // this.on('component-changed', () => {
     //   this.hasChanges = true
@@ -93,7 +95,13 @@ export default class Document extends Emitter {
     this.treeletExpansion.set(key, expanded)
   }
 
+  markChanged() {
+    this.hasChanges = true
+    this.isFresh = false
+  }
+
   createComponent(parent) {
+    if(parent.readOnly) return
     const feature = new CreateComponentFeature(this, parent.sourceId())
     this.addFeature(feature)
     const newComp = this.top().findChild(feature.id)
@@ -101,12 +109,13 @@ export default class Document extends Emitter {
   }
 
   createComponentInstance(component) {
-    if(!component.parent) return
+    if(!component.parent || component.readOnly) return
     const feature = new CreateComponentInstanceFeature(this, component.sourceId(), component.parent.id)
     this.addFeature(feature)
   }
 
   convertBodyToComponent(component, body) {
+    if(component.readOnly) return
     const feature = new ConvertBodyToComponentFeature(this)
     feature.componentId = component.sourceId()
     feature.body = () => body.reference()
@@ -122,6 +131,7 @@ export default class Document extends Emitter {
   }
 
   activateComponent(comp, closeSimulation = true) {
+    if(comp?.readOnly) return
     if(closeSimulation) this.activateSimulation(null)
     if(comp) comp.creator.hidden = false
     this.activeComponent = comp
@@ -373,26 +383,122 @@ export default class Document extends Emitter {
   addView(view) {
     this.views.push(view)
     this.dirtyView = null
+    this.markChanged()
     this.activateView(view)
+  }
+
+  removeView(index) {
+    this.clearViewPreview()
+    const [view] = this.views.splice(index, 1)
+    if(!view) return
+    if(this.activeView?.id == view.id) this.activeView = null
+    if(this.previewView?.id == view.id) this.previewView = null
+    this.markChanged()
   }
 
   // User changed camera from viewport
   viewChanged(position, target) {
     this.dirtyView = { position: position.clone(), target: target.clone() }
+    this.currentCameraView = cloneCameraView(this.dirtyView)
     this.activeView = null
   }
 
+  cameraViewApplied(position, target) {
+    this.currentCameraView = {
+      position: position.clone(),
+      target: target.clone(),
+    }
+  }
+
+  previewSavedView(view) {
+    this.restoreViewPreview()
+    this.viewPreviewSnapshot = this.captureVisualViewState()
+    this.previewView = view
+    this.applyPartVisibilities(view.visibilities)
+    this.applySectionVisibilities(view.sections)
+  }
+
+  clearViewPreview() {
+    this.restoreViewPreview()
+    this.previewView = this.dirtyView
+  }
+
+  restoreViewPreview() {
+    if(!this.viewPreviewSnapshot) return
+    this.applyPartVisibilities(this.viewPreviewSnapshot.visibilities)
+    this.applySectionVisibilities(this.viewPreviewSnapshot.sections)
+    this.viewPreviewSnapshot = null
+  }
+
+  captureVisualViewState() {
+    const visibilities = {}
+    const sections = {}
+    this.top().getChildren().forEach(comp => {
+      visibilities[comp.id] = {
+        compHidden: comp.creator.hidden,
+        itemsHidden: JSON.parse(JSON.stringify(comp.creator.itemsHidden)),
+      }
+      sections[comp.id] = comp.creator.sectionViews.map(section => ({
+        id: section.id,
+        hidden: section.hidden ?? false,
+      }))
+    })
+    return { visibilities, sections }
+  }
+
+  applyPartVisibilities(visibilities) {
+    if(!visibilities) return
+    Object.entries(visibilities).forEach(([compId, { compHidden, itemsHidden }]) => {
+      const comp = this.getComponent(compId)
+      if(!comp) return
+      comp.creator.hidden = compHidden
+      comp.creator.itemsHidden = JSON.parse(JSON.stringify(itemsHidden))
+    })
+  }
+
+  applySectionVisibilities(sections) {
+    if(!sections) return
+    Object.entries(sections).forEach(([compId, snapshots]) => {
+      const comp = this.getComponent(compId)
+      if(!comp) return
+      const hiddenById = new Map(snapshots.map(section => [section.id, section.hidden ?? false]))
+      comp.creator.sectionViews.forEach(section => {
+        if(hiddenById.has(section.id)) section.hidden = hiddenById.get(section.id)
+      })
+    })
+  }
+
   activateView(view) {
+    this.restoreViewPreview()
     this.activeView = view
     this.previewView = null
     this.dirtyView = null
-    if(view.marker) this.moveMarker(view.marker)
-    if(view.activeComponentId) this.activateComponent(this.getComponent(view.activeComponentId))
-    if(view.visibilities) {
-      Object.entries(view.visibilities).forEach(([compId, { compHidden, itemsHidden }]) => {
+    if(view.marker !== undefined && view.marker !== null) this.moveMarker(view.marker)
+    if(view.activeComponentId) {
+      const component = this.getComponent(view.activeComponentId)
+      if(component) this.activateComponent(component)
+    }
+    this.applyPartVisibilities(view.visibilities)
+    if(view.sections) {
+      Object.entries(view.sections).forEach(([compId, snapshots]) => {
         const comp = this.getComponent(compId)
-        comp.creator.hidden = compHidden
-        comp.creator.itemsHidden = JSON.parse(JSON.stringify(itemsHidden))
+        if(!comp) return
+        const existing = new Map(comp.creator.sectionViews.map(section => [section.id, section]))
+        comp.creator.sectionViews = snapshots.map(snapshot => {
+          const section = existing.get(snapshot.id) || new SectionView(snapshot.id)
+          section.orientation = { ...snapshot.orientation }
+          section.position = { ...snapshot.position }
+          section.side = snapshot.side ?? false
+          section.hidden = snapshot.hidden ?? false
+          return section
+        })
+      })
+    }
+    if(view.expansions) {
+      this.treeletsExpandedByDefault = view.expansionDefault ?? this.treeletsExpandedByDefault
+      this.treeletExpansion.clear()
+      Object.entries(view.expansions).forEach(([key, expanded]) => {
+        this.treeletExpansion.set(key, expanded)
       })
     }
   }
@@ -401,6 +507,10 @@ export default class Document extends Emitter {
     const dump = {
       lastId,
       timeline: this.timeline,
+      views: this.views.map(view => {
+        const { editing, ...storedView } = view
+        return storedView
+      }),
     }
     const json = Serialize.stringify(dump)
     try {
@@ -429,7 +539,23 @@ export default class Document extends Emitter {
     this.timeline = dump.timeline
     this.timeline.evaluate()
     this.activeComponent = this.top()
+    if(Array.isArray(dump.views)) this.views = dump.views
+    this.activeView = null
+    this.previewView = null
+    this.dirtyView = null
+    this.viewPreviewSnapshot = null
+    const homeView = this.views.find(view => view.system && view.title == 'Home') ||
+      this.views.find(view => view.position && view.target)
+    if(homeView) this.currentCameraView = cloneCameraView(homeView)
   }
 }
 
 const bigIntMax = (...args) => args.reduce((m, e) => e > m ? e : m)
+
+function cloneCameraView(view) {
+  if(!view?.position || !view?.target) return null
+  return {
+    position: view.position.clone(),
+    target: view.target.clone(),
+  }
+}

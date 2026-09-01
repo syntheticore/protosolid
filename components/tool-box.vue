@@ -240,6 +240,7 @@
 
   import {
     CreateSketchFeature,
+    PlaceFeature,
     PlaneFeature,
     ExtrudeFeature,
     FilletFeature,
@@ -348,6 +349,7 @@
                 icon: 'calculator',
                 isDisabled: () => !!this.document.activeComponent.creator.variant,
               },
+              { title: 'Place', feature: PlaceFeature },
             ]
           },
           {
@@ -424,7 +426,12 @@
           {
             title: 'Simulate',
             tools: [
-              { title: 'Material', action: this.addMaterial, icon: 'volleyball-ball' },
+              {
+                title: 'Material',
+                action: this.addMaterial,
+                icon: 'volleyball-ball',
+                isDisabled: () => !!this.document.activeComponent.creator.material,
+              },
               { title: 'Joint', feature: JointFeature },
               { title: 'Group', feature: GroupFeature },
               { title: 'Motion Link', feature: MotionLinkFeature },

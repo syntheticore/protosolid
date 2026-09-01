@@ -17,6 +17,7 @@ import ShadowCatcher from './three/shadow-catcher.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
 
 const SKETCH_RENDER_OFFSET = 0.0001
+const LINE_PICKING_THRESHOLD = 4
 
 
 export default class Renderer {
@@ -118,7 +119,12 @@ export default class Renderer {
     this.setActiveCamera(this.cameraOrtho)
 
     const setPixelRatio = () => {
-      this.renderer.setPixelRatio(this.getPixelRatio())
+      const pixelRatio = this.getPixelRatio()
+      this.renderer.setPixelRatio(pixelRatio)
+      // Line2 raycasting accepts an additional screen-space width that is
+      // independent of the rendered material linewidth. Keep it in CSS-pixel
+      // terms so edge and sketch-curve picking feels the same on HiDPI screens.
+      this.raycaster.params.Line2 = { threshold: LINE_PICKING_THRESHOLD * pixelRatio }
       this.render()
     }
 
@@ -265,10 +271,11 @@ export default class Renderer {
   }
 
   setPivot(coords) {
-    const vec = this.fromScreen(coords)
+    const vec = this.fromScreen(coords, true)
     if(!vec) return
     const cameraTarget = vec.clone().sub(this.viewControls.target).add(this.activeCamera.position)
     this.setView(cameraTarget, vec)
+    this.reportViewChange()
   }
 
   lookAt(plane, report=true) {
@@ -282,6 +289,7 @@ export default class Renderer {
   }
 
   zoomToFit(objects, report=true, view=null) {
+    const fitPadding = 0.9
     objects ||= [this.world]
     const box = new THREE.Box3()
     objects.forEach(obj => box.expandByObject(obj) )
@@ -294,7 +302,7 @@ export default class Renderer {
 
     if(this.activeCamera == this.cameraOrtho) {
       const vFOV = this.camera.getEffectiveFOV() * THREE.MathUtils.DEG2RAD
-      const distanceToFit = radius / Math.sin(vFOV * 0.5) * 1.6
+      const distanceToFit = radius / Math.sin(vFOV * 0.5) * fitPadding
       this.setView(target.clone().addScaledVector(direction, distanceToFit), target)
 
     } else {
@@ -302,7 +310,7 @@ export default class Renderer {
       const hFOV = Math.atan(Math.tan(vFOV * 0.5) * this.camera.aspect) * 2.0
       const fov = this.camera.aspect > 1.0 ? vFOV : hFOV
       const distanceToFit = radius / (Math.sin(fov * 0.5))
-      const dir = direction.multiplyScalar(distanceToFit * 1.6)
+      const dir = direction.multiplyScalar(distanceToFit * fitPadding)
       const position = target.clone().add(dir)
       this.setView(position, target)
     }
@@ -314,6 +322,7 @@ export default class Renderer {
     const polePosition = this.poleSafePosition(position, target)
     this.cameraTarget = polePosition || position
     this.viewControlsTarget = target
+    this.dualCamera.retarget(target, this.cameraTarget)
     if(polePosition) {
       camera.updateMatrixWorld()
       this.cameraTransitionUp = new THREE.Vector3()
@@ -526,8 +535,8 @@ export default class Renderer {
   getCanvasCoords(mouseCoords) {
     const canvas = this.renderer.domElement
     return new THREE.Vector2(
-      (mouseCoords.x - 2) / canvas.offsetWidth * 2 - 1,
-      (-mouseCoords.y + 2) / canvas.offsetHeight * 2 + 1,
+      mouseCoords.x / canvas.offsetWidth * 2 - 1,
+      -mouseCoords.y / canvas.offsetHeight * 2 + 1,
     )
   }
 
@@ -546,8 +555,15 @@ export default class Renderer {
     return this.raycaster.ray.intersectPlane(plane, new THREE.Vector3())
   }
 
-  fromScreen(coords) {
-    const intersects = this.hitTest(coords).filter(obj => obj.object.alcProjectable )
+  fromScreen(coords, visibleOnly=false) {
+    const intersects = this.hitTest(coords).filter(({ object }) => {
+      if(!object.alcProjectable) return false
+      if(!visibleOnly) return true
+      for(let current = object; current; current = current.parent) {
+        if(!current.visible) return false
+      }
+      return true
+    })
     const hit = intersects[0]
     return hit && hit.point
   }

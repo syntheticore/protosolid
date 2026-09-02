@@ -463,6 +463,98 @@ fn rolling_ball_fillet_supports_closed_hole_rims() {
 }
 
 #[test]
+fn rolling_ball_fillet_orients_direct_and_post_boolean_hole_rims_consistently() {
+    let tolerance = ModelTolerance::default();
+    let outer = Wire2::polygon(
+        [
+            Point2::new(0.0, 0.0),
+            Point2::new(60.0, 0.0),
+            Point2::new(60.0, 30.0),
+            Point2::new(0.0, 30.0),
+        ],
+        tolerance,
+    )
+    .expect("outer wire");
+    let left_hole = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(15.0, 15.0), 6.0).expect("left hole")],
+        tolerance,
+    )
+    .expect("left hole wire");
+    let base = Profile::new(outer, [left_hole], tolerance)
+        .expect("profile with original hole")
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .expect("base extrusion");
+
+    let right_hole = Wire2::new(
+        [TrimmedCurve2::circle(Point2::new(45.0, 15.0), 6.0).expect("right hole")],
+        tolerance,
+    )
+    .expect("right hole wire");
+    let cutter = Profile::new(right_hole, [], tolerance)
+        .expect("cutter profile")
+        .extrude(
+            Plane3::new(
+                Point3::new(0.0, 0.0, 20.0),
+                Vec3::unit_x(),
+                Vec3::unit_y(),
+                tolerance,
+            )
+            .expect("cutter plane"),
+            Vec3::new(0.0, 0.0, -20.0),
+        )
+        .expect("cutter extrusion");
+    let cut = base.difference(&cutter).expect("post-extrusion hole cut");
+    let rims = cut
+        .edges()
+        .filter(|edge| {
+            let Curve3::Circle(circle) = edge.curve() else {
+                return false;
+            };
+            (circle.center().z - 20.0).abs() <= tolerance.linear * 8.0
+                && ((circle.center().x - 15.0).abs() <= tolerance.linear * 8.0
+                    || (circle.center().x - 45.0).abs() <= tolerance.linear * 8.0)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(rims.len(), 2, "both top hole rims must remain selectable");
+
+    let filleted = cut
+        .fillet(&rims, 0.25)
+        .expect("fillet original and post-Boolean hole rims");
+    let mut tori = filleted
+        .faces()
+        .filter_map(|face| match face.surface() {
+            Surface3::Torus(torus) => Some(*torus),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    tori.sort_by(|first, second| first.center().x.total_cmp(&second.center().x));
+    assert_eq!(
+        tori.len(),
+        8,
+        "each closed hole rim is split into four toroidal blend patches"
+    );
+    for torus in tori {
+        assert!(
+            (torus.center().z - 19.75).abs() <= tolerance.linear * 32.0,
+            "hole-rim fillet center lies on the wrong side of the top face: {:?}",
+            torus.center(),
+        );
+        assert!(
+            (torus.major_radius() - 6.25).abs() <= tolerance.linear * 32.0,
+            "hole-rim fillet rolls on the wrong side of the cylindrical wall: {}",
+            torus.major_radius(),
+        );
+        assert!(
+            torus.normal().z > 0.0,
+            "hole-rim torus has a flipped parameter frame at {:?}: {:?}",
+            torus.center(),
+            torus.normal(),
+        );
+    }
+}
+
+#[test]
 fn rolling_ball_fillet_certifies_curved_and_post_fillet_face_loops() {
     let tolerance = ModelTolerance::default();
     let outer = Wire2::new(

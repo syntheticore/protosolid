@@ -4228,7 +4228,21 @@ impl Surface3 {
             )?
             .into()),
             Self::Cylinder(cylinder) => {
-                let radius = cylinder.radius() + distance;
+                // `Cylinder3` permits its axial direction to be parallel or
+                // antiparallel to the radial frame normal.  The parameter-space
+                // surface normal (`du × dv`) points radially outward in the
+                // first case and inward in the second, so an offset along that
+                // normal changes the geometric radius with the same sign.
+                let normal_sign = if cylinder
+                    .axis()
+                    .dot(cylinder.x_radius().cross(cylinder.y_radius()))
+                    >= 0.0
+                {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let radius = cylinder.radius() + distance * normal_sign;
                 if radius <= tolerance.linear_at_scale(cylinder.radius()) {
                     return Err(invalid("cylinder offset collapses its radius"));
                 }

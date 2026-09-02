@@ -108,6 +108,13 @@ struct BoundaryVertex {
     point: Point3,
 }
 
+struct SurfaceTriangulationSeed {
+    uvs: Vec<Point2>,
+    positions: Vec<Point3>,
+    boundary_edges: BTreeSet<(usize, usize)>,
+    triangles: Vec<[usize; 3]>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct CurveSample {
     point: Point3,
@@ -259,32 +266,35 @@ impl Kernel {
         cache: &mut BTreeMap<EdgeId, EdgePolyline>,
     ) -> KernelResult<TriangleMesh> {
         let face = self.topology().face(face_id)?;
-        let (mut rings, parameters_are_continuous) =
-            if let Some(ring) = self.sample_full_periodic_cylinder_band(face_id, options)? {
-                (vec![ring], true)
-            } else {
-                let mut loop_ids = face.loops().to_vec();
-                loop_ids.sort_by_key(|loop_id| {
-                    self.topology()
-                        .loop_(*loop_id)
-                        .map(|loop_| match loop_.kind() {
-                            super::LoopKind::Outer => 0,
-                            super::LoopKind::Inner => 1,
-                        })
-                        .unwrap_or(2)
-                });
-                let mut rings = Vec::new();
-                for loop_id in loop_ids {
-                    rings.push(self.sample_loop(loop_id, options, cache)?);
-                }
-                (rings, false)
-            };
+        if let Some(seed) = self.sample_full_periodic_band(face_id, options)? {
+            return finish_surface_triangulation(
+                face.surface(),
+                face.orientation(),
+                face_id,
+                self.tolerance(),
+                options,
+                seed,
+            );
+        }
+
+        let mut loop_ids = face.loops().to_vec();
+        loop_ids.sort_by_key(|loop_id| {
+            self.topology()
+                .loop_(*loop_id)
+                .map(|loop_| match loop_.kind() {
+                    super::LoopKind::Outer => 0,
+                    super::LoopKind::Inner => 1,
+                })
+                .unwrap_or(2)
+        });
+        let mut rings = Vec::new();
+        for loop_id in loop_ids {
+            rings.push(self.sample_loop(loop_id, options, cache)?);
+        }
         let chart = sphere_tessellation_chart(face.surface(), &rings, self.tolerance())?;
         let tessellation_surface = chart.as_ref().unwrap_or_else(|| face.surface());
-        if !parameters_are_continuous {
-            for ring in &mut rings {
-                unwrap_periodic_ring(tessellation_surface, self.tolerance(), ring)?;
-            }
+        for ring in &mut rings {
+            unwrap_periodic_ring(tessellation_surface, self.tolerance(), ring)?;
         }
         if rings.is_empty() || rings[0].len() < 3 {
             return Err(KernelError::new(
@@ -325,67 +335,27 @@ impl Kernel {
             ));
         }
 
-        let mut normals = Vec::with_capacity(positions.len());
-        for ring in &rings {
-            for vertex in ring {
-                let (lifted, mut normal) =
-                    surface_point_normal(tessellation_surface, vertex.uv.x, vertex.uv.y)?;
-                let allowed = self
-                    .tolerance()
-                    .linear_at_scale(vertex.point.to_vec().magnitude());
-                if lifted.distance(vertex.point) > allowed {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "tessellation chart does not lift its exact BREP boundary",
-                    ));
-                }
-                if face.orientation() == FaceOrientation::Reversed {
-                    normal = -normal;
-                }
-                normals.push(normal);
-            }
-        }
         let mut triangles = Vec::with_capacity(indices.len() / 3);
         for values in indices.chunks_exact(3) {
-            let mut triangle = [values[0], values[1], values[2]];
+            let triangle = [values[0], values[1], values[2]];
             if uv_triangle_is_degenerate(triangle, &uvs) {
                 continue;
             }
-            let geometric_normal = (positions[triangle[1]] - positions[triangle[0]])
-                .cross(positions[triangle[2]] - positions[triangle[0]]);
-            if geometric_normal.magnitude()
-                <= self
-                    .tolerance()
-                    .linear_at_scale(positions[triangle[0]].to_vec().magnitude())
-                    .powi(2)
-            {
-                // Earcut may emit zero-area ears at exact collinear BREP
-                // vertices. They cover no surface and must not enter either
-                // display meshes or physical certification.
-                continue;
-            }
-            let desired_normal = normals[triangle[0]] + normals[triangle[1]] + normals[triangle[2]];
-            if geometric_normal.dot(desired_normal) < 0.0 {
-                triangle.swap(1, 2);
-            }
             triangles.push(triangle);
         }
-        refine_surface_triangles(
+        finish_surface_triangulation(
             tessellation_surface,
             face.orientation(),
+            face_id,
+            self.tolerance(),
             options,
-            &boundary_edges,
-            &mut uvs,
-            &mut positions,
-            &mut normals,
-            &mut triangles,
-        )?;
-        Ok(TriangleMesh {
-            positions,
-            normals,
-            triangle_faces: vec![face_id; triangles.len()],
-            triangles,
-        })
+            SurfaceTriangulationSeed {
+                uvs,
+                positions,
+                boundary_edges,
+                triangles,
+            },
+        )
     }
 
     fn sample_loop(
@@ -499,81 +469,348 @@ impl Kernel {
         })
     }
 
-    /// Sample the canonical trim of a complete periodic cylinder band.
+    /// Sample the canonical trim of a complete band on a periodic surface.
     ///
-    /// An exact circle is partitioned into arcs while Euler construction is in
-    /// progress. After adjacent bands are sewn, the remaining same-face seam
-    /// edges are topological parameter seams rather than trim boundaries. A
-    /// planar triangulator cannot consume that seam-spiked loop directly, so
-    /// derive the equivalent rectangle in the cylinder's exact `(u, v)`
-    /// domain. Partial cylinders and cylinders with non-circular trims fall
+    /// A face spanning one full surface period retains a same-face edge so its
+    /// Euler loop has a finite chart. That edge is a parameter seam, not a
+    /// material trim. Feeding the seam-spiked loop to a planar triangulator
+    /// creates triangles across the wrapped chart. Recognize the topological
+    /// pattern and express its exact trim as a rectangle on one continuous
+    /// parameter sheet. Shapes that are not constant-width periodic bands fall
     /// through to ordinary p-curve tessellation.
-    fn sample_full_periodic_cylinder_band(
+    fn sample_full_periodic_band(
         &self,
         face_id: FaceId,
         options: TessellationOptions,
-    ) -> KernelResult<Option<Vec<BoundaryVertex>>> {
+    ) -> KernelResult<Option<SurfaceTriangulationSeed>> {
         let face = self.topology().face(face_id)?;
-        let super::Surface3::Cylinder(cylinder) = face.surface() else {
+        if face.loops().len() != 1 {
             return Ok(None);
+        }
+
+        let domains = face.surface().domains();
+        if !domains.iter().any(|domain| domain.period.is_some()) {
+            return Ok(None);
+        }
+
+        let loop_id = face.loops()[0];
+        let coedges = self.topology().loop_coedges(loop_id)?;
+        let parameter_tolerance = self.tolerance().parameter * 64.0;
+        let coordinates = |point: Point2| [point.x, point.y];
+        let aligned = |value: f64, reference: f64, axis: usize| {
+            domains[axis]
+                .period
+                .map(|period| value + ((reference - value) / period).round() * period)
+                .unwrap_or(value)
         };
-        let mut levels = Vec::new();
-        let mut has_parameter_seam = false;
-        for edge_id in self.topology().face_edges(face_id)? {
-            let edge = self.topology().edge(edge_id)?;
-            let adjacent = self.topology().edge_faces(edge_id)?;
-            if adjacent.len() == 1 {
-                // The intrinsic cylinder seam is longitudinal. Sewing two
-                // complete bands can additionally leave a circular same-face
-                // seam at the former interface; neither trims the face.
-                has_parameter_seam = true;
+
+        // A genuine chart seam has two uses in this face. Its periodic
+        // coordinate is constant while the transverse coordinate changes.
+        let mut periodic_axis = None;
+        let mut seam_parameter = 0.0;
+        for coedge_id in &coedges {
+            let coedge = self.topology().coedge(*coedge_id)?;
+            if self.topology().edge_faces(coedge.edge())?.len() != 1 {
                 continue;
             }
-            if !matches!(edge.curve(), super::Curve3::Circle(_)) {
-                return Ok(None);
+            let range = coedge.range();
+            let samples = [
+                coordinates(coedge.pcurve().evaluate(range.start)?.point),
+                coordinates(
+                    coedge
+                        .pcurve()
+                        .evaluate((range.start + range.end) * 0.5)?
+                        .point,
+                ),
+                coordinates(coedge.pcurve().evaluate(range.end)?.point),
+            ];
+            for axis in 0..2 {
+                let Some(period) = domains[axis].period else {
+                    continue;
+                };
+                let transverse = 1 - axis;
+                let constant = samples.iter().all(|sample| {
+                    (aligned(sample[axis], samples[0][axis], axis) - samples[0][axis]).abs()
+                        <= parameter_tolerance
+                });
+                let transverse_span = samples
+                    .iter()
+                    .map(|sample| {
+                        (aligned(sample[transverse], samples[0][transverse], transverse)
+                            - samples[0][transverse])
+                            .abs()
+                    })
+                    .fold(0.0_f64, f64::max);
+                if constant && transverse_span > parameter_tolerance {
+                    periodic_axis = Some(axis);
+                    seam_parameter = domains[axis].normalize(samples[0][axis]);
+                    debug_assert!(period.is_finite());
+                    break;
+                }
             }
-            let point = edge.curve().evaluate(edge.range().start)?.point;
-            let projection = face.surface().project(point, self.tolerance())?;
-            if !levels.iter().any(|level: &f64| {
-                (*level - projection.parameters.1).abs() <= self.tolerance().parameter * 8.0
-            }) {
-                levels.push(projection.parameters.1);
+            if periodic_axis.is_some() {
+                break;
             }
         }
-        if !has_parameter_seam || levels.len() != 2 {
+        let Some(periodic_axis) = periodic_axis else {
+            return Ok(None);
+        };
+        let transverse_axis = 1 - periodic_axis;
+        let period = domains[periodic_axis]
+            .period
+            .expect("the selected surface coordinate is periodic");
+
+        // Every material boundary of a simple periodic band is an isoparametric
+        // curve at one of two transverse levels. Work from its retained
+        // p-curve instead of projecting back to an ambiguous periodic chart.
+        let mut levels = Vec::new();
+        for coedge_id in &coedges {
+            let coedge = self.topology().coedge(*coedge_id)?;
+            if self.topology().edge_faces(coedge.edge())?.len() == 1 {
+                continue;
+            }
+            let range = coedge.range();
+            let samples = [
+                coordinates(coedge.pcurve().evaluate(range.start)?.point),
+                coordinates(
+                    coedge
+                        .pcurve()
+                        .evaluate((range.start + range.end) * 0.5)?
+                        .point,
+                ),
+                coordinates(coedge.pcurve().evaluate(range.end)?.point),
+            ];
+            let mut level = samples[1][transverse_axis];
+            if let Some(reference) = levels.first().copied() {
+                level = aligned(level, reference, transverse_axis);
+            }
+            if samples.iter().any(|sample| {
+                (aligned(sample[transverse_axis], level, transverse_axis) - level).abs()
+                    > parameter_tolerance
+            }) {
+                return Ok(None);
+            }
+            if !levels
+                .iter()
+                .any(|existing: &f64| (*existing - level).abs() <= parameter_tolerance)
+            {
+                levels.push(level);
+            }
+        }
+        if levels.len() != 2 {
             return Ok(None);
         }
         levels.sort_by(f64::total_cmp);
 
-        let radius = cylinder.radius();
-        let chord_angle = if options.chord_tolerance >= radius * 2.0 {
-            std::f64::consts::PI
-        } else {
-            2.0 * (1.0 - options.chord_tolerance / radius)
-                .clamp(-1.0, 1.0)
-                .acos()
+        // Use a common adaptive subdivision for both boundary curves. Besides
+        // satisfying the requested display error, sharing the periodic samples
+        // prevents a diagonal mismatch between the two sides of the band.
+        let periodic_parameters = adaptive_isoparametric_samples(
+            face.surface(),
+            periodic_axis,
+            seam_parameter,
+            seam_parameter + period,
+            &levels,
+            8,
+            options,
+        )?;
+        // The two chart sides are boundary edges too. Sample them in the
+        // transverse direction; otherwise the adaptive triangle refiner can
+        // never reduce the normal change on that protected boundary edge.
+        let transverse_parameters = adaptive_isoparametric_samples(
+            face.surface(),
+            transverse_axis,
+            levels[0],
+            levels[1],
+            &[seam_parameter, seam_parameter + period],
+            1,
+            options,
+        )?;
+        let parameters = |periodic: f64, transverse: f64| {
+            if periodic_axis == 0 {
+                (periodic, transverse)
+            } else {
+                (transverse, periodic)
+            }
         };
-        let maximum_angle = options.angular_tolerance.min(chord_angle);
-        let segments = (std::f64::consts::TAU / maximum_angle).ceil().max(8.0) as usize;
-        let mut ring = Vec::with_capacity((segments + 1) * 2);
-        for index in 0..=segments {
-            let u = std::f64::consts::TAU * index as f64 / segments as f64;
-            let point = face.surface().first_order(u, levels[0])?.0;
-            ring.push(BoundaryVertex {
-                uv: Point2::new(u, levels[0]),
-                point,
-            });
+
+        // Triangulate the rectangular chart as a structured grid. Ear-clipping
+        // only its densely sampled perimeter produces a long rotating fan of
+        // diagonals; analytical normals are correct at the vertices, but their
+        // interpolation across that fan creates a visible spiral.
+        let columns = periodic_parameters.len();
+        let rows = transverse_parameters.len();
+        let mut uvs = Vec::with_capacity(columns * rows);
+        let mut positions = Vec::with_capacity(columns * rows);
+        for transverse in transverse_parameters.iter().copied() {
+            for periodic in periodic_parameters.iter().copied() {
+                let (u, v) = parameters(periodic, transverse);
+                uvs.push(Point2::new(u, v));
+                positions.push(face.surface().first_order(u, v)?.0);
+            }
         }
-        for index in (0..=segments).rev() {
-            let u = std::f64::consts::TAU * index as f64 / segments as f64;
-            let point = face.surface().first_order(u, levels[1])?.0;
-            ring.push(BoundaryVertex {
-                uv: Point2::new(u, levels[1]),
-                point,
-            });
+        let mut boundary_edges = BTreeSet::new();
+        for column in 0..columns - 1 {
+            boundary_edges.insert(ordered_edge(column, column + 1));
+            let upper = (rows - 1) * columns + column;
+            boundary_edges.insert(ordered_edge(upper, upper + 1));
         }
-        Ok(Some(ring))
+        for row in 0..rows - 1 {
+            let lower = row * columns;
+            let upper = (row + 1) * columns;
+            boundary_edges.insert(ordered_edge(lower, upper));
+            boundary_edges.insert(ordered_edge(lower + columns - 1, upper + columns - 1));
+        }
+        let mut triangles = Vec::with_capacity((columns - 1) * (rows - 1) * 2);
+        for row in 0..rows - 1 {
+            for column in 0..columns - 1 {
+                let lower_left = row * columns + column;
+                let lower_right = lower_left + 1;
+                let upper_left = lower_left + columns;
+                let upper_right = upper_left + 1;
+                triangles.extend([
+                    [lower_left, lower_right, upper_right],
+                    [lower_left, upper_right, upper_left],
+                ]);
+            }
+        }
+        Ok(Some(SurfaceTriangulationSeed {
+            uvs,
+            positions,
+            boundary_edges,
+            triangles,
+        }))
     }
+}
+
+fn finish_surface_triangulation(
+    surface: &super::Surface3,
+    orientation: FaceOrientation,
+    face_id: FaceId,
+    tolerance: ModelTolerance,
+    options: TessellationOptions,
+    seed: SurfaceTriangulationSeed,
+) -> KernelResult<TriangleMesh> {
+    let SurfaceTriangulationSeed {
+        mut uvs,
+        mut positions,
+        boundary_edges,
+        mut triangles,
+    } = seed;
+    let mut normals = Vec::with_capacity(positions.len());
+    for (uv, point) in uvs.iter().zip(&positions) {
+        let (lifted, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
+        let allowed = tolerance.linear_at_scale(point.to_vec().magnitude());
+        if lifted.distance(*point) > allowed {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "tessellation chart does not lift its exact BREP boundary",
+            ));
+        }
+        if orientation == FaceOrientation::Reversed {
+            normal = -normal;
+        }
+        normals.push(normal);
+    }
+    triangles.retain_mut(|triangle| {
+        let geometric_normal = (positions[triangle[1]] - positions[triangle[0]])
+            .cross(positions[triangle[2]] - positions[triangle[0]]);
+        if geometric_normal.magnitude()
+            <= tolerance
+                .linear_at_scale(positions[triangle[0]].to_vec().magnitude())
+                .powi(2)
+        {
+            return false;
+        }
+        let desired_normal = normals[triangle[0]] + normals[triangle[1]] + normals[triangle[2]];
+        if geometric_normal.dot(desired_normal) < 0.0 {
+            triangle.swap(1, 2);
+        }
+        true
+    });
+    refine_surface_triangles(
+        surface,
+        orientation,
+        options,
+        &boundary_edges,
+        &mut uvs,
+        &mut positions,
+        &mut normals,
+        &mut triangles,
+    )?;
+    Ok(TriangleMesh {
+        positions,
+        normals,
+        triangle_faces: vec![face_id; triangles.len()],
+        triangles,
+    })
+}
+
+/// Subdivide a surface isoparametric interval until both exact boundary
+/// curves satisfy the tessellation error policy. `fixed_parameters` lets both
+/// sides of a band share an identical subdivision.
+fn adaptive_isoparametric_samples(
+    surface: &super::Surface3,
+    varying_axis: usize,
+    start: f64,
+    end: f64,
+    fixed_parameters: &[f64],
+    initial_segments: usize,
+    options: TessellationOptions,
+) -> KernelResult<Vec<f64>> {
+    let parameters = |varying: f64, fixed: f64| {
+        if varying_axis == 0 {
+            (varying, fixed)
+        } else {
+            (fixed, varying)
+        }
+    };
+    let mut samples = (0..=initial_segments)
+        .map(|index| start + (end - start) * index as f64 / initial_segments as f64)
+        .collect::<Vec<_>>();
+    for depth in 0..options.maximum_depth {
+        let mut refined = Vec::with_capacity(samples.len() * 2);
+        refined.push(samples[0]);
+        let mut split_any = false;
+        for interval in samples.windows(2) {
+            let first = interval[0];
+            let last = interval[1];
+            let middle = (first + last) * 0.5;
+            let mut split = false;
+            for fixed in fixed_parameters {
+                let (first_u, first_v) = parameters(first, *fixed);
+                let (middle_u, middle_v) = parameters(middle, *fixed);
+                let (last_u, last_v) = parameters(last, *fixed);
+                let (first_point, first_normal) = surface_point_normal(surface, first_u, first_v)?;
+                let (middle_point, _) = surface_point_normal(surface, middle_u, middle_v)?;
+                let (last_point, last_normal) = surface_point_normal(surface, last_u, last_v)?;
+                let chord_middle =
+                    Point3::from_vec((first_point.to_vec() + last_point.to_vec()) * 0.5);
+                if middle_point.distance(chord_middle) > options.chord_tolerance
+                    || first_normal.angle(last_normal).0 > options.angular_tolerance
+                {
+                    split = true;
+                    break;
+                }
+            }
+            if split {
+                refined.push(middle);
+                split_any = true;
+            }
+            refined.push(last);
+        }
+        samples = refined;
+        if !split_any {
+            return Ok(samples);
+        }
+        if depth + 1 == options.maximum_depth {
+            return Err(KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                "periodic band boundary did not satisfy tessellation tolerance",
+            ));
+        }
+    }
+    Ok(samples)
 }
 
 /// Lift periodic surface parameters onto one continuous sheet before planar

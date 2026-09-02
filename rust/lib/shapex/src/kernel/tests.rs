@@ -521,20 +521,31 @@ fn rolling_ball_fillet_orients_direct_and_post_boolean_hole_rims_consistently() 
     let filleted = cut
         .fillet(&rims, 0.25)
         .expect("fillet original and post-Boolean hole rims");
-    let mut tori = filleted
+    let mut torus_faces = filleted
         .faces()
-        .filter_map(|face| match face.surface() {
-            Surface3::Torus(torus) => Some(*torus),
-            _ => None,
-        })
+        .filter(|face| matches!(face.surface(), Surface3::Torus(_)))
+        .cloned()
         .collect::<Vec<_>>();
-    tori.sort_by(|first, second| first.center().x.total_cmp(&second.center().x));
+    torus_faces.sort_by(|first, second| {
+        let Surface3::Torus(first) = first.surface() else {
+            unreachable!()
+        };
+        let Surface3::Torus(second) = second.surface() else {
+            unreachable!()
+        };
+        first.center().x.total_cmp(&second.center().x)
+    });
     assert_eq!(
-        tori.len(),
+        torus_faces.len(),
         2,
         "each closed hole rim must publish as one toroidal blend face"
     );
-    for torus in tori {
+    let tessellation_options =
+        TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options");
+    for face in &torus_faces {
+        let Surface3::Torus(torus) = face.surface() else {
+            unreachable!()
+        };
         assert!(
             (torus.center().z - 19.75).abs() <= tolerance.linear * 32.0,
             "hole-rim fillet center lies on the wrong side of the top face: {:?}",
@@ -551,11 +562,78 @@ fn rolling_ball_fillet_orients_direct_and_post_boolean_hole_rims_consistently() 
             torus.center(),
             torus.normal(),
         );
+        let mesh = face
+            .tessellate(tessellation_options)
+            .expect("unified torus face tessellation");
+        let longest_edge = mesh
+            .triangles
+            .iter()
+            .flat_map(|triangle| {
+                [
+                    (triangle[0], triangle[1]),
+                    (triangle[1], triangle[2]),
+                    (triangle[2], triangle[0]),
+                ]
+            })
+            .map(|(first, second)| mesh.positions[first].distance(mesh.positions[second]))
+            .fold(0.0_f64, f64::max);
+        assert!(
+            longest_edge < 1.0,
+            "periodic torus tessellation contains a seam-crossing wedge of length {longest_edge}"
+        );
+        let mut normal_orientation = None;
+        for (position, normal) in mesh.positions.iter().zip(&mesh.normals) {
+            let projection = face
+                .surface()
+                .project(*position, tolerance)
+                .expect("mesh vertex projects onto its analytical torus");
+            let analytical = face
+                .surface()
+                .normal(projection.parameters.0, projection.parameters.1)
+                .expect("analytical torus normal");
+            let alignment = normal.dot(analytical);
+            let sign = *normal_orientation.get_or_insert(alignment.signum());
+            assert!(
+                alignment * sign > 1.0 - 1.0e-10,
+                "toroidal vertex normal changes orientation or belongs to another position"
+            );
+        }
+        for triangle in &mesh.triangles {
+            for (first, second) in [
+                (triangle[0], triangle[1]),
+                (triangle[1], triangle[2]),
+                (triangle[2], triangle[0]),
+            ] {
+                assert!(
+                    mesh.normals[first].angle(mesh.normals[second]).0 < 0.2,
+                    "a torus triangle interpolates across discontinuous analytical normals"
+                );
+            }
+        }
+        let mut occupied_angular_sectors = [false; 8];
+        for triangle in &mesh.triangles {
+            let centroid = Point3::from_vec(
+                (mesh.positions[triangle[0]].to_vec()
+                    + mesh.positions[triangle[1]].to_vec()
+                    + mesh.positions[triangle[2]].to_vec())
+                    / 3.0,
+            );
+            let angle = (centroid.y - torus.center().y)
+                .atan2(centroid.x - torus.center().x)
+                .rem_euclid(std::f64::consts::TAU);
+            occupied_angular_sectors[(angle / std::f64::consts::TAU
+                * occupied_angular_sectors.len() as f64)
+                as usize] = true;
+        }
+        assert!(
+            occupied_angular_sectors
+                .into_iter()
+                .all(|occupied| occupied),
+            "periodic torus tessellation leaves an angular wedge uncovered"
+        );
     }
     filleted
-        .tessellate(
-            TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
-        )
+        .tessellate(tessellation_options)
         .expect("unified periodic fillet tessellation");
 
     let unrelated_boss = owned_cuboid(Point3::new(27.0, 0.0, 20.0), Point3::new(33.0, 5.0, 22.0));

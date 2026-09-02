@@ -26,6 +26,7 @@ struct FaceCurve {
     range: ParameterRange,
     loop_end: bool,
     loop_kind: LoopKind,
+    parameter_seam: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +186,7 @@ pub(crate) fn boolean_brep(
                         range,
                         loop_end: false,
                         loop_kind: LoopKind::Outer,
+                        parameter_seam: false,
                     });
                     let second_curve = boundary_curve_for_intersection(
                         &intersection.curve,
@@ -198,6 +200,7 @@ pub(crate) fn boolean_brep(
                         range,
                         loop_end: false,
                         loop_kind: LoopKind::Outer,
+                        parameter_seam: false,
                     });
                     face_curves
                         .get_mut(&(0, first_index))
@@ -255,6 +258,7 @@ pub(crate) fn boolean_brep(
                         range: source.range,
                         loop_end: false,
                         loop_kind: source.loop_kind,
+                        parameter_seam: source.parameter_seam,
                     });
             }
             for source in first_boundary {
@@ -285,6 +289,7 @@ pub(crate) fn boolean_brep(
                         range: source.range,
                         loop_end: false,
                         loop_kind: source.loop_kind,
+                        parameter_seam: source.parameter_seam,
                     });
             }
         }
@@ -548,6 +553,7 @@ fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec
                 range: coedge.range(),
                 loop_end: index == last,
                 loop_kind: loop_value.kind(),
+                parameter_seam: topology.edge_faces(coedge.edge())?.len() == 1,
             });
         }
     }
@@ -646,6 +652,7 @@ fn boundary_curve_for_intersection(
                     range: replacement_range,
                     loop_end: false,
                     loop_kind: candidate.loop_kind,
+                    parameter_seam: candidate.parameter_seam,
                 }));
             }
         }
@@ -736,6 +743,7 @@ fn trim_to_faces(
         range: domain,
         loop_end: false,
         loop_kind: LoopKind::Outer,
+        parameter_seam: false,
     };
     let second_curve = FaceCurve {
         curve: curve.clone(),
@@ -743,6 +751,7 @@ fn trim_to_faces(
         range: domain,
         loop_end: false,
         loop_kind: LoopKind::Outer,
+        parameter_seam: false,
     };
     let mut parameters = vec![domain.start, domain.end];
     for boundary in first_boundary {
@@ -932,10 +941,7 @@ fn arrange_face(
         .abs()
         .min((uv_bounds[1].y - uv_bounds[0].y).abs())
         * 5.0e-2;
-    let orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
-        if !has_coincident_support && !point_in_trim(uv, original_boundary)? {
-            return Ok(None);
-        }
+    let classify_orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
         let value = surface.evaluate(uv.x, uv.y)?;
         let parameter_normal = value.normal()?;
         let normal_probe = classification_offset;
@@ -991,20 +997,49 @@ fn arrange_face(
             _ => None,
         })
     };
+    let orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
+        if !has_coincident_support && !point_in_trim(uv, original_boundary)? {
+            return Ok(None);
+        }
+        classify_orientation_at(uv)
+    };
 
     if curves.len() == original_boundary.len() {
-        let first = &original_boundary[0];
-        let parameter = first.range.start + first.range.span() * 0.5;
-        let (boundary_uv, tangent) = first.pcurve.first_order(parameter)?;
-        let tangent = tangent * first.range.span().signum();
-        let mut inward = Vec2::new(-tangent.y, tangent.x).normalize();
-        if source_orientation == FaceOrientation::Reversed {
-            inward = -inward;
+        // A periodic face can retain a same-face parameter seam in its loop.
+        // That seam is not a material boundary, and its first listed use need
+        // not have a meaningful "inside" side in the wrapped UV chart. Search
+        // all boundary uses for a valid interior probe instead of allowing the
+        // arbitrary loop start to decide whether an unchanged face survives.
+        let mut desired = None;
+        for boundary in original_boundary
+            .iter()
+            .filter(|boundary| !boundary.parameter_seam)
+        {
+            let parameter = boundary.range.start + boundary.range.span() * 0.5;
+            let (boundary_uv, tangent) = boundary.pcurve.first_order(parameter)?;
+            let tangent = tangent * boundary.range.span().signum();
+            if tangent.magnitude2() <= tolerance.parameter.powi(2) {
+                continue;
+            }
+            let mut inward = Vec2::new(-tangent.y, tangent.x).normalize();
+            if source_orientation == FaceOrientation::Reversed {
+                inward = -inward;
+            }
+            let surface_value = surface.evaluate(boundary_uv.x, boundary_uv.y)?;
+            let world_inward = surface_value.du * inward.x + surface_value.dv * inward.y;
+            if world_inward.magnitude2() <= tolerance.linear.powi(2) {
+                continue;
+            }
+            let uv_step = (classification_offset / world_inward.magnitude()).min(uv_probe_limit);
+            // This point is constructed from the oriented trim itself, so it
+            // is the local interior by definition. Periodic seam-spiked loops
+            // are not necessarily representable as one planar polygon and
+            // therefore must not be rejected by `point_in_trim` here.
+            if let Some(orientation) = classify_orientation_at(boundary_uv + inward * uv_step)? {
+                desired = Some(orientation);
+                break;
+            }
         }
-        let surface_value = surface.evaluate(boundary_uv.x, boundary_uv.y)?;
-        let world_inward = surface_value.du * inward.x + surface_value.dv * inward.y;
-        let uv_step = (classification_offset / world_inward.magnitude()).min(uv_probe_limit);
-        let desired = orientation_at(boundary_uv + inward * uv_step)?;
         return match desired {
             None => Ok(Vec::new()),
             Some(orientation) => Ok(vec![unchanged_face_patch(
@@ -1699,6 +1734,7 @@ fn patch_contains_patch(
             range: segment.range,
             loop_end: false,
             loop_kind: LoopKind::Outer,
+            parameter_seam: false,
         })
         .collect::<Vec<_>>();
     for point in candidate_edges.iter().flatten() {

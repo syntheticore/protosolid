@@ -2974,6 +2974,28 @@ impl EulerTransaction<'_> {
         for vertex in contact_vertices.values().copied() {
             self.repair_outgoing(vertex)?;
         }
+
+        // Closed periodic edges are split into arcs while the rolling network
+        // is constructed so that its endpoint machinery always works on
+        // ordinary vertices.  Those construction joins are not material
+        // boundaries.  Collapse every join whose two patches use the exact
+        // same analytical support; the final join then remains as the single
+        // same-face parameter seam required by the periodic surface.
+        let transition_edges = smooth_edges
+            .values()
+            .map(|(edge, _)| *edge)
+            .collect::<Vec<_>>();
+        for edge in transition_edges {
+            let faces = self.working.edge_faces(edge)?;
+            if faces.len() != 2 || faces[0] == faces[1] {
+                continue;
+            }
+            let first_surface = self.working.face(faces[0])?.surface.clone();
+            let second_surface = self.working.face(faces[1])?.surface.clone();
+            if first_surface == second_surface {
+                self.kef(edge, faces[1])?;
+            }
+        }
         for face in modified_faces {
             let name = self.working.face(face)?.name;
             self.history.changed(name, ChangeKind::Modified, [name]);

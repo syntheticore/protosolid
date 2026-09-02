@@ -531,8 +531,8 @@ fn rolling_ball_fillet_orients_direct_and_post_boolean_hole_rims_consistently() 
     tori.sort_by(|first, second| first.center().x.total_cmp(&second.center().x));
     assert_eq!(
         tori.len(),
-        8,
-        "each closed hole rim is split into four toroidal blend patches"
+        2,
+        "each closed hole rim must publish as one toroidal blend face"
     );
     for torus in tori {
         assert!(
@@ -552,6 +552,24 @@ fn rolling_ball_fillet_orients_direct_and_post_boolean_hole_rims_consistently() 
             torus.normal(),
         );
     }
+    filleted
+        .tessellate(
+            TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
+        )
+        .expect("unified periodic fillet tessellation");
+
+    let unrelated_boss = owned_cuboid(Point3::new(27.0, 0.0, 20.0), Point3::new(33.0, 5.0, 22.0));
+    let modified = filleted
+        .union(&unrelated_boss)
+        .expect("unrelated operation after the two fillets");
+    assert_eq!(
+        modified
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface3::Torus(_)))
+            .count(),
+        2,
+        "later operations must preserve one selectable face per circular fillet"
+    );
 }
 
 #[test]

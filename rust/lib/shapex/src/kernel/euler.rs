@@ -12,11 +12,11 @@ use super::polyhedron::PolyhedralTriangle;
 use super::topology::{Body, Coedge, Edge, Face, Loop, Shell, Vertex};
 use super::validation::{validate, ValidationMode};
 use super::{
-    BodyId, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, DiagnosticKind,
-    DomainBounds, EdgeId, FaceId, FaceOrientation, Kernel, KernelError, KernelResult, Line2, Line3,
-    LoopId, LoopKind, ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, OperationHistory,
-    ParameterRange, Plane3, PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3,
-    Topology, Torus3, TrimmedCurve2, VertexId, Wire2,
+    BodyId, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, DiagnosticKind, EdgeId,
+    FaceId, FaceOrientation, Kernel, KernelError, KernelResult, Line2, Line3, LoopId, LoopKind,
+    ModelTolerance, NurbsCurve3, NurbsSurface3, OperationHistory, ParameterRange, Plane3,
+    PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3, TessellationOptions, Topology,
+    Torus3, TriangleMesh, TrimmedCurve2, VertexId, Wire2,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -113,6 +113,30 @@ pub struct KfmrhResult {
 pub struct MfkrhResult {
     pub face: FaceId,
     pub outer_loop: LoopId,
+}
+
+/// One oriented exact boundary segment used by the generic BREP shell builder.
+///
+/// The 3D curve and the p-curve share the same parameter. `range` is directed
+/// in loop order; the shell builder owns edge sharing and coedge orientation.
+#[derive(Debug, Clone)]
+pub(crate) struct BrepPatchSegment {
+    pub curve: Curve3,
+    pub pcurve: Curve2,
+    pub range: ParameterRange,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BrepPatchLoop {
+    pub kind: LoopKind,
+    pub segments: Vec<BrepPatchSegment>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BrepPatch {
+    pub surface: Surface3,
+    pub orientation: FaceOrientation,
+    pub loops: Vec<BrepPatchLoop>,
 }
 
 #[derive(Debug)]
@@ -1646,795 +1670,6 @@ impl<'kernel> EulerTransaction<'kernel> {
         Ok(shell)
     }
 
-    /// Sew two closed bodies across a geometrically coincident face pair.
-    ///
-    /// This is the high-level Euler composition used by an adjacent union: the
-    /// two material-opposed faces are removed, their duplicate boundary graph
-    /// is welded, and the remaining shells become one closed shell atomically.
-    pub fn sew_bodies_across_faces(
-        &mut self,
-        target: BodyId,
-        source: BodyId,
-        target_face: FaceId,
-        source_face: FaceId,
-    ) -> KernelResult<BodyId> {
-        let snapshot = self.working.clone();
-        let history_snapshot = self.history.clone();
-        let touched_snapshot = self.touched_bodies.clone();
-        let composition_snapshot = self.composes_imported_topology;
-        let result = self
-            .sew_bodies_across_faces_unchecked(target, source, target_face, source_face)
-            .and_then(|body| {
-                validate(
-                    &self.working,
-                    self.kernel.tolerance,
-                    ValidationMode::Construction,
-                )
-                .into_result()
-                .map(|_| body)
-            });
-        if result.is_err() {
-            self.working = snapshot;
-            self.history = history_snapshot;
-            self.touched_bodies = touched_snapshot;
-            self.composes_imported_topology = composition_snapshot;
-        }
-        result
-    }
-
-    fn sew_bodies_across_faces_unchecked(
-        &mut self,
-        target: BodyId,
-        source: BodyId,
-        target_face: FaceId,
-        source_face: FaceId,
-    ) -> KernelResult<BodyId> {
-        if target == source {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "face sewing requires two distinct bodies",
-            ));
-        }
-        let target_shells = self.working.body(target)?.shells.clone();
-        let source_shells = self.working.body(source)?.shells.clone();
-        if target_shells.len() != 1 || source_shells.len() != 1 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "adjacent face sewing currently requires one shell per body",
-            ));
-        }
-        let target_shell = target_shells[0];
-        let source_shell = source_shells[0];
-        if self.working.face(target_face)?.shell != target_shell
-            || self.working.face(source_face)?.shell != source_shell
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "sewn faces must belong to their specified bodies",
-            ));
-        }
-        let target_loops = self.working.face(target_face)?.loops.clone();
-        let source_loops = self.working.face(source_face)?.loops.clone();
-        if target_loops.is_empty() || source_loops.len() < target_loops.len() {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "adjacent face sewing requires every target loop to occur on the source patch",
-            ));
-        }
-        let linear = self.kernel.tolerance.linear;
-        let loops_match = |first: LoopId, second: LoopId| -> KernelResult<bool> {
-            let first_boundary = self.collect_loop(first)?;
-            let second_boundary = self.collect_loop(second)?;
-            if first_boundary.len() != second_boundary.len() {
-                return Ok(false);
-            }
-            let mut used = std::collections::BTreeSet::new();
-            for first_use in first_boundary {
-                let first_edge = self.working.coedge(first_use)?.edge;
-                let first_value = self.working.edge(first_edge)?;
-                let first_points = [
-                    self.working.vertex(first_value.vertices[0])?.point,
-                    self.working.vertex(first_value.vertices[1])?.point,
-                ];
-                let first_middle = first_value
-                    .curve
-                    .evaluate(first_value.range.start + first_value.range.span() * 0.5)?
-                    .point;
-                let Some(second_edge) = second_boundary.iter().find_map(|second_use| {
-                    let edge = self.working.coedge(*second_use).ok()?.edge;
-                    if used.contains(&edge) {
-                        return None;
-                    }
-                    let value = self.working.edge(edge).ok()?;
-                    let second_points = [
-                        self.working.vertex(value.vertices[0]).ok()?.point,
-                        self.working.vertex(value.vertices[1]).ok()?.point,
-                    ];
-                    let middle = value
-                        .curve
-                        .evaluate(value.range.start + value.range.span() * 0.5)
-                        .ok()?
-                        .point;
-                    (first_middle.distance(middle) <= linear
-                        && ((first_points[0].distance(second_points[0]) <= linear
-                            && first_points[1].distance(second_points[1]) <= linear)
-                            || (first_points[0].distance(second_points[1]) <= linear
-                                && first_points[1].distance(second_points[0]) <= linear)))
-                        .then_some(edge)
-                }) else {
-                    return Ok(false);
-                };
-                used.insert(second_edge);
-            }
-            Ok(true)
-        };
-        let mut used_source_loops = std::collections::BTreeSet::new();
-        let mut loop_pairs = Vec::new();
-        for target_loop in &target_loops {
-            let mut matched = None;
-            for source_loop in &source_loops {
-                if !used_source_loops.contains(source_loop)
-                    && loops_match(*target_loop, *source_loop)?
-                {
-                    matched = Some(*source_loop);
-                    break;
-                }
-            }
-            let Some(source_loop) = matched else {
-                return Err(KernelError::new(
-                    DiagnosticKind::InvalidInput,
-                    "coincident sewn face patches do not have matching boundary loops",
-                ));
-            };
-            used_source_loops.insert(source_loop);
-            loop_pairs.push((*target_loop, source_loop));
-        }
-        let source_inner_loops = source_loops
-            .iter()
-            .copied()
-            .filter(|loop_id| !used_source_loops.contains(loop_id))
-            .collect::<Vec<_>>();
-        if source_inner_loops.iter().any(|loop_id| {
-            self.working
-                .loop_(*loop_id)
-                .map(|loop_value| loop_value.kind != LoopKind::Inner)
-                .unwrap_or(true)
-        }) {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "only unmatched source inner loops can survive face-patch sewing",
-            ));
-        }
-        let (patch_surface, patch_orientation) = {
-            let face = self.working.face(target_face)?;
-            (face.surface.clone(), face.orientation)
-        };
-        for loop_id in &source_inner_loops {
-            let patch = self.mfkrh_unchecked(*loop_id, patch_surface.clone(), patch_orientation)?;
-            self.reparameterize_planar_face(patch.face)?;
-        }
-        let mut target_boundary = Vec::new();
-        let mut source_boundary = Vec::new();
-        for (target_loop, source_loop) in &loop_pairs {
-            target_boundary.extend(self.collect_loop(*target_loop)?);
-            source_boundary.extend(self.collect_loop(*source_loop)?);
-        }
-
-        let mut used_target_edges = std::collections::BTreeSet::new();
-        let mut vertex_welds = std::collections::BTreeMap::<VertexId, VertexId>::new();
-        let mut edge_welds = Vec::new();
-        for source_use in &source_boundary {
-            let source_edge = self.working.coedge(*source_use)?.edge;
-            let source_vertices = self.working.edge(source_edge)?.vertices;
-            let source_points = [
-                self.working.vertex(source_vertices[0])?.point,
-                self.working.vertex(source_vertices[1])?.point,
-            ];
-            let target_use = target_boundary
-                .iter()
-                .copied()
-                .find(|candidate| {
-                    let Ok(edge) = self.working.coedge(*candidate).map(|coedge| coedge.edge) else {
-                        return false;
-                    };
-                    if used_target_edges.contains(&edge) {
-                        return false;
-                    }
-                    let Ok(vertices) = self.working.edge(edge).map(|edge| edge.vertices) else {
-                        return false;
-                    };
-                    let Ok(first) = self.working.vertex(vertices[0]).map(|vertex| vertex.point)
-                    else {
-                        return false;
-                    };
-                    let Ok(second) = self.working.vertex(vertices[1]).map(|vertex| vertex.point)
-                    else {
-                        return false;
-                    };
-                    let Ok(target_midpoint) = self
-                        .working
-                        .edge(edge)
-                        .and_then(|edge| {
-                            edge.curve
-                                .evaluate(edge.range.start + edge.range.span() * 0.5)
-                        })
-                        .map(|evaluation| evaluation.point)
-                    else {
-                        return false;
-                    };
-                    let Ok(source_midpoint) = self
-                        .working
-                        .edge(source_edge)
-                        .and_then(|edge| {
-                            edge.curve
-                                .evaluate(edge.range.start + edge.range.span() * 0.5)
-                        })
-                        .map(|evaluation| evaluation.point)
-                    else {
-                        return false;
-                    };
-                    target_midpoint.distance(source_midpoint) <= linear
-                        && ((first.distance(source_points[0]) <= linear
-                            && second.distance(source_points[1]) <= linear)
-                            || (first.distance(source_points[1]) <= linear
-                                && second.distance(source_points[0]) <= linear))
-                })
-                .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::InvalidInput,
-                        "coincident sewn faces do not have matching boundary edges",
-                    )
-                })?;
-            let target_edge = self.working.coedge(target_use)?.edge;
-            used_target_edges.insert(target_edge);
-            let target_vertices = self.working.edge(target_edge)?.vertices;
-            for source_vertex in source_vertices {
-                let point = self.working.vertex(source_vertex)?.point;
-                let target_vertex = target_vertices
-                    .iter()
-                    .copied()
-                    .find(|candidate| {
-                        self.working
-                            .vertex(*candidate)
-                            .map(|vertex| vertex.point.distance(point) <= linear)
-                            .unwrap_or(false)
-                    })
-                    .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::InvalidInput,
-                            "coincident boundary vertices do not match",
-                        )
-                    })?;
-                vertex_welds.insert(source_vertex, target_vertex);
-            }
-            let target_mate = self
-                .working
-                .edge(target_edge)?
-                .coedges
-                .iter()
-                .copied()
-                .find(|coedge| *coedge != target_use)
-                .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "target sewn edge has no mate",
-                    )
-                })?;
-            let source_mate = self
-                .working
-                .edge(source_edge)?
-                .coedges
-                .iter()
-                .copied()
-                .find(|coedge| *coedge != *source_use)
-                .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "source sewn edge has no mate",
-                    )
-                })?;
-            edge_welds.push((target_edge, target_mate, source_edge, source_mate));
-        }
-
-        let all_edges = self.working.edges().map(|(id, _)| id).collect::<Vec<_>>();
-        for edge in all_edges {
-            let vertices = self.working.edge(edge)?.vertices;
-            self.working.edges.get_mut(edge)?.vertices = [
-                vertex_welds
-                    .get(&vertices[0])
-                    .copied()
-                    .unwrap_or(vertices[0]),
-                vertex_welds
-                    .get(&vertices[1])
-                    .copied()
-                    .unwrap_or(vertices[1]),
-            ];
-        }
-        for (target_edge, target_mate, source_edge, source_mate) in &edge_welds {
-            let target_vertices = self.working.edge(*target_edge)?.vertices;
-            let source_vertices = self.working.edge(*source_edge)?.vertices;
-            let circular = matches!(self.working.edge(*target_edge)?.curve, Curve3::Circle(_))
-                && matches!(self.working.edge(*source_edge)?.curve, Curve3::Circle(_));
-            let source_mate_face = self
-                .working
-                .loop_(self.working.coedge(*source_mate)?.loop_id)?
-                .face;
-            let cylindrical = circular
-                && matches!(
-                    self.working.face(source_mate_face)?.surface,
-                    Surface3::Cylinder(_)
-                );
-            let forward = if cylindrical {
-                !self.working.coedge(*target_mate)?.forward
-            } else {
-                let source_start = if self.working.coedge(*source_mate)?.forward {
-                    source_vertices[0]
-                } else {
-                    source_vertices[1]
-                };
-                source_start == target_vertices[0]
-            };
-            let replacement_pcurve = cylindrical
-                .then(|| self.pcurve_for_welded_circular_edge(*target_edge, *source_mate))
-                .transpose()?;
-            let source_name = self.working.edge(*source_edge)?.name;
-            {
-                let target_range = self.working.edge(*target_edge)?.range;
-                let source_use = self.working.coedges.get_mut(*source_mate)?;
-                source_use.edge = *target_edge;
-                source_use.forward = forward;
-                if let Some(pcurve) = replacement_pcurve {
-                    source_use.pcurve = pcurve;
-                    source_use.range = if forward {
-                        target_range
-                    } else {
-                        target_range.reversed()
-                    };
-                }
-            }
-            self.working.edges.get_mut(*target_edge)?.coedges = vec![*target_mate, *source_mate];
-            self.working.edges.remove(*source_edge)?;
-            self.history.changed(
-                source_name,
-                ChangeKind::Merged,
-                [self.working.edge(*target_edge)?.name],
-            );
-        }
-
-        let removed_coedges = target_boundary
-            .iter()
-            .chain(&source_boundary)
-            .copied()
-            .collect::<Vec<_>>();
-        let removed_names = removed_coedges
-            .iter()
-            .map(|coedge| self.working.coedge(*coedge).map(|value| value.name))
-            .collect::<KernelResult<Vec<_>>>()?;
-        for coedge in removed_coedges {
-            self.working.coedges.remove(coedge)?;
-        }
-        let removed_loop_names = loop_pairs
-            .iter()
-            .flat_map(|(target_loop, source_loop)| [*target_loop, *source_loop])
-            .map(|loop_id| {
-                self.working
-                    .loop_(loop_id)
-                    .map(|loop_value| loop_value.name)
-            })
-            .collect::<KernelResult<Vec<_>>>()?;
-        let target_face_name = self.working.face(target_face)?.name;
-        let source_face_name = self.working.face(source_face)?.name;
-        for (target_loop, source_loop) in &loop_pairs {
-            self.working.loops.remove(*target_loop)?;
-            self.working.loops.remove(*source_loop)?;
-        }
-        self.working.faces.remove(target_face)?;
-        self.working
-            .shells
-            .get_mut(target_shell)?
-            .faces
-            .retain(|face| *face != target_face);
-        self.working.faces.remove(source_face)?;
-        let source_faces = self.working.shell(source_shell)?.faces.clone();
-        for face in source_faces.into_iter().filter(|face| *face != source_face) {
-            self.working.faces.get_mut(face)?.shell = target_shell;
-            self.working.shells.get_mut(target_shell)?.faces.push(face);
-        }
-        let source_shell_name = self.working.shell(source_shell)?.name;
-        let source_body_name = self.working.body(source)?.name;
-        self.working.shells.remove(source_shell)?;
-        self.working.bodies.remove(source)?;
-
-        for (edge, _, _, source_mate) in &edge_welds {
-            let source_loop = self.working.coedge(*source_mate)?.loop_id;
-            let source_face = self.working.loop_(source_loop)?.face;
-            let adjacent = self.working.edge(*edge)?.coedges.clone();
-            if adjacent.len() != 2 {
-                continue;
-            }
-            let first_face = self
-                .working
-                .loop_(self.working.coedge(adjacent[0])?.loop_id)?
-                .face;
-            let second_face = self
-                .working
-                .loop_(self.working.coedge(adjacent[1])?.loop_id)?
-                .face;
-            if first_face == second_face {
-                continue;
-            }
-            let (same_surface, reparameterize) = {
-                let first = self.working.face(first_face)?;
-                let second = self.working.face(second_face)?;
-                let same_orientation = first.orientation == second.orientation;
-                match (&first.surface, &second.surface) {
-                    (Surface3::Plane(first_plane), Surface3::Plane(second_plane)) => {
-                        let normals_parallel = first_plane
-                            .normal()
-                            .cross(second_plane.normal())
-                            .magnitude()
-                            <= self.kernel.tolerance.angular;
-                        let coplanar = (second_plane.origin() - first_plane.origin())
-                            .dot(first_plane.normal())
-                            .abs()
-                            <= self.kernel.tolerance.linear;
-                        // As with reversed cylinders below, the two analytical
-                        // sweeps can carry opposite raw face flags while their
-                        // parameter planes still describe one physical support.
-                        // The sewn manifold supplies the orientation proof.
-                        (normals_parallel && coplanar, true)
-                    }
-                    (Surface3::Cylinder(first_cylinder), Surface3::Cylinder(second_cylinder)) => (
-                        // A reversed analytical sweep reverses the cylinder's
-                        // parameter axis as well as its topological face flag.
-                        // Coincident adjacent patches therefore have the same
-                        // physical shell orientation even when the raw flags
-                        // differ. The sewn manifold already proves adjacency.
-                        self.coincident_cylinders(*first_cylinder, *second_cylinder),
-                        true,
-                    ),
-                    (Surface3::Nurbs(_), Surface3::Nurbs(_)) => (false, false),
-                    _ => (first.surface == second.surface && same_orientation, false),
-                }
-            };
-            let remaining_face = if source_face == first_face {
-                second_face
-            } else {
-                first_face
-            };
-            let joined_nurbs = if same_surface {
-                false
-            } else {
-                self.join_adjacent_ruled_nurbs_faces(*edge, remaining_face, source_face)?
-            };
-            if same_surface || joined_nurbs {
-                self.kef_unchecked(*edge, source_face)?;
-                if reparameterize {
-                    match self.working.face(remaining_face)?.surface {
-                        Surface3::Plane(_) => self.reparameterize_planar_face(remaining_face)?,
-                        Surface3::Cylinder(_) => {
-                            self.reparameterize_cylindrical_face(remaining_face)?
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        for (source_vertex, target_vertex) in vertex_welds {
-            let source_name = self.working.vertex(source_vertex)?.name;
-            let target_name = self.working.vertex(target_vertex)?.name;
-            self.working.vertices.remove(source_vertex)?;
-            self.repair_outgoing(target_vertex)?;
-            self.history
-                .changed(source_name, ChangeKind::Merged, [target_name]);
-        }
-        let mut deleted_names = removed_loop_names;
-        deleted_names.extend([
-            target_face_name,
-            source_face_name,
-            source_shell_name,
-            source_body_name,
-        ]);
-        for name in removed_names.into_iter().chain(deleted_names) {
-            self.history
-                .changed(name, ChangeKind::Deleted, std::iter::empty());
-        }
-        let target_body_name = self.working.body(target)?.name;
-        let target_shell_name = self.working.shell(target_shell)?.name;
-        self.history
-            .changed(target_body_name, ChangeKind::Modified, [target_body_name]);
-        self.history
-            .changed(target_shell_name, ChangeKind::Modified, [target_shell_name]);
-        self.touched_bodies.retain(|body| *body != source);
-        if !self.touched_bodies.contains(&target) {
-            self.touched_bodies.push(target);
-        }
-        self.composes_imported_topology = true;
-        Ok(target)
-    }
-
-    /// Join the two degree-one sweep directions of adjacent rational ruled
-    /// patches into one exact tensor-product surface. This removes a sewing
-    /// artifact without approximating either rail: the shared control row is
-    /// retained once and an internal degree-one knot records its exact height.
-    fn join_adjacent_ruled_nurbs_faces(
-        &mut self,
-        edge: EdgeId,
-        keep_face: FaceId,
-        remove_face: FaceId,
-    ) -> KernelResult<bool> {
-        let (keep, remove) = match (
-            &self.working.face(keep_face)?.surface,
-            &self.working.face(remove_face)?.surface,
-        ) {
-            (Surface3::Nurbs(keep), Surface3::Nurbs(remove)) => (keep.clone(), remove.clone()),
-            _ => return Ok(false),
-        };
-        if keep.degrees().1 != 1
-            || remove.degrees().1 != 1
-            || keep.control_points().len() != 2
-            || remove.control_points().len() != 2
-            || keep.degrees().0 != remove.degrees().0
-            || keep.control_points()[0].len() != remove.control_points()[0].len()
-        {
-            return Ok(false);
-        }
-
-        let normalized_knots = |knots: &[f64]| -> Option<Vec<f64>> {
-            let start = *knots.first()?;
-            let span = knots.last()? - start;
-            (span.abs() > self.kernel.tolerance.parameter)
-                .then(|| knots.iter().map(|value| (value - start) / span).collect())
-        };
-        let Some(keep_u_knots) = normalized_knots(keep.knots().0) else {
-            return Ok(false);
-        };
-        let Some(remove_u_knots) = normalized_knots(remove.knots().0) else {
-            return Ok(false);
-        };
-        if keep_u_knots.len() != remove_u_knots.len() {
-            return Ok(false);
-        }
-
-        let seam_use = |face: FaceId| -> KernelResult<CoedgeId> {
-            self.working
-                .edge(edge)?
-                .coedges
-                .iter()
-                .copied()
-                .find(|coedge| {
-                    self.working
-                        .coedge(*coedge)
-                        .and_then(|value| self.working.loop_(value.loop_id))
-                        .map(|loop_value| loop_value.face == face)
-                        .unwrap_or(false)
-                })
-                .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "joined NURBS face has no use of its shared edge",
-                    )
-                })
-        };
-        let seam_at_start = |surface: &NurbsSurface3, coedge: CoedgeId| -> KernelResult<bool> {
-            let value = self.working.coedge(coedge)?;
-            let parameter = value.range.start + value.range.span() * 0.5;
-            let v = value.pcurve.evaluate(parameter)?.point.y;
-            let domain = surface.domains()[1];
-            let DomainBounds::Bounded(range) = domain.bounds else {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "a ruled NURBS surface must have a bounded sweep domain",
-                ));
-            };
-            let start_distance = (v - range.start).abs();
-            let end_distance = (v - range.end).abs();
-            let scale = range.span().abs().max(1.0);
-            if start_distance.min(end_distance) > self.kernel.tolerance.parameter * scale * 8.0 {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "shared ruled-surface edge is not isoparametric",
-                ));
-            }
-            Ok(start_distance < end_distance)
-        };
-        let keep_seam_start = seam_at_start(&keep, seam_use(keep_face)?)?;
-        let remove_seam_start = seam_at_start(&remove, seam_use(remove_face)?)?;
-        let keep_seam_index = usize::from(!keep_seam_start);
-        let remove_seam_index = usize::from(!remove_seam_start);
-
-        let rows_match = |reversed: bool| {
-            let remove_index = |index: usize| {
-                if reversed {
-                    keep.control_points()[0].len() - 1 - index
-                } else {
-                    index
-                }
-            };
-            let weight_scale = keep.weights()[keep_seam_index][0]
-                / remove.weights()[remove_seam_index][remove_index(0)];
-            let points_match = keep.control_points()[keep_seam_index]
-                .iter()
-                .enumerate()
-                .all(|(index, point)| {
-                    point.distance(remove.control_points()[remove_seam_index][remove_index(index)])
-                        <= self.kernel.tolerance.linear
-                });
-            let weights_match =
-                keep.weights()[keep_seam_index]
-                    .iter()
-                    .enumerate()
-                    .all(|(index, weight)| {
-                        (weight
-                            - remove.weights()[remove_seam_index][remove_index(index)]
-                                * weight_scale)
-                            .abs()
-                            <= self.kernel.tolerance.parameter * weight.abs().max(1.0) * 8.0
-                    });
-            let knots_match = keep_u_knots.iter().enumerate().all(|(index, knot)| {
-                let candidate = if reversed {
-                    1.0 - remove_u_knots[remove_u_knots.len() - 1 - index]
-                } else {
-                    remove_u_knots[index]
-                };
-                (knot - candidate).abs() <= self.kernel.tolerance.parameter * 8.0
-            });
-            (points_match && weights_match && knots_match).then_some(weight_scale)
-        };
-        let Some((remove_u_reversed, remove_weight_scale)) = rows_match(false)
-            .map(|scale| (false, scale))
-            .or_else(|| rows_match(true).map(|scale| (true, scale)))
-        else {
-            return Ok(false);
-        };
-
-        let row_distance = |surface: &NurbsSurface3, reversed: bool| {
-            let width = surface.control_points()[0].len();
-            (0..width)
-                .map(|index| {
-                    let index = if reversed { width - 1 - index } else { index };
-                    surface.control_points()[0][index].distance(surface.control_points()[1][index])
-                })
-                .sum::<f64>()
-                / width as f64
-        };
-        let keep_length = row_distance(&keep, false);
-        let remove_length = row_distance(&remove, remove_u_reversed);
-        if keep_length <= self.kernel.tolerance.linear
-            || remove_length <= self.kernel.tolerance.linear
-        {
-            return Ok(false);
-        }
-        let low_length = if keep_seam_start {
-            remove_length
-        } else {
-            keep_length
-        };
-        let middle = low_length / (keep_length + remove_length);
-
-        let oriented_remove_row = |row: usize| {
-            let mut points = remove.control_points()[row].clone();
-            let mut weights = remove.weights()[row]
-                .iter()
-                .map(|weight| weight * remove_weight_scale)
-                .collect::<Vec<_>>();
-            if remove_u_reversed {
-                points.reverse();
-                weights.reverse();
-            }
-            (points, weights)
-        };
-        let remove_outer = usize::from(remove_seam_start);
-        let (remove_outer_points, remove_outer_weights) = oriented_remove_row(remove_outer);
-        let (control_points, weights) = if keep_seam_start {
-            (
-                vec![
-                    remove_outer_points,
-                    keep.control_points()[0].clone(),
-                    keep.control_points()[1].clone(),
-                ],
-                vec![
-                    remove_outer_weights,
-                    keep.weights()[0].clone(),
-                    keep.weights()[1].clone(),
-                ],
-            )
-        } else {
-            (
-                vec![
-                    keep.control_points()[0].clone(),
-                    keep.control_points()[1].clone(),
-                    remove_outer_points,
-                ],
-                vec![
-                    keep.weights()[0].clone(),
-                    keep.weights()[1].clone(),
-                    remove_outer_weights,
-                ],
-            )
-        };
-        let joined = NurbsSurface3::new(
-            keep.degrees(),
-            control_points,
-            weights,
-            (keep_u_knots, vec![0.0, 0.0, middle, 1.0, 1.0]),
-        )?;
-
-        let affine = |surface: &NurbsSurface3,
-                      seam_start: bool,
-                      is_keep: bool,
-                      reverse_u: bool|
-         -> KernelResult<(f64, f64, f64, f64)> {
-            let domains = surface.domains();
-            let DomainBounds::Bounded(u) = domains[0].bounds else {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "bounded NURBS u domain required",
-                ));
-            };
-            let DomainBounds::Bounded(v) = domains[1].bounds else {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "bounded NURBS v domain required",
-                ));
-            };
-            let (u_offset, u_scale) = if reverse_u {
-                (u.end / u.span(), -1.0 / u.span())
-            } else {
-                (-u.start / u.span(), 1.0 / u.span())
-            };
-            let (v_low, v_high, reversed_v) = if is_keep {
-                if seam_start {
-                    (middle, 1.0, false)
-                } else {
-                    (0.0, middle, false)
-                }
-            } else if keep_seam_start {
-                (0.0, middle, seam_start)
-            } else {
-                (middle, 1.0, !seam_start)
-            };
-            let span = v_high - v_low;
-            let (v_offset, v_scale) = if reversed_v {
-                (v_high + span * v.start / v.span(), -span / v.span())
-            } else {
-                (v_low - span * v.start / v.span(), span / v.span())
-            };
-            Ok((u_offset, u_scale, v_offset, v_scale))
-        };
-        for (face, surface, seam_start, is_keep, reverse_u) in [
-            (keep_face, &keep, keep_seam_start, true, false),
-            (
-                remove_face,
-                &remove,
-                remove_seam_start,
-                false,
-                remove_u_reversed,
-            ),
-        ] {
-            let (u_offset, u_scale, v_offset, v_scale) =
-                affine(surface, seam_start, is_keep, reverse_u)?;
-            let loops = self.working.face(face)?.loops.clone();
-            for loop_id in loops {
-                for coedge in self.collect_loop(loop_id)? {
-                    let Curve2::Line(line) = self.working.coedge(coedge)?.pcurve else {
-                        return Ok(false);
-                    };
-                    let origin = line.origin();
-                    let direction = line.direction();
-                    self.working.coedges.get_mut(coedge)?.pcurve = Line2::new(
-                        Point2::new(u_offset + u_scale * origin.x, v_offset + v_scale * origin.y),
-                        Vec2::new(u_scale * direction.x, v_scale * direction.y),
-                    )?
-                    .into();
-                }
-            }
-        }
-        self.working.faces.get_mut(keep_face)?.surface = joined.into();
-        Ok(true)
-    }
-
     /// Re-express a circular edge in the parameter space of the face that
     /// survives sewing. Endpoint matching is insufficient for circles because
     /// the discarded edge may use a different angular frame even when both
@@ -2476,22 +1711,6 @@ impl<'kernel> EulerTransaction<'kernel> {
             projection.parameters.1,
         );
         Ok(Line2::new(origin, Vec2::new(direction, 0.0))?.into())
-    }
-
-    fn coincident_cylinders(&self, first: Cylinder3, second: Cylinder3) -> bool {
-        let first_axis = first.axis().normalize();
-        let second_axis = second.axis().normalize();
-        let axes_parallel =
-            first_axis.cross(second_axis).magnitude() <= self.kernel.tolerance.angular;
-        let origins_coaxial = (second.origin() - first.origin())
-            .cross(first_axis)
-            .magnitude()
-            <= self.kernel.tolerance.linear;
-        let radii_equal = (first.x_radius().magnitude() - second.x_radius().magnitude()).abs()
-            <= self.kernel.tolerance.linear
-            && (first.y_radius().magnitude() - second.y_radius().magnitude()).abs()
-                <= self.kernel.tolerance.linear;
-        axes_parallel && origins_coaxial && radii_equal
     }
 
     fn reparameterize_cylindrical_face(&mut self, face_id: FaceId) -> KernelResult<()> {
@@ -2592,144 +1811,6 @@ impl<'kernel> EulerTransaction<'kernel> {
         Ok(())
     }
 
-    pub(crate) fn sew_body_across_face_patch(
-        &mut self,
-        target: BodyId,
-        source: BodyId,
-        target_face: FaceId,
-        source_face: FaceId,
-    ) -> KernelResult<BodyId> {
-        let snapshot = self.working.clone();
-        let history_snapshot = self.history.clone();
-        let touched_snapshot = self.touched_bodies.clone();
-        let composition_snapshot = self.composes_imported_topology;
-        let result = self
-            .sew_body_across_face_patch_unchecked(target, source, target_face, source_face)
-            .and_then(|body| {
-                validate(
-                    &self.working,
-                    self.kernel.tolerance,
-                    ValidationMode::Construction,
-                )
-                .into_result()
-                .map(|_| body)
-            });
-        if result.is_err() {
-            self.working = snapshot;
-            self.history = history_snapshot;
-            self.touched_bodies = touched_snapshot;
-            self.composes_imported_topology = composition_snapshot;
-        }
-        result
-    }
-
-    fn sew_body_across_face_patch_unchecked(
-        &mut self,
-        target: BodyId,
-        source: BodyId,
-        target_face: FaceId,
-        source_face: FaceId,
-    ) -> KernelResult<BodyId> {
-        if target == source {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "face-patch sewing requires two distinct bodies",
-            ));
-        }
-        if self.working.face(source_face)?.loops.len() > 1 {
-            return self.sew_bodies_across_faces_unchecked(
-                target,
-                source,
-                target_face,
-                source_face,
-            );
-        }
-        let target_shells = self.working.body(target)?.shells.clone();
-        let source_shells = self.working.body(source)?.shells.clone();
-        if target_shells.len() != 1 || source_shells.len() != 1 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "face-patch sewing requires one shell per body",
-            ));
-        }
-        let target_shell = target_shells[0];
-        let source_shell = source_shells[0];
-        if self.working.face(target_face)?.shell != target_shell
-            || self.working.face(source_face)?.shell != source_shell
-            || self.working.face(source_face)?.loops.len() != 1
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "the sewn patch must be a simply connected face on the source body",
-            ));
-        }
-
-        let source_loop = self.working.face(source_face)?.loops[0];
-        let circular_frame = self
-            .collect_loop(source_loop)?
-            .into_iter()
-            .find_map(|coedge| {
-                let edge = self.working.coedge(coedge).ok()?.edge();
-                match self.working.edge(edge).ok()?.curve() {
-                    Curve3::Circle(circle) => Some(*circle),
-                    _ => None,
-                }
-            });
-        let target_plane = match self.working.face(target_face)?.surface() {
-            Surface3::Plane(plane) => *plane,
-            _ => {
-                return Err(KernelError::new(
-                    DiagnosticKind::InvalidInput,
-                    "a sewn face patch requires a planar target face",
-                ));
-            }
-        };
-        let parameter_plane = if let Some(circle) = circular_frame {
-            Plane3::new(
-                circle.center(),
-                circle.x_radius().normalize(),
-                circle.y_radius().normalize(),
-                self.kernel.tolerance,
-            )?
-        } else {
-            Plane3::from_origin_normal(target_plane.origin(), target_plane.normal())?
-        };
-        if parameter_plane.normal().dot(target_plane.normal()) < 0.0 {
-            let orientation = self.working.face(target_face)?.orientation;
-            self.working.faces.get_mut(target_face)?.orientation = match orientation {
-                FaceOrientation::Forward => FaceOrientation::Reversed,
-                FaceOrientation::Reversed => FaceOrientation::Forward,
-            };
-        }
-        self.working.faces.get_mut(target_face)?.surface = parameter_plane.into();
-
-        let source_faces = self.working.shell(source_shell)?.faces.clone();
-        for face in source_faces {
-            self.working.faces.get_mut(face)?.shell = target_shell;
-            self.working.shells.get_mut(target_shell)?.faces.push(face);
-        }
-        let source_shell_name = self.working.shell(source_shell)?.name;
-        let source_body_name = self.working.body(source)?.name;
-        self.working.shells.remove(source_shell)?;
-        self.working.bodies.remove(source)?;
-
-        self.kfmrh_unchecked(target_face, source_face)?;
-        self.reparameterize_planar_face(target_face)?;
-        self.history
-            .changed(source_shell_name, ChangeKind::Deleted, std::iter::empty());
-        self.history
-            .changed(source_body_name, ChangeKind::Deleted, std::iter::empty());
-        let target_name = self.working.body(target)?.name;
-        self.history
-            .changed(target_name, ChangeKind::Modified, [target_name]);
-        self.touched_bodies.retain(|body| *body != source);
-        if !self.touched_bodies.contains(&target) {
-            self.touched_bodies.push(target);
-        }
-        self.composes_imported_topology = true;
-        Ok(target)
-    }
-
     /// Move one shell into a newly created body, the inverse body/shell Euler
     /// operator of [`Self::merge_shell_into_body`].
     pub fn split_shell_from_body(&mut self, shell: ShellId) -> KernelResult<BodyId> {
@@ -2814,6 +1895,387 @@ impl<'kernel> EulerTransaction<'kernel> {
             self.touched_bodies = touched_snapshot;
         }
         result
+    }
+
+    /// Assemble analytical face patches into one closed, manifold shell.
+    ///
+    /// This is the Euler composition used after a generic Boolean has imprinted
+    /// and classified the operand faces.  It deliberately knows nothing about
+    /// the operation which produced the patches.  Curves are welded by their
+    /// certified endpoints and midpoint, then ordinary published-topology
+    /// validation proves that every edge has exactly two opposite uses.
+    pub(crate) fn brep_shell(&mut self, patches: &[BrepPatch]) -> KernelResult<BodyId> {
+        let topology_snapshot = self.working.clone();
+        let history_snapshot = self.history.clone();
+        let names_snapshot = self.names.clone();
+        let touched_snapshot = self.touched_bodies.clone();
+        let result = self.brep_shell_unchecked(patches).and_then(|body| {
+            validate(
+                &self.working,
+                self.kernel.tolerance,
+                ValidationMode::Construction,
+            )
+            .into_result()
+            .map(|_| body)
+        });
+        if result.is_err() {
+            self.working = topology_snapshot;
+            self.history = history_snapshot;
+            self.names = names_snapshot;
+            self.touched_bodies = touched_snapshot;
+        }
+        result
+    }
+
+    /// Attach every inward-oriented disconnected shell to the smallest
+    /// outward-oriented shell that geometrically contains it.  Boolean face
+    /// selection naturally produces one connected patch component per shell;
+    /// this operation restores the BREP body/shell nesting without knowing
+    /// anything about the feature or operands that produced those patches.
+    pub(crate) fn nest_brep_shells(
+        &mut self,
+        bodies: &[BodyId],
+        options: TessellationOptions,
+    ) -> KernelResult<()> {
+        if bodies.len() < 2 {
+            return Ok(());
+        }
+        let scratch = Kernel {
+            tolerance: self.kernel.tolerance,
+            topology: self.working.clone(),
+        };
+        let mut shells = Vec::with_capacity(bodies.len());
+        for body in bodies {
+            let value = scratch.topology().body(*body)?;
+            if value.shells().len() != 1 {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "a newly assembled BREP component must contain exactly one shell",
+                ));
+            }
+            let shell = value.shells()[0];
+            let mesh = scratch.tessellate_shell(shell, options)?;
+            let signed_volume = mesh_signed_volume(&mesh);
+            if signed_volume.abs() <= self.kernel.tolerance.linear.powi(3) {
+                return Err(KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "a Boolean shell has zero volume at model tolerance",
+                ));
+            }
+            shells.push((*body, mesh, signed_volume));
+        }
+
+        let outward = shells
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (_, _, volume))| (*volume > 0.0).then_some(index))
+            .collect::<Vec<_>>();
+        for (cavity_body, cavity_mesh, signed_volume) in &shells {
+            if *signed_volume > 0.0 {
+                continue;
+            }
+            let container = outward
+                .iter()
+                .copied()
+                .filter(|candidate| {
+                    let (_, outer_mesh, _) = &shells[*candidate];
+                    cavity_mesh
+                        .positions
+                        .iter()
+                        .all(|point| mesh_contains(outer_mesh, *point))
+                })
+                .min_by(|first, second| shells[*first].2.abs().total_cmp(&shells[*second].2.abs()))
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "an inward-oriented Boolean shell is not contained by an outer shell",
+                    )
+                })?;
+            self.merge_shell_into_body_unchecked(shells[container].0, *cavity_body)?;
+        }
+        Ok(())
+    }
+
+    fn brep_shell_unchecked(&mut self, patches: &[BrepPatch]) -> KernelResult<BodyId> {
+        if patches.is_empty() {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "an analytical BREP shell needs at least one face patch",
+            ));
+        }
+        if patches.iter().any(|patch| {
+            patch.loops.is_empty()
+                || patch.loops.iter().any(|loop_| loop_.segments.is_empty())
+                || patch
+                    .loops
+                    .iter()
+                    .filter(|loop_| loop_.kind == LoopKind::Outer)
+                    .count()
+                    != 1
+        }) {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "every analytical BREP face patch needs one nonempty outer loop",
+            ));
+        }
+
+        self.names.push_scope("brep")?;
+        let body_name = self.names.next_for("body")?;
+        let shell_name = self.names.next_for("shell")?;
+        let body = self.working.bodies.insert(Body::new(body_name));
+        let shell = self
+            .working
+            .shells
+            .insert(Shell::new(shell_name, body, ShellKind::Open));
+        self.working.bodies.get_mut(body)?.shells.push(shell);
+
+        #[derive(Clone)]
+        struct WeldedEdge {
+            edge: EdgeId,
+            vertices: [VertexId; 2],
+            curve: Curve3,
+            range: ParameterRange,
+            start: Point3,
+            end: Point3,
+            middle: Point3,
+        }
+
+        let mut vertices = Vec::<(Point3, VertexId)>::new();
+        let mut edges = Vec::<WeldedEdge>::new();
+        let linear = self.kernel.tolerance.linear;
+        let weld_vertex = |transaction: &mut Self,
+                           vertices: &mut Vec<(Point3, VertexId)>,
+                           point: Point3|
+         -> KernelResult<VertexId> {
+            if let Some((_, vertex)) = vertices
+                .iter()
+                .find(|(candidate, _)| candidate.distance(point) <= linear * 8.0)
+            {
+                return Ok(*vertex);
+            }
+            let name = transaction.names.next_for("vertex")?;
+            let vertex = transaction.make_vertex(name, point);
+            vertices.push((point, vertex));
+            Ok(vertex)
+        };
+
+        for patch in patches {
+            let face_name = self.names.next_for("face")?;
+            let outer_name = self.names.next_for("loop.outer")?;
+            let (face, initial_outer) = self.make_face_loop(
+                shell,
+                face_name,
+                outer_name,
+                patch.surface.clone(),
+                patch.orientation,
+            )?;
+            let outer_index = patch
+                .loops
+                .iter()
+                .position(|loop_| loop_.kind == LoopKind::Outer)
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "analytical BREP face patch lost its outer loop",
+                    )
+                })?;
+
+            for (loop_index, patch_loop) in patch.loops.iter().enumerate() {
+                let loop_id = if loop_index == outer_index {
+                    initial_outer
+                } else {
+                    let name = self.names.next_for("loop.inner")?;
+                    let loop_id = self
+                        .working
+                        .loops
+                        .insert(Loop::new(name, face, LoopKind::Inner));
+                    self.working.faces.get_mut(face)?.loops.push(loop_id);
+                    loop_id
+                };
+                let mut uses = Vec::with_capacity(patch_loop.segments.len());
+                for segment in &patch_loop.segments {
+                    let start = segment.curve.evaluate(segment.range.start)?.point;
+                    let end = segment.curve.evaluate(segment.range.end)?.point;
+                    let middle = segment
+                        .curve
+                        .evaluate(segment.range.start + segment.range.span() * 0.5)?
+                        .point;
+                    let start_vertex = weld_vertex(self, &mut vertices, start)?;
+                    let end_vertex = weld_vertex(self, &mut vertices, end)?;
+                    let matched = edges.iter().cloned().find(|candidate| {
+                        let closed_circles_match = match (&candidate.curve, &segment.curve) {
+                            (Curve3::Circle(first), Curve3::Circle(second)) => {
+                                candidate.start.distance(candidate.end) <= linear * 8.0
+                                    && start.distance(end) <= linear * 8.0
+                                    && first.center().distance(second.center()) <= linear * 8.0
+                                    && (first.radius() - second.radius()).abs() <= linear * 8.0
+                                    && first.normal().dot(second.normal()).abs()
+                                        >= 1.0 - self.kernel.tolerance.angular * 8.0
+                            }
+                            _ => false,
+                        };
+                        let middle_matches = candidate.middle.distance(middle) <= linear * 64.0
+                            || candidate
+                                .curve
+                                .project(middle, self.kernel.tolerance)
+                                .is_ok_and(|projection| {
+                                    projection.distance <= linear * 64.0
+                                        && candidate
+                                            .range
+                                            .contains(projection.parameter, self.kernel.tolerance)
+                                });
+                        closed_circles_match
+                            || (middle_matches
+                                && ((candidate.start.distance(start) <= linear * 8.0
+                                    && candidate.end.distance(end) <= linear * 8.0)
+                                    || (candidate.start.distance(end) <= linear * 8.0
+                                        && candidate.end.distance(start) <= linear * 8.0)))
+                    });
+                    let (edge, forward, pcurve) = if let Some(candidate) = matched {
+                        let closed = candidate.start.distance(candidate.end) <= linear * 8.0
+                            && start.distance(end) <= linear * 8.0;
+                        let forward = if closed {
+                            match (&candidate.curve, &segment.curve) {
+                                (Curve3::Circle(first), Curve3::Circle(second)) => {
+                                    first.normal().dot(second.normal())
+                                        * candidate.range.span().signum()
+                                        * segment.range.span().signum()
+                                        > 0.0
+                                }
+                                _ => true,
+                            }
+                        } else {
+                            candidate.vertices == [start_vertex, end_vertex]
+                        };
+                        if !closed && !forward && candidate.vertices != [end_vertex, start_vertex] {
+                            return Err(KernelError::new(
+                                DiagnosticKind::TopologyInvariant,
+                                "welded analytical edge endpoints disagree",
+                            ));
+                        }
+                        let coedge_range = if forward {
+                            candidate.range
+                        } else {
+                            candidate.range.reversed()
+                        };
+                        let pcurve = if coedge_range == segment.range
+                            && candidate.curve == segment.curve
+                        {
+                            segment.pcurve.clone()
+                        } else if let (Curve3::Line(line), Surface3::Plane(plane)) =
+                            (&candidate.curve, &patch.surface)
+                        {
+                            // A line on a plane has an unbounded exact p-curve.
+                            // Keep that simple representation so later Euler
+                            // edits may trim or extend the edge without leaving
+                            // an artificial projection-guide domain.
+                            let origin = plane.project(line.origin())?.parameters;
+                            let next = plane.project(line.origin() + line.direction())?.parameters;
+                            Line2::new(
+                                Point2::new(origin.0, origin.1),
+                                Vec2::new(next.0 - origin.0, next.1 - origin.1),
+                            )?
+                            .into()
+                        } else {
+                            let guide_range = ParameterRange::new(
+                                candidate.range.start.min(candidate.range.end),
+                                candidate.range.start.max(candidate.range.end),
+                            )?;
+                            let mut guide_points = Vec::new();
+                            for index in 0..=32 {
+                                let parameter =
+                                    guide_range.start + guide_range.span() * index as f64 / 32.0;
+                                let point = candidate.curve.evaluate(parameter)?.point;
+                                let projected =
+                                    patch.surface.project(point, self.kernel.tolerance)?;
+                                guide_points.push(Point2::new(
+                                    projected.parameters.0,
+                                    projected.parameters.1,
+                                ));
+                            }
+                            let guide: Curve2 = super::intersection::smooth_nurbs_guide(
+                                &guide_points,
+                                guide_range,
+                            )?
+                            .into();
+                            super::SurfaceProjectionPcurve2::new(
+                                candidate.curve.clone(),
+                                patch.surface.clone(),
+                                guide,
+                                guide_range,
+                                self.kernel.tolerance,
+                            )?
+                            .into()
+                        };
+                        (candidate.edge, forward, pcurve)
+                    } else {
+                        let edge_name = self.names.next_for("edge")?;
+                        let edge = self.make_edge(
+                            edge_name,
+                            [start_vertex, end_vertex],
+                            segment.curve.clone(),
+                            segment.range,
+                        )?;
+                        edges.push(WeldedEdge {
+                            edge,
+                            vertices: [start_vertex, end_vertex],
+                            curve: segment.curve.clone(),
+                            range: segment.range,
+                            start,
+                            end,
+                            middle,
+                        });
+                        (edge, true, segment.pcurve.clone())
+                    };
+                    let edge_range = self.working.edge(edge)?.range;
+                    let coedge_name = self.names.next_for("coedge")?;
+                    let coedge = self.make_coedge(
+                        coedge_name,
+                        edge,
+                        loop_id,
+                        forward,
+                        pcurve,
+                        if forward {
+                            edge_range
+                        } else {
+                            edge_range.reversed()
+                        },
+                    )?;
+                    uses.push(coedge);
+                    if self.working.vertex(start_vertex)?.outgoing.is_none() {
+                        self.working.vertices.get_mut(start_vertex)?.outgoing = Some(coedge);
+                    }
+                }
+                for index in 0..uses.len() {
+                    let previous = uses[(index + uses.len() - 1) % uses.len()];
+                    let next = uses[(index + 1) % uses.len()];
+                    let value = self.working.coedges.get_mut(uses[index])?;
+                    value.previous = previous;
+                    value.next = next;
+                }
+                self.working.loops.get_mut(loop_id)?.first = uses.first().copied();
+            }
+        }
+        self.names.pop_scope()?;
+        if let Some(edge) = edges.iter().find(|edge| {
+            self.working
+                .edge(edge.edge)
+                .is_ok_and(|value| value.coedges.len() != 2)
+        }) {
+            let uses = self.working.edge(edge.edge)?.coedges.len();
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                format!(
+                    "analytical BREP edge has {uses} uses instead of two: {:?} -> {:?} via {:?}",
+                    edge.start, edge.end, edge.middle
+                ),
+            ));
+        }
+        self.seal_shell_unchecked(shell)?;
+        if !self.touched_bodies.contains(&body) {
+            self.touched_bodies.push(body);
+        }
+        Ok(body)
     }
 
     /// Build a closed triangular polyhedron through a shelling sequence of MEV
@@ -4725,100 +4187,19 @@ impl<'kernel> EulerTransaction<'kernel> {
                 curve.knots().to_vec(),
             )?
             .into(),
+            Curve2::SurfaceIntersection(curve) if curve.lies_on(&Surface3::Plane(plane)) => {
+                curve.spatial_curve()
+            }
+            Curve2::SurfaceProjection(curve) if curve.surface() == &Surface3::Plane(plane) => {
+                curve.curve().clone()
+            }
             Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => {
                 return Err(KernelError::new(
                     DiagnosticKind::UnsupportedGeometry,
-                    "an implicit surface p-curve cannot be lifted onto another plane",
+                    "an implicit p-curve can only be lifted onto its retained plane",
                 ))
             }
         })
-    }
-
-    pub(super) fn reparameterize_planar_face(&mut self, face: FaceId) -> KernelResult<()> {
-        let Surface3::Plane(plane) = self.working.face(face)?.surface().clone() else {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "planar face reparameterization received a non-planar face",
-            ));
-        };
-        let loops = self.working.face(face)?.loops().to_vec();
-        for loop_id in loops {
-            for coedge_id in self.collect_loop(loop_id)? {
-                let edge_id = self.working.coedge(coedge_id)?.edge();
-                let edge = self.working.edge(edge_id)?;
-                self.working.coedges.get_mut(coedge_id)?.pcurve = match edge.curve() {
-                    Curve3::Line(_) => {
-                        let vertices = self.working.coedge_vertices(coedge_id)?;
-                        let start = plane
-                            .project(self.working.vertex(vertices[0])?.point())?
-                            .parameters;
-                        let end = plane
-                            .project(self.working.vertex(vertices[1])?.point())?
-                            .parameters;
-                        let range = self.working.coedge(coedge_id)?.range;
-                        let start = Point2::new(start.0, start.1);
-                        let end = Point2::new(end.0, end.1);
-                        let direction = (end - start) / range.span();
-                        Line2::new(start - direction * range.start, direction)?.into()
-                    }
-                    Curve3::Circle(circle) => {
-                        let center = plane.project(circle.center())?.parameters;
-                        let x = plane
-                            .project(circle.center() + circle.x_radius())?
-                            .parameters;
-                        let y = plane
-                            .project(circle.center() + circle.y_radius())?
-                            .parameters;
-                        let radius = circle.radius();
-                        let achieved = (x.0 - center.0 - radius)
-                            .abs()
-                            .max((x.1 - center.1).abs())
-                            .max((y.0 - center.0).abs())
-                            .max((y.1 - center.1 - radius).abs());
-                        if achieved > self.kernel.tolerance.linear_at_scale(radius) {
-                            return Err(KernelError::new(
-                                DiagnosticKind::UnsupportedGeometry,
-                                "a circular planar edge requires an aligned face parameter frame",
-                            ));
-                        }
-                        Circle2::new(Point2::new(center.0, center.1), radius)?.into()
-                    }
-                    Curve3::Nurbs(curve) => NurbsCurve2::new(
-                        curve.degree(),
-                        curve
-                            .control_points()
-                            .iter()
-                            .map(|point| {
-                                let projected = plane.project(*point)?.parameters;
-                                Ok(Point2::new(projected.0, projected.1))
-                            })
-                            .collect::<KernelResult<Vec<_>>>()?,
-                        curve.weights().to_vec(),
-                        curve.knots().to_vec(),
-                    )?
-                    .into(),
-                    Curve3::SurfaceIntersection(curve) => curve
-                        .pcurve_for_surface(&Surface3::Plane(plane))
-                        .cloned()
-                        .ok_or_else(|| {
-                            KernelError::new(
-                                DiagnosticKind::GeometryInvariant,
-                                "implicit intersection edge does not retain the planar face",
-                            )
-                        })?,
-                    Curve3::SurfaceCurve(curve) => {
-                        if curve.surface() != &Surface3::Plane(plane) {
-                            return Err(KernelError::new(
-                                DiagnosticKind::GeometryInvariant,
-                                "surface curve does not retain the planar face",
-                            ));
-                        }
-                        curve.pcurve().clone()
-                    }
-                };
-            }
-        }
-        Ok(())
     }
 
     pub(super) fn make_vertex(&mut self, name: super::PersistentId, point: Point3) -> VertexId {
@@ -4853,6 +4234,9 @@ impl<'kernel> EulerTransaction<'kernel> {
         self.working.shells.get_mut(shell)?.faces.push(face);
         Ok((face, loop_id))
     }
+
+    /// Create an exact edge without uses. Uses are attached explicitly while a
+    /// surrounding Euler rewrite is assembled.
 
     /// Create an exact edge without uses. Uses are attached explicitly while a
     /// surrounding Euler rewrite is assembled.
@@ -5294,57 +4678,36 @@ impl<'kernel> EulerTransaction<'kernel> {
             certificates,
         })
     }
+}
 
-    /// Finish a constructor with physical properties integrated over its exact
-    /// analytical parameterization using explicit error bounds.
-    pub(crate) fn finish_with_certificate(
-        self,
-        properties: super::MassProperties,
-    ) -> KernelResult<CommittedOperation> {
-        validate(
-            &self.working,
-            self.kernel.tolerance,
-            ValidationMode::PublishedWithCertificate,
-        )
-        .into_result()?;
-        if self.touched_bodies.len() != 1 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "analytical constructor did not produce exactly one certified body",
-            ));
-        }
-        let body = self.touched_bodies[0];
-        let scale = properties
-            .centroid
-            .to_vec()
-            .magnitude()
-            .max(properties.volume.abs().cbrt())
-            .max(1.0);
-        super::physical::validate_supplied_properties(properties, self.kernel.tolerance, scale)?;
-        let certificates = std::collections::BTreeMap::from([(
-            body,
-            super::physical::PhysicalCertificate { properties },
-        )]);
-        let mut current_names = std::collections::BTreeSet::new();
-        current_names.extend(self.working.body_entity_names(body)?);
-        if !self.composes_imported_topology
-            && current_names
-                .iter()
-                .any(|name| name.namespace != self.namespace)
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "a transaction may publish only topology owned by its operation namespace",
-            ));
-        }
-        self.kernel.topology = self.working;
-        Ok(CommittedOperation {
-            operation: self.namespace,
-            bodies: self.touched_bodies,
-            history: self.history,
-            certificates,
+fn mesh_signed_volume(mesh: &TriangleMesh) -> f64 {
+    mesh.triangles
+        .iter()
+        .map(|triangle| {
+            let [a, b, c] = triangle.map(|index| mesh.positions[index].to_vec());
+            a.dot(b.cross(c)) / 6.0
         })
+        .sum()
+}
+
+fn mesh_contains(mesh: &TriangleMesh, point: Point3) -> bool {
+    let mut solid_angle = 0.0;
+    for triangle in &mesh.triangles {
+        let a = mesh.positions[triangle[0]] - point;
+        let b = mesh.positions[triangle[1]] - point;
+        let c = mesh.positions[triangle[2]] - point;
+        let lengths = [a.magnitude(), b.magnitude(), c.magnitude()];
+        if lengths.iter().any(|length| *length <= f64::EPSILON) {
+            return true;
+        }
+        let numerator = a.dot(b.cross(c));
+        let denominator = lengths[0] * lengths[1] * lengths[2]
+            + a.dot(b) * lengths[2]
+            + b.dot(c) * lengths[0]
+            + c.dot(a) * lengths[1];
+        solid_angle += 2.0 * numerator.atan2(denominator);
     }
+    solid_angle.abs() > std::f64::consts::TAU
 }
 
 pub(super) fn prepared_wire_segments(wire: &Wire2) -> KernelResult<Vec<TrimmedCurve2>> {

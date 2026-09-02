@@ -84,11 +84,7 @@ impl Profile {
         self.tolerance
     }
 
-    pub(crate) fn boolean_planar(
-        &self,
-        other: &Self,
-        kind: BooleanKind,
-    ) -> KernelResult<Vec<Self>> {
+    pub fn boolean_planar(&self, other: &Self, kind: BooleanKind) -> KernelResult<Vec<Self>> {
         if self.tolerance != other.tolerance {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidTolerance,

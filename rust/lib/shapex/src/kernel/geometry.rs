@@ -1471,6 +1471,14 @@ pub struct SurfaceIntersectionPcurve2 {
 }
 
 impl SurfaceIntersectionPcurve2 {
+    pub(crate) fn spatial_curve(&self) -> Curve3 {
+        Curve3::SurfaceIntersection((*self.curve).clone())
+    }
+
+    pub(crate) fn lies_on(&self, surface: &Surface3) -> bool {
+        self.curve.first_surface() == surface || self.curve.second_surface() == surface
+    }
+
     fn evaluate(&self, parameter: f64) -> KernelResult<Curve2Evaluation> {
         let parameters = self.curve.corrected_parameters(parameter)?;
         let first_guide = self.curve.first_pcurve.evaluate(parameter)?;
@@ -1632,7 +1640,11 @@ impl SurfaceProjectionPcurve2 {
     }
 
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<(f64, f64)> {
-        let parameter = self.domain().normalize(parameter);
+        let mut parameter = parameter;
+        if let Some(period) = self.domain().period {
+            let center = (self.range.start + self.range.end) * 0.5;
+            parameter += ((center - parameter) / period).round() * period;
+        }
         if !self.range.contains(parameter, self.tolerance) {
             return Err(invalid(
                 "surface-projection parameter lies outside its certified range",
@@ -2754,18 +2766,27 @@ impl NurbsSurface3 {
     fn evaluate(&self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {
         let domains = self.domains();
         let in_domain = |domain: ParameterDomain, value: f64| match domain.bounds {
-            super::DomainBounds::Bounded(range) => range.start <= value && value <= range.end,
-            _ => true,
+            super::DomainBounds::Bounded(range) => {
+                let minimum = range.start.min(range.end);
+                let maximum = range.start.max(range.end);
+                let slack = f64::EPSILON
+                    * minimum.abs().max(maximum.abs()).max(value.abs()).max(1.0)
+                    * 256.0;
+                (value >= minimum - slack && value <= maximum + slack)
+                    .then_some(value.clamp(minimum, maximum))
+            }
+            _ => Some(value),
         };
-        if !u.is_finite()
-            || !v.is_finite()
-            || !in_domain(domains[0], u)
-            || !in_domain(domains[1], v)
-        {
+        let Some(u) = u.is_finite().then(|| in_domain(domains[0], u)).flatten() else {
             return Err(invalid(
                 "NURBS surface parameters lie outside its natural domain",
             ));
-        }
+        };
+        let Some(v) = v.is_finite().then(|| in_domain(domains[1], v)).flatten() else {
+            return Err(invalid(
+                "NURBS surface parameters lie outside its natural domain",
+            ));
+        };
         let rows = self.homogeneous_rows();
         let along_u: Vec<Vec4> = rows
             .iter()

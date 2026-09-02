@@ -16,14 +16,11 @@ pub enum ValidationMode {
     Construction,
     /// Published model: every body must bound a closed, geometrically consistent volume.
     Published,
-    /// Published topology accompanied by a separately validated analytical
-    /// physical certificate.
-    PublishedWithCertificate,
 }
 
 impl ValidationMode {
     fn is_published(self) -> bool {
-        matches!(self, Self::Published | Self::PublishedWithCertificate)
+        matches!(self, Self::Published)
     }
 }
 

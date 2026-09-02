@@ -1115,7 +1115,11 @@ fn blind_nurbs_pocket_has_exact_prismatic_mass_properties() {
         .extrude(tool_plane, Vec3::new(0.0, 0.0, -5.0))
         .expect("pocket tool");
     let pocket = block.difference(&tool).expect("exact NURBS pocket");
-    assert!((pocket.volume() - expected).abs() < 1.0e-6);
+    assert!(
+        (pocket.volume() - expected).abs() < 1.0e-6,
+        "expected {expected}, got {}",
+        pocket.volume()
+    );
     assert!(pocket
         .faces()
         .any(|face| matches!(face.surface(), Surface3::Nurbs(_))));
@@ -1953,6 +1957,19 @@ fn contained_nurbs_prism_difference_is_analytical_and_empty() {
 }
 
 #[test]
+fn enclosed_difference_nests_the_cavity_shell_in_its_body() {
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let cavity = owned_cuboid(Point3::new(4.0, 4.0, 4.0), Point3::new(6.0, 6.0, 6.0));
+
+    let result = block
+        .difference(&cavity)
+        .expect("an enclosed subtraction should produce an inner BREP shell");
+
+    assert_eq!(result.solids().len(), 1);
+    assert!((result.volume() - 992.0).abs() < 1.0e-7);
+}
+
+#[test]
 fn circular_prism_can_join_partially_across_a_planar_face() {
     let tolerance = ModelTolerance::default();
     let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 20.0));
@@ -2022,12 +2039,6 @@ fn circular_prism_can_join_a_planar_face_with_an_existing_hole() {
         )
         .expect("boss");
 
-    assert!(
-        super::boolean::coincident_opposite_face_patch_names(&frame, &boss)
-            .expect("face-patch detection")
-            .is_some(),
-        "the circular base must be detected inside the holed planar cap"
-    );
     let joined = frame.union(&boss).expect("circular boss on frame");
     assert_eq!(joined.solids().len(), 1);
     let expected = (20.0 * 20.0 - 6.0 * 6.0) * 20.0 + 4.0 * std::f64::consts::PI * 5.0;

@@ -744,6 +744,9 @@ impl Surface3 {
             (Self::Cylinder(first), Self::Plane(second)) => Ok(swap_surface_curves(
                 plane_cylinder(*second, *first, tolerance)?,
             )),
+            (Self::Cylinder(first), Self::Cylinder(second)) => {
+                cylinder_cylinder(*first, *second, tolerance)
+            }
             (Self::Nurbs(_) | Self::Offset(_), Self::Nurbs(_) | Self::Offset(_)) => {
                 trace_regular_surface_intersections(self, other, tolerance)
             }
@@ -752,6 +755,120 @@ impl Surface3 {
             )),
         }
     }
+
+    /// Intersect two supports over finite parameter boxes supplied by their
+    /// trimmed BREP faces.  This is the general Boolean/feature entry point for
+    /// primitives with globally unbounded parameters and for procedural blend
+    /// surfaces.  The resulting curve remains the exact common zero set of the
+    /// retained supports; subdivision and tracing only construct branch guides.
+    pub(crate) fn intersect_surface_in_bounds(
+        &self,
+        other: &Self,
+        first_domains: [super::ParameterRange; 2],
+        second_domains: [super::ParameterRange; 2],
+        tolerance: ModelTolerance,
+    ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+        match self.intersect_surface(other, tolerance) {
+            Ok(result) => Ok(result),
+            Err(error)
+                if error
+                    .diagnostics()
+                    .iter()
+                    .all(|diagnostic| diagnostic.kind == DiagnosticKind::UnsupportedGeometry) =>
+            {
+                trace_surface_intersections_in_domains(
+                    self,
+                    other,
+                    first_domains,
+                    second_domains,
+                    tolerance,
+                )
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+fn cylinder_cylinder(
+    first: super::Cylinder3,
+    second: super::Cylinder3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let first_axis = first.axis();
+    let second_axis = second.axis();
+    let first_unit = first_axis.normalize();
+    let second_unit = second_axis.normalize();
+    if first_unit.dot(second_unit).abs() < 1.0 - tolerance.angular {
+        return Err(unsupported(
+            "nonparallel cylinder intersection requires bounded general surface tracing",
+        ));
+    }
+    let axial_offset = (second.origin() - first.origin()).dot(first_unit);
+    let second_center = second.origin() - first_unit * axial_offset;
+    let center_delta = second_center - first.origin();
+    let distance = center_delta.magnitude();
+    let first_radius = first.radius();
+    let second_radius = second.radius();
+    let linear = tolerance.linear_at_scale(
+        first
+            .origin()
+            .to_vec()
+            .magnitude()
+            .max(second.origin().to_vec().magnitude())
+            .max(first_radius)
+            .max(second_radius),
+    );
+    if distance <= linear {
+        return if (first_radius - second_radius).abs() <= linear {
+            Ok(IntersectionSet::Coincident)
+        } else {
+            Ok(IntersectionSet::Empty)
+        };
+    }
+    if distance > first_radius + second_radius + linear
+        || distance < (first_radius - second_radius).abs() - linear
+    {
+        return Ok(IntersectionSet::Empty);
+    }
+    let along =
+        (first_radius.powi(2) - second_radius.powi(2) + distance.powi(2)) / (2.0 * distance);
+    let height_squared = first_radius.powi(2) - along.powi(2);
+    if height_squared < -linear * linear {
+        return Ok(IntersectionSet::Empty);
+    }
+    let base = first.origin() + center_delta * (along / distance);
+    let perpendicular = first_unit.cross(center_delta).normalize();
+    let height = height_squared.max(0.0).sqrt();
+    let points = if height <= linear {
+        vec![base]
+    } else {
+        vec![base + perpendicular * height, base - perpendicular * height]
+    };
+    let mut curves = Vec::with_capacity(points.len());
+    for point in points {
+        let first_projection = Surface3::Cylinder(first).project(point, tolerance)?;
+        let second_projection = Surface3::Cylinder(second).project(point, tolerance)?;
+        let second_rate = first_axis.dot(second_axis) / second_axis.magnitude2();
+        let line: Curve3 = Line3::new(point, first_axis)?.into();
+        curves.push(SurfaceSurfaceCurve {
+            curve: line,
+            first_pcurve: Line2::new(
+                Point2::new(first_projection.parameters.0, first_projection.parameters.1),
+                crate::Vec2::new(0.0, 1.0),
+            )?
+            .into(),
+            second_pcurve: Line2::new(
+                Point2::new(
+                    second_projection.parameters.0,
+                    second_projection.parameters.1,
+                ),
+                crate::Vec2::new(0.0, second_rate),
+            )?
+            .into(),
+            achieved_error: first_projection.distance.max(second_projection.distance),
+        });
+    }
+    Ok(IntersectionSet::Isolated(curves))
 }
 
 fn swap_surface_curves(
@@ -781,10 +898,87 @@ fn plane_cylinder(
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let axis = cylinder.axis().normalize();
     let alignment = plane.normal().dot(axis).abs();
+    if alignment <= tolerance.angular {
+        let normal = plane.normal();
+        let a = normal.dot(cylinder.x_radius());
+        let b = normal.dot(cylinder.y_radius());
+        let c = normal.dot(cylinder.origin() - plane.origin());
+        let radial = a.hypot(b);
+        let linear = tolerance.linear_at_scale(
+            cylinder
+                .origin()
+                .to_vec()
+                .magnitude()
+                .max(cylinder.radius()),
+        );
+        if radial <= linear || c.abs() > radial + linear {
+            return Ok(IntersectionSet::Empty);
+        }
+        let phase = b.atan2(a);
+        let offset = (-c / radial).clamp(-1.0, 1.0).acos();
+        let parameters = if offset.sin().abs() <= tolerance.angular {
+            vec![phase + offset]
+        } else {
+            vec![phase + offset, phase - offset]
+        };
+        let mut curves = Vec::with_capacity(parameters.len());
+        for u in parameters {
+            let u = u.rem_euclid(std::f64::consts::TAU);
+            let origin = cylinder.evaluate(u, 0.0)?.point;
+            let line: Curve3 = Line3::new(origin, cylinder.axis())?.into();
+            let plane_origin = plane.project(origin)?.parameters;
+            let plane_next = plane.project(origin + cylinder.axis())?.parameters;
+            curves.push(SurfaceSurfaceCurve {
+                curve: line,
+                first_pcurve: Line2::new(
+                    Point2::new(plane_origin.0, plane_origin.1),
+                    Point2::new(plane_next.0, plane_next.1)
+                        - Point2::new(plane_origin.0, plane_origin.1),
+                )?
+                .into(),
+                second_pcurve: Line2::new(Point2::new(u, 0.0), crate::Vec2::new(0.0, 1.0))?.into(),
+                achieved_error: plane.project(origin)?.distance,
+            });
+        }
+        return Ok(IntersectionSet::Isolated(curves));
+    }
     if alignment < 1.0 - tolerance.angular {
-        return Err(unsupported(
-            "oblique plane/cylinder intersection requires bounded general surface tracing",
-        ));
+        let denominator = plane.normal().dot(cylinder.axis());
+        let range = super::ParameterRange::new(0.0, std::f64::consts::TAU)?;
+        let mut plane_points = Vec::new();
+        let mut cylinder_points = Vec::new();
+        let mut achieved_error = 0.0_f64;
+        for index in 0..=32 {
+            let u = std::f64::consts::TAU * index as f64 / 32.0;
+            let radial = cylinder.x_radius() * u.cos() + cylinder.y_radius() * u.sin();
+            let v = -plane
+                .normal()
+                .dot(cylinder.origin() + radial - plane.origin())
+                / denominator;
+            let point = cylinder.evaluate(u, v)?.point;
+            let projected = plane.project(point)?;
+            achieved_error = achieved_error.max(projected.distance);
+            plane_points.push(Point2::new(projected.parameters.0, projected.parameters.1));
+            cylinder_points.push(Point2::new(u, v));
+        }
+        let plane_guide: Curve2 = smooth_nurbs_guide(&plane_points, range)?.into();
+        let cylinder_guide: Curve2 = smooth_nurbs_guide(&cylinder_points, range)?.into();
+        let implicit = SurfaceIntersectionCurve::new(
+            Surface3::Plane(plane),
+            Surface3::Cylinder(cylinder),
+            plane_guide.clone(),
+            cylinder_guide.clone(),
+            range,
+            tolerance,
+            achieved_error,
+        )?;
+        let [first_pcurve, second_pcurve] = implicit.exact_pcurves();
+        return Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
+            curve: implicit.clone().into(),
+            first_pcurve,
+            second_pcurve,
+            achieved_error,
+        }]));
     }
     let denominator = plane.normal().dot(cylinder.axis());
     let v = plane.normal().dot(plane.origin() - cylinder.origin()) / denominator;
@@ -831,6 +1025,16 @@ fn trace_regular_surface_intersections(
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let first_domains = bounded_surface_domains(first)?;
     let second_domains = bounded_surface_domains(second)?;
+    trace_surface_intersections_in_domains(first, second, first_domains, second_domains, tolerance)
+}
+
+fn trace_surface_intersections_in_domains(
+    first: &Surface3,
+    second: &Surface3,
+    first_domains: [super::ParameterRange; 2],
+    second_domains: [super::ParameterRange; 2],
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let parameter_scale = first_domains
         .iter()
         .chain(&second_domains)
@@ -838,7 +1042,15 @@ fn trace_regular_surface_intersections(
         .fold(1.0_f64, f64::max);
     let mut seeds = Vec::<[f64; 4]>::new();
     let mut try_seed = |guess: [f64; 4]| -> KernelResult<()> {
-        let Some(parameters) = correct_surface_pair(first, second, guess, tolerance)? else {
+        let Some(parameters) = correct_surface_pair(
+            first,
+            second,
+            guess,
+            first_domains,
+            second_domains,
+            tolerance,
+        )?
+        else {
             return Ok(());
         };
         let point = first.evaluate(parameters[0], parameters[1])?.point;
@@ -854,58 +1066,82 @@ fn trace_regular_surface_intersections(
         Ok(())
     };
 
-    let mut stack = Vec::new();
-    let second_cells = rational_surface_cells(second)?;
-    for first_cell in rational_surface_cells(first)? {
-        for second_cell in &second_cells {
-            stack.push((first_cell.clone(), second_cell.clone(), 0_u8));
+    if matches!(first, Surface3::Nurbs(_) | Surface3::Offset(_))
+        && matches!(second, Surface3::Nurbs(_) | Surface3::Offset(_))
+    {
+        let mut stack = Vec::new();
+        let second_cells = rational_surface_cells(second)?;
+        for first_cell in rational_surface_cells(first)? {
+            for second_cell in &second_cells {
+                stack.push((first_cell.clone(), second_cell.clone(), 0_u8));
+            }
         }
-    }
-    let mut visited = 0_usize;
-    while let Some((first_cell, second_cell, depth)) = stack.pop() {
-        visited += 1;
-        if visited > 500_000 {
-            return Err(KernelError::new(
-                DiagnosticKind::NumericalFailure,
-                "certified NURBS surface intersection exceeded its subdivision budget",
-            ));
+        let mut visited = 0_usize;
+        while let Some((first_cell, second_cell, depth)) = stack.pop() {
+            visited += 1;
+            if visited > 500_000 {
+                return Err(KernelError::new(
+                    DiagnosticKind::NumericalFailure,
+                    "certified NURBS surface intersection exceeded its subdivision budget",
+                ));
+            }
+            let first_bounds = first_cell.bounds()?;
+            let second_bounds = second_cell.bounds()?;
+            if surface_bounds_separated(first_bounds, second_bounds, tolerance.linear) {
+                continue;
+            }
+            let first_flat = first_cell.directional_flatness()?;
+            let second_flat = second_cell.directional_flatness()?;
+            let linear = tolerance.linear_at_scale(
+                surface_bounds_scale(first_bounds).max(surface_bounds_scale(second_bounds)),
+            );
+            let first_max_flat = first_flat[0].max(first_flat[1]);
+            let second_max_flat = second_flat[0].max(second_flat[1]);
+            if depth >= 48 || first_max_flat.max(second_max_flat) <= linear * 2.0 {
+                try_seed([
+                    first_cell.u_range.start + first_cell.u_range.span() * 0.5,
+                    first_cell.v_range.start + first_cell.v_range.span() * 0.5,
+                    second_cell.u_range.start + second_cell.u_range.span() * 0.5,
+                    second_cell.v_range.start + second_cell.v_range.span() * 0.5,
+                ])?;
+                continue;
+            }
+            if first_max_flat >= second_max_flat {
+                let (left, right) = first_cell.split_direction(first_flat);
+                stack.push((right, second_cell.clone(), depth + 1));
+                stack.push((left, second_cell, depth + 1));
+            } else {
+                let (left, right) = second_cell.split_direction(second_flat);
+                stack.push((first_cell.clone(), right, depth + 1));
+                stack.push((first_cell, left, depth + 1));
+            }
         }
-        let first_bounds = first_cell.bounds()?;
-        let second_bounds = second_cell.bounds()?;
-        if surface_bounds_separated(first_bounds, second_bounds, tolerance.linear) {
-            continue;
-        }
-        let first_flat = first_cell.directional_flatness()?;
-        let second_flat = second_cell.directional_flatness()?;
-        let linear = tolerance.linear_at_scale(
-            surface_bounds_scale(first_bounds).max(surface_bounds_scale(second_bounds)),
-        );
-        let first_max_flat = first_flat[0].max(first_flat[1]);
-        let second_max_flat = second_flat[0].max(second_flat[1]);
-        if depth >= 48 || first_max_flat.max(second_max_flat) <= linear * 2.0 {
-            try_seed([
-                first_cell.u_range.start + first_cell.u_range.span() * 0.5,
-                first_cell.v_range.start + first_cell.v_range.span() * 0.5,
-                second_cell.u_range.start + second_cell.u_range.span() * 0.5,
-                second_cell.v_range.start + second_cell.v_range.span() * 0.5,
-            ])?;
-            continue;
-        }
-        if first_max_flat >= second_max_flat {
-            let (left, right) = first_cell.split_direction(first_flat);
-            stack.push((right, second_cell.clone(), depth + 1));
-            stack.push((left, second_cell, depth + 1));
-        } else {
-            let (left, right) = second_cell.split_direction(second_flat);
-            stack.push((first_cell.clone(), right, depth + 1));
-            stack.push((first_cell, left, depth + 1));
+    } else {
+        const DIVISIONS: usize = 3;
+        for first_u in 0..=DIVISIONS {
+            for first_v in 0..=DIVISIONS {
+                for second_u in 0..=DIVISIONS {
+                    for second_v in 0..=DIVISIONS {
+                        try_seed([
+                            first_domains[0].start
+                                + first_domains[0].span() * first_u as f64 / DIVISIONS as f64,
+                            first_domains[1].start
+                                + first_domains[1].span() * first_v as f64 / DIVISIONS as f64,
+                            second_domains[0].start
+                                + second_domains[0].span() * second_u as f64 / DIVISIONS as f64,
+                            second_domains[1].start
+                                + second_domains[1].span() * second_v as f64 / DIVISIONS as f64,
+                        ])?;
+                    }
+                }
+            }
         }
     }
     if seeds.is_empty() {
         return Ok(IntersectionSet::Empty);
     }
 
-    let base_step = parameter_scale / 96.0;
+    let base_step = parameter_scale / 48.0;
     let mut traced = Vec::<Vec<[f64; 4]>>::new();
     for seed in seeds {
         if traced.iter().any(|curve| {
@@ -915,10 +1151,26 @@ fn trace_regular_surface_intersections(
         }) {
             continue;
         }
-        let backward =
-            trace_surface_intersection_direction(first, second, seed, -1.0, base_step, tolerance)?;
-        let forward =
-            trace_surface_intersection_direction(first, second, seed, 1.0, base_step, tolerance)?;
+        let backward = trace_surface_intersection_direction(
+            first,
+            second,
+            seed,
+            -1.0,
+            base_step,
+            first_domains,
+            second_domains,
+            tolerance,
+        )?;
+        let forward = trace_surface_intersection_direction(
+            first,
+            second,
+            seed,
+            1.0,
+            base_step,
+            first_domains,
+            second_domains,
+            tolerance,
+        )?;
         let mut parameters = backward.into_iter().rev().collect::<Vec<_>>();
         if parameters
             .last()
@@ -931,6 +1183,45 @@ fn trace_regular_surface_intersections(
         parameters.dedup_by(|first, second| {
             parameter_distance(*first, *second) <= tolerance.parameter * 16.0
         });
+        let snap = |parameters: &mut [f64; 4]| -> KernelResult<()> {
+            let mut changed = [false; 2];
+            for (index, (value, range)) in parameters
+                .iter_mut()
+                .zip([
+                    first_domains[0],
+                    first_domains[1],
+                    second_domains[0],
+                    second_domains[1],
+                ])
+                .enumerate()
+            {
+                if (*value - range.start).abs() <= base_step * 0.1 {
+                    *value = range.start;
+                    changed[index / 2] = true;
+                } else if (*value - range.end).abs() <= base_step * 0.1 {
+                    *value = range.end;
+                    changed[index / 2] = true;
+                }
+            }
+            if changed[1] {
+                let point = second.evaluate(parameters[2], parameters[3])?.point;
+                let projection = first.project(point, tolerance)?;
+                parameters[0] = projection.parameters.0;
+                parameters[1] = projection.parameters.1;
+            } else if changed[0] {
+                let point = first.evaluate(parameters[0], parameters[1])?.point;
+                let projection = second.project(point, tolerance)?;
+                parameters[2] = projection.parameters.0;
+                parameters[3] = projection.parameters.1;
+            }
+            Ok(())
+        };
+        if let Some(first) = parameters.first_mut() {
+            snap(first)?;
+        }
+        if let Some(last) = parameters.last_mut() {
+            snap(last)?;
+        }
         if parameters.len() >= 2 {
             traced.push(parameters);
         }
@@ -1223,10 +1514,10 @@ fn correct_surface_pair(
     first: &Surface3,
     second: &Surface3,
     parameters: [f64; 4],
+    first_domains: [super::ParameterRange; 2],
+    second_domains: [super::ParameterRange; 2],
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<[f64; 4]>> {
-    let first_domains = bounded_surface_domains(first)?;
-    let second_domains = bounded_surface_domains(second)?;
     let mut parameters = clamp_parameters(parameters, first_domains, second_domains);
     for _ in 0..32 {
         let first_value = first.evaluate(parameters[0], parameters[1])?;
@@ -1311,14 +1602,14 @@ fn trace_surface_intersection_direction(
     seed: [f64; 4],
     direction: f64,
     step: f64,
+    first_domains: [super::ParameterRange; 2],
+    second_domains: [super::ParameterRange; 2],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<[f64; 4]>> {
-    let first_domains = bounded_surface_domains(first)?;
-    let second_domains = bounded_surface_domains(second)?;
     let mut result = Vec::new();
     let mut current = seed;
     let mut previous_tangent = None;
-    for _ in 0..2048 {
+    for _ in 0..512 {
         let first_value = first.evaluate(current[0], current[1])?;
         let second_value = second.evaluate(current[2], current[3])?;
         let jacobian = [
@@ -1365,9 +1656,32 @@ fn trace_surface_intersection_direction(
             tangent = tangent.map(|value| value * direction);
         }
         let predicted = std::array::from_fn(|index| current[index] + tangent[index] * step);
-        let Some(next) =
-            correct_surface_pair_with_gauge(first, second, predicted, tangent, tolerance)?
+        let Some(next) = correct_surface_pair_with_gauge(
+            first,
+            second,
+            predicted,
+            tangent,
+            first_domains,
+            second_domains,
+            tolerance,
+        )?
         else {
+            // A gauge-constrained step can become infeasible when it crosses a
+            // trimmed parameter-box boundary.  Finish the branch with an
+            // unconstrained correction of the clamped prediction so adjacent
+            // face arrangements receive the exact common endpoint.
+            if let Some(endpoint) = correct_surface_pair(
+                first,
+                second,
+                clamp_parameters(predicted, first_domains, second_domains),
+                first_domains,
+                second_domains,
+                tolerance,
+            )? {
+                if parameter_distance(endpoint, current) > tolerance.parameter * 16.0 {
+                    result.push(endpoint);
+                }
+            }
             break;
         };
         if !parameters_in_ranges(
@@ -1387,9 +1701,6 @@ fn trace_surface_intersection_direction(
         }
         current = next;
         previous_tangent = Some(tangent);
-        if parameter_on_boundary(current, first_domains, second_domains, step * 0.5) {
-            break;
-        }
     }
     Ok(result)
 }
@@ -1399,10 +1710,10 @@ fn correct_surface_pair_with_gauge(
     second: &Surface3,
     guide: [f64; 4],
     tangent: [f64; 4],
+    first_domains: [super::ParameterRange; 2],
+    second_domains: [super::ParameterRange; 2],
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<[f64; 4]>> {
-    let first_domains = bounded_surface_domains(first)?;
-    let second_domains = bounded_surface_domains(second)?;
     let mut parameters = clamp_parameters(guide, first_domains, second_domains);
     for _ in 0..24 {
         let first_value = first.evaluate(parameters[0], parameters[1])?;
@@ -1637,20 +1948,6 @@ fn clamp_parameters(
             ranges[index].start.max(ranges[index].end),
         )
     })
-}
-
-fn parameter_on_boundary(
-    parameters: [f64; 4],
-    first: [super::ParameterRange; 2],
-    second: [super::ParameterRange; 2],
-    tolerance: f64,
-) -> bool {
-    [first[0], first[1], second[0], second[1]]
-        .into_iter()
-        .zip(parameters)
-        .any(|(range, value)| {
-            (value - range.start).abs() <= tolerance || (value - range.end).abs() <= tolerance
-        })
 }
 
 fn parameter_distance(first: [f64; 4], second: [f64; 4]) -> f64 {

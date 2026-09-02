@@ -3,15 +3,15 @@ use std::sync::Arc;
 
 use cgmath::prelude::*;
 
-use crate::{Point2, Point3, Vec3};
+use crate::{Point3, Vec3};
 
 use super::euler::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
-    BodyId, BooleanKind, ChangeKind, Circle2, Curve2, Curve3, DiagnosticKind, EdgeId, EntityId,
-    FaceId, Kernel, KernelError, KernelResult, LoopKind, MassProperties, ModelTolerance,
-    NurbsCurve2, OperationHistory, Origin, ParameterRange, PersistentId, Plane3, Profile,
-    RigidTransform3, Surface3, Tessellate, TessellationOptions, TriangleMesh, TrimmedCurve2, Wire2,
+    BodyId, BooleanKind, ChangeKind, Curve3, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel,
+    KernelError, KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin,
+    PersistentId, Plane3, Profile, RigidTransform3, Surface3, Tessellate, TessellationOptions,
+    Topology, TriangleMesh,
 };
 
 #[derive(Clone, Copy)]
@@ -414,6 +414,9 @@ impl FaceHandle {
     pub fn surface(&self) -> &super::Surface3 {
         &self.surface
     }
+    pub(crate) fn topology_id(&self) -> FaceId {
+        self.face
+    }
     pub fn boundary_edges(&self) -> KernelResult<Vec<EdgeHandle>> {
         self.state
             .topology()
@@ -426,21 +429,6 @@ impl FaceHandle {
     }
     pub fn tessellate(&self, options: TessellationOptions) -> KernelResult<TriangleMesh> {
         <Self as Tessellate>::tessellate(self, options)
-    }
-    pub(crate) fn effective_normal(&self) -> KernelResult<crate::Vec3> {
-        let normal = match self.surface() {
-            Surface3::Plane(plane) => plane.normal(),
-            _ => {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "exact face comparison currently requires planar faces",
-                ))
-            }
-        };
-        Ok(match self.state.topology().face(self.face)?.orientation() {
-            super::FaceOrientation::Forward => normal,
-            super::FaceOrientation::Reversed => -normal,
-        })
     }
 }
 
@@ -818,6 +806,9 @@ impl Compound {
     pub(crate) fn tolerance(&self) -> ModelTolerance {
         self.state.tolerance()
     }
+    pub(crate) fn topology(&self) -> &Topology {
+        self.state.topology()
+    }
     pub fn volume(&self) -> f64 {
         self.properties.volume
     }
@@ -905,9 +896,6 @@ impl Compound {
         if self.solids.len() == 1 && other.solids.len() == 1 {
             return self.boolean_single(other, kind);
         }
-        if let Some(result) = self.boolean_parallel_prisms_exact(other, kind)? {
-            return Ok(result);
-        }
         match kind {
             BooleanKind::Union => self.union_components_iterative(other),
             BooleanKind::Intersection => {
@@ -969,168 +957,6 @@ impl Compound {
         combine_compounds(components, self.state.tolerance())
     }
 
-    /// Reconstruct a Boolean of uniform, parallel analytical prisms as exact
-    /// axial layers. Each interval evaluates the two operand profile sets in
-    /// two dimensions, then adjacent layers are sewn through Euler operations.
-    fn boolean_parallel_prisms_exact(
-        &self,
-        other: &Self,
-        kind: BooleanKind,
-    ) -> KernelResult<Option<Self>> {
-        let first_operands = self
-            .solids
-            .iter()
-            .map(Solid::to_compound)
-            .collect::<Vec<_>>();
-        let second_operands = other
-            .solids
-            .iter()
-            .map(Solid::to_compound)
-            .collect::<Vec<_>>();
-        let operands = first_operands
-            .iter()
-            .chain(&second_operands)
-            .collect::<Vec<_>>();
-        let mut candidates = Vec::<Vec3>::new();
-        for operand in &operands {
-            for face in operand.faces() {
-                let candidate = match face.surface() {
-                    Surface3::Plane(plane) => Some(plane.normal()),
-                    Surface3::Cylinder(cylinder) => Some(cylinder.axis().normalize()),
-                    Surface3::Nurbs(surface) => nurbs_translation_axis(surface, self.tolerance()),
-                    Surface3::Cone(_)
-                    | Surface3::Sphere(_)
-                    | Surface3::Torus(_)
-                    | Surface3::Revolved(_)
-                    | Surface3::Offset(_)
-                    | Surface3::RollingBall(_) => None,
-                };
-                if let Some(candidate) = candidate {
-                    let candidate = candidate.normalize();
-                    if !candidates.iter().any(|existing| {
-                        existing
-                            .angle(candidate)
-                            .0
-                            .min(existing.angle(-candidate).0)
-                            <= self.tolerance().angular
-                    }) {
-                        candidates.push(candidate);
-                    }
-                }
-            }
-        }
-        let tolerance = self.tolerance();
-        let mut common_axis = None;
-        for candidate in candidates {
-            let candidate = candidate.normalize();
-            if operands
-                .iter()
-                .map(|operand| operand.is_prism_along(candidate))
-                .collect::<KernelResult<Vec<_>>>()?
-                .into_iter()
-                .all(|valid| valid)
-            {
-                common_axis = Some(candidate);
-                break;
-            }
-        }
-        let Some(axis) = common_axis else {
-            return Ok(None);
-        };
-        let bounds = operands
-            .iter()
-            .map(|operand| {
-                operand
-                    .vertices()
-                    .map(|vertex| axis.dot(vertex.point().to_vec()))
-                    .fold(
-                        (f64::INFINITY, f64::NEG_INFINITY),
-                        |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
-                    )
-            })
-            .collect::<Vec<_>>();
-        let minimum = bounds
-            .iter()
-            .map(|bounds| bounds.0)
-            .fold(f64::INFINITY, f64::min);
-        let maximum = bounds
-            .iter()
-            .map(|bounds| bounds.1)
-            .fold(f64::NEG_INFINITY, f64::max);
-        let scale = minimum.abs().max(maximum.abs()).max(1.0);
-        let linear = tolerance.linear_at_scale(scale) * 8.0;
-        let base_plane = Plane3::from_origin_normal(Point3::from_vec(axis * minimum), axis)?;
-        let mut profiles = Vec::with_capacity(operands.len());
-        for (operand, bounds) in operands.iter().zip(&bounds) {
-            let Some(profile) = operand.profile_on_parallel_cap(axis, bounds.0, base_plane)? else {
-                return Ok(None);
-            };
-            profiles.push(profile);
-        }
-        let mut levels = bounds
-            .iter()
-            .flat_map(|bounds| [bounds.0, bounds.1])
-            .collect::<Vec<_>>();
-        levels.sort_by(f64::total_cmp);
-        levels.dedup_by(|first, second| (*first - *second).abs() <= linear);
-
-        let mut layers = Vec::new();
-        for interval in levels.windows(2) {
-            let start = interval[0];
-            let end = interval[1];
-            if end - start <= linear {
-                continue;
-            }
-            let middle = (start + end) * 0.5;
-            let first_active = profiles
-                .iter()
-                .zip(&bounds)
-                .take(first_operands.len())
-                .filter_map(|(profile, bounds)| {
-                    (middle > bounds.0 - linear && middle < bounds.1 + linear)
-                        .then_some(profile.clone())
-                })
-                .collect::<Vec<_>>();
-            let second_active = profiles
-                .iter()
-                .zip(&bounds)
-                .skip(first_operands.len())
-                .filter_map(|(profile, bounds)| {
-                    (middle > bounds.0 - linear && middle < bounds.1 + linear)
-                        .then_some(profile.clone())
-                })
-                .collect::<Vec<_>>();
-            let regions = boolean_profile_sets(first_active, second_active, kind)?;
-            if regions.is_empty() {
-                continue;
-            }
-            let plane = Plane3::new(
-                base_plane.origin() + axis * (start - minimum),
-                base_plane.u(),
-                base_plane.v(),
-                tolerance,
-            )?;
-            let pieces = regions
-                .into_iter()
-                .map(|profile| profile.extrude(plane, axis * (end - start)))
-                .collect::<KernelResult<Vec<_>>>()?;
-            layers.push(combine_compounds(pieces, tolerance)?);
-        }
-        let mut layers = layers.into_iter();
-        let mut result = layers
-            .next()
-            .unwrap_or(combine_compounds(Vec::new(), tolerance)?);
-        for layer in layers {
-            result = result.union_components_iterative(&layer)?;
-        }
-        let role = match kind {
-            BooleanKind::Union => "boolean.union",
-            BooleanKind::Difference => "boolean.difference",
-            BooleanKind::Intersection => "boolean.intersection",
-        };
-        Ok(Some(result.with_boolean_parents(self, other, role)?))
-    }
-
     fn boolean_single(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
         debug_assert_eq!(self.solids.len(), 1);
         debug_assert_eq!(other.solids.len(), 1);
@@ -1152,24 +978,7 @@ impl Compound {
             };
             return result.with_boolean_parents(self, other, role);
         }
-        // Shared analytical faces are sewn directly with Euler operators for
-        // both planar and curved prisms, preserving the source BREP and entity
-        // lineage without invoking a general intersection solve.
-        if kind == BooleanKind::Union {
-            if let Some(result) = self.union_adjacent_exact(other)? {
-                return Ok(result);
-            }
-        }
-        // Parallel analytical prisms are reconstructed as exact profile
-        // layers. This also covers tools that pass through an operand and
-        // extend beyond it, and disconnected profile sets at several depths.
-        if let Some(result) = self.boolean_parallel_prisms_exact(other, kind)? {
-            return Ok(result);
-        }
-        Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "this Boolean does not yet have an exact analytical BREP construction; polyhedral reconstruction has been removed",
-        ))
+        super::boolean::boolean_brep(self, other, kind)
     }
 
     /// A conservative analytic enclosure used only to prove separation. Circle
@@ -1216,189 +1025,6 @@ impl Compound {
             }
         }
         bounds
-    }
-
-    fn is_prism_along(&self, axis: Vec3) -> KernelResult<bool> {
-        let axis = axis.normalize();
-        for face in self.faces() {
-            match face.surface() {
-                Surface3::Plane(plane) => {
-                    let alignment = plane.normal().dot(axis).abs();
-                    if alignment > self.tolerance().angular
-                        && 1.0 - alignment > self.tolerance().angular
-                    {
-                        return Ok(false);
-                    }
-                }
-                Surface3::Cylinder(cylinder) => {
-                    if cylinder
-                        .axis()
-                        .normalize()
-                        .angle(axis)
-                        .0
-                        .min(cylinder.axis().normalize().angle(-axis).0)
-                        > self.tolerance().angular
-                    {
-                        return Ok(false);
-                    }
-                }
-                Surface3::Nurbs(surface) => {
-                    let Some(direction) = nurbs_translation_axis(surface, self.tolerance()) else {
-                        return Ok(false);
-                    };
-                    if direction.angle(axis).0.min(direction.angle(-axis).0)
-                        > self.tolerance().angular
-                    {
-                        return Ok(false);
-                    }
-                }
-                Surface3::Cone(_)
-                | Surface3::Sphere(_)
-                | Surface3::Torus(_)
-                | Surface3::Revolved(_)
-                | Surface3::Offset(_)
-                | Surface3::RollingBall(_) => return Ok(false),
-            }
-        }
-        let (minimum, maximum) = self
-            .vertices()
-            .map(|vertex| axis.dot(vertex.point().to_vec()))
-            .fold(
-                (f64::INFINITY, f64::NEG_INFINITY),
-                |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
-            );
-        if maximum - minimum <= self.tolerance().linear {
-            return Ok(false);
-        }
-        let parameter_plane = Plane3::from_origin_normal(Point3::from_vec(axis * minimum), axis)?;
-        if self
-            .profile_on_parallel_cap(axis, minimum, parameter_plane)?
-            .is_none()
-        {
-            return Ok(false);
-        }
-        if self
-            .profile_on_parallel_cap(axis, maximum, parameter_plane)?
-            .is_none()
-        {
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
-    fn profile_on_parallel_cap(
-        &self,
-        axis: Vec3,
-        minimum: f64,
-        target_plane: Plane3,
-    ) -> KernelResult<Option<Profile>> {
-        let tolerance = self.tolerance();
-        let cap = self.faces().find(|face| {
-            let Surface3::Plane(plane) = face.surface() else {
-                return false;
-            };
-            if plane
-                .normal()
-                .angle(axis)
-                .0
-                .min(plane.normal().angle(-axis).0)
-                > tolerance.angular
-            {
-                return false;
-            }
-            (axis.dot(plane.origin().to_vec()) - minimum).abs()
-                <= tolerance.linear_at_scale(minimum.abs().max(1.0)) * 8.0
-        });
-        let Some(cap) = cap else {
-            return Ok(None);
-        };
-        self.profile_on_planar_face(cap, target_plane)
-    }
-
-    pub(crate) fn profile_on_planar_face(
-        &self,
-        cap: &FaceHandle,
-        target_plane: Plane3,
-    ) -> KernelResult<Option<Profile>> {
-        let tolerance = self.tolerance();
-        let Surface3::Plane(cap_plane) = cap.surface() else {
-            return Ok(None);
-        };
-        let map = |point: Point2| -> KernelResult<Point2> {
-            let world = cap_plane.evaluate(point.x, point.y)?.point;
-            let projected = target_plane.project(world)?.parameters;
-            Ok(Point2::new(projected.0, projected.1))
-        };
-        let topology = self.state.topology();
-        let mut outer = None;
-        let mut holes = Vec::new();
-        for loop_id in topology.face(cap.face)?.loops() {
-            let mut segments = Vec::new();
-            for coedge_id in topology.loop_coedges(*loop_id)? {
-                let coedge = topology.coedge(coedge_id)?;
-                let range = coedge.range();
-                let start = map(coedge.pcurve().evaluate(range.start)?.point)?;
-                let end = map(coedge.pcurve().evaluate(range.end)?.point)?;
-                let segment = match coedge.pcurve() {
-                    Curve2::Line(_) => TrimmedCurve2::line(start, end)?,
-                    Curve2::Circle(_) => {
-                        if start.distance(end) <= tolerance.linear {
-                            let quarter = map(coedge
-                                .pcurve()
-                                .evaluate(range.start + range.span() * 0.25)?
-                                .point)?;
-                            let center = map(match coedge.pcurve() {
-                                Curve2::Circle(circle) => circle.center(),
-                                _ => unreachable!(),
-                            })?;
-                            let radius = center.distance(start);
-                            let orientation = (start - center).x * (quarter - center).y
-                                - (start - center).y * (quarter - center).x;
-                            TrimmedCurve2::new(
-                                Circle2::new(center, radius)?,
-                                ParameterRange::new(
-                                    0.0,
-                                    orientation.signum() * std::f64::consts::TAU,
-                                )?,
-                            )?
-                        } else {
-                            let middle = map(coedge
-                                .pcurve()
-                                .evaluate((range.start + range.end) * 0.5)?
-                                .point)?;
-                            TrimmedCurve2::arc_through(start, middle, end)?
-                        }
-                    }
-                    Curve2::Nurbs(curve) => TrimmedCurve2::new(
-                        NurbsCurve2::new(
-                            curve.degree(),
-                            curve
-                                .control_points()
-                                .iter()
-                                .copied()
-                                .map(map)
-                                .collect::<KernelResult<Vec<_>>>()?,
-                            curve.weights().to_vec(),
-                            curve.knots().to_vec(),
-                        )?,
-                        range,
-                    )?,
-                    Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => {
-                        return Ok(None)
-                    }
-                };
-                segments.push(segment);
-            }
-            let wire = Wire2::new(segments, tolerance)?;
-            match topology.loop_(*loop_id)?.kind() {
-                LoopKind::Outer => outer = Some(wire),
-                LoopKind::Inner => holes.push(wire),
-            }
-        }
-        let Some(outer) = outer else {
-            return Ok(None);
-        };
-        Profile::new(outer, holes, tolerance).map(Some)
     }
 
     fn with_geometric_parents(
@@ -1556,75 +1182,13 @@ impl Compound {
         )
     }
 
-    fn with_boolean_parents(&self, first: &Self, second: &Self, role: &str) -> KernelResult<Self> {
-        self.with_geometric_parents(&[first, second], role, &BTreeMap::new())
-    }
-
-    fn union_adjacent_exact(&self, other: &Self) -> KernelResult<Option<Self>> {
-        self.union_adjacent_exact_with_certificate(other, None)
-    }
-
-    fn union_adjacent_exact_with_certificate(
+    pub(crate) fn with_boolean_parents(
         &self,
-        other: &Self,
-        properties: Option<MassProperties>,
-    ) -> KernelResult<Option<Self>> {
-        let equal_faces = super::boolean::coincident_opposite_face_names(self, other)?;
-        let patch_faces = if equal_faces.is_none() {
-            super::boolean::coincident_opposite_face_patch_names(self, other)?
-        } else {
-            None
-        };
-        let Some((target_is_first, target_name, source_name, whole_face)) = equal_faces
-            .map(|(first, second)| (true, first, second, true))
-            .or_else(|| patch_faces.map(|(first, target, source)| (first, target, source, false)))
-        else {
-            return Ok(None);
-        };
-        let mut kernel = Kernel::new(self.state.tolerance())?;
-        let first = kernel
-            .topology
-            .import_body(self.state.topology(), self.solids[0].body)?;
-        let second = kernel
-            .topology
-            .import_body(other.state.topology(), other.solids[0].body)?;
-        let target_face = kernel
-            .topology
-            .faces()
-            .find_map(|(id, face)| (face.name() == target_name).then_some(id))
-            .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::MissingEntity,
-                    "imported adjacent union lost its target face",
-                )
-            })?;
-        let source_face = kernel
-            .topology
-            .faces()
-            .find_map(|(id, face)| (face.name() == source_name).then_some(id))
-            .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::MissingEntity,
-                    "imported adjacent union lost its source face",
-                )
-            })?;
-        let (target, source) = if target_is_first {
-            (first, second)
-        } else {
-            (second, first)
-        };
-        let mut transaction = kernel.begin_operation();
-        if whole_face {
-            transaction.sew_bodies_across_faces(target, source, target_face, source_face)?;
-        } else {
-            transaction.sew_body_across_face_patch(target, source, target_face, source_face)?;
-        }
-        let committed = if let Some(properties) = properties {
-            transaction.finish_with_certificate(properties)?
-        } else {
-            transaction.finish()?
-        };
-        Self::from_operation(kernel, committed, [self, other]).map(Some)
+        first: &Self,
+        second: &Self,
+        role: &str,
+    ) -> KernelResult<Self> {
+        self.with_geometric_parents(&[first, second], role, &BTreeMap::new())
     }
 
     pub fn union(&self, other: &Self) -> KernelResult<Self> {
@@ -1978,84 +1542,6 @@ impl Tessellate for Compound {
         }
         Ok(mesh)
     }
-}
-
-fn nurbs_translation_axis(
-    surface: &super::NurbsSurface3,
-    tolerance: ModelTolerance,
-) -> Option<Vec3> {
-    if surface.degrees().1 != 1 || surface.control_points().len() != 2 {
-        return None;
-    }
-    let first = &surface.control_points()[0];
-    let second = &surface.control_points()[1];
-    let vector = second
-        .first()
-        .zip(first.first())
-        .map(|(top, bottom)| *top - *bottom)?;
-    let scale = vector.magnitude().max(1.0);
-    (vector.magnitude() > tolerance.linear
-        && first.iter().zip(second).all(|(bottom, top)| {
-            ((*top - *bottom) - vector).magnitude() <= tolerance.linear_at_scale(scale) * 8.0
-        }))
-    .then(|| vector.normalize())
-}
-
-fn boolean_profile_sets(
-    first: impl IntoIterator<Item = Profile>,
-    second: impl IntoIterator<Item = Profile>,
-    kind: BooleanKind,
-) -> KernelResult<Vec<Profile>> {
-    let first = union_profile_set(first)?;
-    let second = union_profile_set(second)?;
-    match kind {
-        BooleanKind::Union => union_profile_set(first.into_iter().chain(second)),
-        BooleanKind::Intersection => {
-            let mut intersections = Vec::new();
-            for first_region in &first {
-                for second_region in &second {
-                    intersections.extend(
-                        first_region.boolean_planar(second_region, BooleanKind::Intersection)?,
-                    );
-                }
-            }
-            union_profile_set(intersections)
-        }
-        BooleanKind::Difference => {
-            let mut output = Vec::new();
-            for first_region in first {
-                let mut pieces = vec![first_region];
-                for second_region in &second {
-                    let mut next = Vec::new();
-                    for piece in pieces {
-                        next.extend(piece.boolean_planar(second_region, BooleanKind::Difference)?);
-                    }
-                    pieces = next;
-                }
-                output.extend(pieces);
-            }
-            union_profile_set(output)
-        }
-    }
-}
-
-fn union_profile_set(profiles: impl IntoIterator<Item = Profile>) -> KernelResult<Vec<Profile>> {
-    let mut components = Vec::<Profile>::new();
-    for mut candidate in profiles {
-        let mut index = 0;
-        while index < components.len() {
-            let united = components[index].boolean_planar(&candidate, BooleanKind::Union)?;
-            if united.len() == 1 {
-                candidate = united.into_iter().next().expect("one union component");
-                components.remove(index);
-                index = 0;
-            } else {
-                index += 1;
-            }
-        }
-        components.push(candidate);
-    }
-    Ok(components)
 }
 
 fn combine_compounds(

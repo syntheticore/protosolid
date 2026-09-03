@@ -987,8 +987,7 @@ fn offset_body(
         edge.range = trim_offset_edge(topology, *edge_id, edge, &vertices, tolerance)?;
     }
 
-    let mut patches_by_shell = BTreeMap::<super::ShellId, Vec<BrepPatch>>::new();
-    let mut patch_sources = Vec::new();
+    let mut patches_by_shell = BTreeMap::<super::ShellId, Vec<(BrepPatch, PersistentId)>>::new();
     for face_id in source_faces {
         let face = topology.face(face_id)?;
         let surface = &supports[&face_id];
@@ -1022,22 +1021,24 @@ fn offset_body(
                 segments,
             });
         }
-        patches_by_shell
-            .entry(face.shell())
-            .or_default()
-            .push(BrepPatch {
+        patches_by_shell.entry(face.shell()).or_default().push((
+            BrepPatch {
                 surface: surface.clone(),
                 orientation: face.orientation(),
                 loops,
-            });
-        patch_sources.push(face.name());
+            },
+            face.name(),
+        ));
     }
 
     let mut kernel = Kernel::new(tolerance)?;
     let mut transaction = kernel.begin_operation();
     let mut bodies = Vec::new();
-    for patches in patches_by_shell.values() {
-        bodies.push(transaction.brep_shell(patches)?);
+    let mut patch_sources = Vec::new();
+    for patches_and_sources in patches_by_shell.into_values() {
+        let (patches, sources): (Vec<_>, Vec<_>) = patches_and_sources.into_iter().unzip();
+        bodies.push(transaction.brep_shell(&patches)?);
+        patch_sources.extend(sources);
     }
     transaction.nest_brep_shells(&bodies, TessellationOptions::default())?;
     let committed = transaction.finish()?;
@@ -1329,23 +1330,30 @@ fn assemble_shell_boundary(
         .faces()
         .map(|face| (face.persistent_id(), face.topology_id()))
         .collect::<BTreeMap<_, _>>();
-    let correspondence = raw_offset
-        .faces()
-        .zip(patch_sources.iter().copied())
-        .map(|(offset_face, source_name)| {
-            let source_face = source_by_name.get(&source_name).copied().ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "an offset face lost its source-face correspondence",
-                )
-            })?;
-            Ok((source_face, offset_face.topology_id(), source_name))
-        })
-        .collect::<KernelResult<Vec<_>>>()?;
+    if raw_offset.faces().count() != patch_sources.len() {
+        return Err(KernelError::new(
+            DiagnosticKind::TopologyInvariant,
+            "offset face count does not match its source-face correspondence",
+        ));
+    }
 
     let mut offset_by_source = BTreeMap::new();
-    for (source_face, offset_face, _) in &correspondence {
-        offset_by_source.insert(*source_face, *offset_face);
+    for (offset_face, source_name) in raw_offset.faces().zip(patch_sources.iter().copied()) {
+        let source_face = source_by_name.get(&source_name).copied().ok_or_else(|| {
+            KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "an offset face lost its source-face correspondence",
+            )
+        })?;
+        if offset_by_source
+            .insert(source_face, offset_face.topology_id())
+            .is_some()
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "multiple offset faces claim the same source face",
+            ));
+        }
     }
 
     let source_shells = source
@@ -1499,6 +1507,12 @@ pub(crate) fn shell(
     let (raw_offset, patch_sources) = offset_body(source, &opening_ids, distance)?;
     let (raw_shell, shell_sources) =
         assemble_shell_boundary(source, &raw_offset, &patch_sources, &opening_ids, distance)?;
+    if raw_shell.faces().count() != shell_sources.len() {
+        return Err(KernelError::new(
+            DiagnosticKind::TopologyInvariant,
+            "shell face count does not match its source-face correspondence",
+        ));
+    }
     let mut origins = BTreeMap::new();
     for (face, source_name) in raw_shell.faces().zip(shell_sources) {
         origins.insert(face.persistent_id(), vec![source_name]);

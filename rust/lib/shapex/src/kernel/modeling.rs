@@ -1191,6 +1191,15 @@ impl Compound {
         self.with_geometric_parents(&[first, second], role, &BTreeMap::new())
     }
 
+    pub(crate) fn with_feature_parent(
+        &self,
+        parent: &Self,
+        role: &str,
+        extra_origins: &BTreeMap<PersistentId, Vec<PersistentId>>,
+    ) -> KernelResult<Self> {
+        self.with_geometric_parents(&[parent], role, extra_origins)
+    }
+
     pub fn union(&self, other: &Self) -> KernelResult<Self> {
         self.boolean(other, BooleanKind::Union)
     }
@@ -1202,11 +1211,39 @@ impl Compound {
     }
 
     pub fn shell(&self, openings: &[FaceHandle], distance: f64) -> KernelResult<Self> {
+        if !distance.is_finite() || distance.abs() <= self.tolerance().linear {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "shell thickness must be finite and exceed model tolerance",
+            ));
+        }
+        let selected = openings
+            .iter()
+            .map(FaceHandle::persistent_id)
+            .collect::<BTreeSet<_>>();
+        if selected.len() != openings.len() {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "shell opening selection contains duplicates",
+            ));
+        }
+        let available = self
+            .faces()
+            .map(FaceHandle::persistent_id)
+            .collect::<BTreeSet<_>>();
+        if !selected.is_subset(&available) {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "shell opening faces do not belong to this compound revision",
+            ));
+        }
+        if !available.is_empty() && selected == available {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "shelling cannot remove every face of a solid",
+            ));
+        }
         if self.solids.len() > 1 {
-            let selected = openings
-                .iter()
-                .map(FaceHandle::persistent_id)
-                .collect::<BTreeSet<_>>();
             let mut results = Vec::new();
             for solid in &self.solids {
                 let names = solid

@@ -99,7 +99,7 @@ export class ShapexBackend {
       revolve: false,
       loft: false,
       fillet: true,
-      offset: false,
+      offset: true,
       split: false,
       compoundMerge: true,
       multiSolidBoolean: true,
@@ -156,8 +156,17 @@ export class ShapexBackend {
     )
   }
 
-  shell() {
-    unsupported('analytical shelling yet')
+  shell(geometry, selected, distance) {
+    const faces = new this.api.FaceList()
+    selected.forEach(face => faces.add(face))
+    try {
+      return new ShapexGeometry(geometry.raw.shell(faces, distance))
+    } catch(error) {
+      throw {
+        type: 'error',
+        msg: `Shapex shell failed: ${error?.message || error}`,
+      }
+    }
   }
 
   fillet(geometry, selected, radius, followTangentEdges=true) {

@@ -2066,7 +2066,7 @@ fn full_off_axis_revolutions_publish_exact_genus_one_solids() {
 }
 
 #[test]
-fn approximation_only_features_report_unsupported_geometry() {
+fn approximation_only_lofts_report_unsupported_geometry() {
     let tolerance = ModelTolerance::default();
     let wire = Wire2::polygon(
         [
@@ -2093,13 +2093,60 @@ fn approximation_only_features_report_unsupported_geometry() {
         loft_error.diagnostics()[0].kind,
         super::DiagnosticKind::UnsupportedGeometry
     );
+}
 
+#[test]
+fn analytical_shell_offsets_a_closed_polyhedral_skin() {
     let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
-    let shell_error = cube
+    let source_face = cube.faces().next().expect("source face").clone();
+    let inward = cube.shell(&[], -1.0).expect("inward shell");
+    assert_eq!(inward.solids().len(), 1);
+    assert_eq!(inward.faces().count(), 12);
+    assert!((inward.volume() - 488.0).abs() < 1.0e-7);
+    assert!(matches!(
+        inward.resolve(&source_face),
+        Resolution::Split(ref faces) if faces.len() == 2
+    ));
+
+    let outward = cube.shell(&[], 1.0).expect("outward shell");
+    assert_eq!(outward.solids().len(), 1);
+    assert!((outward.volume() - 728.0).abs() < 1.0e-7);
+}
+
+#[test]
+fn analytical_shell_can_leave_a_face_open() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let opening = cube.faces().next().expect("opening face").clone();
+    let shelled = cube
+        .shell(std::slice::from_ref(&opening), -1.0)
+        .expect("open shell");
+    assert_eq!(shelled.solids().len(), 1);
+    assert_eq!(shelled.faces().count(), 11);
+    assert!((shelled.volume() - 424.0).abs() < 1.0e-7);
+    assert!(matches!(shelled.resolve(&opening), Resolution::Modified(_)));
+}
+
+#[test]
+fn shell_rejects_curved_faces_until_periodic_seams_can_be_certified() {
+    let tolerance = ModelTolerance::default();
+    let profile = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 5.0).expect("circle")],
+            tolerance,
+        )
+        .expect("wire"),
+        [],
+        tolerance,
+    )
+    .expect("profile");
+    let cylinder = profile
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
+        .expect("cylinder");
+    let error = cylinder
         .shell(&[], -1.0)
-        .expect_err("shell must not fall back to a faceted BREP");
+        .expect_err("curved shell publication must remain conservative");
     assert_eq!(
-        shell_error.diagnostics()[0].kind,
+        error.diagnostics()[0].kind,
         super::DiagnosticKind::UnsupportedGeometry
     );
 }

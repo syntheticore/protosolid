@@ -94,6 +94,8 @@ The current publisher certifies:
   kernel's Euler compositions;
 - normal extrusions of profiles bounded by exact lines and circular arcs,
   including multiple holes;
+- exact inward and outward shelling of planar, linear-edge manifold bodies,
+  with optional removed-face openings;
 - rigid transforms of those bodies.
 
 Planar bodies receive intersection/contact checks and mass properties from their

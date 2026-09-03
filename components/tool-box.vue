@@ -411,7 +411,7 @@
           {
             title: 'Edit Solid',
             tools: [
-              { title: 'Offset', feature: OffsetFeature },
+              { title: 'Shell', feature: OffsetFeature },
               { title: 'Boolean', feature: BooleanFeature },
               { title: 'Move', feature: MoveFeature, hotKey: 'Q', keyCode: 81, disabled: true },
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },

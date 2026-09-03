@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cgmath::prelude::*;
 
-use crate::{Point2, Point3, Vec3};
+use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::integration::{adaptive_gauss_kronrod, adaptive_simpson};
 use super::{
@@ -451,14 +451,47 @@ fn brep_shell_properties(
                 .unwrap_or(domain_origin)
         };
         for loop_id in face.loops() {
+            // Lift every periodic p-curve loop into one continuous UV chart.
+            // Topology may legitimately store both uses of a seam in the same
+            // principal period because they are the same spatial edge. Green's
+            // theorem, however, needs the two chart copies separated by one
+            // period or their contributions cancel and the curved face appears
+            // to have zero area and volume.
+            let domains = face.surface().domains();
+            let mut previous_end = None;
             for coedge_id in topology.loop_coedges(*loop_id)? {
                 let coedge = topology.coedge(coedge_id)?;
                 let range = coedge.range();
+                let raw_start = coedge.pcurve().evaluate(range.start)?.point;
+                let chart_shift = previous_end
+                    .map(|previous: Point2| {
+                        let delta = previous - raw_start;
+                        let shift = |value: f64, period: Option<f64>| {
+                            period
+                                .map(|period| {
+                                    let candidate = (value / period).round() * period;
+                                    if (value - candidate).abs() <= tolerance.parameter * 64.0 {
+                                        candidate
+                                    } else {
+                                        0.0
+                                    }
+                                })
+                                .unwrap_or(0.0)
+                        };
+                        Vec2::new(
+                            shift(delta.x, domains[0].period),
+                            shift(delta.y, domains[1].period),
+                        )
+                    })
+                    .unwrap_or_else(|| Vec2::new(0.0, 0.0));
+                let raw_end = coedge.pcurve().evaluate(range.end)?.point;
+                previous_end = Some(raw_end + chart_shift);
                 let outer = adaptive_gauss_kronrod(
                     range.start,
                     range.end,
                     |parameter| {
-                        let (point, derivative) = coedge.pcurve().first_order(parameter)?;
+                        let (raw_point, derivative) = coedge.pcurve().first_order(parameter)?;
+                        let point = raw_point + chart_shift;
                         let inner = adaptive_simpson(
                             primitive_origin,
                             point.x,

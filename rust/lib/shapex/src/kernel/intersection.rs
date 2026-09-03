@@ -90,7 +90,13 @@ impl Curve3 {
                 .magnitude()
                 .max(second.point.to_vec().magnitude())
                 .max(1.0);
-            if residual.magnitude() <= tolerance.linear_at_scale(scale) {
+            // Topological vertices are shared by every incident edge, so a
+            // model-tolerance early exit here can leave two individually
+            // acceptable curve hits whose averaged points disagree after an
+            // Euler weld. Drive the local identity to floating-point accuracy;
+            // the model tolerance still selects and validates the branch.
+            let linear_target = f64::EPSILON * scale * 2048.0;
+            if residual.magnitude() <= linear_target {
                 let transverse = first
                     .first_derivative
                     .normalize()
@@ -747,6 +753,16 @@ impl Surface3 {
             (Self::Cylinder(first), Self::Cylinder(second)) => {
                 cylinder_cylinder(*first, *second, tolerance)
             }
+            (Self::Cylinder(cylinder), Self::Torus(torus)) => {
+                cylinder_torus(*cylinder, *torus, tolerance)
+            }
+            (Self::Torus(torus), Self::Cylinder(cylinder)) => Ok(swap_surface_curves(
+                cylinder_torus(*cylinder, *torus, tolerance)?,
+            )),
+            (Self::Plane(plane), Self::Torus(torus)) => plane_torus(*plane, *torus, tolerance),
+            (Self::Torus(torus), Self::Plane(plane)) => {
+                Ok(swap_surface_curves(plane_torus(*plane, *torus, tolerance)?))
+            }
             (Self::Nurbs(_) | Self::Offset(_), Self::Nurbs(_) | Self::Offset(_)) => {
                 trace_regular_surface_intersections(self, other, tolerance)
             }
@@ -866,6 +882,153 @@ fn cylinder_cylinder(
             )?
             .into(),
             achieved_error: first_projection.distance.max(second_projection.distance),
+        });
+    }
+    Ok(IntersectionSet::Isolated(curves))
+}
+
+fn cylinder_torus(
+    cylinder: super::Cylinder3,
+    torus: super::Torus3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let cylinder_axis = cylinder.axis();
+    let cylinder_unit = cylinder_axis.normalize();
+    let torus_normal = torus.normal();
+    let scale = cylinder
+        .origin()
+        .to_vec()
+        .magnitude()
+        .max(torus.center().to_vec().magnitude())
+        .max(cylinder.radius())
+        .max(torus.major_radius());
+    let linear = tolerance.linear_at_scale(scale);
+    let center_delta = torus.center() - cylinder.origin();
+    let radial_delta = center_delta - cylinder_unit * center_delta.dot(cylinder_unit);
+    if cylinder_unit.dot(torus_normal).abs() < 1.0 - tolerance.angular
+        || radial_delta.magnitude() > linear
+    {
+        return Err(unsupported(
+            "noncoaxial cylinder/torus intersection requires bounded general surface tracing",
+        ));
+    }
+
+    let radial_cosine = (cylinder.radius() - torus.major_radius()) / torus.minor_radius();
+    if radial_cosine.abs() > 1.0 + tolerance.relative * 64.0 {
+        return Ok(IntersectionSet::Empty);
+    }
+    let angle = radial_cosine.clamp(-1.0, 1.0).acos();
+    let minor_parameters = if angle.sin().abs() <= tolerance.angular {
+        vec![angle]
+    } else {
+        vec![angle, -angle]
+    };
+    let mut curves = Vec::with_capacity(minor_parameters.len());
+    for minor_parameter in minor_parameters {
+        let center = torus.center() + torus_normal * (torus.minor_radius() * minor_parameter.sin());
+        let circle = Circle3::new(center, cylinder.x_radius(), cylinder.y_radius(), tolerance)?;
+        let point = circle.evaluate(0.0)?.point;
+        let cylinder_v =
+            (center - cylinder.origin()).dot(cylinder_axis) / cylinder_axis.magnitude2();
+        let torus_projection = Surface3::Torus(torus).project(point, tolerance)?;
+        let torus_evaluation = Surface3::Torus(torus)
+            .evaluate(torus_projection.parameters.0, torus_projection.parameters.1)?;
+        let curve_tangent = circle.evaluate(0.0)?.first_derivative;
+        let torus_rate = if curve_tangent.dot(torus_evaluation.du) >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        curves.push(SurfaceSurfaceCurve {
+            curve: circle.into(),
+            first_pcurve: Line2::new(Point2::new(0.0, cylinder_v), crate::Vec2::new(1.0, 0.0))?
+                .into(),
+            second_pcurve: Line2::new(
+                Point2::new(torus_projection.parameters.0, minor_parameter),
+                crate::Vec2::new(torus_rate, 0.0),
+            )?
+            .into(),
+            achieved_error: torus_projection.distance,
+        });
+    }
+    Ok(IntersectionSet::Isolated(curves))
+}
+
+fn plane_torus(
+    plane: Plane3,
+    torus: super::Torus3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let torus_normal = torus.normal();
+    if plane.normal().dot(torus_normal).abs() < 1.0 - tolerance.angular {
+        return Err(unsupported(
+            "oblique plane/torus intersection requires bounded general surface tracing",
+        ));
+    }
+    let scale = plane
+        .origin()
+        .to_vec()
+        .magnitude()
+        .max(torus.center().to_vec().magnitude())
+        .max(torus.major_radius());
+    let linear = tolerance.linear_at_scale(scale);
+    let height = (plane.origin() - torus.center()).dot(torus_normal);
+    if height.abs() > torus.minor_radius() + linear {
+        return Ok(IntersectionSet::Empty);
+    }
+    let u_scale = plane.u().magnitude();
+    let v_scale = plane.v().magnitude();
+    if (u_scale - v_scale).abs() > linear.max(u_scale.max(v_scale) * tolerance.relative * 64.0) {
+        return Err(unsupported(
+            "plane/torus circular intersection needs an equally scaled planar chart",
+        ));
+    }
+
+    let sine = (height / torus.minor_radius()).clamp(-1.0, 1.0);
+    let first = sine.asin();
+    let second = std::f64::consts::PI - first;
+    let minor_parameters = if (first - second).abs() <= tolerance.parameter
+        || (first - second).abs() >= std::f64::consts::TAU - tolerance.parameter
+    {
+        vec![first]
+    } else {
+        vec![first, second]
+    };
+    let center = torus.center() + torus_normal * height;
+    let center_uv = plane.project(center)?.parameters;
+    let mut curves = Vec::with_capacity(minor_parameters.len());
+    for minor_parameter in minor_parameters {
+        let radius = torus.major_radius() + torus.minor_radius() * minor_parameter.cos();
+        let circle = Circle3::new(
+            center,
+            plane.u().normalize() * radius,
+            plane.v().normalize() * radius,
+            tolerance,
+        )?;
+        let evaluation = circle.evaluate(0.0)?;
+        let torus_projection = Surface3::Torus(torus).project(evaluation.point, tolerance)?;
+        let torus_evaluation =
+            Surface3::Torus(torus).evaluate(torus_projection.parameters.0, minor_parameter)?;
+        let torus_rate = if evaluation.first_derivative.dot(torus_evaluation.du) >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        curves.push(SurfaceSurfaceCurve {
+            curve: circle.into(),
+            first_pcurve: super::Circle2::new(
+                Point2::new(center_uv.0, center_uv.1),
+                radius / ((u_scale + v_scale) * 0.5),
+            )?
+            .into(),
+            second_pcurve: Line2::new(
+                Point2::new(torus_projection.parameters.0, minor_parameter),
+                crate::Vec2::new(torus_rate, 0.0),
+            )?
+            .into(),
+            achieved_error: torus_projection
+                .distance
+                .max(plane.project(evaluation.point)?.distance),
         });
     }
     Ok(IntersectionSet::Isolated(curves))
@@ -1230,14 +1393,16 @@ fn trace_surface_intersections_in_domains(
     let curves = traced
         .into_iter()
         .map(|parameters| {
-            let first_points = parameters
+            let mut first_points = parameters
                 .iter()
                 .map(|value| Point2::new(value[0], value[1]))
                 .collect::<Vec<_>>();
-            let second_points = parameters
+            let mut second_points = parameters
                 .iter()
                 .map(|value| Point2::new(value[2], value[3]))
                 .collect::<Vec<_>>();
+            unwrap_periodic_points(&mut first_points, first.domains());
+            unwrap_periodic_points(&mut second_points, second.domains());
             let range = super::ParameterRange::new(0.0, 1.0)?;
             let first_pcurve = smooth_nurbs_guide(&first_points, range)?;
             let second_pcurve = smooth_nurbs_guide(&second_points, range)?;
@@ -1798,6 +1963,22 @@ pub(crate) fn smooth_nurbs_guide(
     );
     knots.extend(vec![range.end; degree + 1]);
     NurbsCurve2::new(degree, points.to_vec(), vec![1.0; points.len()], knots)
+}
+
+/// Lift sampled UV values into one continuous copy of every periodic chart.
+/// Surface projection returns principal parameters, which may jump by a full
+/// period along an otherwise smooth edge; feeding that jump to a spline guide
+/// creates a false high-speed excursion through the middle of the chart.
+pub(crate) fn unwrap_periodic_points(points: &mut [Point2], domains: [super::ParameterDomain; 2]) {
+    for index in 1..points.len() {
+        let previous = points[index - 1];
+        if let Some(period) = domains[0].period {
+            points[index].x += ((previous.x - points[index].x) / period).round() * period;
+        }
+        if let Some(period) = domains[1].period {
+            points[index].y += ((previous.y - points[index].y) / period).round() * period;
+        }
+    }
 }
 
 /// Builds an interpolating piecewise-linear guide for difficult local inverse

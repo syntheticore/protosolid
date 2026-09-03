@@ -88,20 +88,23 @@ The current publisher certifies:
 
 - arbitrary closed planar, linear-edge manifold shells, including cavities and
   genus introduced by through-holes;
-- planar Boolean union, intersection, and difference, including disconnected
-  material bodies and fully enclosed cavity shells;
+- analytical BREP Boolean union, intersection, and difference, including curved
+  supports, disconnected material bodies, and fully enclosed cavity shells;
 - exact right cylinders, cones, spheres, and regular ring tori constructed by the
   kernel's Euler compositions;
 - normal extrusions of profiles bounded by exact lines and circular arcs,
   including multiple holes;
-- exact inward and outward shelling of planar, linear-edge manifold bodies,
-  with optional removed-face openings;
+- exact inward and outward shelling of manifold analytical BREP bodies, including
+  planar, cylindrical, and toroidal fillet/protrusion combinations, with optional
+  removed-face openings;
 - rigid transforms of those bodies.
 
 Planar bodies receive intersection/contact checks and mass properties from their
 exact boundary triangulation. Recognized analytic bodies receive closed-form volume,
-area, centroid, and inertia checks. Other curved combinations are rejected at the
-publication boundary until a conservative curved-shell certifier supports them.
+area, centroid, and inertia checks. General curved BREP combinations are certified by
+direct divergence-theorem integration over exact trimmed parametric faces; periodic
+p-curve loops are lifted into a continuous parameter chart before winding and physical
+integration.
 
 ## Parametric systems
 

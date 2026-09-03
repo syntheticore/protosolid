@@ -943,25 +943,61 @@ fn validate_face_parameter_loops(
             };
             let mut current = first;
             let mut signed_area = 0.0;
+            let mut principal_area = 0.0;
+            let mut previous_end = None;
             loop {
                 let Ok(coedge) = topology.coedge(current) else {
                     break;
+                };
+                let start = coedge.pcurve.evaluate(coedge.range.start);
+                let end = coedge.pcurve.evaluate(coedge.range.end);
+                let chart_shift = match (previous_end, &start) {
+                    (Some(previous), Ok(start)) => {
+                        let delta: crate::Vec2 = previous - start.point;
+                        let shift = |value: f64, period: Option<f64>| {
+                            period
+                                .map(|period| {
+                                    let candidate = (value / period).round() * period;
+                                    if (value - candidate).abs() <= tolerance.parameter * 64.0 {
+                                        candidate
+                                    } else {
+                                        0.0
+                                    }
+                                })
+                                .unwrap_or(0.0)
+                        };
+                        crate::Vec2::new(
+                            shift(delta.x, domains[0].period),
+                            shift(delta.y, domains[1].period),
+                        )
+                    }
+                    _ => crate::Vec2::new(0.0, 0.0),
                 };
                 match coedge
                     .pcurve
                     .signed_area_contribution(coedge.range, tolerance.parameter)
                 {
-                    Ok(area) => signed_area += area,
+                    Ok(mut area) => {
+                        principal_area += area;
+                        if let (Ok(start), Ok(end)) = (&start, &end) {
+                            area += 0.5
+                                * (chart_shift.x * (end.point.y - start.point.y)
+                                    - chart_shift.y * (end.point.x - start.point.x));
+                        }
+                        signed_area += area;
+                    }
                     Err(error) => {
                         for diagnostic in error.diagnostics() {
                             report.error(diagnostic.clone().with_entity(coedge.name));
                         }
                     }
                 }
+                if let Ok(end) = &end {
+                    previous_end = Some(end.point + chart_shift);
+                }
                 if let Ok(next) = topology.coedge(coedge.next) {
-                    let end = coedge.pcurve.evaluate(coedge.range.end);
                     let start = next.pcurve.evaluate(next.range.start);
-                    if let (Ok(end), Ok(start)) = (end, start) {
+                    if let (Ok(end), Ok(start)) = (&end, start) {
                         if !domains[0].equivalent(end.point.x, start.point.x, tolerance.parameter)
                             || !domains[1].equivalent(
                                 end.point.y,
@@ -1009,8 +1045,10 @@ fn validate_face_parameter_loops(
                                 // vertex. Account for that implicit bridge in
                                 // the loop winding without inventing a
                                 // zero-length 3D edge.
-                                signed_area += 0.5
+                                let bridge = 0.5
                                     * (end.point.x * start.point.y - start.point.x * end.point.y);
+                                signed_area += bridge;
+                                principal_area += bridge;
                             }
                         }
                     }
@@ -1024,11 +1062,16 @@ fn validate_face_parameter_loops(
                 FaceOrientation::Forward => 1.0,
                 FaceOrientation::Reversed => -1.0,
             };
-            let oriented_area = signed_area * orientation;
-            let correct_winding = match loop_value.kind {
-                LoopKind::Outer => oriented_area > tolerance.parameter.powi(2),
-                LoopKind::Inner => oriented_area < -tolerance.parameter.powi(2),
+            let correct = |area: f64| match loop_value.kind {
+                LoopKind::Outer => area * orientation > tolerance.parameter.powi(2),
+                LoopKind::Inner => area * orientation < -tolerance.parameter.powi(2),
             };
+            // Existing canonical primitive builders may retain a valid loop
+            // wholly inside the principal chart. Boolean and shell rebuilds
+            // can instead retain equivalent seam endpoints in adjacent chart
+            // copies. Accept the principal representation when it already has
+            // the required winding; otherwise use its continuous periodic lift.
+            let correct_winding = correct(principal_area) || correct(signed_area);
             if mode.is_published() && !correct_winding {
                 report.error(
                     Diagnostic::new(

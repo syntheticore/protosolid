@@ -1468,16 +1468,23 @@ fn unchanged_face_patch(
 
 fn connect_loops(
     pieces: Vec<DirectedPiece>,
-    _tolerance: ModelTolerance,
+    tolerance: ModelTolerance,
     surface: &Surface3,
     orientation: FaceOrientation,
 ) -> KernelResult<Vec<Vec<DirectedPiece>>> {
+    let domains = surface.domains();
+    let equivalent = |first: Point2, second: Point2| {
+        domains[0].equivalent(first.x, second.x, tolerance.parameter * 64.0)
+            && domains[1].equivalent(first.y, second.y, tolerance.parameter * 64.0)
+    };
     let mut unused = (0..pieces.len()).collect::<BTreeSet<_>>();
     let mut loops = Vec::new();
     while let Some(start_index) = unused.iter().next().copied() {
         unused.remove(&start_index);
         let start_node = pieces[start_index].start_node;
+        let start_uv = pieces[start_index].start_uv;
         let mut end_node = pieces[start_index].end_node;
+        let mut end_uv = pieces[start_index].end_uv;
         let mut loop_ = vec![pieces[start_index].clone()];
         while end_node != start_node {
             let candidates = unused
@@ -1488,6 +1495,9 @@ fn connect_loops(
                 })
                 .collect::<Vec<_>>();
             if candidates.is_empty() {
+                if equivalent(end_uv, start_uv) {
+                    break;
+                }
                 return Err(KernelError::new(
                     DiagnosticKind::TopologyInvariant,
                     format!(
@@ -1545,6 +1555,7 @@ fn connect_loops(
                 pieces[next_index].reversed()
             };
             end_node = next.end_node;
+            end_uv = next.end_uv;
             loop_.push(next);
             if loop_.len() > pieces.len() {
                 return Err(KernelError::new(

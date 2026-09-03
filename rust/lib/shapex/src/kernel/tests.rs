@@ -128,7 +128,7 @@ fn rolling_ball_fillet_chain_certifies_at_application_scale() {
         !tangent_edges.is_empty(),
         "straight edges tangent to first fillet"
     );
-    for tangent_edge in tangent_edges {
+    for (index, tangent_edge) in tangent_edges.into_iter().enumerate() {
         let second = first
             .fillet(&[tangent_edge], 1.0)
             .expect("tangent continuation fillet");
@@ -138,6 +138,10 @@ fn rolling_ball_fillet_chain_certifies_at_application_scale() {
                 TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
             )
             .expect("tangent continuation display tessellation");
+        if index == 0 {
+            let shelled = second.shell(&[], -0.1).expect("twice-filleted shell");
+            assert_eq!(shelled.solids().len(), 1);
+        }
     }
 }
 
@@ -2127,7 +2131,30 @@ fn analytical_shell_can_leave_a_face_open() {
 }
 
 #[test]
-fn shell_rejects_curved_faces_until_periodic_seams_can_be_certified() {
+fn analytical_shell_can_leave_adjacent_faces_open_without_shared_rim_geometry() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let top = cube
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z > 9.9))
+        .expect("top face")
+        .clone();
+    let side = cube
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().x > 9.9))
+        .expect("adjacent side face")
+        .clone();
+    let shelled = cube
+        .shell(&[top, side], -1.0)
+        .expect("shell with adjacent openings");
+    assert_eq!(shelled.solids().len(), 1);
+    assert_eq!(shelled.faces().count(), 10);
+    shelled
+        .tessellate(TessellationOptions::default())
+        .expect("adjacent-opening shell tessellation");
+}
+
+#[test]
+fn analytical_shell_offsets_a_closed_cylinder() {
     let tolerance = ModelTolerance::default();
     let profile = Profile::new(
         Wire2::new(
@@ -2142,13 +2169,152 @@ fn shell_rejects_curved_faces_until_periodic_seams_can_be_certified() {
     let cylinder = profile
         .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
         .expect("cylinder");
-    let error = cylinder
-        .shell(&[], -1.0)
-        .expect_err("curved shell publication must remain conservative");
-    assert_eq!(
-        error.diagnostics()[0].kind,
-        super::DiagnosticKind::UnsupportedGeometry
+    let shelled = cylinder.shell(&[], -1.0).expect("cylindrical shell");
+    assert_eq!(shelled.solids().len(), 1);
+    assert!(
+        (shelled.volume() - 122.0 * std::f64::consts::PI).abs() < 1.0e-7,
+        "volume={}, centroid={:?}, faces={}",
+        shelled.volume(),
+        shelled.centroid(),
+        shelled.faces().count()
     );
+    let top = cylinder
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z > 9.9))
+        .expect("top cap")
+        .clone();
+    let opened = cylinder.shell(&[top], -1.0).expect("open cylinder shell");
+    assert!((opened.volume() - 106.0 * std::f64::consts::PI).abs() < 1.0e-7);
+    let outward = cylinder.shell(&[], 1.0).expect("outward cylinder shell");
+    assert!((outward.volume() - 182.0 * std::f64::consts::PI).abs() < 1.0e-7);
+}
+
+#[test]
+fn analytical_shell_offsets_a_solid_with_a_circular_boss() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 10.0));
+    let profile = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(10.0, 10.0), 3.0).expect("circle")],
+            tolerance,
+        )
+        .expect("wire"),
+        [],
+        tolerance,
+    )
+    .expect("profile");
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 10.0),
+        Vec3::unit_x(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .expect("boss plane");
+    let boss = profile
+        .extrude(plane, Vec3::new(0.0, 0.0, 5.0))
+        .expect("boss");
+    let joined = block.union(&boss).expect("boss union");
+    let opening = joined
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z > 14.9))
+        .expect("boss top")
+        .clone();
+    let shelled = joined.shell(&[opening], -0.5).expect("boss shell");
+    assert_eq!(shelled.solids().len(), 1);
+    assert!(shelled.volume() > 0.0);
+    assert!(shelled
+        .faces()
+        .any(|face| matches!(face.surface(), Surface3::Cylinder(_))));
+
+    let base_rim = joined
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
+        .find(|edge| {
+            edge.endpoints()
+                .is_ok_and(|points| points.iter().all(|point| (point.z - 10.0).abs() < 1.0e-7))
+        })
+        .expect("boss base rim")
+        .clone();
+    let filleted = joined.fillet(&[base_rim], 0.5).expect("boss fillet");
+    let opening = filleted
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z > 14.9))
+        .expect("filleted boss top")
+        .clone();
+    let filleted_shell = filleted
+        .shell(&[opening], -0.25)
+        .expect("filleted boss shell");
+    assert_eq!(filleted_shell.solids().len(), 1);
+    assert!(filleted_shell.faces().any(|face| matches!(
+        face.surface(),
+        Surface3::Torus(_) | Surface3::Offset(_) | Surface3::RollingBall(_)
+    )));
+}
+
+#[test]
+fn analytical_shell_closes_a_reversed_cylinder_chart_at_two_pi() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(Point3::new(-35.0, 0.0, -20.0), Point3::new(5.0, 15.0, 15.0));
+    let mut kernel = Kernel::new(tolerance).expect("kernel");
+    let mut transaction = kernel.begin_operation();
+    transaction
+        .cylinder(
+            Point3::new(-17.345868645558674, 0.0, -2.9254542313024605),
+            Vec3::new(12.763607080181341, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, -12.763607080181341),
+            Vec3::new(0.0, -15.0, 0.0),
+        )
+        .expect("reversed-frame cylinder");
+    let committed = transaction.finish().expect("cylinder commit");
+    let boss = super::Compound::from_operation(kernel, committed, []).expect("boss");
+    let joined = block.union(&boss).expect("side boss union");
+    let opening = joined
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().y < -14.9))
+        .expect("boss end cap")
+        .clone();
+    let shelled = joined
+        .shell(&[opening], -1.0)
+        .expect("reversed cylinder shell");
+    assert_eq!(shelled.solids().len(), 1);
+    assert!(shelled.volume() > 0.0);
+}
+
+#[test]
+fn analytical_shell_offsets_a_rolling_ball_fillet() {
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let edge = block
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .is_ok_and(|points| (points[1].z - points[0].z).abs() > 4.9)
+        })
+        .expect("vertical edge")
+        .clone();
+    let filleted = block.fillet(&[edge], 1.0).expect("fillet");
+    let opening = filleted
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface3::Plane(_)))
+        .max_by(|first, second| {
+            let first_z = match first.surface() {
+                Surface3::Plane(plane) => plane.origin().z,
+                _ => unreachable!(),
+            };
+            let second_z = match second.surface() {
+                Surface3::Plane(plane) => plane.origin().z,
+                _ => unreachable!(),
+            };
+            first_z.total_cmp(&second_z)
+        })
+        .expect("top face")
+        .clone();
+    let shelled = filleted.shell(&[opening], -0.25).expect("filleted shell");
+    assert_eq!(shelled.solids().len(), 1);
+    assert!(shelled.volume() > 0.0);
+    assert!(shelled.faces().any(|face| matches!(
+        face.surface(),
+        Surface3::Cylinder(_) | Surface3::Offset(_) | Surface3::RollingBall(_)
+    )));
 }
 
 #[test]

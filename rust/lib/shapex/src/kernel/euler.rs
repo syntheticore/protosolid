@@ -1928,10 +1928,10 @@ impl<'kernel> EulerTransaction<'kernel> {
     }
 
     /// Attach every inward-oriented disconnected shell to the smallest
-    /// outward-oriented shell that geometrically contains it.  Boolean face
-    /// selection naturally produces one connected patch component per shell;
-    /// this operation restores the BREP body/shell nesting without knowing
-    /// anything about the feature or operands that produced those patches.
+    /// outward-oriented shell that geometrically contains it. Analytical face
+    /// construction produces one connected patch component per shell; this
+    /// operation restores the BREP body/shell nesting without knowing which
+    /// feature produced those patches.
     pub(crate) fn nest_brep_shells(
         &mut self,
         bodies: &[BodyId],
@@ -1959,7 +1959,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             if signed_volume.abs() <= self.kernel.tolerance.linear.powi(3) {
                 return Err(KernelError::new(
                     DiagnosticKind::GeometryInvariant,
-                    "a Boolean shell has zero volume at model tolerance",
+                    "an analytical BREP shell has zero volume at model tolerance",
                 ));
             }
             shells.push((*body, mesh, signed_volume));
@@ -1988,7 +1988,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 .ok_or_else(|| {
                     KernelError::new(
                         DiagnosticKind::TopologyInvariant,
-                        "an inward-oriented Boolean shell is not contained by an outer shell",
+                        "an inward-oriented analytical BREP shell is not contained by an outer shell",
                     )
                 })?;
             self.merge_shell_into_body_unchecked(shells[container].0, *cavity_body)?;
@@ -2193,6 +2193,10 @@ impl<'kernel> EulerTransaction<'kernel> {
                                     projected.parameters.1,
                                 ));
                             }
+                            super::intersection::unwrap_periodic_points(
+                                &mut guide_points,
+                                patch.surface.domains(),
+                            );
                             let guide: Curve2 = super::intersection::smooth_nurbs_guide(
                                 &guide_points,
                                 guide_range,

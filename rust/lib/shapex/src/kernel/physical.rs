@@ -4,7 +4,7 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec2, Vec3};
 
-use super::integration::{adaptive_gauss_kronrod, adaptive_simpson};
+use super::integration::{adaptive_gauss_kronrod_partitioned, adaptive_simpson};
 use super::{
     BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, DomainBounds, FaceId, Kernel, KernelError,
     KernelResult, MassProperties, ModelTolerance, ShellId, Surface3, Topology,
@@ -486,7 +486,8 @@ fn brep_shell_properties(
                     .unwrap_or_else(|| Vec2::new(0.0, 0.0));
                 let raw_end = coedge.pcurve().evaluate(range.end)?.point;
                 previous_end = Some(raw_end + chart_shift);
-                let outer = adaptive_gauss_kronrod(
+                let breakpoints = coedge.pcurve().integration_breakpoints(range);
+                let outer = adaptive_gauss_kronrod_partitioned(
                     range.start,
                     range.end,
                     |parameter| {
@@ -505,6 +506,7 @@ fn brep_shell_properties(
                     targets,
                     14,
                     "exact BREP boundary integration did not converge",
+                    &breakpoints,
                 )
                 .map_err(|error| {
                     KernelError::new(

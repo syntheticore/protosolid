@@ -12,6 +12,33 @@ fn simpson<const N: usize>(
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quadrature_resolves_a_parameter_break_in_both_directions() {
+        let knot = 0.315791;
+        let terms = |parameter| Ok([if parameter < knot { 1.0 } else { 3.0 }, parameter]);
+        let targets = [1.0e-12; 2];
+        assert!(adaptive_gauss_kronrod(0.0, 1.0, terms, targets, 2, "not converged").is_err());
+        for (start, end, sign) in [(0.0, 1.0, 1.0), (1.0, 0.0, -1.0)] {
+            let result = adaptive_gauss_kronrod_partitioned(
+                start,
+                end,
+                terms,
+                targets,
+                2,
+                "not converged",
+                &[knot],
+            )
+            .unwrap();
+            assert!((result[0] - sign * (3.0 - 2.0 * knot)).abs() < targets[0]);
+            assert!((result[1] - sign * 0.5).abs() < targets[1]);
+        }
+    }
+}
+
 pub(crate) fn adaptive_simpson<const N: usize>(
     start: f64,
     end: f64,
@@ -56,6 +83,29 @@ pub(crate) fn adaptive_gauss_kronrod<const N: usize>(
     maximum_depth: u8,
     failure_message: &'static str,
 ) -> KernelResult<[f64; N]> {
+    adaptive_gauss_kronrod_partitioned(
+        start,
+        end,
+        terms,
+        targets,
+        maximum_depth,
+        failure_message,
+        &[],
+    )
+}
+
+/// Resolve an interval that exhausts ordinary bisection at a known parameter
+/// break. The open rule evaluates each side separately without sampling the
+/// derivative discontinuity or relaxing the interval's error budget.
+pub(crate) fn adaptive_gauss_kronrod_partitioned<const N: usize>(
+    start: f64,
+    end: f64,
+    terms: impl Fn(f64) -> KernelResult<[f64; N]>,
+    targets: [f64; N],
+    maximum_depth: u8,
+    failure_message: &'static str,
+    breakpoints: &[f64],
+) -> KernelResult<[f64; N]> {
     gauss_kronrod_interval(
         &terms,
         start,
@@ -64,6 +114,7 @@ pub(crate) fn adaptive_gauss_kronrod<const N: usize>(
         0,
         maximum_depth,
         failure_message,
+        breakpoints,
     )
 }
 
@@ -75,6 +126,7 @@ fn gauss_kronrod_interval<const N: usize, F>(
     depth: u8,
     maximum_depth: u8,
     failure_message: &'static str,
+    breakpoints: &[f64],
 ) -> KernelResult<[f64; N]>
 where
     F: Fn(f64) -> KernelResult<[f64; N]>,
@@ -131,7 +183,16 @@ where
     if (0..N).all(|index| errors[index] <= targets[index]) {
         return Ok(kronrod);
     }
-    if depth >= maximum_depth {
+    let breakpoint = (depth >= maximum_depth)
+        .then(|| {
+            breakpoints
+                .iter()
+                .copied()
+                .filter(|point| *point > start.min(end) && *point < start.max(end))
+                .min_by(|first, second| (first - center).abs().total_cmp(&(second - center).abs()))
+        })
+        .flatten();
+    if depth >= maximum_depth && breakpoint.is_none() {
         let worst = (0..N)
             .max_by(|first, second| {
                 (errors[*first] / targets[*first]).total_cmp(&(errors[*second] / targets[*second]))
@@ -145,25 +206,32 @@ where
             ),
         ));
     }
-    let middle = (start + end) * 0.5;
-    let child_targets = targets.map(|target| target * 0.5);
+    let middle = breakpoint.unwrap_or(center);
+    let fraction = (middle - start) / (end - start);
+    let child_depth = if breakpoint.is_some() {
+        depth
+    } else {
+        depth + 1
+    };
     let first = gauss_kronrod_interval(
         terms,
         start,
         middle,
-        child_targets,
-        depth + 1,
+        targets.map(|target| target * fraction),
+        child_depth,
         maximum_depth,
         failure_message,
+        breakpoints,
     )?;
     let second = gauss_kronrod_interval(
         terms,
         middle,
         end,
-        child_targets,
-        depth + 1,
+        targets.map(|target| target * (1.0 - fraction)),
+        child_depth,
         maximum_depth,
         failure_message,
+        breakpoints,
     )?;
     Ok(std::array::from_fn(|index| first[index] + second[index]))
 }

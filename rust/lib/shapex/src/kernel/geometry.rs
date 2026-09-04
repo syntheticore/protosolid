@@ -436,6 +436,40 @@ pub enum Curve2 {
 }
 
 impl Curve2 {
+    /// Split quadrature at guide knots: the exact intersection is smooth in
+    /// space, but its guide can give it a piecewise-smooth parameter speed.
+    pub(crate) fn integration_breakpoints(&self, range: ParameterRange) -> Vec<f64> {
+        let mut parameters = Vec::new();
+        self.collect_parameter_breaks(&mut parameters);
+        parameters.retain(|value| {
+            *value > range.start.min(range.end) && *value < range.start.max(range.end)
+        });
+        parameters.sort_by(f64::total_cmp);
+        parameters.dedup();
+        parameters
+    }
+
+    fn collect_parameter_breaks(&self, parameters: &mut Vec<f64>) {
+        match self {
+            Self::Nurbs(curve) => parameters.extend_from_slice(curve.knots()),
+            Self::SurfaceIntersection(curve) => {
+                curve
+                    .curve
+                    .first_pcurve
+                    .collect_parameter_breaks(parameters);
+                curve
+                    .curve
+                    .second_pcurve
+                    .collect_parameter_breaks(parameters);
+            }
+            Self::SurfaceProjection(curve) => {
+                curve.guide.collect_parameter_breaks(parameters);
+                curve.curve.collect_parameter_breaks(parameters);
+            }
+            Self::Line(_) | Self::Circle(_) => {}
+        }
+    }
+
     pub fn domain(&self) -> ParameterDomain {
         match self {
             Self::Line(_) => ParameterDomain::unbounded(),
@@ -2317,6 +2351,18 @@ pub enum Curve3 {
 }
 
 impl Curve3 {
+    fn collect_parameter_breaks(&self, parameters: &mut Vec<f64>) {
+        match self {
+            Self::Nurbs(curve) => parameters.extend_from_slice(curve.knots()),
+            Self::SurfaceIntersection(curve) => {
+                curve.first_pcurve.collect_parameter_breaks(parameters);
+                curve.second_pcurve.collect_parameter_breaks(parameters);
+            }
+            Self::SurfaceCurve(curve) => curve.pcurve().collect_parameter_breaks(parameters),
+            Self::Line(_) | Self::Circle(_) => {}
+        }
+    }
+
     pub fn domain(&self) -> ParameterDomain {
         match self {
             Self::Line(_) => ParameterDomain::unbounded(),

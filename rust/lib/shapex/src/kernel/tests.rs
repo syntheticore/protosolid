@@ -2467,6 +2467,59 @@ fn transverse_circle_joins_a_shelled_filleted_boss_in_both_directions() {
         assert!(result.volume() > shell.volume());
     }
 
+    let shallow_tool = circle(
+        Point2::new(26.820213683179933, -2.8914822011701538),
+        23.07147441660714,
+    )
+    .extrude(plane, Vec3::new(-20.0, 0.0, 0.0))
+    .unwrap();
+    let shallow_cut = shell
+        .difference(&shallow_tool)
+        .expect("shallow transverse cut");
+    let rim = shallow_cut
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(circle)
+            if (circle.radius() - 23.07147441660714).abs() < tolerance.linear
+                && circle.center().x.abs() < tolerance.linear)
+        })
+        .unwrap()
+        .clone();
+    let shallow_cut = shallow_cut
+        .fillet(&[rim], 2.0)
+        .expect("round shallow tool rim");
+    let bottom_edge = shallow_cut
+        .edges()
+        .find(|edge| {
+            let ends = edge.endpoints().unwrap();
+            matches!(edge.curve(), Curve3::Circle(_))
+                && ends
+                    .iter()
+                    .all(|p| (p.x + 20.0).abs() < tolerance.linear && p.y < -12.9)
+                && (ends[0].y - ends[1].y).abs() > 2.9
+        })
+        .expect("short bottom thickness edge")
+        .clone();
+    let bottom_fillet = shallow_cut
+        .fillet(&[bottom_edge], 1.0)
+        .expect("round bottom edge through toroidal trims");
+    assert!(bottom_fillet.volume() > 0.0);
+    for body in [&shallow_cut, &bottom_fillet] {
+        let mesh = body
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap();
+        for triangle in &mesh.triangles {
+            let [a, b, c] = *triangle;
+            let geometric = (mesh.positions[b] - mesh.positions[a])
+                .cross(mesh.positions[c] - mesh.positions[a]);
+            let analytical = mesh.normals[a] + mesh.normals[b] + mesh.normals[c];
+            assert!(
+                geometric.dot(analytical) >= -1.0e-12,
+                "curved triangles must agree with their analytical normals"
+            );
+        }
+    }
+
     // A transverse cut opens the periodic boss and both of its blend skins.
     // Their former chart seams must disappear from the BREP itself.
     let tool = circle(

@@ -712,6 +712,20 @@ fn finish_surface_triangulation(
         }
         normals.push(normal);
     }
+    // Coarse triangles can span more than half a curved support. Their flat
+    // normals do not determine the winding of the refined surface patches.
+    // Keep the chart winding during subdivision and orient the final mesh.
+    triangles.retain(|triangle| !uv_triangle_is_degenerate(*triangle, &uvs));
+    refine_surface_triangles(
+        surface,
+        orientation,
+        options,
+        &boundary_edges,
+        &mut uvs,
+        &mut positions,
+        &mut normals,
+        &mut triangles,
+    )?;
     triangles.retain_mut(|triangle| {
         let geometric_normal = (positions[triangle[1]] - positions[triangle[0]])
             .cross(positions[triangle[2]] - positions[triangle[0]]);
@@ -728,16 +742,6 @@ fn finish_surface_triangulation(
         }
         true
     });
-    refine_surface_triangles(
-        surface,
-        orientation,
-        options,
-        &boundary_edges,
-        &mut uvs,
-        &mut positions,
-        &mut normals,
-        &mut triangles,
-    )?;
     Ok(TriangleMesh {
         positions,
         normals,

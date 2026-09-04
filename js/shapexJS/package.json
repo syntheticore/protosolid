@@ -1,0 +1,16 @@
+{
+  "name": "@protosolid/shapex-js",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wasm-pack build rust --target web --out-dir ../pkg --out-name shapex_js_wasm"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "types": "./index.d.ts"
+}

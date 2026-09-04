@@ -9,6 +9,11 @@ one document evaluation never contains objects from two kernels.
 - `shapex.js` adapts the high-level classes exported by the external
   `rust/lib/shapex-wasm` crate.
 
+`js/shapexJS` is a separate, self-contained JavaScript library. It has its own
+private transport crate, depends directly on Shapex, and does not use the
+application bridge above. Its public object API parallels Shapex's normal Rust
+API while using JavaScript camel case.
+
 The bridge is generated with `npm run build-shapex` into
 `public/kernels/shapex`. Generated JavaScript and WebAssembly are not source
 files and are ignored by Git. The Shapex Rust crate itself contains no binding

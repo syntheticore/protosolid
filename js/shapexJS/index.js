@@ -387,6 +387,55 @@ export class Circle2 {
   _dto() { return { kind: 'circle', center: this._center.toArray(), radius: this._radius } }
 }
 
+export class Line3 {
+  constructor(origin, direction) {
+    this._origin = instance(origin, Point3, 'origin')
+    this._direction = instance(direction, Vec3, 'direction')
+    if(this._direction.magnitude() == 0) throw new RangeError('line direction must be nonzero')
+    Object.freeze(this)
+  }
+  static new(origin, direction) { return new this(origin, direction) }
+  static through(start, end) {
+    instance(start, Point3, 'start'); instance(end, Point3, 'end')
+    return new this(start, new Vec3(end.x - start.x, end.y - start.y, end.z - start.z))
+  }
+  origin() { return this._origin }
+  direction() { return this._direction }
+}
+
+export class Circle3 {
+  constructor(center, xRadius, yRadius, tolerance = ModelTolerance.default()) {
+    this._center = instance(center, Point3, 'center')
+    this._xRadius = instance(xRadius, Vec3, 'xRadius')
+    this._yRadius = instance(yRadius, Vec3, 'yRadius')
+    instance(tolerance, ModelTolerance, 'tolerance')
+    const xLength = this._xRadius.magnitude()
+    const yLength = this._yRadius.magnitude()
+    const scale = Math.max(xLength, yLength)
+    if(xLength <= tolerance.linearAtScale(scale) || yLength <= tolerance.linearAtScale(scale)) {
+      throw new RangeError('circle radius must exceed model tolerance')
+    }
+    const cosine = Math.max(-1, Math.min(1, this._xRadius.dot(this._yRadius) / (xLength * yLength)))
+    if(Math.abs(xLength - yLength) > tolerance.linearAtScale(scale)
+      || Math.abs(Math.acos(cosine) - Math.PI / 2) > tolerance.angular) {
+      throw new RangeError('circle radius vectors must be perpendicular and equally long')
+    }
+    Object.freeze(this)
+  }
+  static new(center, xRadius, yRadius, tolerance) { return new this(center, xRadius, yRadius, tolerance) }
+  static fromAxis(axis, radius, tolerance = ModelTolerance.default()) {
+    instance(axis, Axis3, 'axis')
+    positive(radius, 'radius')
+    const frame = Frame3.fromZ(axis.origin(), axis.direction())
+    return new this(axis.origin(), frame.x().scaled(radius), frame.y().scaled(radius), tolerance)
+  }
+  center() { return this._center }
+  radius() { return this._xRadius.magnitude() }
+  xRadius() { return this._xRadius }
+  yRadius() { return this._yRadius }
+  normal() { return this._xRadius.cross(this._yRadius).normalized() }
+}
+
 export class NurbsCurve2 {
   constructor(degree, controlPoints, weights, knots) {
     if(!Number.isInteger(degree) || degree < 1) throw new RangeError('degree must be a positive integer')
@@ -537,11 +586,8 @@ function profileDto(profile) {
   return { outer: profile._outer._dto(), holes: profile._holes.map(hole => hole._dto()), tolerance: profile._tolerance }
 }
 
-function defaultUrls() {
-  return {
-    moduleUrl: new URL('./pkg/shapex_js_wasm.js', import.meta.url).href,
-    wasmUrl: new URL('./pkg/shapex_js_wasm_bg.wasm', import.meta.url).href,
-  }
+function defaultWasmUrl() {
+  return new URL('./pkg/shapex_js_wasm_bg.wasm', import.meta.url).href
 }
 
 /** Create the public API around this package's initialized private transport. */
@@ -651,6 +697,17 @@ export function createShapex(bindings) {
   class Edge extends NativeValue {
     id() { return this._raw().id }
     endpoints() { return triples(nativeCall(() => this._raw().endpoints()), Point3) }
+    curve() {
+      const kind = this._raw().curveKind()
+      const values = Array.from(this._raw().curveData())
+      if(kind == 'line') return Line3.new(new Point3(...values.slice(0, 3)), new Vec3(...values.slice(3, 6)))
+      if(kind == 'circle') return new Circle3(
+        new Point3(...values.slice(0, 3)),
+        new Vec3(...values.slice(3, 6)),
+        new Vec3(...values.slice(6, 9)),
+      )
+      return { kind }
+    }
     connectedFaces() {
       const raw = nativeCall(() => this._raw().connectedFaces())
       try { return Array.from({ length: raw.length }, (_, index) => new Face(raw.get(index))) }
@@ -811,7 +868,7 @@ export function createShapex(bindings) {
   return Object.freeze({
     Point2, Vec2, Point3, Vec3, Vector3: Vec3, Matrix3, Quaternion,
     ModelTolerance, ParameterRange, Axis3, Frame3, Plane3, RigidTransform3,
-    Line2, Circle2, NurbsCurve2, TrimmedCurve2, Wire2: BoundWire2, Profile,
+    Line2, Circle2, NurbsCurve2, Line3, Circle3, TrimmedCurve2, Wire2: BoundWire2, Profile,
     TessellationOptions, FilletOptions, TriangleMesh, Polyline,
     BooleanKind,
     Face, Edge, Vertex, Solid, Compound, Resolution,
@@ -820,10 +877,11 @@ export function createShapex(bindings) {
 
 /** Load ShapexJS's own WebAssembly transport. */
 export async function initShapex({ bindings, moduleUrl, wasmUrl, wasm } = {}) {
-  const defaults = defaultUrls()
-  const transport = bindings || await import(moduleUrl || defaults.moduleUrl)
+  const transport = bindings || (moduleUrl
+    ? await import(/* @vite-ignore */ moduleUrl)
+    : await import('./pkg/shapex_js_wasm.js'))
   if(typeof transport.default != 'function') throw new TypeError('ShapexJS transport has no initializer')
-  await transport.default({ module_or_path: wasm || wasmUrl || defaults.wasmUrl })
+  await transport.default({ module_or_path: wasm || wasmUrl || defaultWasmUrl() })
   return createShapex(transport)
 }
 

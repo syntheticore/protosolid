@@ -6,18 +6,17 @@ rigid transforms, and tessellation. The setting is intentionally restart-bound:
 one document evaluation never contains objects from two kernels.
 
 - `occ.js` adapts the existing OpenCascade.js implementation.
-- `shapex.js` adapts the high-level classes exported by the external
-  `rust/lib/shapex-wasm` crate.
+- `shapex.js` adapts the public API exported by `js/shapexJS`.
 
-`js/shapexJS` is a separate, self-contained JavaScript library. It has its own
-private transport crate, depends directly on Shapex, and does not use the
-application bridge above. Its public object API parallels Shapex's normal Rust
-API while using JavaScript camel case.
+`js/shapexJS` is a separate, self-contained JavaScript library. Its private
+transport crate depends directly on Shapex, while its public object API
+parallels Shapex's normal Rust API using JavaScript camel case. ProtoSolid uses
+the same public API as any other ShapexJS consumer.
 
-The bridge is generated with `npm run build-shapex` into
-`public/kernels/shapex`. Generated JavaScript and WebAssembly are not source
-files and are ignored by Git. The Shapex Rust crate itself contains no binding
-or WebAssembly code.
+The private transport is generated with `npm run build-shapex` into
+`js/shapexJS/pkg`. Generated JavaScript and WebAssembly are not source files and
+are ignored by Git. The Shapex Rust crate itself contains no binding or
+WebAssembly code.
 
 PlaneGCS and the current exact 2D sketch implementation still use the existing
 OpenCascade.js compatibility object. That object is not used for 3D modeling in

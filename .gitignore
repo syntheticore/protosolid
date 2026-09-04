@@ -34,8 +34,5 @@ assets/oc/*.js
 assets/oc/*.ts
 assets/oc/*.wasm
 
-# Generated Shapex WebAssembly bridge
-public/kernels/shapex/
-
 electron/app
 docs

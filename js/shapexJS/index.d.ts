@@ -141,6 +141,25 @@ export class Circle2 {
   radius(): number
 }
 
+export class Line3 {
+  constructor(origin: Point3, direction: Vec3)
+  static new(origin: Point3, direction: Vec3): Line3
+  static through(start: Point3, end: Point3): Line3
+  origin(): Point3
+  direction(): Vec3
+}
+
+export class Circle3 {
+  constructor(center: Point3, xRadius: Vec3, yRadius: Vec3, tolerance?: ModelTolerance)
+  static new(center: Point3, xRadius: Vec3, yRadius: Vec3, tolerance: ModelTolerance): Circle3
+  static fromAxis(axis: Axis3, radius: number, tolerance?: ModelTolerance): Circle3
+  center(): Point3
+  radius(): number
+  xRadius(): Vec3
+  yRadius(): Vec3
+  normal(): Vec3
+}
+
 export class NurbsCurve2 {
   constructor(degree: number, controlPoints: Iterable<Point2>, weights: Iterable<number>, knots: Iterable<number>)
   static new(degree: number, controlPoints: Iterable<Point2>, weights: Iterable<number>, knots: Iterable<number>): NurbsCurve2
@@ -223,6 +242,7 @@ export interface Face extends NativeValue {
 export interface Edge extends NativeValue {
   id(): string
   endpoints(): Point3[]
+  curve(): Line3 | Circle3 | { kind: string }
   connectedFaces(): Face[]
   tessellate(options?: TessellationOptions): Polyline
 }
@@ -320,6 +340,8 @@ export interface Shapex {
   Line2: typeof Line2
   Circle2: typeof Circle2
   NurbsCurve2: typeof NurbsCurve2
+  Line3: typeof Line3
+  Circle3: typeof Circle3
   TrimmedCurve2: typeof TrimmedCurve2
   Wire2: typeof Wire2
   Profile: ProfileConstructor

@@ -8,7 +8,7 @@ use js_sys::{Float64Array, Uint32Array, JSON};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use shapex::kernel::{
-    Axis3, BooleanKind, Circle2, Curve2, Line2, NurbsCurve2, Origin, ParameterRange,
+    Axis3, BooleanKind, Circle2, Curve2, Curve3, Line2, NurbsCurve2, Origin, ParameterRange,
     RigidTransform3, Surface3,
 };
 use shapex::{
@@ -491,6 +491,45 @@ impl NativeEdge {
             .flat_map(point_values)
             .collect::<Vec<_>>();
         Ok(f64_array(&values))
+    }
+
+    #[wasm_bindgen(js_name = curveKind)]
+    pub fn curve_kind(&self) -> String {
+        match self.inner.curve() {
+            Curve3::Line(_) => "line",
+            Curve3::Circle(_) => "circle",
+            Curve3::Nurbs(_) => "nurbs",
+            Curve3::SurfaceIntersection(_) => "surface-intersection",
+            Curve3::SurfaceCurve(_) => "surface-curve",
+        }
+        .to_owned()
+    }
+
+    #[wasm_bindgen(js_name = curveData)]
+    pub fn curve_data(&self) -> Float64Array {
+        let values = match self.inner.curve() {
+            Curve3::Line(line) => vec![
+                line.origin().x,
+                line.origin().y,
+                line.origin().z,
+                line.direction().x,
+                line.direction().y,
+                line.direction().z,
+            ],
+            Curve3::Circle(circle) => vec![
+                circle.center().x,
+                circle.center().y,
+                circle.center().z,
+                circle.x_radius().x,
+                circle.x_radius().y,
+                circle.x_radius().z,
+                circle.y_radius().x,
+                circle.y_radius().y,
+                circle.y_radius().z,
+            ],
+            _ => Vec::new(),
+        };
+        f64_array(&values)
     }
 
     #[wasm_bindgen(js_name = connectedFaces)]

@@ -1939,7 +1939,7 @@ impl SurfaceIntersectionCurve {
             let previous = residual.magnitude2() + gauge * gauge;
             let mut damping = 1.0;
             for _ in 0..12 {
-                let candidate =
+                let mut candidate =
                     std::array::from_fn(|index| parameters[index] + delta[index] * damping);
                 if parameters_in_surface_domains(
                     &self.first_surface,
@@ -1950,6 +1950,22 @@ impl SurfaceIntersectionCurve {
                     [candidate[2], candidate[3]],
                     self.tolerance,
                 ) {
+                    // Domain acceptance includes the parameter tolerance;
+                    // evaluators require coordinates inside the natural box.
+                    for (axis, domain) in self
+                        .first_surface
+                        .domains()
+                        .into_iter()
+                        .chain(self.second_surface.domains())
+                        .enumerate()
+                    {
+                        if domain.period.is_none() {
+                            if let DomainBounds::Bounded(range) = domain.bounds {
+                                candidate[axis] = candidate[axis]
+                                    .clamp(range.start.min(range.end), range.start.max(range.end));
+                            }
+                        }
+                    }
                     let first = self.first_surface.evaluate(candidate[0], candidate[1])?;
                     let second = self.second_surface.evaluate(candidate[2], candidate[3])?;
                     let residual = first.point - second.point;

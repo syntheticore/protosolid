@@ -1346,44 +1346,62 @@ fn trace_surface_intersections_in_domains(
         parameters.dedup_by(|first, second| {
             parameter_distance(*first, *second) <= tolerance.parameter * 16.0
         });
-        let snap = |parameters: &mut [f64; 4]| -> KernelResult<()> {
+        // At a tangency the residual is quadratic in parameter error, so a
+        // converged trace can still sit next to a trim corner. A nearby box
+        // endpoint is usable only if it is a common point of both supports.
+        let snap = |values: &mut [f64; 4]| -> KernelResult<()> {
+            let mut candidate = *values;
             let mut changed = [false; 2];
-            for (index, (value, range)) in parameters
-                .iter_mut()
-                .zip([
-                    first_domains[0],
-                    first_domains[1],
-                    second_domains[0],
-                    second_domains[1],
-                ])
-                .enumerate()
+            for (index, range) in [
+                first_domains[0],
+                first_domains[1],
+                second_domains[0],
+                second_domains[1],
+            ]
+            .into_iter()
+            .enumerate()
             {
-                if (*value - range.start).abs() <= base_step * 0.1 {
-                    *value = range.start;
-                    changed[index / 2] = true;
-                } else if (*value - range.end).abs() <= base_step * 0.1 {
-                    *value = range.end;
-                    changed[index / 2] = true;
+                for bound in [range.start, range.end] {
+                    if (candidate[index] - bound).abs() <= base_step * 0.1 {
+                        candidate[index] = bound;
+                        changed[index / 2] = true;
+                    }
                 }
             }
-            if changed[1] {
-                let point = second.evaluate(parameters[2], parameters[3])?.point;
-                let projection = first.project(point, tolerance)?;
-                parameters[0] = projection.parameters.0;
-                parameters[1] = projection.parameters.1;
+            let projection = if changed[1] {
+                let point = second.evaluate(candidate[2], candidate[3])?.point;
+                let projected = first.project(point, tolerance)?;
+                candidate[0] = projected.parameters.0;
+                candidate[1] = projected.parameters.1;
+                Some((point, projected.distance))
             } else if changed[0] {
-                let point = first.evaluate(parameters[0], parameters[1])?.point;
-                let projection = second.project(point, tolerance)?;
-                parameters[2] = projection.parameters.0;
-                parameters[3] = projection.parameters.1;
+                let point = first.evaluate(candidate[0], candidate[1])?.point;
+                let projected = second.project(point, tolerance)?;
+                candidate[2] = projected.parameters.0;
+                candidate[3] = projected.parameters.1;
+                Some((point, projected.distance))
+            } else {
+                None
+            };
+            if let Some((point, distance)) = projection {
+                if distance <= f64::EPSILON * point.to_vec().magnitude().max(1.0) * 256.0
+                    && parameters_in_ranges(
+                        candidate,
+                        first_domains,
+                        second_domains,
+                        tolerance.parameter,
+                    )
+                {
+                    *values = candidate;
+                }
             }
             Ok(())
         };
-        if let Some(first) = parameters.first_mut() {
-            snap(first)?;
+        if let Some(value) = parameters.first_mut() {
+            snap(value)?;
         }
-        if let Some(last) = parameters.last_mut() {
-            snap(last)?;
+        if let Some(value) = parameters.last_mut() {
+            snap(value)?;
         }
         if parameters.len() >= 2 {
             traced.push(parameters);
@@ -1831,21 +1849,54 @@ fn trace_surface_intersection_direction(
             tolerance,
         )?
         else {
-            // A gauge-constrained step can become infeasible when it crosses a
-            // trimmed parameter-box boundary.  Finish the branch with an
-            // unconstrained correction of the clamped prediction so adjacent
-            // face arrangements receive the exact common endpoint.
-            if let Some(endpoint) = correct_surface_pair(
-                first,
-                second,
-                clamp_parameters(predicted, first_domains, second_domains),
-                first_domains,
-                second_domains,
-                tolerance,
-            )? {
-                if parameter_distance(endpoint, current) > tolerance.parameter * 16.0 {
-                    result.push(endpoint);
+            // Complete the intersection at a box boundary by solving both
+            // surfaces with that parameter fixed. Clamping a prediction and
+            // projecting onto only one support does not give a common point.
+            let mut closest = None::<(f64, [f64; 4])>;
+            for (index, range) in [
+                first_domains[0],
+                first_domains[1],
+                second_domains[0],
+                second_domains[1],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if tangent[index].abs() <= tolerance.parameter {
+                    continue;
                 }
+                let bound = if tangent[index] > 0.0 {
+                    range.start.max(range.end)
+                } else {
+                    range.start.min(range.end)
+                };
+                let travel = (bound - current[index]) / tangent[index];
+                if travel < -tolerance.parameter || travel > step * 2.0 {
+                    continue;
+                }
+                let mut guide = std::array::from_fn(|axis| current[axis] + tangent[axis] * travel);
+                guide[index] = bound;
+                let mut gauge = [0.0; 4];
+                gauge[index] = 1.0;
+                if let Some(endpoint) = correct_surface_pair_with_gauge(
+                    first,
+                    second,
+                    guide,
+                    gauge,
+                    first_domains,
+                    second_domains,
+                    tolerance,
+                )? {
+                    let distance = parameter_distance(endpoint, current);
+                    if distance > tolerance.parameter * 16.0
+                        && closest.as_ref().is_none_or(|(best, _)| distance < *best)
+                    {
+                        closest = Some((distance, endpoint));
+                    }
+                }
+            }
+            if let Some((_, endpoint)) = closest {
+                result.push(endpoint);
             }
             break;
         };
@@ -1891,8 +1942,9 @@ fn correct_surface_pair_with_gauge(
             .map(|((value, guide), tangent)| (value - guide) * tangent)
             .sum::<f64>();
         if residual.magnitude()
-            <= tolerance.linear_at_scale(first_value.point.to_vec().magnitude().max(1.0))
-            && gauge.abs() <= tolerance.parameter * 8.0
+            <= f64::EPSILON * first_value.point.to_vec().magnitude().max(1.0) * 64.0
+            && gauge.abs()
+                <= f64::EPSILON * guide.iter().map(|v| v.abs()).fold(1.0_f64, f64::max) * 64.0
         {
             return Ok(Some(parameters));
         }

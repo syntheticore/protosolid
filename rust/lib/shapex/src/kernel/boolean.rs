@@ -57,10 +57,67 @@ impl DirectedPiece {
 #[derive(Clone, Copy)]
 struct ClassificationMesh<'a> {
     mesh: &'a TriangleMesh,
+    faces: &'a [ClassificationFace],
+    tolerance: ModelTolerance,
+    chord: f64,
+}
+
+struct ClassificationFace {
+    surface: Surface3,
+    orientation: FaceOrientation,
+    boundary: Vec<FaceCurve>,
+    bounds: [ParameterRange; 2],
 }
 
 impl ClassificationMesh<'_> {
     fn contains(self, point: Point3) -> bool {
+        // A chord mesh can put a point on the wrong side of a curved support.
+        // Within its error envelope, classify against the nearest exact face.
+        let mut nearest = None::<(f64, bool)>;
+        for face in self.faces {
+            if !matches!(
+                face.surface,
+                Surface3::Plane(_) | Surface3::Cylinder(_) | Surface3::Torus(_)
+            ) {
+                continue;
+            }
+            let Ok(projection) = face.surface.project(point, self.tolerance) else {
+                continue;
+            };
+            if projection.distance > self.chord * 2.0
+                || nearest.is_some_and(|(d, _)| d <= projection.distance)
+            {
+                continue;
+            }
+            let mut uv = Point2::new(projection.parameters.0, projection.parameters.1);
+            for axis in 0..2 {
+                if let Some(period) = face.surface.domains()[axis].period {
+                    let center = (face.bounds[axis].start + face.bounds[axis].end) * 0.5;
+                    uv[axis] += ((center - uv[axis]) / period).round() * period;
+                }
+            }
+            if !point_in_trim(uv, &face.boundary).unwrap_or(false) {
+                continue;
+            }
+            let Ok(value) = face.surface.evaluate(uv.x, uv.y) else {
+                continue;
+            };
+            let Ok(normal) = value.normal() else {
+                continue;
+            };
+            let sign = if face.orientation == FaceOrientation::Forward {
+                1.0
+            } else {
+                -1.0
+            };
+            nearest = Some((
+                projection.distance,
+                (point - value.point).dot(normal) * sign <= 0.0,
+            ));
+        }
+        if let Some((_, inside)) = nearest {
+            return inside;
+        }
         let mut solid_angle = 0.0;
         for triangle in &self.mesh.triangles {
             let a = self.mesh.positions[triangle[0]] - point;
@@ -112,10 +169,6 @@ pub(crate) fn boolean_brep(
     let options = TessellationOptions::new(chord, 0.12, 12)?;
     let first_mesh = first.tessellate(options)?;
     let second_mesh = second.tessellate(options)?;
-    let classifiers = [
-        ClassificationMesh { mesh: &first_mesh },
-        ClassificationMesh { mesh: &second_mesh },
-    ];
     let classification_offset = chord * 8.0;
 
     let first_faces = first.faces().cloned().collect::<Vec<_>>();
@@ -133,6 +186,39 @@ pub(crate) fn boolean_brep(
         }
     }
     let original_curves = face_curves.clone();
+    let classification_faces = [(first, &first_faces), (second, &second_faces)]
+        .into_iter()
+        .enumerate()
+        .map(|(operand, (compound, faces))| {
+            faces
+                .iter()
+                .enumerate()
+                .map(|(index, face)| {
+                    let boundary = original_curves[&(operand, index)].clone();
+                    Ok(ClassificationFace {
+                        surface: face.surface().clone(),
+                        orientation: compound.topology().face(face.topology_id())?.orientation(),
+                        bounds: face_parameter_bounds(&boundary, tolerance)?,
+                        boundary,
+                    })
+                })
+                .collect::<KernelResult<Vec<_>>>()
+        })
+        .collect::<KernelResult<Vec<_>>>()?;
+    let classifiers = [
+        ClassificationMesh {
+            mesh: &first_mesh,
+            faces: &classification_faces[0],
+            tolerance,
+            chord,
+        },
+        ClassificationMesh {
+            mesh: &second_mesh,
+            faces: &classification_faces[1],
+            tolerance,
+            chord,
+        },
+    ];
 
     for (first_index, first_face) in first_faces.iter().enumerate() {
         for (second_index, second_face) in second_faces.iter().enumerate() {
@@ -433,6 +519,15 @@ fn align_pcurve_to_face_chart(
     if offset.magnitude2() <= tolerance.parameter.powi(2) {
         return Ok(pcurve.clone());
     }
+    translate_pcurve(pcurve, offset, surface, tolerance)
+}
+
+fn translate_pcurve(
+    pcurve: &Curve2,
+    offset: Vec2,
+    surface: &Surface3,
+    tolerance: ModelTolerance,
+) -> KernelResult<Curve2> {
     match pcurve {
         Curve2::Line(line) => {
             Ok(super::Line2::new(line.origin() + offset, line.direction())?.into())
@@ -452,8 +547,7 @@ fn align_pcurve_to_face_chart(
         )?
         .into()),
         Curve2::SurfaceProjection(projection) => {
-            let guide =
-                align_pcurve_to_face_chart(projection.guide(), surface, boundary, tolerance)?;
+            let guide = translate_pcurve(projection.guide(), offset, surface, tolerance)?;
             Ok(super::SurfaceProjectionPcurve2::new(
                 projection.curve().clone(),
                 projection.surface().clone(),
@@ -463,9 +557,28 @@ fn align_pcurve_to_face_chart(
             )?
             .into())
         }
-        // General surface tracing seeds its implicit p-curves inside the
-        // supplied face bounds, so it already carries the desired chart branch.
-        Curve2::SurfaceIntersection(_) => Ok(pcurve.clone()),
+        Curve2::SurfaceIntersection(intersection) => {
+            let spatial = intersection.spatial_curve();
+            let Curve3::SurfaceIntersection(curve) = &spatial else {
+                unreachable!()
+            };
+            let guide = curve.pcurve_for_surface(surface).ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "intersection p-curve belongs to another support",
+                )
+            })?;
+            let guide = translate_pcurve(guide, offset, surface, tolerance)?;
+            let range = curve.range();
+            Ok(super::SurfaceProjectionPcurve2::new(
+                spatial,
+                surface.clone(),
+                guide,
+                range,
+                tolerance,
+            )?
+            .into())
+        }
     }
 }
 
@@ -539,17 +652,35 @@ fn face_bounds_separated(
 
 fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec<FaceCurve>> {
     let topology = compound.topology();
+    let surface = topology.face(face)?.surface();
+    let domains = surface.domains();
     let mut curves = Vec::new();
     for loop_id in topology.face(face)?.loops() {
         let loop_value = topology.loop_(*loop_id)?;
         let coedges = topology.loop_coedges(*loop_id)?;
         let last = coedges.len().saturating_sub(1);
+        // Keep the complete loop in one continuous periodic chart. Individual
+        // coedges may use different principal copies of the same seam.
+        let mut previous = None::<Point2>;
         for (index, coedge_id) in coedges.into_iter().enumerate() {
             let coedge = topology.coedge(coedge_id)?;
             let edge = topology.edge(coedge.edge())?;
+            let mut pcurve = coedge.pcurve().clone();
+            if let Some(previous) = previous {
+                let start = pcurve.evaluate(coedge.range().start)?.point;
+                let delta = previous - start;
+                let offset = Vec2::new(
+                    domains[0].period.map_or(0.0, |p| (delta.x / p).round() * p),
+                    domains[1].period.map_or(0.0, |p| (delta.y / p).round() * p),
+                );
+                if offset.magnitude2() > compound.tolerance().parameter.powi(2) {
+                    pcurve = translate_pcurve(&pcurve, offset, surface, compound.tolerance())?;
+                }
+            }
+            previous = Some(pcurve.evaluate(coedge.range().end)?.point);
             curves.push(FaceCurve {
                 curve: edge.curve().clone(),
-                pcurve: coedge.pcurve().clone(),
+                pcurve,
                 range: coedge.range(),
                 loop_end: index == last,
                 loop_kind: loop_value.kind(),
@@ -571,7 +702,28 @@ fn point_in_trim(point: Point2, boundary: &[FaceCurve]) -> KernelResult<bool> {
                 return Ok(true);
             }
             if (first.y > point.y) != (second.y > point.y) {
-                let x = first.x + (point.y - first.y) * (second.x - first.x) / (second.y - first.y);
+                // The chords only bracket a ray crossing. Classifying against
+                // their x coordinate can exclude an exact intersection lying
+                // on a curved trim, leaving its neighboring face open.
+                let mut low = pair[0].0;
+                let mut high = pair[1].0;
+                let mut crossing = first;
+                for _ in 0..48 {
+                    let middle = (low + high) * 0.5;
+                    crossing = curve.pcurve.evaluate(middle)?.point;
+                    if (crossing.y - point.y).abs() <= 1.0e-12 {
+                        break;
+                    }
+                    if (crossing.y > point.y) == (first.y > point.y) {
+                        low = middle;
+                    } else {
+                        high = middle;
+                    }
+                }
+                let x = crossing.x;
+                if (x - point.x).abs() <= 1.0e-9 {
+                    return Ok(true);
+                }
                 if x > point.x {
                     crossings += 1;
                 }
@@ -810,12 +962,52 @@ fn curve_intersections(
     second: &FaceCurve,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<(f64, f64)>> {
+    let endpoint_hits = || -> KernelResult<Vec<(f64, f64)>> {
+        let fit = |curve: &Curve3, range: ParameterRange, point: Point3| -> Option<f64> {
+            let projection = curve.project(point, tolerance).ok()?;
+            let mut parameter = projection.parameter;
+            if let Some(period) = curve.domain().period {
+                let center = (range.start + range.end) * 0.5;
+                parameter += ((center - parameter) / period).round() * period;
+            }
+            let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0;
+            (projection.distance <= allowed && range.contains(parameter, tolerance))
+                .then_some(parameter.clamp(range.start.min(range.end), range.start.max(range.end)))
+        };
+        let mut hits = Vec::<(f64, f64)>::new();
+        for first_parameter in [first.range.start, first.range.end] {
+            let point = first.curve.evaluate(first_parameter)?.point;
+            if let Some(second_parameter) = fit(&second.curve, second.range, point) {
+                hits.push((first_parameter, second_parameter));
+            }
+        }
+        for second_parameter in [second.range.start, second.range.end] {
+            let point = second.curve.evaluate(second_parameter)?.point;
+            if let Some(first_parameter) = fit(&first.curve, first.range, point) {
+                hits.push((first_parameter, second_parameter));
+            }
+        }
+        Ok(hits)
+    };
+    let deduplicate = |mut hits: Vec<(f64, f64)>| {
+        hits.sort_by(|first, second| {
+            first
+                .0
+                .total_cmp(&second.0)
+                .then_with(|| first.1.total_cmp(&second.1))
+        });
+        hits.dedup_by(|first, second| {
+            (first.0 - second.0).abs() <= tolerance.parameter * 64.0
+                && (first.1 - second.1).abs() <= tolerance.parameter * 64.0
+        });
+        hits
+    };
     if matches!(first.curve, Curve3::Line(_) | Curve3::Circle(_))
         && matches!(second.curve, Curve3::Line(_) | Curve3::Circle(_))
     {
         match first.curve.intersect_curve(&second.curve, tolerance)? {
             IntersectionSet::Isolated(hits) => {
-                return Ok(hits
+                let mut hits = hits
                     .into_iter()
                     .filter_map(|hit| {
                         let fit = |mut parameter: f64, curve: &Curve3, range: ParameterRange| {
@@ -831,9 +1023,19 @@ fn curve_intersections(
                             second.range,
                         ))
                     })
-                    .collect());
+                    .collect::<Vec<_>>();
+                hits.extend(endpoint_hits()?);
+                return Ok(deduplicate(hits));
             }
-            IntersectionSet::Empty | IntersectionSet::Coincident => return Ok(Vec::new()),
+            IntersectionSet::Empty | IntersectionSet::Coincident => {
+                // Coincident trims can cover different portions of the same
+                // basis curve. Their overlap endpoints are arrangement
+                // vertices just as much as transverse intersections are. If
+                // they are not transferred to both parameter ranges, a long
+                // edge and a shorter duplicate survive with different node
+                // pairs and leave the selected boundary graph non-manifold.
+                return Ok(deduplicate(endpoint_hits()?));
+            }
         }
     }
     let first_samples = sample_pcurve(first, 32)?;
@@ -850,8 +1052,10 @@ fn curve_intersections(
                 continue;
             };
             let mut parameters = [
-                first_pair[0].0 + (first_pair[1].0 - first_pair[0].0) * first_fraction,
-                second_pair[0].0 + (second_pair[1].0 - second_pair[0].0) * second_fraction,
+                first_pair[0].0
+                    + (first_pair[1].0 - first_pair[0].0) * first_fraction.clamp(0.0, 1.0),
+                second_pair[0].0
+                    + (second_pair[1].0 - second_pair[0].0) * second_fraction.clamp(0.0, 1.0),
             ];
             for _ in 0..24 {
                 let first_value = first.pcurve.first_order(parameters[0])?;
@@ -890,7 +1094,8 @@ fn curve_intersections(
             }
         }
     }
-    Ok(hits)
+    hits.extend(endpoint_hits()?);
+    Ok(deduplicate(hits))
 }
 
 fn segment_intersection_parameters(
@@ -973,29 +1178,7 @@ fn arrange_face(
             (BooleanKind::Difference, 1) => other_contains.then_some(source_orientation.reversed()),
             _ => unreachable!(),
         };
-        if direct.is_some() {
-            return Ok(direct);
-        }
-        if !has_coincident_support {
-            return Ok(None);
-        }
-        let below = value.point - parameter_normal * classification_offset;
-        let above = value.point + parameter_normal * classification_offset;
-        let below_occupied = occupied(
-            kind,
-            classifiers[0].contains(below),
-            classifiers[1].contains(below),
-        );
-        let above_occupied = occupied(
-            kind,
-            classifiers[0].contains(above),
-            classifiers[1].contains(above),
-        );
-        Ok(match (below_occupied, above_occupied) {
-            (true, false) => Some(FaceOrientation::Forward),
-            (false, true) => Some(FaceOrientation::Reversed),
-            _ => None,
-        })
+        Ok(direct)
     };
     let orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
         if !has_coincident_support && !point_in_trim(uv, original_boundary)? {
@@ -1069,18 +1252,30 @@ fn arrange_face(
 
     let mut nodes = Vec::<Point2>::new();
     let mut pieces = Vec::<DirectedPiece>::new();
-    let weld_node = |nodes: &mut Vec<Point2>, point: Point2| -> usize {
-        if let Some(index) = nodes
-            .iter()
-            .position(|candidate| candidate.distance(point) <= tolerance.parameter * 64.0)
-        {
-            index
+    let weld_node = |nodes: &mut Vec<Point2>, point: Point2| -> KernelResult<usize> {
+        let value = surface.evaluate(point.x, point.y)?;
+        let linear = tolerance.linear_at_scale(value.point.to_vec().magnitude());
+        if let Some(index) = nodes.iter().position(|candidate| {
+            let delta = *candidate - point;
+            // Intersection solvers converge in model units, not UV units.
+            // Use the local surface metric while keeping distinct periodic
+            // chart endpoints (whose raw UV separation is a full period).
+            candidate.distance(point) <= tolerance.parameter * 64.0
+                || (value.du * delta.x + value.dv * delta.y).magnitude() <= linear
+        }) {
+            Ok(index)
         } else {
             nodes.push(point);
-            nodes.len() - 1
+            Ok(nodes.len() - 1)
         }
     };
     for (curve, mut parameters) in curves.iter().zip(split_parameters) {
+        for parameter in &mut parameters {
+            *parameter = parameter.clamp(
+                curve.range.start.min(curve.range.end),
+                curve.range.start.max(curve.range.end),
+            );
+        }
         parameters.sort_by(f64::total_cmp);
         parameters.dedup_by(|first, second| (*first - *second).abs() <= tolerance.parameter * 32.0);
         if curve.range.span() < 0.0 {
@@ -1100,8 +1295,8 @@ fn arrange_face(
             {
                 continue;
             }
-            let start_node = weld_node(&mut nodes, start_uv);
-            let end_node = weld_node(&mut nodes, end_uv);
+            let start_node = weld_node(&mut nodes, start_uv)?;
+            let end_node = weld_node(&mut nodes, end_uv)?;
             pieces.push(DirectedPiece {
                 curve: curve.curve.clone(),
                 pcurve: curve.pcurve.clone(),
@@ -1117,7 +1312,20 @@ fn arrange_face(
     let mut selected = [Vec::<DirectedPiece>::new(), Vec::<DirectedPiece>::new()];
     for piece in &pieces {
         let parameter = piece.range.start + piece.range.span() * 0.5;
-        let (uv, tangent) = piece.pcurve.first_order(parameter)?;
+        let (mut uv, tangent) = piece.pcurve.first_order(parameter)?;
+        if matches!(piece.curve, Curve3::SurfaceIntersection(_)) {
+            // A tracing spline selects the intersection branch but is not the
+            // intersection itself. Center side probes on the corrected curve.
+            let point = piece.curve.evaluate(parameter)?.point;
+            let projection = surface.project(point, tolerance)?;
+            let mut exact = Point2::new(projection.parameters.0, projection.parameters.1);
+            for axis in 0..2 {
+                if let Some(period) = surface.domains()[axis].period {
+                    exact[axis] += ((uv[axis] - exact[axis]) / period).round() * period;
+                }
+            }
+            uv = exact;
+        }
         let tangent = tangent * piece.range.span().signum();
         if tangent.magnitude2() <= tolerance.parameter.powi(2) {
             continue;
@@ -1128,7 +1336,24 @@ fn arrange_face(
         if world_left.magnitude2() <= tolerance.linear.powi(2) {
             continue;
         }
-        let uv_step = (classification_offset / world_left.magnitude()).min(uv_probe_limit);
+        let mut probe = classification_offset;
+        for curve in curves {
+            let Ok(projection) = curve.curve.project(surface_value.point, tolerance) else {
+                continue;
+            };
+            let mut parameter = projection.parameter;
+            if let Some(period) = curve.curve.domain().period {
+                parameter += (((curve.range.start + curve.range.end) * 0.5 - parameter) / period)
+                    .round()
+                    * period;
+            }
+            if projection.distance > tolerance.linear * 16.0
+                && curve.range.contains(parameter, tolerance)
+            {
+                probe = probe.min(projection.distance * 0.25);
+            }
+        }
+        let uv_step = (probe / world_left.magnitude()).min(uv_probe_limit);
         let left_orientation = orientation_at(uv + left * uv_step)?;
         let right_orientation = orientation_at(uv - left * uv_step)?;
         for (slot, orientation) in [FaceOrientation::Forward, FaceOrientation::Reversed]

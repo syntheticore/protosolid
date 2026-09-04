@@ -2403,6 +2403,148 @@ fn circular_prism_can_join_partially_across_a_planar_face() {
 }
 
 #[test]
+fn transverse_circle_joins_a_shelled_filleted_boss_in_both_directions() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(
+        Point3::new(-61.51105455585198, 0.0, -34.901492966646394),
+        Point3::new(62.18948530462976, 37.0, 26.684942786593528),
+    );
+    let circle = |center, radius| {
+        Profile::new(
+            Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tolerance).unwrap(),
+            [],
+            tolerance,
+        )
+        .unwrap()
+    };
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tolerance,
+    )
+    .unwrap();
+    let boss = circle(Point2::new(-24.206992697151723, 2.570753756415946), 15.0)
+        .extrude(plane, Vec3::new(0.0, -16.0, 0.0))
+        .unwrap();
+    let joined = block.union(&boss).unwrap();
+    let rims = joined
+        .edges()
+        .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let rounded = joined.fillet(&rims, 4.0).unwrap();
+    let openings = rounded
+        .faces()
+        .filter(|face| {
+            matches!(face.surface(), Surface3::Plane(p) if
+                ((p.origin().y-37.0).abs() < 1.0e-7 && p.normal().y.abs() > 0.99)
+                || ((p.origin().z+34.901492966646394).abs() < 1.0e-7 && p.normal().z.abs() > 0.99)
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(openings.len(), 2);
+    let shell = rounded.shell(&openings, -3.0).unwrap();
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        -Vec3::unit_z(),
+        Vec3::unit_y(),
+        tolerance,
+    )
+    .unwrap();
+    for distance in [20.0, -20.0] {
+        let tool = circle(
+            Point2::new(26.820213683179933, -2.8914822011701538),
+            23.07147441660714,
+        )
+        .extrude(plane, Vec3::new(distance, 0.0, 0.0))
+        .unwrap();
+        let result = shell
+            .union(&tool)
+            .expect("transverse join through rounded shell");
+        assert_eq!(result.solids().len(), 1);
+        assert!(result.volume() > shell.volume());
+    }
+}
+
+#[test]
+fn circular_prism_can_join_through_a_shallow_planar_overlap() {
+    let tolerance = ModelTolerance::default();
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tolerance,
+    )
+    .expect("profile plane");
+    let body = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(0.0, 34.901492966646394),
+                Point2::new(56.18948530462976, 34.901492966646394),
+                Point2::new(56.18948530462976, -2.6849427865935285),
+                Point2::new(38.189485304629756, -20.684942786593528),
+                Point2::new(-37.511054555851985, -20.684942786593528),
+                Point2::new(-55.51105455585198, -2.684942786593526),
+                Point2::new(-55.51105455585198, 3.930647011080744),
+                Point2::new(0.0, 3.930647011080744),
+            ],
+            tolerance,
+        )
+        .expect("body outline"),
+        [],
+        tolerance,
+    )
+    .expect("body profile")
+    .extrude(plane, Vec3::new(0.0, 200.0, 0.0))
+    .expect("body");
+    let center = Point2::new(-24.206992697151726, 2.570753756415947);
+    let radius = 19.0;
+    let boss = |center: Point2, radius: f64| {
+        Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(center, radius).expect("boss circle")],
+                tolerance,
+            )
+            .expect("boss wire"),
+            [],
+            tolerance,
+        )
+        .expect("boss profile")
+        .extrude(plane, Vec3::new(0.0, -20.0, 0.0))
+        .expect("boss")
+    };
+    let body = body
+        .union(&boss(Point2::new(center.x - 10.0, center.y), 9.0))
+        .expect("existing cylindrical boss");
+    let circle = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(center, radius).expect("circle")],
+            tolerance,
+        )
+        .expect("circle wire"),
+        [],
+        tolerance,
+    )
+    .expect("circle profile")
+    .extrude(
+        Plane3::new(
+            Point3::new(0.0, -50.0, 0.0),
+            Vec3::unit_x(),
+            -Vec3::unit_z(),
+            tolerance,
+        )
+        .expect("tool plane"),
+        Vec3::new(0.0, 300.0, 0.0),
+    )
+    .expect("circle tool");
+
+    let joined = body.union(&circle).expect("shallow through union");
+    assert_eq!(joined.solids().len(), 1);
+}
+
+#[test]
 fn circular_prism_can_join_a_planar_face_with_an_existing_hole() {
     let tolerance = ModelTolerance::default();
     let rectangle = |minimum: f64, maximum: f64| {

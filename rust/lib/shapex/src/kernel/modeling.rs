@@ -177,6 +177,16 @@ fn semantic_edge(history: &OperationHistory, edge: &EdgeHandle) -> bool {
     if faces.len() != 2 {
         return true;
     }
+    // A subdivision of one support is not a model edge, regardless of which
+    // operation last touched the body. Operation history contains only the
+    // current operation and can lose the common ancestry of untouched faces.
+    if same_surface_support(
+        faces[0].surface(),
+        faces[1].surface(),
+        edge.state.tolerance(),
+    ) {
+        return false;
+    }
     let first_roots = semantic_roots(history, faces[0].persistent_id());
     let second_roots = semantic_roots(history, faces[1].persistent_id());
     if first_roots.is_disjoint(&second_roots) {

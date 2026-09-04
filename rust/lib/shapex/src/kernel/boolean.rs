@@ -437,6 +437,7 @@ pub(crate) fn boolean_brep(
         bodies.push(transaction.brep_shell(component)?);
     }
     transaction.nest_brep_shells(&bodies, options)?;
+    transaction.merge_periodic_face_partitions()?;
     let committed = transaction.finish()?;
     let role = match kind {
         BooleanKind::Union => "boolean.union",
@@ -522,7 +523,7 @@ fn align_pcurve_to_face_chart(
     translate_pcurve(pcurve, offset, surface, tolerance)
 }
 
-fn translate_pcurve(
+pub(super) fn translate_pcurve(
     pcurve: &Curve2,
     offset: Vec2,
     surface: &Surface3,

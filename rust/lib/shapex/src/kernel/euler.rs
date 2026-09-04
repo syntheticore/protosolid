@@ -960,6 +960,85 @@ impl<'kernel> EulerTransaction<'kernel> {
         })
     }
 
+    /// Remove Boolean partition edges between patches in the same periodic
+    /// surface chart. Keep actual seams (two uses on one face), distinct
+    /// supports, and disconnected face regions intact.
+    pub(crate) fn merge_periodic_face_partitions(&mut self) -> KernelResult<()> {
+        loop {
+            let mut candidate = None;
+            for (edge_id, edge) in self.working.edges() {
+                if edge.coedges.len() != 2 {
+                    continue;
+                }
+                let first_use = self.working.coedge(edge.coedges[0])?;
+                let second_use = self.working.coedge(edge.coedges[1])?;
+                let first_loop = self.working.loop_(first_use.loop_id)?;
+                let second_loop = self.working.loop_(second_use.loop_id)?;
+                if first_loop.face == second_loop.face
+                    || first_loop.kind != LoopKind::Outer
+                    || second_loop.kind != LoopKind::Outer
+                {
+                    continue;
+                }
+                let first = self.working.face(first_loop.face)?;
+                let second = self.working.face(second_loop.face)?;
+                if first.surface != second.surface
+                    || first.orientation != second.orientation
+                    || second.loops.len() != 1
+                    || !matches!(first.surface, Surface3::Cylinder(_) | Surface3::Torus(_))
+                {
+                    continue;
+                }
+                // Put the removed patch in the survivor's periodic chart
+                // before splicing its boundary. A complete period is the only
+                // permissible change to these exact p-curves.
+                let first_uv = first_use.pcurve.evaluate(first_use.range.start)?.point;
+                let second_uv = second_use.pcurve.evaluate(second_use.range.end)?.point;
+                let domains = first.surface.domains();
+                let delta = first_uv - second_uv;
+                let offset = Vec2::new(
+                    domains[0]
+                        .period
+                        .map_or(0.0, |period| (delta.x / period).round() * period),
+                    domains[1]
+                        .period
+                        .map_or(0.0, |period| (delta.y / period).round() * period),
+                );
+                if (delta - offset).magnitude() > self.kernel.tolerance.parameter * 16.0 {
+                    continue;
+                }
+                candidate = Some((
+                    edge_id,
+                    second_loop.face,
+                    second_use.loop_id,
+                    first.surface.clone(),
+                    offset,
+                ));
+                break;
+            }
+            let Some((edge, removed_face, removed_loop, surface, offset)) = candidate else {
+                break;
+            };
+            if offset.magnitude2() > 0.0 {
+                for coedge in self.collect_loop(removed_loop)? {
+                    let translated = super::boolean::translate_pcurve(
+                        &self.working.coedge(coedge)?.pcurve,
+                        offset,
+                        &surface,
+                        self.kernel.tolerance,
+                    )?;
+                    self.working.coedges.get_mut(coedge)?.pcurve = translated;
+                }
+            }
+            let removed_name = self.working.face(removed_face)?.name;
+            let survivor = self.kef_unchecked(edge, removed_face)?.surviving_face;
+            let survivor_name = self.working.face(survivor)?.name;
+            self.history
+                .changed(removed_name, ChangeKind::Merged, [survivor_name]);
+        }
+        Ok(())
+    }
+
     pub(super) fn repair_outgoing(&mut self, vertex: VertexId) -> KernelResult<()> {
         let replacement = self.working.coedges().find_map(|(id, _)| {
             self.working

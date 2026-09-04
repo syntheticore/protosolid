@@ -2466,6 +2466,55 @@ fn transverse_circle_joins_a_shelled_filleted_boss_in_both_directions() {
         assert_eq!(result.solids().len(), 1);
         assert!(result.volume() > shell.volume());
     }
+
+    // A transverse cut opens the periodic boss and both of its blend skins.
+    // Their former chart seams must disappear from the BREP itself.
+    let tool = circle(
+        Point2::new(26.820213683179933, -2.8914822011701538),
+        23.07147441660714,
+    )
+    .extrude(plane, Vec3::new(-100.0, 0.0, 0.0))
+    .unwrap();
+    let cut = shell.difference(&tool).expect("cut through rounded shell");
+    let check_partitions = |compound: &super::Compound| {
+        for edge in compound.edges() {
+            let faces = edge.connected_faces().unwrap();
+            if faces.len() == 2
+                && matches!(
+                    faces[0].surface(),
+                    Surface3::Cylinder(_) | Surface3::Torus(_)
+                )
+            {
+                assert_ne!(
+                    faces[0].surface(), faces[1].surface(),
+                    "connected periodic patches must form one face"
+                );
+            }
+        }
+    };
+    check_partitions(&cut);
+    let remote_edge = cut
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(circle)
+                if (circle.radius() - 23.07147441660714).abs() < tolerance.linear
+                    && circle.center().x.abs() < tolerance.linear)
+        })
+        .expect("transverse tool rim")
+        .clone();
+    let rounded_cut = cut.fillet(&[remote_edge], 2.0).expect("unrelated rim fillet");
+    check_partitions(&rounded_cut);
+    for edge in cut.edges() {
+        if let Some(unchanged) = rounded_cut
+            .edges()
+            .find(|candidate| candidate.persistent_id() == edge.persistent_id())
+        {
+            assert_eq!(
+                cut.is_semantic_edge(edge), rounded_cut.is_semantic_edge(unchanged),
+                "an unrelated fillet must not change existing edge visibility"
+            );
+        }
+    }
 }
 
 #[test]

@@ -78,6 +78,10 @@ function componentTriangleMeshes(component, maxDistance, maxAngle) {
 }
 
 function geometryTriangles(geometry, transform, maxDistance, maxAngle) {
+  if(window.kernel?.modeling?.id == 'shapex') {
+    return shapexGeometryTriangles(geometry, transform, maxDistance, maxAngle)
+  }
+
   const triangles = []
 
   // Export from an unmeshed geometry copy so these settings do not replace
@@ -98,6 +102,23 @@ function geometryTriangles(geometry, transform, maxDistance, maxAngle) {
   mesher.delete()
   shape.delete()
   copy.delete()
+  return triangles
+}
+
+function shapexGeometryTriangles(geometry, transform, maxDistance, maxAngle) {
+  const mesh = window.kernel.modeling.mesh(geometry, {
+    chordTolerance: maxDistance,
+    angularTolerance: maxAngle,
+  })
+  const positions = mesh.positions
+  const triangles = []
+  for(let offset = 0; offset < positions.length; offset += 9) {
+    triangles.push([0, 3, 6].map(index => new THREE.Vector3(
+      positions[offset + index],
+      positions[offset + index + 1],
+      positions[offset + index + 2],
+    ).applyMatrix4(transform)))
+  }
   return triangles
 }
 

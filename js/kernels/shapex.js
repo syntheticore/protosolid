@@ -240,6 +240,28 @@ export class ShapexBackend {
     unsupported('analytical splitting yet')
   }
 
+  halfCut(geometry, plane, side) {
+    const halfSize = 500
+    const height = 1000
+    const wire = this.api.Wire2.polygon([
+      this.api.Point2.new(-halfSize, -halfSize),
+      this.api.Point2.new(halfSize, -halfSize),
+      this.api.Point2.new(halfSize, halfSize),
+      this.api.Point2.new(-halfSize, halfSize),
+    ], this.tolerance)
+    const profile = this.api.Profile.new(wire, [], this.tolerance)
+    const { normal } = planeFrame(plane)
+    const cutter = profile.extrude(
+      this.plane(plane),
+      this.vector3(normal.multiplyScalar(side ? height : -height)),
+    )
+    try {
+      return new ShapexGeometry(geometryValue(geometry).difference(cutter))
+    } finally {
+      cutter.free()
+    }
+  }
+
   removeSolids(geometry, removed) {
     return new ShapexGeometry(
       geometryValue(geometry).withoutSolids(removed.map(shapexValue))
@@ -365,9 +387,16 @@ export class ShapexBackend {
     }
   }
 
-  mesh(raw) {
+  mesh(raw, options = {}) {
     const value = shapexValue(raw)
-    return meshFromShapex(value.tessellate(this.tessellationOptions))
+    const tessellationOptions = options.chordTolerance || options.angularTolerance || options.maximumDepth
+      ? this.api.TessellationOptions.new(
+        options.chordTolerance ?? LINEAR_TOLERANCE,
+        options.angularTolerance ?? ANGULAR_TOLERANCE,
+        options.maximumDepth ?? MAXIMUM_TESSELLATION_DEPTH,
+      )
+      : this.tessellationOptions
+    return meshFromShapex(value.tessellate(tessellationOptions))
   }
 
   edgePolyline(raw) {

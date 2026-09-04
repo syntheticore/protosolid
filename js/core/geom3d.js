@@ -1321,6 +1321,15 @@ export class Compound extends Volumetric {
 
   halfCut(plane, side, featureId) {
     if(!this.geom) return this
+    if(this.isShapex) {
+      try {
+        const geometry = window.kernel.modeling.halfCut(this.kernelGeometry, plane, side)
+        return new Compound(this.componentId, geometry)
+          .inheritShapexTopology([this], side ? 'split-left' : 'split-right', featureId)
+      } catch(error) {
+        throw new Error(`Shapex section view failed: ${error?.message || error}`)
+      }
+    }
     let box = new window.oc.oc.BRepPrimAPI_MakeBox_2(1000, 1000, side ? 1000 : -1000).Shape() //XXX determine bounding box automatically
     box = transformGeometry(box, new THREE.Matrix4().makeTranslation(-500, -500, 0).premultiply(plane)).Shape()
     const algo = new window.oc.oc.BRepAlgoAPI_Cut_3(this.geom(), box, new window.oc.oc.Message_ProgressRange_1())

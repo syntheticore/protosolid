@@ -410,6 +410,7 @@ impl NativeFace {
             Surface3::Nurbs(_) => "nurbs",
             Surface3::Offset(_) => "offset",
             Surface3::RollingBall(_) => "rolling-ball",
+            Surface3::Ruled(_) => "ruled",
         }
         .to_owned()
     }

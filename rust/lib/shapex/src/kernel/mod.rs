@@ -8,10 +8,10 @@
 mod arena;
 mod boolean;
 mod domain;
+mod edge_blend;
 mod error;
 mod euler;
 mod features;
-mod fillet;
 mod geometry;
 mod history;
 mod identity;
@@ -44,8 +44,9 @@ pub use euler::{
 };
 pub use geometry::{
     Axis3, Circle2, Circle3, Cone3, Curve2, Curve2Evaluation, Curve3, CurveEvaluation, Cylinder3,
-    Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3, OffsetSurface3, Plane3,
-    Projection1, Projection2, RevolvedSurface3, RollingBallSurface3, Sphere3, Surface3,
+    EdgeBlendSurface3, Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3,
+    OffsetSurface3, Plane3, Projection1, Projection2, RevolvedSurface3, RollingBallSurface3,
+    Sphere3, Surface3,
     SurfaceCurvature, SurfaceCurve3, SurfaceEvaluation, SurfaceIntersectionCurve,
     SurfaceProjectionPcurve2, Torus3,
 };

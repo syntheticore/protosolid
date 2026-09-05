@@ -9,6 +9,51 @@ use super::{
     Surface3, TessellationOptions, TrimmedCurve2, Wire2,
 };
 
+// Run both cross sections on the same source revision and selection. Keeping
+// these checks in the fillet fixtures prevents their supported domains drifting.
+trait CheckEdgeBlends {
+    fn check_edge_blends(
+        &self,
+        edges: &[super::EdgeHandle],
+        size: f64,
+    ) -> super::KernelResult<super::Compound>;
+    fn check_edge_blends_with_options(
+        &self,
+        edges: &[super::EdgeHandle],
+        options: FilletOptions,
+    ) -> super::KernelResult<super::Compound>;
+}
+impl CheckEdgeBlends for super::Compound {
+    fn check_edge_blends(
+        &self,
+        edges: &[super::EdgeHandle],
+        size: f64,
+    ) -> super::KernelResult<super::Compound> {
+        self.check_edge_blends_with_options(edges, FilletOptions::new(size))
+    }
+    fn check_edge_blends_with_options(
+        &self,
+        edges: &[super::EdgeHandle],
+        options: FilletOptions,
+    ) -> super::KernelResult<super::Compound> {
+        let fillet = self.fillet_with_options(edges, options)?;
+        let chamfer = self
+            .chamfer_with_tangent_propagation(edges, options.radius, options.follow_tangent_edges)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "chamfer counterpart of supported fillet ({} edges, size {}): {error}",
+                    edges.len(),
+                    options.radius
+                )
+            });
+        assert_eq!(chamfer.solids().len(), fillet.solids().len());
+        chamfer
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .expect("chamfer counterpart display mesh");
+        Ok(fillet)
+    }
+}
+
 fn certified_properties(kernel: &Kernel, body: BodyId) -> MassProperties {
     super::physical::certify_topology(kernel.topology(), kernel.tolerance())
         .expect("certified topology")[&body]
@@ -46,7 +91,9 @@ fn rolling_ball_fillet_rewrites_only_local_brep() {
         })
         .expect("vertical edge")
         .clone();
-    let filleted = cuboid.fillet(&[edge], 1.0).expect("rolling-ball fillet");
+    let filleted = cuboid
+        .check_edge_blends(&[edge], 1.0)
+        .expect("rolling-ball fillet");
     assert_eq!(filleted.faces().count(), cuboid.faces().count() + 1);
     assert!(filleted
         .faces()
@@ -61,7 +108,7 @@ fn rolling_ball_fillet_rewrites_only_local_brep() {
         .expect("fillet end edge")
         .clone();
     let end_points = end_edge.endpoints().expect("fillet end points");
-    let arc_result = filleted.fillet(&[end_edge.clone()], 0.5);
+    let arc_result = filleted.check_edge_blends(&[end_edge.clone()], 0.5);
     assert!(
         arc_result.is_ok(),
         "fillet generated end edge: {arc_result:?}"
@@ -83,7 +130,7 @@ fn rolling_ball_fillet_rewrites_only_local_brep() {
         .expect("straight edge tangent to the fillet end")
         .clone();
     let second = filleted
-        .fillet_with_options(
+        .check_edge_blends_with_options(
             &[tangent_edge],
             super::FilletOptions::new(0.25).with_tangent_propagation(false),
         )
@@ -102,7 +149,9 @@ fn rolling_ball_fillet_chain_certifies_at_application_scale() {
         })
         .expect("vertical edge")
         .clone();
-    let first = cuboid.fillet(&[edge], 2.0).expect("first fillet");
+    let first = cuboid
+        .check_edge_blends(&[edge], 2.0)
+        .expect("first fillet");
     let end_edge = first
         .edges()
         .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
@@ -130,7 +179,7 @@ fn rolling_ball_fillet_chain_certifies_at_application_scale() {
     );
     for (index, tangent_edge) in tangent_edges.into_iter().enumerate() {
         let second = first
-            .fillet(&[tangent_edge], 1.0)
+            .check_edge_blends(&[tangent_edge], 1.0)
             .expect("tangent continuation fillet");
         assert!(second.faces().count() > first.faces().count());
         second
@@ -167,15 +216,15 @@ fn rolling_ball_fillet_supports_three_consecutive_perimeter_operations() {
 
     let first_edge = top_edge_near(&cuboid, Point3::new(25.0, 0.0, 8.0), Vec3::unit_x());
     let first = cuboid
-        .fillet(&[first_edge], 2.0)
+        .check_edge_blends(&[first_edge], 2.0)
         .expect("first perimeter fillet");
     let second_edge = top_edge_near(&first, Point3::new(50.0, 12.5, 8.0), Vec3::unit_y());
     let second = first
-        .fillet(&[second_edge], 1.0)
+        .check_edge_blends(&[second_edge], 1.0)
         .expect("second perimeter fillet");
     let third_edge = top_edge_near(&second, Point3::new(25.0, 25.0, 8.0), Vec3::unit_x());
     second
-        .fillet(&[third_edge], 0.5)
+        .check_edge_blends(&[third_edge], 0.5)
         .expect("third perimeter fillet");
 }
 
@@ -192,7 +241,7 @@ fn rolling_ball_fillet_batches_disconnected_edges_transactionally() {
         .cloned()
         .collect::<Vec<_>>();
     let filleted = cuboid
-        .fillet(&edges, 1.0)
+        .check_edge_blends(&edges, 1.0)
         .expect("batched rolling-ball fillet");
     assert_eq!(filleted.faces().count(), cuboid.faces().count() + 2);
 }
@@ -213,7 +262,7 @@ fn rolling_ball_fillet_builds_exact_trihedral_vertex_transition() {
         .collect::<Vec<_>>();
     assert_eq!(edges.len(), 3);
     let filleted = cuboid
-        .fillet(&edges, 0.5)
+        .check_edge_blends(&edges, 0.5)
         .expect("trihedral rolling-ball fillet");
     assert!(filleted
         .faces()
@@ -446,14 +495,14 @@ fn rolling_ball_fillet_supports_closed_hole_rims() {
         .expect("top circular hole rim")
         .clone();
     let oversized = solid
-        .fillet(&[rim.clone()], 8.0)
+        .check_edge_blends(&[rim.clone()], 8.0)
         .expect_err("a circular-rim fillet must not overlap the body's outer boundary");
     assert!(
-        oversized.to_string().contains("fillet contact boundary"),
+        oversized.to_string().contains("blend contact boundary"),
         "unexpected oversized-fillet diagnostic: {oversized}",
     );
     let filleted = solid
-        .fillet(&[rim], 0.25)
+        .check_edge_blends(&[rim], 0.25)
         .expect("closed circular rim fillet");
     assert!(filleted.faces().count() > solid.faces().count());
     assert!(filleted
@@ -523,7 +572,7 @@ fn rolling_ball_fillet_orients_direct_and_post_boolean_hole_rims_consistently() 
     assert_eq!(rims.len(), 2, "both top hole rims must remain selectable");
 
     let filleted = cut
-        .fillet(&rims, 0.25)
+        .check_edge_blends(&rims, 0.25)
         .expect("fillet original and post-Boolean hole rims");
     let mut torus_faces = filleted
         .faces()
@@ -707,7 +756,7 @@ fn rolling_ball_fillet_certifies_curved_and_post_fillet_face_loops() {
         .expect("top circular-hole rim")
         .clone();
     solid
-        .fillet(&[top_circle], 0.5)
+        .check_edge_blends(&[top_circle], 0.5)
         .expect("circular-hole fillet on a curved multi-loop face");
 
     let rectangular_rim_edge = solid
@@ -724,7 +773,7 @@ fn rolling_ball_fillet_certifies_curved_and_post_fillet_face_loops() {
         .clone();
     for radius in [1.0, 2.0] {
         solid
-            .fillet(std::slice::from_ref(&rectangular_rim_edge), radius)
+            .check_edge_blends(std::slice::from_ref(&rectangular_rim_edge), radius)
             .expect("rectangular-hole fillet after changing its radius")
             .tessellate(
                 TessellationOptions::new(0.1, 0.1, 24).expect("application tessellation options"),
@@ -742,7 +791,7 @@ fn rolling_ball_fillet_certifies_curved_and_post_fillet_face_loops() {
         .expect("upper top perimeter edge")
         .clone();
     let first = solid
-        .fillet_with_options(
+        .check_edge_blends_with_options(
             &[upper_edge],
             FilletOptions::new(1.0).with_tangent_propagation(false),
         )
@@ -759,7 +808,7 @@ fn rolling_ball_fillet_certifies_curved_and_post_fillet_face_loops() {
         .expect("top rectangular-slot edge")
         .clone();
     first
-        .fillet_with_options(
+        .check_edge_blends_with_options(
             &[slot_edge],
             FilletOptions::new(0.5).with_tangent_propagation(false),
         )
@@ -826,7 +875,7 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
     let edge = top_rim[0].clone();
     for radius in [0.25, 0.5, 1.0] {
         let filleted = solid
-            .fillet(std::slice::from_ref(&edge), radius)
+            .check_edge_blends(std::slice::from_ref(&edge), radius)
             .expect("concave straight hole-edge fillet");
         for lower_edge in &lower_rim {
             assert!(
@@ -882,7 +931,7 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
         .clone();
     for follow_tangent_edges in [true, false] {
         let filleted = solid
-            .fillet_with_options(
+            .check_edge_blends_with_options(
                 std::slice::from_ref(&vertical),
                 FilletOptions::new(0.5).with_tangent_propagation(follow_tangent_edges),
             )
@@ -937,7 +986,7 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
             .expect("vertical hole-edge fillet display tessellation");
     }
     solid
-        .fillet(std::slice::from_ref(&vertical), 5.0)
+        .check_edge_blends(std::slice::from_ref(&vertical), 5.0)
         .expect_err("a vertical fillet must not cross the body boundary");
 
     let top_vertex = vertical
@@ -962,7 +1011,7 @@ fn rolling_ball_fillet_supports_concave_straight_hole_edges() {
     assert_eq!(trihedral.len(), 3, "three edges at the concave top corner");
     for radius in [0.5, 1.0] {
         let setback = solid
-            .fillet_with_options(
+            .check_edge_blends_with_options(
                 &trihedral,
                 FilletOptions::new(radius).with_tangent_propagation(false),
             )
@@ -1008,7 +1057,7 @@ fn rolling_ball_fillet_supports_a_boss_base_edge() {
         .clone();
 
     let filleted = joined
-        .fillet(std::slice::from_ref(&base_edge), 1.0)
+        .check_edge_blends(std::slice::from_ref(&base_edge), 1.0)
         .expect("boss-base fillet");
     assert_eq!(filleted.faces().count(), joined.faces().count() + 1);
     filleted
@@ -1031,7 +1080,7 @@ fn rolling_ball_fillet_supports_a_boss_base_edge() {
         .expect("vertical boss edge")
         .clone();
     let rounded_boss = joined
-        .fillet(std::slice::from_ref(&vertical), 5.0)
+        .check_edge_blends(std::slice::from_ref(&vertical), 5.0)
         .expect("vertical boss fillet");
     let modified_base_edge = match rounded_boss.resolve(&base_edge) {
         Resolution::Preserved(edge) | Resolution::Modified(edge) | Resolution::Merged(edge) => edge,
@@ -1039,7 +1088,7 @@ fn rolling_ball_fillet_supports_a_boss_base_edge() {
     };
     for radius in [1.0, 2.0, 3.0] {
         let final_shape = rounded_boss
-            .fillet(std::slice::from_ref(&modified_base_edge), radius)
+            .check_edge_blends(std::slice::from_ref(&modified_base_edge), radius)
             .unwrap_or_else(|error| {
                 panic!("{radius} mm boss-base fillet after vertical boss fillet: {error}")
             });
@@ -2540,7 +2589,8 @@ fn transverse_circle_joins_a_shelled_filleted_boss_in_both_directions() {
                 )
             {
                 assert_ne!(
-                    faces[0].surface(), faces[1].surface(),
+                    faces[0].surface(),
+                    faces[1].surface(),
                     "connected periodic patches must form one face"
                 );
             }
@@ -2556,7 +2606,9 @@ fn transverse_circle_joins_a_shelled_filleted_boss_in_both_directions() {
         })
         .expect("transverse tool rim")
         .clone();
-    let rounded_cut = cut.fillet(&[remote_edge], 2.0).expect("unrelated rim fillet");
+    let rounded_cut = cut
+        .fillet(&[remote_edge], 2.0)
+        .expect("unrelated rim fillet");
     check_partitions(&rounded_cut);
     for edge in cut.edges() {
         if let Some(unchanged) = rounded_cut
@@ -2564,7 +2616,8 @@ fn transverse_circle_joins_a_shelled_filleted_boss_in_both_directions() {
             .find(|candidate| candidate.persistent_id() == edge.persistent_id())
         {
             assert_eq!(
-                cut.is_semantic_edge(edge), rounded_cut.is_semantic_edge(unchanged),
+                cut.is_semantic_edge(edge),
+                rounded_cut.is_semantic_edge(unchanged),
                 "an unrelated fillet must not change existing edge visibility"
             );
         }
@@ -3123,4 +3176,135 @@ fn extrusion_exposes_semantic_creation_provenance() {
             .count(),
         4
     );
+}
+
+#[test]
+fn chamfer_setbacks_on_oblique_planes_and_trihedral_corners() {
+    let tolerance = ModelTolerance::default();
+    let profile = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(0.0, 0.0),
+                Point2::new(20.0, 0.0),
+                Point2::new(20.0, 20.0),
+                Point2::new(0.0, 20.0),
+            ],
+            tolerance,
+        )
+        .unwrap(),
+        [],
+        tolerance,
+    )
+    .unwrap();
+    let body = profile
+        .extrude(Plane3::xy(), Vec3::new(3.0, 2.0, 10.0))
+        .unwrap();
+    let corner = Point3::new(0.0, 0.0, 0.0);
+    let edges = body
+        .edges()
+        .filter(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .any(|point| point.distance(corner) < 1e-7)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for edge in &edges {
+        let result = body.chamfer(&[edge.clone()], 1.0).unwrap();
+        let source = edge.curve();
+        let new_face = result
+            .faces()
+            .find(|face| {
+                body.faces()
+                    .all(|old| old.persistent_id() != face.persistent_id())
+            })
+            .unwrap();
+        // The long contact boundaries stay exactly one unit from the source line.
+        let mut contacts = 0;
+        for boundary in new_face.boundary_edges().unwrap() {
+            let points = boundary.endpoints().unwrap();
+            let midpoint = Point3::from_vec((points[0].to_vec() + points[1].to_vec()) * 0.5);
+            if (source.project(midpoint, tolerance).unwrap().distance - 1.0).abs() < 1e-6 {
+                contacts += 1;
+            }
+        }
+        assert_eq!(contacts, 2);
+    }
+    body.check_edge_blends(&edges, 1.0)
+        .expect("oblique trihedral blends");
+}
+
+#[test]
+fn chamfer_planar_boundaries_are_visible_before_another_operation() {
+    let source = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(50.0, 25.0, 20.0));
+    let vertical = source
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|point| point.x.abs() < 1e-7 && point.y.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let rounded = source.fillet(&[vertical], 5.0).unwrap();
+    let top = rounded
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(_))
+                && edge
+                    .endpoints()
+                    .unwrap()
+                    .iter()
+                    .all(|point| (point.z - 20.0).abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let chamfered = rounded
+        .chamfer_with_tangent_propagation(&[top], 2.0, true)
+        .unwrap();
+    let boundaries = chamfered
+        .edges()
+        .filter(|edge| {
+            let faces = edge.connected_faces().unwrap();
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|point| point.z >= 18.0 - 1e-7)
+                && faces.len() == 2
+                && matches!((faces[0].surface(), faces[1].surface()),
+            (Surface3::Plane(first), Surface3::Plane(second))
+                if first.normal().cross(second.normal()).magnitude() > 1e-7)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(!boundaries.is_empty());
+    for edge in &boundaries {
+        assert!(
+            chamfered.is_semantic_edge(edge),
+            "sharp planar boundary hidden immediately after chamfer"
+        );
+    }
+    let bottom = chamfered
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(_))
+                && edge
+                    .endpoints()
+                    .unwrap()
+                    .iter()
+                    .all(|point| point.z.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let next = chamfered.fillet(&[bottom], 1.0).unwrap();
+    for edge in boundaries {
+        match next.resolve(&edge) {
+            Resolution::Preserved(edge) | Resolution::Modified(edge) => {
+                assert!(next.is_semantic_edge(&edge))
+            }
+            _ => panic!("subsequent bottom fillet lost a planar boundary"),
+        }
+    }
 }

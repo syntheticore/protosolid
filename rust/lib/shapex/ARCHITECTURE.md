@@ -101,8 +101,10 @@ The current publisher certifies:
   possible and exact revolved surfaces for other meridians;
 - smooth rational section lofts through line, circle, and NURBS profiles, with
   exact subdivision and degree elevation for section correspondence;
-- equal-distance chamfers of planar edges and cylinder/plane rims, and neutral
-  plane drafts of planar and pull-aligned cylindrical/conical faces;
+- local fillet/chamfer edge networks sharing propagation, contact trimming,
+  endpoint handling, topology rewriting, history, and validation; chamfers use
+  planes, cones, or exact ruled contact-rail surfaces instead of Boolean cutters;
+- neutral plane drafts of planar and pull-aligned cylindrical/conical faces;
 - plane splits retaining either or both sides, including disconnected solids;
 - rigid transforms of those bodies.
 
@@ -118,7 +120,8 @@ Before sewing, unmatched face boundaries are split at existing vertices on their
 exact curves so adjacent faces can share an edge despite different subdivisions.
 Boolean side probes use distances to retained curve intervals; coincident supports
 use oriented trims to determine material sides. These operations retain exact
-supports and curves, including when a chamfer cuts across earlier fillets. Periodic
+supports and curves. Edge blends likewise retain exact supports when trimming
+across earlier fillets. Periodic
 seam continuity and display bands use a consistent parameter chart, with retained
 seams selecting the intended sweep interval at and beyond a half turn.
 

@@ -1126,6 +1126,7 @@ fn surface_kind(surface: &super::Surface3) -> &'static str {
         super::Surface3::Nurbs(_) => "NURBS",
         super::Surface3::Offset(_) => "offset",
         super::Surface3::RollingBall(_) => "rolling-ball",
+        super::Surface3::Ruled(_) => "ruled",
     }
 }
 

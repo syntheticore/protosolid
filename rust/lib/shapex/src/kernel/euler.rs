@@ -4638,7 +4638,11 @@ impl<'kernel> EulerTransaction<'kernel> {
                     "edge does not contain the endpoint being retargeted",
                 )
             })?;
-        let projection = edge.curve.project(point, self.kernel.tolerance)?;
+        let mut projection = edge.curve.project(point, self.kernel.tolerance)?;
+        if let Some(period) = edge.curve.domain().period {
+            let reference = if endpoint == 0 { edge.range.start } else { edge.range.end };
+            projection.parameter += ((reference - projection.parameter) / period).round() * period;
+        }
         let allowed = self
             .kernel
             .tolerance

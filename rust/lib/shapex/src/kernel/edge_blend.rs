@@ -1,3 +1,6 @@
+//! Local edge treatments: shared discovery, trimming, junction topology and
+//! transactional publication for circular blends and ruled chamfers.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::prelude::*;
@@ -10,29 +13,46 @@ use super::topology::{Edge, Vertex};
 use super::validation::{validate, ValidationMode};
 use super::wire::{curve_loop_contains_point, curve_pair_intersection};
 use super::{
-    Circle2, Circle3, CoedgeId, Curve2, Curve3, Cylinder3, Diagnostic, DiagnosticKind,
+    Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, Diagnostic, DiagnosticKind,
     DomainBounds, EdgeId, FaceId, FaceOrientation, Frame3, IntersectionSet, KernelError,
-    KernelResult, Line2, ModelTolerance, ParameterRange, RevolvedSurface3, RollingBallSurface3,
-    Sphere3, Surface3, SurfaceCurve3, SurfaceIntersectionCurve, SurfaceProjectionPcurve2,
-    SurfaceSurfaceCurve, Torus3, TrimmedCurve2, VertexId,
+    KernelResult, Line2, ModelTolerance, ParameterRange, Plane3, RevolvedSurface3,
+    RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3, SurfaceIntersectionCurve,
+    SurfaceProjectionPcurve2, SurfaceSurfaceCurve, Torus3, TrimmedCurve2, VertexId,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EdgeBlendKind {
+    Fillet,
+    Chamfer,
+}
+
+impl EdgeBlendKind {
+    fn role(self, suffix: &str) -> String {
+        let name = match self {
+            Self::Fillet => "fillet",
+            Self::Chamfer => "chamfer",
+        };
+        format!("{name}.{suffix}")
+    }
+}
 
 fn signed_periodic_delta(start: f64, end: f64) -> f64 {
     (end - start + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
 }
 
 #[derive(Debug, Clone)]
-struct FilletEndpoint {
+struct BlendEndpoint {
     old_vertex: VertexId,
     terminating_face: FaceId,
     adjacent_uses: [CoedgeId; 2],
     contact_parameters: [f64; 2],
     contact_points: [Point3; 2],
     allow_adjacent_extension: [bool; 2],
+    cap: Option<(usize, Plane3)>,
 }
 
 #[derive(Debug, Clone)]
-struct FilletBoundary {
+struct BlendBoundary {
     curve: Curve3,
     parent_pcurve: Curve2,
     blend_pcurve: Curve2,
@@ -40,28 +60,29 @@ struct FilletBoundary {
 }
 
 #[derive(Debug, Clone)]
-struct FilletSpine {
+struct BlendSpine {
     edge_id: EdgeId,
     edge: Edge,
     uses: [CoedgeId; 2],
     faces: [FaceId; 2],
     parent_surfaces: [Surface3; 2],
     concave: bool,
+    offset: f64,
     center: SurfaceSurfaceCurve,
     endpoint_seeds: [f64; 2],
     provisional_range: ParameterRange,
 }
 
 #[derive(Debug, Clone)]
-struct FilletJunction {
+struct BlendJunction {
     faces: Vec<FaceId>,
     center: Point3,
     contact_points: BTreeMap<FaceId, Point3>,
-    kind: FilletJunctionKind,
+    kind: BlendJunctionKind,
 }
 
 #[derive(Debug, Clone)]
-enum FilletJunctionKind {
+enum BlendJunctionKind {
     RimCorner {
         carrier_face: FaceId,
         seam_edge: EdgeId,
@@ -77,34 +98,34 @@ enum FilletJunctionKind {
 }
 
 #[derive(Debug, Clone)]
-enum FilletPatchEnd {
-    Boundary(FilletEndpoint),
+enum BlendPatchEnd {
+    Boundary(BlendEndpoint),
     Junction(VertexId),
 }
 
 #[derive(Debug, Clone)]
-struct FilletPatch {
-    spine: FilletSpine,
-    ends: [FilletPatchEnd; 2],
+struct BlendPatch {
+    spine: BlendSpine,
+    ends: [BlendPatchEnd; 2],
     contact_parameters: [[f64; 2]; 2],
     contact_points: [[Point3; 2]; 2],
-    contact_boundaries: [FilletBoundary; 2],
-    end_boundaries: [FilletBoundary; 2],
+    contact_boundaries: [BlendBoundary; 2],
+    end_boundaries: [BlendBoundary; 2],
     blend_surface: Surface3,
-    blend_parameterization: FilletSurfaceParameterization,
+    blend_parameterization: BlendSurfaceParameterization,
 }
 
 /// Affine map from rolling coordinates `(center_parameter, blend_fraction)`
 /// into a selected support surface's native parameters.
 #[derive(Debug, Clone, Copy)]
-struct FilletSurfaceParameterization {
+struct BlendSurfaceParameterization {
     origin: Point2,
     center_direction: Vec2,
     blend_direction: Vec2,
 }
 
-impl FilletSurfaceParameterization {
-    const ROLLING_BALL: Self = Self {
+impl BlendSurfaceParameterization {
+    const CONTACT_RAILS: Self = Self {
         origin: Point2::new(0.0, 0.0),
         center_direction: Vec2::new(1.0, 0.0),
         blend_direction: Vec2::new(0.0, 1.0),
@@ -139,20 +160,22 @@ impl FilletSurfaceParameterization {
 }
 
 impl EulerTransaction<'_> {
-    pub(crate) fn fillet_edges(
+    pub(crate) fn blend_edges(
         &mut self,
         edges: &[EdgeId],
         radius: f64,
         follow_tangent_edges: bool,
+        kind: EdgeBlendKind,
     ) -> KernelResult<()> {
         let snapshot = self.working.clone();
         let history_snapshot = self.history.clone();
         let names_snapshot = self.names.clone();
         let touched_snapshot = self.touched_bodies.clone();
-        let result = self.fillet_network_unchecked(
+        let result = self.blend_network_unchecked(
             edges.iter().copied().collect(),
             radius,
             follow_tangent_edges,
+            kind,
         );
         let result = result.and_then(|_| {
             validate(
@@ -171,17 +194,18 @@ impl EulerTransaction<'_> {
         result
     }
 
-    fn fillet_network_unchecked(
+    fn blend_network_unchecked(
         &mut self,
         mut selected: BTreeSet<EdgeId>,
         radius: f64,
         follow_tangent_edges: bool,
+        kind: EdgeBlendKind,
     ) -> KernelResult<()> {
-        selected = self.subdivide_closed_fillet_edges(&selected)?;
-        let mut junction_kinds = BTreeMap::<VertexId, FilletJunctionKind>::new();
+        selected = self.subdivide_closed_blend_edges(&selected, kind)?;
+        let mut junction_kinds = BTreeMap::<VertexId, BlendJunctionKind>::new();
         let mut junction_sources = BTreeMap::<VertexId, EdgeId>::new();
-        let mut spines = BTreeMap::<EdgeId, FilletSpine>::new();
-        let mut regular_endpoints = BTreeMap::<(EdgeId, usize), Option<FilletEndpoint>>::new();
+        let mut spines = BTreeMap::<EdgeId, BlendSpine>::new();
+        let mut regular_endpoints = BTreeMap::<(EdgeId, usize), Option<BlendEndpoint>>::new();
         loop {
             let missing = selected
                 .iter()
@@ -189,7 +213,7 @@ impl EulerTransaction<'_> {
                 .filter(|edge| !spines.contains_key(edge))
                 .collect::<Vec<_>>();
             for edge in missing {
-                spines.insert(edge, self.prepare_fillet_spine(edge, radius)?);
+                spines.insert(edge, self.prepare_blend_spine(edge, radius, kind)?);
             }
             let mut additions = BTreeSet::new();
             for spine in spines.values() {
@@ -209,16 +233,16 @@ impl EulerTransaction<'_> {
                             self.tangent_chain_continuation(spine, endpoint_index)?
                         {
                             junction_kinds
-                                .insert(vertex, FilletJunctionKind::TangentChain { tangent_faces });
+                                .insert(vertex, BlendJunctionKind::TangentChain { tangent_faces });
                             junction_sources.insert(vertex, spine.edge_id);
                             additions.insert(continuation);
                             continue;
                         } else if let Some((seam_edge, continuation, tangent_faces)) =
-                            self.smooth_fillet_continuation(vertex, &selected)?
+                            self.smooth_blend_continuation(vertex, spine.edge_id, &selected)?
                         {
                             junction_kinds.insert(
                                 vertex,
-                                FilletJunctionKind::Smooth {
+                                BlendJunctionKind::Smooth {
                                     seam_edge,
                                     tangent_faces,
                                 },
@@ -229,7 +253,16 @@ impl EulerTransaction<'_> {
                         }
                     }
                     if selected_degree == 1 {
-                        let endpoint = self.prepare_fillet_endpoint(spine, endpoint_index)?;
+                        let endpoint = self.prepare_blend_endpoint(spine, endpoint_index).or_else(
+                            |error| {
+                                if kind == EdgeBlendKind::Chamfer {
+                                    self.prepare_capped_endpoint(spine, endpoint_index)
+                                        .map_err(|_| error)
+                                } else {
+                                    Err(error)
+                                }
+                            },
+                        )?;
                         regular_endpoints.insert((spine.edge_id, endpoint_index), Some(endpoint));
                         continue;
                     }
@@ -239,18 +272,18 @@ impl EulerTransaction<'_> {
                     {
                         if selected.contains(&continuation) {
                             junction_kinds
-                                .insert(vertex, FilletJunctionKind::TangentChain { tangent_faces });
+                                .insert(vertex, BlendJunctionKind::TangentChain { tangent_faces });
                             junction_sources.insert(vertex, spine.edge_id);
                             continue;
                         }
                     }
                     if let Some((seam_edge, continuation, tangent_faces)) =
-                        self.smooth_fillet_continuation(vertex, &selected)?
+                        self.smooth_blend_continuation(vertex, spine.edge_id, &selected)?
                     {
                         if selected.contains(&continuation) {
                             junction_kinds.insert(
                                 vertex,
-                                FilletJunctionKind::Smooth {
+                                BlendJunctionKind::Smooth {
                                     seam_edge,
                                     tangent_faces,
                                 },
@@ -265,7 +298,7 @@ impl EulerTransaction<'_> {
                         if selected.contains(&continuation) {
                             junction_kinds.insert(
                                 vertex,
-                                FilletJunctionKind::RimCorner {
+                                BlendJunctionKind::RimCorner {
                                     carrier_face,
                                     seam_edge,
                                 },
@@ -288,22 +321,22 @@ impl EulerTransaction<'_> {
                                 .fold(
                                     Diagnostic::new(
                                         DiagnosticKind::UnsupportedGeometry,
-                                        "mixed convex-concave three-edge fillets require a setback corner patch",
+                                        "mixed convex-concave three-edge blends require a setback corner patch",
                                     )
-                                    .with_operation("fillet.mixed-trihedral-setback"),
+                                    .with_operation("blend.mixed-trihedral-setback"),
                                     |diagnostic, edge| {
                                         diagnostic.with_entity(spines[edge].edge.name)
                                     },
                                 );
                             return Err(KernelError::from_diagnostic(diagnostic));
                         }
-                        junction_kinds.insert(vertex, FilletJunctionKind::Trihedral);
+                        junction_kinds.insert(vertex, BlendJunctionKind::Trihedral);
                         junction_sources.insert(vertex, spine.edge_id);
                         continue;
                     }
                     return Err(KernelError::new(
                         DiagnosticKind::UnsupportedGeometry,
-                        "selected fillet edges do not define a supported local corner transition",
+                        "selected blend edges do not define a supported local corner transition",
                     ));
                 }
             }
@@ -311,23 +344,23 @@ impl EulerTransaction<'_> {
             selected.extend(additions);
             if selected.len() == previous {
                 let mut junctions = BTreeMap::new();
-                for (vertex, kind) in &junction_kinds {
+                for (vertex, junction_kind) in &junction_kinds {
                     let spine = spines.get(&junction_sources[vertex]).ok_or_else(|| {
                         KernelError::new(
                             DiagnosticKind::TopologyInvariant,
-                            "fillet junction source edge was not retained",
+                            "blend junction source edge was not retained",
                         )
                     })?;
-                    if let FilletJunctionKind::Smooth {
+                    if let BlendJunctionKind::Smooth {
                         seam_edge,
                         tangent_faces,
-                    } = kind
+                    } = junction_kind
                     {
                         junctions.insert(
                             *vertex,
                             self.prepare_smooth_fillet_junction(
                                 *vertex,
-                                radius,
+                                spine.offset,
                                 *seam_edge,
                                 *tangent_faces,
                                 spine.concave,
@@ -343,10 +376,10 @@ impl EulerTransaction<'_> {
                         .ok_or_else(|| {
                             KernelError::new(
                                 DiagnosticKind::TopologyInvariant,
-                                "fillet network junction has no incident rolling patch",
+                                "blend network junction has no incident rolling patch",
                             )
                         })?;
-                    if let FilletJunctionKind::TangentChain { tangent_faces } = kind {
+                    if let BlendJunctionKind::TangentChain { tangent_faces } = junction_kind {
                         junctions.insert(
                             *vertex,
                             self.prepare_tangent_chain_junction(
@@ -357,17 +390,23 @@ impl EulerTransaction<'_> {
                         );
                         continue;
                     }
+                    if kind == EdgeBlendKind::Chamfer
+                        && matches!(junction_kind, BlendJunctionKind::Trihedral)
+                    {
+                        junctions.insert(*vertex, self.prepare_chamfer_junction(*vertex, &spines)?);
+                        continue;
+                    }
                     junctions.insert(
                         *vertex,
-                        match kind {
-                            FilletJunctionKind::RimCorner { .. } => {
-                                self.prepare_rim_corner_junction(*vertex, kind.clone())?
+                        match junction_kind {
+                            BlendJunctionKind::RimCorner { .. } => {
+                                self.prepare_rim_corner_junction(*vertex, junction_kind.clone())?
                             }
                             _ => self.prepare_fillet_junction(
                                 spine,
                                 endpoint_index,
-                                radius,
-                                kind.clone(),
+                                spine.offset,
+                                junction_kind.clone(),
                             )?,
                         },
                     );
@@ -375,7 +414,7 @@ impl EulerTransaction<'_> {
                 let junction_surfaces = junctions
                     .iter()
                     .filter_map(|(vertex, junction)| match junction.kind {
-                        FilletJunctionKind::Trihedral => Some((|| {
+                        BlendJunctionKind::Trihedral => Some((|| {
                             let radials = junction
                                 .faces
                                 .iter()
@@ -383,6 +422,20 @@ impl EulerTransaction<'_> {
                                     (junction.contact_points[face] - junction.center).normalize()
                                 })
                                 .collect::<Vec<_>>();
+                            if kind == EdgeBlendKind::Chamfer {
+                                let points = junction
+                                    .faces
+                                    .iter()
+                                    .map(|face| junction.contact_points[face])
+                                    .collect::<Vec<_>>();
+                                return Plane3::new(
+                                    points[0],
+                                    points[1] - points[0],
+                                    points[2] - points[0],
+                                    self.kernel.tolerance,
+                                )
+                                .map(|plane| (*vertex, Surface3::from(plane)));
+                            }
                             let polar = (radials[0]
                                 + radials[1] * std::f64::consts::SQRT_2
                                 + radials[2] * std::f64::consts::PI)
@@ -397,11 +450,11 @@ impl EulerTransaction<'_> {
                             )
                             .map(|sphere| (*vertex, Surface3::from(sphere)))
                         })()),
-                        FilletJunctionKind::RimCorner {
+                        BlendJunctionKind::RimCorner {
                             carrier_face,
                             seam_edge,
                         } => Some(
-                            self.rim_corner_surface(*vertex, carrier_face, seam_edge, radius)
+                            self.rim_corner_surface(*vertex, carrier_face, seam_edge, radius, kind)
                                 .map(|surface| (*vertex, surface)),
                         ),
                         _ => None,
@@ -410,22 +463,22 @@ impl EulerTransaction<'_> {
                 let patches = spines
                     .into_values()
                     .map(|spine| {
-                        self.prepare_fillet_patch(
+                        self.prepare_blend_patch(
                             spine,
                             &junctions,
                             &junction_surfaces,
                             &regular_endpoints,
-                            radius,
+                            kind,
                         )
                     })
                     .collect::<KernelResult<Vec<_>>>()?;
-                self.certify_fillet_contact_trims(&patches)?;
-                return self.rewrite_fillet_network(&patches, &junctions, &junction_surfaces);
+                self.certify_blend_contact_trims(&patches)?;
+                return self.rewrite_blend_network(&patches, &junctions, &junction_surfaces, kind);
             }
             if selected.len() > 256 {
                 return Err(KernelError::new(
                     DiagnosticKind::UnsupportedGeometry,
-                    "fillet transition propagation exceeded the connected regular edge network",
+                    "blend transition propagation exceeded the connected regular edge network",
                 ));
             }
         }
@@ -436,7 +489,7 @@ impl EulerTransaction<'_> {
     /// the seam and continuing onto the opposite rim.
     fn inner_rim_corner(
         &self,
-        spine: &FilletSpine,
+        spine: &BlendSpine,
         vertex: VertexId,
     ) -> KernelResult<Option<(EdgeId, FaceId, EdgeId)>> {
         let inner_uses = spine
@@ -477,13 +530,14 @@ impl EulerTransaction<'_> {
         Ok(Some((continuation, carrier_loop.face, seam_edge)))
     }
 
-    /// The fillet network represents rolling-patch joins at edge endpoints.
+    /// The blend network represents rolling-patch joins at edge endpoints.
     /// Published periodic edges correctly have one artificial seam vertex, so
     /// subdivide them only inside this transaction. The temporary arcs are all
-    /// selected and are consumed by the subsequent fillet rewrite.
-    fn subdivide_closed_fillet_edges(
+    /// selected and are consumed by the subsequent blend rewrite.
+    fn subdivide_closed_blend_edges(
         &mut self,
         selected: &BTreeSet<EdgeId>,
+        kind: EdgeBlendKind,
     ) -> KernelResult<BTreeSet<EdgeId>> {
         let mut result = BTreeSet::new();
         for edge_id in selected {
@@ -495,7 +549,7 @@ impl EulerTransaction<'_> {
             if edge.coedges.len() != 2 {
                 return Err(KernelError::new(
                     DiagnosticKind::TopologyInvariant,
-                    "a closed fillet edge must have exactly two face uses",
+                    "a closed blend edge must have exactly two face uses",
                 ));
             }
 
@@ -505,14 +559,14 @@ impl EulerTransaction<'_> {
             for part in 1..4 {
                 let parameter = edge.range.start + edge.range.span() * part as f64 / 4.0;
                 let point = edge.curve.evaluate(parameter)?.point;
-                let name = self.names.next_for("fillet.periodic-split.vertex")?;
+                let name = self.names.next_for(&kind.role("periodic-split.vertex"))?;
                 let vertex = self.working.vertices.insert(Vertex::new(
                     name,
                     point,
                     self.kernel.tolerance.linear,
                 ));
                 self.history
-                    .derived(name, [source_name], "fillet.periodic-split.vertex");
+                    .derived(name, [source_name], &kind.role("periodic-split.vertex"));
                 vertices.push(vertex);
             }
             vertices.push(seam);
@@ -533,7 +587,7 @@ impl EulerTransaction<'_> {
             }
             let mut arcs = vec![*edge_id];
             for part in 1..4 {
-                let name = self.names.next_for("fillet.periodic-split.edge")?;
+                let name = self.names.next_for(&kind.role("periodic-split.edge"))?;
                 let arc = self.make_edge(
                     name,
                     [vertices[part], vertices[part + 1]],
@@ -541,7 +595,7 @@ impl EulerTransaction<'_> {
                     ranges[part],
                 )?;
                 self.history
-                    .derived(name, [source_name], "fillet.periodic-split.edge");
+                    .derived(name, [source_name], &kind.role("periodic-split.edge"));
                 arcs.push(arc);
             }
 
@@ -554,7 +608,7 @@ impl EulerTransaction<'_> {
                 };
                 let mut uses = Vec::with_capacity(4);
                 for (part, arc) in traversal_arcs.into_iter().enumerate() {
-                    let name = self.names.next_for("fillet.periodic-split.use")?;
+                    let name = self.names.next_for(&kind.role("periodic-split.use"))?;
                     let range = ParameterRange::new(
                         old_use.range.start + old_use.range.span() * part as f64 / 4.0,
                         old_use.range.start + old_use.range.span() * (part + 1) as f64 / 4.0,
@@ -568,7 +622,7 @@ impl EulerTransaction<'_> {
                         range,
                     )?;
                     self.history
-                        .derived(name, [source_name], "fillet.periodic-split.use");
+                        .derived(name, [source_name], &kind.role("periodic-split.use"));
                     uses.push(use_id);
                 }
                 for index in 0..uses.len() {
@@ -617,13 +671,18 @@ impl EulerTransaction<'_> {
         Ok(result)
     }
 
-    fn prepare_fillet_spine(&self, edge_id: EdgeId, radius: f64) -> KernelResult<FilletSpine> {
+    fn prepare_blend_spine(
+        &self,
+        edge_id: EdgeId,
+        size: f64,
+        kind: EdgeBlendKind,
+    ) -> KernelResult<BlendSpine> {
         let tolerance = self.kernel.tolerance;
         let edge = self.working.edge(edge_id)?.clone();
         if edge.coedges.len() != 2 {
             return Err(KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "fillet requires a manifold edge with two face uses",
+                "blend requires a manifold edge with two face uses",
             ));
         }
         let uses = [edge.coedges[0], edge.coedges[1]];
@@ -638,7 +697,7 @@ impl EulerTransaction<'_> {
         if faces[0] == faces[1] {
             return Err(KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "fillet requires two distinct incident faces",
+                "blend requires two distinct incident faces",
             ));
         }
         let parent_surfaces = [
@@ -649,8 +708,31 @@ impl EulerTransaction<'_> {
             .curve
             .evaluate((edge.range.start + edge.range.end) * 0.5)?
             .point;
-        let concave =
-            self.fillet_edge_is_concave(&edge, uses, faces, &parent_surfaces, midpoint)?;
+        let concave = self.blend_edge_is_concave(&edge, uses, faces, &parent_surfaces, midpoint)?;
+        // Equal setbacks on planar supports correspond to r = d cot(theta/2),
+        // where theta is the angle between outward normals. Perpendicular rims
+        // retain r = d, including plane/cylinder tangent chains.
+        let radius = if kind == EdgeBlendKind::Chamfer {
+            let normals = (0..2)
+                .map(|index| {
+                    let uv = parent_surfaces[index]
+                        .project(midpoint, tolerance)?
+                        .parameters;
+                    let sign = if self.working.face(faces[index])?.orientation
+                        == FaceOrientation::Forward
+                    {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    Ok(parent_surfaces[index].normal(uv.0, uv.1)? * sign)
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            let cosine = normals[0].dot(normals[1]).clamp(-1.0, 1.0);
+            size * ((1.0 + cosine) / (1.0 - cosine)).sqrt()
+        } else {
+            size
+        };
         let offset_distance = |face: FaceId| -> KernelResult<f64> {
             let outward = match self.working.face(face)?.orientation {
                 FaceOrientation::Forward => radius,
@@ -673,7 +755,7 @@ impl EulerTransaction<'_> {
             Ok(IntersectionSet::Coincident) => {
                 return Err(KernelError::new(
                     DiagnosticKind::UnsupportedGeometry,
-                    "incident face offsets are coincident and do not define one fillet spine",
+                    "incident face offsets are coincident and do not define one blend spine",
                 ))
             }
             Err(_) => {
@@ -694,7 +776,7 @@ impl EulerTransaction<'_> {
             .ok_or_else(|| {
                 KernelError::new(
                     DiagnosticKind::NumericalFailure,
-                    "fillet could not select the local offset intersection branch",
+                    "blend could not select the local offset intersection branch",
                 )
             })?;
 
@@ -735,20 +817,21 @@ impl EulerTransaction<'_> {
                 endpoint_seeds[0].max(endpoint_seeds[1]) + seed_span,
             )?,
         };
-        Ok(FilletSpine {
+        Ok(BlendSpine {
             edge_id,
             edge,
             uses,
             faces,
             parent_surfaces,
             concave,
+            offset: radius,
             center,
             endpoint_seeds,
             provisional_range,
         })
     }
 
-    fn fillet_edge_is_concave(
+    fn blend_edge_is_concave(
         &self,
         edge: &Edge,
         uses: [CoedgeId; 2],
@@ -774,17 +857,84 @@ impl EulerTransaction<'_> {
         if signed_turn.abs() <= self.kernel.tolerance.angular {
             return Err(KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "fillet edge has no well-defined convex or concave dihedral",
+                "blend edge has no well-defined convex or concave dihedral",
             ));
         }
         Ok(signed_turn < 0.0)
     }
 
-    fn prepare_fillet_endpoint(
+    // A selected circular segment can stop before its tangent continuation.
+    // Its inset rail misses the unselected tangent edge; retain that endpoint
+    // and close the bevel with a transverse triangular face instead.
+    fn prepare_capped_endpoint(
         &self,
-        spine: &FilletSpine,
+        spine: &BlendSpine,
+        index: usize,
+    ) -> KernelResult<BlendEndpoint> {
+        let tolerance = self.kernel.tolerance;
+        let vertex = spine.edge.vertices[index];
+        let old_point = self.working.vertex(vertex)?.point;
+        let plane = Plane3::from_origin_normal(old_point, spine.edge.endpoint_tangent(index)?)?;
+        let terminating_face = self
+            .working
+            .vertex_faces(vertex)?
+            .into_iter()
+            .find(|face| !spine.faces.contains(face))
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "partial blend has no terminating face",
+                )
+            })?;
+        let parameter = spine.endpoint_seeds[index];
+        let mut points = [old_point; 2];
+        let mut uses = spine.uses;
+        let mut free = Vec::new();
+        for parent in 0..2 {
+            uses[parent] = self.adjacent_use_at_vertex(spine.uses[parent], vertex)?;
+            let uv = if parent == 0 {
+                &spine.center.first_pcurve
+            } else {
+                &spine.center.second_pcurve
+            }
+            .evaluate(parameter)?
+            .point;
+            points[parent] = spine.parent_surfaces[parent].evaluate(uv.x, uv.y)?.point;
+            let edge = self.working.edge(self.working.coedge(uses[parent])?.edge)?;
+            let projection = edge.curve.project(points[parent], tolerance)?;
+            if projection.distance > tolerance.linear_at_scale(old_point.to_vec().magnitude()) * 8.0
+            {
+                free.push(parent);
+            }
+        }
+        if free.len() != 1
+            || points.iter().any(|point| {
+                plane.project(*point).map_or(true, |projection| {
+                    projection.distance > tolerance.linear * 32.0
+                })
+            })
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "partial blend cannot close on a transverse end plane",
+            ));
+        }
+        Ok(BlendEndpoint {
+            old_vertex: vertex,
+            terminating_face,
+            adjacent_uses: uses,
+            contact_parameters: [parameter; 2],
+            contact_points: points,
+            allow_adjacent_extension: [false; 2],
+            cap: Some((free[0], plane)),
+        })
+    }
+
+    fn prepare_blend_endpoint(
+        &self,
+        spine: &BlendSpine,
         endpoint_index: usize,
-    ) -> KernelResult<FilletEndpoint> {
+    ) -> KernelResult<BlendEndpoint> {
         let tolerance = self.kernel.tolerance;
         let old_vertex = spine.edge.vertices[endpoint_index];
         let terminating_faces = self
@@ -796,7 +946,7 @@ impl EulerTransaction<'_> {
         if terminating_faces.len() != 1 {
             return Err(KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "a regular fillet endpoint must have one terminating face",
+                "a regular blend endpoint must have one terminating face",
             ));
         }
         let terminating_face = terminating_faces[0];
@@ -847,15 +997,21 @@ impl EulerTransaction<'_> {
                 .ok_or_else(|| {
                     KernelError::new(
                         DiagnosticKind::NumericalFailure,
-                        "fillet endpoint contact search found no local seed",
+                        "blend endpoint contact search found no local seed",
                     )
                 })?;
             let seed_point = contact_curve.evaluate(seed)?.point;
             let seed_allowed =
                 tolerance.linear_at_scale(seed_point.to_vec().magnitude().max(1.0)) * 8.0;
-            let (contact_parameter, rail_parameter, contact_point) = if rail_seed.distance
-                <= seed_allowed
-            {
+            let local_hit = contact_curve.intersect_curve_near(
+                &adjacent_edge.curve,
+                spine.endpoint_seeds[endpoint_index],
+                adjacent_seed,
+                tolerance,
+            );
+            let (contact_parameter, rail_parameter, contact_point) = if let Ok(hit) = local_hit {
+                (hit.first_parameter, hit.second_parameter, hit.point)
+            } else if rail_seed.distance <= seed_allowed {
                 (
                     seed,
                     rail_seed.parameter,
@@ -877,7 +1033,7 @@ impl EulerTransaction<'_> {
                         KernelError::new(
                             DiagnosticKind::NumericalFailure,
                             format!(
-                                "fillet endpoint {endpoint_index} contact {parent_index} cannot terminate on its adjacent exact edge (nearest distance {}): {error}",
+                                "blend endpoint {endpoint_index} contact {parent_index} cannot terminate on its adjacent exact edge (nearest distance {}): {error}",
                                 rail_seed.distance,
                             ),
                         )
@@ -892,26 +1048,85 @@ impl EulerTransaction<'_> {
         if spine.concave && allow_adjacent_extension.iter().all(|extension| *extension) {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
-                "fillet radius reaches beyond an adjacent boundary edge",
+                "blend radius reaches beyond an adjacent boundary edge",
             ));
         }
-        Ok(FilletEndpoint {
+        Ok(BlendEndpoint {
             old_vertex,
             terminating_face,
             adjacent_uses,
             contact_parameters,
             contact_points,
             allow_adjacent_extension,
+            cap: None,
+        })
+    }
+
+    fn prepare_chamfer_junction(
+        &self,
+        vertex: VertexId,
+        spines: &BTreeMap<EdgeId, BlendSpine>,
+    ) -> KernelResult<BlendJunction> {
+        let tolerance = self.kernel.tolerance;
+        let faces = self.working.vertex_faces(vertex)?;
+        let mut contact_points = BTreeMap::new();
+        for face in &faces {
+            let rails = spines
+                .values()
+                .filter(|spine| spine.edge.vertices.contains(&vertex) && spine.faces.contains(face))
+                .map(|spine| {
+                    let parent = usize::from(spine.faces[0] != *face);
+                    let endpoint = usize::from(spine.edge.vertices[0] != vertex);
+                    let pcurve = if parent == 0 {
+                        &spine.center.first_pcurve
+                    } else {
+                        &spine.center.second_pcurve
+                    };
+                    Ok((
+                        Curve3::from(SurfaceCurve3::new(
+                            spine.parent_surfaces[parent].clone(),
+                            pcurve.clone(),
+                            spine.provisional_range,
+                            tolerance,
+                        )?),
+                        spine.endpoint_seeds[endpoint],
+                    ))
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            if rails.len() != 2 {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "a chamfer corner needs two contact rails per parent face",
+                ));
+            }
+            let hit =
+                rails[0]
+                    .0
+                    .intersect_curve_near(&rails[1].0, rails[0].1, rails[1].1, tolerance)?;
+            contact_points.insert(*face, hit.point);
+        }
+        let center = Point3::from_vec(
+            contact_points
+                .values()
+                .map(|point| point.to_vec())
+                .fold(Vec3::new(0.0, 0.0, 0.0), |sum, point| sum + point)
+                / contact_points.len() as f64,
+        );
+        Ok(BlendJunction {
+            faces,
+            center,
+            contact_points,
+            kind: BlendJunctionKind::Trihedral,
         })
     }
 
     fn prepare_fillet_junction(
         &self,
-        spine: &FilletSpine,
+        spine: &BlendSpine,
         endpoint_index: usize,
         radius: f64,
-        kind: FilletJunctionKind,
-    ) -> KernelResult<FilletJunction> {
+        kind: BlendJunctionKind,
+    ) -> KernelResult<BlendJunction> {
         let tolerance = self.kernel.tolerance;
         let old_vertex = spine.edge.vertices[endpoint_index];
         let vertex_faces = self.working.vertex_faces(old_vertex)?;
@@ -928,7 +1143,7 @@ impl EulerTransaction<'_> {
             .ok_or_else(|| {
                 KernelError::new(
                     DiagnosticKind::TopologyInvariant,
-                    "fillet junction has no third incident face",
+                    "blend junction has no third incident face",
                 )
             })?;
         let third_surface = self.working.face(third_face)?.surface.clone();
@@ -978,11 +1193,11 @@ impl EulerTransaction<'_> {
             if (point.distance(hit.point) - radius).abs() > allowed {
                 return Err(KernelError::new(
                     DiagnosticKind::GeometryInvariant,
-                    "trihedral fillet contact is not at the requested rolling-ball radius",
+                    "trihedral blend contact is not at the requested rolling-ball radius",
                 ));
             }
         }
-        Ok(FilletJunction {
+        Ok(BlendJunction {
             faces: vec![spine.faces[0], spine.faces[1], third_face],
             center: hit.point,
             contact_points: BTreeMap::from([
@@ -997,9 +1212,9 @@ impl EulerTransaction<'_> {
     fn prepare_rim_corner_junction(
         &self,
         vertex: VertexId,
-        kind: FilletJunctionKind,
-    ) -> KernelResult<FilletJunction> {
-        let FilletJunctionKind::RimCorner {
+        kind: BlendJunctionKind,
+    ) -> KernelResult<BlendJunction> {
+        let BlendJunctionKind::RimCorner {
             carrier_face,
             seam_edge,
         } = kind
@@ -1018,11 +1233,11 @@ impl EulerTransaction<'_> {
         }
         self.working.face(carrier_face)?;
         self.working.edge(seam_edge)?;
-        Ok(FilletJunction {
+        Ok(BlendJunction {
             faces,
             center: self.working.vertex(vertex)?.point,
             contact_points: BTreeMap::new(),
-            kind: FilletJunctionKind::RimCorner {
+            kind: BlendJunctionKind::RimCorner {
                 carrier_face,
                 seam_edge,
             },
@@ -1035,6 +1250,7 @@ impl EulerTransaction<'_> {
         carrier_face: FaceId,
         seam_edge: EdgeId,
         radius: f64,
+        kind: EdgeBlendKind,
     ) -> KernelResult<Surface3> {
         let tolerance = self.kernel.tolerance;
         let point = self.working.vertex(vertex)?.point;
@@ -1073,7 +1289,17 @@ impl EulerTransaction<'_> {
         }
         let singular = point - outward * radius;
         let frame = Frame3::from_z(singular, outward)?;
-        let profile: Curve2 = Circle2::new(Point2::new(radius, 0.0), radius)?.into();
+        let profile: Curve2 = if kind == EdgeBlendKind::Chamfer {
+            // Keep the shared rim parameter interval and its singular endpoint.
+            let span = std::f64::consts::FRAC_PI_2;
+            Line2::new(
+                Point2::new(2.0 * radius, 2.0 * radius),
+                Vec2::new(-radius / span, -radius / span),
+            )?
+            .into()
+        } else {
+            Circle2::new(Point2::new(radius, 0.0), radius)?.into()
+        };
         RevolvedSurface3::new(
             frame,
             profile,
@@ -1090,13 +1316,13 @@ impl EulerTransaction<'_> {
         seam_edge: EdgeId,
         tangent_faces: [FaceId; 2],
         concave: bool,
-    ) -> KernelResult<FilletJunction> {
+    ) -> KernelResult<BlendJunction> {
         let tolerance = self.kernel.tolerance;
         let vertex_faces = self.working.vertex_faces(vertex)?;
         if vertex_faces.len() != 3 || self.working.vertex_edges(vertex)?.len() != 3 {
             return Err(KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "a smooth fillet transition requires a regular valence-three BREP vertex",
+                "a smooth blend transition requires a regular valence-three BREP vertex",
             ));
         }
         let common_face = vertex_faces
@@ -1106,7 +1332,7 @@ impl EulerTransaction<'_> {
             .ok_or_else(|| {
                 KernelError::new(
                     DiagnosticKind::TopologyInvariant,
-                    "smooth fillet transition has no common incident face",
+                    "smooth blend transition has no common incident face",
                 )
             })?;
         let seam = self.working.edge(seam_edge)?.clone();
@@ -1117,7 +1343,7 @@ impl EulerTransaction<'_> {
         } else {
             return Err(KernelError::new(
                 DiagnosticKind::TopologyInvariant,
-                "smooth fillet seam is not incident to its junction vertex",
+                "smooth blend seam is not incident to its junction vertex",
             ));
         };
         let tangent_face = tangent_faces[0];
@@ -1136,7 +1362,7 @@ impl EulerTransaction<'_> {
             .ok_or_else(|| {
                 KernelError::new(
                     DiagnosticKind::TopologyInvariant,
-                    "smooth fillet seam has no use on its tangent support",
+                    "smooth blend seam has no use on its tangent support",
                 )
             })?;
         let seam_pcurve = self.working.coedge(tangent_use)?.pcurve.clone();
@@ -1177,7 +1403,7 @@ impl EulerTransaction<'_> {
             {
                 return Err(KernelError::new(
                     DiagnosticKind::GeometryInvariant,
-                    "smooth fillet seam reached a singular tangent support",
+                    "smooth blend seam reached a singular tangent support",
                 ));
             }
             let normal = cross / magnitude;
@@ -1261,7 +1487,7 @@ impl EulerTransaction<'_> {
         let (center, seam_contact, common_parameters) = solution.ok_or_else(|| {
             KernelError::new(
                 DiagnosticKind::NumericalFailure,
-                "exact smooth fillet junction correction did not converge",
+                "exact smooth blend junction correction did not converge",
             )
         })?;
         let common_contact = common_surface
@@ -1273,11 +1499,11 @@ impl EulerTransaction<'_> {
             if (contact.distance(center) - radius).abs() > allowed {
                 return Err(KernelError::new(
                     DiagnosticKind::GeometryInvariant,
-                    "smooth fillet junction contact is not at the requested rolling-ball radius",
+                    "smooth blend junction contact is not at the requested rolling-ball radius",
                 ));
             }
         }
-        Ok(FilletJunction {
+        Ok(BlendJunction {
             faces: vec![tangent_faces[0], tangent_faces[1], common_face],
             center,
             contact_points: BTreeMap::from([
@@ -1285,7 +1511,7 @@ impl EulerTransaction<'_> {
                 (tangent_faces[1], seam_contact),
                 (common_face, common_contact),
             ]),
-            kind: FilletJunctionKind::Smooth {
+            kind: BlendJunctionKind::Smooth {
                 seam_edge,
                 tangent_faces,
             },
@@ -1294,10 +1520,10 @@ impl EulerTransaction<'_> {
 
     fn prepare_tangent_chain_junction(
         &self,
-        spine: &FilletSpine,
+        spine: &BlendSpine,
         endpoint_index: usize,
         tangent_faces: [FaceId; 2],
-    ) -> KernelResult<FilletJunction> {
+    ) -> KernelResult<BlendJunction> {
         let tolerance = self.kernel.tolerance;
         let old_vertex = spine.edge.vertices[endpoint_index];
         let old_point = self.working.vertex(old_vertex)?.point;
@@ -1321,17 +1547,17 @@ impl EulerTransaction<'_> {
                 .point;
             contact_points.insert(spine.faces[parent_index], point);
         }
-        Ok(FilletJunction {
+        Ok(BlendJunction {
             faces: tangent_faces.to_vec(),
             center,
             contact_points,
-            kind: FilletJunctionKind::TangentChain { tangent_faces },
+            kind: BlendJunctionKind::TangentChain { tangent_faces },
         })
     }
 
     fn tangent_chain_continuation(
         &self,
-        spine: &FilletSpine,
+        spine: &BlendSpine,
         endpoint_index: usize,
     ) -> KernelResult<Option<(EdgeId, [FaceId; 2])>> {
         let vertex = spine.edge.vertices[endpoint_index];
@@ -1409,16 +1635,17 @@ impl EulerTransaction<'_> {
             if continuation.replace(candidate_id).is_some() {
                 return Err(KernelError::new(
                     DiagnosticKind::UnsupportedGeometry,
-                    "a fillet tangent chain branches at one topological vertex",
+                    "a blend tangent chain branches at one topological vertex",
                 ));
             }
         }
         Ok(continuation.map(|edge| (edge, spine.faces)))
     }
 
-    fn smooth_fillet_continuation(
+    fn smooth_blend_continuation(
         &self,
         vertex: VertexId,
+        current_edge: EdgeId,
         selected: &BTreeSet<EdgeId>,
     ) -> KernelResult<Option<(EdgeId, EdgeId, [FaceId; 2])>> {
         let point = self.working.vertex(vertex)?.point;
@@ -1452,7 +1679,7 @@ impl EulerTransaction<'_> {
             let continuation = incident
                 .iter()
                 .copied()
-                .find(|edge| *edge != seam && !selected.contains(edge));
+                .find(|edge| *edge != seam && *edge != current_edge);
             if let Some(continuation) = continuation {
                 return Ok(Some((seam, continuation, [faces[0], faces[1]])));
             }
@@ -1460,12 +1687,100 @@ impl EulerTransaction<'_> {
         Ok(None)
     }
 
+    fn chamfer_surface(
+        &self,
+        spine: &BlendSpine,
+        range: ParameterRange,
+    ) -> KernelResult<(Surface3, BlendSurfaceParameterization)> {
+        let tolerance = self.kernel.tolerance;
+        let contact = |index: usize, parameter: f64| -> KernelResult<Point3> {
+            let uv = if index == 0 {
+                &spine.center.first_pcurve
+            } else {
+                &spine.center.second_pcurve
+            }
+            .evaluate(parameter)?
+            .point;
+            Ok(spine.parent_surfaces[index].evaluate(uv.x, uv.y)?.point)
+        };
+        let t = (range.start + range.end) * 0.5;
+        let first = contact(0, t)?;
+        let second = contact(1, t)?;
+        if spine
+            .parent_surfaces
+            .iter()
+            .all(|surface| matches!(surface, Surface3::Plane(_)))
+        {
+            if let Curve3::Line(line) = &spine.center.curve {
+                let plane = Plane3::new(first, line.direction(), second - first, tolerance)?;
+                let origin = plane.project(contact(0, t - 1.0)?)?.parameters;
+                let middle = plane.project(first)?.parameters;
+                let end = plane.project(second)?.parameters;
+                let direction = Vec2::new(middle.0 - origin.0, middle.1 - origin.1);
+                return Ok((
+                    plane.into(),
+                    BlendSurfaceParameterization {
+                        origin: Point2::new(middle.0, middle.1) - direction * t,
+                        center_direction: direction,
+                        blend_direction: Vec2::new(end.0 - middle.0, end.1 - middle.1),
+                    },
+                ));
+            }
+        }
+        if matches!(
+            spine.parent_surfaces,
+            [Surface3::Plane(_), Surface3::Cylinder(_)]
+                | [Surface3::Cylinder(_), Surface3::Plane(_)]
+        ) {
+            if let Curve3::Circle(circle) = &spine.center.curve {
+                let radial = (circle.evaluate(t)?.point - circle.center()).normalize();
+                let normal = circle.normal();
+                let r0 = (first - circle.center()).dot(radial);
+                let r1 = (second - circle.center()).dot(radial);
+                let z0 = (first - circle.center()).dot(normal);
+                let z1 = (second - circle.center()).dot(normal);
+                let dz_dr = (z1 - z0) / (r1 - r0);
+                let apex = circle.center() + normal * (z0 - r0 * dz_dr);
+                let cone = Cone3::new(
+                    apex,
+                    normal * dz_dr,
+                    circle.x_radius().normalize(),
+                    circle.y_radius().normalize(),
+                    tolerance,
+                )?;
+                return Ok((
+                    cone.into(),
+                    BlendSurfaceParameterization {
+                        origin: Point2::new(0.0, r0),
+                        center_direction: Vec2::new(1.0, 0.0),
+                        blend_direction: Vec2::new(0.0, r1 - r0),
+                    },
+                ));
+            }
+        }
+        Ok((
+            RollingBallSurface3::new(
+                spine.center.curve.clone(),
+                spine.parent_surfaces[0].clone(),
+                spine.parent_surfaces[1].clone(),
+                spine.center.first_pcurve.clone(),
+                spine.center.second_pcurve.clone(),
+                range,
+                spine.offset,
+                tolerance,
+            )?
+            .into_ruled()
+            .into(),
+            BlendSurfaceParameterization::CONTACT_RAILS,
+        ))
+    }
+
     fn most_implicit_fillet_surface(
         &self,
-        spine: &FilletSpine,
+        spine: &BlendSpine,
         center_range: ParameterRange,
         radius: f64,
-    ) -> KernelResult<(Surface3, FilletSurfaceParameterization)> {
+    ) -> KernelResult<(Surface3, BlendSurfaceParameterization)> {
         let tolerance = self.kernel.tolerance;
         if matches!(
             spine.parent_surfaces,
@@ -1505,7 +1820,7 @@ impl EulerTransaction<'_> {
                             tolerance,
                         )?
                         .into();
-                        let parameterization = FilletSurfaceParameterization {
+                        let parameterization = BlendSurfaceParameterization {
                             origin: Point2::new(0.0, 0.0),
                             center_direction: Vec2::new(0.0, 1.0),
                             blend_direction: Vec2::new(angle, 0.0),
@@ -1556,7 +1871,7 @@ impl EulerTransaction<'_> {
                     && delta.abs() > tolerance.angular
                     && std::f64::consts::PI - delta.abs() > tolerance.angular
                 {
-                    let parameterization = FilletSurfaceParameterization {
+                    let parameterization = BlendSurfaceParameterization {
                         origin: Point2::new(0.0, angles[0]),
                         center_direction: Vec2::new(1.0, 0.0),
                         blend_direction: Vec2::new(0.0, delta),
@@ -1613,16 +1928,16 @@ impl EulerTransaction<'_> {
                 tolerance,
             )?
             .into(),
-            FilletSurfaceParameterization::ROLLING_BALL,
+            BlendSurfaceParameterization::CONTACT_RAILS,
         ))
     }
 
     fn fillet_surface_matches(
         &self,
-        spine: &FilletSpine,
+        spine: &BlendSpine,
         center_range: ParameterRange,
         surface: &Surface3,
-        parameterization: FilletSurfaceParameterization,
+        parameterization: BlendSurfaceParameterization,
         radius: f64,
     ) -> KernelResult<bool> {
         for sample in 0..=2 {
@@ -1665,7 +1980,7 @@ impl EulerTransaction<'_> {
         terminating_surface: &Surface3,
         blend_guide: &Curve2,
         contact_points: [Point3; 2],
-    ) -> KernelResult<Option<FilletBoundary>> {
+    ) -> KernelResult<Option<BlendBoundary>> {
         let tolerance = self.kernel.tolerance;
         let IntersectionSet::Isolated(candidates) =
             (match blend_surface.intersect_surface(terminating_surface, tolerance) {
@@ -1716,7 +2031,7 @@ impl EulerTransaction<'_> {
         let Ok(range) = ParameterRange::new(first.parameter, second.parameter) else {
             return Ok(None);
         };
-        Ok(Some(FilletBoundary {
+        Ok(Some(BlendBoundary {
             curve: candidate.curve,
             parent_pcurve: candidate.second_pcurve,
             blend_pcurve: candidate.first_pcurve,
@@ -1724,14 +2039,115 @@ impl EulerTransaction<'_> {
         }))
     }
 
-    fn prepare_fillet_patch(
+    fn prepare_end_boundary(
         &self,
-        spine: FilletSpine,
-        junctions: &BTreeMap<VertexId, FilletJunction>,
+        blend_surface: &Surface3,
+        terminating_surface: Surface3,
+        blend_pcurve: Curve2,
+        contact_points: [Point3; 2],
+        reference: Point2,
+    ) -> KernelResult<BlendBoundary> {
+        let tolerance = self.kernel.tolerance;
+        let unit = ParameterRange::new(0.0, 1.0)?;
+        if let Some(boundary) = self.implicit_end_boundary(
+            blend_surface,
+            &terminating_surface,
+            &blend_pcurve,
+            contact_points,
+        )? {
+            return Ok(boundary);
+        }
+        let mut guide_parameters = Vec::with_capacity(65);
+        let mut blend_parameters: Vec<Point2> = Vec::with_capacity(65);
+        let mut parent_parameters: Vec<Point2> = Vec::with_capacity(65);
+        for index in 0..=64 {
+            let parameter = 0.5 - 0.5 * (std::f64::consts::PI * index as f64 / 64.0).cos();
+            guide_parameters.push(parameter);
+            let blend_uv = blend_pcurve.evaluate(parameter)?.point;
+            let point = blend_surface.evaluate(blend_uv.x, blend_uv.y)?.point;
+            let projected = terminating_surface.project(point, tolerance)?;
+            let seed = [
+                blend_uv.x,
+                blend_uv.y,
+                projected.parameters.0,
+                projected.parameters.1,
+            ];
+            let corrected = match super::intersection::correct_surface_pair_near(
+                blend_surface,
+                &terminating_surface,
+                seed,
+                tolerance,
+            ) {
+                Ok(corrected) => corrected,
+                Err(_) if index == 0 || index == 64 => seed,
+                Err(error) => {
+                    return Err(KernelError::new(
+                        DiagnosticKind::NumericalFailure,
+                        format!(
+                            "blend end-boundary guide correction failed at sample {index}: {error}"
+                        ),
+                    ))
+                }
+            };
+            let lift = |mut uv: Point2, near: Point2, surface: &Surface3| {
+                let domains = surface.domains();
+                if let Some(period) = domains[0].period {
+                    uv.x += ((near.x - uv.x) / period).round() * period;
+                }
+                if let Some(period) = domains[1].period {
+                    uv.y += ((near.y - uv.y) / period).round() * period;
+                }
+                uv
+            };
+            blend_parameters.push(lift(
+                Point2::new(corrected[0], corrected[1]),
+                blend_parameters.last().copied().unwrap_or(blend_uv),
+                blend_surface,
+            ));
+            parent_parameters.push(lift(
+                Point2::new(corrected[2], corrected[3]),
+                parent_parameters.last().copied().unwrap_or(reference),
+                &terminating_surface,
+            ));
+        }
+        let blend_guide: Curve2 =
+            super::intersection::interpolating_nurbs_guide(&blend_parameters, &guide_parameters)?
+                .into();
+        let parent_guide: Curve2 =
+            super::intersection::interpolating_nurbs_guide(&parent_parameters, &guide_parameters)?
+                .into();
+        let intersection = SurfaceIntersectionCurve::new(
+            (*blend_surface).clone(),
+            terminating_surface,
+            blend_guide,
+            parent_guide,
+            unit,
+            tolerance,
+            tolerance.linear,
+        )
+        .map_err(|error| {
+            KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                format!("blend end boundary exact intersection failed: {error}"),
+            )
+        })?;
+        let exact = intersection.exact_pcurves();
+        Ok(BlendBoundary {
+            curve: intersection.into(),
+            parent_pcurve: exact[1].clone(),
+            blend_pcurve: exact[0].clone(),
+            range: unit,
+        })
+    }
+
+    fn prepare_blend_patch(
+        &self,
+        spine: BlendSpine,
+        junctions: &BTreeMap<VertexId, BlendJunction>,
         junction_surfaces: &BTreeMap<VertexId, Surface3>,
-        regular_endpoints: &BTreeMap<(EdgeId, usize), Option<FilletEndpoint>>,
-        radius: f64,
-    ) -> KernelResult<FilletPatch> {
+        regular_endpoints: &BTreeMap<(EdgeId, usize), Option<BlendEndpoint>>,
+        kind: EdgeBlendKind,
+    ) -> KernelResult<BlendPatch> {
         let tolerance = self.kernel.tolerance;
         let mut ends = Vec::with_capacity(2);
         let mut contact_parameters = [[0.0; 2]; 2];
@@ -1739,7 +2155,7 @@ impl EulerTransaction<'_> {
         for endpoint_index in 0..2 {
             let vertex = spine.edge.vertices[endpoint_index];
             if let Some(junction) = junctions.get(&vertex) {
-                if matches!(junction.kind, FilletJunctionKind::RimCorner { .. }) {
+                if matches!(junction.kind, BlendJunctionKind::RimCorner { .. }) {
                     let parameter = spine.endpoint_seeds[endpoint_index];
                     for parent_index in 0..2 {
                         let uv = if parent_index == 0 {
@@ -1753,7 +2169,38 @@ impl EulerTransaction<'_> {
                             .evaluate(uv.x, uv.y)?
                             .point;
                     }
-                    ends.push(FilletPatchEnd::Junction(vertex));
+                    ends.push(BlendPatchEnd::Junction(vertex));
+                    continue;
+                }
+                if kind == EdgeBlendKind::Chamfer
+                    && matches!(junction.kind, BlendJunctionKind::Trihedral)
+                {
+                    for parent in 0..2 {
+                        let point = junction.contact_points[&spine.faces[parent]];
+                        let pcurve = if parent == 0 {
+                            &spine.center.first_pcurve
+                        } else {
+                            &spine.center.second_pcurve
+                        };
+                        let rail = Curve3::from(SurfaceCurve3::new(
+                            spine.parent_surfaces[parent].clone(),
+                            pcurve.clone(),
+                            spine.provisional_range,
+                            tolerance,
+                        )?);
+                        let projection = rail.project(point, tolerance)?;
+                        if projection.distance
+                            > tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0
+                        {
+                            return Err(KernelError::new(
+                                DiagnosticKind::GeometryInvariant,
+                                "chamfer corner misses its incident contact rail",
+                            ));
+                        }
+                        contact_parameters[endpoint_index][parent] = projection.parameter;
+                        contact_points[endpoint_index][parent] = point;
+                    }
+                    ends.push(BlendPatchEnd::Junction(vertex));
                     continue;
                 }
                 let projected = spine
@@ -1779,7 +2226,7 @@ impl EulerTransaction<'_> {
                 if achieved > allowed {
                     return Err(KernelError::new(
                         DiagnosticKind::GeometryInvariant,
-                        "fillet junction center does not lie on every incident offset intersection",
+                        "blend junction center does not lie on every incident offset intersection",
                     ));
                 }
                 for parent_index in 0..2 {
@@ -1790,11 +2237,11 @@ impl EulerTransaction<'_> {
                         .ok_or_else(|| {
                             KernelError::new(
                                 DiagnosticKind::TopologyInvariant,
-                                "fillet junction lost an incident face contact",
+                                "blend junction lost an incident face contact",
                             )
                         })?;
                 }
-                ends.push(FilletPatchEnd::Junction(vertex));
+                ends.push(BlendPatchEnd::Junction(vertex));
             } else {
                 let endpoint = regular_endpoints
                     .get(&(spine.edge_id, endpoint_index))
@@ -1802,12 +2249,12 @@ impl EulerTransaction<'_> {
                     .ok_or_else(|| {
                         KernelError::new(
                             DiagnosticKind::TopologyInvariant,
-                            "regular fillet endpoint was not retained during network discovery",
+                            "regular blend endpoint was not retained during network discovery",
                         )
                     })?;
                 contact_parameters[endpoint_index] = endpoint.contact_parameters;
                 contact_points[endpoint_index] = endpoint.contact_points;
-                ends.push(FilletPatchEnd::Boundary(endpoint));
+                ends.push(BlendPatchEnd::Boundary(endpoint));
             }
         }
         let minimum = contact_parameters
@@ -1820,24 +2267,27 @@ impl EulerTransaction<'_> {
             .fold(f64::NEG_INFINITY, f64::max);
         let center_domain = spine.center.curve.domain();
         let blend_support_range = match center_domain.bounds {
-            _ if center_domain.period.is_some() => ParameterRange::new(minimum, maximum).map_err(
-                |_| {
+            _ if center_domain.period.is_some() => {
+                ParameterRange::new(minimum, maximum).map_err(|_| {
                     KernelError::new(
                         DiagnosticKind::GeometryInvariant,
                         format!(
-                            "fillet rolling support collapsed to zero span ({minimum} to {maximum})",
+                            "blend rolling support collapsed to zero span ({minimum} to {maximum})",
                         ),
                     )
-                },
-            )?,
+                })?
+            }
             DomainBounds::Bounded(range) => range,
             _ => {
                 let span = (maximum - minimum).abs().max(1.0);
                 ParameterRange::new(minimum - span, maximum + span)?
             }
         };
-        let (blend_surface, blend_parameterization) =
-            self.most_implicit_fillet_surface(&spine, blend_support_range, radius)?;
+        let (blend_surface, blend_parameterization) = if kind == EdgeBlendKind::Chamfer {
+            self.chamfer_surface(&spine, blend_support_range)?
+        } else {
+            self.most_implicit_fillet_surface(&spine, blend_support_range, spine.offset)?
+        };
         let contact_boundaries = (0..2)
             .map(|parent_index| {
                 let range = ParameterRange::new(
@@ -1848,7 +2298,7 @@ impl EulerTransaction<'_> {
                     KernelError::new(
                         DiagnosticKind::GeometryInvariant,
                         format!(
-                            "fillet contact boundary {parent_index} collapsed to zero span ({} to {})",
+                            "blend contact boundary {parent_index} collapsed to zero span ({} to {})",
                             contact_parameters[0][parent_index],
                             contact_parameters[1][parent_index],
                         ),
@@ -1860,7 +2310,7 @@ impl EulerTransaction<'_> {
                     spine.center.second_pcurve.clone()
                 };
                 let blend_pcurve = blend_parameterization.contact_pcurve(parent_index)?;
-                Ok(FilletBoundary {
+                Ok(BlendBoundary {
                     curve: SurfaceCurve3::new(
                         spine.parent_surfaces[parent_index].clone(),
                         parent_pcurve.clone(),
@@ -1887,95 +2337,75 @@ impl EulerTransaction<'_> {
                     contact_parameters[endpoint_index][1],
                 )?;
                 match &ends[endpoint_index] {
-                    FilletPatchEnd::Boundary(endpoint) => {
-                        let terminating_surface = self
+                    BlendPatchEnd::Boundary(endpoint) => {
+                        let terminating_surface = match endpoint.cap {
+                            Some((_, plane)) => Surface3::from(plane),
+                            None => self
+                                .working
+                                .face(endpoint.terminating_face)?
+                                .surface
+                                .clone(),
+                        };
+                        let adjacent_edge = self.working.coedge(endpoint.adjacent_uses[0])?.edge;
+                        let (terminating_id, terminating_use) = self
                             .working
-                            .face(endpoint.terminating_face)?
-                            .surface
-                            .clone();
-                        if let Some(boundary) = self.implicit_end_boundary(
+                            .edge(adjacent_edge)?
+                            .coedges
+                            .iter()
+                            .filter_map(|id| {
+                                self.working.coedge(*id).ok().map(|coedge| (*id, coedge))
+                            })
+                            .find(|(_, coedge)| {
+                                self.working
+                                    .loop_(coedge.loop_id)
+                                    .is_ok_and(|loop_| loop_.face == endpoint.terminating_face)
+                            })
+                            .ok_or_else(|| {
+                                KernelError::new(
+                                    DiagnosticKind::TopologyInvariant,
+                                    "blend endpoint lost its terminating chart",
+                                )
+                            })?;
+                        let traversal = self.working.coedge_vertices(terminating_id)?;
+                        let reference = if endpoint.cap.is_some() {
+                            let uv = terminating_surface
+                                .project(contact_points[endpoint_index][0], tolerance)?
+                                .parameters;
+                            Point2::new(uv.0, uv.1)
+                        } else {
+                            terminating_use
+                                .pcurve
+                                .evaluate(if traversal[0] == endpoint.old_vertex {
+                                    terminating_use.range.start
+                                } else {
+                                    terminating_use.range.end
+                                })?
+                                .point
+                        };
+                        self.prepare_end_boundary(
                             &blend_surface,
-                            &terminating_surface,
-                            &blend_pcurve,
-                            contact_points[endpoint_index],
-                        )? {
-                            return Ok(boundary);
-                        }
-                        let mut guide_parameters = Vec::with_capacity(65);
-                        let mut blend_parameters: Vec<Point2> = Vec::with_capacity(65);
-                        let mut parent_parameters: Vec<Point2> = Vec::with_capacity(65);
-                        for index in 0..=64 {
-                            let parameter = 0.5
-                                - 0.5
-                                    * (std::f64::consts::PI * index as f64 / 64.0).cos();
-                            guide_parameters.push(parameter);
-                            let blend_uv = blend_pcurve.evaluate(parameter)?.point;
-                            let point = blend_surface.evaluate(blend_uv.x, blend_uv.y)?.point;
-                            let projected = terminating_surface.project(point, tolerance)?;
-                            let seed = [
-                                blend_uv.x,
-                                blend_uv.y,
-                                projected.parameters.0,
-                                projected.parameters.1,
-                            ];
-                            let corrected = match super::intersection::correct_surface_pair_near(
-                                &blend_surface,
-                                &terminating_surface,
-                                seed,
-                                tolerance,
-                            ) {
-                                Ok(corrected) => corrected,
-                                Err(_) if index == 0 || index == 64 => seed,
-                                Err(error) => {
-                                    return Err(KernelError::new(
-                                        DiagnosticKind::NumericalFailure,
-                                        format!(
-                                            "fillet end-boundary guide correction failed at sample {index}: {error}"
-                                        ),
-                                    ))
-                                }
-                            };
-                            blend_parameters.push(Point2::new(corrected[0], corrected[1]));
-                            parent_parameters.push(Point2::new(corrected[2], corrected[3]));
-                        }
-                        let blend_guide: Curve2 =
-                            super::intersection::interpolating_nurbs_guide(
-                                &blend_parameters,
-                                &guide_parameters,
-                            )?
-                            .into();
-                        let parent_guide: Curve2 =
-                            super::intersection::interpolating_nurbs_guide(
-                                &parent_parameters,
-                                &guide_parameters,
-                            )?
-                            .into();
-                        let intersection = SurfaceIntersectionCurve::new(
-                            blend_surface.clone(),
                             terminating_surface,
-                            blend_guide,
-                            parent_guide,
-                            unit,
-                            tolerance,
-                            tolerance.linear,
+                            blend_pcurve,
+                            contact_points[endpoint_index],
+                            reference,
                         )
-                        .map_err(|error| {
-                            KernelError::new(
-                                DiagnosticKind::NumericalFailure,
-                                format!(
-                                    "fillet end boundary {endpoint_index} exact intersection failed: {error}"
-                                ),
-                            )
-                        })?;
-                        let exact = intersection.exact_pcurves();
-                        Ok(FilletBoundary {
-                            curve: intersection.into(),
-                            parent_pcurve: exact[1].clone(),
-                            blend_pcurve: exact[0].clone(),
-                            range: unit,
-                        })
                     }
-                    FilletPatchEnd::Junction(vertex) => {
+                    BlendPatchEnd::Junction(vertex) => {
+                        if kind == EdgeBlendKind::Chamfer
+                            && matches!(junctions[vertex].kind, BlendJunctionKind::Trihedral)
+                        {
+                            let surface = junction_surfaces[vertex].clone();
+                            let uv = surface
+                                .project(contact_points[endpoint_index][0], tolerance)?
+                                .parameters;
+                            return self.prepare_end_boundary(
+                                &blend_surface,
+                                surface,
+                                blend_pcurve,
+                                contact_points[endpoint_index],
+                                Point2::new(uv.0, uv.1),
+                            );
+                        }
                         let curve: Curve3 = SurfaceCurve3::new(
                             blend_surface.clone(),
                             blend_pcurve.clone(),
@@ -1984,14 +2414,14 @@ impl EulerTransaction<'_> {
                         )?
                         .into();
                         let Some(junction_surface) = junction_surfaces.get(vertex) else {
-                            return Ok(FilletBoundary {
+                            return Ok(BlendBoundary {
                                 curve,
                                 parent_pcurve: blend_pcurve.clone(),
                                 blend_pcurve,
                                 range: unit,
                             });
                         };
-                        if let FilletJunctionKind::RimCorner { carrier_face, .. } =
+                        if let BlendJunctionKind::RimCorner { carrier_face, .. } =
                             junctions[vertex].kind
                         {
                             let carrier_index = spine
@@ -2021,7 +2451,7 @@ impl EulerTransaction<'_> {
                                 Vec2::new(0.0, end_v - start_v),
                             )?
                             .into();
-                            return Ok(FilletBoundary {
+                            return Ok(BlendBoundary {
                                 curve,
                                 parent_pcurve,
                                 blend_pcurve,
@@ -2031,9 +2461,8 @@ impl EulerTransaction<'_> {
                         let mut parameters: Vec<Point2> = Vec::with_capacity(17);
                         for index in 0..=16 {
                             let parameter = index as f64 / 16.0;
-                            let projection =
-                                junction_surface
-                                    .project(curve.evaluate(parameter)?.point, tolerance)?;
+                            let projection = junction_surface
+                                .project(curve.evaluate(parameter)?.point, tolerance)?;
                             let mut uv =
                                 Point2::new(projection.parameters.0, projection.parameters.1);
                             if let Some(previous) = parameters.last().copied() {
@@ -2053,7 +2482,7 @@ impl EulerTransaction<'_> {
                             tolerance,
                         )?
                         .into();
-                        Ok(FilletBoundary {
+                        Ok(BlendBoundary {
                             curve,
                             parent_pcurve,
                             blend_pcurve,
@@ -2067,7 +2496,7 @@ impl EulerTransaction<'_> {
             .map_err(|_| {
                 KernelError::new(DiagnosticKind::TopologyInvariant, "two ends expected")
             })?;
-        Ok(FilletPatch {
+        Ok(BlendPatch {
             spine,
             ends: ends.try_into().map_err(|_| {
                 KernelError::new(DiagnosticKind::TopologyInvariant, "two patch ends expected")
@@ -2083,8 +2512,8 @@ impl EulerTransaction<'_> {
 
     /// Certify that each new contact curve remains in the trimmed domain of
     /// its planar parent face. Crossing another loop would make the local
-    /// Euler rewrite publish a self-overlapping shell instead of a fillet.
-    fn certify_fillet_contact_trims(&self, patches: &[FilletPatch]) -> KernelResult<()> {
+    /// Euler rewrite publish a self-overlapping shell instead of a blend.
+    fn certify_blend_contact_trims(&self, patches: &[BlendPatch]) -> KernelResult<()> {
         let tolerance = self.kernel.tolerance;
         for patch in patches {
             for parent_index in 0..2 {
@@ -2120,10 +2549,10 @@ impl EulerTransaction<'_> {
                     .ends
                     .iter()
                     .map(|end| match end {
-                        FilletPatchEnd::Boundary(endpoint) => {
+                        BlendPatchEnd::Boundary(endpoint) => {
                             Ok(endpoint.adjacent_uses[parent_index])
                         }
-                        FilletPatchEnd::Junction(vertex) => {
+                        BlendPatchEnd::Junction(vertex) => {
                             self.adjacent_use_at_vertex(patch.spine.uses[parent_index], *vertex)
                         }
                     })
@@ -2156,7 +2585,7 @@ impl EulerTransaction<'_> {
                         {
                             return Err(KernelError::new(
                                 DiagnosticKind::GeometryInvariant,
-                                "fillet contact boundary crosses an existing face boundary",
+                                "blend contact boundary crosses an existing face boundary",
                             ));
                         }
                     }
@@ -2174,13 +2603,13 @@ impl EulerTransaction<'_> {
                 if closed && inside_existing_hole && !crosses_locally_rewritten_boundary {
                     return Err(KernelError::new(
                         DiagnosticKind::GeometryInvariant,
-                        "fillet contact boundary enters an existing face hole",
+                        "blend contact boundary enters an existing face hole",
                     ));
                 }
                 if closed && !outer_contains_middle && !crosses_locally_rewritten_boundary {
                     return Err(KernelError::new(
                         DiagnosticKind::GeometryInvariant,
-                        "fillet contact boundary leaves its incident face trim",
+                        "blend contact boundary leaves its incident face trim",
                     ));
                 }
             }
@@ -2189,21 +2618,21 @@ impl EulerTransaction<'_> {
     }
 
     fn contact_vertex_key(
-        patch: &FilletPatch,
+        patch: &BlendPatch,
         endpoint_index: usize,
         parent_index: usize,
-        junctions: &BTreeMap<VertexId, FilletJunction>,
+        junctions: &BTreeMap<VertexId, BlendJunction>,
     ) -> (VertexId, FaceId, Option<EdgeId>) {
         let vertex = patch.spine.edge.vertices[endpoint_index];
         let face = patch.spine.faces[parent_index];
         match junctions.get(&vertex).map(|junction| &junction.kind) {
-            Some(FilletJunctionKind::RimCorner { carrier_face, .. }) if face == *carrier_face => {
+            Some(BlendJunctionKind::RimCorner { carrier_face, .. }) if face == *carrier_face => {
                 (vertex, face, Some(patch.spine.edge_id))
             }
-            Some(FilletJunctionKind::RimCorner { carrier_face, .. }) => {
+            Some(BlendJunctionKind::RimCorner { carrier_face, .. }) => {
                 (vertex, *carrier_face, None)
             }
-            Some(FilletJunctionKind::Smooth { tangent_faces, .. })
+            Some(BlendJunctionKind::Smooth { tangent_faces, .. })
                 if tangent_faces.contains(&face) =>
             {
                 (vertex, tangent_faces[0], None)
@@ -2228,15 +2657,16 @@ impl EulerTransaction<'_> {
         Ok(area)
     }
 
-    fn rewrite_fillet_network(
+    fn rewrite_blend_network(
         &mut self,
-        patches: &[FilletPatch],
-        junctions: &BTreeMap<VertexId, FilletJunction>,
+        patches: &[BlendPatch],
+        junctions: &BTreeMap<VertexId, BlendJunction>,
         junction_surfaces: &BTreeMap<VertexId, Surface3>,
+        kind: EdgeBlendKind,
     ) -> KernelResult<()> {
         let tolerance = self.kernel.tolerance;
         let first_patch = patches.first().ok_or_else(|| {
-            KernelError::new(DiagnosticKind::InvalidInput, "fillet network is empty")
+            KernelError::new(DiagnosticKind::InvalidInput, "blend network is empty")
         })?;
         let shell = self.working.face(first_patch.spine.faces[0])?.shell;
         for patch in patches {
@@ -2244,7 +2674,7 @@ impl EulerTransaction<'_> {
                 if self.working.face(face)?.shell != shell {
                     return Err(KernelError::new(
                         DiagnosticKind::TopologyInvariant,
-                        "fillet network crosses shell boundaries",
+                        "blend network crosses shell boundaries",
                     ));
                 }
             }
@@ -2254,7 +2684,7 @@ impl EulerTransaction<'_> {
         let mut termination_gaps = BTreeMap::new();
         for patch in patches {
             for endpoint_index in 0..2 {
-                let FilletPatchEnd::Boundary(endpoint) = &patch.ends[endpoint_index] else {
+                let BlendPatchEnd::Boundary(endpoint) = &patch.ends[endpoint_index] else {
                     continue;
                 };
                 let mut uses = Vec::with_capacity(2);
@@ -2276,7 +2706,7 @@ impl EulerTransaction<'_> {
                         .ok_or_else(|| {
                             KernelError::new(
                                 DiagnosticKind::TopologyInvariant,
-                                "fillet boundary rail has no terminating-face use",
+                                "blend boundary rail has no terminating-face use",
                             )
                         })?;
                     uses.push(terminating_use);
@@ -2290,13 +2720,13 @@ impl EulerTransaction<'_> {
                 } else {
                     return Err(KernelError::new(
                         DiagnosticKind::TopologyInvariant,
-                        "fillet terminating-face uses do not form one vertex gap",
+                        "blend terminating-face uses do not form one vertex gap",
                     ));
                 };
                 if self.working.coedge(gap.0)?.next != gap.1 {
                     return Err(KernelError::new(
                         DiagnosticKind::TopologyInvariant,
-                        "fillet terminating-face gap is not consecutive",
+                        "blend terminating-face gap is not consecutive",
                     ));
                 }
                 termination_gaps.insert((patch.spine.edge.name, endpoint.old_vertex), gap);
@@ -2315,7 +2745,7 @@ impl EulerTransaction<'_> {
                         continue;
                     }
                     let point = patch.contact_points[endpoint_index][parent_index];
-                    let name = self.names.next_for("fillet.contact.vertex")?;
+                    let name = self.names.next_for(&kind.role("contact.vertex"))?;
                     let vertex = self.make_vertex(name, point);
                     self.history.derived(
                         name,
@@ -2323,7 +2753,7 @@ impl EulerTransaction<'_> {
                             self.working.vertex(old_vertex)?.name,
                             self.working.face(face)?.name,
                         ],
-                        "fillet.contact.vertex",
+                        &kind.role("contact.vertex"),
                     );
                     contact_vertices.insert(key, vertex);
                 }
@@ -2333,10 +2763,13 @@ impl EulerTransaction<'_> {
         let mut trimmed = BTreeSet::new();
         for patch in patches {
             for endpoint_index in 0..2 {
-                let FilletPatchEnd::Boundary(endpoint) = &patch.ends[endpoint_index] else {
+                let BlendPatchEnd::Boundary(endpoint) = &patch.ends[endpoint_index] else {
                     continue;
                 };
                 for parent_index in 0..2 {
+                    if endpoint.cap.is_some_and(|(free, _)| free == parent_index) {
+                        continue;
+                    }
                     let adjacent_edge = self
                         .working
                         .coedge(endpoint.adjacent_uses[parent_index])?
@@ -2366,7 +2799,7 @@ impl EulerTransaction<'_> {
         }
 
         for (old_vertex, junction) in junctions {
-            let FilletJunctionKind::Smooth {
+            let BlendJunctionKind::Smooth {
                 seam_edge,
                 tangent_faces,
             } = junction.kind
@@ -2386,7 +2819,7 @@ impl EulerTransaction<'_> {
             .map(|patch| patch.spine.edge_id)
             .collect::<BTreeSet<_>>();
         for (old_vertex, junction) in junctions {
-            let FilletJunctionKind::TangentChain { tangent_faces } = junction.kind else {
+            let BlendJunctionKind::TangentChain { tangent_faces } = junction.kind else {
                 continue;
             };
             for seam_edge in self
@@ -2421,7 +2854,7 @@ impl EulerTransaction<'_> {
             }
         }
         for (old_vertex, junction) in junctions {
-            let FilletJunctionKind::RimCorner {
+            let BlendJunctionKind::RimCorner {
                 carrier_face,
                 seam_edge,
             } = junction.kind
@@ -2440,13 +2873,13 @@ impl EulerTransaction<'_> {
         for (vertex, junction) in junctions {
             if !matches!(
                 junction.kind,
-                FilletJunctionKind::Trihedral | FilletJunctionKind::RimCorner { .. }
+                BlendJunctionKind::Trihedral | BlendJunctionKind::RimCorner { .. }
             ) {
                 continue;
             }
             let surface = junction_surfaces[vertex].clone();
-            let face_name = self.names.next_for("fillet.vertex.face")?;
-            let loop_name = self.names.next_for("fillet.vertex.loop")?;
+            let face_name = self.names.next_for(&kind.role("vertex.face"))?;
+            let loop_name = self.names.next_for(&kind.role("vertex.loop"))?;
             let (face, loop_id) = self.make_face_loop(
                 shell,
                 face_name,
@@ -2461,22 +2894,52 @@ impl EulerTransaction<'_> {
                     .iter()
                     .map(|face| self.working.face(*face).map(|value| value.name))
                     .collect::<KernelResult<Vec<_>>>()?,
-                "fillet.vertex.face",
+                &kind.role("vertex.face"),
             );
             self.history
-                .derived(loop_name, [face_name], "fillet.vertex.loop");
+                .derived(loop_name, [face_name], &kind.role("vertex.loop"));
             junction_faces.insert(*vertex, face);
             junction_loops.insert(*vertex, loop_id);
             junction_uses.insert(*vertex, Vec::with_capacity(3));
         }
 
+        let mut cap_loops = BTreeMap::new();
+        let mut cap_uses = BTreeMap::<(EdgeId, usize), Vec<CoedgeId>>::new();
+        for patch in patches {
+            for index in 0..2 {
+                if let BlendPatchEnd::Boundary(BlendEndpoint {
+                    cap: Some((_, plane)),
+                    ..
+                }) = &patch.ends[index]
+                {
+                    let face_name = self.names.next_for(&kind.role("cap.face"))?;
+                    let loop_name = self.names.next_for(&kind.role("cap.loop"))?;
+                    let (_, loop_id) = self.make_face_loop(
+                        shell,
+                        face_name,
+                        loop_name,
+                        (*plane).into(),
+                        FaceOrientation::Forward,
+                    )?;
+                    self.history.derived(
+                        face_name,
+                        [patch.spine.edge.name],
+                        &kind.role("cap.face"),
+                    );
+                    self.history
+                        .derived(loop_name, [face_name], &kind.role("cap.loop"));
+                    cap_loops.insert((patch.spine.edge_id, index), loop_id);
+                    cap_uses.insert((patch.spine.edge_id, index), Vec::new());
+                }
+            }
+        }
         let mut blend_cycles = Vec::with_capacity(patches.len());
         let mut smooth_edges = BTreeMap::<VertexId, (EdgeId, Curve3)>::new();
         let mut contact_parent_uses = BTreeMap::<(EdgeId, usize), CoedgeId>::new();
         for patch in patches {
             let selected_name = patch.spine.edge.name;
-            let blend_face_name = self.names.next_for("fillet.blend.face")?;
-            let blend_loop_name = self.names.next_for("fillet.blend.loop")?;
+            let blend_face_name = self.names.next_for(&kind.role("blend.face"))?;
+            let blend_loop_name = self.names.next_for(&kind.role("blend.loop"))?;
             let (_blend_face, blend_loop) = self.make_face_loop(
                 shell,
                 blend_face_name,
@@ -2491,10 +2954,10 @@ impl EulerTransaction<'_> {
                     self.working.face(patch.spine.faces[0])?.name,
                     self.working.face(patch.spine.faces[1])?.name,
                 ],
-                "fillet.blend.face",
+                &kind.role("blend.face"),
             );
             self.history
-                .derived(blend_loop_name, [blend_face_name], "fillet.blend.loop");
+                .derived(blend_loop_name, [blend_face_name], &kind.role("blend.loop"));
 
             let mut blend_uses = Vec::with_capacity(4);
             for parent_index in 0..2 {
@@ -2503,9 +2966,9 @@ impl EulerTransaction<'_> {
                     contact_vertices[&Self::contact_vertex_key(patch, 0, parent_index, junctions)];
                 let second_vertex =
                     contact_vertices[&Self::contact_vertex_key(patch, 1, parent_index, junctions)];
-                let edge_name = self.names.next_for("fillet.contact.edge")?;
-                let parent_use_name = self.names.next_for("fillet.contact.parent-use")?;
-                let blend_use_name = self.names.next_for("fillet.contact.blend-use")?;
+                let edge_name = self.names.next_for(&kind.role("contact.edge"))?;
+                let parent_use_name = self.names.next_for(&kind.role("contact.parent-use"))?;
+                let blend_use_name = self.names.next_for(&kind.role("contact.blend-use"))?;
                 let edge = self.make_edge(
                     edge_name,
                     [first_vertex, second_vertex],
@@ -2549,20 +3012,23 @@ impl EulerTransaction<'_> {
                         selected_name,
                         self.working.face(patch.spine.faces[parent_index])?.name,
                     ],
-                    "fillet.contact.edge",
+                    &kind.role("contact.edge"),
+                );
+                self.history.derived(
+                    parent_use_name,
+                    [edge_name],
+                    &kind.role("contact.parent-use"),
                 );
                 self.history
-                    .derived(parent_use_name, [edge_name], "fillet.contact.parent-use");
-                self.history
-                    .derived(blend_use_name, [edge_name], "fillet.contact.blend-use");
+                    .derived(blend_use_name, [edge_name], &kind.role("contact.blend-use"));
             }
 
             for endpoint_index in 0..2 {
                 let boundary = &patch.end_boundaries[endpoint_index];
-                if let FilletPatchEnd::Junction(vertex) = &patch.ends[endpoint_index] {
+                if let BlendPatchEnd::Junction(vertex) = &patch.ends[endpoint_index] {
                     if matches!(
                         junctions[vertex].kind,
-                        FilletJunctionKind::Smooth { .. } | FilletJunctionKind::TangentChain { .. }
+                        BlendJunctionKind::Smooth { .. } | BlendJunctionKind::TangentChain { .. }
                     ) {
                         let vertices = [
                             contact_vertices
@@ -2584,9 +3050,9 @@ impl EulerTransaction<'_> {
                                 false
                             } else {
                                 return Err(KernelError::new(
-                                        DiagnosticKind::TopologyInvariant,
-                                        "smooth fillet transition patches do not share contact vertices",
-                                    ));
+                                    DiagnosticKind::TopologyInvariant,
+                                    "smooth blend transition patches do not share contact vertices",
+                                ));
                             };
                             let first = patch.contact_parameters[endpoint_index][0];
                             let second = patch.contact_parameters[endpoint_index][1];
@@ -2605,13 +3071,13 @@ impl EulerTransaction<'_> {
                             .into();
                             (edge, curve, same_direction, pcurve)
                         } else {
-                            let edge_name = self.names.next_for("fillet.transition.edge")?;
+                            let edge_name = self.names.next_for(&kind.role("transition.edge"))?;
                             let edge =
                                 self.make_edge(edge_name, vertices, boundary.curve.clone(), unit)?;
                             self.history.derived(
                                 edge_name,
                                 [selected_name],
-                                "fillet.transition.edge",
+                                &kind.role("transition.edge"),
                             );
                             smooth_edges.insert(*vertex, (edge, boundary.curve.clone()));
                             (
@@ -2627,7 +3093,7 @@ impl EulerTransaction<'_> {
                         } else {
                             !desired_current_forward
                         };
-                        let use_name = self.names.next_for("fillet.transition.blend-use")?;
+                        let use_name = self.names.next_for(&kind.role("transition.blend-use"))?;
                         let blend_use = self.make_coedge(
                             use_name,
                             edge,
@@ -2640,7 +3106,7 @@ impl EulerTransaction<'_> {
                         self.history.derived(
                             use_name,
                             [self.working.edge(edge)?.name],
-                            "fillet.transition.blend-use",
+                            &kind.role("transition.blend-use"),
                         );
                         continue;
                     }
@@ -2651,17 +3117,24 @@ impl EulerTransaction<'_> {
                     contact_vertices
                         [&Self::contact_vertex_key(patch, endpoint_index, 1, junctions)],
                 ];
-                let edge_name = self.names.next_for("fillet.end.edge")?;
-                let other_use_name = self.names.next_for("fillet.end.other-use")?;
-                let blend_use_name = self.names.next_for("fillet.end.blend-use")?;
+                let edge_name = self.names.next_for(&kind.role("end.edge"))?;
+                let other_use_name = self.names.next_for(&kind.role("end.other-use"))?;
+                let blend_use_name = self.names.next_for(&kind.role("end.blend-use"))?;
                 let edge =
                     self.make_edge(edge_name, vertices, boundary.curve.clone(), boundary.range)?;
                 let (other_loop, other_forward) = match &patch.ends[endpoint_index] {
-                    FilletPatchEnd::Boundary(endpoint) => {
+                    BlendPatchEnd::Boundary(endpoint) => {
                         let gap = termination_gaps[&(selected_name, endpoint.old_vertex)];
-                        (self.working.coedge(gap.0)?.loop_id, gap.2)
+                        (
+                            if endpoint.cap.is_some() {
+                                cap_loops[&(patch.spine.edge_id, endpoint_index)]
+                            } else {
+                                self.working.coedge(gap.0)?.loop_id
+                            },
+                            gap.2,
+                        )
                     }
-                    FilletPatchEnd::Junction(vertex) => (junction_loops[vertex], true),
+                    BlendPatchEnd::Junction(vertex) => (junction_loops[vertex], true),
                 };
                 let other_use = self.make_coedge(
                     other_use_name,
@@ -2689,21 +3162,109 @@ impl EulerTransaction<'_> {
                     },
                 )?;
                 match &patch.ends[endpoint_index] {
-                    FilletPatchEnd::Boundary(endpoint) => {
+                    BlendPatchEnd::Boundary(endpoint) => {
                         let gap = termination_gaps[&(selected_name, endpoint.old_vertex)];
-                        self.insert_loop_coedge(gap.0, gap.1, other_use)?;
+                        if let Some((free, plane)) = endpoint.cap {
+                            let cap_key = (patch.spine.edge_id, endpoint_index);
+                            cap_uses.get_mut(&cap_key).unwrap().push(other_use);
+                            for parent in 0..2 {
+                                let contact_vertex = vertices[parent];
+                                let original_vertex = endpoint.old_vertex;
+                                let start = self.working.vertex(original_vertex)?.point;
+                                let end = self.working.vertex(contact_vertex)?.point;
+                                let target_loop = if parent == free {
+                                    self.working
+                                        .coedge(
+                                            contact_parent_uses[&(patch.spine.edge_id, parent)],
+                                        )?
+                                        .loop_id
+                                } else {
+                                    self.working.coedge(gap.0)?.loop_id
+                                };
+                                let surface = self
+                                    .working
+                                    .face(self.working.loop_(target_loop)?.face)?
+                                    .surface
+                                    .clone();
+                                let curve: Curve3 = super::Line3::new(start, end - start)?.into();
+                                let range = ParameterRange::new(0.0, 1.0)?;
+                                let pcurve = |support: &Surface3| -> KernelResult<Curve2> {
+                                    let a = support.project(start, tolerance)?.parameters;
+                                    let mut b = support.project(end, tolerance)?.parameters;
+                                    if let Some(period) = support.domains()[0].period {
+                                        b.0 += ((a.0 - b.0) / period).round() * period;
+                                    }
+                                    Line2::new(
+                                        Point2::new(a.0, a.1),
+                                        Vec2::new(b.0 - a.0, b.1 - a.1),
+                                    )
+                                    .map(Curve2::from)
+                                };
+                                let name = self.names.next_for(&kind.role("cap.edge"))?;
+                                let cap_edge = self.make_edge(
+                                    name,
+                                    [original_vertex, contact_vertex],
+                                    curve,
+                                    range,
+                                )?;
+                                let (previous, next) = if parent == free {
+                                    let rail = contact_parent_uses[&(patch.spine.edge_id, parent)];
+                                    let rail_vertices = self.working.coedge_vertices(rail)?;
+                                    if rail_vertices[0] == contact_vertex {
+                                        (self.working.coedge(rail)?.previous, rail)
+                                    } else {
+                                        (rail, self.working.coedge(rail)?.next)
+                                    }
+                                } else {
+                                    (gap.0, gap.1)
+                                };
+                                let forward =
+                                    self.working.coedge_vertices(previous)?[1] == original_vertex;
+                                let use_name = self.names.next_for(&kind.role("cap.parent-use"))?;
+                                let use_id = self.make_coedge(
+                                    use_name,
+                                    cap_edge,
+                                    target_loop,
+                                    forward,
+                                    pcurve(&surface)?,
+                                    if forward { range } else { range.reversed() },
+                                )?;
+                                self.insert_loop_coedge(previous, next, use_id)?;
+                                let cap_name = self.names.next_for(&kind.role("cap.use"))?;
+                                let cap_use = self.make_coedge(
+                                    cap_name,
+                                    cap_edge,
+                                    cap_loops[&cap_key],
+                                    !forward,
+                                    pcurve(&Surface3::from(plane))?,
+                                    if forward { range.reversed() } else { range },
+                                )?;
+                                cap_uses.get_mut(&cap_key).unwrap().push(cap_use);
+                                self.history
+                                    .derived(name, [selected_name], &kind.role("cap.edge"));
+                                self.history.derived(
+                                    use_name,
+                                    [name],
+                                    &kind.role("cap.parent-use"),
+                                );
+                                self.history
+                                    .derived(cap_name, [name], &kind.role("cap.use"));
+                            }
+                        } else {
+                            self.insert_loop_coedge(gap.0, gap.1, other_use)?;
+                        }
                     }
-                    FilletPatchEnd::Junction(vertex) => {
+                    BlendPatchEnd::Junction(vertex) => {
                         junction_uses.get_mut(vertex).unwrap().push(other_use);
                     }
                 }
                 blend_uses.push(blend_use);
                 self.history
-                    .derived(edge_name, [selected_name], "fillet.end.edge");
+                    .derived(edge_name, [selected_name], &kind.role("end.edge"));
                 self.history
-                    .derived(other_use_name, [edge_name], "fillet.end.other-use");
+                    .derived(other_use_name, [edge_name], &kind.role("end.other-use"));
                 self.history
-                    .derived(blend_use_name, [edge_name], "fillet.end.blend-use");
+                    .derived(blend_use_name, [edge_name], &kind.role("end.blend-use"));
             }
             blend_cycles.push((blend_loop, blend_uses));
         }
@@ -2713,7 +3274,7 @@ impl EulerTransaction<'_> {
                 return Err(KernelError::new(
                     DiagnosticKind::TopologyInvariant,
                     format!(
-                        "smooth fillet junction {:?} is not shared by exactly two rolling patches",
+                        "smooth blend junction {:?} is not shared by exactly two rolling patches",
                         vertex
                     ),
                 ));
@@ -2732,7 +3293,7 @@ impl EulerTransaction<'_> {
                     .ok_or_else(|| {
                         KernelError::new(
                             DiagnosticKind::TopologyInvariant,
-                            "fillet junction boundary has no paired rolling-patch use",
+                            "blend junction boundary has no paired rolling-patch use",
                         )
                     })?;
                 let blend_loop = self.working.coedge(blend_use)?.loop_id;
@@ -2742,7 +3303,7 @@ impl EulerTransaction<'_> {
                     .ok_or_else(|| {
                         KernelError::new(
                             DiagnosticKind::TopologyInvariant,
-                            "fillet junction boundary lost its rolling-patch cycle",
+                            "blend junction boundary lost its rolling-patch cycle",
                         )
                     })?;
                 self.orient_closing_coedge(cycle, blend_use)?;
@@ -2751,7 +3312,7 @@ impl EulerTransaction<'_> {
             }
         }
         for (vertex, junction) in junctions {
-            let FilletJunctionKind::RimCorner { carrier_face, .. } = junction.kind else {
+            let BlendJunctionKind::RimCorner { carrier_face, .. } = junction.kind else {
                 continue;
             };
             let incidents = patches
@@ -2848,9 +3409,9 @@ impl EulerTransaction<'_> {
                 tolerance,
             )?
             .into();
-            let edge_name = self.names.next_for("fillet.rim-corner.contact.edge")?;
-            let carrier_use_name = self.names.next_for("fillet.rim-corner.carrier-use")?;
-            let junction_use_name = self.names.next_for("fillet.rim-corner.junction-use")?;
+            let edge_name = self.names.next_for(&kind.role("rim-corner.contact.edge"))?;
+            let carrier_use_name = self.names.next_for(&kind.role("rim-corner.carrier-use"))?;
+            let junction_use_name = self.names.next_for(&kind.role("rim-corner.junction-use"))?;
             let edge = self.make_edge(edge_name, [start_vertex, end_vertex], curve, range)?;
             let carrier_use = self.make_coedge(
                 carrier_use_name,
@@ -2874,18 +3435,21 @@ impl EulerTransaction<'_> {
             self.history.derived(
                 edge_name,
                 [self.working.face(carrier_face)?.name],
-                "fillet.rim-corner.contact.edge",
+                &kind.role("rim-corner.contact.edge"),
             );
             self.history.derived(
                 carrier_use_name,
                 [edge_name],
-                "fillet.rim-corner.carrier-use",
+                &kind.role("rim-corner.carrier-use"),
             );
             self.history.derived(
                 junction_use_name,
                 [edge_name],
-                "fillet.rim-corner.junction-use",
+                &kind.role("rim-corner.junction-use"),
             );
+        }
+        for (key, uses) in cap_uses {
+            blend_cycles.push((cap_loops[&key], uses));
         }
         for (loop_id, uses) in blend_cycles {
             self.close_loop_from_coedges(loop_id, &uses)
@@ -2917,14 +3481,14 @@ impl EulerTransaction<'_> {
             if uses.len() != 3 {
                 return Err(KernelError::new(
                     DiagnosticKind::TopologyInvariant,
-                    "a regular fillet junction must have three boundary patches",
+                    "a regular blend junction must have three boundary patches",
                 ));
             }
             self.close_loop_from_coedges(junction_loops[vertex], uses)
                 .map_err(|error| {
                     KernelError::new(
                         DiagnosticKind::TopologyInvariant,
-                        format!("fillet junction boundary cycle failed: {error}"),
+                        format!("blend junction boundary cycle failed: {error}"),
                     )
                 })?;
             let area = self.loop_parameter_area(junction_loops[vertex])?;
@@ -2944,13 +3508,18 @@ impl EulerTransaction<'_> {
             old_vertices.extend(patch.spine.edge.vertices);
             modified_faces.extend(patch.spine.faces);
             for end in &patch.ends {
-                if let FilletPatchEnd::Boundary(endpoint) = end {
+                if let BlendPatchEnd::Boundary(endpoint) = end {
                     modified_faces.insert(endpoint.terminating_face);
                 }
             }
             self.delete_edge_and_uses(patch.spine.edge_id, &patch.spine.uses)?;
         }
         for old_vertex in old_vertices {
+            if patches.iter().any(|patch| patch.ends.iter().any(|end|
+                matches!(end, BlendPatchEnd::Boundary(endpoint) if endpoint.old_vertex == old_vertex && endpoint.cap.is_some()))) {
+                self.repair_outgoing(old_vertex)?;
+                continue;
+            }
             let outputs = contact_vertices
                 .iter()
                 .filter_map(|((vertex, _, _), replacement)| {
@@ -3010,7 +3579,7 @@ impl EulerTransaction<'_> {
         } else {
             Err(KernelError::new(
                 DiagnosticKind::TopologyInvariant,
-                "selected coedge is not incident to its fillet endpoint",
+                "selected coedge is not incident to its blend endpoint",
             ))
         }
     }
@@ -3089,7 +3658,7 @@ impl EulerTransaction<'_> {
         .map_err(|error| {
             KernelError::new(
                 DiagnosticKind::NumericalFailure,
-                format!("local fillet offset intersection failed: {error}"),
+                format!("local blend offset intersection failed: {error}"),
             )
         })?;
         let exact_pcurves = implicit.exact_pcurves();

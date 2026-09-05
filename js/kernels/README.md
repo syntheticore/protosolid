@@ -28,7 +28,10 @@ full and partial revolutions, smooth section lofts with optional alignment,
 Booleans across multiple solids, fillet, shell, chamfer, draft, plane splitting,
 rigid transforms, properties, topology resolution, and entity tessellation.
 
-Chamfer supports straight edges between planes and circular cylinder/plane rims.
+Fillet and chamfer share a local edge-network rewrite, including closed rims,
+concave edges, tangent continuations, and corner transitions. Chamfer retains
+planes and cones for elementary supports and exact ruled patches otherwise;
+it does not construct cutter solids or call Boolean operations.
 Its Propagation radio bar switches between following tangent edges and using only
 the selection. Connected tangent chamfers are constructed as one contour; saved
 chamfers created before this option retain selection-only behavior.

@@ -3889,7 +3889,7 @@ impl OffsetSurface3 {
     }
 }
 
-/// Constant-radius rolling-ball envelope between two regular surface supports.
+/// Exact circular or ruled cross sections between two retained contact rails.
 ///
 /// The center curve is the intersection of the two inward offsets. Its two
 /// p-curves retain the corresponding parameters on the un-offset supports.
@@ -3897,7 +3897,8 @@ impl OffsetSurface3 {
 /// a fitted patch: every evaluation is constructed from the exact center and
 /// contact points on the parent surfaces.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RollingBallSurface3 {
+pub struct EdgeBlendSurface3 {
+    ruled: bool,
     center_curve: Box<Curve3>,
     first_surface: Box<Surface3>,
     second_surface: Box<Surface3>,
@@ -3908,7 +3909,10 @@ pub struct RollingBallSurface3 {
     tolerance: ModelTolerance,
 }
 
-impl RollingBallSurface3 {
+/// Circular-section compatibility name for the shared edge blend support.
+pub type RollingBallSurface3 = EdgeBlendSurface3;
+
+impl EdgeBlendSurface3 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         center_curve: Curve3,
@@ -3941,6 +3945,7 @@ impl RollingBallSurface3 {
             ));
         }
         let surface = Self {
+            ruled: false,
             center_curve: Box::new(center_curve),
             first_surface: Box::new(first_surface),
             second_surface: Box::new(second_surface),
@@ -3960,6 +3965,17 @@ impl RollingBallSurface3 {
             }
         }
         Ok(surface)
+    }
+
+    /// Join the retained contact rails with straight generators. The rails,
+    /// domains, projection and differential evaluation are shared with fillets.
+    pub(crate) fn into_ruled(mut self) -> Self {
+        self.ruled = true;
+        self
+    }
+
+    pub(crate) fn is_ruled(&self) -> bool {
+        self.ruled
     }
 
     pub fn center_curve(&self) -> &Curve3 {
@@ -4004,9 +4020,16 @@ impl RollingBallSurface3 {
         if !self.center_range.contains(parameter, self.tolerance) || !blend.is_finite() {
             return Err(invalid("rolling-ball parameter lies outside its domain"));
         }
-        let (center_point, center_tangent) = self.center_curve.first_order(parameter)?;
         let first = Self::contact(&self.first_surface, &self.first_pcurve, parameter)?;
         let second = Self::contact(&self.second_surface, &self.second_pcurve, parameter)?;
+        if self.ruled {
+            return Ok((
+                first.0 + (second.0 - first.0) * blend,
+                first.1 * (1.0 - blend) + second.1 * blend,
+                second.0 - first.0,
+            ));
+        }
+        let (center_point, center_tangent) = self.center_curve.first_order(parameter)?;
         let first_radial = first.0 - center_point;
         let second_radial = second.0 - center_point;
         let scale = center_point
@@ -4216,13 +4239,14 @@ pub enum Surface3 {
     Nurbs(NurbsSurface3),
     Offset(OffsetSurface3),
     RollingBall(RollingBallSurface3),
+    Ruled(EdgeBlendSurface3),
 }
 
 impl Surface3 {
     pub(crate) fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
         match self {
             Self::Offset(surface) => surface.first_order(u, v),
-            Self::RollingBall(surface) => surface.first_order(u, v),
+            Self::RollingBall(surface) | Self::Ruled(surface) => surface.first_order(u, v),
             _ => self
                 .evaluate(u, v)
                 .map(|value| (value.point, value.du, value.dv)),
@@ -4296,7 +4320,7 @@ impl Surface3 {
             ],
             Self::Nurbs(surface) => surface.domains(),
             Self::Offset(surface) => surface.base.domains(),
-            Self::RollingBall(surface) => [
+            Self::RollingBall(surface) | Self::Ruled(surface) => [
                 ParameterDomain {
                     bounds: DomainBounds::Bounded(surface.center_range()),
                     period: None,
@@ -4316,7 +4340,7 @@ impl Surface3 {
             Self::Revolved(surface) => surface.evaluate(u, v),
             Self::Nurbs(surface) => surface.evaluate(u, v),
             Self::Offset(surface) => surface.evaluate(u, v),
-            Self::RollingBall(surface) => surface.evaluate(u, v),
+            Self::RollingBall(surface) | Self::Ruled(surface) => surface.evaluate(u, v),
         }
     }
 
@@ -4356,7 +4380,7 @@ impl Surface3 {
             Self::Revolved(surface) => surface.project(point),
             Self::Nurbs(surface) => surface.project(point, tolerance),
             Self::Offset(surface) => surface.project(point),
-            Self::RollingBall(surface) => surface.project(point),
+            Self::RollingBall(surface) | Self::Ruled(surface) => surface.project(point),
         }
     }
 
@@ -4472,6 +4496,10 @@ impl From<OffsetSurface3> for Surface3 {
 }
 impl From<RollingBallSurface3> for Surface3 {
     fn from(value: RollingBallSurface3) -> Self {
-        Self::RollingBall(value)
+        if value.is_ruled() {
+            Self::Ruled(value)
+        } else {
+            Self::RollingBall(value)
+        }
     }
 }

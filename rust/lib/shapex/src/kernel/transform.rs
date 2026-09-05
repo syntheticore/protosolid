@@ -297,16 +297,23 @@ fn transform_surface(
             tolerance,
         )?
         .into(),
-        Surface3::RollingBall(surface) => RollingBallSurface3::new(
-            transform_curve(surface.center_curve().clone(), transform, tolerance)?,
-            transform_surface(surface.first_surface().clone(), transform, tolerance)?,
-            transform_surface(surface.second_surface().clone(), transform, tolerance)?,
-            surface.first_pcurve().clone(),
-            surface.second_pcurve().clone(),
-            surface.center_range(),
-            surface.radius(),
-            tolerance,
-        )?
-        .into(),
+        Surface3::RollingBall(surface) | Surface3::Ruled(surface) => {
+            let transformed = RollingBallSurface3::new(
+                transform_curve(surface.center_curve().clone(), transform, tolerance)?,
+                transform_surface(surface.first_surface().clone(), transform, tolerance)?,
+                transform_surface(surface.second_surface().clone(), transform, tolerance)?,
+                surface.first_pcurve().clone(),
+                surface.second_pcurve().clone(),
+                surface.center_range(),
+                surface.radius(),
+                tolerance,
+            )?;
+            if surface.is_ruled() {
+                transformed.into_ruled()
+            } else {
+                transformed
+            }
+            .into()
+        }
     })
 }

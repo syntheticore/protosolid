@@ -209,9 +209,19 @@ fn semantic_edge(history: &OperationHistory, edge: &EdgeHandle) -> bool {
                 )
         )
     };
+    // Chamfer faces deliberately inherit from their adjacent parent faces.
+    // That shared ancestry is not a faceted reconstruction: the crease against
+    // either parent (or a corner/cap patch) is a real model edge immediately.
+    let chamfer_face = |face: &FaceHandle| {
+        matches!(history.origin(face.persistent_id()),
+            Some(Origin::Derived { role, .. }) if matches!(role.as_str(),
+                "chamfer.blend.face" | "chamfer.vertex.face" | "chamfer.cap.face"))
+    };
     match (faces[0].surface(), faces[1].surface()) {
         (Surface3::Plane(first), Surface3::Plane(second))
-            if exact_boolean_face(&faces[0]) && exact_boolean_face(&faces[1]) =>
+            if (exact_boolean_face(&faces[0]) && exact_boolean_face(&faces[1]))
+                || chamfer_face(&faces[0])
+                || chamfer_face(&faces[1]) =>
         {
             first.normal().cross(second.normal()).magnitude() > edge.state.tolerance().angular
         }
@@ -1284,17 +1294,31 @@ impl Compound {
         edges: &[EdgeHandle],
         options: FilletOptions,
     ) -> KernelResult<Self> {
-        let radius = options.radius;
-        if !radius.is_finite() || radius <= self.tolerance().linear {
+        self.blend_edges(
+            edges,
+            options.radius,
+            options.follow_tangent_edges,
+            super::edge_blend::EdgeBlendKind::Fillet,
+        )
+    }
+
+    fn blend_edges(
+        &self,
+        edges: &[EdgeHandle],
+        size: f64,
+        follow_tangent_edges: bool,
+        kind: super::edge_blend::EdgeBlendKind,
+    ) -> KernelResult<Self> {
+        if !size.is_finite() || size <= self.tolerance().linear {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
-                "fillet radius must be finite and exceed model tolerance",
+                "edge blend size must be finite and exceed model tolerance",
             ));
         }
         if edges.is_empty() {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
-                "fillet needs at least one edge",
+                "edge blend needs at least one edge",
             ));
         }
         let selected = edges
@@ -1304,7 +1328,7 @@ impl Compound {
         if selected.len() != edges.len() {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
-                "fillet edge selection contains duplicates",
+                "edge blend edge selection contains duplicates",
             ));
         }
         let available = self
@@ -1314,7 +1338,7 @@ impl Compound {
         if !selected.is_subset(&available) {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
-                "fillet edges do not belong to this compound revision",
+                "edge blend edges do not belong to this compound revision",
             ));
         }
         if self.solids.len() > 1 {
@@ -1329,7 +1353,7 @@ impl Compound {
                 results.push(if local.is_empty() {
                     local_compound
                 } else {
-                    local_compound.fillet_with_options(&local, options)?
+                    local_compound.blend_edges(&local, size, follow_tangent_edges, kind)?
                 });
             }
             return combine_compounds(results, self.tolerance());
@@ -1345,23 +1369,23 @@ impl Compound {
                 Some(EntityId::Edge(edge)) => Ok(edge),
                 _ => Err(KernelError::new(
                     DiagnosticKind::TopologyInvariant,
-                    "imported fillet edge could not be reidentified",
+                    "imported edge blend edge could not be reidentified",
                 )),
             })
             .collect::<KernelResult<Vec<_>>>()?;
         let mut transaction = kernel.begin_operation();
         if let Err(error) =
-            transaction.fillet_edges(&imported_edges, radius, options.follow_tangent_edges)
+            transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind)
         {
             let mixed_trihedral = (edges.len() == 3)
                 .then(|| {
                     error.diagnostics().iter().find(|diagnostic| {
-                        diagnostic.operation.as_deref() == Some("fillet.mixed-trihedral-setback")
+                        diagnostic.operation.as_deref() == Some("blend.mixed-trihedral-setback")
                     })
                 })
                 .flatten();
             if let Some(diagnostic) = mixed_trihedral {
-                return self.fillet_three_edge_setback(edges, options, &diagnostic.entities);
+                return self.blend_three_edge_setback(edges, size, &diagnostic.entities, kind);
             }
             return Err(error);
         }
@@ -1369,16 +1393,16 @@ impl Compound {
         Self::from_operation(kernel, committed, [self])
     }
 
-    fn fillet_three_edge_setback(
+    fn blend_three_edge_setback(
         &self,
         edges: &[EdgeHandle],
-        options: FilletOptions,
+        size: f64,
         concave_edges: &[PersistentId],
+        kind: super::edge_blend::EdgeBlendKind,
     ) -> KernelResult<Self> {
         // Each stage creates smooth continuation edges that the following stage must consume to
         // enter the already-rounded corner. This is internal continuation, not user-facing
         // selection propagation: the original sharp-edge selection remains exactly `edges`.
-        let stage_options = options.with_tangent_propagation(true);
         let fallback_orders = [
             [[0, 1], [2, usize::MAX]],
             [[0, 2], [1, usize::MAX]],
@@ -1427,12 +1451,11 @@ impl Compound {
                         }
                         _ => Err(KernelError::new(
                             DiagnosticKind::UnsupportedGeometry,
-                            "setback fillet could not reidentify an incident edge after the preceding blend",
+                            "setback blend could not reidentify an incident edge after the preceding blend",
                         )),
                     })
                     .collect::<KernelResult<Vec<_>>>();
-                match resolved
-                    .and_then(|resolved| result.fillet_with_options(&resolved, stage_options))
+                match resolved.and_then(|resolved| result.blend_edges(&resolved, size, true, kind))
                 {
                     Ok(next) => result = next,
                     Err(error) => {
@@ -1449,7 +1472,7 @@ impl Compound {
         Err(last_error.unwrap_or_else(|| {
             KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "mixed convex-concave setback fillet has no valid construction order",
+                "mixed convex-concave setback blend has no valid construction order",
             )
         }))
     }
@@ -1491,43 +1514,12 @@ impl Compound {
         distance: f64,
         follow_tangent_edges: bool,
     ) -> KernelResult<Self> {
-        if !distance.is_finite() || distance <= self.tolerance().linear {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "chamfer distance must be positive and exceed model tolerance",
-            ));
-        }
-        if edges.is_empty()
-            || edges
-                .iter()
-                .any(|edge| !self.edges().any(|available| *available == *edge))
-            || edges
-                .iter()
-                .map(EdgeHandle::persistent_id)
-                .collect::<BTreeSet<_>>()
-                .len()
-                != edges.len()
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "chamfer needs distinct edges from this compound revision",
-            ));
-        }
-        let mut results = Vec::new();
-        for solid in &self.solids {
-            let local = edges
-                .iter()
-                .filter(|edge| solid.edges().any(|available| *available == **edge))
-                .cloned()
-                .collect::<Vec<_>>();
-            let body = solid.to_compound();
-            results.push(if local.is_empty() {
-                body
-            } else {
-                super::features::chamfer(&body, &local, distance, follow_tangent_edges)?
-            });
-        }
-        combine_compounds(results, self.tolerance())
+        self.blend_edges(
+            edges,
+            distance,
+            follow_tangent_edges,
+            super::edge_blend::EdgeBlendKind::Chamfer,
+        )
     }
     pub fn draft(&self, faces: &[FaceHandle], plane: Plane3, angle: f64) -> KernelResult<Self> {
         if faces.is_empty()

@@ -3452,11 +3452,20 @@ fn fillet_short_edge_at_partial_chamfer_end() {
         })
         .unwrap()
         .clone();
-    let result = body.fillet(&[short], 0.1).unwrap();
-    assert_eq!(result.solids().len(), 1);
-    assert_eq!(result.faces().count(), body.faces().count() + 1);
-    assert!(result.solids().next().unwrap().volume() > body.solids().next().unwrap().volume());
-    result
-        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
-        .unwrap();
+    // Preserve the certified geometry at both the original radius and the
+    // larger radius that exposed repeated intersection-evaluation costs.
+    for (radius, volume, area) in [
+        (0.1, 94578.79148614826, 13670.747305236526),
+        (0.7, 94579.58912582739, 13668.850104317711),
+    ] {
+        let result = body.fillet(&[short.clone()], radius).unwrap();
+        assert_eq!(result.solids().len(), 1);
+        assert_eq!(result.faces().count(), body.faces().count() + 1);
+        let solid = result.solids().next().unwrap();
+        assert!((solid.volume() - volume).abs() < 1e-6);
+        assert!((solid.surface_area() - area).abs() < 1e-6);
+        result
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap();
+    }
 }

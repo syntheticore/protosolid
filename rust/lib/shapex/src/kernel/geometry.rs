@@ -1515,73 +1515,7 @@ impl SurfaceIntersectionPcurve2 {
 
     fn evaluate(&self, parameter: f64) -> KernelResult<Curve2Evaluation> {
         let parameters = self.curve.corrected_parameters(parameter)?;
-        let first_guide = self.curve.first_pcurve.evaluate(parameter)?;
-        let second_guide = self.curve.second_pcurve.evaluate(parameter)?;
-        let guide = [
-            first_guide.point.x,
-            first_guide.point.y,
-            second_guide.point.x,
-            second_guide.point.y,
-        ];
-        let guide_derivative = [
-            first_guide.first_derivative.x,
-            first_guide.first_derivative.y,
-            second_guide.first_derivative.x,
-            second_guide.first_derivative.y,
-        ];
-        let guide_second = [
-            first_guide.second_derivative.x,
-            first_guide.second_derivative.y,
-            second_guide.second_derivative.x,
-            second_guide.second_derivative.y,
-        ];
-        let speed = guide_derivative
-            .iter()
-            .map(|value| value * value)
-            .sum::<f64>()
-            .sqrt();
-        if speed <= self.curve.tolerance.parameter {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "surface-intersection p-curve guide has a singular tangent",
-            ));
-        }
-        let gauge_tangent = guide_derivative.map(|value| value / speed);
-        let speed_derivative = guide_derivative
-            .iter()
-            .zip(guide_second)
-            .map(|(first, second)| first * second)
-            .sum::<f64>()
-            / speed;
-        let gauge_tangent_derivative: [f64; 4] = std::array::from_fn(|index| {
-            guide_second[index] / speed - guide_derivative[index] * speed_derivative / speed.powi(2)
-        });
-        let (_, first_du, first_dv) = self
-            .curve
-            .first_surface
-            .first_order(parameters[0], parameters[1])?;
-        let (_, second_du, second_dv) = self
-            .curve
-            .second_surface
-            .first_order(parameters[2], parameters[3])?;
-        let gauge_rhs = gauge_tangent
-            .iter()
-            .zip(guide_derivative)
-            .map(|(tangent, derivative)| tangent * derivative)
-            .sum::<f64>()
-            - gauge_tangent_derivative
-                .iter()
-                .zip(parameters.iter().zip(guide))
-                .map(|(derivative, (value, guide))| derivative * (value - guide))
-                .sum::<f64>();
-        let matrix = [
-            [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
-            [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
-            [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
-            gauge_tangent,
-        ];
-        let derivative =
-            solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], guide_derivative)?;
+        let derivative = self.curve.parameter_derivative(parameter, parameters)?;
         let (point, first_derivative) = if self.first {
             (
                 Point2::new(parameters[0], parameters[1]),
@@ -1892,6 +1826,75 @@ impl SurfaceIntersectionCurve {
         ]
     }
 
+    // Reuse the converged parameters for both spatial and parameter-space
+    // tangents, without cloning the intersection or running Newton again.
+    fn parameter_derivative(&self, parameter: f64, parameters: [f64; 4]) -> KernelResult<[f64; 4]> {
+        let first_guide = self.first_pcurve.evaluate(parameter)?;
+        let second_guide = self.second_pcurve.evaluate(parameter)?;
+        let guide = [
+            first_guide.point.x,
+            first_guide.point.y,
+            second_guide.point.x,
+            second_guide.point.y,
+        ];
+        let guide_derivative = [
+            first_guide.first_derivative.x,
+            first_guide.first_derivative.y,
+            second_guide.first_derivative.x,
+            second_guide.first_derivative.y,
+        ];
+        let guide_second = [
+            first_guide.second_derivative.x,
+            first_guide.second_derivative.y,
+            second_guide.second_derivative.x,
+            second_guide.second_derivative.y,
+        ];
+        let speed = guide_derivative
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        if speed <= self.tolerance.parameter {
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "surface-intersection p-curve guide has a singular tangent",
+            ));
+        }
+        let gauge_tangent = guide_derivative.map(|value| value / speed);
+        let speed_derivative = guide_derivative
+            .iter()
+            .zip(guide_second)
+            .map(|(first, second)| first * second)
+            .sum::<f64>()
+            / speed;
+        let gauge_tangent_derivative: [f64; 4] = std::array::from_fn(|index| {
+            guide_second[index] / speed - guide_derivative[index] * speed_derivative / speed.powi(2)
+        });
+        let (_, first_du, first_dv) = self
+            .first_surface
+            .first_order(parameters[0], parameters[1])?;
+        let (_, second_du, second_dv) = self
+            .second_surface
+            .first_order(parameters[2], parameters[3])?;
+        let gauge_rhs = gauge_tangent
+            .iter()
+            .zip(guide_derivative)
+            .map(|(tangent, derivative)| tangent * derivative)
+            .sum::<f64>()
+            - gauge_tangent_derivative
+                .iter()
+                .zip(parameters.iter().zip(guide))
+                .map(|(derivative, (value, guide))| derivative * (value - guide))
+                .sum::<f64>();
+        let matrix = [
+            [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
+            [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
+            [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
+            gauge_tangent,
+        ];
+        solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], guide_derivative)
+    }
+
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
         if !self.range.contains(parameter, self.tolerance) {
             return Err(invalid(
@@ -1925,10 +1928,16 @@ impl SurfaceIntersectionCurve {
         }
         let tangent = tangent.map(|value| value / tangent_norm);
         let mut parameters = guide;
+        // Newton needs no second derivatives; evaluating them on rolling
+        // surfaces would repeatedly finite-difference the same contact curves.
         for _ in 0..24 {
-            let first = self.first_surface.evaluate(parameters[0], parameters[1])?;
-            let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
-            let residual = first.point - second.point;
+            let (first_point, first_du, first_dv) = self
+                .first_surface
+                .first_order(parameters[0], parameters[1])?;
+            let (second_point, second_du, second_dv) = self
+                .second_surface
+                .first_order(parameters[2], parameters[3])?;
+            let residual = first_point - second_point;
             let gauge = parameters
                 .iter()
                 .zip(guide)
@@ -1942,11 +1951,10 @@ impl SurfaceIntersectionCurve {
             // creates a false derivative kink. Converge the implicit identity
             // to floating-point accuracy so position and derivatives describe
             // one continuous curve.
-            let coordinate_scale = first
-                .point
+            let coordinate_scale = first_point
                 .to_vec()
                 .magnitude()
-                .max(second.point.to_vec().magnitude())
+                .max(second_point.to_vec().magnitude())
                 .max(1.0);
             let parameter_scale = parameters
                 .iter()
@@ -1959,9 +1967,9 @@ impl SurfaceIntersectionCurve {
                 return Ok(parameters);
             }
             let matrix = [
-                [first.du.x, first.dv.x, -second.du.x, -second.dv.x],
-                [first.du.y, first.dv.y, -second.du.y, -second.dv.y],
-                [first.du.z, first.dv.z, -second.du.z, -second.dv.z],
+                [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
+                [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
+                [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
                 tangent,
             ];
             let Some(delta) =
@@ -2000,9 +2008,12 @@ impl SurfaceIntersectionCurve {
                             }
                         }
                     }
-                    let first = self.first_surface.evaluate(candidate[0], candidate[1])?;
-                    let second = self.second_surface.evaluate(candidate[2], candidate[3])?;
-                    let residual = first.point - second.point;
+                    let (first_point, _, _) =
+                        self.first_surface.first_order(candidate[0], candidate[1])?;
+                    let (second_point, _, _) = self
+                        .second_surface
+                        .first_order(candidate[2], candidate[3])?;
+                    let residual = first_point - second_point;
                     let gauge = candidate
                         .iter()
                         .zip(guide)
@@ -2021,15 +2032,18 @@ impl SurfaceIntersectionCurve {
                 break;
             }
         }
-        let first = self.first_surface.evaluate(parameters[0], parameters[1])?;
-        let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
-        let scale = first
-            .point
+        let (first_point, _, _) = self
+            .first_surface
+            .first_order(parameters[0], parameters[1])?;
+        let (second_point, _, _) = self
+            .second_surface
+            .first_order(parameters[2], parameters[3])?;
+        let scale = first_point
             .to_vec()
             .magnitude()
-            .max(second.point.to_vec().magnitude())
+            .max(second_point.to_vec().magnitude())
             .max(1.0);
-        if first.point.distance(second.point)
+        if first_point.distance(second_point)
             <= self
                 .achieved_error
                 .max(self.tolerance.linear_at_scale(scale))
@@ -2044,7 +2058,7 @@ impl SurfaceIntersectionCurve {
                     .evaluate(guide[0], guide[1])?
                     .point
                     .distance(self.second_surface.evaluate(guide[2], guide[3])?.point),
-                first.point.distance(second.point),
+                first_point.distance(second_point),
             ),
         ))
     }
@@ -2053,17 +2067,11 @@ impl SurfaceIntersectionCurve {
         let parameters = self.corrected_parameters(parameter)?;
         let first = self.first_surface.evaluate(parameters[0], parameters[1])?;
         let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
-        let exact_parameters = SurfaceIntersectionPcurve2 {
-            curve: Box::new(self.clone()),
-            first: true,
-        }
-        .evaluate(parameter)?;
-        let first_derivative = first.du * exact_parameters.first_derivative.x
-            + first.dv * exact_parameters.first_derivative.y;
-        let second_derivative = first.duu * exact_parameters.first_derivative.x.powi(2)
-            + first.duv
-                * (2.0 * exact_parameters.first_derivative.x * exact_parameters.first_derivative.y)
-            + first.dvv * exact_parameters.first_derivative.y.powi(2);
+        let derivative = self.parameter_derivative(parameter, parameters)?;
+        let first_derivative = first.du * derivative[0] + first.dv * derivative[1];
+        let second_derivative = first.duu * derivative[0].powi(2)
+            + first.duv * (2.0 * derivative[0] * derivative[1])
+            + first.dvv * derivative[1].powi(2);
         Ok(CurveEvaluation {
             point: Point3::from_vec((first.point.to_vec() + second.point.to_vec()) * 0.5),
             first_derivative,
@@ -2079,15 +2087,10 @@ impl SurfaceIntersectionCurve {
         let (second_point, _, _) = self
             .second_surface
             .first_order(parameters[2], parameters[3])?;
-        let exact_parameters = SurfaceIntersectionPcurve2 {
-            curve: Box::new(self.clone()),
-            first: true,
-        }
-        .evaluate(parameter)?;
+        let derivative = self.parameter_derivative(parameter, parameters)?;
         Ok((
             Point3::from_vec((first_point.to_vec() + second_point.to_vec()) * 0.5),
-            first_du * exact_parameters.first_derivative.x
-                + first_dv * exact_parameters.first_derivative.y,
+            first_du * derivative[0] + first_dv * derivative[1],
         ))
     }
 

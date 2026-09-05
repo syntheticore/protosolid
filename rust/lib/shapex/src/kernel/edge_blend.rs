@@ -90,6 +90,7 @@ enum BlendJunctionKind {
     Smooth {
         seam_edge: EdgeId,
         tangent_faces: [FaceId; 2],
+        second_seam: Option<(EdgeId, [FaceId; 2])>,
     },
     TangentChain {
         tangent_faces: [FaceId; 2],
@@ -245,6 +246,7 @@ impl EulerTransaction<'_> {
                                 BlendJunctionKind::Smooth {
                                     seam_edge,
                                     tangent_faces,
+                                    second_seam: None,
                                 },
                             );
                             junction_sources.insert(vertex, spine.edge_id);
@@ -286,6 +288,7 @@ impl EulerTransaction<'_> {
                                 BlendJunctionKind::Smooth {
                                     seam_edge,
                                     tangent_faces,
+                                    second_seam: None,
                                 },
                             );
                             junction_sources.insert(vertex, spine.edge_id);
@@ -354,6 +357,7 @@ impl EulerTransaction<'_> {
                     if let BlendJunctionKind::Smooth {
                         seam_edge,
                         tangent_faces,
+                        ..
                     } = junction_kind
                     {
                         junctions.insert(
@@ -780,6 +784,7 @@ impl EulerTransaction<'_> {
                 )
             })?;
 
+        let middle_parameter = center.curve.project(midpoint, tolerance)?.parameter;
         let endpoint_seeds = edge
             .vertices
             .iter()
@@ -787,7 +792,14 @@ impl EulerTransaction<'_> {
                 center
                     .curve
                     .project(self.working.vertex(*vertex)?.point, tolerance)
-                    .map(|projection| projection.parameter)
+                    .and_then(|projection| {
+                        blend_parameter_near(
+                            &center.curve,
+                            projection.parameter,
+                            middle_parameter,
+                            tolerance,
+                        )
+                    })
             })
             .collect::<KernelResult<Vec<_>>>()?;
         let endpoint_seeds = [endpoint_seeds[0], endpoint_seeds[1]];
@@ -1042,7 +1054,14 @@ impl EulerTransaction<'_> {
             };
             let needs_extension = !adjacent_edge.range.contains(rail_parameter, tolerance);
             allow_adjacent_extension[parent_index] = needs_extension;
-            contact_parameters[parent_index] = contact_parameter;
+            // The intersection solver may return an equivalent point one turn
+            // away. Keep both rails on the same local branch as their spine.
+            contact_parameters[parent_index] = blend_parameter_near(
+                &spine.center.curve,
+                contact_parameter,
+                spine.endpoint_seeds[endpoint_index],
+                tolerance,
+            )?;
             contact_points[parent_index] = contact_point;
         }
         if spine.concave && allow_adjacent_extension.iter().all(|extension| *extension) {
@@ -1319,22 +1338,39 @@ impl EulerTransaction<'_> {
     ) -> KernelResult<BlendJunction> {
         let tolerance = self.kernel.tolerance;
         let vertex_faces = self.working.vertex_faces(vertex)?;
-        if vertex_faces.len() != 3 || self.working.vertex_edges(vertex)?.len() != 3 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "a smooth blend transition requires a regular valence-three BREP vertex",
-            ));
-        }
-        let common_face = vertex_faces
+        let other_faces = vertex_faces
             .iter()
             .copied()
-            .find(|face| !tangent_faces.contains(face))
-            .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "smooth blend transition has no common incident face",
-                )
-            })?;
+            .filter(|face| !tangent_faces.contains(face))
+            .collect::<Vec<_>>();
+        let incident = self.working.vertex_edges(vertex)?;
+        // Both incident supports can change across a tangent transition.
+        // Retain a shared contact vertex for each pair of tangent faces.
+        let second_seam =
+            if vertex_faces.len() == 4 && incident.len() == 4 && other_faces.len() == 2 {
+                let pair = [other_faces[0], other_faces[1]];
+                let edge = incident
+                    .iter()
+                    .copied()
+                    .find(|edge| {
+                        self.working.edge_faces(*edge).is_ok_and(|faces| {
+                            faces.len() == 2 && faces.iter().all(|face| pair.contains(face))
+                        })
+                    })
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::UnsupportedGeometry,
+                            "smooth blend transition has no opposite support seam",
+                        )
+                    })?;
+                Some((edge, pair))
+            } else if vertex_faces.len() == 3 && incident.len() == 3 && other_faces.len() == 1 {
+                None
+            } else {
+                return Err(KernelError::new(DiagnosticKind::UnsupportedGeometry,
+                "a smooth blend transition requires three faces or two pairs of tangent supports"));
+            };
+        let common_face = other_faces[0];
         let seam = self.working.edge(seam_edge)?.clone();
         let seam_parameter = if seam.vertices[0] == vertex {
             seam.range.start
@@ -1503,17 +1539,54 @@ impl EulerTransaction<'_> {
                 ));
             }
         }
+        let mut contact_points = BTreeMap::from([
+            (tangent_faces[0], seam_contact),
+            (tangent_faces[1], seam_contact),
+            (common_face, common_contact),
+        ]);
+        if let Some((opposite, pair)) = second_seam {
+            let edge = self.working.edge(opposite)?;
+            let projection = edge.curve.project(common_contact, tolerance)?;
+            if projection.distance > allowed {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "smooth blend contacts do not meet the opposite support seam",
+                ));
+            }
+            let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
+            for side in 0..2 {
+                let face = self.working.face(pair[side])?;
+                let uv = face.surface.project(common_contact, tolerance)?;
+                if uv.distance > allowed {
+                    return Err(KernelError::new(
+                        DiagnosticKind::GeometryInvariant,
+                        "smooth blend contact misses an opposite support",
+                    ));
+                }
+                normals[side] = face
+                    .surface
+                    .normal(uv.parameters.0, uv.parameters.1)?
+                    .normalize();
+                if face.orientation == FaceOrientation::Reversed {
+                    normals[side] = -normals[side];
+                }
+            }
+            if normals[0].dot(normals[1]) < 1.0 - tolerance.angular.max(f64::EPSILON.sqrt()) * 8.0 {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "opposite blend supports are not tangent at their seam",
+                ));
+            }
+            contact_points.insert(pair[1], common_contact);
+        }
         Ok(BlendJunction {
-            faces: vec![tangent_faces[0], tangent_faces[1], common_face],
+            faces: vertex_faces,
             center,
-            contact_points: BTreeMap::from([
-                (tangent_faces[0], seam_contact),
-                (tangent_faces[1], seam_contact),
-                (common_face, common_contact),
-            ]),
+            contact_points,
             kind: BlendJunctionKind::Smooth {
                 seam_edge,
                 tangent_faces,
+                second_seam,
             },
         })
     }
@@ -1676,10 +1749,42 @@ impl EulerTransaction<'_> {
             {
                 continue;
             }
-            let continuation = incident
-                .iter()
-                .copied()
-                .find(|edge| *edge != seam && *edge != current_edge);
+            // A chamfer over a rounded corner has two smooth seams at this
+            // vertex. Continue along the sharp rim, never along the other seam.
+            let continuation = incident.iter().copied().find(|edge| {
+                if *edge == seam || *edge == current_edge {
+                    return false;
+                }
+                let Ok(value) = self.working.edge(*edge) else {
+                    return false;
+                };
+                let Ok(faces) = self.working.edge_faces(*edge) else {
+                    return false;
+                };
+                if faces.len() != 2 || value.coedges.len() != 2 {
+                    return false;
+                }
+                let (Ok(first_face), Ok(second_face)) =
+                    (self.working.face(faces[0]), self.working.face(faces[1]))
+                else {
+                    return false;
+                };
+                let supports = [first_face.surface.clone(), second_face.surface.clone()];
+                let Ok(midpoint) = value
+                    .curve
+                    .evaluate((value.range.start + value.range.end) * 0.5)
+                else {
+                    return false;
+                };
+                self.blend_edge_is_concave(
+                    value,
+                    [value.coedges[0], value.coedges[1]],
+                    [faces[0], faces[1]],
+                    &supports,
+                    midpoint.point,
+                )
+                .is_ok()
+            });
             if let Some(continuation) = continuation {
                 return Ok(Some((seam, continuation, [faces[0], faces[1]])));
             }
@@ -2208,13 +2313,12 @@ impl EulerTransaction<'_> {
                     .curve
                     .project(junction.center, tolerance)?
                     .parameter;
-                let parameter = if let Some(period) = spine.center.curve.domain().period {
-                    projected
-                        + ((spine.endpoint_seeds[endpoint_index] - projected) / period).round()
-                            * period
-                } else {
-                    projected
-                };
+                let parameter = blend_parameter_near(
+                    &spine.center.curve,
+                    projected,
+                    spine.endpoint_seeds[endpoint_index],
+                    tolerance,
+                )?;
                 let achieved = spine
                     .center
                     .curve
@@ -2637,6 +2741,10 @@ impl EulerTransaction<'_> {
             {
                 (vertex, tangent_faces[0], None)
             }
+            Some(BlendJunctionKind::Smooth {
+                second_seam: Some((_, pair)),
+                ..
+            }) if pair.contains(&face) => (vertex, pair[0], None),
             _ => (vertex, face, None),
         }
     }
@@ -2802,6 +2910,7 @@ impl EulerTransaction<'_> {
             let BlendJunctionKind::Smooth {
                 seam_edge,
                 tangent_faces,
+                second_seam,
             } = junction.kind
             else {
                 continue;
@@ -2813,6 +2922,14 @@ impl EulerTransaction<'_> {
                 new_vertex,
                 junction.contact_points[&tangent_faces[0]],
             )?;
+            if let Some((edge, pair)) = second_seam {
+                self.retarget_edge_endpoint(
+                    edge,
+                    *old_vertex,
+                    contact_vertices[&(*old_vertex, pair[0], None)],
+                    junction.contact_points[&pair[0]],
+                )?;
+            }
         }
         let selected_edges = patches
             .iter()
@@ -3639,8 +3756,20 @@ impl EulerTransaction<'_> {
                 [first.x, first.y, second.x, second.y],
                 tolerance,
             )?;
-            parameters[0].push(Point2::new(corrected[0], corrected[1]));
-            parameters[1].push(Point2::new(corrected[2], corrected[3]));
+            // Correction normalizes periodic coordinates. Lift them back onto
+            // the sampled branch before interpolating a continuous guide.
+            for side in 0..2 {
+                let seed = if side == 0 { first } else { second };
+                let mut uv = Point2::new(corrected[side * 2], corrected[side * 2 + 1]);
+                let domains = offsets[side].domains();
+                if let Some(period) = domains[0].period {
+                    uv.x += ((seed.x - uv.x) / period).round() * period;
+                }
+                if let Some(period) = domains[1].period {
+                    uv.y += ((seed.y - uv.y) / period).round() * period;
+                }
+                parameters[side].push(uv);
+            }
         }
         let first_pcurve: Curve2 =
             super::intersection::smooth_nurbs_guide(&parameters[0], support_range)?.into();
@@ -3669,4 +3798,53 @@ impl EulerTransaction<'_> {
             achieved_error: tolerance.linear,
         })
     }
+}
+
+// Bounded implicit intersections can describe a complete closed section without
+// declaring a period. Their two endpoints are equivalent, but a blend must use
+// the endpoint in its local chart instead of traversing the rest of the section.
+fn blend_parameter_near(
+    curve: &Curve3,
+    parameter: f64,
+    reference: f64,
+    tolerance: ModelTolerance,
+) -> KernelResult<f64> {
+    let domain = curve.domain();
+    if let Some(period) = domain.period {
+        return Ok(parameter + ((reference - parameter) / period).round() * period);
+    }
+    if let DomainBounds::Bounded(range) = domain.bounds {
+        if (parameter - range.start)
+            .abs()
+            .min((parameter - range.end).abs())
+            <= tolerance.parameter * 64.0
+        {
+            let first = curve.evaluate(range.start)?;
+            let last = curve.evaluate(range.end)?;
+            let allowed = tolerance.linear_at_scale(
+                first
+                    .point
+                    .to_vec()
+                    .magnitude()
+                    .max(last.point.to_vec().magnitude())
+                    .max(1.0),
+            );
+            if first.point.distance(last.point) <= allowed
+                && first
+                    .first_derivative
+                    .normalize()
+                    .dot(last.first_derivative.normalize())
+                    >= 1.0 - tolerance.angular * 8.0
+            {
+                return Ok(
+                    if (reference - range.start).abs() <= (reference - range.end).abs() {
+                        range.start
+                    } else {
+                        range.end
+                    },
+                );
+            }
+        }
+    }
+    Ok(parameter)
 }

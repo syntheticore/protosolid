@@ -3308,3 +3308,100 @@ fn chamfer_planar_boundaries_are_visible_before_another_operation() {
         }
     }
 }
+
+#[test]
+fn fillet_chamfer_rim_after_bottom_fillets() {
+    let tolerance = ModelTolerance::default();
+    let points = [
+        Point2::new(-48.09320196891367, 20.428303658663456),
+        Point2::new(54.19907870791369, 20.428303658663456),
+        Point2::new(54.19907870791369, -26.081893232094234),
+        Point2::new(-48.09320196891367, -26.081893232094234),
+    ];
+    let wire = Wire2::new(
+        (0..4)
+            .rev()
+            .map(|i| TrimmedCurve2::line(points[(i + 1) % 4], points[i]).unwrap()),
+        tolerance,
+    )
+    .unwrap();
+    let profile = Profile::new(wire, [], tolerance).unwrap();
+    let body = profile
+        .extrude(
+            Plane3::new(
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::unit_x(),
+                -Vec3::unit_z(),
+                tolerance,
+            )
+            .unwrap(),
+            Vec3::new(0.0, 34.0, 0.0),
+        )
+        .unwrap();
+    let corner = body
+        .edges()
+        .find(|edge| {
+            edge.endpoints().unwrap().iter().all(|p| {
+                (p.x - 54.19907870791369).abs() < 1e-7 && (p.z - 26.081893232094234).abs() < 1e-7
+            })
+        })
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[corner], 21.0).unwrap();
+    let top = body
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|p| (p.z - 26.081893232094234).abs() < 1e-7)
+                && edge
+                    .endpoints()
+                    .unwrap()
+                    .iter()
+                    .all(|p| (p.y - 34.0).abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let body = body
+        .chamfer_with_tangent_propagation(&[top], 10.0, true)
+        .unwrap();
+    let bottom = body
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(_))
+                && edge.endpoints().unwrap().iter().all(|p| p.y.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[bottom], 13.0).unwrap();
+    let bottom = body
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|p| p.y.abs() < 1e-7 && (p.z + 20.428303658663456).abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[bottom], 4.0).unwrap();
+    let rim = body
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|p| (p.y - 24.0).abs() < 1e-7 && (p.x - 54.19907870791369).abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    for radius in [1.0, 2.0, 3.0] {
+        let result = body.fillet(&[rim.clone()], radius).unwrap();
+        assert_eq!(result.solids().len(), 1);
+        assert!(result.solids().next().unwrap().volume() < body.solids().next().unwrap().volume());
+        result
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .expect("chamfer rim fillet display mesh");
+    }
+}

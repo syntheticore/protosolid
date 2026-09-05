@@ -73,6 +73,7 @@ struct BlendSpine {
     center: SurfaceSurfaceCurve,
     endpoint_seeds: [f64; 2],
     provisional_range: ParameterRange,
+    shared_seam: Option<VertexId>,
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +205,19 @@ impl EulerTransaction<'_> {
         follow_tangent_edges: bool,
         kind: EdgeBlendKind,
     ) -> KernelResult<()> {
+        // General rolling supports must share one chart before their temporary
+        // arcs are built, otherwise structurally different guides prevent KEF.
+        let mut closed_spines = Vec::new();
+        for edge in &selected {
+            let value = self.working.edge(*edge)?;
+            if value.vertices[0] == value.vertices[1] {
+                if let Ok(spine) = self.prepare_blend_spine(*edge, radius, kind, None) {
+                    if matches!(spine.center.curve, Curve3::SurfaceIntersection(_)) {
+                        closed_spines.push(spine);
+                    }
+                }
+            }
+        }
         selected = self.subdivide_closed_blend_edges(&selected, kind)?;
         let mut junction_kinds = BTreeMap::<VertexId, BlendJunctionKind>::new();
         let mut junction_sources = BTreeMap::<VertexId, EdgeId>::new();
@@ -216,7 +230,13 @@ impl EulerTransaction<'_> {
                 .filter(|edge| !spines.contains_key(edge))
                 .collect::<Vec<_>>();
             for edge in missing {
-                spines.insert(edge, self.prepare_blend_spine(edge, radius, kind)?);
+                let value = self.working.edge(edge)?;
+                let faces = self.working.edge_faces(edge)?;
+                let shared = closed_spines.iter().find(|spine| {
+                    spine.edge.curve == value.curve
+                        && spine.faces.iter().all(|face| faces.contains(face))
+                });
+                spines.insert(edge, self.prepare_blend_spine(edge, radius, kind, shared)?);
             }
             let mut additions = BTreeSet::new();
             for spine in spines.values() {
@@ -698,6 +718,7 @@ impl EulerTransaction<'_> {
         edge_id: EdgeId,
         size: f64,
         kind: EdgeBlendKind,
+        shared: Option<&BlendSpine>,
     ) -> KernelResult<BlendSpine> {
         let tolerance = self.kernel.tolerance;
         let edge = self.working.edge(edge_id)?.clone();
@@ -766,24 +787,27 @@ impl EulerTransaction<'_> {
             parent_surfaces[0].offset(offset_distance(faces[0])?, tolerance)?,
             parent_surfaces[1].offset(offset_distance(faces[1])?, tolerance)?,
         ];
-        let candidates = match offsets[0].intersect_surface(&offsets[1], tolerance) {
-            Ok(IntersectionSet::Isolated(curves)) => curves,
-            Ok(IntersectionSet::Empty) => {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "incident face offsets do not intersect at the requested radius",
-                ))
-            }
-            Ok(IntersectionSet::Coincident) => {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "incident face offsets are coincident and do not define one blend spine",
-                ))
-            }
-            Err(_) => {
-                vec![self.local_offset_intersection(uses, &offsets, tolerance)?]
-            }
-        };
+        let candidates =
+            if let Some(shared) = shared {
+                vec![shared.center.clone()]
+            } else {
+                match offsets[0].intersect_surface(&offsets[1], tolerance) {
+                    Ok(IntersectionSet::Isolated(curves)) => curves,
+                    Ok(IntersectionSet::Empty) => {
+                        return Err(KernelError::new(
+                            DiagnosticKind::GeometryInvariant,
+                            "incident face offsets do not intersect at the requested radius",
+                        ))
+                    }
+                    Ok(IntersectionSet::Coincident) => return Err(KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "incident face offsets are coincident and do not define one blend spine",
+                    )),
+                    Err(_) => {
+                        vec![self.local_offset_intersection(uses, &offsets, tolerance)?]
+                    }
+                }
+            };
         let center = candidates
             .into_iter()
             .filter_map(|candidate| {
@@ -834,6 +858,22 @@ impl EulerTransaction<'_> {
         } else {
             endpoint_seeds
         };
+        // The local guide uses a normalized source traversal. These are branch
+        // hints; the final junction projection is corrected on the exact curve.
+        let endpoint_seeds = if let Some(shared) = shared {
+            std::array::from_fn(|i| {
+                let source_parameter = if i == 0 {
+                    edge.range.start
+                } else {
+                    edge.range.end
+                };
+                let reference =
+                    (source_parameter - shared.edge.range.start) / shared.edge.range.span();
+                endpoint_seeds[i] + (reference - endpoint_seeds[i]).round()
+            })
+        } else {
+            endpoint_seeds
+        };
         let seed_span = (endpoint_seeds[1] - endpoint_seeds[0]).abs().max(1.0);
         let center_domain = center.curve.domain();
         let provisional_range = match center_domain.bounds {
@@ -858,6 +898,7 @@ impl EulerTransaction<'_> {
             center,
             endpoint_seeds,
             provisional_range,
+            shared_seam: shared.map(|spine| spine.edge.vertices[0]),
         })
     }
 
@@ -1937,12 +1978,48 @@ impl EulerTransaction<'_> {
         let old_vertex = spine.edge.vertices[endpoint_index];
         let old_point = self.working.vertex(old_vertex)?.point;
         let projected = spine.center.curve.project(old_point, tolerance)?.parameter;
-        let parameter = if let Some(period) = spine.center.curve.domain().period {
+        let mut parameter = if let Some(period) = spine.shared_seam.map(|_| 1.0).or(spine
+            .center
+            .curve
+            .domain()
+            .period)
+        {
             projected
                 + ((spine.endpoint_seeds[endpoint_index] - projected) / period).round() * period
         } else {
             projected
         };
+        // A periodic support seam must meet the exact contact curve. The
+        // nearest center to the old vertex need not lie on that seam.
+        for seam_id in self.working.vertex_edges(old_vertex)? {
+            let faces = self.working.edge_faces(seam_id)?;
+            if faces.len() != 1 {
+                continue;
+            }
+            let Some(parent) = spine.faces.iter().position(|face| faces.contains(face)) else {
+                continue;
+            };
+            let seam = self.working.edge(seam_id)?;
+            let contact: Curve3 = SurfaceCurve3::new(
+                spine.parent_surfaces[parent].clone(),
+                if parent == 0 {
+                    spine.center.first_pcurve.clone()
+                } else {
+                    spine.center.second_pcurve.clone()
+                },
+                spine.provisional_range,
+                tolerance,
+            )?
+            .into();
+            let seam_parameter = if seam.vertices[0] == old_vertex {
+                seam.range.start
+            } else {
+                seam.range.end
+            };
+            parameter = contact
+                .intersect_curve_near(&seam.curve, parameter, seam_parameter, tolerance)?
+                .first_parameter;
+        }
         let center = spine.center.curve.evaluate(parameter)?.point;
         let mut contact_points = BTreeMap::new();
         for parent_index in 0..2 {
@@ -2213,7 +2290,11 @@ impl EulerTransaction<'_> {
                 spine.parent_surfaces[1].clone(),
                 spine.center.first_pcurve.clone(),
                 spine.center.second_pcurve.clone(),
-                range,
+                if spine.shared_seam.is_some() {
+                    spine.provisional_range
+                } else {
+                    range
+                },
                 spine.offset,
                 tolerance,
             )?
@@ -2371,7 +2452,11 @@ impl EulerTransaction<'_> {
                 spine.parent_surfaces[1].clone(),
                 spine.center.first_pcurve.clone(),
                 spine.center.second_pcurve.clone(),
-                center_range,
+                if spine.shared_seam.is_some() {
+                    spine.provisional_range
+                } else {
+                    center_range
+                },
                 radius,
                 tolerance,
             )?
@@ -2656,12 +2741,29 @@ impl EulerTransaction<'_> {
                     .curve
                     .project(junction.center, tolerance)?
                     .parameter;
-                let parameter = blend_parameter_near(
-                    &spine.center.curve,
-                    projected,
-                    spine.endpoint_seeds[endpoint_index],
-                    tolerance,
-                )?;
+                let mut parameter = if spine.shared_seam.is_some() {
+                    projected + (spine.endpoint_seeds[endpoint_index] - projected).round()
+                } else {
+                    blend_parameter_near(
+                        &spine.center.curve,
+                        projected,
+                        spine.endpoint_seeds[endpoint_index],
+                        tolerance,
+                    )?
+                };
+                if spine.shared_seam.is_some() {
+                    // Repeated guide turns need not have identical parameter
+                    // speeds, so an integer shift alone is only a seed.
+                    for _ in 0..16 {
+                        let value = spine.center.curve.evaluate(parameter)?;
+                        let residual = value.point - junction.center;
+                        if residual.magnitude() <= tolerance.linear {
+                            break;
+                        }
+                        parameter -= residual.dot(value.first_derivative)
+                            / value.first_derivative.magnitude2();
+                    }
+                }
                 let achieved = spine
                     .center
                     .curve
@@ -4021,11 +4123,18 @@ impl EulerTransaction<'_> {
         // is constructed so that its endpoint machinery always works on
         // ordinary vertices.  Those construction joins are not material
         // boundaries.  Collapse every join whose two patches use the exact
-        // same analytical support; the final join then remains as the single
+        // same support; the final join then remains as the single
         // same-face parameter seam required by the periodic surface.
+        // A general shared chart is bounded, so retain its original cut.
+        // Merging across that cut would join different turns in UV space.
         let transition_edges = smooth_edges
-            .values()
-            .map(|(edge, _)| *edge)
+            .iter()
+            .filter(|(vertex, _)| {
+                !patches
+                    .iter()
+                    .any(|patch| patch.spine.shared_seam == Some(**vertex))
+            })
+            .map(|(_, (edge, _))| *edge)
             .collect::<Vec<_>>();
         for edge in transition_edges {
             let faces = self.working.edge_faces(edge)?;
@@ -4116,8 +4225,23 @@ impl EulerTransaction<'_> {
                 boundary_parameters[side].push(uv);
             }
         }
-        let extrapolated = |side: usize, index: i32| {
-            if index < 0 {
+        let source = self.working.edge(self.working.coedge(uses[0])?.edge)?;
+        let closed = source.vertices[0] == source.vertices[1];
+        let extrapolated = |side: usize, index: i32| -> KernelResult<Point2> {
+            if closed {
+                let coedge = self.working.coedge(uses[side])?;
+                let fraction = index as f64 / 16.0;
+                let fraction = if coedge.forward {
+                    fraction
+                } else {
+                    1.0 - fraction
+                };
+                return Ok(coedge
+                    .pcurve
+                    .evaluate(coedge.range.start + coedge.range.span() * fraction)?
+                    .point);
+            }
+            Ok(if index < 0 {
                 boundary_parameters[side][0]
                     + (boundary_parameters[side][1] - boundary_parameters[side][0]) * index as f64
             } else if index > 16 {
@@ -4126,12 +4250,12 @@ impl EulerTransaction<'_> {
                         * (index - 16) as f64
             } else {
                 boundary_parameters[side][index as usize]
-            }
+            })
         };
         let mut parameters: [Vec<Point2>; 2] = [Vec::with_capacity(49), Vec::with_capacity(49)];
         for index in -16..=32 {
-            let first = extrapolated(0, index);
-            let second = extrapolated(1, index);
+            let first = extrapolated(0, index)?;
+            let second = extrapolated(1, index)?;
             let corrected = super::intersection::correct_surface_pair_near(
                 &offsets[0],
                 &offsets[1],

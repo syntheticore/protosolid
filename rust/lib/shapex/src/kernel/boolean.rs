@@ -1811,7 +1811,9 @@ fn unchanged_face_patch(
         current_kind.get_or_insert(segment.loop_kind);
         current.push(BrepPatchSegment {
             curve: segment.curve.clone(),
-            pcurve: exact_pcurve_on_surface(&segment.curve, surface, &segment.pcurve),
+            // An unchanged face already has exact, chart-aligned coedges.
+            // The edge's own p-curve may describe the other side of its seam.
+            pcurve: segment.pcurve.clone(),
             range: segment.range,
         });
         if segment.loop_end {

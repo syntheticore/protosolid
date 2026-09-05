@@ -3529,3 +3529,105 @@ fn fillet_chamfer_rim_after_partial_end_fillets() {
         .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
         .unwrap();
 }
+
+#[test]
+fn blend_oblique_partial_torus_rim() {
+    let tol = ModelTolerance::default();
+    let wire = Wire2::new(
+        [TrimmedCurve2::circle(
+            Point2::new(-43.19342433885193, 7.0858322653666725),
+            29.84371852126014,
+        )
+        .unwrap()],
+        tol,
+    )
+    .unwrap();
+    let profile = Profile::new(wire, [], tol).unwrap();
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tol,
+    )
+    .unwrap();
+    let axis = Axis3::new(
+        Point3::new(7.161213459321003, 0.0, -21.48364037903721),
+        Vec3::new(
+            32.187769969790175 - 7.161213459321003,
+            0.0,
+            34.67534938370912 + 21.48364037903721,
+        ),
+    )
+    .unwrap();
+    let body = profile
+        .revolve(plane, axis, 1.5 * std::f64::consts::PI)
+        .unwrap();
+    let rims = body
+        .edges()
+        .filter(|edge| {
+            edge.connected_faces()
+                .unwrap()
+                .iter()
+                .any(|f| matches!(f.surface(), Surface3::Plane(_)))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(rims.len(), 2);
+    for size in [1.0, 5.0] {
+        for edge in &rims {
+            for result in [
+                body.fillet(&[edge.clone()], size).unwrap(),
+                body.chamfer(&[edge.clone()], size).unwrap(),
+            ] {
+                assert_eq!(result.solids().len(), 1);
+                assert_eq!(
+                    result.faces().count(),
+                    4,
+                    "one continuous blend face per rim"
+                );
+                assert!(result.volume() < body.volume());
+                result
+                    .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                    .unwrap();
+            }
+        }
+    }
+    let both = body.fillet(&rims, 5.0).unwrap();
+    assert_eq!(both.faces().count(), 5, "two continuous blend faces");
+    both.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .unwrap();
+    // The saved follow-up sketch cuts a 4 mm pocket into the starting cap.
+    let pocket_plane = both
+        .faces()
+        .find_map(|face| match face.surface() {
+            Surface3::Plane(plane) => Some(*plane),
+            _ => None,
+        })
+        .unwrap();
+    let pocket_profile = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(
+                Point2::new(52.6543864532136, -6.740777335198338),
+                12.163742788970556,
+            )
+            .unwrap()],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap();
+    let cutter = pocket_profile
+        .extrude(pocket_plane, pocket_plane.normal() * -4.0)
+        .unwrap();
+    let pocket = both
+        .difference(&cutter)
+        .expect("pocket after continuous rim fillets");
+    assert_eq!(pocket.solids().len(), 1);
+    assert_eq!(pocket.faces().count(), 7, "pocket preserves continuous fillets");
+    assert!(pocket.volume() < both.volume());
+    pocket
+        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .unwrap();
+}

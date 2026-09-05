@@ -3405,3 +3405,58 @@ fn fillet_chamfer_rim_after_bottom_fillets() {
             .expect("chamfer rim fillet display mesh");
     }
 }
+
+#[test]
+fn fillet_short_edge_at_partial_chamfer_end() {
+    let body = owned_cuboid(
+        Point3::new(-39.34898342911119, 0.0, -24.348125762908833),
+        Point3::new(50.430018992481585, 26.0, 18.09148663497865),
+    );
+    let corner = body
+        .edges()
+        .find(|e| {
+            e.endpoints().unwrap().iter().all(|p| {
+                (p.x - 50.430018992481585).abs() < 1e-7 && (p.z - 18.09148663497865).abs() < 1e-7
+            })
+        })
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[corner], 22.0).unwrap();
+    let rims = body
+        .edges()
+        .filter(|e| {
+            e.endpoints()
+                .unwrap()
+                .iter()
+                .all(|p| (p.y - 26.0).abs() < 1e-7)
+                && (matches!(e.curve(), Curve3::Circle(_))
+                    || e.endpoints()
+                        .unwrap()
+                        .iter()
+                        .all(|p| (p.z - 18.09148663497865).abs() < 1e-7))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(rims.len(), 2);
+    let body = body
+        .chamfer_with_tangent_propagation(&rims, 6.0, false)
+        .unwrap();
+    let short = body
+        .edges()
+        .find(|e| {
+            let p = e.endpoints().unwrap();
+            p.iter().all(|p| (p.z + 3.908513365021342).abs() < 1e-7)
+                && (p[0].y - p[1].y).abs() > 5.9
+                && (p[0].y - p[1].y).abs() < 6.1
+                && (p[0].x - p[1].x).abs() > 5.9
+        })
+        .unwrap()
+        .clone();
+    let result = body.fillet(&[short], 0.1).unwrap();
+    assert_eq!(result.solids().len(), 1);
+    assert_eq!(result.faces().count(), body.faces().count() + 1);
+    assert!(result.solids().next().unwrap().volume() > body.solids().next().unwrap().volume());
+    result
+        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .unwrap();
+}

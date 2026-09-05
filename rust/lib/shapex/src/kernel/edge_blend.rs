@@ -44,6 +44,8 @@ fn signed_periodic_delta(start: f64, end: f64) -> f64 {
 struct BlendEndpoint {
     old_vertex: VertexId,
     terminating_face: FaceId,
+    // Shared terminating seam and the parent contact that moves its endpoint.
+    tangent_termination: Option<(EdgeId, usize)>,
     adjacent_uses: [CoedgeId; 2],
     contact_parameters: [f64; 2],
     contact_points: [Point3; 2],
@@ -934,6 +936,7 @@ impl EulerTransaction<'_> {
         Ok(BlendEndpoint {
             old_vertex: vertex,
             terminating_face,
+            tangent_termination: None,
             adjacent_uses: uses,
             contact_parameters: [parameter; 2],
             contact_points: points,
@@ -955,13 +958,13 @@ impl EulerTransaction<'_> {
             .into_iter()
             .filter(|face| !spine.faces.contains(face))
             .collect::<Vec<_>>();
-        if terminating_faces.len() != 1 {
+        if terminating_faces.is_empty() || terminating_faces.len() > 2 {
             return Err(KernelError::new(
                 DiagnosticKind::UnsupportedGeometry,
-                "a regular blend endpoint must have one terminating face",
+                "a regular blend endpoint requires one face or two tangent terminating faces",
             ));
         }
-        let terminating_face = terminating_faces[0];
+        let mut terminating_face = terminating_faces[0];
         let mut adjacent_uses = [spine.uses[0]; 2];
         let mut contact_parameters = [0.0; 2];
         let mut contact_points = [Point3::new(0.0, 0.0, 0.0); 2];
@@ -1064,6 +1067,81 @@ impl EulerTransaction<'_> {
             )?;
             contact_points[parent_index] = contact_point;
         }
+        // At a partial chamfer end, the two terminating supports meet
+        // tangentially. The new boundary can lie entirely on one support,
+        // with its other contact extending their shared seam.
+        let mut tangent_termination = None;
+        if terminating_faces.len() == 2 {
+            let seam = self
+                .working
+                .vertex_edges(old_vertex)?
+                .into_iter()
+                .find(|edge| {
+                    self.working.edge_faces(*edge).is_ok_and(|faces| {
+                        faces.len() == 2
+                            && faces.iter().all(|face| terminating_faces.contains(face))
+                    })
+                })
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "blend terminating supports have no shared seam",
+                    )
+                })?;
+            let point = self.working.vertex(old_vertex)?.point;
+            let mut normals = Vec::new();
+            for face in &terminating_faces {
+                let face = self.working.face(*face)?;
+                let uv = face.surface.project(point, tolerance)?.parameters;
+                let normal = face.surface.normal(uv.0, uv.1)?;
+                normals.push(if face.orientation == FaceOrientation::Reversed {
+                    -normal
+                } else {
+                    normal
+                });
+            }
+            if normals[0].normalize().dot(normals[1].normalize()) < 1.0 - tolerance.angular * 8.0 {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "blend endpoint requires tangent terminating supports",
+                ));
+            }
+            let allowed = tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 8.0;
+            for face in &terminating_faces {
+                let surface = &self.working.face(*face)?.surface;
+                if contact_points.iter().any(|point| {
+                    surface
+                        .project(*point, tolerance)
+                        .map_or(true, |projection| projection.distance > allowed)
+                }) {
+                    continue;
+                }
+                for parent in 0..2 {
+                    let adjacent = self.working.coedge(adjacent_uses[parent])?.edge;
+                    if self.working.edge_faces(adjacent)?.contains(face) {
+                        continue;
+                    }
+                    if self
+                        .working
+                        .edge(seam)?
+                        .curve
+                        .project(contact_points[parent], tolerance)?
+                        .distance
+                        > allowed
+                    {
+                        continue;
+                    }
+                    terminating_face = *face;
+                    tangent_termination = Some((seam, parent));
+                }
+            }
+            if tangent_termination.is_none() {
+                return Err(KernelError::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "blend endpoint crosses both terminating supports",
+                ));
+            }
+        }
         if spine.concave && allow_adjacent_extension.iter().all(|extension| *extension) {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
@@ -1073,6 +1151,7 @@ impl EulerTransaction<'_> {
         Ok(BlendEndpoint {
             old_vertex,
             terminating_face,
+            tangent_termination,
             adjacent_uses,
             contact_parameters,
             contact_points,
@@ -1722,6 +1801,7 @@ impl EulerTransaction<'_> {
         selected: &BTreeSet<EdgeId>,
     ) -> KernelResult<Option<(EdgeId, EdgeId, [FaceId; 2])>> {
         let point = self.working.vertex(vertex)?.point;
+        let current_faces = self.working.edge_faces(current_edge)?;
         let incident = self.working.vertex_edges(vertex)?;
         for seam in incident
             .iter()
@@ -1729,6 +1809,12 @@ impl EulerTransaction<'_> {
             .filter(|edge| !selected.contains(edge))
         {
             let faces = self.working.edge_faces(seam)?;
+            // A nearby tangent seam is only a continuation when it belongs
+            // to a support of the selected edge. Four-face cap corners also
+            // contain an unrelated seam between their terminating supports.
+            if !faces.iter().any(|face| current_faces.contains(face)) {
+                continue;
+            }
             if faces.len() != 2 {
                 continue;
             }
@@ -2450,7 +2536,10 @@ impl EulerTransaction<'_> {
                                 .surface
                                 .clone(),
                         };
-                        let adjacent_edge = self.working.coedge(endpoint.adjacent_uses[0])?.edge;
+                        let adjacent_edge = match endpoint.tangent_termination {
+                            Some((seam, 0)) => seam,
+                            _ => self.working.coedge(endpoint.adjacent_uses[0])?.edge,
+                        };
                         let (terminating_id, terminating_use) = self
                             .working
                             .edge(adjacent_edge)?
@@ -2796,8 +2885,11 @@ impl EulerTransaction<'_> {
                     continue;
                 };
                 let mut uses = Vec::with_capacity(2);
-                for adjacent in endpoint.adjacent_uses {
-                    let adjacent_edge = self.working.coedge(adjacent)?.edge;
+                for (parent, adjacent) in endpoint.adjacent_uses.into_iter().enumerate() {
+                    let adjacent_edge = match endpoint.tangent_termination {
+                        Some((seam, index)) if index == parent => seam,
+                        _ => self.working.coedge(adjacent)?.edge,
+                    };
                     let terminating_use = self
                         .working
                         .edge(adjacent_edge)?
@@ -2874,6 +2966,16 @@ impl EulerTransaction<'_> {
                 let BlendPatchEnd::Boundary(endpoint) = &patch.ends[endpoint_index] else {
                     continue;
                 };
+                if let Some((seam, parent)) = endpoint.tangent_termination {
+                    let vertex = contact_vertices
+                        [&Self::contact_vertex_key(patch, endpoint_index, parent, junctions)];
+                    self.retarget_edge_endpoint_allow_extension(
+                        seam,
+                        endpoint.old_vertex,
+                        vertex,
+                        endpoint.contact_points[parent],
+                    )?;
+                }
                 for parent_index in 0..2 {
                     if endpoint.cap.is_some_and(|(free, _)| free == parent_index) {
                         continue;
@@ -3627,6 +3729,9 @@ impl EulerTransaction<'_> {
             for end in &patch.ends {
                 if let BlendPatchEnd::Boundary(endpoint) = end {
                     modified_faces.insert(endpoint.terminating_face);
+                    if let Some((seam, _)) = endpoint.tangent_termination {
+                        modified_faces.extend(self.working.edge_faces(seam)?);
+                    }
                 }
             }
             self.delete_edge_and_uses(patch.spine.edge_id, &patch.spine.uses)?;

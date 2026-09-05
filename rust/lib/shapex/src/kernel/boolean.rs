@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::prelude::*;
@@ -55,8 +56,10 @@ impl DirectedPiece {
 }
 
 #[derive(Clone, Copy)]
-struct ClassificationMesh<'a> {
-    mesh: &'a TriangleMesh,
+struct OperandClassifier<'a> {
+    compound: &'a Compound,
+    mesh: &'a OnceCell<KernelResult<TriangleMesh>>,
+    options: TessellationOptions,
     faces: &'a [ClassificationFace],
     tolerance: ModelTolerance,
     chord: f64,
@@ -69,7 +72,7 @@ struct ClassificationFace {
     bounds: [ParameterRange; 2],
 }
 
-impl ClassificationMesh<'_> {
+impl OperandClassifier<'_> {
     fn sides_on_support(
         self,
         support: &Surface3,
@@ -111,11 +114,11 @@ impl ClassificationMesh<'_> {
         if covered {
             Ok(sides)
         } else {
-            let inside = self.contains(point);
+            let inside = self.contains(point)?;
             Ok((inside, inside))
         }
     }
-    fn contains(self, point: Point3) -> bool {
+    fn contains(self, point: Point3) -> KernelResult<bool> {
         // A chord mesh can put a point on the wrong side of a curved support.
         // Within its error envelope, classify against the nearest exact face.
         let mut nearest = None::<(f64, bool)>;
@@ -161,16 +164,23 @@ impl ClassificationMesh<'_> {
             ));
         }
         if let Some((_, inside)) = nearest {
-            return inside;
+            return Ok(inside);
         }
+        // Geometry queries above need no mesh. Build the fallback at most once
+        // per operand and operation, only when those queries are inconclusive.
+        let mesh = self
+            .mesh
+            .get_or_init(|| self.compound.tessellate(self.options))
+            .as_ref()
+            .map_err(Clone::clone)?;
         let mut solid_angle = 0.0;
-        for triangle in &self.mesh.triangles {
-            let a = self.mesh.positions[triangle[0]] - point;
-            let b = self.mesh.positions[triangle[1]] - point;
-            let c = self.mesh.positions[triangle[2]] - point;
+        for triangle in &mesh.triangles {
+            let a = mesh.positions[triangle[0]] - point;
+            let b = mesh.positions[triangle[1]] - point;
+            let c = mesh.positions[triangle[2]] - point;
             let lengths = [a.magnitude(), b.magnitude(), c.magnitude()];
             if lengths.iter().any(|length| *length <= f64::EPSILON) {
-                return true;
+                return Ok(true);
             }
             let numerator = a.dot(b.cross(c));
             let denominator = lengths[0] * lengths[1] * lengths[2]
@@ -179,7 +189,7 @@ impl ClassificationMesh<'_> {
                 + c.dot(a) * lengths[1];
             solid_angle += 2.0 * numerator.atan2(denominator);
         }
-        solid_angle.abs() > std::f64::consts::TAU
+        Ok(solid_angle.abs() > std::f64::consts::TAU)
     }
 }
 
@@ -212,8 +222,8 @@ pub(crate) fn boolean_brep(
     // meshes while the eight-chord offset stays clear of its error envelope.
     let chord = (tolerance.linear_at_scale(scale) * 32.0).max(scale * 5.0e-4);
     let options = TessellationOptions::new(chord, 0.12, 12)?;
-    let first_mesh = first.tessellate(options)?;
-    let second_mesh = second.tessellate(options)?;
+    let first_mesh = OnceCell::new();
+    let second_mesh = OnceCell::new();
     let classification_offset = chord * 8.0;
 
     let first_faces = first.faces().cloned().collect::<Vec<_>>();
@@ -251,14 +261,18 @@ pub(crate) fn boolean_brep(
         })
         .collect::<KernelResult<Vec<_>>>()?;
     let classifiers = [
-        ClassificationMesh {
+        OperandClassifier {
+            compound: first,
             mesh: &first_mesh,
+            options,
             faces: &classification_faces[0],
             tolerance,
             chord,
         },
-        ClassificationMesh {
+        OperandClassifier {
+            compound: second,
             mesh: &second_mesh,
+            options,
             faces: &classification_faces[1],
             tolerance,
             chord,
@@ -1291,7 +1305,7 @@ fn arrange_face(
     original_boundary: &[FaceCurve],
     curves: &[FaceCurve],
     has_coincident_support: bool,
-    classifiers: [ClassificationMesh<'_>; 2],
+    classifiers: [OperandClassifier<'_>; 2],
     kind: BooleanKind,
     classification_offset: f64,
     tolerance: ModelTolerance,
@@ -1330,7 +1344,7 @@ fn arrange_face(
             };
             return Ok(coincident_orientation);
         }
-        let other_contains = classifiers[1 - operand].contains(value.point);
+        let other_contains = classifiers[1 - operand].contains(value.point)?;
         let direct = match (kind, operand) {
             (BooleanKind::Union, _) => (!other_contains).then_some(source_orientation),
             (BooleanKind::Intersection, _) => other_contains.then_some(source_orientation),
@@ -2187,4 +2201,88 @@ fn patch_components(
         );
     }
     Ok(components)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Plane3, Profile, TrimmedCurve2, Wire2};
+    use super::*;
+    use crate::Vec3;
+
+    #[test]
+    fn classification_mesh_is_lazy_reused_and_fallible() {
+        let tolerance = ModelTolerance::default();
+        let compound = Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 10.0).unwrap()],
+                tolerance,
+            )
+            .unwrap(),
+            [],
+            tolerance,
+        )
+        .unwrap()
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+        .unwrap();
+        let faces = compound
+            .faces()
+            .map(|face| {
+                let boundary = boundary_curves(&compound, face.topology_id()).unwrap();
+                ClassificationFace {
+                    surface: face.surface().clone(),
+                    orientation: compound
+                        .topology()
+                        .face(face.topology_id())
+                        .unwrap()
+                        .orientation(),
+                    bounds: face_parameter_bounds(&boundary, tolerance).unwrap(),
+                    boundary,
+                }
+            })
+            .collect::<Vec<_>>();
+        let mesh = OnceCell::new();
+        let classifier = OperandClassifier {
+            compound: &compound,
+            mesh: &mesh,
+            options: TessellationOptions::new(0.1, 0.12, 12).unwrap(),
+            faces: &faces,
+            tolerance,
+            chord: 0.1,
+        };
+        assert!(classifier.contains(Point3::new(9.95, 0.0, 10.0)).unwrap());
+        assert!(!classifier.contains(Point3::new(10.05, 0.0, 10.0)).unwrap());
+        assert!(
+            mesh.get().is_none(),
+            "exact face queries must not mesh the operand"
+        );
+        assert!(classifier.contains(Point3::new(0.0, 0.0, 10.0)).unwrap());
+        let cached = mesh.get().unwrap() as *const _;
+        assert!(!classifier.contains(Point3::new(20.0, 0.0, 10.0)).unwrap());
+        assert_eq!(
+            cached,
+            mesh.get().unwrap() as *const _,
+            "reuse the fallback mesh"
+        );
+
+        let failing_mesh = OnceCell::new();
+        let failing = OperandClassifier {
+            mesh: &failing_mesh,
+            options: TessellationOptions {
+                maximum_depth: 0,
+                ..classifier.options
+            },
+            ..classifier
+        };
+        assert!(failing.contains(Point3::new(9.95, 0.0, 10.0)).unwrap());
+        assert!(failing_mesh.get().is_none());
+        let error = failing.contains(Point3::new(0.0, 0.0, 10.0)).unwrap_err();
+        assert_eq!(
+            failing.contains(Point3::new(0.0, 0.0, 10.0)).unwrap_err(),
+            error
+        );
+        assert!(
+            failing_mesh.get().unwrap().is_err(),
+            "retain fallback errors too"
+        );
+    }
 }

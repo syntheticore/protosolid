@@ -3406,8 +3406,7 @@ fn fillet_chamfer_rim_after_bottom_fillets() {
     }
 }
 
-#[test]
-fn fillet_short_edge_at_partial_chamfer_end() {
+fn partial_chamfer_fixture() -> super::Compound {
     let body = owned_cuboid(
         Point3::new(-39.34898342911119, 0.0, -24.348125762908833),
         Point3::new(50.430018992481585, 26.0, 18.09148663497865),
@@ -3441,6 +3440,12 @@ fn fillet_short_edge_at_partial_chamfer_end() {
     let body = body
         .chamfer_with_tangent_propagation(&rims, 6.0, false)
         .unwrap();
+    body
+}
+
+#[test]
+fn fillet_short_edge_at_partial_chamfer_end() {
+    let body = partial_chamfer_fixture();
     let short = body
         .edges()
         .find(|e| {
@@ -3468,4 +3473,59 @@ fn fillet_short_edge_at_partial_chamfer_end() {
             .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
             .unwrap();
     }
+}
+
+#[test]
+fn fillet_chamfer_rim_after_partial_end_fillets() {
+    let mut body = partial_chamfer_fixture();
+    for (axis, coordinate, radius) in [(0, 50.430018992481585, 3.0), (2, -24.348125762908833, 1.0)]
+    {
+        let edge = body
+            .edges()
+            .find(|e| {
+                e.endpoints().unwrap().iter().all(|p| {
+                    (p.y - 26.0).abs() < 1e-7
+                        && ((if axis == 0 { p.x } else { p.z }) - coordinate).abs() < 1e-7
+                })
+            })
+            .unwrap()
+            .clone();
+        body = body.fillet(&[edge], radius).unwrap();
+    }
+    let short = body
+        .edges()
+        .find(|e| {
+            let p = e.endpoints().unwrap();
+            p.iter().all(|p| (p.z + 3.908513365021342).abs() < 1e-7)
+                && (p[0].y - p[1].y).abs() > 2.9
+                && (p[0].x - p[1].x).abs() > 2.9
+        })
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[short], 0.75).unwrap();
+    let rim = body
+        .edges()
+        .find(|e| {
+            e.connected_faces()
+                .unwrap()
+                .iter()
+                .any(|f| matches!(f.surface(), Surface3::Cone(_)))
+                && e.endpoints()
+                    .unwrap()
+                    .iter()
+                    .all(|p| (p.y - 26.0).abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let result = body.fillet(&[rim], 0.2).unwrap();
+    assert_eq!(result.solids().len(), 1);
+    assert!(result.volume() < body.volume());
+    for edge in result.edges() {
+        assert_eq!(edge.connected_faces().unwrap().len(), 2);
+        let points = edge.endpoints().unwrap();
+        assert!(points[0].distance(points[1]) > 1e-7);
+    }
+    result
+        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .unwrap();
 }

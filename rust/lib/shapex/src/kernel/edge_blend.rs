@@ -362,16 +362,32 @@ impl EulerTransaction<'_> {
                         ..
                     } = junction_kind
                     {
-                        junctions.insert(
+                        let junction = self.prepare_smooth_fillet_junction(
                             *vertex,
-                            self.prepare_smooth_fillet_junction(
-                                *vertex,
-                                spine.offset,
-                                *seam_edge,
-                                *tangent_faces,
-                                spine.concave,
-                            )?,
+                            spine.offset,
+                            *seam_edge,
+                            *tangent_faces,
+                            spine.concave,
                         );
+                        match junction {
+                            Ok(junction) => {
+                                junctions.insert(*vertex, junction);
+                            }
+                            Err(error)
+                                if kind == EdgeBlendKind::Fillet
+                                    && self.working.vertex_faces(*vertex)?.len() == 4 =>
+                            {
+                                return self.split_smooth_blend_transition(
+                                    *vertex,
+                                    *tangent_faces,
+                                    &selected,
+                                    radius,
+                                    follow_tangent_edges,
+                                    error,
+                                );
+                            }
+                            Err(error) => return Err(error),
+                        }
                         continue;
                     }
                     let endpoint_index = spine
@@ -854,7 +870,16 @@ impl EulerTransaction<'_> {
         midpoint: Point3,
     ) -> KernelResult<bool> {
         let parameter = (edge.range.start + edge.range.end) * 0.5;
-        let traversal = self.working.coedge(uses[0])?.range.span().signum();
+        let use_value = self.working.coedge(uses[0])?;
+        let traversal = if edge.range.span() == 0.0 {
+            if use_value.forward {
+                1.0
+            } else {
+                -1.0
+            }
+        } else {
+            use_value.range.span().signum()
+        };
         let tangent = edge.curve.evaluate(parameter)?.first_derivative * traversal;
         let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
         for index in 0..2 {
@@ -1407,6 +1432,236 @@ impl EulerTransaction<'_> {
         .map(Surface3::from)
     }
 
+    // A four-face tangent vertex can separate two transitions that the
+    // rolling ball reaches at different positions. Split its zero-length
+    // cross-support edge internally; the finished blend replaces it completely.
+    fn split_smooth_blend_transition(
+        &mut self,
+        vertex: VertexId,
+        tangent: [FaceId; 2],
+        selected: &BTreeSet<EdgeId>,
+        radius: f64,
+        follow: bool,
+        original_error: KernelError,
+    ) -> KernelResult<()> {
+        let other = self
+            .working
+            .vertex_faces(vertex)?
+            .into_iter()
+            .filter(|face| !tangent.contains(face))
+            .collect::<Vec<_>>();
+        let incident = self.working.vertex_edges(vertex)?;
+        if other.len() != 2
+            || incident.len() != 4
+            || incident
+                .iter()
+                .filter(|edge| selected.contains(edge))
+                .count()
+                != 2
+        {
+            return Err(original_error);
+        }
+        let point = self.working.vertex(vertex)?.point;
+        let normals = other
+            .iter()
+            .map(|face| {
+                let face = self.working.face(*face)?;
+                let uv = face
+                    .surface
+                    .project(point, self.kernel.tolerance)?
+                    .parameters;
+                let normal = face.surface.normal(uv.0, uv.1)?.normalize();
+                Ok(if face.orientation == FaceOrientation::Reversed {
+                    -normal
+                } else {
+                    normal
+                })
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        if normals[0].dot(normals[1])
+            < 1.0 - self.kernel.tolerance.angular.max(f64::EPSILON.sqrt()) * 8.0
+        {
+            return Err(original_error);
+        }
+        let snapshot = (
+            self.working.clone(),
+            self.history.clone(),
+            self.names.clone(),
+            self.touched_bodies.clone(),
+            self.composes_imported_topology,
+        );
+        for cross in tangent
+            .into_iter()
+            .flat_map(|face| other.iter().map(move |other| [face, *other]))
+        {
+            if incident.iter().any(|edge| {
+                self.working
+                    .edge_faces(*edge)
+                    .is_ok_and(|faces| cross.iter().all(|face| faces.contains(face)))
+            }) {
+                continue;
+            }
+            let attempt = (|| {
+                let bridge = self.insert_blend_transition_bridge(vertex, cross, selected)?;
+                let mut selected = selected.clone();
+                selected.insert(bridge);
+                self.blend_network_unchecked(selected, radius, follow, EdgeBlendKind::Fillet)
+            })();
+            if attempt.is_ok() {
+                return attempt;
+            }
+            self.working = snapshot.0.clone();
+            self.history = snapshot.1.clone();
+            self.names = snapshot.2.clone();
+            self.touched_bodies = snapshot.3.clone();
+            self.composes_imported_topology = snapshot.4;
+        }
+        Err(original_error)
+    }
+
+    fn insert_blend_transition_bridge(
+        &mut self,
+        vertex: VertexId,
+        cross: [FaceId; 2],
+        selected: &BTreeSet<EdgeId>,
+    ) -> KernelResult<EdgeId> {
+        let tolerance = self.kernel.tolerance;
+        let incident = self.working.vertex_edges(vertex)?;
+        // Seed the new support intersection from the existing sharp boundary
+        // on the second support. Its projected guide is corrected exactly.
+        let source_id = incident
+            .iter()
+            .copied()
+            .find(|edge| {
+                selected.contains(edge)
+                    && self
+                        .working
+                        .edge_faces(*edge)
+                        .is_ok_and(|faces| faces.contains(&cross[1]))
+            })
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "transition bridge has no source boundary",
+                )
+            })?;
+        let source = self.working.edge(source_id)?.clone();
+        let source_use = source
+            .coedges
+            .iter()
+            .copied()
+            .find(|id| {
+                self.working
+                    .coedge(*id)
+                    .and_then(|coedge| self.working.loop_(coedge.loop_id))
+                    .is_ok_and(|loop_| loop_.face == cross[1])
+            })
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "transition source has no support coedge",
+                )
+            })?;
+        let first = self.working.face(cross[0])?.surface.clone();
+        let second = self.working.face(cross[1])?.surface.clone();
+        let mut guide = Vec::new();
+        let mut parameters = Vec::new();
+        for index in 0..=16 {
+            let t = source.range.start + source.range.span() * index as f64 / 16.0;
+            let uv = first
+                .project(source.curve.evaluate(t)?.point, tolerance)?
+                .parameters;
+            guide.push(Point2::new(uv.0, uv.1));
+            parameters.push(t);
+        }
+        let curve = SurfaceIntersectionCurve::new(
+            first,
+            second,
+            super::intersection::interpolating_nurbs_guide(&guide, &parameters)?.into(),
+            self.working.coedge(source_use)?.pcurve.clone(),
+            source.range,
+            tolerance,
+            tolerance.linear,
+        )?;
+        let pcurves = curve.exact_pcurves();
+        let parameter = if source.vertices[0] == vertex {
+            source.range.start
+        } else {
+            source.range.end
+        };
+        let point = self.working.vertex(vertex)?.point;
+        let name = self.names.next_for("fillet.transition.vertex")?;
+        let new_vertex = self.make_vertex(name, point);
+        self.history.derived(
+            name,
+            [self.working.vertex(vertex)?.name],
+            "fillet.transition.vertex",
+        );
+        // Move the source and the adjacent seam on the first support to the
+        // second vertex, leaving a gap in each cross-support loop.
+        let source_faces = self.working.edge_faces(source_id)?;
+        let moved_face = *source_faces
+            .iter()
+            .find(|face| **face != cross[1])
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "transition source has no opposite support",
+                )
+            })?;
+        for edge in &incident {
+            if self.working.edge_faces(*edge)?.contains(&moved_face) {
+                for endpoint in &mut self.working.edges.get_mut(*edge)?.vertices {
+                    if *endpoint == vertex {
+                        *endpoint = new_vertex;
+                    }
+                }
+            }
+        }
+        let range = ParameterRange {
+            start: parameter,
+            end: parameter,
+        };
+        let name = self.names.next_for("fillet.transition.edge")?;
+        let edge = self.make_edge(name, [vertex, new_vertex], curve.into(), range)?;
+        self.history.derived(
+            name,
+            [self.working.vertex(vertex)?.name],
+            "fillet.transition.edge",
+        );
+        for side in 0..2 {
+            let mut gap = None;
+            for loop_id in self.working.face(cross[side])?.loops.clone() {
+                for previous in self.collect_loop(loop_id)? {
+                    let next = self.working.coedge(previous)?.next;
+                    let a = self.working.coedge_vertices(previous)?[1];
+                    let b = self.working.coedge_vertices(next)?[0];
+                    if (a == vertex && b == new_vertex) || (a == new_vertex && b == vertex) {
+                        gap = Some((previous, next, loop_id, a == vertex));
+                    }
+                }
+            }
+            let (previous, next, loop_id, forward) = gap.ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "transition bridge has no loop gap",
+                )
+            })?;
+            let name = self.names.next_for("fillet.transition.use")?;
+            let coedge =
+                self.make_coedge(name, edge, loop_id, forward, pcurves[side].clone(), range)?;
+            self.history.derived(
+                name,
+                [self.working.edge(edge)?.name],
+                "fillet.transition.use",
+            );
+            self.insert_loop_coedge(previous, next, coedge)?;
+        }
+        self.repair_outgoing(vertex)?;
+        self.repair_outgoing(new_vertex)?;
+        Ok(edge)
+    }
+
     fn prepare_smooth_fillet_junction(
         &self,
         vertex: VertexId,
@@ -1501,11 +1756,6 @@ impl EulerTransaction<'_> {
             -common_outward
         };
         let common_offset = common_surface.offset(common_distance, tolerance)?;
-        let old_point = self.working.vertex(vertex)?.point;
-        let common_seed = match &common_offset {
-            Surface3::Offset(offset) => offset.base().project(old_point, tolerance)?.parameters,
-            _ => common_offset.project(old_point, tolerance)?.parameters,
-        };
         let offset_seam = |parameter: f64| -> KernelResult<(Point3, Vec3, Point3)> {
             let uv = seam_pcurve.evaluate(parameter)?;
             let surface = tangent_surface.evaluate(uv.point.x, uv.point.y)?;
@@ -1535,6 +1785,13 @@ impl EulerTransaction<'_> {
             ))
         };
 
+        // Seed from the offset seam, not the old vertex: at a tangential
+        // termination the old vertex can put Newton on a singular boundary.
+        let seed_center = offset_seam(seam_parameter)?.0;
+        let common_seed = match &common_offset {
+            Surface3::Offset(offset) => offset.base().project(seed_center, tolerance)?.parameters,
+            _ => common_offset.project(seed_center, tolerance)?.parameters,
+        };
         let mut parameters = [seam_parameter, common_seed.0, common_seed.1];
         let mut solution = None;
         for _ in 0..48 {
@@ -2754,6 +3011,11 @@ impl EulerTransaction<'_> {
                     let identified_segments = self
                         .collect_loop(loop_id)?
                         .into_iter()
+                        .filter(|coedge_id| {
+                            self.working
+                                .coedge(*coedge_id)
+                                .is_ok_and(|coedge| coedge.range.span() != 0.0)
+                        })
                         .map(|coedge_id| {
                             let coedge = self.working.coedge(coedge_id)?;
                             Ok((
@@ -3824,8 +4086,23 @@ impl EulerTransaction<'_> {
                 } else {
                     1.0 - fraction
                 };
-                let pcurve_parameter =
-                    coedge.range.start + coedge.range.span() * traversal_fraction;
+                // Internal transition connectors have zero source length;
+                // their exact supporting intersection still supplies a guide.
+                let range = if coedge.range.span() == 0.0 {
+                    match coedge.pcurve.domain().bounds {
+                        DomainBounds::Bounded(range) => {
+                            if coedge.forward {
+                                range
+                            } else {
+                                range.reversed()
+                            }
+                        }
+                        _ => coedge.range,
+                    }
+                } else {
+                    coedge.range
+                };
+                let pcurve_parameter = range.start + range.span() * traversal_fraction;
                 let mut uv = coedge.pcurve.evaluate(pcurve_parameter)?.point;
                 if let Some(previous) = boundary_parameters[side].last().copied() {
                     let domains = offsets[side].domains();

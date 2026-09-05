@@ -949,6 +949,10 @@ fn refine_surface_triangles(
     normals: &mut Vec<Vec3>,
     triangles: &mut Vec<[usize; 3]>,
 ) -> KernelResult<()> {
+    // Refinement only appends vertices. Unchanged edges and triangles retain
+    // identical UVs, so their exact error estimates can be reused across rounds.
+    let mut edge_errors = BTreeMap::new();
+    let mut triangle_errors = BTreeMap::new();
     for depth in 0..=options.maximum_depth {
         let mut marked_edges = BTreeSet::new();
         let mut edge_scores = BTreeMap::new();
@@ -961,8 +965,13 @@ fn refine_surface_triangles(
         }
         for edge in unique_edges {
             if !boundary_edges.contains(&edge) {
-                let (chord_error, mut angular_error) =
-                    surface_edge_error(surface, orientation, edge, uvs, positions)?;
+                let (chord_error, mut angular_error) = if let Some(error) = edge_errors.get(&edge) {
+                    *error
+                } else {
+                    let error = surface_edge_error(surface, orientation, edge, uvs, positions)?;
+                    edge_errors.insert(edge, error);
+                    error
+                };
                 if let Some(resolved_error) = collapsed_periodic_angular_error(
                     surface,
                     &[uvs[edge.0], uvs[edge.1]],
@@ -984,8 +993,15 @@ fn refine_surface_triangles(
             }
         }
         for (index, triangle) in triangles.iter().copied().enumerate() {
-            let (chord_error, mut angular_error) =
-                surface_triangle_error(surface, orientation, triangle, uvs, positions)?;
+            let (chord_error, mut angular_error) = if let Some(error) =
+                triangle_errors.get(&triangle)
+            {
+                *error
+            } else {
+                let error = surface_triangle_error(surface, orientation, triangle, uvs, positions)?;
+                triangle_errors.insert(triangle, error);
+                error
+            };
             let [a, b, c] = triangle;
             if let Some(resolved_error) = collapsed_periodic_angular_error(
                 surface,

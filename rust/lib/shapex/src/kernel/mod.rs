@@ -23,6 +23,7 @@ mod naming;
 mod physical;
 mod polyhedron;
 mod profile;
+mod sweeps;
 mod tessellation;
 mod tolerance;
 mod topology;

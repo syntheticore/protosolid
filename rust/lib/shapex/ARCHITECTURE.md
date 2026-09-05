@@ -97,6 +97,13 @@ The current publisher certifies:
 - exact inward and outward shelling of manifold analytical BREP bodies, including
   planar, cylindrical, and toroidal fillet/protrusion combinations, with optional
   removed-face openings;
+- full and partial profile revolutions, retaining primitive supports where
+  possible and exact revolved surfaces for other meridians;
+- smooth rational section lofts through line, circle, and NURBS profiles, with
+  exact subdivision and degree elevation for section correspondence;
+- equal-distance chamfers of planar edges and cylinder/plane rims, and neutral
+  plane drafts of planar and pull-aligned cylindrical/conical faces;
+- plane splits retaining either or both sides, including disconnected solids;
 - rigid transforms of those bodies.
 
 Planar bodies receive intersection/contact checks and mass properties from their
@@ -105,6 +112,15 @@ area, centroid, and inertia checks. General curved BREP combinations are certifi
 direct divergence-theorem integration over exact trimmed parametric faces; periodic
 p-curve loops are lifted into a continuous parameter chart before winding and physical
 integration.
+
+
+Before sewing, unmatched face boundaries are split at existing vertices on their
+exact curves so adjacent faces can share an edge despite different subdivisions.
+Boolean side probes use distances to retained curve intervals; coincident supports
+use oriented trims to determine material sides. These operations retain exact
+supports and curves, including when a chamfer cuts across earlier fillets. Periodic
+seam continuity and display bands use a consistent parameter chart, with retained
+seams selecting the intended sweep interval at and beyond a half turn.
 
 ## Parametric systems
 

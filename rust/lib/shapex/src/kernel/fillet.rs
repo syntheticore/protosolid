@@ -1335,18 +1335,7 @@ impl EulerTransaction<'_> {
         endpoint_index: usize,
     ) -> KernelResult<Option<(EdgeId, [FaceId; 2])>> {
         let vertex = spine.edge.vertices[endpoint_index];
-        let source_parameter = if endpoint_index == 0 {
-            spine.edge.range.start
-        } else {
-            spine.edge.range.end
-        };
-        let source = spine.edge.curve.evaluate(source_parameter)?;
-        let source_tangent = if endpoint_index == 0 {
-            source.first_derivative
-        } else {
-            -source.first_derivative
-        }
-        .normalize();
+        let source_tangent = spine.edge.endpoint_tangent(endpoint_index)?.normalize();
         let source_faces = spine.faces.into_iter().collect::<BTreeSet<_>>();
         let mut continuation = None;
         for candidate_id in self
@@ -1401,14 +1390,14 @@ impl EulerTransaction<'_> {
             {
                 continue;
             }
-            let (parameter, sign) = if candidate.vertices[0] == vertex {
-                (candidate.range.start, 1.0)
+            let endpoint = if candidate.vertices[0] == vertex {
+                0
             } else if candidate.vertices[1] == vertex {
-                (candidate.range.end, -1.0)
+                1
             } else {
                 continue;
             };
-            let tangent = candidate.curve.evaluate(parameter)?.first_derivative * sign;
+            let tangent = candidate.endpoint_tangent(endpoint)?;
             if tangent.magnitude2() <= self.kernel.tolerance.linear.powi(2) {
                 continue;
             }

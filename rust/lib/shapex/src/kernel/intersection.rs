@@ -750,6 +750,16 @@ impl Surface3 {
             (Self::Cylinder(first), Self::Plane(second)) => Ok(swap_surface_curves(
                 plane_cylinder(*second, *first, tolerance)?,
             )),
+            (Self::Plane(plane), Self::Cone(cone)) => plane_cone(*plane, *cone, tolerance),
+            (Self::Cone(cone), Self::Plane(plane)) => {
+                Ok(swap_surface_curves(plane_cone(*plane, *cone, tolerance)?))
+            }
+            (Self::Cylinder(cylinder), Self::Cone(cone)) => {
+                cylinder_cone(*cylinder, *cone, tolerance)
+            }
+            (Self::Cone(cone), Self::Cylinder(cylinder)) => Ok(swap_surface_curves(cylinder_cone(
+                *cylinder, *cone, tolerance,
+            )?)),
             (Self::Cylinder(first), Self::Cylinder(second)) => {
                 cylinder_cylinder(*first, *second, tolerance)
             }
@@ -803,6 +813,136 @@ impl Surface3 {
             Err(error) => Err(error),
         }
     }
+}
+
+fn plane_cone(
+    plane: Plane3,
+    cone: super::Cone3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    // A plane through the apex cuts generators, including the single generator
+    // of a tangent plane. A regular surface tracer cannot find that singular
+    // contact reliably (drafted cylindrical fillets produce it routinely).
+    let normal = plane.normal();
+    let apex_distance = (cone.apex() - plane.origin()).dot(normal);
+    let scale = cone
+        .axis()
+        .magnitude()
+        .max(cone.reference_radius())
+        .max(1.0);
+    if apex_distance.abs() <= tolerance.linear_at_scale(scale) {
+        let a = normal.dot(cone.x_radius());
+        let b = normal.dot(cone.y_radius());
+        let c = normal.dot(cone.axis());
+        let amplitude = a.hypot(b);
+        if amplitude <= tolerance.linear_at_scale(scale) {
+            return Ok(IntersectionSet::Empty);
+        }
+        let ratio = -c / amplitude;
+        let angular_error = tolerance.linear_at_scale(scale) / amplitude;
+        if ratio.abs() > 1.0 + angular_error {
+            return Ok(IntersectionSet::Empty);
+        }
+        let phase = b.atan2(a);
+        let delta = if (ratio.abs() - 1.0).abs() <= angular_error {
+            if ratio >= 0.0 {
+                0.0
+            } else {
+                std::f64::consts::PI
+            }
+        } else {
+            ratio.acos()
+        };
+        let mut angles = vec![phase + delta];
+        if delta.sin().abs() > tolerance.angular {
+            angles.push(phase - delta);
+        }
+        let origin = plane.project(cone.apex())?.parameters;
+        let curves = angles
+            .into_iter()
+            .map(|u| {
+                let direction = cone.axis() + cone.x_radius() * u.cos() + cone.y_radius() * u.sin();
+                let end = plane.project(cone.apex() + direction)?.parameters;
+                Ok(SurfaceSurfaceCurve {
+                    curve: Line3::new(cone.apex(), direction)?.into(),
+                    first_pcurve: Line2::new(
+                        Point2::new(origin.0, origin.1),
+                        crate::Vec2::new(end.0 - origin.0, end.1 - origin.1),
+                    )?
+                    .into(),
+                    second_pcurve: Line2::new(Point2::new(u, 0.0), crate::Vec2::unit_y())?.into(),
+                    achieved_error: apex_distance.abs(),
+                })
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        return Ok(IntersectionSet::Isolated(curves));
+    }
+    if plane.normal().dot(cone.axis().normalize()).abs() < 1.0 - tolerance.angular {
+        return Err(unsupported(
+            "oblique plane/cone intersection requires bounded tracing",
+        ));
+    }
+    let v = (plane.origin() - cone.apex()).dot(plane.normal()) / cone.axis().dot(plane.normal());
+    if v <= tolerance.parameter {
+        return Ok(IntersectionSet::Empty);
+    }
+    let center = cone.apex() + cone.axis() * v;
+    let curve: Curve3 =
+        Circle3::new(center, cone.x_radius() * v, cone.y_radius() * v, tolerance)?.into();
+    let range = super::ParameterRange::new(0.0, std::f64::consts::TAU)?;
+    let center_uv = plane.project(center)?.parameters;
+    let x_uv = plane.project(center + cone.x_radius() * v)?.parameters;
+    let y_uv = plane.project(center + cone.y_radius() * v)?.parameters;
+    let guide_radius = (x_uv.0 - center_uv.0)
+        .hypot(x_uv.1 - center_uv.1)
+        .max((y_uv.0 - center_uv.0).hypot(y_uv.1 - center_uv.1));
+    // Plane charts may be scaled or skewed. The section is still an exact
+    // spatial circle; only its parameter-space image becomes an ellipse.
+    let pcurve = SurfaceProjectionPcurve2::new(
+        curve.clone(),
+        Surface3::Plane(plane),
+        super::Circle2::new(Point2::new(center_uv.0, center_uv.1), guide_radius)?.into(),
+        range,
+        tolerance,
+    )?
+    .into();
+    Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
+        curve,
+        first_pcurve: pcurve,
+        second_pcurve: Line2::new(Point2::new(0.0, v), crate::Vec2::unit_x())?.into(),
+        achieved_error: 0.0,
+    }]))
+}
+fn cylinder_cone(
+    cylinder: super::Cylinder3,
+    cone: super::Cone3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let axis = cylinder.axis().normalize();
+    if axis.dot(cone.axis().normalize()).abs() < 1.0 - tolerance.angular
+        || (cone.apex() - cylinder.origin()).cross(axis).magnitude() > tolerance.linear
+    {
+        return Err(unsupported(
+            "noncoaxial cylinder/cone intersection requires bounded tracing",
+        ));
+    }
+    let v = cylinder.radius() / cone.reference_radius();
+    let center = cone.apex() + cone.axis() * v;
+    let circle = Circle3::new(center, cone.x_radius() * v, cone.y_radius() * v, tolerance)?;
+    let point = circle.evaluate(0.0)?;
+    let uv = Surface3::Cylinder(cylinder)
+        .project(point.point, tolerance)?
+        .parameters;
+    let rate = point
+        .first_derivative
+        .dot(Surface3::Cylinder(cylinder).evaluate(uv.0, uv.1)?.du)
+        .signum();
+    Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
+        curve: circle.into(),
+        first_pcurve: Line2::new(Point2::new(uv.0, uv.1), crate::Vec2::new(rate, 0.0))?.into(),
+        second_pcurve: Line2::new(Point2::new(0.0, v), crate::Vec2::unit_x())?.into(),
+        achieved_error: 0.0,
+    }]))
 }
 
 fn cylinder_cylinder(
@@ -1404,7 +1544,19 @@ fn trace_surface_intersections_in_domains(
             snap(value)?;
         }
         if parameters.len() >= 2 {
-            traced.push(parameters);
+            // A tangential contact at a trim corner can converge to several
+            // parameter samples of the same spatial point. It has no curve
+            // extent and must not become a constant, singular guide spline.
+            let origin = first.evaluate(parameters[0][0], parameters[0][1])?.point;
+            let linear = tolerance.linear_at_scale(origin.to_vec().magnitude().max(1.0));
+            let mut extent = 0.0_f64;
+            for value in &parameters {
+                extent = extent.max(origin.distance(first.evaluate(value[0], value[1])?.point));
+                extent = extent.max(origin.distance(second.evaluate(value[2], value[3])?.point));
+            }
+            if extent > linear {
+                traced.push(parameters);
+            }
         }
     }
 

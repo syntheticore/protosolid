@@ -2095,7 +2095,7 @@ impl SurfaceIntersectionCurve {
         if !finite_point(point) {
             return Err(invalid("projection point must be finite"));
         }
-        let mut parameter = (0..=32)
+        let parameter = (0..=32)
             .map(|index| self.range.start + self.range.span() * index as f64 / 32.0)
             .map(|parameter| {
                 self.evaluate(parameter)
@@ -2111,32 +2111,65 @@ impl SurfaceIntersectionCurve {
                     "surface-intersection projection has no seed",
                 )
             })?;
-        for _ in 0..32 {
-            let value = self.evaluate(parameter)?;
-            let residual = value.point - point;
-            let function = residual.dot(value.first_derivative);
-            let derivative =
-                value.first_derivative.magnitude2() + residual.dot(value.second_derivative);
-            if derivative.abs() <= f64::EPSILON {
-                break;
-            }
-            let next = (parameter - function / derivative).clamp(
-                self.range.start.min(self.range.end),
-                self.range.start.max(self.range.end),
-            );
-            if (next - parameter).abs() <= self.tolerance.parameter {
-                parameter = next;
-                break;
-            }
-            parameter = next;
-        }
         let projected = self.evaluate(parameter)?.point;
-        Ok(Projection1 {
-            parameter,
-            point: projected,
-            distance: projected.distance(point),
-        })
+        refine_curve_projection(
+            point,
+            self.range,
+            self.tolerance,
+            Projection1 {
+                parameter,
+                point: projected,
+                distance: projected.distance(point),
+            },
+            |parameter| self.first_order(parameter),
+        )
     }
+}
+
+// Refine a seeded projection without leaving its retained parameter interval.
+// Shared by complete implicit curves and trimmed Boolean arrangement edges.
+fn refine_curve_projection(
+    point: Point3,
+    range: ParameterRange,
+    tolerance: ModelTolerance,
+    mut best: Projection1,
+    first_order: impl Fn(f64) -> KernelResult<(Point3, Vec3)>,
+) -> KernelResult<Projection1> {
+    let low = range.start.min(range.end);
+    let high = range.start.max(range.end);
+    // Corrected implicit intersections provide a reliable first derivative,
+    // but not full curvature. Damping keeps the distance decreasing without
+    // depending on an incomplete second derivative or leaving the trim.
+    for _ in 0..64 {
+        let (projected, tangent) = first_order(best.parameter)?;
+        let residual = projected - point;
+        let speed2 = tangent.magnitude2();
+        if speed2 <= f64::EPSILON {
+            break;
+        }
+        let mut step = residual.dot(tangent) / speed2;
+        let mut next = best;
+        for _ in 0..24 {
+            let parameter = (best.parameter - step).clamp(low, high);
+            let projected = first_order(parameter)?.0;
+            let distance = projected.distance(point);
+            if distance < best.distance {
+                next = Projection1 {
+                    parameter,
+                    point: projected,
+                    distance,
+                };
+                break;
+            }
+            step *= 0.5;
+        }
+        let converged = (next.parameter - best.parameter).abs() <= tolerance.parameter;
+        best = next;
+        if converged {
+            break;
+        }
+    }
+    Ok(best)
 }
 
 fn parameters_in_surface_domains(
@@ -2403,6 +2436,53 @@ impl Curve3 {
                 .evaluate(parameter)
                 .map(|value| (value.point, value.first_derivative)),
         }
+    }
+
+    /// Closest point on a retained edge interval, including its endpoints.
+    /// Searching the whole basis curve can select another branch or periodic
+    /// copy and miss a nearby boundary of a thin Boolean region.
+    pub(crate) fn project_on_trim(
+        &self,
+        point: Point3,
+        range: ParameterRange,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Projection1> {
+        let low = range.start.min(range.end);
+        let high = range.start.max(range.end);
+        let mut seeds = vec![low, high];
+        if matches!(self, Self::Line(_) | Self::Circle(_)) {
+            let mut parameter = self.project(point, tolerance)?.parameter;
+            if let Some(period) = self.domain().period {
+                parameter += (((low + high) * 0.5 - parameter) / period).round() * period;
+            }
+            seeds.push(parameter.clamp(low, high));
+        } else {
+            seeds.extend((1..32).map(|i| low + (high - low) * i as f64 / 32.0));
+            self.collect_parameter_breaks(&mut seeds);
+        }
+        seeds.retain(|parameter| *parameter >= low && *parameter <= high);
+        let mut best = None;
+        for parameter in seeds {
+            let projected = self.first_order(parameter)?.0;
+            let distance = projected.distance(point);
+            if best
+                .as_ref()
+                .is_none_or(|value: &Projection1| distance < value.distance)
+            {
+                best = Some(Projection1 {
+                    parameter,
+                    point: projected,
+                    distance,
+                });
+            }
+        }
+        let best = best.ok_or_else(|| invalid("curve trim has no projection seed"))?;
+        if matches!(self, Self::Line(_) | Self::Circle(_)) {
+            return Ok(best);
+        }
+        refine_curve_projection(point, range, tolerance, best, |parameter| {
+            self.first_order(parameter)
+        })
     }
 
     pub fn project(&self, point: Point3, tolerance: ModelTolerance) -> KernelResult<Projection1> {

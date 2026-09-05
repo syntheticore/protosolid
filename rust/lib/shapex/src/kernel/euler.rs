@@ -139,6 +139,148 @@ pub(crate) struct BrepPatch {
     pub loops: Vec<BrepPatchLoop>,
 }
 
+/// Imprint existing boundary vertices onto unpaired exact trims before sewing.
+/// Adjacent faces may describe one physical edge with different subdivisions.
+/// Only parameter ranges change; supports, curves, and p-curves remain exact.
+pub(crate) fn conform_brep_boundaries(
+    patches: &mut [BrepPatch],
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    let segments = patches
+        .iter()
+        .flat_map(|p| &p.loops)
+        .flat_map(|l| &l.segments)
+        .collect::<Vec<_>>();
+    let ends = segments
+        .iter()
+        .map(|s| {
+            Ok([
+                s.curve.evaluate(s.range.start)?.point,
+                s.curve.evaluate(s.range.end)?.point,
+            ])
+        })
+        .collect::<KernelResult<Vec<_>>>()?;
+    let close = |a: Point3, b: Point3| {
+        a.distance(b)
+            <= tolerance
+                .linear_at_scale(a.to_vec().magnitude().max(b.to_vec().magnitude()).max(1.0))
+                * 8.0
+    };
+    let middles = segments
+        .iter()
+        .map(|s| {
+            s.curve
+                .evaluate((s.range.start + s.range.end) * 0.5)
+                .map(|v| v.point)
+        })
+        .collect::<KernelResult<Vec<_>>>()?;
+    let paired = ends
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            ends.iter().enumerate().any(|(j, b)| {
+                if i == j {
+                    return false;
+                }
+                if (close(a[0], b[0]) && close(a[1], b[1]))
+                    || (close(a[0], b[1]) && close(a[1], b[0]))
+                {
+                    return close(middles[i], middles[j])
+                        || segments[i]
+                            .curve
+                            .project(middles[j], tolerance)
+                            .is_ok_and(|p| {
+                                let mut t = p.parameter;
+                                if let Some(period) = segments[i].curve.domain().period {
+                                    t += (((segments[i].range.start + segments[i].range.end)
+                                        * 0.5
+                                        - t)
+                                        / period)
+                                        .round()
+                                        * period;
+                                }
+                                close(p.point, middles[j])
+                                    && segments[i].range.contains(t, tolerance)
+                            });
+                }
+                match (&segments[i].curve, &segments[j].curve) {
+                    (Curve3::Circle(first), Curve3::Circle(second)) => {
+                        close(a[0], a[1])
+                            && close(b[0], b[1])
+                            && close(first.center(), second.center())
+                            && (first.radius() - second.radius()).abs() <= tolerance.linear * 8.0
+                            && first.normal().dot(second.normal()).abs()
+                                >= 1.0 - tolerance.angular * 8.0
+                    }
+                    _ => false,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    if paired.iter().all(|p| *p) {
+        return Ok(());
+    }
+    let mut vertices = Vec::new();
+    for point in ends.iter().flatten() {
+        if !vertices.iter().any(|candidate| close(*point, *candidate)) {
+            vertices.push(*point);
+        }
+    }
+    let mut index = 0;
+    for loop_ in patches.iter_mut().flat_map(|p| &mut p.loops) {
+        let mut conformed = Vec::new();
+        for segment in std::mem::take(&mut loop_.segments) {
+            let current = index;
+            index += 1;
+            if paired[current] {
+                conformed.push(segment);
+                continue;
+            }
+            let mut parameters = vec![segment.range.start, segment.range.end];
+            for point in &vertices {
+                if ends[current].iter().any(|end| close(*end, *point)) {
+                    continue;
+                }
+                let Ok(projection) = segment.curve.project(*point, tolerance) else {
+                    continue;
+                };
+                if !close(projection.point, *point) {
+                    continue;
+                }
+                let mut parameter = projection.parameter;
+                if let Some(period) = segment.curve.domain().period {
+                    parameter += (((segment.range.start + segment.range.end) * 0.5 - parameter)
+                        / period)
+                        .round()
+                        * period;
+                }
+                if segment.range.contains(parameter, tolerance)
+                    && !parameters
+                        .iter()
+                        .any(|p| (*p - parameter).abs() <= tolerance.parameter * 64.0)
+                {
+                    parameters.push(parameter.clamp(
+                        segment.range.start.min(segment.range.end),
+                        segment.range.start.max(segment.range.end),
+                    ));
+                }
+            }
+            parameters.sort_by(f64::total_cmp);
+            if segment.range.span() < 0.0 {
+                parameters.reverse();
+            }
+            for pair in parameters.windows(2) {
+                conformed.push(BrepPatchSegment {
+                    range: ParameterRange::new(pair[0], pair[1])?,
+                    ..segment.clone()
+                });
+            }
+        }
+        loop_.segments = conformed;
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub(crate) struct CommittedOperation {
     pub operation: Uuid,
@@ -1984,11 +2126,13 @@ impl<'kernel> EulerTransaction<'kernel> {
     /// certified endpoints and midpoint, then ordinary published-topology
     /// validation proves that every edge has exactly two opposite uses.
     pub(crate) fn brep_shell(&mut self, patches: &[BrepPatch]) -> KernelResult<BodyId> {
+        let mut patches = patches.to_vec();
+        conform_brep_boundaries(&mut patches, self.kernel.tolerance)?;
         let topology_snapshot = self.working.clone();
         let history_snapshot = self.history.clone();
         let names_snapshot = self.names.clone();
         let touched_snapshot = self.touched_bodies.clone();
-        let result = self.brep_shell_unchecked(patches).and_then(|body| {
+        let result = self.brep_shell_unchecked(&patches).and_then(|body| {
             validate(
                 &self.working,
                 self.kernel.tolerance,
@@ -2221,7 +2365,21 @@ impl<'kernel> EulerTransaction<'kernel> {
                                         * segment.range.span().signum()
                                         > 0.0
                                 }
-                                _ => true,
+                                _ => {
+                                    let parameter = segment
+                                        .curve
+                                        .project(candidate.start, self.kernel.tolerance)?
+                                        .parameter;
+                                    let first = candidate
+                                        .curve
+                                        .evaluate(candidate.range.start)?
+                                        .first_derivative
+                                        * candidate.range.span().signum();
+                                    let second =
+                                        segment.curve.evaluate(parameter)?.first_derivative
+                                            * segment.range.span().signum();
+                                    first.dot(second) > 0.0
+                                }
                             }
                         } else {
                             candidate.vertices == [start_vertex, end_vertex]
@@ -2241,6 +2399,28 @@ impl<'kernel> EulerTransaction<'kernel> {
                             && candidate.curve == segment.curve
                         {
                             segment.pcurve.clone()
+                        } else if let (
+                            Curve3::Line(line),
+                            Curve3::Line(source),
+                            Curve2::Line(pcurve),
+                            Surface3::Cone(_),
+                        ) = (
+                            &candidate.curve,
+                            &segment.curve,
+                            &segment.pcurve,
+                            &patch.surface,
+                        ) {
+                            // Reparameterize exact generator lines algebraically.
+                            // Projection is undefined at a cone/sphere pole.
+                            let scale = line.direction().dot(source.direction())
+                                / source.direction().magnitude2();
+                            let offset = (line.origin() - source.origin()).dot(source.direction())
+                                / source.direction().magnitude2();
+                            Line2::new(
+                                pcurve.origin() + pcurve.direction() * offset,
+                                pcurve.direction() * scale,
+                            )?
+                            .into()
                         } else if let (Curve3::Line(line), Surface3::Plane(plane)) =
                             (&candidate.curve, &patch.surface)
                         {

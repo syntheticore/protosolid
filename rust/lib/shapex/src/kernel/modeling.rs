@@ -1481,6 +1481,88 @@ impl Compound {
         )
     }
 
+    pub fn chamfer(&self, edges: &[EdgeHandle], distance: f64) -> KernelResult<Self> {
+        self.chamfer_with_tangent_propagation(edges, distance, false)
+    }
+
+    pub fn chamfer_with_tangent_propagation(
+        &self,
+        edges: &[EdgeHandle],
+        distance: f64,
+        follow_tangent_edges: bool,
+    ) -> KernelResult<Self> {
+        if !distance.is_finite() || distance <= self.tolerance().linear {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "chamfer distance must be positive and exceed model tolerance",
+            ));
+        }
+        if edges.is_empty()
+            || edges
+                .iter()
+                .any(|edge| !self.edges().any(|available| *available == *edge))
+            || edges
+                .iter()
+                .map(EdgeHandle::persistent_id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != edges.len()
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "chamfer needs distinct edges from this compound revision",
+            ));
+        }
+        let mut results = Vec::new();
+        for solid in &self.solids {
+            let local = edges
+                .iter()
+                .filter(|edge| solid.edges().any(|available| *available == **edge))
+                .cloned()
+                .collect::<Vec<_>>();
+            let body = solid.to_compound();
+            results.push(if local.is_empty() {
+                body
+            } else {
+                super::features::chamfer(&body, &local, distance, follow_tangent_edges)?
+            });
+        }
+        combine_compounds(results, self.tolerance())
+    }
+    pub fn draft(&self, faces: &[FaceHandle], plane: Plane3, angle: f64) -> KernelResult<Self> {
+        if faces.is_empty()
+            || faces
+                .iter()
+                .any(|face| !self.faces().any(|available| *available == *face))
+            || faces
+                .iter()
+                .map(FaceHandle::persistent_id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != faces.len()
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "draft needs distinct faces from this compound revision",
+            ));
+        }
+        let mut results = Vec::new();
+        for solid in &self.solids {
+            let local = faces
+                .iter()
+                .filter(|face| solid.faces().any(|available| *available == **face))
+                .cloned()
+                .collect::<Vec<_>>();
+            let body = solid.to_compound();
+            results.push(if local.is_empty() {
+                body
+            } else {
+                super::features::draft(&body, &local, plane, angle)?
+            });
+        }
+        combine_compounds(results, self.tolerance())
+    }
+
     pub fn split(&self, plane: Plane3, keep: &str) -> KernelResult<Self> {
         if self.solids.len() > 1 {
             let results = self

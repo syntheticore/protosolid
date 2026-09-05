@@ -103,6 +103,16 @@ impl Edge {
     pub fn coedges(&self) -> &[CoedgeId] {
         &self.coedges
     }
+
+    /// Tangent directed from an endpoint into the retained edge interval.
+    pub(crate) fn endpoint_tangent(&self, endpoint: usize) -> KernelResult<crate::Vec3> {
+        let (parameter, sign) = if endpoint == 0 {
+            (self.range.start, 1.0)
+        } else {
+            (self.range.end, -1.0)
+        };
+        Ok(self.curve.first_order(parameter)?.1 * (self.range.span().signum() * sign))
+    }
 }
 
 #[derive(Debug, Clone)]

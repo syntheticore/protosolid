@@ -1851,6 +1851,18 @@ export class SweepFeature extends Feature {
 Serialize.register(SweepFeature, 'SweepFeature')
 
 
+function edgePropagationSetting() {
+  return {
+    title: 'Propagation',
+    type: 'select',
+    options: {
+      tangent: { title: 'Follow tangent edges', icon: 'link' },
+      selected: { title: 'Selected edges only', icon: 'mouse-pointer' },
+    },
+  }
+}
+
+
 export class FilletFeature extends Feature {
   static icon = 'scroll'
   constructor(doc) {
@@ -1865,14 +1877,7 @@ export class FilletFeature extends Feature {
         type: 'length',
         gizmo: true,
       },
-      propagation: {
-        title: 'Propagation',
-        type: 'enum',
-        options: {
-          tangent: 'Tangent edges',
-          selected: 'Selected edges only',
-        },
-      },
+      propagation: edgePropagationSetting(),
     })
 
     this.edges = null
@@ -1919,6 +1924,13 @@ Serialize.register(FilletFeature, 'FilletFeature')
 
 export class ChamferFeature extends Feature {
   static icon = 'screwdriver'
+  static undump(dump, context) {
+    const feature = super.undump(dump, context)
+    // Existing chamfers predate propagation and used only their selection.
+    if(dump.values?.propagation == null) feature.propagation = 'selected'
+    return feature
+  }
+
   constructor(doc) {
     super(doc, false, 'Chamfer', {
       edges: {
@@ -1931,8 +1943,10 @@ export class ChamferFeature extends Feature {
         type: 'length',
         gizmo: true,
       },
+      propagation: edgePropagationSetting(),
     })
 
+    this.propagation = 'tangent'
     this.edges = null
     this.distance = 1.0
   }
@@ -1940,7 +1954,11 @@ export class ChamferFeature extends Feature {
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      comp.compound = comp.compound.chamfer(references.edges, this.distance)
+      comp.compound = comp.compound.chamfer(
+        references.edges,
+        this.distance,
+        this.propagation === 'tangent',
+      )
     } catch(err) { this.error = err || this.error }
   }
 

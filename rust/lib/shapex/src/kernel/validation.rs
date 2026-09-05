@@ -1005,32 +1005,57 @@ fn validate_face_parameter_loops(
                                 tolerance.parameter,
                             )
                         {
-                            let collapsed_bridge = face
+                            let (collapsed_bridge, bridge_start) = face
                                 .surface
                                 .evaluate(end.point.x, end.point.y)
                                 .and_then(|end_value| {
                                     face.surface
                                         .evaluate(start.point.x, start.point.y)
                                         .and_then(|start_value| {
+                                            // Compare the short interval in one
+                                            // periodic chart. Raw representatives
+                                            // near opposite sides of a seam can
+                                            // differ by a full turn plus harmless
+                                            // numerical error in the other axis.
+                                            let mut aligned_start = start.point;
+                                            for axis in 0..2 {
+                                                if let Some(period) = domains[axis].period {
+                                                    let derivative = if axis == 0 {
+                                                        end_value.du
+                                                    } else {
+                                                        end_value.dv
+                                                    };
+                                                    if derivative.magnitude() > tolerance.linear {
+                                                        aligned_start[axis] += ((end.point[axis]
+                                                            - aligned_start[axis])
+                                                            / period)
+                                                            .round()
+                                                            * period;
+                                                    }
+                                                }
+                                            }
                                             let middle = Point2::from_vec(
-                                                (end.point.to_vec() + start.point.to_vec()) * 0.5,
+                                                (end.point.to_vec() + aligned_start.to_vec()) * 0.5,
                                             );
                                             face.surface.evaluate(middle.x, middle.y).map(
                                                 |middle_value| {
                                                     let allowed = tolerance.linear_at_scale(
                                                         scale_from_point(end_value.point),
                                                     );
-                                                    end_value.point.distance(start_value.point)
-                                                        <= allowed
-                                                        && end_value
-                                                            .point
-                                                            .distance(middle_value.point)
+                                                    (
+                                                        end_value.point.distance(start_value.point)
                                                             <= allowed
+                                                            && end_value
+                                                                .point
+                                                                .distance(middle_value.point)
+                                                                <= allowed,
+                                                        aligned_start,
+                                                    )
                                                 },
                                             )
                                         })
                                 })
-                                .unwrap_or(false);
+                                .unwrap_or((false, start.point));
                             if !collapsed_bridge {
                                 report.error(
                                     Diagnostic::new(
@@ -1046,7 +1071,7 @@ fn validate_face_parameter_loops(
                                 // the loop winding without inventing a
                                 // zero-length 3D edge.
                                 let bridge = 0.5
-                                    * (end.point.x * start.point.y - start.point.x * end.point.y);
+                                    * (end.point.x * bridge_start.y - bridge_start.x * end.point.y);
                                 signed_area += bridge;
                                 principal_area += bridge;
                             }

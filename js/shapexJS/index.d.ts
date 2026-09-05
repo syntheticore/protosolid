@@ -296,6 +296,8 @@ export interface Compound extends NativeValue {
   shell(openings: Iterable<Face>, distance: number): Compound
   fillet(edges: Iterable<Edge>, radius: number): Compound
   filletWithOptions(edges: Iterable<Edge>, options: FilletOptions): Compound
+  chamfer(edges: Iterable<Edge>, distance: number, followTangentEdges?: boolean): Compound
+  draft(faces: Iterable<Face>, plane: Plane3, angle: number): Compound
   split(plane: Plane3, keep: string): Compound
   withoutSolids(solids: Iterable<Solid>): Compound
   moveFaces(faces: Iterable<Face>, transform: RigidTransform3): Compound

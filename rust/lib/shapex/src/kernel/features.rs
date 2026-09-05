@@ -273,14 +273,6 @@ fn exact_pcurve(
     })
 }
 
-fn incident_faces(topology: &Topology, edge: EdgeId) -> KernelResult<Vec<FaceId>> {
-    let mut faces = BTreeSet::new();
-    for coedge in topology.edge(edge)?.coedges() {
-        faces.insert(topology.loop_(topology.coedge(*coedge)?.loop_id())?.face());
-    }
-    Ok(faces.into_iter().collect())
-}
-
 fn exact_surface_curve(
     surface: &Surface3,
     pcurve: &Curve2,
@@ -295,7 +287,7 @@ fn exact_surface_curve(
     if let Curve2::Line(line) = pcurve {
         let direction = line.direction();
         if matches!(surface, Surface3::Plane(_))
-            || (matches!(surface, Surface3::Cylinder(_))
+            || (matches!(surface, Surface3::Cylinder(_) | Surface3::Cone(_))
                 && direction.x.abs() <= tolerance.parameter * direction.y.abs().max(1.0))
         {
             let parameter = if range.contains(0.0, tolerance) {
@@ -322,7 +314,7 @@ fn offset_edge(
     bounds: &BTreeMap<FaceId, [ParameterRange; 2]>,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<OffsetEdge> {
-    let faces = incident_faces(topology, edge)?;
+    let faces = topology.edge_faces(edge)?;
     if faces.len() == 1 {
         // A one-face edge is a periodic parameter seam. Its existing p-curve
         // remains the exact seam on the normally offset support.
@@ -955,6 +947,20 @@ fn offset_body(
         bounds.insert(*face_id, expanded);
     }
 
+    rebuild_supports(source, supports, bounds)
+}
+
+fn rebuild_supports(
+    source: &Compound,
+    supports: BTreeMap<FaceId, Surface3>,
+    bounds: BTreeMap<FaceId, [ParameterRange; 2]>,
+) -> KernelResult<(Compound, Vec<PersistentId>)> {
+    let topology = source.topology();
+    let tolerance = source.tolerance();
+    let source_faces = source
+        .faces()
+        .map(|face| face.topology_id())
+        .collect::<BTreeSet<_>>();
     let mut source_edges = BTreeSet::new();
     for face_id in &source_faces {
         source_edges.extend(topology.face_edges(*face_id)?);
@@ -1024,7 +1030,28 @@ fn offset_body(
         patches_by_shell.entry(face.shell()).or_default().push((
             BrepPatch {
                 surface: surface.clone(),
-                orientation: face.orientation(),
+                orientation: {
+                    let sample = topology.face_edges(face_id)?[0];
+                    let edge = topology.edge(sample)?;
+                    let point = edge
+                        .curve()
+                        .evaluate((edge.range().start + edge.range().end) * 0.5)?
+                        .point;
+                    let old_uv = face.surface().project(point, tolerance)?.parameters;
+                    let new_uv = surface.project(point, tolerance)?.parameters;
+                    let same = face
+                        .surface()
+                        .normal(old_uv.0, old_uv.1)?
+                        .dot(surface.normal(new_uv.0, new_uv.1)?)
+                        >= 0.0;
+                    if same {
+                        face.orientation()
+                    } else if face.orientation() == FaceOrientation::Forward {
+                        FaceOrientation::Reversed
+                    } else {
+                        FaceOrientation::Forward
+                    }
+                },
                 loops,
             },
             face.name(),
@@ -1520,11 +1547,23 @@ pub(crate) fn shell(
     raw_shell.with_feature_parent(source, "shell", &origins)
 }
 
-pub(crate) fn split(_source: &Compound, _plane: Plane3, keep: &str) -> KernelResult<Compound> {
+pub(crate) fn split(source: &Compound, plane: Plane3, keep: &str) -> KernelResult<Compound> {
     if !matches!(keep, "left" | "right" | "both") {
         return Err(invalid("split keep mode must be left, right, or both"));
     }
-    Err(unsupported("splitting"))
+    if source.solids().len() == 0 {
+        return Ok(source.clone());
+    }
+    let cutter = half_space_cutter(source, plane)?;
+    match keep {
+        "left" => source.difference(&cutter),
+        "right" => source.intersection(&cutter),
+        _ => {
+            let left = source.difference(&cutter)?;
+            let right = source.intersection(&cutter)?;
+            left.combined(&[right])
+        }
+    }
 }
 
 pub(crate) fn move_faces(
@@ -1560,7 +1599,7 @@ impl Profile {
                 return Ok(exact);
             }
         }
-        Err(unsupported("revolution"))
+        super::sweeps::revolve(self, plane, axis, angle)
     }
 
     pub fn loft<'a>(
@@ -1573,10 +1612,414 @@ impl Profile {
 
     pub fn loft_with_alignment<'a>(
         &'a self,
-        _plane: Plane3,
-        _sections: impl IntoIterator<Item = (Plane3, &'a Profile)>,
-        _align_sections: bool,
+        plane: Plane3,
+        sections: impl IntoIterator<Item = (Plane3, &'a Profile)>,
+        align_sections: bool,
     ) -> KernelResult<Compound> {
-        Err(unsupported("lofting"))
+        let sections = std::iter::once((plane, self))
+            .chain(sections)
+            .collect::<Vec<_>>();
+        super::sweeps::loft(&sections, align_sections)
     }
+}
+
+/// A finite half-space proxy enclosing the operand, with margin beyond its
+/// certified display envelope. Only the plane itself can intersect the body.
+fn half_space_cutter(source: &Compound, plane: Plane3) -> KernelResult<Compound> {
+    let tolerance = source.tolerance();
+    let options = TessellationOptions::default();
+    let mesh = source.tessellate(options)?;
+    let mut minimum = crate::Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut maximum = -minimum;
+    let plane = Plane3::from_origin_normal(plane.origin(), plane.normal())?;
+    for point in mesh.positions {
+        let delta = point - plane.origin();
+        let local = crate::Vec3::new(
+            delta.dot(plane.u()),
+            delta.dot(plane.v()),
+            delta.dot(plane.normal()),
+        );
+        for axis in 0..3 {
+            minimum[axis] = minimum[axis].min(local[axis]);
+            maximum[axis] = maximum[axis].max(local[axis]);
+        }
+    }
+    let margin = (maximum - minimum).magnitude().max(1.0) + options.chord_tolerance * 4.0;
+    let wire = Wire2::polygon(
+        [
+            Point2::new(minimum.x - margin, minimum.y - margin),
+            Point2::new(maximum.x + margin, minimum.y - margin),
+            Point2::new(maximum.x + margin, maximum.y + margin),
+            Point2::new(minimum.x - margin, maximum.y + margin),
+        ],
+        tolerance,
+    )?;
+    Profile::new(wire, [], tolerance)?
+        .extrude(plane, plane.normal() * (maximum.z.max(0.0) + margin))
+}
+
+pub(crate) fn draft(
+    source: &Compound,
+    faces: &[FaceHandle],
+    neutral: Plane3,
+    angle: f64,
+) -> KernelResult<Compound> {
+    if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 {
+        return Err(invalid(
+            "draft angle must be finite and smaller than 90 degrees",
+        ));
+    }
+    if angle.abs() <= source.tolerance().angular {
+        return Ok(source.clone());
+    }
+    let tolerance = source.tolerance();
+    let selected = faces
+        .iter()
+        .map(FaceHandle::persistent_id)
+        .collect::<BTreeSet<_>>();
+    let direction = neutral.normal();
+    let mut supports = BTreeMap::new();
+    let mut bounds = BTreeMap::new();
+    for handle in source.faces() {
+        let face = source.topology().face(handle.topology_id())?;
+        let mut surface = face.surface().clone();
+        let orientation = if face.orientation() == FaceOrientation::Forward {
+            1.0
+        } else {
+            -1.0
+        };
+        if selected.contains(&face.name()) {
+            surface = match surface {
+                Surface3::Plane(plane) => {
+                    let normal = plane.normal() * orientation;
+                    let horizontal = normal - direction * normal.dot(direction);
+                    if horizontal.magnitude() <= tolerance.angular {
+                        return Err(invalid("draft face must intersect the neutral plane"));
+                    }
+                    let horizontal = horizontal.normalize();
+                    let point = neutral.origin()
+                        + horizontal * (plane.origin() - neutral.origin()).dot(normal)
+                            / normal.dot(horizontal);
+                    let normal = horizontal * angle.cos() + direction * angle.sin();
+                    Plane3::from_origin_normal(point, normal * orientation)?.into()
+                }
+                Surface3::Cylinder(cylinder) => {
+                    if cylinder.axis().normalize().dot(direction).abs() < 1.0 - tolerance.angular {
+                        return Err(unsupported(
+                            "draft of a cylinder oblique to the pull direction",
+                        ));
+                    }
+                    // Retain the cylindrical UV frame so its seam and cap edges
+                    // can be rebuilt by the same support-intersection machinery.
+                    let height = (cylinder.origin() - neutral.origin()).dot(direction);
+                    let radial_sign = Surface3::Cylinder(cylinder)
+                        .normal(0.0, 0.0)?
+                        .dot(cylinder.x_radius())
+                        .signum()
+                        * orientation;
+                    let slope = -angle.tan() * radial_sign;
+                    let origin_radius = cylinder.radius() + slope * height;
+                    let axial_slope = slope * cylinder.axis().dot(direction);
+                    let apex_parameter = -origin_radius / axial_slope;
+                    super::Cone3::new(
+                        cylinder.origin() + cylinder.axis() * apex_parameter,
+                        -cylinder.axis() * apex_parameter,
+                        cylinder.x_radius() * (origin_radius / cylinder.radius()),
+                        cylinder.y_radius() * (origin_radius / cylinder.radius()),
+                        tolerance,
+                    )?
+                    .into()
+                }
+                Surface3::Cone(cone) => {
+                    if cone.axis().normalize().dot(direction).abs() < 1.0 - tolerance.angular {
+                        return Err(unsupported("draft of a cone oblique to the pull direction"));
+                    }
+                    let neutral_parameter = (neutral.origin() - cone.apex()).dot(direction)
+                        / cone.axis().dot(direction);
+                    let neutral_radius = cone.reference_radius() * neutral_parameter;
+                    let reference_center = cone.apex() + cone.axis();
+                    let radial_sign = Surface3::Cone(cone)
+                        .normal(0.0, 1.0)?
+                        .dot(cone.x_radius())
+                        .signum()
+                        * orientation;
+                    let slope = -angle.tan() * radial_sign;
+                    let reference_radius = neutral_radius
+                        + slope * (reference_center - neutral.origin()).dot(direction);
+                    if reference_radius <= tolerance.linear {
+                        return Err(invalid("draft collapses the conical reference section"));
+                    }
+                    let axis = direction * (reference_radius / slope);
+                    super::Cone3::new(
+                        reference_center - axis,
+                        axis,
+                        cone.x_radius() * (reference_radius / cone.reference_radius()),
+                        cone.y_radius() * (reference_radius / cone.reference_radius()),
+                        tolerance,
+                    )?
+                    .into()
+                }
+                _ => return Err(unsupported("draft of this face support")),
+            };
+        }
+        bounds.insert(
+            handle.topology_id(),
+            face_parameter_bounds(source.topology(), handle.topology_id(), tolerance)?,
+        );
+        supports.insert(handle.topology_id(), surface);
+    }
+    let (result, origins) = rebuild_supports(source, supports, bounds)?;
+    let origins = result
+        .faces()
+        .zip(origins)
+        .map(|(face, origin)| (face.persistent_id(), vec![origin]))
+        .collect();
+    result.with_feature_parent(source, "draft", &origins)
+}
+
+fn tangent_continuations(
+    topology: &Topology,
+    edge_id: EdgeId,
+    vertex: VertexId,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<Vec<EdgeId>> {
+    let edge = topology.edge(edge_id)?;
+    let endpoint = usize::from(edge.vertices()[0] != vertex);
+    let tangent = edge.endpoint_tangent(endpoint)?.normalize();
+    let faces = topology.edge_faces(edge_id)?;
+    let mut result = Vec::new();
+    for candidate_id in topology.vertex_edges(vertex)? {
+        if candidate_id == edge_id {
+            continue;
+        }
+        let candidate = topology.edge(candidate_id)?;
+        if !topology
+            .edge_faces(candidate_id)?
+            .iter()
+            .any(|face| faces.contains(face))
+        {
+            continue;
+        }
+        let endpoint = usize::from(candidate.vertices()[0] != vertex);
+        let other = candidate.endpoint_tangent(endpoint)?.normalize();
+        if tangent.cross(other).magnitude() <= tolerance.angular.max(1e-8) {
+            result.push(candidate_id);
+        }
+    }
+    Ok(result)
+}
+
+pub(crate) fn chamfer(
+    source: &Compound,
+    selected: &[super::EdgeHandle],
+    distance: f64,
+    follow_tangent_edges: bool,
+) -> KernelResult<Compound> {
+    let tolerance = source.tolerance();
+    let mut selected_ids = selected
+        .iter()
+        .map(
+            |handle| match source.topology().entity(handle.persistent_id()) {
+                Some(super::EntityId::Edge(edge)) => Ok(edge),
+                _ => Err(invalid("chamfer edge is absent from the source body")),
+            },
+        )
+        .collect::<KernelResult<BTreeSet<_>>>()?;
+    if follow_tangent_edges {
+        let mut pending = selected_ids.iter().copied().collect::<Vec<_>>();
+        while let Some(edge_id) = pending.pop() {
+            for vertex in source.topology().edge(edge_id)?.vertices() {
+                for continuation in
+                    tangent_continuations(source.topology(), edge_id, vertex, tolerance)?
+                {
+                    if selected_ids.insert(continuation) {
+                        pending.push(continuation);
+                    }
+                }
+            }
+        }
+    }
+    let selected = source
+        .edges()
+        .filter(|handle| {
+            matches!(source.topology().entity(handle.persistent_id()),
+        Some(super::EntityId::Edge(edge)) if selected_ids.contains(&edge))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut result = source.clone();
+    let mut cutters = BTreeMap::new();
+    for handle in &selected {
+        let edge_id = match source.topology().entity(handle.persistent_id()) {
+            Some(super::EntityId::Edge(edge)) => edge,
+            _ => return Err(invalid("chamfer edge is absent from the source body")),
+        };
+        let edge = source.topology().edge(edge_id)?;
+        let faces = source.topology().edge_faces(edge_id)?;
+        if faces.len() != 2 {
+            return Err(invalid(
+                "a chamfer needs an edge between two distinct faces",
+            ));
+        }
+        let face_values = faces
+            .iter()
+            .map(|f| source.topology().face(*f))
+            .collect::<KernelResult<Vec<_>>>()?;
+        let outward = |face: &super::Face, point: Point3| -> KernelResult<crate::Vec3> {
+            let uv = face.surface().project(point, tolerance)?.parameters;
+            Ok(face.surface().normal(uv.0, uv.1)?
+                * if face.orientation() == FaceOrientation::Forward {
+                    1.0
+                } else {
+                    -1.0
+                })
+        };
+        let middle = edge
+            .curve()
+            .evaluate((edge.range().start + edge.range().end) * 0.5)?
+            .point;
+        let normals = [
+            outward(face_values[0], middle)?,
+            outward(face_values[1], middle)?,
+        ];
+        let cosine = normals[0].dot(normals[1]);
+        if cosine.abs() > 1.0 - tolerance.angular {
+            return Err(invalid("a tangent edge cannot be chamfered"));
+        }
+        let inward = [
+            -(normals[1] - normals[0] * cosine).normalize(),
+            -(normals[0] - normals[1] * cosine).normalize(),
+        ];
+        let (cutter, concave) = match edge.curve() {
+            Curve3::Line(line)
+                if face_values
+                    .iter()
+                    .all(|f| matches!(f.surface(), Surface3::Plane(_))) =>
+            {
+                let endpoints = handle.endpoints()?;
+                let tangent = (endpoints[1] - endpoints[0]).normalize();
+                let coedge = source.topology().coedge(edge.coedges()[0])?;
+                let first_face = source
+                    .topology()
+                    .face(source.topology().loop_(coedge.loop_id())?.face())?;
+                let normal = outward(first_face, middle)?;
+                let directed = line.direction() * coedge.range().span();
+                let other = if first_face.name() == face_values[0].name() {
+                    normals[1]
+                } else {
+                    normals[0]
+                };
+                let concave = normal.cross(directed).dot(other) > 0.0;
+                let sign = if concave { -1.0 } else { 1.0 };
+                let mut extensions = [0.0; 2];
+                if !concave {
+                    for (index, vertex) in edge.vertices().iter().enumerate() {
+                        let continuations =
+                            tangent_continuations(source.topology(), edge_id, *vertex, tolerance)?;
+                        let selected_continuation =
+                            continuations.iter().any(|id| selected_ids.contains(id));
+                        if !selected_continuation {
+                            extensions[index] = distance;
+                        }
+                    }
+                }
+                let start = endpoints[0] - tangent * extensions[0];
+                let plane = Plane3::new(
+                    start,
+                    inward[0] * sign,
+                    tangent.cross(inward[0] * sign),
+                    tolerance,
+                )?;
+                let point = endpoints[0] + inward[1] * (distance * sign);
+                let uv = plane.project(point)?.parameters;
+                let outside = start + (normals[0] + normals[1]) * distance * sign;
+                let outside_uv = plane.project(outside)?.parameters;
+                let profile = Profile::new(
+                    Wire2::polygon(
+                        [
+                            Point2::new(outside_uv.0, outside_uv.1),
+                            Point2::new(distance, 0.0),
+                            Point2::new(uv.0, uv.1),
+                        ],
+                        tolerance,
+                    )?,
+                    [],
+                    tolerance,
+                )?;
+                (
+                    profile.extrude(
+                        plane,
+                        endpoints[1] - endpoints[0] + tangent * (extensions[0] + extensions[1]),
+                    )?,
+                    concave,
+                )
+            }
+            Curve3::Circle(circle) => {
+                let plane_face = face_values
+                    .iter()
+                    .find(|f| matches!(f.surface(), Surface3::Plane(_)))
+                    .ok_or_else(|| unsupported("chamfer between curved faces"))?;
+                let cylinder_face = face_values
+                    .iter()
+                    .find(|f| matches!(f.surface(), Surface3::Cylinder(_)))
+                    .ok_or_else(|| unsupported("circular chamfer without a cylindrical face"))?;
+                let axis = circle.normal();
+                let radial =
+                    (circle.evaluate(edge.range().start)?.point - circle.center()).normalize();
+                let middle_radial = (middle - circle.center()).normalize();
+                let axial_sign = -outward(plane_face, middle)?.dot(axis).signum();
+                let radial_sign = -outward(cylinder_face, middle)?.dot(middle_radial).signum();
+                let r = circle.radius();
+                if r + radial_sign * distance <= tolerance.linear {
+                    return Err(invalid("chamfer distance consumes the circular face"));
+                }
+                let profile = Profile::new(
+                    Wire2::polygon(
+                        [
+                            Point2::new(r - radial_sign * distance, -axial_sign * distance),
+                            Point2::new(r + radial_sign * distance, 0.0),
+                            Point2::new(r, axial_sign * distance),
+                        ],
+                        tolerance,
+                    )?,
+                    [],
+                    tolerance,
+                )?;
+                let plane = Plane3::new(circle.center(), radial, axis, tolerance)?;
+                (
+                    profile.revolve(
+                        plane,
+                        Axis3::new(circle.center(), axis)?,
+                        edge.range().span(),
+                    )?,
+                    false,
+                )
+            }
+            _ => return Err(unsupported("chamfer of this edge support")),
+        };
+        cutters.insert(edge_id, (cutter, concave));
+    }
+    // Adjacent tangent pieces share their end sections. Unite each contour
+    // before cutting the body so intermediate chamfers cannot trim one another.
+    while let Some(edge_id) = cutters.keys().next().copied() {
+        let (mut cutter, concave) = cutters.remove(&edge_id).unwrap();
+        let mut pending = vec![edge_id];
+        while let Some(current) = pending.pop() {
+            for vertex in source.topology().edge(current)?.vertices() {
+                for next in tangent_continuations(source.topology(), current, vertex, tolerance)? {
+                    if cutters.get(&next).is_some_and(|(_, sign)| *sign == concave) {
+                        let (piece, _) = cutters.remove(&next).unwrap();
+                        cutter = cutter.union(&piece)?;
+                        pending.push(next);
+                    }
+                }
+            }
+        }
+        result = if concave {
+            result.union(&cutter)?
+        } else {
+            result.difference(&cutter)?
+        };
+    }
+    result.with_feature_parent(source, "chamfer", &BTreeMap::new())
 }

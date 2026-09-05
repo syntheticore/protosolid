@@ -597,6 +597,15 @@ export function createShapex(bindings) {
     if(typeof bindings?.[name] != 'function') throw new TypeError(`invalid ShapexJS transport: missing ${name}`)
   })
 
+  for(const method of ['chamfer', 'draft']) {
+    if(typeof bindings.NativeCompound.prototype[method] != 'function') {
+      throw new TypeError(`outdated ShapexJS transport: missing ${method}; rebuild the WASM package`)
+    }
+  }
+  if(bindings.NativeCompound.prototype.chamfer.length < 3) {
+    throw new TypeError('outdated ShapexJS transport: chamfer propagation is unavailable; rebuild the WASM package')
+  }
+
   function mesh(raw) {
     try {
       const triangles = Array.from(raw.triangles)
@@ -794,6 +803,23 @@ export function createShapex(bindings) {
       try {
         array(edges, 'edges').forEach((edge, index) => list.add(instance(edge, Edge, `edges[${index}]`)._raw()))
         return nativeCall(() => new Compound(this._raw().fillet(list, options.radius, options.followTangentEdges)))
+      } finally { free(list) }
+    }
+    chamfer(edges, distance, followTangentEdges=false) {
+      const list = new bindings.NativeEdgeList()
+      try {
+        array(edges, 'edges').forEach((edge, index) => list.add(instance(edge, Edge, `edges[${index}]`)._raw()))
+        return nativeCall(() => new Compound(this._raw().chamfer(list, finite(distance, 'distance'), Boolean(followTangentEdges))))
+      } finally { free(list) }
+    }
+    draft(faces, plane, angle) {
+      instance(plane, Plane3, 'plane')
+      const list = new bindings.NativeFaceList()
+      try {
+        array(faces, 'faces').forEach((face, index) => list.add(instance(face, Face, `faces[${index}]`)._raw()))
+        return nativeCall(() => new Compound(this._raw().draft(
+          list, new Float64Array(plane._values()), finite(angle, 'angle'), new Float64Array(plane.tolerance.toArray()),
+        )))
       } finally { free(list) }
     }
     split(plane, keep) {

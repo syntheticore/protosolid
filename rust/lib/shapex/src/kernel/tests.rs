@@ -2070,7 +2070,7 @@ fn full_off_axis_revolutions_publish_exact_genus_one_solids() {
 }
 
 #[test]
-fn approximation_only_lofts_report_unsupported_geometry() {
+fn lofts_publish_exact_section_surfaces() {
     let tolerance = ModelTolerance::default();
     let wire = Wire2::polygon(
         [
@@ -2090,13 +2090,14 @@ fn approximation_only_lofts_report_unsupported_geometry() {
         tolerance,
     )
     .expect("upper plane");
-    let loft_error = profile
+    let loft = profile
         .loft(Plane3::xy(), [(upper_plane, &profile)])
-        .expect_err("loft must not fall back to a faceted BREP");
-    assert_eq!(
-        loft_error.diagnostics()[0].kind,
-        super::DiagnosticKind::UnsupportedGeometry
-    );
+        .expect("exact loft between identical sections");
+    assert!((loft.volume() - 12.0).abs() < 1.0e-7);
+    assert!(!loft
+        .tessellate(TessellationOptions::default())
+        .expect("loft mesh")
+        .is_empty());
 }
 
 #[test]

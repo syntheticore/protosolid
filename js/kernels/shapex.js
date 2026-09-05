@@ -17,6 +17,14 @@ function unsupported(operation) {
   }
 }
 
+function featureResult(operation, create) {
+  try {
+    return new ShapexGeometry(create())
+  } catch(error) {
+    throw { type: 'error', msg: `Shapex ${operation} failed: ${error?.message || error}`, kernel: 'shapex' }
+  }
+}
+
 function planeFrame(matrix) {
   const elements = matrix.elements
   const origin = new THREE.Vector3().setFromMatrixPosition(matrix)
@@ -70,11 +78,13 @@ export class ShapexBackend {
       boolean: true,
       transform: true,
       tessellate: true,
-      revolve: false,
-      loft: false,
+      revolve: true,
+      loft: true,
       fillet: true,
+      chamfer: true,
+      draft: true,
       offset: true,
-      split: false,
+      split: true,
       compoundMerge: true,
       multiSolidBoolean: true,
     })
@@ -182,12 +192,22 @@ export class ShapexBackend {
     }
   }
 
-  revolve() {
-    unsupported('analytical revolutions yet')
+  revolve(profile, axis, angle) {
+    const { origin, normal } = planeFrame(axis)
+    return featureResult('revolve', () => this.profile(profile).revolve(
+      this.plane(profile.sketch.workplane),
+      this.api.Axis3.new(this.point3(origin), this.vector3(normal)),
+      angle,
+    ))
   }
 
-  loft() {
-    unsupported('analytical lofts yet')
+  loft(profiles, alignSections) {
+    const [first, ...others] = profiles
+    return featureResult('loft', () => this.profile(first).loft(
+      this.plane(first.sketch.workplane),
+      others.map(profile => ({ profile: this.profile(profile), plane: this.plane(profile.sketch.workplane) })),
+      alignSections,
+    ))
   }
 
   boolean(first, second, operation) {
@@ -236,30 +256,20 @@ export class ShapexBackend {
     }
   }
 
-  split() {
-    unsupported('analytical splitting yet')
+  chamfer(geometry, selected, distance, followTangentEdges=true) {
+    return featureResult('chamfer', () => geometryValue(geometry).chamfer(selected.map(shapexValue), distance, followTangentEdges))
+  }
+
+  draft(geometry, selected, plane, angle) {
+    return featureResult('draft', () => geometryValue(geometry).draft(selected.map(shapexValue), this.plane(plane), angle))
+  }
+
+  split(geometry, plane, keep) {
+    return featureResult('split', () => geometryValue(geometry).split(this.plane(plane), keep))
   }
 
   halfCut(geometry, plane, side) {
-    const halfSize = 500
-    const height = 1000
-    const wire = this.api.Wire2.polygon([
-      this.api.Point2.new(-halfSize, -halfSize),
-      this.api.Point2.new(halfSize, -halfSize),
-      this.api.Point2.new(halfSize, halfSize),
-      this.api.Point2.new(-halfSize, halfSize),
-    ], this.tolerance)
-    const profile = this.api.Profile.new(wire, [], this.tolerance)
-    const { normal } = planeFrame(plane)
-    const cutter = profile.extrude(
-      this.plane(plane),
-      this.vector3(normal.multiplyScalar(side ? height : -height)),
-    )
-    try {
-      return new ShapexGeometry(geometryValue(geometry).difference(cutter))
-    } finally {
-      cutter.free()
-    }
+    return this.split(geometry, plane, side ? 'left' : 'right')
   }
 
   removeSolids(geometry, removed) {

@@ -1150,7 +1150,14 @@ export class Compound extends Volumetric {
     }
   }
 
-  chamfer(edges, distance) {
+  chamfer(edges, distance, followTangentEdges=true) {
+    if(this.isShapex) {
+      const geometry = window.kernel.modeling.chamfer(
+        this.kernelGeometry, edges.map(edge => edge.geom()), distance, followTangentEdges,
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], 'chamfer')
+    }
     const chamfer = new window.oc.oc.BRepFilletAPI_MakeChamfer(this.geom())
     edges.forEach(edge => {
       chamfer.Add_2(distance, edge.geom())
@@ -1208,6 +1215,13 @@ export class Compound extends Volumetric {
   }
 
   draft(faces, plane, angle) {
+    if(this.isShapex) {
+      const geometry = window.kernel.modeling.draft(
+        this.kernelGeometry, faces.map(face => face.geom()), plane, angle,
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], 'draft')
+    }
     try {
       const draft = new window.oc.oc.BRepOffsetAPI_DraftAngle_1()
       draft.Init(this.geom())

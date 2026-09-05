@@ -13,6 +13,8 @@ export class OccBackend {
       revolve: true,
       loft: true,
       fillet: true,
+      chamfer: true,
+      draft: true,
       offset: true,
       split: true,
       compoundMerge: true,

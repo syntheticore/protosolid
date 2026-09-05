@@ -978,6 +978,30 @@ impl NativeCompound {
             .map(|inner| Self { inner })
             .map_err(js_error)
     }
+    pub fn chamfer(
+        &self,
+        edges: &NativeEdgeList,
+        distance: f64,
+        follow_tangent_edges: bool,
+    ) -> Result<Self, JsValue> {
+        self.inner
+            .chamfer_with_tangent_propagation(&edges.values, distance, follow_tangent_edges)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+    pub fn draft(
+        &self,
+        faces: &NativeFaceList,
+        plane_values: &[f64],
+        angle: f64,
+        tolerance_values: &[f64],
+    ) -> Result<Self, JsValue> {
+        let tolerance = tolerance(tolerance_values)?;
+        self.inner
+            .draft(&faces.values, plane(plane_values, tolerance)?, angle)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
     pub fn split(
         &self,
         plane_values: &[f64],

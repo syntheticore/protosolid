@@ -398,7 +398,28 @@ impl Kernel {
             let edge = self.topology().edge(coedge.edge())?;
             for (sample_index, (parameter, edge_point)) in samples.iter().enumerate() {
                 if sample_index + 1 == samples.len() {
-                    continue;
+                    let end = coedge.pcurve().evaluate(coedge.range().end)?.point;
+                    let next = self.topology().coedge(coedge.next())?;
+                    let start = next.pcurve().evaluate(next.range().start)?.point;
+                    let (_, du, dv) = face.surface().first_order(end.x, end.y)?;
+                    let collapsed =
+                        face.surface()
+                            .domains()
+                            .iter()
+                            .enumerate()
+                            .any(|(axis, domain)| {
+                                domain.period.is_some()
+                                    && if axis == 0 {
+                                        du.magnitude() <= self.tolerance().linear
+                                    } else {
+                                        dv.magnitude() <= self.tolerance().linear
+                                    }
+                            });
+                    if !collapsed || end.distance(start) <= self.tolerance().parameter {
+                        continue;
+                    }
+                    // A pole joins two distinct UV endpoints at one 3D point.
+                    // Keep the collapsed chart edge for planar triangulation.
                 }
                 let alpha = if coedge.is_forward() {
                     (*parameter - edge.range().start) / edge.range().span()
@@ -508,6 +529,7 @@ impl Kernel {
         // coordinate is constant while the transverse coordinate changes.
         let mut periodic_axis = None;
         let mut seam_parameter = 0.0;
+        let mut transverse_center = 0.0;
         for coedge_id in &coedges {
             let coedge = self.topology().coedge(*coedge_id)?;
             if self.topology().edge_faces(coedge.edge())?.len() != 1 {
@@ -544,6 +566,7 @@ impl Kernel {
                 if constant && transverse_span > parameter_tolerance {
                     periodic_axis = Some(axis);
                     seam_parameter = domains[axis].normalize(samples[0][axis]);
+                    transverse_center = samples[1][transverse];
                     debug_assert!(period.is_finite());
                     break;
                 }
@@ -580,10 +603,10 @@ impl Kernel {
                 ),
                 coordinates(coedge.pcurve().evaluate(range.end)?.point),
             ];
-            let mut level = samples[1][transverse_axis];
-            if let Some(reference) = levels.first().copied() {
-                level = aligned(level, reference, transverse_axis);
-            }
+            // The seam runs through the interior of the intended band. Its
+            // midpoint selects the sheet even when the two boundary levels
+            // are half a period apart, or bound a band wider than half a turn.
+            let level = aligned(samples[1][transverse_axis], transverse_center, transverse_axis);
             if samples.iter().any(|sample| {
                 (aligned(sample[transverse_axis], level, transverse_axis) - level).abs()
                     > parameter_tolerance
@@ -889,14 +912,19 @@ fn unwrap_periodic_ring(
         } else {
             first.uv.y
         };
+        let mut previous_point = first.point;
         for vertex in ring.iter_mut().skip(1) {
+            let collapsed_bridge = previous_point.distance(vertex.point) <= tolerance.linear;
             let value = if coordinate == 0 {
                 &mut vertex.uv.x
             } else {
                 &mut vertex.uv.y
             };
-            *value += ((previous - *value) / period).round() * period;
+            if !collapsed_bridge {
+                *value += ((previous - *value) / period).round() * period;
+            }
             previous = *value;
+            previous_point = vertex.point;
         }
     }
     Ok(())
@@ -1193,6 +1221,12 @@ fn surface_point_normal(surface: &super::Surface3, u: f64, v: f64) -> KernelResu
         // Longitude is singular at a sphere's poles even though the exact
         // surface normal remains well defined there.
         super::Surface3::Sphere(sphere) => point - sphere.center(),
+        super::Surface3::Cone(_) if v == 0.0 => {
+            // A cone tip has one limiting normal per meridian. Retain that
+            // meridian's normal at the shared apex instead of normalizing zero.
+            let (_, tangent, generator) = surface.first_order(u, 1.0)?;
+            tangent.cross(generator)
+        }
         _ => du.cross(dv),
     };
     if normal.magnitude2() == 0.0 {

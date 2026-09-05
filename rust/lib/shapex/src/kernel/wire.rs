@@ -255,7 +255,11 @@ fn validate_no_self_intersection(
                 .evaluate(range.start + range.span() * 0.5)?
                 .point;
             let end = segment.curve().evaluate(range.end)?.point;
-            let arc = TrimmedCurve2::arc_through(start, middle, end)?;
+            let Ok(arc) = TrimmedCurve2::arc_through(start, middle, end) else {
+                // A degree-elevated line is a valid rational quadratic, but it
+                // does not participate in the circular-wire fast path.
+                return Ok(None);
+            };
             let Curve2::Circle(circle) = arc.curve() else {
                 unreachable!()
             };

@@ -2081,13 +2081,21 @@ impl SurfaceIntersectionCurve {
 
     fn first_order(&self, parameter: f64) -> KernelResult<(Point3, Vec3)> {
         let parameters = self.corrected_parameters(parameter)?;
+        let derivative = self.parameter_derivative(parameter, parameters)?;
+        self.first_order_at(parameters, derivative)
+    }
+
+    fn first_order_at(
+        &self,
+        parameters: [f64; 4],
+        derivative: [f64; 4],
+    ) -> KernelResult<(Point3, Vec3)> {
         let (first_point, first_du, first_dv) = self
             .first_surface
             .first_order(parameters[0], parameters[1])?;
         let (second_point, _, _) = self
             .second_surface
             .first_order(parameters[2], parameters[3])?;
-        let derivative = self.parameter_derivative(parameter, parameters)?;
         Ok((
             Point3::from_vec((first_point.to_vec() + second_point.to_vec()) * 0.5),
             first_du * derivative[0] + first_dv * derivative[1],
@@ -3902,6 +3910,7 @@ impl OffsetSurface3 {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EdgeBlendSurface3 {
     ruled: bool,
+    shared_intersection: bool,
     center_curve: Box<Curve3>,
     first_surface: Box<Surface3>,
     second_surface: Box<Surface3>,
@@ -3947,8 +3956,17 @@ impl EdgeBlendSurface3 {
                 "rolling-ball center and contact guides must cover the trim range",
             ));
         }
+        // The center and both contact p-curves can retain the same exact
+        // intersection. Recognize it once so evaluations solve it only once.
+        let shared_intersection = matches!(
+            (&center_curve, &first_pcurve, &second_pcurve),
+            (Curve3::SurfaceIntersection(center), Curve2::SurfaceIntersection(first), Curve2::SurfaceIntersection(second))
+                if first.first && !second.first
+                    && first.curve.as_ref() == center && second.curve.as_ref() == center
+        );
         let surface = Self {
             ruled: false,
+            shared_intersection,
             center_curve: Box::new(center_curve),
             first_surface: Box::new(first_surface),
             second_surface: Box::new(second_surface),
@@ -4015,16 +4033,50 @@ impl EdgeBlendSurface3 {
         parameter: f64,
     ) -> KernelResult<(Point3, Vec3)> {
         let (parameters, parameter_tangent) = pcurve.first_order(parameter)?;
+        Self::contact_at(surface, parameters, parameter_tangent)
+    }
+
+    fn contact_at(
+        surface: &Surface3,
+        parameters: Point2,
+        tangent: Vec2,
+    ) -> KernelResult<(Point3, Vec3)> {
         let (point, du, dv) = surface.first_order(parameters.x, parameters.y)?;
-        Ok((point, du * parameter_tangent.x + dv * parameter_tangent.y))
+        Ok((point, du * tangent.x + dv * tangent.y))
     }
 
     fn first_order(&self, parameter: f64, blend: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
         if !self.center_range.contains(parameter, self.tolerance) || !blend.is_finite() {
             return Err(invalid("rolling-ball parameter lies outside its domain"));
         }
-        let first = Self::contact(&self.first_surface, &self.first_pcurve, parameter)?;
-        let second = Self::contact(&self.second_surface, &self.second_pcurve, parameter)?;
+        let mut center = None;
+        let (first, second) = if self.shared_intersection {
+            let Curve3::SurfaceIntersection(intersection) = self.center_curve.as_ref() else {
+                unreachable!("shared intersection is checked at construction")
+            };
+            let uv = intersection.corrected_parameters(parameter)?;
+            let tangent = intersection.parameter_derivative(parameter, uv)?;
+            if !self.ruled {
+                center = Some(intersection.first_order_at(uv, tangent)?);
+            }
+            (
+                Self::contact_at(
+                    &self.first_surface,
+                    Point2::new(uv[0], uv[1]),
+                    Vec2::new(tangent[0], tangent[1]),
+                )?,
+                Self::contact_at(
+                    &self.second_surface,
+                    Point2::new(uv[2], uv[3]),
+                    Vec2::new(tangent[2], tangent[3]),
+                )?,
+            )
+        } else {
+            (
+                Self::contact(&self.first_surface, &self.first_pcurve, parameter)?,
+                Self::contact(&self.second_surface, &self.second_pcurve, parameter)?,
+            )
+        };
         if self.ruled {
             return Ok((
                 first.0 + (second.0 - first.0) * blend,
@@ -4032,7 +4084,10 @@ impl EdgeBlendSurface3 {
                 second.0 - first.0,
             ));
         }
-        let (center_point, center_tangent) = self.center_curve.first_order(parameter)?;
+        let (center_point, center_tangent) = match center {
+            Some(value) => value,
+            None => self.center_curve.first_order(parameter)?,
+        };
         let first_radial = first.0 - center_point;
         let second_radial = second.0 - center_point;
         let scale = center_point

@@ -3594,8 +3594,22 @@ fn blend_oblique_partial_torus_rim() {
     }
     let both = body.fillet(&rims, 5.0).unwrap();
     assert_eq!(both.faces().count(), 5, "two continuous blend faces");
-    both.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+    let mesh = both
+        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
         .unwrap();
+    let blends = both
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface3::RollingBall(_)))
+        .map(|face| face.topology_id())
+        .collect::<Vec<_>>();
+    assert!(
+        mesh.triangle_faces
+            .iter()
+            .filter(|face| blends.contains(face))
+            .count()
+            < 30_000,
+        "band meshing should avoid excessive refinement of the two fillets"
+    );
     // The saved follow-up sketch cuts a 4 mm pocket into the starting cap.
     let pocket_plane = both
         .faces()
@@ -3625,7 +3639,11 @@ fn blend_oblique_partial_torus_rim() {
         .difference(&cutter)
         .expect("pocket after continuous rim fillets");
     assert_eq!(pocket.solids().len(), 1);
-    assert_eq!(pocket.faces().count(), 7, "pocket preserves continuous fillets");
+    assert_eq!(
+        pocket.faces().count(),
+        7,
+        "pocket preserves continuous fillets"
+    );
     assert!(pocket.volume() < both.volume());
     pocket
         .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())

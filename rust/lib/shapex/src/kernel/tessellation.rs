@@ -327,6 +327,32 @@ impl Kernel {
             holes.push(running);
             running += ring.len();
         }
+        if holes.is_empty()
+            && matches!(
+                tessellation_surface,
+                super::Surface3::RollingBall(_) | super::Surface3::Ruled(_)
+            )
+        {
+            if let Some(indices) = triangulate_blend_band(&uvs) {
+                let seed = SurfaceTriangulationSeed {
+                    uvs,
+                    positions,
+                    boundary_edges,
+                    triangles: indices
+                        .chunks_exact(3)
+                        .map(|v| [v[0], v[1], v[2]])
+                        .collect(),
+                };
+                return finish_surface_triangulation(
+                    tessellation_surface,
+                    face.orientation(),
+                    face_id,
+                    self.tolerance(),
+                    options,
+                    seed,
+                );
+            }
+        }
         let indices = earcutr::earcut(&flat_uv, &holes, 2);
         if indices.len() < 3 || indices.len() % 3 != 0 {
             return Err(KernelError::new(
@@ -704,6 +730,92 @@ impl Kernel {
             triangles,
         }))
     }
+}
+
+/// Zip the two boundary chains along the blend's longitudinal (u) direction.
+/// Accept only a complete triangulation with consistent winding. Keep every BREP
+/// boundary vertex, including projected seams, instead of creating a fan of
+/// long diagonals. Unsupported trims fall back to the general triangulator.
+fn triangulate_blend_band(points: &[Point2]) -> Option<Vec<usize>> {
+    if points.len() < 4 {
+        return None;
+    }
+    let origin = points[0];
+    let area = points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .take(points.len())
+        .map(|(a, b)| {
+            let a = *a - origin;
+            let b = *b - origin;
+            a.x * b.y - a.y * b.x
+        })
+        .sum::<f64>();
+    let orientation = area.signum();
+    let compare = |a: &usize, b: &usize| {
+        points[*a]
+            .x
+            .total_cmp(&points[*b].x)
+            .then(points[*a].y.total_cmp(&points[*b].y))
+    };
+    let start = (0..points.len()).min_by(compare)?;
+    let end = (0..points.len()).max_by(compare)?;
+    if start == end {
+        return None;
+    }
+    let chain = |step: usize| {
+        let mut path = vec![start];
+        let mut index = start;
+        while index != end {
+            index = (index + step) % points.len();
+            path.push(index);
+        }
+        path
+    };
+    let a = chain(1);
+    let b = chain(points.len() - 1);
+    let mut i = 1;
+    let mut j = 0;
+    let mut triangles = Vec::with_capacity((points.len() - 2) * 3);
+    while triangles.len() < (points.len() - 2) * 3 {
+        let candidates = [
+            (i + 1 < a.len()).then(|| [a[i], a[i + 1], b[j]]),
+            (j + 1 < b.len()).then(|| [a[i], b[j + 1], b[j]]),
+        ];
+        let valid = |triangle: Option<[usize; 3]>| {
+            triangle.is_some_and(|[a, b, c]| {
+                let u = points[b] - points[a];
+                let v = points[c] - points[a];
+                (u.x * v.y - u.y * v.x) * orientation > 0.0
+            })
+        };
+        let advance_a = match (valid(candidates[0]), valid(candidates[1])) {
+            (true, true) => {
+                // Keep the shared endpoint until all intermediate seam
+                // vertices are consumed, including collinear samples.
+                if i + 2 == a.len() {
+                    false
+                } else if j + 2 == b.len() {
+                    true
+                } else {
+                    points[a[i + 1]].x <= points[b[j + 1]].x
+                }
+            }
+            (true, false) => true,
+            (false, true) => false,
+            (false, false) => break,
+        };
+        triangles.extend(candidates[usize::from(!advance_a)]?);
+        if advance_a {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    if triangles.len() == (points.len() - 2) * 3 {
+        return Some(triangles);
+    }
+    None
 }
 
 fn finish_surface_triangulation(
@@ -1476,4 +1588,76 @@ fn sample_interval(
         normal_angle,
         output,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blend_strip_preserves_straight_and_curved_boundary_samples() {
+        for bow in [0.0, 0.015] {
+            let ring = vec![
+                Point2::new(0.0, 0.0),
+                Point2::new(0.3, 0.0),
+                Point2::new(0.7, 0.0),
+                Point2::new(1.0, 0.0),
+                Point2::new(1.0 - bow, 0.25),
+                Point2::new(1.0 - bow, 0.75),
+                Point2::new(1.0, 1.0),
+                Point2::new(0.7, 1.0),
+                Point2::new(0.3, 1.0),
+                Point2::new(0.0, 1.0),
+                Point2::new(bow, 0.75),
+                Point2::new(bow, 0.25),
+            ];
+            for reversed in [false, true] {
+                let mut points = ring.clone();
+                if reversed {
+                    points.reverse();
+                }
+                for _ in 0..points.len() {
+                    points.rotate_left(1);
+                    let indices = triangulate_blend_band(&points).expect("trimmed band");
+                    assert_eq!(indices.len(), (points.len() - 2) * 3);
+                    let polygon_area = points
+                        .iter()
+                        .zip(points.iter().cycle().skip(1))
+                        .take(points.len())
+                        .map(|(a, b)| a.x * b.y - a.y * b.x)
+                        .sum::<f64>();
+                    let mut area = 0.0;
+                    let mut edges = BTreeMap::new();
+                    for triangle in indices.chunks_exact(3) {
+                        let u = points[triangle[1]] - points[triangle[0]];
+                        let v = points[triangle[2]] - points[triangle[0]];
+                        let signed = u.x * v.y - u.y * v.x;
+                        assert!(
+                            signed * polygon_area > 0.0,
+                            "no inverted or collapsed triangles"
+                        );
+                        area += signed;
+                        for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+                            *edges
+                                .entry(ordered_edge(triangle[a], triangle[b]))
+                                .or_insert(0) += 1;
+                        }
+                    }
+                    assert!((area - polygon_area).abs() < 1.0e-12);
+                    let boundary = (0..points.len())
+                        .map(|i| ordered_edge(i, (i + 1) % points.len()))
+                        .collect::<BTreeSet<_>>();
+                    assert_eq!(
+                        edges
+                            .iter()
+                            .filter(|(_, count)| **count == 1)
+                            .map(|(edge, _)| *edge)
+                            .collect::<BTreeSet<_>>(),
+                        boundary
+                    );
+                    assert!(edges.values().all(|count| *count == 1 || *count == 2));
+                }
+            }
+        }
+    }
 }

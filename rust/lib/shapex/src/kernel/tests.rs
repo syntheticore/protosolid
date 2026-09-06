@@ -3913,3 +3913,70 @@ fn join_after_shell_opening_blends() {
             .unwrap();
     }
 }
+
+#[test]
+fn rounded_partial_torus_rim_blends() {
+    let tol = ModelTolerance::default();
+    let top = Point2::new(-1.9799571066866424, 21.848456911735045);
+    let bottom = Point2::new(-1.9799571066866424, -21.84845691173505);
+    let wire = Wire2::new(
+        [
+            TrimmedCurve2::arc_through(
+                top,
+                Point2::new(-28.888150160955835 - 34.66130295978159, 0.0),
+                bottom,
+            )
+            .unwrap(),
+            TrimmedCurve2::line(bottom, top).unwrap(),
+        ],
+        tol,
+    )
+    .unwrap();
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        -Vec3::unit_z(),
+        Vec3::unit_y(),
+        tol,
+    )
+    .unwrap();
+    let axis = Axis3::new(Point3::new(0.0, 0.0, -12.045831777920995), -Vec3::unit_y()).unwrap();
+    let body = Profile::new(wire, [], tol)
+        .unwrap()
+        .revolve(plane, axis, std::f64::consts::PI)
+        .unwrap();
+    let edges = body
+        .edges()
+        .filter(|e| matches!(e.curve(), Curve3::Line(_)))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(edges.len(), 2);
+    let body = body.fillet(&edges, 13.0).unwrap();
+    let rims = body
+        .edges()
+        .filter(|e| {
+            matches!(e.curve(), Curve3::Circle(_))
+                && e.connected_faces()
+                    .unwrap()
+                    .iter()
+                    .any(|f| matches!(f.surface(), Surface3::Plane(_)))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(rims.len(), 2);
+    for edge in rims {
+        for size in [0.5, 1.0, 5.0] {
+            for result in [
+                body.fillet(&[edge.clone()], size)
+                    .expect("rounded torus fillet"),
+                body.chamfer_with_tangent_propagation(&[edge.clone()], size, true)
+                    .expect("rounded torus chamfer"),
+            ] {
+                assert_eq!(result.solids().len(), 1);
+                assert!(result.volume() > 0.0 && result.volume() < body.volume());
+                result
+                    .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                    .unwrap();
+            }
+        }
+    }
+}

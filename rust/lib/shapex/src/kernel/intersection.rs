@@ -2079,7 +2079,7 @@ fn trace_surface_intersection_direction(
     Ok(result)
 }
 
-fn correct_surface_pair_with_gauge(
+pub(crate) fn correct_surface_pair_with_gauge(
     first: &Surface3,
     second: &Surface3,
     guide: [f64; 4],

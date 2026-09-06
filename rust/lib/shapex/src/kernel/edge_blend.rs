@@ -4205,7 +4205,6 @@ impl EulerTransaction<'_> {
         offsets: &[Surface3; 2],
         tolerance: ModelTolerance,
     ) -> KernelResult<SurfaceSurfaceCurve> {
-        let support_range = ParameterRange::new(-1.0, 2.0)?;
         let mut boundary_parameters: [Vec<Point2>; 2] =
             [Vec::with_capacity(17), Vec::with_capacity(17)];
         for index in 0..=16 {
@@ -4248,6 +4247,34 @@ impl EulerTransaction<'_> {
             }
         }
         let source = self.working.edge(self.working.coedge(uses[0])?.edge)?;
+        // Across a straight-spine fillet, preserve the angular coordinate
+        // while solving the other three coordinates. Least-norm correction
+        // can slide along the section and fold the sampled guide at a seam.
+        let angular_side = offsets
+            .iter()
+            .position(|surface| {
+                matches!(surface,
+            Surface3::Offset(offset) if matches!(offset.base(), Surface3::RollingBall(blend)
+                if matches!(blend.center_curve(), Curve3::Line(_))))
+            })
+            .filter(|side| {
+                (boundary_parameters[*side][16].y - boundary_parameters[*side][0].y).abs()
+                    > tolerance.parameter
+            });
+        // Keep open curved-edge continuation local to the retained sector.
+        // Extending an entire edge length can wrap around a curved
+        // support and introduce another inverse branch into the same guide.
+        let extension = if source.vertices[0] == source.vertices[1]
+            || matches!(source.curve, Curve3::Line(_))
+        {
+            16
+        } else {
+            2
+        };
+        let support_range = ParameterRange::new(
+            -f64::from(extension) / 16.0,
+            1.0 + f64::from(extension) / 16.0,
+        )?;
         let closed = source.vertices[0] == source.vertices[1];
         let extrapolated = |side: usize, index: i32| -> KernelResult<Point2> {
             if closed {
@@ -4275,15 +4302,52 @@ impl EulerTransaction<'_> {
             })
         };
         let mut parameters: [Vec<Point2>; 2] = [Vec::with_capacity(49), Vec::with_capacity(49)];
-        for index in -16..=32 {
+        for index in -extension..=16 + extension {
             let first = extrapolated(0, index)?;
             let second = extrapolated(1, index)?;
-            let corrected = super::intersection::correct_surface_pair_near(
-                &offsets[0],
-                &offsets[1],
-                [first.x, first.y, second.x, second.y],
-                tolerance,
-            )?;
+            let corrected = if let Some(side) = angular_side {
+                let guide = [first.x, first.y, second.x, second.y];
+                let mut gauge = [0.0; 4];
+                gauge[side * 2 + 1] = 1.0;
+                let domains = |side: usize| {
+                    std::array::from_fn(|axis| {
+                        let domain = offsets[side].domains()[axis];
+                        if let Some(period) = domain.period {
+                            return ParameterRange::new(
+                                guide[side * 2 + axis] - period,
+                                guide[side * 2 + axis] + period,
+                            )
+                            .unwrap();
+                        }
+                        match domain.bounds {
+                            DomainBounds::Bounded(range) => range,
+                            _ => ParameterRange::new(-f64::MAX / 4.0, f64::MAX / 4.0).unwrap(),
+                        }
+                    })
+                };
+                super::intersection::correct_surface_pair_with_gauge(
+                    &offsets[0],
+                    &offsets[1],
+                    guide,
+                    gauge,
+                    domains(0),
+                    domains(1),
+                    tolerance,
+                )?
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::NumericalFailure,
+                        "fixed angular offset correction failed",
+                    )
+                })?
+            } else {
+                super::intersection::correct_surface_pair_near(
+                    &offsets[0],
+                    &offsets[1],
+                    [first.x, first.y, second.x, second.y],
+                    tolerance,
+                )?
+            };
             // Correction normalizes periodic coordinates. Lift them back onto
             // the sampled branch before interpolating a continuous guide.
             for side in 0..2 {

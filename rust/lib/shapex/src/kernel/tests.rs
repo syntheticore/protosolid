@@ -2625,6 +2625,79 @@ fn transverse_circle_joins_a_shelled_filleted_boss_in_both_directions() {
 }
 
 #[test]
+fn moved_circle_joins_across_a_rounded_shell_opening() {
+    let tolerance = ModelTolerance::default();
+    let circle = |center, radius| {
+        Profile::new(
+            Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tolerance).unwrap(),
+            [],
+            tolerance,
+        )
+        .unwrap()
+    };
+    let plane = |x| {
+        Plane3::new(
+            Point3::new(x, 0.0, 0.0),
+            -Vec3::unit_z(),
+            Vec3::unit_y(),
+            tolerance,
+        )
+        .unwrap()
+    };
+    let base = circle(
+        Point2::new(-17.094721967326727, 3.621763128670917),
+        38.40462700511438,
+    )
+    .extrude(plane(0.0), Vec3::new(33.0, 0.0, 0.0))
+    .unwrap();
+    let bottom = base
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(c) if c.center().x.abs() < tolerance.linear)
+        })
+        .unwrap()
+        .clone();
+    let rounded = base.fillet(&[bottom], 12.0).unwrap();
+    let opening = rounded
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+                if (p.origin().x - 33.0).abs() < tolerance.linear)
+        })
+        .unwrap()
+        .clone();
+    let shell = rounded.shell(&[opening], -4.0).unwrap();
+    let cutter = circle(
+        Point2::new(26.107773279218943, 7.6318958166238975),
+        26.954243397522823,
+    )
+    .extrude(plane(33.0), Vec3::new(-44.0, 0.0, 0.0))
+    .unwrap();
+    let cut = shell.difference(&cutter).unwrap();
+    let rim = cut
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(c)
+                if c.center().x.abs() < tolerance.linear
+                    && (c.radius() - 26.954243397522823).abs() < tolerance.linear)
+        })
+        .unwrap()
+        .clone();
+    let rounded_cut = cut.fillet(&[rim], 1.0).unwrap();
+    let tool = circle(
+        Point2::new(-3.435024046379482, 5.236934939201773),
+        11.980574220283309,
+    )
+    .extrude(plane(0.0), Vec3::new(20.0, 0.0, 0.0))
+    .unwrap();
+    let joined = rounded_cut
+        .union(&tool)
+        .expect("join across the rounded opening");
+    assert_eq!(joined.solids().len(), 1);
+    assert!(joined.volume() > rounded_cut.volume());
+}
+
+#[test]
 fn circular_prism_can_join_through_a_shallow_planar_overlap() {
     let tolerance = ModelTolerance::default();
     let plane = Plane3::new(

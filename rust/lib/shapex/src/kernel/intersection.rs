@@ -1490,6 +1490,42 @@ fn trace_surface_intersections_in_domains(
         // converged trace can still sit next to a trim corner. A nearby box
         // endpoint is usable only if it is a common point of both supports.
         let snap = |values: &mut [f64; 4]| -> KernelResult<()> {
+            // Correct all remaining coordinates with a nearby trim coordinate
+            // fixed. Projecting a clamped point onto just the other support can
+            // accept a tangential residual while leaving an endpoint short of
+            // the trim in parameter space.
+            for (index, range) in [
+                first_domains[0],
+                first_domains[1],
+                second_domains[0],
+                second_domains[1],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                for bound in [range.start, range.end] {
+                    if (values[index] - bound).abs() > base_step * 0.1 {
+                        continue;
+                    }
+                    let mut guide = *values;
+                    guide[index] = bound;
+                    let mut gauge = [0.0; 4];
+                    gauge[index] = 1.0;
+                    if let Some(endpoint) = correct_surface_pair_with_gauge(
+                        first,
+                        second,
+                        guide,
+                        gauge,
+                        first_domains,
+                        second_domains,
+                        tolerance,
+                    )? {
+                        if parameter_distance(endpoint, *values) <= base_step * 0.1 {
+                            *values = endpoint;
+                        }
+                    }
+                }
+            }
             let mut candidate = *values;
             let mut changed = [false; 2];
             for (index, range) in [

@@ -4116,3 +4116,87 @@ fn extrude_circle_on_open_torus_shell() {
         }
     }
 }
+
+#[test]
+fn surface_projection_refines_within_model_tolerance() {
+    use super::{Line2, Line3, SurfaceProjectionPcurve2};
+    use crate::Vec2;
+
+    let tolerance = ModelTolerance::default();
+    let range = ParameterRange::new(0.0, 1.0).unwrap();
+    for normal_offset in [0.0, tolerance.linear * 0.5] {
+        let curve = Line3::new(Point3::new(0.0, 0.0, normal_offset), Vec3::unit_x()).unwrap();
+        // The guide is already within tolerance, but has tangential error.
+        let guide = Line2::new(
+            Point2::new(0.0, tolerance.linear * 0.5),
+            Vec2::new(1.0, 0.0),
+        )
+        .unwrap();
+        let projected = SurfaceProjectionPcurve2::new(
+            curve.into(),
+            Plane3::xy().into(),
+            guide.into(),
+            range,
+            tolerance,
+        )
+        .unwrap();
+        let projected = Curve2::from(projected);
+        for parameter in [0.0, 0.4, 1.0] {
+            let uv = projected.evaluate(parameter).unwrap().point;
+            assert!(uv.distance(Point2::new(parameter, 0.0)) < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn transverse_circle_on_open_torus_shell() {
+    let tol = ModelTolerance::default();
+    let body = rounded_chamfered_torus(true);
+    let opening = body
+        .faces()
+        .find(|f| matches!(f.surface(), Surface3::Plane(_)))
+        .unwrap()
+        .clone();
+    let shell = body.shell(&[opening], -3.0).unwrap();
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tol,
+    )
+    .unwrap();
+    let circle = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(
+                Point2::new(12.754345842186886, 9.817011016391483),
+                43.44134694370669,
+            )
+            .unwrap()],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap();
+    for distance in [1.0, -1.0, 5.0, -5.0, 20.0, -20.0] {
+        let tool = circle.extrude(plane, Vec3::unit_y() * distance).unwrap();
+        for cut in [false, true] {
+            let result = if cut {
+                shell.difference(&tool)
+            } else {
+                shell.union(&tool)
+            }
+            .unwrap_or_else(|error| panic!("distance {distance}, cut {cut}: {error}"));
+            assert_eq!(result.solids().len(), 1);
+            assert!(if cut {
+                result.volume() < shell.volume()
+            } else {
+                result.volume() > shell.volume()
+            });
+            result
+                .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                .unwrap();
+        }
+    }
+}

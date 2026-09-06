@@ -1725,7 +1725,10 @@ impl SurfaceProjectionPcurve2 {
                 .magnitude()
                 .max(target.to_vec().magnitude())
                 .max(1.0);
-            if residual.magnitude() <= self.tolerance.linear_at_scale(scale) {
+            // Model tolerance permits a small normal offset, but is too coarse
+            // for the tangential position: adjacent uses can acquire different
+            // endpoints when their guides stop at different residuals.
+            if residual.magnitude() <= f64::EPSILON * scale * 2048.0 {
                 return Ok(uv);
             }
             let a00 = du.magnitude2();
@@ -1761,6 +1764,17 @@ impl SurfaceProjectionPcurve2 {
             if !accepted {
                 break;
             }
+        }
+        let point = self.surface.first_order(uv.0, uv.1)?.0;
+        let scale = point
+            .to_vec()
+            .magnitude()
+            .max(target.to_vec().magnitude())
+            .max(1.0);
+        // Once refinement stops improving, retain the existing certification
+        // allowance for a curve that lies only within tolerance of its support.
+        if point.distance(target) <= self.tolerance.linear_at_scale(scale) {
+            return Ok(uv);
         }
         Err(KernelError::new(
             DiagnosticKind::NumericalFailure,

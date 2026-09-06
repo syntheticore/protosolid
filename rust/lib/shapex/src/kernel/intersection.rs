@@ -1903,27 +1903,52 @@ fn correct_surface_pair(
             .magnitude()
             .max(second_point.to_vec().magnitude())
             .max(1.0);
-        if residual.magnitude() <= tolerance.linear_at_scale(scale) {
+        // A model-tolerance residual near tangency can manufacture a tiny
+        // intersection branch. Match the accuracy of implicit evaluation.
+        if residual.magnitude() <= f64::EPSILON * scale * 2048.0 {
             let regularity = first
                 .normal(parameters[0], parameters[1])?
                 .cross(second.normal(parameters[2], parameters[3])?)
                 .magnitude();
             return Ok((regularity > tolerance.angular * 8.0).then_some(parameters));
         }
-        let jacobian = [
+        let mut jacobian = [
             [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
             [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
             [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
         ];
-        let normal = multiply_3x4_by_transpose(jacobian);
-        let Some(lambda) = solve_linear_3(normal, [-residual.x, -residual.y, -residual.z]) else {
-            return Ok(None);
-        };
-        let delta: [f64; 4] = std::array::from_fn(|column| {
-            (0..3)
-                .map(|row| jacobian[row][column] * lambda[row])
-                .sum::<f64>()
-        });
+        let mut delta = [0.0; 4];
+        // A clamped parameter cannot contribute an outward Newton step.
+        // Re-solve with those columns fixed, or a narrow trim can keep
+        // absorbing most of the correction without reducing the residual.
+        // Each pass fixes at least one of the four parameters.
+        for _ in 0..=4 {
+            let normal = multiply_3x4_by_transpose(jacobian);
+            let Some(lambda) = solve_linear_3(normal, [-residual.x, -residual.y, -residual.z]) else {
+                return Ok(None);
+            };
+            delta = std::array::from_fn(|column| {
+                (0..3)
+                    .map(|row| jacobian[row][column] * lambda[row])
+                    .sum::<f64>()
+            });
+            let mut constrained = false;
+            for (index, range) in first_domains.iter().chain(&second_domains).enumerate() {
+                if (parameters[index] <= range.start.min(range.end) + tolerance.parameter
+                    && delta[index] < 0.0)
+                    || (parameters[index] >= range.start.max(range.end) - tolerance.parameter
+                        && delta[index] > 0.0)
+                {
+                    for row in &mut jacobian {
+                        row[index] = 0.0;
+                    }
+                    constrained = true;
+                }
+            }
+            if !constrained {
+                break;
+            }
+        }
         let mut damping = 1.0;
         let mut accepted = false;
         for _ in 0..12 {
@@ -2103,9 +2128,11 @@ pub(crate) fn correct_surface_pair_with_gauge(
             .zip(tangent)
             .map(|((value, guide), tangent)| (value - guide) * tangent)
             .sum::<f64>();
-        if residual.magnitude() <= f64::EPSILON * first_point.to_vec().magnitude().max(1.0) * 64.0
+        // The supports can themselves contain corrected implicit curves;
+        // demanding a tighter residual than their evaluation stops a valid trace.
+        if residual.magnitude() <= f64::EPSILON * first_point.to_vec().magnitude().max(1.0) * 2048.0
             && gauge.abs()
-                <= f64::EPSILON * guide.iter().map(|v| v.abs()).fold(1.0_f64, f64::max) * 64.0
+                <= f64::EPSILON * guide.iter().map(|v| v.abs()).fold(1.0_f64, f64::max) * 2048.0
         {
             return Ok(Some(parameters));
         }

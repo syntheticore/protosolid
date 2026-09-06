@@ -345,6 +345,38 @@ fn offset_edge(
     let second = faces[1];
     let source = topology.edge(edge)?;
     let source_range = source.range();
+    let carried_curve = |face: FaceId, pcurve: &Curve2| -> KernelResult<Curve3> {
+        let mut range = source_range;
+        if let Curve2::Line(line) = pcurve {
+            let origin = line.origin();
+            let direction = line.direction();
+            let domains = supports[&face].domains();
+            // A shared cross-section may need to extend past its old end trim
+            // to meet an opening. Keep periodic contact/seam ranges unchanged.
+            if !domains.iter().enumerate().any(|(axis, domain)| {
+                direction[axis].abs() > tolerance.parameter
+                    && matches!(domain.bounds, super::DomainBounds::Unbounded)
+            }) {
+                return exact_surface_curve(&supports[&face], pcurve, range, tolerance);
+            }
+            let mut lower = f64::NEG_INFINITY;
+            let mut upper = f64::INFINITY;
+            for axis in 0..2 {
+                if direction[axis].abs() <= tolerance.parameter {
+                    continue;
+                }
+                let limits = bounds[&face][axis];
+                let a = (limits.start - origin[axis]) / direction[axis];
+                let b = (limits.end - origin[axis]) / direction[axis];
+                lower = lower.max(a.min(b));
+                upper = upper.min(a.max(b));
+            }
+            if lower.is_finite() && upper.is_finite() && lower < upper {
+                range = ParameterRange::new(lower, upper)?;
+            }
+        }
+        exact_surface_curve(&supports[&face], pcurve, range, tolerance)
+    };
     let mut shared_pcurves = BTreeMap::new();
     let mut shared_curve = None;
     let mut shared_points = Vec::<Vec<Point3>>::new();
@@ -353,12 +385,7 @@ fn offset_edge(
         let face = topology.loop_(coedge.loop_id())?.face();
         shared_pcurves.insert(*coedge_id, coedge.pcurve().clone());
         if shared_curve.is_none() {
-            shared_curve = Some(exact_surface_curve(
-                &supports[&face],
-                coedge.pcurve(),
-                source_range,
-                tolerance,
-            )?);
+            shared_curve = Some(carried_curve(face, coedge.pcurve())?);
         }
         shared_points.push(
             [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -397,12 +424,95 @@ fn offset_edge(
             });
         }
     }
-    let intersections = supports[&first].intersect_surface_in_bounds(
-        &supports[&second],
-        bounds[&first],
-        bounds[&second],
-        tolerance,
-    )?;
+    let intersections = supports[&first]
+        .intersect_surface(&supports[&second], tolerance)
+        .or_else(|error| {
+            if !error
+                .diagnostics()
+                .iter()
+                .all(|d| d.kind == DiagnosticKind::UnsupportedGeometry)
+            {
+                return Err(error);
+            }
+            // The existing coedges identify the desired local branch, including
+            // on unbounded blend supports. Retain exact surface intersection
+            // evaluation; these samples only provide its parameter guides.
+            let mut points = [Vec::new(), Vec::new()];
+            let uses = [first, second].map(|face| {
+                *source
+                    .coedges()
+                    .iter()
+                    .find(|id| {
+                        topology
+                            .coedge(**id)
+                            .and_then(|c| topology.loop_(c.loop_id()))
+                            .is_ok_and(|l| l.face() == face)
+                    })
+                    .unwrap()
+            });
+            for index in 0..=32 {
+                let parameter = source_range.start + source_range.span() * index as f64 / 32.0;
+                let first_uv = topology
+                    .coedge(uses[0])?
+                    .pcurve()
+                    .evaluate(parameter)?
+                    .point;
+                let second_uv = topology
+                    .coedge(uses[1])?
+                    .pcurve()
+                    .evaluate(parameter)?
+                    .point;
+                let corrected = if supports[&first]
+                    .evaluate(first_uv.x, first_uv.y)?
+                    .point
+                    .distance(supports[&second].evaluate(second_uv.x, second_uv.y)?.point)
+                    <= tolerance.linear
+                {
+                    [first_uv.x, first_uv.y, second_uv.x, second_uv.y]
+                } else {
+                    super::intersection::correct_surface_pair_near(
+                        &supports[&first],
+                        &supports[&second],
+                        [first_uv.x, first_uv.y, second_uv.x, second_uv.y],
+                        tolerance,
+                    )?
+                };
+                points[0].push(Point2::new(corrected[0], corrected[1]));
+                points[1].push(Point2::new(corrected[2], corrected[3]));
+            }
+            for (side, face) in [first, second].into_iter().enumerate() {
+                super::intersection::unwrap_periodic_points(
+                    &mut points[side],
+                    supports[&face].domains(),
+                );
+            }
+            let curve = SurfaceIntersectionCurve::new(
+                supports[&first].clone(),
+                supports[&second].clone(),
+                super::intersection::smooth_nurbs_guide(
+                    &points[0],
+                    ParameterRange::new(0.0, 1.0)?,
+                )?
+                .into(),
+                super::intersection::smooth_nurbs_guide(
+                    &points[1],
+                    ParameterRange::new(0.0, 1.0)?,
+                )?
+                .into(),
+                ParameterRange::new(0.0, 1.0)?,
+                tolerance,
+                tolerance.linear,
+            )?;
+            let pcurves = curve.exact_pcurves();
+            Ok(IntersectionSet::Isolated(vec![
+                super::SurfaceSurfaceCurve {
+                    curve: curve.into(),
+                    first_pcurve: pcurves[0].clone(),
+                    second_pcurve: pcurves[1].clone(),
+                    achieved_error: tolerance.linear,
+                },
+            ]))
+        })?;
     let intersections = match intersections {
         IntersectionSet::Isolated(intersections) => intersections,
         IntersectionSet::Coincident => {
@@ -416,12 +526,7 @@ fn offset_edge(
                 let face = topology.loop_(coedge.loop_id())?.face();
                 pcurves.insert(*coedge_id, coedge.pcurve().clone());
                 if curve.is_none() {
-                    curve = Some(exact_surface_curve(
-                        &supports[&face],
-                        coedge.pcurve(),
-                        source.range(),
-                        tolerance,
-                    )?);
+                    curve = Some(carried_curve(face, coedge.pcurve())?);
                 }
             }
             return Ok(OffsetEdge {
@@ -512,6 +617,7 @@ fn offset_vertex(
     topology: &Topology,
     vertex: VertexId,
     edges: &BTreeMap<EdgeId, OffsetEdge>,
+    supports: &BTreeMap<FaceId, Surface3>,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Point3> {
     let source_point = topology.vertex(vertex)?.point();
@@ -520,6 +626,25 @@ fn offset_vertex(
         .into_iter()
         .filter(|edge| edges.contains_key(edge))
         .collect::<Vec<_>>();
+    let faces = incident
+        .iter()
+        .map(|edge| topology.edge_faces(*edge))
+        .collect::<KernelResult<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect::<BTreeSet<_>>();
+    if incident.iter().any(|edge| {
+        matches!(
+            edges[edge].curve,
+            Curve3::SurfaceCurve(_) | Curve3::SurfaceIntersection(_)
+        )
+    }) {
+        if let Ok(point) =
+            refine_offset_corner(source_point, &faces, &incident, edges, supports, tolerance)
+        {
+            return Ok(point);
+        }
+    }
     let mut candidates = Vec::new();
     let complexity = |curve: &Curve3| match curve {
         Curve3::Line(_) => 0_u8,
@@ -564,7 +689,7 @@ fn offset_vertex(
                 continue;
             };
             let scale = hit.point.to_vec().magnitude().max(1.0);
-            let allowed = tolerance.linear_at_scale(scale) * 128.0;
+            let allowed = tolerance.linear_at_scale(scale);
             let distances = incident
                 .iter()
                 .map(|edge| distance_to_support(&edges[edge].curve, hit.point))
@@ -602,6 +727,112 @@ fn offset_vertex(
                 ),
             )
         })
+}
+
+// Solve the supporting surfaces together. Tangent contact curves add the
+// constraints that coincident surface normals cannot supply on their own.
+fn refine_offset_corner(
+    mut point: Point3,
+    faces: &BTreeSet<FaceId>,
+    incident: &[EdgeId],
+    edges: &BTreeMap<EdgeId, OffsetEdge>,
+    supports: &BTreeMap<FaceId, Surface3>,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<Point3> {
+    for _ in 0..96 {
+        let mut matrix = [[0.0; 3]; 3];
+        let mut rhs = [0.0; 3];
+        let mut worst = 0.0_f64;
+        let mut cost = 0.0;
+        for face in faces {
+            let surface = &supports[face];
+            let projection = surface.project(point, tolerance)?;
+            let normal = surface.normal(projection.parameters.0, projection.parameters.1)?;
+            let residual = (point - projection.point).dot(normal);
+            worst = worst.max(projection.distance);
+            cost += projection.distance.powi(2);
+            for row in 0..3 {
+                rhs[row] -= normal[row] * residual;
+                for col in 0..3 {
+                    matrix[row][col] += normal[row] * normal[col];
+                }
+            }
+        }
+        for edge in incident {
+            let curve = &edges[edge].curve;
+            if matches!(curve, Curve3::SurfaceIntersection(_)) {
+                continue;
+            }
+            let projection = curve.project(point, tolerance)?;
+
+            let tangent = curve
+                .evaluate(projection.parameter)?
+                .first_derivative
+                .normalize();
+            let residual = point - projection.point;
+            worst = worst.max(projection.distance);
+            cost += projection.distance.powi(2);
+            for row in 0..3 {
+                rhs[row] -= residual[row];
+                for col in 0..3 {
+                    matrix[row][col] +=
+                        (if row == col { 1.0 } else { 0.0 }) - tangent[row] * tangent[col];
+                }
+            }
+        }
+        for axis in 0..3 {
+            matrix[axis][axis] += 1e-12;
+        }
+        let Some(step) = super::intersection::solve_linear_3(matrix, rhs) else {
+            break;
+        };
+        let step = crate::Vec3::new(step[0], step[1], step[2]);
+        // Near tangency a small normal residual can still hide a large movement
+        // along the surfaces. Require positional convergence as well.
+        if worst <= tolerance.linear * 0.1 && step.magnitude() <= tolerance.linear * 0.01 {
+            return Ok(point);
+        }
+        if step.magnitude() <= tolerance.linear * 0.001 {
+            break;
+        }
+        let mut damping = 1.0;
+        let mut accepted = false;
+        for _ in 0..12 {
+            let candidate = point + step * damping;
+            let candidate_cost = (|| -> KernelResult<f64> {
+                let mut cost = 0.0;
+                for face in faces {
+                    cost += supports[face]
+                        .project(candidate, tolerance)?
+                        .distance
+                        .powi(2);
+                }
+                for edge in incident {
+                    if !matches!(edges[edge].curve, Curve3::SurfaceIntersection(_)) {
+                        cost += edges[edge]
+                            .curve
+                            .project(candidate, tolerance)?
+                            .distance
+                            .powi(2);
+                    }
+                }
+                Ok(cost)
+            })();
+            if candidate_cost.is_ok_and(|candidate| candidate < cost) {
+                point = candidate;
+                accepted = true;
+                break;
+            }
+            damping *= 0.5;
+        }
+        if !accepted {
+            break;
+        }
+    }
+    Err(KernelError::new(
+        DiagnosticKind::NumericalFailure,
+        "offset corner did not converge",
+    ))
 }
 
 fn retarget_offset_intersection_endpoints(
@@ -756,8 +987,25 @@ fn trim_offset_edge(
             Ok(bounds.reversed())
         };
     }
-    let first = edge.curve.project(vertices[&first_vertex], tolerance)?;
-    let second = edge.curve.project(vertices[&second_vertex], tolerance)?;
+    let project_endpoint = |point: Point3| -> KernelResult<super::Projection1> {
+        let mut projection = edge.curve.project(point, tolerance)?;
+        if let super::DomainBounds::Bounded(range) = edge.curve.domain().bounds {
+            for parameter in [range.start, range.end] {
+                let candidate = edge.curve.evaluate(parameter)?.point;
+                let distance = candidate.distance(point);
+                if distance < projection.distance {
+                    projection = super::Projection1 {
+                        parameter,
+                        point: candidate,
+                        distance,
+                    };
+                }
+            }
+        }
+        Ok(projection)
+    };
+    let first = project_endpoint(vertices[&first_vertex])?;
+    let second = project_endpoint(vertices[&second_vertex])?;
     let mut range = ParameterRange::new(first.parameter, second.parameter)?;
     if let Some(period) = edge.curve.domain().period {
         let source_midpoint = source
@@ -910,6 +1158,11 @@ fn expanded_offset_bounds(
             } else {
                 ParameterRange::new(minimum, maximum)?
             }
+        } else if let super::DomainBounds::Bounded(domain) = domains[axis].bounds {
+            ParameterRange::new(
+                minimum.max(domain.start.min(domain.end)),
+                maximum.min(domain.start.max(domain.end)),
+            )?
         } else {
             ParameterRange::new(minimum, maximum)?
         };
@@ -983,14 +1236,162 @@ fn rebuild_supports(
         }
     }
     let mut vertices = BTreeMap::new();
+    let mut split_vertices = BTreeMap::<(EdgeId, VertexId), Point3>::new();
+    let mut corner_edges = BTreeMap::<(VertexId, FaceId), Curve3>::new();
     for vertex in required_vertices {
-        vertices.insert(vertex, offset_vertex(topology, vertex, &edges, tolerance)?);
+        match offset_vertex(topology, vertex, &edges, &supports, tolerance) {
+            Ok(point) => {
+                vertices.insert(vertex, point);
+            }
+            Err(error) => {
+                // A four-face corner need not survive an offset as one vertex.
+                // Try the two diagonals of its face fan, retaining the split
+                // whose triple intersections lie inside the remaining faces.
+                let incident = topology.vertex_edges(vertex)?;
+                let faces = incident
+                    .iter()
+                    .map(|edge| topology.edge_faces(*edge))
+                    .collect::<KernelResult<Vec<_>>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect::<BTreeSet<_>>();
+                if incident.len() != 4 || faces.len() != 4 {
+                    return Err(error);
+                }
+                let source_point = topology.vertex(vertex)?.point();
+                let mut solution = None;
+                for first in &faces {
+                    for second in
+                        faces.range((std::ops::Bound::Excluded(first), std::ops::Bound::Unbounded))
+                    {
+                        if incident.iter().any(|edge| {
+                            topology
+                                .edge_faces(*edge)
+                                .is_ok_and(|f| f.contains(first) && f.contains(second))
+                        }) {
+                            continue;
+                        }
+                        let others = faces
+                            .iter()
+                            .filter(|f| *f != first && *f != second)
+                            .copied()
+                            .collect::<Vec<_>>();
+                        let mut ends = Vec::new();
+                        for other in &others {
+                            let subset = BTreeSet::from([*first, *second, *other]);
+                            let uses = incident
+                                .iter()
+                                .filter(|edge| {
+                                    topology
+                                        .edge_faces(**edge)
+                                        .is_ok_and(|f| f.iter().all(|face| subset.contains(face)))
+                                })
+                                .copied()
+                                .collect::<Vec<_>>();
+                            if let Ok(point) = refine_offset_corner(
+                                source_point,
+                                &subset,
+                                &uses,
+                                &edges,
+                                &supports,
+                                tolerance,
+                            ) {
+                                ends.push((point, uses));
+                            }
+                        }
+                        if ends.len() != 2 {
+                            continue;
+                        }
+                        let mut inside = true;
+                        for side in 0..2 {
+                            let excluded = others[1 - side];
+                            let projection =
+                                supports[&excluded].project(ends[side].0, tolerance)?;
+                            let uv = projection.parameters;
+                            let face = topology.face(excluded)?;
+                            let sign = if face.orientation() == FaceOrientation::Forward {
+                                1.0
+                            } else {
+                                -1.0
+                            };
+                            if (ends[side].0 - projection.point)
+                                .dot(supports[&excluded].normal(uv.0, uv.1)?)
+                                * sign
+                                > tolerance.linear
+                            {
+                                inside = false;
+                            }
+                        }
+                        if !inside {
+                            continue;
+                        }
+                        solution = Some((*first, *second, ends));
+                        break;
+                    }
+                    if solution.is_some() {
+                        break;
+                    }
+                }
+                let Some((first, second, ends)) = solution else {
+                    return Err(error);
+                };
+                let mut guides = [Vec::new(), Vec::new()];
+                for index in 0..=8 {
+                    let point = ends[0].0 + (ends[1].0 - ends[0].0) * (index as f64 / 8.0);
+                    let a = supports[&first].project(point, tolerance)?.parameters;
+                    let b = supports[&second].project(point, tolerance)?.parameters;
+                    let corrected = super::intersection::correct_surface_pair_near(
+                        &supports[&first],
+                        &supports[&second],
+                        [a.0, a.1, b.0, b.1],
+                        tolerance,
+                    )?;
+                    guides[0].push(Point2::new(corrected[0], corrected[1]));
+                    guides[1].push(Point2::new(corrected[2], corrected[3]));
+                }
+                let range = ParameterRange::new(0.0, 1.0)?;
+                for (side, face) in [first, second].into_iter().enumerate() {
+                    super::intersection::unwrap_periodic_points(
+                        &mut guides[side],
+                        supports[&face].domains(),
+                    );
+                }
+                let curve: Curve3 = SurfaceIntersectionCurve::new(
+                    supports[&first].clone(),
+                    supports[&second].clone(),
+                    super::intersection::smooth_nurbs_guide(&guides[0], range)?.into(),
+                    super::intersection::smooth_nurbs_guide(&guides[1], range)?.into(),
+                    range,
+                    tolerance,
+                    tolerance.linear,
+                )?
+                .into();
+                corner_edges.insert((vertex, first), curve.clone());
+                corner_edges.insert((vertex, second), curve);
+                for (point, uses) in ends {
+                    for edge in uses {
+                        split_vertices.insert((edge, vertex), point);
+                    }
+                }
+            }
+        }
     }
     for (edge_id, edge) in &mut edges {
+        let endpoints = topology
+            .edge(*edge_id)?
+            .vertices()
+            .into_iter()
+            .filter_map(|vertex| {
+                split_vertices
+                    .get(&(*edge_id, vertex))
+                    .or_else(|| vertices.get(&vertex))
+                    .map(|point| (vertex, *point))
+            })
+            .collect();
         retarget_offset_intersection_endpoints(
-            topology, *edge_id, edge, &vertices, &supports, tolerance,
+            topology, *edge_id, edge, &endpoints, &supports, tolerance,
         )?;
-        edge.range = trim_offset_edge(topology, *edge_id, edge, &vertices, tolerance)?;
+        edge.range = trim_offset_edge(topology, *edge_id, edge, &endpoints, tolerance)?;
     }
 
     let mut patches_by_shell = BTreeMap::<super::ShellId, Vec<(BrepPatch, PersistentId)>>::new();
@@ -1021,6 +1422,31 @@ fn rebuild_supports(
                     pcurve,
                     range,
                 });
+                let source_edge = topology.edge(coedge.edge())?;
+                let vertex = source_edge.vertices()[if coedge.is_forward() { 1 } else { 0 }];
+                if let Some(curve) = corner_edges.get(&(vertex, face_id)) {
+                    let next = topology.coedge(coedge.next())?;
+                    let start = split_vertices[&(coedge.edge(), vertex)];
+                    let end = split_vertices[&(next.edge(), vertex)];
+                    let range = ParameterRange::new(
+                        curve.project(start, tolerance)?.parameter,
+                        curve.project(end, tolerance)?.parameter,
+                    )?;
+                    let Curve3::SurfaceIntersection(intersection) = curve else {
+                        unreachable!()
+                    };
+                    let exact = intersection.exact_pcurves();
+                    let pcurve = if intersection.first_surface() == surface {
+                        exact[0].clone()
+                    } else {
+                        exact[1].clone()
+                    };
+                    segments.push(BrepPatchSegment {
+                        curve: curve.clone(),
+                        pcurve,
+                        range,
+                    });
+                }
             }
             loops.push(BrepPatchLoop {
                 kind: loop_value.kind(),

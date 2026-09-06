@@ -3980,3 +3980,139 @@ fn rounded_partial_torus_rim_blends() {
         }
     }
 }
+
+fn rounded_chamfered_torus(other_end: bool) -> super::Compound {
+    let tol = ModelTolerance::default();
+    let top = Point2::new(-1.9799571066866424, 21.848456911735045);
+    let bottom = Point2::new(-1.9799571066866424, -21.84845691173505);
+    let wire = Wire2::new(
+        [
+            TrimmedCurve2::arc_through(
+                top,
+                Point2::new(-28.888150160955835 - 34.66130295978159, 0.0),
+                bottom,
+            )
+            .unwrap(),
+            TrimmedCurve2::line(bottom, top).unwrap(),
+        ],
+        tol,
+    )
+    .unwrap();
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        -Vec3::unit_z(),
+        Vec3::unit_y(),
+        tol,
+    )
+    .unwrap();
+    let axis = Axis3::new(Point3::new(0.0, 0.0, -12.045831777920995), -Vec3::unit_y()).unwrap();
+    let body = Profile::new(wire, [], tol)
+        .unwrap()
+        .revolve(plane, axis, std::f64::consts::PI)
+        .unwrap();
+    let edges = body
+        .edges()
+        .filter(|e| {
+            e.connected_faces()
+                .unwrap()
+                .iter()
+                .all(|f| !matches!(f.surface(), Surface3::Plane(_)))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(edges.len(), 2);
+    let rounded = body.fillet(&edges, 12.0).unwrap();
+    let rim = rounded
+        .edges()
+        .find(|e| {
+            matches!(e.curve(), Curve3::Circle(c) if !other_end || c.center().z < -12.045831777920995)
+                && e.connected_faces()
+                    .unwrap()
+                    .iter()
+                    .any(|f| matches!(f.surface(), Surface3::Plane(_)))
+        })
+        .unwrap()
+        .clone();
+    rounded
+        .chamfer_with_tangent_propagation(&[rim], 5.0, true)
+        .unwrap()
+}
+
+#[test]
+fn shell_rounded_chamfered_torus() {
+    let body = rounded_chamfered_torus(false);
+    let planar = body
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface3::Plane(_)))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(planar.len(), 2);
+    for thickness in [1.0, 0.5, 2.0] {
+        for openings in [vec![], vec![planar[0].clone()], vec![planar[1].clone()]] {
+            let result = body.shell(&openings, -thickness).unwrap_or_else(|error| {
+                panic!("shell {thickness}, {} openings: {error:?}", openings.len())
+            });
+            assert_eq!(result.solids().len(), 1);
+            assert!(result.volume() > 0.0 && result.volume() < body.volume());
+            result
+                .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn extrude_circle_on_open_torus_shell() {
+    let tol = ModelTolerance::default();
+    let body = rounded_chamfered_torus(true);
+    let opening = body
+        .faces()
+        .find(|f| matches!(f.surface(), Surface3::Plane(_)))
+        .unwrap()
+        .clone();
+    let shell = body.shell(&[opening], -3.0).unwrap();
+    let plane = Plane3::new(
+        Point3::new(0.0, 21.848456911735045, -12.045831777920995),
+        Vec3::unit_z(),
+        -Vec3::unit_y(),
+        tol,
+    )
+    .unwrap();
+    let profile = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(
+                Point2::new(66.24627742902457, 20.76851015338629),
+                21.902415063989423,
+            )
+            .unwrap()],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap();
+    for distance in [0.5, -0.5, 1.0, -1.0, 5.0, -5.0, 20.0, -20.0] {
+        let tool = profile
+            .extrude(plane, Vec3::new(distance, 0.0, 0.0))
+            .unwrap();
+        for cut in [false, true] {
+            let result = if cut {
+                shell.difference(&tool)
+            } else {
+                shell.union(&tool)
+            };
+            let result =
+                result.unwrap_or_else(|error| panic!("distance {distance} cut {cut}: {error}"));
+            assert_eq!(result.solids().len(), 1);
+            if cut {
+                assert!(result.volume() <= shell.volume() * (1.0 + 1e-6));
+            } else {
+                assert!(result.volume() > shell.volume());
+            }
+            result
+                .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                .unwrap();
+        }
+    }
+}

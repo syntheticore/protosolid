@@ -367,8 +367,8 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
 /// Direct divergence-theorem integration over exact trimmed parametric faces.
 ///
 /// For each surface quantity `h(u,v)`, Green's theorem converts the UV-domain
-/// integral to `integral Q dv` around the exact p-curves, where
-/// `Q(u,v) = integral(0..u) h(s,v) ds`.  Both integrations are adaptive and
+/// integral to `integral Q dv` or `-integral P du` around the exact p-curves,
+/// where Q integrates h along u and P integrates it along v. Both are adaptive and
 /// evaluate the retained analytical/implicit supports; rendering meshes never
 /// participate in physical certification.
 fn brep_shell_properties(
@@ -428,14 +428,26 @@ fn brep_shell_properties(
                 point.y.powi(2) * point.z * normal.y / 2.0,
             ])
         };
-        let domain_origin = match face.surface().domains()[0].bounds {
+        // Offset blends need the rail derivatives to evaluate their normals.
+        // Integrating across v first reuses one section throughout the inner
+        // quadrature. Keep the established path for cheaper un-offset supports.
+        // Green's theorem permits either Q dv or -P du with the same targets.
+        let mut support = face.surface();
+        while let Surface3::Offset(offset) = support {
+            support = offset.base();
+        }
+        let primitive_axis = usize::from(
+            matches!(face.surface(), Surface3::Offset(_))
+                && matches!(support, Surface3::RollingBall(_) | Surface3::Ruled(_)),
+        );
+        let primitive_domain = face.surface().domains()[primitive_axis];
+        let domain_origin = match primitive_domain.bounds {
             DomainBounds::Bounded(range) => range.start,
             DomainBounds::LowerBounded(start) => start,
             DomainBounds::UpperBounded(end) => end,
             DomainBounds::Unbounded => 0.0,
         };
-        let u_domain = face.surface().domains()[0];
-        let primitive_origin = if u_domain.contains(0.0, tolerance.parameter) {
+        let primitive_origin = if primitive_domain.contains(0.0, tolerance.parameter) {
             0.0
         } else {
             face.loops()
@@ -448,7 +460,7 @@ fn brep_shell_properties(
                         .pcurve()
                         .evaluate(coedge.range().start)
                         .ok()
-                        .map(|value| value.point.x)
+                        .map(|value| value.point[primitive_axis])
                 })
                 .unwrap_or(domain_origin)
         };
@@ -507,16 +519,30 @@ fn brep_shell_properties(
                     range.end,
                     |parameter| {
                         let (raw_point, derivative) = coedge.pcurve().first_order(parameter)?;
+                        let weight = if primitive_axis == 0 {
+                            derivative.y
+                        } else {
+                            -derivative.x
+                        };
+                        if weight == 0.0 {
+                            return Ok([0.0; TERMS]);
+                        }
                         let point = raw_point + chart_shift;
                         let inner = adaptive_simpson(
                             primitive_origin,
-                            point.x,
-                            |u| surface_terms(u, point.y),
+                            point[primitive_axis],
+                            |parameter| {
+                                if primitive_axis == 0 {
+                                    surface_terms(parameter, point.y)
+                                } else {
+                                    surface_terms(point.x, parameter)
+                                }
+                            },
                             targets,
                             14,
                             "exact BREP surface primitive did not converge",
                         )?;
-                        Ok(inner.map(|value| value * derivative.y * orientation))
+                        Ok(inner.map(|value| value * weight * orientation))
                     },
                     targets,
                     14,

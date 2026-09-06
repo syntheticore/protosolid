@@ -1626,10 +1626,13 @@ fn trace_surface_intersections_in_domains(
                 tolerance,
                 achieved_error,
             )?;
+            // Trims and spatial edges must use the same corrected intersection;
+            // the tracing splines only identify its branch.
+            let [first_pcurve, second_pcurve] = implicit.exact_pcurves();
             Ok(SurfaceSurfaceCurve {
                 curve: implicit.into(),
-                first_pcurve: first_pcurve.into(),
-                second_pcurve: second_pcurve.into(),
+                first_pcurve,
+                second_pcurve,
                 achieved_error,
             })
         })
@@ -2144,6 +2147,12 @@ pub(crate) fn smooth_nurbs_guide(
     points: &[Point2],
     range: super::ParameterRange,
 ) -> KernelResult<NurbsCurve2> {
+    // Coedges can run backwards, but a NURBS knot vector must increase.
+    // Reverse both the samples and range to preserve their parameter values.
+    if range.span() < 0.0 {
+        let reversed = points.iter().rev().copied().collect::<Vec<_>>();
+        return smooth_nurbs_guide(&reversed, range.reversed());
+    }
     if points.len() < 2 {
         return Err(unsupported(
             "surface-intersection guide needs at least two points",

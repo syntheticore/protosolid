@@ -283,7 +283,13 @@ pub(crate) fn boolean_brep(
         for (second_index, second_face) in second_faces.iter().enumerate() {
             let first_boundary = &original_curves[&(0, first_index)];
             let second_boundary = &original_curves[&(1, second_index)];
-            if face_bounds_separated(first_boundary, second_boundary, tolerance)? {
+            if face_bounds_separated(
+                first_face.surface(),
+                first_boundary,
+                second_face.surface(),
+                second_boundary,
+                tolerance,
+            )? {
                 continue;
             }
             let first_bounds = face_parameter_bounds(first_boundary, tolerance)?;
@@ -484,12 +490,56 @@ pub(crate) fn boolean_brep(
             if operand == 1 && has_coincident_support {
                 continue;
             }
+            let mut combined_curves = Vec::new();
+            if has_coincident_support {
+                // A shell can have several disjoint faces on this support.
+                // Arrange their combined boundaries once, or each face can
+                // independently publish the opposite operand's end cap.
+                let same_support = |other: &super::FaceHandle| {
+                    face.surface()
+                        .intersect_surface(other.surface(), tolerance)
+                        .is_ok_and(|set| matches!(set, IntersectionSet::Coincident))
+                };
+                if faces[..index].iter().any(same_support) {
+                    continue;
+                }
+                for (other_index, other) in faces.iter().enumerate() {
+                    if same_support(other) {
+                        for curve in &face_curves[&(operand, other_index)] {
+                            let mut curve = curve.clone();
+                            if other.surface() != face.surface() {
+                                curve.pcurve = super::SurfaceProjectionPcurve2::new(
+                                    curve.curve.clone(),
+                                    face.surface().clone(),
+                                    curve.pcurve.clone(),
+                                    curve.range,
+                                    tolerance,
+                                )?
+                                .into();
+                            }
+                            if other_index != index {
+                                curve.pcurve = align_pcurve_to_face_chart(
+                                    &curve.pcurve,
+                                    face.surface(),
+                                    &original,
+                                    tolerance,
+                                )?;
+                            }
+                            combined_curves.push(curve);
+                        }
+                    }
+                }
+            }
             patches.extend(arrange_face(
                 operand,
                 face.surface(),
                 compound.topology().face(face.topology_id())?.orientation(),
                 &original,
-                &face_curves[&(operand, index)],
+                if has_coincident_support {
+                    &combined_curves
+                } else {
+                    &face_curves[&(operand, index)]
+                },
                 has_coincident_support,
                 classifiers,
                 kind,
@@ -774,29 +824,89 @@ fn face_parameter_bounds(
 }
 
 fn face_bounds_separated(
+    first_surface: &Surface3,
     first: &[FaceCurve],
+    second_surface: &Surface3,
     second: &[FaceCurve],
     tolerance: ModelTolerance,
 ) -> KernelResult<bool> {
-    let bounds = |curves: &[FaceCurve]| -> KernelResult<[Point3; 2]> {
+    let bounds = |surface: &Surface3, curves: &[FaceCurve]| -> KernelResult<Option<[Point3; 2]>> {
+        // Boundary samples do not enclose a curved face's interior. Use a
+        // support enclosure, or decline the shortcut when none is certified.
+        if let Surface3::Torus(torus) = surface {
+            let radius = torus.major_radius() + torus.minor_radius();
+            let extent = crate::Vec3::new(radius, radius, radius);
+            return Ok(Some([torus.center() - extent, torus.center() + extent]));
+        }
+        if let Surface3::Sphere(sphere) = surface {
+            let r = sphere.radius();
+            let extent = crate::Vec3::new(r, r, r);
+            return Ok(Some([sphere.center() - extent, sphere.center() + extent]));
+        }
+        if !matches!(surface, Surface3::Plane(_) | Surface3::Cylinder(_)) {
+            return Ok(None);
+        }
         let mut minimum = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
         let mut maximum = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let mut include = |point: Point3| {
+            for axis in 0..3 {
+                minimum[axis] = minimum[axis].min(point[axis]);
+                maximum[axis] = maximum[axis].max(point[axis]);
+            }
+        };
         for curve in curves {
-            for index in 0..=16 {
-                let parameter = curve.range.start + curve.range.span() * index as f64 / 16.0;
-                let point = curve.curve.evaluate(parameter)?.point;
-                minimum.x = minimum.x.min(point.x);
-                minimum.y = minimum.y.min(point.y);
-                minimum.z = minimum.z.min(point.z);
-                maximum.x = maximum.x.max(point.x);
-                maximum.y = maximum.y.max(point.y);
-                maximum.z = maximum.z.max(point.z);
+            match &curve.curve {
+                Curve3::Line(_) => {
+                    include(curve.curve.evaluate(curve.range.start)?.point);
+                    include(curve.curve.evaluate(curve.range.end)?.point);
+                }
+                Curve3::Circle(circle) => {
+                    let x = circle.x_radius();
+                    let y = circle.y_radius();
+                    let extent = crate::Vec3::new(x.x.hypot(y.x), x.y.hypot(y.y), x.z.hypot(y.z));
+                    include(circle.center() - extent);
+                    include(circle.center() + extent);
+                }
+                Curve3::Nurbs(curve) => {
+                    for point in curve.control_points() {
+                        include(*point);
+                    }
+                }
+                _ => return Ok(None),
             }
         }
-        Ok([minimum, maximum])
+        if let Surface3::Cylinder(cylinder) = surface {
+            let axis = cylinder.axis().normalize();
+            let mut low = f64::INFINITY;
+            let mut high = f64::NEG_INFINITY;
+            for mask in 0..8 {
+                let point = Point3::new(
+                    if mask & 1 == 0 { minimum.x } else { maximum.x },
+                    if mask & 2 == 0 { minimum.y } else { maximum.y },
+                    if mask & 4 == 0 { minimum.z } else { maximum.z },
+                );
+                let height = (point - cylinder.origin()).dot(axis);
+                low = low.min(height);
+                high = high.max(height);
+            }
+            let start = cylinder.origin() + axis * low;
+            let end = cylinder.origin() + axis * high;
+            let x = cylinder.x_radius();
+            let y = cylinder.y_radius();
+            for coordinate in 0..3 {
+                let radius = x[coordinate].hypot(y[coordinate]);
+                minimum[coordinate] = start[coordinate].min(end[coordinate]) - radius;
+                maximum[coordinate] = start[coordinate].max(end[coordinate]) + radius;
+            }
+        }
+        Ok(Some([minimum, maximum]))
     };
-    let first = bounds(first)?;
-    let second = bounds(second)?;
+    let (Some(first), Some(second)) = (
+        bounds(first_surface, first)?,
+        bounds(second_surface, second)?,
+    ) else {
+        return Ok(false);
+    };
     let scale = first
         .iter()
         .chain(&second)
@@ -1631,15 +1741,24 @@ fn arrange_face(
         } else {
             -1.0
         };
+        let mut loops = loops
+            .into_iter()
+            .map(|loop_| {
+                let area = loop_.iter().try_fold(0.0, |sum, piece| {
+                    Ok::<_, KernelError>(
+                        sum + piece
+                            .pcurve
+                            .signed_area_contribution(piece.range, tolerance.parameter)?,
+                    )
+                })?;
+                Ok::<_, KernelError>((loop_, area))
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        // Enclosing loops must be classified before their holes, regardless
+        // of which source face supplied the first arrangement edge.
+        loops.sort_by(|first, second| second.1.abs().total_cmp(&first.1.abs()));
         let mut classified = Vec::<(Vec<DirectedPiece>, Vec<Point2>, f64, bool)>::new();
-        for mut loop_ in loops {
-            let area = loop_.iter().try_fold(0.0, |sum, piece| {
-                Ok::<_, KernelError>(
-                    sum + piece
-                        .pcurve
-                        .signed_area_contribution(piece.range, tolerance.parameter)?,
-                )
-            })?;
+        for (mut loop_, area) in loops {
             if area.abs() <= tolerance.parameter.powi(2) {
                 continue;
             }
@@ -1664,14 +1783,12 @@ fn arrange_face(
             }
             classified.push((loop_, polygon, area, outer));
         }
-        classified.sort_by(|first, second| second.2.abs().total_cmp(&first.2.abs()));
-        let mut outers = classified
+        for outer_index in classified
             .iter()
             .enumerate()
             .filter(|(_, value)| value.3)
             .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        for outer_index in outers.drain(..) {
+        {
             let outer = &classified[outer_index].0;
             let outer_polygon = &classified[outer_index].1;
             let mut patch_loops = vec![BrepPatchLoop {

@@ -1413,7 +1413,7 @@ pub struct SurfaceIntersectionCurve {
     range: ParameterRange,
     tolerance: ModelTolerance,
     achieved_error: f64,
-    evaluations: IntersectionEvaluationCache,
+    evaluations: ParameterEvaluationCache<IntersectionEvaluation>,
 }
 
 /// Evaluations belong to immutable geometry and can be shared by its edge,
@@ -1421,31 +1421,36 @@ pub struct SurfaceIntersectionCurve {
 /// Keep the cache bounded and exclude its incidental contents from identity.
 type IntersectionEvaluation = ([f64; 4], Option<[f64; 4]>);
 
-#[derive(Clone, Default)]
-struct IntersectionEvaluationCache(
-    std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, IntersectionEvaluation>>>,
+#[derive(Clone)]
+struct ParameterEvaluationCache<T>(
+    std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, T>>>,
 );
 
-impl std::fmt::Debug for IntersectionEvaluationCache {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("IntersectionEvaluationCache")
+impl<T> Default for ParameterEvaluationCache<T> {
+    fn default() -> Self {
+        Self(std::sync::Arc::default())
     }
 }
-impl PartialEq for IntersectionEvaluationCache {
+impl<T> std::fmt::Debug for ParameterEvaluationCache<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ParameterEvaluationCache")
+    }
+}
+impl<T> PartialEq for ParameterEvaluationCache<T> {
     fn eq(&self, _: &Self) -> bool {
         true
     }
 }
-impl IntersectionEvaluationCache {
-    fn get(&self, parameter: f64) -> Option<IntersectionEvaluation> {
+impl<T: Copy> ParameterEvaluationCache<T> {
+    fn get(&self, parameter: f64) -> Option<T> {
         self.0.lock().ok()?.get(&parameter.to_bits()).copied()
     }
-    fn insert(&self, parameter: f64, parameters: [f64; 4], derivative: Option<[f64; 4]>) {
+    fn insert(&self, parameter: f64, value: T) {
         if let Ok(mut entries) = self.0.lock() {
             if entries.len() >= 512 && !entries.contains_key(&parameter.to_bits()) {
                 entries.clear();
             }
-            entries.insert(parameter.to_bits(), (parameters, derivative));
+            entries.insert(parameter.to_bits(), value);
         }
     }
 }
@@ -1851,7 +1856,7 @@ impl SurfaceIntersectionCurve {
             range,
             tolerance,
             achieved_error,
-            evaluations: IntersectionEvaluationCache::default(),
+            evaluations: ParameterEvaluationCache::default(),
         };
         for parameter in [range.start, (range.start + range.end) * 0.5, range.end] {
             curve.corrected_parameters(parameter)?;
@@ -1978,7 +1983,7 @@ impl SurfaceIntersectionCurve {
         let derivative =
             solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], guide_derivative)?;
         self.evaluations
-            .insert(parameter, parameters, Some(derivative));
+            .insert(parameter, (parameters, Some(derivative)));
         Ok(derivative)
     }
 
@@ -2054,7 +2059,7 @@ impl SurfaceIntersectionCurve {
             let linear_target = f64::EPSILON * coordinate_scale * 2048.0;
             let parameter_target = f64::EPSILON * parameter_scale * 2048.0;
             if residual.magnitude() <= linear_target && gauge.abs() <= parameter_target {
-                self.evaluations.insert(parameter, parameters, None);
+                self.evaluations.insert(parameter, (parameters, None));
                 return Ok(parameters);
             }
             let matrix = [
@@ -3912,29 +3917,44 @@ impl OffsetSurface3 {
 
     fn project(&self, point: Point3) -> KernelResult<Projection2> {
         let domains = self.base.domains();
-        let (DomainBounds::Bounded(u_range), DomainBounds::Bounded(v_range)) =
-            (domains[0].bounds, domains[1].bounds)
-        else {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "projection onto a general offset requires bounded parent parameters",
-            ));
+        let bounded = match (domains[0].bounds, domains[1].bounds) {
+            (DomainBounds::Bounded(u), DomainBounds::Bounded(v)) => Some([u, v]),
+            _ => None,
         };
-        let mut parameters = (0..=8)
-            .flat_map(|u_index| {
-                (0..=8).map(move |v_index| {
-                    (
-                        u_range.start + u_range.span() * u_index as f64 / 8.0,
-                        v_range.start + v_range.span() * v_index as f64 / 8.0,
-                    )
+        // An unbounded blend has no finite grid to search. Its parent provides
+        // a local seed in the same UV chart; bounded parents keep the grid path.
+        let parent_seed = if bounded.is_none() {
+            self.base
+                .project(point, self.tolerance)
+                .ok()
+                .map(|projection| projection.parameters)
+        } else {
+            None
+        };
+        let constrain = |axis: usize, value: f64| match domains[axis].bounds {
+            DomainBounds::Bounded(range) => {
+                value.clamp(range.start.min(range.end), range.start.max(range.end))
+            }
+            _ => value,
+        };
+        let mut parameters = bounded
+            .into_iter()
+            .flat_map(|[u_range, v_range]| {
+                (0..=8).flat_map(move |u_index| {
+                    (0..=8).map(move |v_index| {
+                        (
+                            u_range.start + u_range.span() * u_index as f64 / 8.0,
+                            v_range.start + v_range.span() * v_index as f64 / 8.0,
+                        )
+                    })
                 })
             })
-            .map(|parameters| {
+            .chain(parent_seed)
+            .filter_map(|parameters| {
                 self.evaluate(parameters.0, parameters.1)
+                    .ok()
                     .map(|value| (parameters, value.point.distance2(point)))
             })
-            .collect::<KernelResult<Vec<_>>>()?
-            .into_iter()
             .min_by(|first, second| first.1.total_cmp(&second.1))
             .map(|candidate| candidate.0)
             .ok_or_else(|| {
@@ -3965,14 +3985,8 @@ impl OffsetSurface3 {
             let delta_u = (-first * matrix[1][1] + second * matrix[0][1]) / determinant;
             let delta_v = (-second * matrix[0][0] + first * matrix[1][0]) / determinant;
             let next = (
-                (parameters.0 + delta_u).clamp(
-                    u_range.start.min(u_range.end),
-                    u_range.start.max(u_range.end),
-                ),
-                (parameters.1 + delta_v).clamp(
-                    v_range.start.min(v_range.end),
-                    v_range.start.max(v_range.end),
-                ),
+                constrain(0, parameters.0 + delta_u),
+                constrain(1, parameters.1 + delta_v),
             );
             if (next.0 - parameters.0)
                 .abs()
@@ -4012,6 +4026,14 @@ pub struct EdgeBlendSurface3 {
     center_range: ParameterRange,
     radius: f64,
     tolerance: ModelTolerance,
+    sections: ParameterEvaluationCache<BlendSection>,
+}
+
+#[derive(Clone, Copy)]
+struct BlendSection {
+    first: (Point3, Vec3),
+    second: (Point3, Vec3),
+    center: Option<(Point3, Vec3)>,
 }
 
 /// Circular-section compatibility name for the shared edge blend support.
@@ -4068,6 +4090,7 @@ impl EdgeBlendSurface3 {
             center_range,
             radius,
             tolerance,
+            sections: ParameterEvaluationCache::default(),
         };
         for parameter in [
             center_range.start,
@@ -4085,6 +4108,7 @@ impl EdgeBlendSurface3 {
     /// domains, projection and differential evaluation are shared with fillets.
     pub(crate) fn into_ruled(mut self) -> Self {
         self.ruled = true;
+        self.sections = ParameterEvaluationCache::default();
         self
     }
 
@@ -4138,9 +4162,12 @@ impl EdgeBlendSurface3 {
         Ok((point, du * tangent.x + dv * tangent.y))
     }
 
-    fn first_order(&self, parameter: f64, blend: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
-        if !self.center_range.contains(parameter, self.tolerance) || !blend.is_finite() {
-            return Err(invalid("rolling-ball parameter lies outside its domain"));
+    // Every point across a blend section uses the same contact rails and spine.
+    // Offset derivatives and quadrature revisit these exact parameters many
+    // times. Cache that section independently of the transverse coordinate.
+    fn section(&self, parameter: f64) -> KernelResult<BlendSection> {
+        if let Some(section) = self.sections.get(parameter) {
+            return Ok(section);
         }
         let mut center = None;
         let (first, second) = if self.shared_intersection {
@@ -4170,6 +4197,27 @@ impl EdgeBlendSurface3 {
                 Self::contact(&self.second_surface, &self.second_pcurve, parameter)?,
             )
         };
+        if !self.ruled && center.is_none() {
+            center = Some(self.center_curve.first_order(parameter)?);
+        }
+        let section = BlendSection {
+            first,
+            second,
+            center,
+        };
+        self.sections.insert(parameter, section);
+        Ok(section)
+    }
+
+    fn first_order(&self, parameter: f64, blend: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
+        if !self.center_range.contains(parameter, self.tolerance) || !blend.is_finite() {
+            return Err(invalid("rolling-ball parameter lies outside its domain"));
+        }
+        let BlendSection {
+            first,
+            second,
+            center,
+        } = self.section(parameter)?;
         if self.ruled {
             return Ok((
                 first.0 + (second.0 - first.0) * blend,
@@ -4177,10 +4225,8 @@ impl EdgeBlendSurface3 {
                 second.0 - first.0,
             ));
         }
-        let (center_point, center_tangent) = match center {
-            Some(value) => value,
-            None => self.center_curve.first_order(parameter)?,
-        };
+        let (center_point, center_tangent) =
+            center.expect("circular sections include their center");
         let first_radial = first.0 - center_point;
         let second_radial = second.0 - center_point;
         let scale = center_point

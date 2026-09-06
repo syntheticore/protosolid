@@ -2199,12 +2199,11 @@ impl SurfaceIntersectionCurve {
         }
         let parameter = (0..=32)
             .map(|index| self.range.start + self.range.span() * index as f64 / 32.0)
-            .map(|parameter| {
+            .filter_map(|parameter| {
                 self.evaluate(parameter)
+                    .ok()
                     .map(|value| (parameter, value.point.distance2(point)))
             })
-            .collect::<KernelResult<Vec<_>>>()?
-            .into_iter()
             .min_by(|first, second| first.1.total_cmp(&second.1))
             .map(|value| value.0)
             .ok_or_else(|| {
@@ -2253,7 +2252,10 @@ fn refine_curve_projection(
         let mut next = best;
         for _ in 0..24 {
             let parameter = (best.parameter - step).clamp(low, high);
-            let projected = first_order(parameter)?.0;
+            let Ok((projected, _)) = first_order(parameter) else {
+                step *= 0.5;
+                continue;
+            };
             let distance = projected.distance(point);
             if distance < best.distance {
                 next = Projection1 {

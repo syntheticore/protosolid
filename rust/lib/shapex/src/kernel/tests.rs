@@ -2689,7 +2689,11 @@ fn moved_circle_joins_across_a_rounded_shell_opening() {
     let mesh = rounded_cut
         .tessellate(TessellationOptions::new(0.03, 0.12, 12).unwrap())
         .unwrap();
-    assert!(mesh.triangles.len() < 50_000, "{} triangles", mesh.triangles.len());
+    assert!(
+        mesh.triangles.len() < 50_000,
+        "{} triangles",
+        mesh.triangles.len()
+    );
     let tool = circle(
         Point2::new(-3.435024046379482, 5.236934939201773),
         11.980574220283309,
@@ -3727,4 +3731,86 @@ fn blend_oblique_partial_torus_rim() {
     pocket
         .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
         .unwrap();
+}
+
+#[test]
+fn shell_opening_edge_blends_at_small_sizes() {
+    let tolerance = ModelTolerance::default();
+    let circle = |center, radius| {
+        Profile::new(
+            Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tolerance).unwrap(),
+            [],
+            tolerance,
+        )
+        .unwrap()
+    };
+    let plane = |x| {
+        Plane3::new(
+            Point3::new(x, 0.0, 0.0),
+            -Vec3::unit_z(),
+            Vec3::unit_y(),
+            tolerance,
+        )
+        .unwrap()
+    };
+    let base = circle(
+        Point2::new(-17.094721967326727, 3.621763128670917),
+        38.40462700511438,
+    )
+    .extrude(plane(0.0), Vec3::new(33.0, 0.0, 0.0))
+    .unwrap();
+    let bottom = base
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(c) if c.center().x.abs() < tolerance.linear)
+        })
+        .unwrap()
+        .clone();
+    let rounded = base.fillet(&[bottom], 12.0).unwrap();
+    let opening = rounded
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+                if (p.origin().x - 33.0).abs() < tolerance.linear)
+        })
+        .unwrap()
+        .clone();
+    let shell = rounded.shell(&[opening], -4.0).unwrap();
+    let cutter = circle(
+        Point2::new(26.107773279218943, 7.6318958166238975),
+        26.954243397522823,
+    )
+    .extrude(plane(33.0), Vec3::new(-44.0, 0.0, 0.0))
+    .unwrap();
+    let cut = shell.difference(&cutter).unwrap();
+    let edges = cut
+        .edges()
+        .filter(|edge| {
+            matches!(edge.curve(), Curve3::Line(_))
+                && edge
+                    .connected_faces()
+                    .unwrap()
+                    .iter()
+                    .all(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let edges = edges.into_iter().filter(|edge| edge.connected_faces().unwrap().iter().any(|face| matches!(face.surface(), Surface3::Cylinder(c) if (c.radius() - 38.40462700511438).abs() < tolerance.linear))).collect::<Vec<_>>();
+    assert_eq!(edges.len(), 2);
+    for edge in edges {
+        for size in [1.0, 0.5] {
+            for result in [
+                cut.fillet(&[edge.clone()], size)
+                    .expect("shell opening fillet"),
+                cut.chamfer_with_tangent_propagation(&[edge.clone()], size, true)
+                    .expect("shell opening chamfer"),
+            ] {
+                assert_eq!(result.solids().len(), 1);
+                assert!(result.volume() > 0.0 && result.volume() < cut.volume());
+                result
+                    .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                    .expect("shell opening blend display mesh");
+            }
+        }
+    }
 }

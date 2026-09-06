@@ -211,7 +211,7 @@ impl EulerTransaction<'_> {
         for edge in &selected {
             let value = self.working.edge(*edge)?;
             if value.vertices[0] == value.vertices[1] {
-                if let Ok(spine) = self.prepare_blend_spine(*edge, radius, kind, None) {
+                if let Ok(spine) = self.prepare_blend_spine(*edge, radius, kind, None, None) {
                     if matches!(spine.center.curve, Curve3::SurfaceIntersection(_)) {
                         closed_spines.push(spine);
                     }
@@ -222,6 +222,7 @@ impl EulerTransaction<'_> {
         let mut junction_kinds = BTreeMap::<VertexId, BlendJunctionKind>::new();
         let mut junction_sources = BTreeMap::<VertexId, EdgeId>::new();
         let mut spines = BTreeMap::<EdgeId, BlendSpine>::new();
+        let mut propagated_offsets = BTreeMap::<EdgeId, f64>::new();
         let mut regular_endpoints = BTreeMap::<(EdgeId, usize), Option<BlendEndpoint>>::new();
         loop {
             let missing = selected
@@ -236,7 +237,16 @@ impl EulerTransaction<'_> {
                     spine.edge.curve == value.curve
                         && spine.faces.iter().all(|face| faces.contains(face))
                 });
-                spines.insert(edge, self.prepare_blend_spine(edge, radius, kind, shared)?);
+                spines.insert(
+                    edge,
+                    self.prepare_blend_spine(
+                        edge,
+                        radius,
+                        kind,
+                        shared,
+                        propagated_offsets.get(&edge).copied(),
+                    )?,
+                );
             }
             let mut additions = BTreeSet::new();
             for spine in spines.values() {
@@ -259,6 +269,9 @@ impl EulerTransaction<'_> {
                                 .insert(vertex, BlendJunctionKind::TangentChain { tangent_faces });
                             junction_sources.insert(vertex, spine.edge_id);
                             additions.insert(continuation);
+                            propagated_offsets
+                                .entry(continuation)
+                                .or_insert(spine.offset);
                             continue;
                         } else if let Some((seam_edge, continuation, tangent_faces)) =
                             self.smooth_blend_continuation(vertex, spine.edge_id, &selected)?
@@ -273,6 +286,9 @@ impl EulerTransaction<'_> {
                             );
                             junction_sources.insert(vertex, spine.edge_id);
                             additions.insert(continuation);
+                            propagated_offsets
+                                .entry(continuation)
+                                .or_insert(spine.offset);
                             continue;
                         }
                     }
@@ -719,6 +735,7 @@ impl EulerTransaction<'_> {
         size: f64,
         kind: EdgeBlendKind,
         shared: Option<&BlendSpine>,
+        propagated_offset: Option<f64>,
     ) -> KernelResult<BlendSpine> {
         let tolerance = self.kernel.tolerance;
         let edge = self.working.edge(edge_id)?.clone();
@@ -755,7 +772,12 @@ impl EulerTransaction<'_> {
         // Equal setbacks on planar supports correspond to r = d cot(theta/2),
         // where theta is the angle between outward normals. Perpendicular rims
         // retain r = d, including plane/cylinder tangent chains.
-        let radius = if kind == EdgeBlendKind::Chamfer {
+        let radius = if let Some(offset) = propagated_offset {
+            // A propagated rolling chamfer must retain its source offset across
+            // smooth support seams. Recomputing it at each edge midpoint makes
+            // the contact rails disagree at their shared endpoint.
+            offset
+        } else if kind == EdgeBlendKind::Chamfer {
             let normals = (0..2)
                 .map(|index| {
                     let uv = parent_surfaces[index]

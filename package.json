@@ -9,14 +9,12 @@
     "dev-electron": "npm run build-shapex && electron ./electron",
     "build": "npm run build-oc && npm run build-shapex && npm run build-app",
     "pack": "npm run build-app && cd electron && electron-builder",
-
     "build-oc": "cd assets/oc && docker run --rm -it -v \"$(pwd):/src\" -u \"$(id -u):$(id -g)\" donalffons/opencascade.js oc.yml",
     "build-oc-win": "cd assets/oc && docker run --rm -it -v \".\\:/src\" donalffons/opencascade.js oc.yml",
     "build-shapex": "npm run build --prefix js/shapexJS",
-    "build-app": "npm run clean && npm run generate && mv -v .output/public/* electron/app",
+    "build-app": "npm run clean && npm run generate && node scripts/copy-generated-app.mjs",
     "generate": "nuxt generate",
-    "clean": "rm -rf .output electron/app/*",
-
+    "clean": "node scripts/clean.mjs",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
@@ -47,6 +45,7 @@
     "three-mesh-bvh": "0.8.0",
     "vite-plugin-electron": "^0.28.7",
     "vite-plugin-electron-renderer": "^0.14.5",
+    "wasm-pack": "^0.15.0",
     "xatlas-web": "0.1.0"
   }
 }

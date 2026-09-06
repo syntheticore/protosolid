@@ -1467,7 +1467,23 @@ fn arrange_face(
             if start.distance(end) <= tolerance.linear * 8.0
                 && range.span().abs() < curve.curve.domain().period.unwrap_or(f64::INFINITY) * 0.5
             {
-                continue;
+                // Bounded intersection guides can describe complete closed
+                // curves without a periodic evaluation domain. Coincident
+                // endpoints alone do not make such a boundary degenerate.
+                let mut collapsed = true;
+                for fraction in [0.25, 0.5, 0.75] {
+                    let point = curve
+                        .curve
+                        .evaluate(range.start + range.span() * fraction)?
+                        .point;
+                    if start.distance(point) > tolerance.linear * 8.0 {
+                        collapsed = false;
+                        break;
+                    }
+                }
+                if collapsed {
+                    continue;
+                }
             }
             let start_node = weld_node(&mut nodes, start_uv)?;
             let end_node = weld_node(&mut nodes, end_uv)?;

@@ -465,27 +465,40 @@ fn brep_shell_properties(
                 let coedge = topology.coedge(coedge_id)?;
                 let range = coedge.range();
                 let raw_start = coedge.pcurve().evaluate(range.start)?.point;
-                let chart_shift = previous_end
-                    .map(|previous: Point2| {
-                        let delta = previous - raw_start;
-                        let shift = |value: f64, period: Option<f64>| {
-                            period
-                                .map(|period| {
-                                    let candidate = (value / period).round() * period;
-                                    if (value - candidate).abs() <= tolerance.parameter * 64.0 {
-                                        candidate
-                                    } else {
-                                        0.0
-                                    }
-                                })
-                                .unwrap_or(0.0)
-                        };
-                        Vec2::new(
-                            shift(delta.x, domains[0].period),
-                            shift(delta.y, domains[1].period),
-                        )
-                    })
-                    .unwrap_or_else(|| Vec2::new(0.0, 0.0));
+                let chart_shift = if let Some(previous) = previous_end {
+                    let delta: Vec2 = previous - raw_start;
+                    let (point, du, dv) = face.surface().first_order(raw_start.x, raw_start.y)?;
+                    let linear = tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0));
+                    let shift = |value: f64, period: Option<f64>, tangent: Vec3| {
+                        period
+                            .map(|period| {
+                                let candidate = (value / period).round() * period;
+                                // Sewn implicit trims agree in model space, not
+                                // necessarily to the much smaller parameter epsilon.
+                                // Scale that existing tolerance by the local chart
+                                // metric before recognizing a complete seam turn.
+                                // At a collapsed pole retain the explicit UV span.
+                                let speed = tangent.magnitude();
+                                let epsilon = if speed > linear {
+                                    (linear / speed).max(tolerance.parameter * 64.0)
+                                } else {
+                                    tolerance.parameter * 64.0
+                                };
+                                if (value - candidate).abs() <= epsilon {
+                                    candidate
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .unwrap_or(0.0)
+                    };
+                    Vec2::new(
+                        shift(delta.x, domains[0].period, du),
+                        shift(delta.y, domains[1].period, dv),
+                    )
+                } else {
+                    Vec2::new(0.0, 0.0)
+                };
                 let raw_end = coedge.pcurve().evaluate(range.end)?.point;
                 previous_end = Some(raw_end + chart_shift);
                 let breakpoints = coedge.pcurve().integration_breakpoints(range);

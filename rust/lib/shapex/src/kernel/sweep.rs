@@ -317,25 +317,9 @@ impl Profile {
         if rail.range().span() < 0.0 {
             parameters.reverse();
         }
-        let mut sections = Vec::new();
+        // Keep each source section edge intact. Periodic charts and display
+        // subdivision must not introduce artificial CAD edges into the solid.
         for section in self.outer().segments() {
-            let count = if matches!(section.curve(), Curve2::Circle(_)) {
-                4
-            } else {
-                1
-            };
-            for i in 0..count {
-                sections.push(TrimmedCurve2::new(
-                    section.curve().clone(),
-                    ParameterRange::new(
-                        section.range().start + section.range().span() * i as f64 / count as f64,
-                        section.range().start
-                            + section.range().span() * (i + 1) as f64 / count as f64,
-                    )?,
-                )?);
-            }
-        }
-        for section in &sections {
             let surface = Surface3::Swept(SweptSurface3::new(
                 plane,
                 section.clone(),
@@ -598,6 +582,19 @@ mod tests {
             joined.volume() > block.volume() && joined.volume() < body.volume() + block.volume()
         );
         assert_eq!(joined.solids().len(), 1);
+        let cut = body.difference(&block).unwrap();
+        let common = body.intersection(&block).unwrap();
+        assert_eq!(cut.solids().len(), 1);
+        assert_eq!(common.solids().len(), 1);
+        assert!(cut.volume() > 0.0 && common.volume() > 0.0);
+        // Mass-property quadrature uses the whole solid's spatial scale;
+        // this long, thin sweep has a much smaller volume than that scale cubed.
+        let volume_tolerance = body.volume() * 1e-3;
+        assert!((cut.volume() + common.volume() - body.volume()).abs() < volume_tolerance);
+        assert!(
+            (joined.volume() + common.volume() - body.volume() - block.volume()).abs()
+                < volume_tolerance
+        );
     }
     #[test]
     fn sweep_closed_rational_rail() {
@@ -654,5 +651,71 @@ mod tests {
             .unwrap()
             .triangles
             .is_empty());
+    }
+    #[test]
+    fn swept_circle_end_fillets_from_document_65() {
+        // untitled(65).cad.cad: circle on the application's YZ workplane
+        // (local X points along -Z), swept along the XY cubic sketch spline.
+        let t = ModelTolerance::default();
+        let profile = Profile::new(
+            Wire2::new(
+                [
+                    TrimmedCurve2::circle(Point2::new(0.0, 8.442693762145785), 31.213640464146206)
+                        .unwrap(),
+                ],
+                t,
+            )
+            .unwrap(),
+            [],
+            t,
+        )
+        .unwrap();
+        let rail = TrimmedCurve2::new(
+            NurbsCurve2::new(
+                3,
+                vec![
+                    Point2::new(0.0, 0.0),
+                    Point2::new(89.2170942259588, 11.288693555121299),
+                    Point2::new(163.50398084675714, -89.94539703596661),
+                    Point2::new(274.2060079679468, 31.681172235340455),
+                ],
+                vec![1.0; 4],
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            ParameterRange::new(0.0, 1.0).unwrap(),
+        )
+        .unwrap();
+        let plane = Plane3::new(
+            Point3::new(0.0, 0.0, 0.0),
+            -Vec3::unit_z(),
+            Vec3::unit_y(),
+            t,
+        )
+        .unwrap();
+        let body = profile.sweep(plane, Plane3::xy(), &rail).unwrap();
+        assert_eq!(body.faces().count(), 3);
+        let rims = body
+            .edges()
+            .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(rims.len(), 2);
+        for edge in &rims {
+            assert!(edge.endpoints().unwrap()[0].distance(edge.endpoints().unwrap()[1]) < 1e-7);
+        }
+        for radius in [1.0, 5.0] {
+            for selection in [&rims[..1], &rims[1..], &rims[..]] {
+                let result = body.fillet(selection, radius).unwrap_or_else(|error| {
+                    panic!("{} rims, radius {radius}: {error}", selection.len())
+                });
+                assert!(result.volume() < body.volume() && result.volume() > body.volume() * 0.99);
+                assert!(!result
+                    .tessellate(TessellationOptions::new(0.1, 0.15, 24).unwrap())
+                    .unwrap()
+                    .triangles
+                    .is_empty());
+            }
+        }
     }
 }

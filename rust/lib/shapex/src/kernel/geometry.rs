@@ -1568,6 +1568,22 @@ pub struct SurfaceIntersectionPcurve2 {
 }
 
 impl SurfaceIntersectionPcurve2 {
+    pub(crate) fn surface(&self) -> &Surface3 {
+        if self.first {
+            self.curve.first_surface()
+        } else {
+            self.curve.second_surface()
+        }
+    }
+
+    pub(crate) fn guide(&self) -> &Curve2 {
+        if self.first {
+            self.curve.first_pcurve()
+        } else {
+            self.curve.second_pcurve()
+        }
+    }
+
     pub(crate) fn spatial_curve(&self) -> Curve3 {
         Curve3::SurfaceIntersection((*self.curve).clone())
     }

@@ -633,7 +633,7 @@ fn intersection_chart_copies(
             result.push(if u == 0.0 && v == 0.0 {
                 pcurve.clone()
             } else {
-                translate_pcurve(pcurve, Vec2::new(u, v), surface, tolerance)?
+                translate_pcurve(pcurve, Vec2::new(u, v), tolerance)?
             });
         }
     }
@@ -683,13 +683,12 @@ fn align_pcurve_to_face_chart(
     if offset.magnitude2() <= tolerance.parameter.powi(2) {
         return Ok(pcurve.clone());
     }
-    translate_pcurve(pcurve, offset, surface, tolerance)
+    translate_pcurve(pcurve, offset, tolerance)
 }
 
 pub(super) fn translate_pcurve(
     pcurve: &Curve2,
     offset: Vec2,
-    surface: &Surface3,
     tolerance: ModelTolerance,
 ) -> KernelResult<Curve2> {
     match pcurve {
@@ -711,7 +710,7 @@ pub(super) fn translate_pcurve(
         )?
         .into()),
         Curve2::SurfaceProjection(projection) => {
-            let guide = translate_pcurve(projection.guide(), offset, surface, tolerance)?;
+            let guide = translate_pcurve(projection.guide(), offset, tolerance)?;
             Ok(super::SurfaceProjectionPcurve2::new(
                 projection.curve().clone(),
                 projection.surface().clone(),
@@ -726,17 +725,14 @@ pub(super) fn translate_pcurve(
             let Curve3::SurfaceIntersection(curve) = &spatial else {
                 unreachable!()
             };
-            let guide = curve.pcurve_for_surface(surface).ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "intersection p-curve belongs to another support",
-                )
-            })?;
-            let guide = translate_pcurve(guide, offset, surface, tolerance)?;
+            // A projection can retain an intersection on a different support as
+            // its guide. Translate that guide on its own selected side, not on
+            // the outer projection's destination surface.
+            let guide = translate_pcurve(intersection.guide(), offset, tolerance)?;
             let range = curve.range();
             Ok(super::SurfaceProjectionPcurve2::new(
                 spatial,
-                surface.clone(),
+                intersection.surface().clone(),
                 guide,
                 range,
                 tolerance,
@@ -838,7 +834,7 @@ fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec
                     domains[1].period.map_or(0.0, |p| (delta.y / p).round() * p),
                 );
                 if offset.magnitude2() > compound.tolerance().parameter.powi(2) {
-                    pcurve = translate_pcurve(&pcurve, offset, surface, compound.tolerance())?;
+                    pcurve = translate_pcurve(&pcurve, offset, compound.tolerance())?;
                 }
             }
             previous = Some(pcurve.evaluate(coedge.range().end)?.point);
@@ -2224,6 +2220,68 @@ mod tests {
     use super::super::{Plane3, Profile, TrimmedCurve2, Wire2};
     use super::*;
     use crate::Vec3;
+
+    #[test]
+    fn periodic_projection_translates_an_intersection_guide_on_its_own_support() {
+        use super::super::{
+            Circle2, Cylinder3, Line2, SurfaceIntersectionCurve, SurfaceProjectionPcurve2,
+        };
+
+        let tolerance = ModelTolerance::default();
+        let cylinder = |height| -> Surface3 {
+            Cylinder3::new(
+                Point3::new(0.0, 0.0, height),
+                Vec3::unit_z(),
+                Vec3::unit_x(),
+                Vec3::unit_y(),
+                tolerance,
+            )
+            .unwrap()
+            .into()
+        };
+        let range = ParameterRange::new(0.0, std::f64::consts::TAU).unwrap();
+        let intersection = SurfaceIntersectionCurve::new(
+            Plane3::xy().into(),
+            cylinder(0.0),
+            Circle2::new(Point2::new(0.0, 0.0), 1.0).unwrap().into(),
+            Line2::new(Point2::new(0.0, 0.0), Vec2::new(1.0, 0.0))
+                .unwrap()
+                .into(),
+            range,
+            tolerance,
+            0.0,
+        )
+        .unwrap();
+        // Same cylindrical support, but a different UV chart. The retained
+        // guide selects the intersection's second side on the original chart.
+        let surface = cylinder(1.0);
+        let projected: Curve2 = SurfaceProjectionPcurve2::new(
+            intersection.clone().into(),
+            surface.clone(),
+            intersection.exact_pcurves()[1].clone(),
+            range,
+            tolerance,
+        )
+        .unwrap()
+        .into();
+        for shift in [-std::f64::consts::TAU, std::f64::consts::TAU] {
+            let translated = translate_pcurve(&projected, Vec2::new(shift, 0.0), tolerance)
+                .expect("nested intersection guide keeps its own support");
+            for parameter in [0.0, 0.7, 3.0, range.end] {
+                let uv = translated.evaluate(parameter).unwrap().point;
+                let original = projected.evaluate(parameter).unwrap().point;
+                assert!((uv - original - Vec2::new(shift, 0.0)).magnitude() < tolerance.linear);
+                let spatial = Curve3::from(intersection.clone())
+                    .evaluate(parameter)
+                    .unwrap()
+                    .point;
+                assert!(
+                    surface.evaluate(uv.x, uv.y).unwrap().point.distance(spatial)
+                        < tolerance.linear
+                );
+            }
+        }
+    }
 
     #[test]
     fn classification_mesh_is_lazy_reused_and_fallible() {

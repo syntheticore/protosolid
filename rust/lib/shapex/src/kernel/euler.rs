@@ -1153,12 +1153,11 @@ impl<'kernel> EulerTransaction<'kernel> {
                     edge_id,
                     second_loop.face,
                     second_use.loop_id,
-                    first.surface.clone(),
                     offset,
                 ));
                 break;
             }
-            let Some((edge, removed_face, removed_loop, surface, offset)) = candidate else {
+            let Some((edge, removed_face, removed_loop, offset)) = candidate else {
                 break;
             };
             if offset.magnitude2() > 0.0 {
@@ -1166,7 +1165,6 @@ impl<'kernel> EulerTransaction<'kernel> {
                     let translated = super::boolean::translate_pcurve(
                         &self.working.coedge(coedge)?.pcurve,
                         offset,
-                        &surface,
                         self.kernel.tolerance,
                     )?;
                     self.working.coedges.get_mut(coedge)?.pcurve = translated;

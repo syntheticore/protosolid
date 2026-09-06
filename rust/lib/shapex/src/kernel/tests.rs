@@ -3814,3 +3814,102 @@ fn shell_opening_edge_blends_at_small_sizes() {
         }
     }
 }
+
+#[test]
+fn join_after_shell_opening_blends() {
+    let tolerance = ModelTolerance::default();
+    let circle = |center, radius| {
+        Profile::new(
+            Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tolerance).unwrap(),
+            [],
+            tolerance,
+        )
+        .unwrap()
+    };
+    let plane = |x| {
+        Plane3::new(
+            Point3::new(x, 0.0, 0.0),
+            -Vec3::unit_z(),
+            Vec3::unit_y(),
+            tolerance,
+        )
+        .unwrap()
+    };
+    let base = circle(
+        Point2::new(-17.094721967326727, 3.621763128670917),
+        38.40462700511438,
+    )
+    .extrude(plane(0.0), Vec3::new(33.0, 0.0, 0.0))
+    .unwrap();
+    let bottom = base
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(c) if c.center().x.abs() < tolerance.linear)
+        })
+        .unwrap()
+        .clone();
+    let rounded = base.fillet(&[bottom], 12.0).unwrap();
+    let opening = rounded
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+                if (p.origin().x - 33.0).abs() < tolerance.linear)
+        })
+        .unwrap()
+        .clone();
+    let shell = rounded.shell(&[opening], -4.0).unwrap();
+    let cutter = circle(
+        Point2::new(26.107773279218943, 7.6318958166238975),
+        26.954243397522823,
+    )
+    .extrude(plane(33.0), Vec3::new(-44.0, 0.0, 0.0))
+    .unwrap();
+    let cut = shell.difference(&cutter).unwrap();
+    let rim = cut.edges().find(|edge| edge.connected_faces().unwrap().iter().any(|face| matches!(face.surface(), Surface3::Torus(t) if (t.minor_radius()-12.0).abs()<tolerance.linear)) && edge.connected_faces().unwrap().iter().any(|face| matches!(face.surface(), Surface3::Cylinder(_)))).unwrap().clone();
+    let body = cut
+        .chamfer_with_tangent_propagation(&[rim], 0.5, true)
+        .unwrap();
+    let inner = body
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Line(_))
+                && edge
+                    .connected_faces()
+                    .unwrap()
+                    .iter()
+                    .all(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+        })
+        .unwrap()
+        .clone();
+    let rounded = body.fillet(&[inner], 0.5).unwrap();
+    for distance in [
+        0.5, 1.0, 5.0, 20.0, 33.0, 40.0, -0.5, -1.0, -5.0, -20.0, -33.0, -40.0,
+    ] {
+        let tool = circle(
+            Point2::new(21.27550542650958, -8.266006903113285),
+            28.817039202349168,
+        )
+        .extrude(plane(33.0), Vec3::new(distance, 0.0, 0.0))
+        .unwrap();
+        let joined = rounded
+            .union(&tool)
+            .unwrap_or_else(|error| panic!("join at {distance} mm: {error}"));
+        assert_eq!(joined.solids().len(), 1);
+        assert!(joined.volume() > rounded.volume());
+        if distance > 0.0 {
+            // Curved-face quadrature uses a scale-dependent error target;
+            // this is a volume sanity check, not an exact integration test.
+            let expected = rounded.volume() + tool.volume();
+            assert!(
+                (joined.volume() - expected).abs() < expected * 1e-5,
+                "distance {distance}: volume delta {}",
+                joined.volume() - expected
+            );
+        } else {
+            assert!(joined.volume() < rounded.volume() + tool.volume());
+        }
+        joined
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap();
+    }
+}

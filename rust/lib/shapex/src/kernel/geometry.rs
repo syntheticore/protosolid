@@ -4319,12 +4319,13 @@ impl EdgeBlendSurface3 {
                     )
                 })
             })
-            .map(|parameters| {
+            // The extended spine can leave the regular intersection branch
+            // outside the retained face. Seed from its evaluable portion.
+            .filter_map(|parameters| {
                 self.point(parameters.0, parameters.1)
+                    .ok()
                     .map(|value| (parameters, value.distance2(point)))
             })
-            .collect::<KernelResult<Vec<_>>>()?
-            .into_iter()
             .min_by(|first, second| first.1.total_cmp(&second.1))
             .map(|candidate| candidate.0)
             .ok_or_else(|| {
@@ -4352,14 +4353,28 @@ impl EdgeBlendSurface3 {
             }
             let first = residual.dot(value.du);
             let second = residual.dot(value.dv);
-            let next = (
-                (parameters.0 + (-first * matrix[1][1] + second * matrix[0][1]) / determinant)
-                    .clamp(
+            let step = (
+                (-first * matrix[1][1] + second * matrix[0][1]) / determinant,
+                (-second * matrix[0][0] + first * matrix[1][0]) / determinant,
+            );
+            let mut next = parameters;
+            let mut damping = 1.0;
+            for _ in 0..24 {
+                let trial = (
+                    (parameters.0 + step.0 * damping).clamp(
                         self.center_range.start.min(self.center_range.end),
                         self.center_range.start.max(self.center_range.end),
                     ),
-                parameters.1 + (-second * matrix[0][0] + first * matrix[1][0]) / determinant,
-            );
+                    parameters.1 + step.1 * damping,
+                );
+                if let Ok(projected) = self.point(trial.0, trial.1) {
+                    if projected.distance2(point) < residual.magnitude2() {
+                        next = trial;
+                        break;
+                    }
+                }
+                damping *= 0.5;
+            }
             if (next.0 - parameters.0)
                 .abs()
                 .max((next.1 - parameters.1).abs())

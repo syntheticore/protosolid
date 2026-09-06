@@ -568,9 +568,9 @@ fn intersection_chart_copies(
     boundary: &[FaceCurve],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<Curve2>> {
-    // These exact closed section solvers use a bounded angular guide. Their
-    // guide may cross the chart seam independently of the face's edge range.
-    // Other solvers already choose their periodic spatial-parameter branches.
+    // Closed sections can cross the chart seam independently of the face's
+    // edge range. This includes circles: their cylinder p-curve is unbounded
+    // even though the spatial curve and its mate have one bounded revolution.
     let conical_section = matches!(
         (surface, other),
         (
@@ -587,7 +587,8 @@ fn intersection_chart_copies(
             (Surface3::Plane(_), Surface3::Cylinder(_))
                 | (Surface3::Cylinder(_), Surface3::Plane(_))
         );
-    if !(conical_section || oblique_section)
+    let circular_section = matches!(curve, Curve3::Circle(_));
+    if !(conical_section || oblique_section || circular_section)
         || !surface.domains().iter().any(|d| d.period.is_some())
     {
         return Ok(vec![pcurve.clone()]);

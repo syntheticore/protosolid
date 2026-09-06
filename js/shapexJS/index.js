@@ -592,7 +592,7 @@ function defaultWasmUrl() {
 
 /** Create the public API around this package's initialized private transport. */
 export function createShapex(bindings) {
-  const required = ['wireProperties', 'profileArea', 'extrude', 'revolve', 'loft', 'NativeCompound', 'NativeFaceList', 'NativeEdgeList', 'NativeSolidList']
+  const required = ['wireProperties', 'profileArea', 'extrude', 'revolve', 'loft', 'sweep', 'NativeCompound', 'NativeFaceList', 'NativeEdgeList', 'NativeSolidList']
   required.forEach(name => {
     if(typeof bindings?.[name] != 'function') throw new TypeError(`invalid ShapexJS transport: missing ${name}`)
   })
@@ -654,6 +654,14 @@ export function createShapex(bindings) {
       instance(plane, Plane3, 'plane'); instance(axis, Axis3, 'axis'); finite(angle, 'angle')
       return nativeCall(() => new Compound(bindings.revolve(
         profileDto(this), new Float64Array(plane._values()), new Float64Array(axis._values()), angle,
+      )))
+    }
+    sweep(plane, railPlane, rail) {
+      instance(plane, Plane3, 'plane'); instance(railPlane, Plane3, 'railPlane')
+      instance(rail, TrimmedCurve2, 'rail')
+      return nativeCall(() => new Compound(bindings.sweep(
+        profileDto(this), new Float64Array(plane._values()), rail._dto(),
+        new Float64Array(railPlane._values()),
       )))
     }
     loft(plane, sections, alignSections = true) {

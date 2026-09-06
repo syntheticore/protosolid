@@ -80,6 +80,7 @@ export class ShapexBackend {
       tessellate: true,
       revolve: true,
       loft: true,
+      sweep: true,
       fillet: true,
       chamfer: true,
       draft: true,
@@ -198,6 +199,12 @@ export class ShapexBackend {
       this.plane(profile.sketch.workplane),
       this.api.Axis3.new(this.point3(origin), this.vector3(normal)),
       angle,
+    ))
+  }
+
+  sweep(profile, rail) {
+    return featureResult('sweep', () => this.profile(profile).sweep(
+      this.plane(profile.sketch.workplane), this.plane(rail.sketch.workplane), this.segment(rail),
     ))
   }
 

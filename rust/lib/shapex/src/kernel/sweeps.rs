@@ -16,7 +16,7 @@ fn range(a: f64, b: f64) -> KernelResult<ParameterRange> {
 fn lift(plane: Plane3, point: Point2) -> Point3 {
     plane.origin() + plane.u() * point.x + plane.v() * point.y
 }
-fn lift_curve(plane: Plane3, curve: &Curve2, tolerance: ModelTolerance) -> KernelResult<Curve3> {
+pub(super) fn lift_curve(plane: Plane3, curve: &Curve2, tolerance: ModelTolerance) -> KernelResult<Curve3> {
     Ok(match curve {
         Curve2::Line(line) => Line3::new(
             lift(plane, line.origin()),
@@ -61,7 +61,7 @@ fn reverse(patch: &mut BrepPatch) {
         }
     }
 }
-fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelResult<BrepPatch> {
+pub(super) fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelResult<BrepPatch> {
     let mut loops = Vec::new();
     for (index, wire) in std::iter::once(profile.outer())
         .chain(profile.holes())
@@ -97,7 +97,7 @@ fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelResult<BrepPat
     }
     Ok(patch)
 }
-fn publish(patches: &[BrepPatch], tolerance: ModelTolerance) -> KernelResult<Compound> {
+pub(super) fn publish(patches: &[BrepPatch], tolerance: ModelTolerance) -> KernelResult<Compound> {
     let mut kernel = Kernel::new(tolerance)?;
     let mut transaction = kernel.begin_operation();
     transaction.brep_shell(patches)?;

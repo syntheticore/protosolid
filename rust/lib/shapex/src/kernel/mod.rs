@@ -23,6 +23,7 @@ mod naming;
 mod physical;
 mod polyhedron;
 mod profile;
+mod sweep;
 mod sweeps;
 mod tessellation;
 mod tolerance;
@@ -42,6 +43,7 @@ pub use euler::{
     EulerTransaction, KefResult, KemrResult, KevResult, KfmrhResult, MefInput, MefResult,
     MekrResult, MevInput, MevResult, MfkrhResult, MvfsResult,
 };
+pub use sweep::SweptSurface3;
 pub use geometry::{
     Axis3, Circle2, Circle3, Cone3, Curve2, Curve2Evaluation, Curve3, CurveEvaluation, Cylinder3,
     EdgeBlendSurface3, Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3,

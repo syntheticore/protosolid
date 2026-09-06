@@ -24,7 +24,7 @@ Shapex mode. Migrating the independent 2D curve utilities does not require a
 change to this 3D backend contract.
 
 Backends publish explicit capabilities. Shapex supports profile extrusion,
-full and partial revolutions, smooth section lofts with optional alignment,
+full and partial revolutions, rail sweeps, smooth section lofts with optional alignment,
 Booleans across multiple solids, fillet, shell, chamfer, draft, plane splitting,
 rigid transforms, properties, topology resolution, and entity tessellation.
 
@@ -35,6 +35,11 @@ it does not construct cutter solids or call Boolean operations.
 Its Propagation radio bar switches between following tangent edges and using only
 the selection. Connected tangent chamfers are constructed as one contour; saved
 chamfers created before this option retain selection-only behavior.
+Sweep accepts a complete line, arc, circle, or regular planar spline rail.
+The section retains its initial placement and turns continuously with the rail;
+straight and circular rails reuse extrusion and revolution, while spline rails
+retain exact swept surfaces. Closed spline rails must have matching seam tangents.
+Partial rail bounds and profiles with holes remain unsupported, as in the OCC path.
 Draft supports planar faces and cylindrical or conical faces aligned with the pull
 direction. Loft accepts line, circular, and NURBS sections, reconciles their curve
 counts and degrees, and passes through every section; profiles with holes remain

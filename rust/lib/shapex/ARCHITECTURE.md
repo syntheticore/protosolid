@@ -99,6 +99,8 @@ The current publisher certifies:
   removed-face openings;
 - full and partial profile revolutions, retaining primitive supports where
   possible and exact revolved surfaces for other meridians;
+- exact sweeps along line, circle, and regular planar NURBS rails, with a
+  continuous tangent frame through inflections and closed rail seams;
 - smooth rational section lofts through line, circle, and NURBS profiles, with
   exact subdivision and degree elevation for section correspondence;
 - local fillet/chamfer edge networks sharing propagation, contact trimming,

@@ -290,6 +290,25 @@ pub fn revolve(
         .map_err(js_error)
 }
 
+#[wasm_bindgen(js_name = sweep)]
+pub fn sweep(
+    description: JsValue,
+    plane_values: &[f64],
+    rail_description: JsValue,
+    rail_plane_values: &[f64],
+) -> Result<NativeCompound, JsValue> {
+    let profile = profile(description)?;
+    let rail = from_js::<TrimmedCurveDto>(rail_description)?.build()?;
+    profile
+        .sweep(
+            plane(plane_values, profile.tolerance())?,
+            plane(rail_plane_values, profile.tolerance())?,
+            &rail,
+        )
+        .map(|inner| NativeCompound { inner })
+        .map_err(js_error)
+}
+
 #[wasm_bindgen(js_name = loft)]
 pub fn loft(sections: JsValue, align_sections: bool) -> Result<NativeCompound, JsValue> {
     let sections = from_js::<Vec<SectionDto>>(sections)?;
@@ -407,6 +426,7 @@ impl NativeFace {
             Surface3::Cone(_) => "cone",
             Surface3::Torus(_) => "torus",
             Surface3::Revolved(_) => "revolved",
+            Surface3::Swept(_) => "swept",
             Surface3::Nurbs(_) => "nurbs",
             Surface3::Offset(_) => "offset",
             Surface3::RollingBall(_) => "rolling-ball",

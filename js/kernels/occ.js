@@ -12,6 +12,7 @@ export class OccBackend {
       tessellate: true,
       revolve: true,
       loft: true,
+      sweep: true,
       fillet: true,
       chamfer: true,
       draft: true,

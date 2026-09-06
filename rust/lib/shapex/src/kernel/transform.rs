@@ -260,6 +260,23 @@ fn transform_surface(
             tolerance,
         )?
         .into(),
+        Surface3::Swept(surface) => {
+            let plane = |p: super::Plane3| {
+                super::Plane3::new(
+                    transform.transform_point(p.origin()),
+                    transform.transform_vector(p.u()),
+                    transform.transform_vector(p.v()),
+                    tolerance,
+                )
+            };
+            Surface3::Swept(super::SweptSurface3::new(
+                plane(surface.profile_plane())?,
+                surface.profile().clone(),
+                plane(surface.rail_plane())?,
+                surface.rail().clone(),
+                tolerance,
+            )?)
+        }
         Surface3::Revolved(surface) => {
             let frame = surface.frame();
             super::RevolvedSurface3::new(

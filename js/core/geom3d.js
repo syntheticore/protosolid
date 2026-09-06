@@ -286,13 +286,18 @@ export class Profile {
     return new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
   }
 
-  sweep(componentId, rail, bounds) {
+  sweep(componentId, rail, bounds, featureId) {
     try {
       if(this.rings.length != 1) {
         throw { type: 'error', msg: 'Sweeps with holes are not supported' }
       }
       if(bounds[0] != 0.0 || bounds[1] != 1.0) {
         throw { type: 'error', msg: 'Partial rail sweeps are not supported' }
+      }
+
+      if(window.kernel.modeling.id == 'shapex') {
+        const geometry = window.kernel.modeling.sweep(this, rail)
+        return new Compound(componentId, geometry).inheritShapexTopology([], 'sweep', featureId)
       }
 
       // A wire profile produces a shell. Use the filled face so MakePipe

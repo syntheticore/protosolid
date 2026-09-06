@@ -436,6 +436,34 @@ pub enum Curve2 {
 }
 
 impl Curve2 {
+    pub(crate) fn third_derivative(&self, parameter: f64) -> KernelResult<Vec2> {
+        match self {
+            Self::Line(_) => Ok(Vec2::new(0.0, 0.0)),
+            Self::Circle(_) => Ok(-self.evaluate(parameter)?.first_derivative),
+            Self::Nurbs(curve) => {
+                let value = curve.evaluate(parameter)?;
+                let mut degree = curve.degree;
+                let mut knots = curve.knots.clone();
+                let mut controls = curve.homogeneous_controls();
+                let weight = de_boor_vec3(degree, &knots, &controls, parameter)?.z;
+                let mut derivatives = [Vec3::new(0.0, 0.0, 0.0); 3];
+                for derivative in &mut derivatives {
+                    let Some(next) = derivative_controls3(degree, &knots, &controls) else {
+                        break;
+                    };
+                    (degree, knots, controls) = next;
+                    *derivative = de_boor_vec3(degree, &knots, &controls, parameter)?;
+                }
+                Ok((derivatives[2].truncate()
+                    - value.point.to_vec() * derivatives[2].z
+                    - value.first_derivative * (3.0 * derivatives[1].z)
+                    - value.second_derivative * (3.0 * derivatives[0].z))
+                    / weight)
+            }
+            _ => Err(invalid("sweep rails must be lines, circles, or NURBS")),
+        }
+    }
+
     /// Split quadrature at guide knots: the exact intersection is smooth in
     /// space, but its guide can give it a piecewise-smooth parameter speed.
     pub(crate) fn integration_breakpoints(&self, range: ParameterRange) -> Vec<f64> {
@@ -4294,6 +4322,7 @@ pub enum Surface3 {
     Sphere(Sphere3),
     Torus(Torus3),
     Revolved(RevolvedSurface3),
+    Swept(super::SweptSurface3),
     Nurbs(NurbsSurface3),
     Offset(OffsetSurface3),
     RollingBall(RollingBallSurface3),
@@ -4303,6 +4332,7 @@ pub enum Surface3 {
 impl Surface3 {
     pub(crate) fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
         match self {
+            Self::Swept(surface) => surface.first_order(u, v),
             Self::Offset(surface) => surface.first_order(u, v),
             Self::RollingBall(surface) | Self::Ruled(surface) => surface.first_order(u, v),
             _ => self
@@ -4376,6 +4406,7 @@ impl Surface3 {
                 },
                 surface.profile_domain(),
             ],
+            Self::Swept(surface) => surface.domains(),
             Self::Nurbs(surface) => surface.domains(),
             Self::Offset(surface) => surface.base.domains(),
             Self::RollingBall(surface) | Self::Ruled(surface) => [
@@ -4396,6 +4427,7 @@ impl Surface3 {
             Self::Sphere(sphere) => sphere.evaluate(u, v),
             Self::Torus(torus) => torus.evaluate(u, v),
             Self::Revolved(surface) => surface.evaluate(u, v),
+            Self::Swept(surface) => surface.evaluate(u, v),
             Self::Nurbs(surface) => surface.evaluate(u, v),
             Self::Offset(surface) => surface.evaluate(u, v),
             Self::RollingBall(surface) | Self::Ruled(surface) => surface.evaluate(u, v),
@@ -4436,6 +4468,7 @@ impl Surface3 {
             Self::Sphere(sphere) => sphere.project(point),
             Self::Torus(torus) => torus.project(point),
             Self::Revolved(surface) => surface.project(point),
+            Self::Swept(surface) => surface.project(point),
             Self::Nurbs(surface) => surface.project(point, tolerance),
             Self::Offset(surface) => surface.project(point),
             Self::RollingBall(surface) | Self::Ruled(surface) => surface.project(point),

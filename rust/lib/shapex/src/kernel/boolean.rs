@@ -552,7 +552,7 @@ fn patch_complexity_key(patch: &BrepPatch) -> (u8, u8) {
         Surface3::Cylinder(_) | Surface3::Cone(_) | Surface3::Sphere(_) | Surface3::Torus(_) => 1,
         Surface3::Revolved(_) => 2,
         Surface3::Nurbs(_) => 3,
-        Surface3::Offset(_) | Surface3::RollingBall(_) | Surface3::Ruled(_) => 4,
+        Surface3::Swept(_) | Surface3::Offset(_) | Surface3::RollingBall(_) | Surface3::Ruled(_) => 4,
     };
     (boundary_complexity, surface_complexity)
 }

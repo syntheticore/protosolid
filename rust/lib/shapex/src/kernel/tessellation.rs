@@ -266,7 +266,8 @@ impl Kernel {
         cache: &mut BTreeMap<EdgeId, EdgePolyline>,
     ) -> KernelResult<TriangleMesh> {
         let face = self.topology().face(face_id)?;
-        if let Some(seed) = self.sample_full_periodic_band(face_id, options)? {
+        if let Some(seed) = self.sample_swept_rectangle(face_id, options)?
+            .or(self.sample_full_periodic_band(face_id, options)?) {
             return finish_surface_triangulation(
                 face.surface(),
                 face.orientation(),
@@ -516,6 +517,91 @@ impl Kernel {
         })
     }
 
+    /// Swept sections form rectangular charts even when sewing reparameterizes
+    /// their shared edges. Recognize those charts and avoid skinny triangle fans.
+    fn sample_swept_rectangle(
+        &self,
+        face_id: FaceId,
+        options: TessellationOptions,
+    ) -> KernelResult<Option<SurfaceTriangulationSeed>> {
+        let face = self.topology().face(face_id)?;
+        if !matches!(face.surface(), super::Surface3::Swept(_)) || face.loops().len() != 1 {
+            return Ok(None);
+        }
+        let mut vertices = Vec::new();
+        let mut edge_samples = Vec::new();
+        let mut previous: Option<Point2> = None;
+        let domains = face.surface().domains();
+        for id in self.topology().loop_coedges(face.loops()[0])? {
+            let edge = self.topology().coedge(id)?;
+            let mut samples = (0..=8)
+                .map(|i| {
+                    edge.pcurve()
+                        .evaluate(edge.range().start + edge.range().span() * i as f64 / 8.0)
+                        .map(|value| value.point)
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            for sample in &mut samples {
+                if let Some(prior) = previous {
+                    for axis in 0..2 {
+                        if let Some(period) = domains[axis].period {
+                            sample[axis] +=
+                                ((prior[axis] - sample[axis]) / period).round() * period;
+                        }
+                    }
+                }
+                previous = Some(*sample);
+            }
+            vertices.extend([samples[0], samples[8]]);
+            edge_samples.push(samples);
+        }
+        let bounds = [0, 1].map(|axis| {
+            let low = vertices
+                .iter()
+                .map(|p| p[axis])
+                .fold(f64::INFINITY, f64::min);
+            let high = vertices
+                .iter()
+                .map(|p| p[axis])
+                .fold(f64::NEG_INFINITY, f64::max);
+            [low, high]
+        });
+        let epsilon = self.tolerance().parameter * 64.0;
+        let mut area = 0.0;
+        for samples in &edge_samples {
+            let on_side = (0..2).any(|axis| {
+                bounds[axis]
+                    .iter()
+                    .any(|level| samples.iter().all(|p| (p[axis] - level).abs() <= epsilon))
+            });
+            if !on_side {
+                return Ok(None);
+            }
+            let a = samples[0];
+            let b = samples[8];
+            area += a.x * b.y - b.x * a.y;
+        }
+        let expected = (bounds[0][1] - bounds[0][0]) * (bounds[1][1] - bounds[1][0]);
+        if expected <= epsilon || (area.abs() * 0.5 - expected).abs() > epsilon * expected.max(1.0)
+        {
+            return Ok(None);
+        }
+        let mut axes = [Vec::new(), Vec::new()];
+        for axis in 0..2 {
+            let other = bounds[1 - axis];
+            axes[axis] = adaptive_isoparametric_samples(
+                face.surface(),
+                axis,
+                bounds[axis][0],
+                bounds[axis][1],
+                &[other[0], (other[0] + other[1]) * 0.5, other[1]],
+                4,
+                options,
+            )?;
+        }
+        Ok(Some(rectangular_surface_seed(face.surface(), axes)?))
+    }
+
     /// Sample the canonical trim of a complete band on a periodic surface.
     ///
     /// A face spanning one full surface period retains a same-face edge so its
@@ -675,61 +761,56 @@ impl Kernel {
             1,
             options,
         )?;
-        let parameters = |periodic: f64, transverse: f64| {
-            if periodic_axis == 0 {
-                (periodic, transverse)
-            } else {
-                (transverse, periodic)
-            }
-        };
-
-        // Triangulate the rectangular chart as a structured grid. Ear-clipping
-        // only its densely sampled perimeter produces a long rotating fan of
-        // diagonals; analytical normals are correct at the vertices, but their
-        // interpolation across that fan creates a visible spiral.
-        let columns = periodic_parameters.len();
-        let rows = transverse_parameters.len();
-        let mut uvs = Vec::with_capacity(columns * rows);
-        let mut positions = Vec::with_capacity(columns * rows);
-        for transverse in transverse_parameters.iter().copied() {
-            for periodic in periodic_parameters.iter().copied() {
-                let (u, v) = parameters(periodic, transverse);
-                uvs.push(Point2::new(u, v));
-                positions.push(face.surface().first_order(u, v)?.0);
-            }
-        }
-        let mut boundary_edges = BTreeSet::new();
-        for column in 0..columns - 1 {
-            boundary_edges.insert(ordered_edge(column, column + 1));
-            let upper = (rows - 1) * columns + column;
-            boundary_edges.insert(ordered_edge(upper, upper + 1));
-        }
-        for row in 0..rows - 1 {
-            let lower = row * columns;
-            let upper = (row + 1) * columns;
-            boundary_edges.insert(ordered_edge(lower, upper));
-            boundary_edges.insert(ordered_edge(lower + columns - 1, upper + columns - 1));
-        }
-        let mut triangles = Vec::with_capacity((columns - 1) * (rows - 1) * 2);
-        for row in 0..rows - 1 {
-            for column in 0..columns - 1 {
-                let lower_left = row * columns + column;
-                let lower_right = lower_left + 1;
-                let upper_left = lower_left + columns;
-                let upper_right = upper_left + 1;
-                triangles.extend([
-                    [lower_left, lower_right, upper_right],
-                    [lower_left, upper_right, upper_left],
-                ]);
-            }
-        }
-        Ok(Some(SurfaceTriangulationSeed {
-            uvs,
-            positions,
-            boundary_edges,
-            triangles,
-        }))
+        let axes = if periodic_axis == 0 {
+            [periodic_parameters, transverse_parameters]
+        } else { [transverse_parameters, periodic_parameters] };
+        Ok(Some(rectangular_surface_seed(face.surface(), axes)?))
     }
+}
+
+/// Share structured chart triangulation between periodic bands and swept faces.
+fn rectangular_surface_seed(
+    surface: &super::Surface3,
+    axes: [Vec<f64>; 2],
+) -> KernelResult<SurfaceTriangulationSeed> {
+    let columns = axes[0].len();
+    let rows = axes[1].len();
+    let mut uvs = Vec::with_capacity(columns * rows);
+    let mut positions = Vec::with_capacity(columns * rows);
+    for v in &axes[1] {
+        for u in &axes[0] {
+            uvs.push(Point2::new(*u, *v));
+            positions.push(surface.first_order(*u, *v)?.0);
+        }
+    }
+    let mut boundary_edges = BTreeSet::new();
+    for column in 0..columns - 1 {
+        boundary_edges.insert(ordered_edge(column, column + 1));
+        let upper = (rows - 1) * columns + column;
+        boundary_edges.insert(ordered_edge(upper, upper + 1));
+    }
+    for row in 0..rows - 1 {
+        let lower = row * columns;
+        let upper = (row + 1) * columns;
+        boundary_edges.insert(ordered_edge(lower, upper));
+        boundary_edges.insert(ordered_edge(lower + columns - 1, upper + columns - 1));
+    }
+    let mut triangles = Vec::with_capacity((columns - 1) * (rows - 1) * 2);
+    for row in 0..rows - 1 {
+        for column in 0..columns - 1 {
+            let a = row * columns + column;
+            let b = a + 1;
+            let c = a + columns;
+            let d = c + 1;
+            triangles.extend([[a, b, d], [a, d, c]]);
+        }
+    }
+    Ok(SurfaceTriangulationSeed {
+        uvs,
+        positions,
+        boundary_edges,
+        triangles,
+    })
 }
 
 /// Zip the two boundary chains along the blend's longitudinal (u) direction.
@@ -1251,6 +1332,7 @@ fn surface_kind(surface: &super::Surface3) -> &'static str {
         super::Surface3::Sphere(_) => "sphere",
         super::Surface3::Torus(_) => "torus",
         super::Surface3::Revolved(_) => "revolved",
+        super::Surface3::Swept(_) => "swept",
         super::Surface3::Nurbs(_) => "NURBS",
         super::Surface3::Offset(_) => "offset",
         super::Surface3::RollingBall(_) => "rolling-ball",

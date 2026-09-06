@@ -177,6 +177,7 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
                     face.surface(),
                     Surface3::Nurbs(_)
                         | Surface3::Revolved(_)
+                        | Surface3::Swept(_)
                         | Surface3::Offset(_)
                         | Surface3::RollingBall(_)
                         | Surface3::Ruled(_)
@@ -587,6 +588,7 @@ fn surface_kind(surface: &super::Surface3) -> &'static str {
         super::Surface3::Sphere(_) => "sphere",
         super::Surface3::Torus(_) => "torus",
         super::Surface3::Revolved(_) => "revolved",
+        super::Surface3::Swept(_) => "swept",
         super::Surface3::Nurbs(_) => "NURBS",
         super::Surface3::Offset(_) => "offset",
         super::Surface3::RollingBall(_) => "rolling-ball",

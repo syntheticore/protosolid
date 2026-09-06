@@ -316,6 +316,7 @@ export interface Profile {
   tolerance(): ModelTolerance
   extrude(plane: Plane3, vector: Vec3): Compound
   revolve(plane: Plane3, axis: Axis3, angle: number): Compound
+  sweep(plane: Plane3, railPlane: Plane3, rail: TrimmedCurve2): Compound
   loft(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections?: boolean): Compound
   loftWithAlignment(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections: boolean): Compound
 }

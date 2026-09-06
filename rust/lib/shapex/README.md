@@ -1,13 +1,11 @@
 # Shapex
 
-Shapex is a standalone Rust BREP CAD kernel. Its safe API returns a solid only
-after topology, trimming geometry, manifoldness, and physical volume have been
-validated. The crate contains no JavaScript, WebAssembly, application document
-model, UI, or STEP integration. The old implementation is available only through
+Shapex is a full BREP cad kernel with fully analytical/implicit/nurbs surfaces and watertight topology guarantees, based on euler operators for internal consistency and mathematical elegance. Its safe API returns a solid only after topology, trimming geometry, manifoldness, and physical volume have been
+validated. It's pleasant to use directly in any rust application, but also make it easy to use in parametrical cad applications, which need to deal with the topological naming problem and re-identify faces and edges across operations. Geometry is always represented using the simplest possible mathematical form. For instance, a cylindrical surface can be described as a surface of revolution, instead of using NURBS. Neighboring surfaces of the same type get unified automatically if possible. (Two planar surfaces of the same orientation for instance)
+
+The old implementation is available only through
 the isolated `legacy` compatibility feature while callers migrate.
 
-The ordinary modeling API uses owned Rust values. Applications do not need a
-kernel database handle, UUID, certificate, or feature graph to make a part:
 
 ```rust
 use shapex::{
@@ -39,10 +37,6 @@ let face_mesh = first_face.tessellate(TessellationOptions::default())?;
 # Ok::<(), shapex::KernelError>(())
 ```
 
-`Wire2::polygon(...)` is a convenience constructor for a line-only wire; there is
-no second polygon-profile abstraction. Lines, circular arcs, full circles, and
-NURBS curves are represented as exact trimmed curve uses.
-
 Entity identities are generated and retained by Shapex. Returned `Solid` and
 `Compound` values carry compact transitive lineage, not previous BREP
 versions. An entity from any ancestor result can therefore be resolved after
@@ -67,10 +61,6 @@ generation queries. For example, an extrusion reports its start, end, and swept
 side faces, while a future fillet can report faces generated from its input edges.
 Applications may associate those roles with their own document references without
 assigning names inside Shapex.
-
-The example is the intended history contract; operations are added only when their
-geometric algorithm and publication certifier are complete. Shapex does not own
-the application's parametric feature graph or parameter expressions.
 
 Advanced clients can use `Kernel`, `EulerTransaction`, and the classical Euler
 operators directly. Each operator validates construction topology; dropping a

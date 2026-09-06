@@ -1841,7 +1841,7 @@ export class SweepFeature extends Feature {
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      const tool = references.profile.sweep(this.componentId, references.rail, this.bounds)
+      const tool = references.profile.sweep(this.componentId, references.rail, this.bounds, this.id)
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }

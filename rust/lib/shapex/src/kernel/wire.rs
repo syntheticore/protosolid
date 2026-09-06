@@ -29,7 +29,21 @@ impl TrimmedCurve2 {
             .map(|period| (range.span().abs() - period).abs() <= f64::EPSILON * 64.0)
             .unwrap_or(false);
         if !closed_period && start == end {
-            return Err(invalid("an open trimmed curve needs distinct endpoints"));
+            // A clamped NURBS can describe a closed loop without a periodic
+            // basis. Distinguish that valid trim from a collapsed curve.
+            let closed_nurbs = if matches!(curve, Curve2::Nurbs(_)) {
+                let mut distinct = false;
+                for fraction in [0.25, 0.5, 0.75] {
+                    distinct |=
+                        curve.evaluate(range.start + range.span() * fraction)?.point != start;
+                }
+                distinct
+            } else {
+                false
+            };
+            if !closed_nurbs {
+                return Err(invalid("an open trimmed curve needs distinct endpoints"));
+            }
         }
         Ok(Self { curve, range })
     }

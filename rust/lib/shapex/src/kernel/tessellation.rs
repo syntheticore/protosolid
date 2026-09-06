@@ -266,7 +266,7 @@ impl Kernel {
         cache: &mut BTreeMap<EdgeId, EdgePolyline>,
     ) -> KernelResult<TriangleMesh> {
         let face = self.topology().face(face_id)?;
-        if let Some(seed) = self.sample_swept_rectangle(face_id, options)?
+        if let Some(seed) = self.sample_rectangular_chart(face_id, options)?
             .or(self.sample_full_periodic_band(face_id, options)?) {
             return finish_surface_triangulation(
                 face.surface(),
@@ -517,15 +517,20 @@ impl Kernel {
         })
     }
 
-    /// Swept sections form rectangular charts even when sewing reparameterizes
-    /// their shared edges. Recognize those charts and avoid skinny triangle fans.
-    fn sample_swept_rectangle(
+    /// Sweeps and edge blends can retain rectangular charts even when sewing
+    /// reparameterizes their shared edges. Sample these as a grid instead of
+    /// refining skinny triangle fans across long, narrow curved faces.
+    fn sample_rectangular_chart(
         &self,
         face_id: FaceId,
         options: TessellationOptions,
     ) -> KernelResult<Option<SurfaceTriangulationSeed>> {
         let face = self.topology().face(face_id)?;
-        if !matches!(face.surface(), super::Surface3::Swept(_)) || face.loops().len() != 1 {
+        if !matches!(
+            face.surface(),
+            super::Surface3::Swept(_) | super::Surface3::RollingBall(_) | super::Surface3::Ruled(_)
+        ) || face.loops().len() != 1
+        {
             return Ok(None);
         }
         let mut vertices = Vec::new();
@@ -1049,13 +1054,17 @@ fn unwrap_periodic_ring(
     if !domains.iter().any(|domain| domain.period.is_some()) {
         return Ok(());
     }
-    // Re-project the exact 3D boundary point before choosing a lift. Sewn
-    // p-curves can legitimately inherit different angular frames from their
-    // source faces; projection supplies one canonical representative on the
-    // surviving surface and the loop order supplies the winding.
+    // Retained p-curves already select a surface chart. Only project a
+    // boundary point when that chart does not reproduce its exact 3D position;
+    // a global inverse search is especially expensive on swept/blend supports.
     for vertex in ring.iter_mut() {
         let original_uv = vertex.uv;
-        let (_, du, dv) = surface.first_order(original_uv.x, original_uv.y)?;
+        let (lifted, du, dv) = surface.first_order(original_uv.x, original_uv.y)?;
+        if lifted.distance(vertex.point)
+            <= tolerance.linear_at_scale(vertex.point.to_vec().magnitude().max(1.0))
+        {
+            continue;
+        }
         let singular_periodic_coordinate =
             domains.iter().enumerate().any(|(coordinate, domain)| {
                 domain.period.is_some()
@@ -1070,16 +1079,10 @@ fn unwrap_periodic_ring(
         // with an arbitrary canonical angle can make a small face appear to
         // wind almost a full turn in its tessellation chart.
         if singular_periodic_coordinate {
-            let lifted = surface.evaluate(original_uv.x, original_uv.y)?.point;
-            if lifted.distance(vertex.point)
-                > tolerance.linear_at_scale(vertex.point.to_vec().magnitude().max(1.0))
-            {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "periodic face boundary does not lie on its retained surface",
-                ));
-            }
-            continue;
+            return Err(KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "periodic face boundary does not lie on its retained surface",
+            ));
         }
         let projection = surface.project(vertex.point, tolerance)?;
         if projection.distance

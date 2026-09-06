@@ -1413,6 +1413,41 @@ pub struct SurfaceIntersectionCurve {
     range: ParameterRange,
     tolerance: ModelTolerance,
     achieved_error: f64,
+    evaluations: IntersectionEvaluationCache,
+}
+
+/// Evaluations belong to immutable geometry and can be shared by its edge,
+/// p-curves and blend supports. Keys are exact parameter bits, never rounded.
+/// Keep the cache bounded and exclude its incidental contents from identity.
+type IntersectionEvaluation = ([f64; 4], Option<[f64; 4]>);
+
+#[derive(Clone, Default)]
+struct IntersectionEvaluationCache(
+    std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, IntersectionEvaluation>>>,
+);
+
+impl std::fmt::Debug for IntersectionEvaluationCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("IntersectionEvaluationCache")
+    }
+}
+impl PartialEq for IntersectionEvaluationCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl IntersectionEvaluationCache {
+    fn get(&self, parameter: f64) -> Option<IntersectionEvaluation> {
+        self.0.lock().ok()?.get(&parameter.to_bits()).copied()
+    }
+    fn insert(&self, parameter: f64, parameters: [f64; 4], derivative: Option<[f64; 4]>) {
+        if let Ok(mut entries) = self.0.lock() {
+            if entries.len() >= 512 && !entries.contains_key(&parameter.to_bits()) {
+                entries.clear();
+            }
+            entries.insert(parameter.to_bits(), (parameters, derivative));
+        }
+    }
 }
 
 /// Exact curve obtained by evaluating a parameter-space curve on a retained
@@ -1800,6 +1835,7 @@ impl SurfaceIntersectionCurve {
             range,
             tolerance,
             achieved_error,
+            evaluations: IntersectionEvaluationCache::default(),
         };
         for parameter in [range.start, (range.start + range.end) * 0.5, range.end] {
             curve.corrected_parameters(parameter)?;
@@ -1857,6 +1893,9 @@ impl SurfaceIntersectionCurve {
     // Reuse the converged parameters for both spatial and parameter-space
     // tangents, without cloning the intersection or running Newton again.
     fn parameter_derivative(&self, parameter: f64, parameters: [f64; 4]) -> KernelResult<[f64; 4]> {
+        if let Some((_, Some(derivative))) = self.evaluations.get(parameter) {
+            return Ok(derivative);
+        }
         let first_guide = self.first_pcurve.evaluate(parameter)?;
         let second_guide = self.second_pcurve.evaluate(parameter)?;
         let guide = [
@@ -1920,7 +1959,11 @@ impl SurfaceIntersectionCurve {
             [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
             gauge_tangent,
         ];
-        solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], guide_derivative)
+        let derivative =
+            solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], guide_derivative)?;
+        self.evaluations
+            .insert(parameter, parameters, Some(derivative));
+        Ok(derivative)
     }
 
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
@@ -1928,6 +1971,9 @@ impl SurfaceIntersectionCurve {
             return Err(invalid(
                 "surface-intersection parameter lies outside its certified range",
             ));
+        }
+        if let Some((parameters, _)) = self.evaluations.get(parameter) {
+            return Ok(parameters);
         }
         let first_guide = self.first_pcurve.evaluate(parameter)?;
         let second_guide = self.second_pcurve.evaluate(parameter)?;
@@ -1992,6 +2038,7 @@ impl SurfaceIntersectionCurve {
             let linear_target = f64::EPSILON * coordinate_scale * 2048.0;
             let parameter_target = f64::EPSILON * parameter_scale * 2048.0;
             if residual.magnitude() <= linear_target && gauge.abs() <= parameter_target {
+                self.evaluations.insert(parameter, parameters, None);
                 return Ok(parameters);
             }
             let matrix = [

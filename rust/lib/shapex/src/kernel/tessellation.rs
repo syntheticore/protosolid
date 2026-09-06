@@ -328,13 +328,11 @@ impl Kernel {
             holes.push(running);
             running += ring.len();
         }
-        if holes.is_empty()
-            && matches!(
-                tessellation_surface,
-                super::Surface3::RollingBall(_) | super::Surface3::Ruled(_)
-            )
-        {
-            if let Some(indices) = triangulate_blend_band(&uvs) {
+        // Short strip diagonals avoid excessive refinement of triangle fans
+        // on curved faces. This depends on the trim's shape, not its support
+        // type; cylinders and tori benefit just like swept and blended faces.
+        if holes.is_empty() && !matches!(tessellation_surface, super::Surface3::Plane(_)) {
+            if let Some(indices) = triangulate_boundary_strip(&uvs) {
                 let seed = SurfaceTriangulationSeed {
                     uvs,
                     positions,
@@ -818,11 +816,11 @@ fn rectangular_surface_seed(
     })
 }
 
-/// Zip the two boundary chains along the blend's longitudinal (u) direction.
+/// Zip two boundary chains along the chart's u direction.
 /// Accept only a complete triangulation with consistent winding. Keep every BREP
 /// boundary vertex, including projected seams, instead of creating a fan of
 /// long diagonals. Unsupported trims fall back to the general triangulator.
-fn triangulate_blend_band(points: &[Point2]) -> Option<Vec<usize>> {
+fn triangulate_boundary_strip(points: &[Point2]) -> Option<Vec<usize>> {
     if points.len() < 4 {
         return None;
     }
@@ -1703,7 +1701,7 @@ mod tests {
                 }
                 for _ in 0..points.len() {
                     points.rotate_left(1);
-                    let indices = triangulate_blend_band(&points).expect("trimmed band");
+                    let indices = triangulate_boundary_strip(&points).expect("trimmed band");
                     assert_eq!(indices.len(), (points.len() - 2) * 3);
                     let polygon_area = points
                         .iter()

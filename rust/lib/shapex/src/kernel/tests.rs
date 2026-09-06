@@ -2684,6 +2684,12 @@ fn moved_circle_joins_across_a_rounded_shell_opening() {
         .unwrap()
         .clone();
     let rounded_cut = cut.fillet(&[rim], 1.0).unwrap();
+    // Boolean classification meshes must resolve the curved trims without
+    // refining long triangle fans into hundreds of thousands of triangles.
+    let mesh = rounded_cut
+        .tessellate(TessellationOptions::new(0.03, 0.12, 12).unwrap())
+        .unwrap();
+    assert!(mesh.triangles.len() < 50_000, "{} triangles", mesh.triangles.len());
     let tool = circle(
         Point2::new(-3.435024046379482, 5.236934939201773),
         11.980574220283309,

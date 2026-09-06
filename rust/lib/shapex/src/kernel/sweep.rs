@@ -652,8 +652,7 @@ mod tests {
             .triangles
             .is_empty());
     }
-    #[test]
-    fn swept_circle_end_fillets_from_document_65() {
+    fn document_65_sweep() -> Compound {
         // untitled(65).cad.cad: circle on the application's YZ workplane
         // (local X points along -Z), swept along the XY cubic sketch spline.
         let t = ModelTolerance::default();
@@ -693,7 +692,11 @@ mod tests {
             t,
         )
         .unwrap();
-        let body = profile.sweep(plane, Plane3::xy(), &rail).unwrap();
+        profile.sweep(plane, Plane3::xy(), &rail).unwrap()
+    }
+    #[test]
+    fn swept_circle_end_fillets_from_document_65() {
+        let body = document_65_sweep();
         assert_eq!(body.faces().count(), 3);
         let rims = body
             .edges()
@@ -716,6 +719,53 @@ mod tests {
                     .triangles
                     .is_empty());
             }
+        }
+    }
+    #[test]
+    fn swept_circle_fillet_cut_from_document_65() {
+        let start = std::time::Instant::now();
+        let body = document_65_sweep();
+        eprintln!("sweep {:?}", start.elapsed());
+        let rim = body
+            .edges()
+            .find(|edge| matches!(edge.curve(), Curve3::Circle(c) if c.center().x > 200.0))
+            .unwrap()
+            .clone();
+        let start = std::time::Instant::now();
+        let rounded = body.fillet(&[rim], 3.0).unwrap();
+        eprintln!("fillet {:?}", start.elapsed());
+        let t = body.tolerance();
+        let plane = body
+            .faces()
+            .find_map(|face| match face.surface() {
+                Surface3::Plane(plane) if plane.origin().x > 200.0 => Some(*plane),
+                _ => None,
+            })
+            .unwrap();
+        let tool = Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(
+                    Point2::new(-0.3730080029745935, 7.445467850896364),
+                    15.095354657612303,
+                )
+                .unwrap()],
+                t,
+            )
+            .unwrap(),
+            [],
+            t,
+        )
+        .unwrap()
+        .extrude(plane, -plane.normal() * 3.0)
+        .unwrap();
+        for (label, source) in [("plain", &body), ("rounded", &rounded)] {
+            let start = std::time::Instant::now();
+            let result = source.difference(&tool).unwrap();
+            eprintln!("{label} cut {:?}", start.elapsed());
+            assert_eq!(result.solids().len(), 1);
+            assert!(
+                (source.volume() - result.volume() - tool.volume()).abs() < tool.volume() * 1e-3
+            );
         }
     }
 }

@@ -4904,7 +4904,7 @@ impl<'kernel> EulerTransaction<'kernel> {
     }
 
     pub(crate) fn finish(self) -> KernelResult<CommittedOperation> {
-        validate(
+        super::validation::validate_structure(
             &self.working,
             self.kernel.tolerance,
             ValidationMode::Published,

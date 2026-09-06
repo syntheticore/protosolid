@@ -62,6 +62,20 @@ pub(crate) fn validate(
     tolerance: ModelTolerance,
     mode: ValidationMode,
 ) -> ValidationReport {
+    let mut report = validate_structure(topology, tolerance, mode);
+    if mode == ValidationMode::Published {
+        validate_physical_volumes(topology, tolerance, &mut report);
+    }
+    report
+}
+
+/// Check published topology and geometry without discarding a newly computed
+/// physical certificate. Commit performs certification once and retains it.
+pub(crate) fn validate_structure(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    mode: ValidationMode,
+) -> ValidationReport {
     let mut report = ValidationReport::default();
     validate_names(topology, &mut report);
     validate_ownership(topology, mode, &mut report);
@@ -73,9 +87,6 @@ pub(crate) fn validate(
         validate_shell_euler_characteristic(topology, &mut report);
     }
     validate_geometry(topology, tolerance, mode, &mut report);
-    if mode == ValidationMode::Published {
-        validate_physical_volumes(topology, tolerance, &mut report);
-    }
     report
 }
 

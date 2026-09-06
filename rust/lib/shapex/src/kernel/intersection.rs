@@ -1855,41 +1855,26 @@ fn correct_surface_pair(
 ) -> KernelResult<Option<[f64; 4]>> {
     let mut parameters = clamp_parameters(parameters, first_domains, second_domains);
     for _ in 0..32 {
-        let first_value = first.evaluate(parameters[0], parameters[1])?;
-        let second_value = second.evaluate(parameters[2], parameters[3])?;
-        let residual = first_value.point - second_value.point;
-        let scale = first_value
-            .point
+        let (first_point, first_du, first_dv) = first.first_order(parameters[0], parameters[1])?;
+        let (second_point, second_du, second_dv) =
+            second.first_order(parameters[2], parameters[3])?;
+        let residual = first_point - second_point;
+        let scale = first_point
             .to_vec()
             .magnitude()
-            .max(second_value.point.to_vec().magnitude())
+            .max(second_point.to_vec().magnitude())
             .max(1.0);
         if residual.magnitude() <= tolerance.linear_at_scale(scale) {
-            let regularity = first_value
-                .normal()?
-                .cross(second_value.normal()?)
+            let regularity = first
+                .normal(parameters[0], parameters[1])?
+                .cross(second.normal(parameters[2], parameters[3])?)
                 .magnitude();
             return Ok((regularity > tolerance.angular * 8.0).then_some(parameters));
         }
         let jacobian = [
-            [
-                first_value.du.x,
-                first_value.dv.x,
-                -second_value.du.x,
-                -second_value.dv.x,
-            ],
-            [
-                first_value.du.y,
-                first_value.dv.y,
-                -second_value.du.y,
-                -second_value.dv.y,
-            ],
-            [
-                first_value.du.z,
-                first_value.dv.z,
-                -second_value.du.z,
-                -second_value.dv.z,
-            ],
+            [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
+            [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
+            [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
         ];
         let normal = multiply_3x4_by_transpose(jacobian);
         let Some(lambda) = solve_linear_3(normal, [-residual.x, -residual.y, -residual.z]) else {
@@ -1914,8 +1899,8 @@ fn correct_surface_pair(
                 second_domains,
                 tolerance.parameter,
             ) {
-                let candidate_residual = first.evaluate(candidate[0], candidate[1])?.point
-                    - second.evaluate(candidate[2], candidate[3])?.point;
+                let candidate_residual = first.first_order(candidate[0], candidate[1])?.0
+                    - second.first_order(candidate[2], candidate[3])?.0;
                 if candidate_residual.magnitude2() < residual.magnitude2() {
                     parameters = candidate;
                     accepted = true;
@@ -1945,27 +1930,12 @@ fn trace_surface_intersection_direction(
     let mut current = seed;
     let mut previous_tangent = None;
     for _ in 0..512 {
-        let first_value = first.evaluate(current[0], current[1])?;
-        let second_value = second.evaluate(current[2], current[3])?;
+        let (_, first_du, first_dv) = first.first_order(current[0], current[1])?;
+        let (_, second_du, second_dv) = second.first_order(current[2], current[3])?;
         let jacobian = [
-            [
-                first_value.du.x,
-                first_value.dv.x,
-                -second_value.du.x,
-                -second_value.dv.x,
-            ],
-            [
-                first_value.du.y,
-                first_value.dv.y,
-                -second_value.du.y,
-                -second_value.dv.y,
-            ],
-            [
-                first_value.du.z,
-                first_value.dv.z,
-                -second_value.du.z,
-                -second_value.dv.z,
-            ],
+            [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
+            [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
+            [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
         ];
         let mut tangent = null_vector_3x4(jacobian);
         let magnitude = tangent
@@ -2084,41 +2054,26 @@ fn correct_surface_pair_with_gauge(
 ) -> KernelResult<Option<[f64; 4]>> {
     let mut parameters = clamp_parameters(guide, first_domains, second_domains);
     for _ in 0..24 {
-        let first_value = first.evaluate(parameters[0], parameters[1])?;
-        let second_value = second.evaluate(parameters[2], parameters[3])?;
-        let residual = first_value.point - second_value.point;
+        let (first_point, first_du, first_dv) = first.first_order(parameters[0], parameters[1])?;
+        let (second_point, second_du, second_dv) =
+            second.first_order(parameters[2], parameters[3])?;
+        let residual = first_point - second_point;
         let gauge = parameters
             .iter()
             .zip(guide)
             .zip(tangent)
             .map(|((value, guide), tangent)| (value - guide) * tangent)
             .sum::<f64>();
-        if residual.magnitude()
-            <= f64::EPSILON * first_value.point.to_vec().magnitude().max(1.0) * 64.0
+        if residual.magnitude() <= f64::EPSILON * first_point.to_vec().magnitude().max(1.0) * 64.0
             && gauge.abs()
                 <= f64::EPSILON * guide.iter().map(|v| v.abs()).fold(1.0_f64, f64::max) * 64.0
         {
             return Ok(Some(parameters));
         }
         let matrix = [
-            [
-                first_value.du.x,
-                first_value.dv.x,
-                -second_value.du.x,
-                -second_value.dv.x,
-            ],
-            [
-                first_value.du.y,
-                first_value.dv.y,
-                -second_value.du.y,
-                -second_value.dv.y,
-            ],
-            [
-                first_value.du.z,
-                first_value.dv.z,
-                -second_value.du.z,
-                -second_value.dv.z,
-            ],
+            [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
+            [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
+            [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
             tangent,
         ];
         let Some(delta) = solve_linear_4(matrix, [-residual.x, -residual.y, -residual.z, -gauge])

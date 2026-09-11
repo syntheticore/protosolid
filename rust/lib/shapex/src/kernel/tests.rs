@@ -4118,6 +4118,148 @@ fn extrude_circle_on_open_torus_shell() {
 }
 
 #[test]
+fn torus_sections_preserve_exact_circles_in_scaled_and_skewed_plane_charts() {
+    let tol = ModelTolerance::default();
+    let torus: Surface3 = super::Torus3::new(
+        Point3::new(3.0, -2.0, 5.0),
+        Vec3::unit_x() * 40.0,
+        Vec3::unit_y() * 40.0,
+        20.0,
+        tol,
+    )
+    .unwrap()
+    .into();
+    for (u, v) in [
+        (Vec3::unit_x(), Vec3::unit_y()),
+        (Vec3::unit_x() * 24.0, Vec3::unit_y() * 60.0),
+        (Vec3::new(24.0, 9.0, 0.0), Vec3::new(-8.0, 60.0, 0.0)),
+        (Vec3::unit_x() * 24.0, -Vec3::unit_y() * 60.0),
+    ] {
+        let plane: Surface3 = Plane3::new(Point3::new(-6.0, 7.0, 17.0), u, v, tol)
+            .unwrap()
+            .into();
+        for (first, second) in [(&plane, &torus), (&torus, &plane)] {
+            let (Surface3::Plane(p), Surface3::Torus(t)) = (&plane, &torus) else {
+                unreachable!()
+            };
+            let sections = super::intersection::parallel_plane_torus_section(*p, *t, tol).unwrap();
+            let sections = if matches!(first, Surface3::Plane(_)) {
+                sections
+            } else {
+                super::intersection::swap_surface_curves(sections)
+            };
+            let IntersectionSet::Isolated(curves) = sections else {
+                panic!("two circular sections expected")
+            };
+            assert_eq!(curves.len(), 2);
+            let mut radii = Vec::new();
+            for intersection in curves {
+                let Curve3::Circle(circle) = &intersection.curve else {
+                    panic!("section must remain an exact circle")
+                };
+                radii.push(circle.radius());
+                for parameter in [-1.0, 0.0, 0.4, 2.0, 5.0, 7.0] {
+                    let curve = intersection.curve.evaluate(parameter).unwrap();
+                    for (surface, pcurve) in [
+                        (first, &intersection.first_pcurve),
+                        (second, &intersection.second_pcurve),
+                    ] {
+                        let uv = pcurve.evaluate(parameter).unwrap();
+                        let value = surface.evaluate(uv.point.x, uv.point.y).unwrap();
+                        assert!(value.point.distance(curve.point) < tol.linear);
+                        let tangent =
+                            value.du * uv.first_derivative.x + value.dv * uv.first_derivative.y;
+                        assert!((tangent - curve.first_derivative).magnitude() < tol.linear);
+                    }
+                }
+            }
+            radii.sort_by(f64::total_cmp);
+            assert!((radii[0] - 24.0).abs() < tol.linear);
+            assert!((radii[1] - 56.0).abs() < tol.linear);
+        }
+    }
+}
+
+#[test]
+fn small_fillet_on_rounded_torus_cutout() {
+    let tol = ModelTolerance::default();
+    let body = rounded_chamfered_torus(true);
+    let opening = body
+        .faces()
+        .find(|f| matches!(f.surface(), Surface3::Plane(_)))
+        .unwrap()
+        .clone();
+    let shell = body.shell(&[opening], -4.0).unwrap();
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        -Vec3::unit_z(),
+        Vec3::unit_y(),
+        tol,
+    )
+    .unwrap();
+    let tool = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(42.11427381659291, -12.144015041766547),
+                Point2::new(66.12781618720352, -12.144015041766547),
+                Point2::new(66.12781618720352, 12.361608115127035),
+                Point2::new(42.11427381659291, 12.361608115127035),
+            ],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap()
+    .extrude(plane, Vec3::new(-60.0, 0.0, 0.0))
+    .unwrap();
+    let cut = shell.difference(&tool).unwrap();
+    let corners = cut
+        .edges()
+        .filter(|edge| {
+            let points = edge.endpoints().unwrap();
+            let p = points[0] + (points[1] - points[0]) * 0.5;
+            p.x < -35.0
+                && edge
+                    .connected_faces()
+                    .unwrap()
+                    .iter()
+                    .all(|face| matches!(face.surface(), Surface3::Plane(_)))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(corners.len(), 4);
+    let rounded = cut.fillet(&corners, 4.0).unwrap();
+    let rim = rounded
+        .edges()
+        .find(|edge| {
+            let faces = edge.connected_faces().unwrap();
+            let points = edge.endpoints().unwrap();
+            let p = points[0] + (points[1] - points[0]) * 0.5;
+            p.x < -59.9
+                && p.z < -55.0
+                && faces
+                    .iter()
+                    .any(|f| matches!(f.surface(), Surface3::Torus(_)))
+        })
+        .unwrap()
+        .clone();
+    for radius in [0.05, 0.1, 0.15, 0.2, 0.25] {
+        let result = rounded
+            .fillet(std::slice::from_ref(&rim), radius)
+            .unwrap_or_else(|e| panic!("radius {radius}: {e}"));
+        assert_eq!(result.solids().len(), 1);
+        assert!((result.volume() / rounded.volume() - 1.0).abs() < 0.001);
+        assert_eq!(result.faces().count(), rounded.faces().count() + 8);
+        let mesh = result
+            .tessellate(TessellationOptions::new(0.02, 0.1, 24).unwrap())
+            .unwrap_or_else(|e| panic!("radius {radius} tessellation: {e}"));
+        assert!(!mesh.triangles.is_empty());
+    }
+}
+
+#[test]
 fn surface_projection_refines_within_model_tolerance() {
     use super::{Line2, Line3, SurfaceProjectionPcurve2};
     use crate::Vec2;

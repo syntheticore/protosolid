@@ -809,27 +809,47 @@ impl EulerTransaction<'_> {
             parent_surfaces[0].offset(offset_distance(faces[0])?, tolerance)?,
             parent_surfaces[1].offset(offset_distance(faces[1])?, tolerance)?,
         ];
-        let candidates =
-            if let Some(shared) = shared {
-                vec![shared.center.clone()]
-            } else {
-                match offsets[0].intersect_surface(&offsets[1], tolerance) {
-                    Ok(IntersectionSet::Isolated(curves)) => curves,
-                    Ok(IntersectionSet::Empty) => {
-                        return Err(KernelError::new(
-                            DiagnosticKind::GeometryInvariant,
-                            "incident face offsets do not intersect at the requested radius",
-                        ))
+        let candidates = if let Some(shared) = shared {
+            vec![shared.center.clone()]
+        } else {
+            let intersection = if kind == EdgeBlendKind::Fillet {
+                match (&offsets[0], &offsets[1]) {
+                    (Surface3::Plane(plane), Surface3::Torus(torus)) => {
+                        super::intersection::parallel_plane_torus_section(*plane, *torus, tolerance)
                     }
-                    Ok(IntersectionSet::Coincident) => return Err(KernelError::new(
+                    (Surface3::Torus(torus), Surface3::Plane(plane)) => {
+                        super::intersection::parallel_plane_torus_section(*plane, *torus, tolerance)
+                            .map(super::intersection::swap_surface_curves)
+                    }
+                    _ => offsets[0].intersect_surface(&offsets[1], tolerance),
+                }
+            } else {
+                offsets[0].intersect_surface(&offsets[1], tolerance)
+            };
+            match intersection {
+                Ok(IntersectionSet::Isolated(curves)) => curves,
+                Ok(IntersectionSet::Empty) => {
+                    return Err(KernelError::new(
+                        DiagnosticKind::GeometryInvariant,
+                        "incident face offsets do not intersect at the requested radius",
+                    ))
+                }
+                Ok(IntersectionSet::Coincident) => {
+                    return Err(KernelError::new(
                         DiagnosticKind::UnsupportedGeometry,
                         "incident face offsets are coincident and do not define one blend spine",
-                    )),
-                    Err(_) => {
-                        vec![self.local_offset_intersection(uses, &offsets, tolerance)?]
-                    }
+                    ))
                 }
-            };
+                Err(_) => {
+                    vec![self.local_offset_intersection(
+                        uses,
+                        &offsets,
+                        tolerance,
+                        kind == EdgeBlendKind::Fillet,
+                    )?]
+                }
+            }
+        };
         let center = candidates
             .into_iter()
             .filter_map(|candidate| {
@@ -4204,6 +4224,7 @@ impl EulerTransaction<'_> {
         uses: [CoedgeId; 2],
         offsets: &[Surface3; 2],
         tolerance: ModelTolerance,
+        cylindrical_chart: bool,
     ) -> KernelResult<SurfaceSurfaceCurve> {
         let mut boundary_parameters: [Vec<Point2>; 2] =
             [Vec::with_capacity(17), Vec::with_capacity(17)];
@@ -4247,20 +4268,44 @@ impl EulerTransaction<'_> {
             }
         }
         let source = self.working.edge(self.working.coedge(uses[0])?.edge)?;
-        // Across a straight-spine fillet, preserve the angular coordinate
-        // while solving the other three coordinates. Least-norm correction
-        // can slide along the section and fold the sampled guide at a seam.
-        let angular_side = offsets
-            .iter()
-            .position(|surface| {
-                matches!(surface,
-            Surface3::Offset(offset) if matches!(offset.base(), Surface3::RollingBall(blend)
-                if matches!(blend.center_curve(), Curve3::Line(_))))
-            })
-            .filter(|side| {
-                (boundary_parameters[*side][16].y - boundary_parameters[*side][0].y).abs()
-                    > tolerance.parameter
-            });
+        // Retain an angular chart through rounded supports. A least-norm
+        // correction can slide across the section and choose another inverse
+        // branch, especially where a cylindrical corner meets a torus.
+        let angular_coordinate = offsets.iter().enumerate().find_map(|(side, surface)| {
+            let axis = match surface {
+                Surface3::Cylinder(_)
+                    if cylindrical_chart
+                        && source.vertices[0] != source.vertices[1]
+                        && (boundary_parameters[side][16].x - boundary_parameters[side][0].x)
+                            .abs()
+                            < std::f64::consts::PI
+                        && matches!(offsets[1 - side], Surface3::Torus(_)) =>
+                {
+                    0
+                }
+                Surface3::Offset(offset)
+                    if matches!(offset.base(), Surface3::RollingBall(blend)
+                    if matches!(blend.center_curve(), Curve3::Line(_))) =>
+                {
+                    1
+                }
+                _ => return None,
+            };
+            ((boundary_parameters[side][16][axis] - boundary_parameters[side][0][axis]).abs()
+                > tolerance.parameter)
+                .then_some((side, axis))
+        });
+        if let Some((side, 0)) = angular_coordinate {
+            // The retained intersection's parameter speed can reverse near
+            // its endpoint. Use the cylinder angle itself as the traversal
+            // coordinate, rather than inheriting that reversal in a new
+            // offset guide. The other coordinates are still solved exactly.
+            let start = boundary_parameters[side][0].x;
+            let end = boundary_parameters[side][16].x;
+            for index in 0..=16 {
+                boundary_parameters[side][index].x = start + (end - start) * index as f64 / 16.0;
+            }
+        }
         // Keep open curved-edge continuation local to the retained sector.
         // Extending an entire edge length can wrap around a curved
         // support and introduce another inverse branch into the same guide.
@@ -4305,10 +4350,10 @@ impl EulerTransaction<'_> {
         for index in -extension..=16 + extension {
             let first = extrapolated(0, index)?;
             let second = extrapolated(1, index)?;
-            let corrected = if let Some(side) = angular_side {
+            let corrected = if let Some((side, axis)) = angular_coordinate {
                 let guide = [first.x, first.y, second.x, second.y];
                 let mut gauge = [0.0; 4];
-                gauge[side * 2 + 1] = 1.0;
+                gauge[side * 2 + axis] = 1.0;
                 let domains = |side: usize| {
                     std::array::from_fn(|axis| {
                         let domain = offsets[side].domains()[axis];
@@ -4325,7 +4370,7 @@ impl EulerTransaction<'_> {
                         }
                     })
                 };
-                super::intersection::correct_surface_pair_with_gauge(
+                let corrected = super::intersection::correct_surface_pair_with_gauge(
                     &offsets[0],
                     &offsets[1],
                     guide,
@@ -4333,8 +4378,14 @@ impl EulerTransaction<'_> {
                     domains(0),
                     domains(1),
                     tolerance,
-                )?
-                .ok_or_else(|| {
+                )?;
+                if corrected.is_none() && axis == 0 {
+                    // Some torus/cylinder intersections turn in the angular
+                    // coordinate. Rebuild the whole guide in the general
+                    // chart; mixing charts sample by sample creates folds.
+                    return self.local_offset_intersection(uses, offsets, tolerance, false);
+                }
+                corrected.ok_or_else(|| {
                     KernelError::new(
                         DiagnosticKind::NumericalFailure,
                         "fixed angular offset correction failed",

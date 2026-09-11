@@ -1099,6 +1099,35 @@ fn plane_torus(
     torus: super::Torus3,
     tolerance: ModelTolerance,
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    // Keep the general intersection dispatch's existing chart eligibility:
+    // widening it changes Boolean split ordering and saved edge identities.
+    let scale = plane
+        .origin()
+        .to_vec()
+        .magnitude()
+        .max(torus.center().to_vec().magnitude())
+        .max(torus.major_radius());
+    let u_scale = plane.u().magnitude();
+    let v_scale = plane.v().magnitude();
+    if (u_scale - v_scale).abs()
+        > tolerance
+            .linear_at_scale(scale)
+            .max(u_scale.max(v_scale) * tolerance.relative * 64.0)
+    {
+        return Err(unsupported(
+            "plane/torus circular intersection needs an equally scaled planar chart",
+        ));
+    }
+    parallel_plane_torus_section(plane, torus, tolerance)
+}
+
+/// Exact parallel section, including anisotropic and skew planar charts.
+/// Fillet supports opt in independently of Boolean intersection dispatch.
+pub(crate) fn parallel_plane_torus_section(
+    plane: Plane3,
+    torus: super::Torus3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let torus_normal = torus.normal();
     if plane.normal().dot(torus_normal).abs() < 1.0 - tolerance.angular {
         return Err(unsupported(
@@ -1118,11 +1147,9 @@ fn plane_torus(
     }
     let u_scale = plane.u().magnitude();
     let v_scale = plane.v().magnitude();
-    if (u_scale - v_scale).abs() > linear.max(u_scale.max(v_scale) * tolerance.relative * 64.0) {
-        return Err(unsupported(
-            "plane/torus circular intersection needs an equally scaled planar chart",
-        ));
-    }
+    let circular_chart = (u_scale - v_scale).abs()
+        <= linear.max(u_scale.max(v_scale) * tolerance.relative * 64.0)
+        && plane.u().normalize().dot(plane.v().normalize()).abs() <= tolerance.angular;
 
     let sine = (height / torus.minor_radius()).clamp(-1.0, 1.0);
     let first = sine.asin();
@@ -1139,12 +1166,9 @@ fn plane_torus(
     let mut curves = Vec::with_capacity(minor_parameters.len());
     for minor_parameter in minor_parameters {
         let radius = torus.major_radius() + torus.minor_radius() * minor_parameter.cos();
-        let circle = Circle3::new(
-            center,
-            plane.u().normalize() * radius,
-            plane.v().normalize() * radius,
-            tolerance,
-        )?;
+        let x = plane.u().normalize();
+        let y = plane.normal().cross(x).normalize();
+        let circle = Circle3::new(center, x * radius, y * radius, tolerance)?;
         let evaluation = circle.evaluate(0.0)?;
         let torus_projection = Surface3::Torus(torus).project(evaluation.point, tolerance)?;
         let torus_evaluation =
@@ -1154,13 +1178,29 @@ fn plane_torus(
         } else {
             -1.0
         };
+        let guide: Curve2 = super::Circle2::new(
+            Point2::new(center_uv.0, center_uv.1),
+            radius / ((u_scale + v_scale) * 0.5),
+        )?
+        .into();
+        let first_pcurve = if circular_chart {
+            guide
+        } else {
+            // The spatial section is a circle even when its planar UV image
+            // is an ellipse. Keep the exact circle and its periodic range;
+            // the projection differentiates the plane's affine inverse.
+            SurfaceProjectionPcurve2::new(
+                circle.into(),
+                plane.into(),
+                guide,
+                super::ParameterRange::new(0.0, std::f64::consts::TAU)?,
+                tolerance,
+            )?
+            .into()
+        };
         curves.push(SurfaceSurfaceCurve {
             curve: circle.into(),
-            first_pcurve: super::Circle2::new(
-                Point2::new(center_uv.0, center_uv.1),
-                radius / ((u_scale + v_scale) * 0.5),
-            )?
-            .into(),
+            first_pcurve,
             second_pcurve: Line2::new(
                 Point2::new(torus_projection.parameters.0, minor_parameter),
                 crate::Vec2::new(torus_rate, 0.0),
@@ -1174,7 +1214,7 @@ fn plane_torus(
     Ok(IntersectionSet::Isolated(curves))
 }
 
-fn swap_surface_curves(
+pub(crate) fn swap_surface_curves(
     curves: IntersectionSet<SurfaceSurfaceCurve>,
 ) -> IntersectionSet<SurfaceSurfaceCurve> {
     match curves {

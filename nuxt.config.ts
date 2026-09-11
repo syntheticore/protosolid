@@ -5,6 +5,8 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-30',
 
+  ignore: ['dist', 'dist/**'],
+
   devtools: {
     enabled: false,
 

@@ -33,7 +33,8 @@
             :allow-negative="setting.allowNegative"
             v-model:value="activeFeature[key]"
             :expression="activeFeature.expressions[key]"
-            :auto-focus="setting.autoFocus !== false && activeFeature.isSettingVisible(setting)"
+            :auto-focus="key === autoFocusSetting"
+            @focusin="setting.autoFocus !== false && (focusedSetting = key)"
             @update:value="update"
             @expression="activeFeature.setExpression(key, $event)"
             @error="error = $event"
@@ -331,11 +332,21 @@
       return {
         error: null,
         activePicker: null,
+        focusedSetting: null,
         status: null,
       }
     },
 
     computed: {
+      autoFocusSetting() {
+        const keys = Object.keys(this.orderedSettings).filter(key => {
+          const setting = this.orderedSettings[key]
+          return ['length', 'angle'].includes(setting.type) &&
+            setting.autoFocus !== false && this.activeFeature.isSettingVisible(setting)
+        })
+        return keys.includes(this.focusedSetting) ? this.focusedSetting : keys[0]
+      },
+
       orderedSettings: function() {
         return Object.fromEntries(
           Object.entries(this.activeFeature.settings).sort(([, left], [, right]) =>

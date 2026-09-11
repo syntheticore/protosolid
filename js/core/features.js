@@ -173,13 +173,15 @@ export class Feature {
       if(!gizmo) return
       gizmo = gizmo.distance
       if(!gizmo) return
+      const component = this.document.top().findChild(this.componentOccurrenceId) ||
+        this.document.top().findChild(this.componentId)
+      const transform = component && worldTransform(component)
+      const center = transform ? gizmo.center.clone().applyMatrix4(transform) : gizmo.center
       if(this.distanceGizmo) {
+        this.distanceGizmo().startPosition.copy(center)
+        this.distanceGizmo().translationSnapOrigin.copy(center)
         this.distanceGizmo().set(gizmo.distance, gizmo.side)
       } else {
-        const component = this.document.top().findChild(this.componentOccurrenceId) ||
-          this.document.top().findChild(this.componentId)
-        const transform = component && worldTransform(component)
-        const center = transform ? gizmo.center.clone().applyMatrix4(transform) : gizmo.center
         const direction = transform ? gizmo.direction.clone().transformDirection(transform) : gizmo.direction
         const distanceGizmo = markRaw(new LengthGizmo(center, direction, gizmo.distance, gizmo.side, gizmo.cb))
         this.distanceGizmo = () => distanceGizmo
@@ -1532,6 +1534,11 @@ export class ExtrudeFeature extends Feature {
         title: 'Distance',
         type: 'length',
       },
+      offset: {
+        title: 'Offset',
+        type: 'length',
+        allowNegative: true,
+      },
       // limit: {
       //   type: 'OR',
       //   settings: [
@@ -1541,25 +1548,39 @@ export class ExtrudeFeature extends Feature {
       // },
       side: {
         title: 'Side',
-        type: 'bool',
-        icons: ['caret-up', 'caret-down']
+        type: 'select',
+        options: {
+          forward: { title: 'Forward', icon: 'caret-up' },
+          reverse: { title: 'Reverse', icon: 'caret-down' },
+          both: { title: 'Both directions (distance per side)', icon: 'arrows-alt-v' },
+        },
       },
     })
 
     this.profiles = null
     this.axis = null
     this.distance = 1.0
-    this.side = true
+    this.offset = 0
+    this.side = 'forward'
+  }
+
+  setValues(values) {
+    // Preserve the direction of documents saved with the old boolean toggle.
+    super.setValues({
+      ...values,
+      side: typeof values.side == 'boolean' ? (values.side ? 'forward' : 'reverse') : (values.side || 'forward'),
+    })
   }
 
   updateFeature(tree, references) {
-    const distance = this.distance * (this.side ? 1 : -1)
+    const distance = this.distance * (this.side == 'reverse' ? -1 : this.side == 'both' ? 2 : 1)
+    const offset = this.offset * (this.side == 'reverse' ? -1 : 1) - (this.side == 'both' ? this.distance : 0)
     const comp = tree.findChild(this.componentId)
 
     let tool = new Compound(this.componentId)
     references.profiles.forEach(profile => {
       try {
-        const extrusion = profile.extrude(this.componentId, distance, this.id)
+        const extrusion = profile.extrude(this.componentId, distance, this.id, offset)
         tool = tool.boolean(extrusion, 'join')
       } catch(err) { this.error = err || this.error }
     })
@@ -1572,16 +1593,17 @@ export class ExtrudeFeature extends Feature {
 
   getGizmo() {
     const profile = this.profiles()[0].getItem()
+    const center = profile.center().clone().addScaledVector(profile.normal(), this.offset * (this.side == 'reverse' ? -1 : 1))
     return {
       distance: {
-        center: profile.center(),
+        center,
         direction: (this.axis && this.axis()) || profile.normal(),
         distance: this.distance,
-        side: this.side,
+        side: this.side != 'reverse',
         cb: (dist, side) => {
           this.setExpression('distance', null)
           this.distance = dist
-          this.side = side
+          if(this.side != 'both') this.side = side ? 'forward' : 'reverse'
         },
       }
     }

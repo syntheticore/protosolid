@@ -227,10 +227,14 @@ export class Profile {
     return compound
   }
 
-  extrude(componentId, height, featureId) {
+  extrude(componentId, height, featureId, offset = 0) {
     if(!height) throw { type: 'error', msg: 'Extrusion has no volume' }
-    const face = this.makeFace()
+    let face = this.makeFace()
     const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
+    if(offset) {
+      const translation = new THREE.Vector3(0, 0, offset).applyQuaternion(rot)
+      face = transformGeometry(face, new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z)).Shape()
+    }
     const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyQuaternion(rot))
     let prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
     // const args = new window.oc.oc.TopTools_ListOfShape_1()

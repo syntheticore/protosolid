@@ -82,6 +82,36 @@ then performs conforming, local refinement in face parameter space. Exact bounda
 samples are reused by adjacent faces, preventing face-by-face cracks. Whole-body
 meshes compose the same face tessellations rather than using a second meshing path.
 
+### Evaluation cost and reuse
+
+Rational 2D and 3D curves share a local homogeneous evaluator for positions and
+their first two derivatives. It locates the active knot span and reads only
+`degree + 1` controls, giving `O(log(control_count) + degree²)` evaluation cost.
+Derivative control data is formed only for that span. Degrees up to 15 use stack
+scratch space; higher degrees use scratch space proportional to the degree.
+Endpoint selection and repeated-knot behavior match whole-curve differentiation.
+
+Edge blends prepare their contact rails, circular frame and differential data once
+per longitudinal parameter. Evaluations across a section reuse that preparation.
+Intersection and blend evaluations share bounded caches through immutable geometry
+clones. Cache keys use exact floating-point bits and cache contents do not affect
+geometry identity. A four-way, 128-set cache replaces entries locally; collisions
+cause recomputation, never approximate reuse. Sets allocate storage on demand.
+
+To profile application scene reconstruction through the release WASM transport,
+run from the repository root:
+
+```sh
+npm run build-shapex
+node --cpu-prof scripts/profile-shapex-scene.mjs path/to/scene.cad
+```
+
+The harness uses saved sketch coordinates and excludes constraint solving,
+runtime startup and UI work. It reports per-feature timings, separate display-mesh
+timing, and geometry measurements for before/after comparisons. The CPU profile
+includes Rust/WASM function names. Use fresh processes and the same build profile
+and scene when comparing changes; verify an ordinary application load separately.
+
 ## Certified publication set
 
 The current publisher certifies:

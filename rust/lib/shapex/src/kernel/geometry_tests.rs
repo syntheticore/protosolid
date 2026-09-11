@@ -1,0 +1,176 @@
+use super::*;
+
+#[test]
+fn parameter_cache_is_bounded_exact_and_shared_with_local_eviction() {
+    let cache = ParameterEvaluationCache::<usize>::default();
+    assert!(cache.0.lock().unwrap().sets.is_empty());
+    cache.insert(0.0, 1);
+    cache.insert(-0.0, 2);
+    assert_eq!(cache.get(0.0), Some(1));
+    assert_eq!(cache.get(-0.0), Some(2));
+    cache.insert(0.0, 3);
+    assert_eq!(cache.clone().get(0.0), Some(3));
+
+    let set = parameter_cache_set(123.0_f64.to_bits());
+    let protected = (1..1000)
+        .map(|i| i as f64)
+        .find(|p| parameter_cache_set(p.to_bits()) != set)
+        .unwrap();
+    cache.insert(protected, 99);
+    let colliding = (1..10000)
+        .map(|i| i as f64)
+        .filter(|p| parameter_cache_set(p.to_bits()) == set)
+        .take(PARAMETER_CACHE_WAYS * 3)
+        .collect::<Vec<_>>();
+    assert_eq!(colliding.len(), PARAMETER_CACHE_WAYS * 3);
+    for (index, parameter) in colliding.into_iter().enumerate() {
+        cache.insert(parameter, index);
+        assert_eq!(cache.get(parameter), Some(index));
+        assert_eq!(
+            cache.get(protected),
+            Some(99),
+            "eviction must not flush unrelated sets"
+        );
+    }
+    let entries = cache.0.lock().unwrap();
+    assert_eq!(entries.sets.len(), PARAMETER_CACHE_SETS);
+    assert!(
+        entries.sets.iter().flatten().count() <= 4,
+        "allocate only the sets used by these samples"
+    );
+}
+
+#[test]
+fn prepared_blend_sections_preserve_circular_and_ruled_differentials() {
+    let tolerance = ModelTolerance::default();
+    let guide: Curve2 = Line2::new(Point2::new(0.0, 0.0), Vec2::new(1.0, 0.0))
+        .unwrap()
+        .into();
+    let surface = EdgeBlendSurface3::new(
+        Line3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_z())
+            .unwrap()
+            .into(),
+        Plane3::new(
+            Point3::new(2.0, 0.0, 0.0),
+            Vec3::unit_z(),
+            Vec3::unit_y(),
+            tolerance,
+        )
+        .unwrap()
+        .into(),
+        Plane3::new(
+            Point3::new(0.0, 2.0, 0.0),
+            Vec3::unit_z(),
+            Vec3::unit_x(),
+            tolerance,
+        )
+        .unwrap()
+        .into(),
+        guide.clone(),
+        guide,
+        ParameterRange::new(0.0, 1.0).unwrap(),
+        2.0,
+        tolerance,
+    )
+    .unwrap();
+    let ruled = surface.clone().into_ruled();
+    let angle = std::f64::consts::FRAC_PI_2;
+    for u in [0.0, 0.3, 1.0] {
+        for v in [-0.2, 0.0, 0.25, 0.5, 1.0, 1.2] {
+            let value = surface.evaluate(u, v).unwrap();
+            let (sin, cos) = (v * angle).sin_cos();
+            assert!(value.point.distance(Point3::new(2.0 * cos, 2.0 * sin, u)) < 1e-12);
+            assert!((value.du - Vec3::unit_z()).magnitude() < 1e-12);
+            assert!(
+                (value.dv - Vec3::new(-2.0 * angle * sin, 2.0 * angle * cos, 0.0)).magnitude()
+                    < 1e-12
+            );
+            assert!(value.duu.magnitude() < 1e-8 && value.duv.magnitude() < 1e-8);
+            assert!(
+                (value.dvv + Vec3::new(cos, sin, 0.0) * (2.0 * angle * angle)).magnitude() < 1e-8
+            );
+            let (point, du, dv) = ruled.first_order(u, v).unwrap();
+            assert!(point.distance(Point3::new(2.0 * (1.0 - v), 2.0 * v, u)) < 1e-12);
+            assert_eq!(du, Vec3::unit_z());
+            assert_eq!(dv, Vec3::new(-2.0, 2.0, 0.0));
+        }
+    }
+}
+
+#[test]
+fn local_spline_jets_match_full_derivative_curves() {
+    for degree in [1, 2, 3, 5, 16, 20] {
+        for multiplicity in [1, degree, degree + 1] {
+            let mut knots = vec![0.0; degree + 1];
+            for knot in [0.07, 0.31, 0.52, 0.9] {
+                knots.extend(std::iter::repeat_n(knot, multiplicity));
+            }
+            knots.extend(std::iter::repeat_n(1.0, degree + 1));
+            check_jet(degree, knots);
+        }
+        // Unclamped endpoints have a different active span from the knot ends.
+        check_jet(
+            degree,
+            (0..degree * 3 + 8)
+                .map(|i| (i as f64 * 0.1).powi(2))
+                .collect(),
+        );
+    }
+}
+
+fn check_jet(degree: usize, knots: Vec<f64>) {
+    let count = knots.len() - degree - 1;
+    let controls = (0..count)
+        .map(|i| {
+            let weight = 0.5 + (i % 7) as f64 * 0.2;
+            Vec4::new(
+                (i as f64).sin() * weight,
+                (i as f64).cos() * weight,
+                i as f64 * weight,
+                weight,
+            )
+        })
+        .collect::<Vec<_>>();
+    let first = derivative_controls(degree, &knots, &controls).unwrap();
+    let second = derivative_controls(first.0, &first.1, &first.2);
+    let start = knots[degree];
+    let end = knots[count];
+    let parameters = knots
+        .iter()
+        .copied()
+        .filter(|t| *t >= start && *t <= end)
+        .chain((0..=100).map(|i| start + (end - start) * i as f64 / 100.0));
+    for t in parameters {
+        let mut accessed = 0;
+        let actual = homogeneous_curve_jet(degree, &knots, count, t, |i| {
+            accessed += 1;
+            controls[i]
+        });
+        assert_eq!(
+            accessed,
+            degree + 1,
+            "work must be independent of the control count"
+        );
+        let expected = [
+            de_boor_vec4(degree, &knots, &controls, t).unwrap(),
+            de_boor_vec4(first.0, &first.1, &first.2, t).unwrap(),
+            second
+                .as_ref()
+                .map(|(d, k, c)| de_boor_vec4(*d, k, c, t).unwrap())
+                .unwrap_or(Vec4::zero()),
+        ];
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!(
+                (actual - expected).magnitude() <= expected.magnitude().max(1.0) * 1e-11,
+                "degree {degree}, parameter {t}: {actual:?} != {expected:?}"
+            );
+        }
+        let actual2 = homogeneous_curve_jet(degree, &knots, count, t, |i| {
+            Vec3::new(controls[i].x, controls[i].y, controls[i].w)
+        });
+        for (actual, expected) in actual2.into_iter().zip(expected) {
+            let expected = Vec3::new(expected.x, expected.y, expected.w);
+            assert!((actual - expected).magnitude() <= expected.magnitude().max(1.0) * 1e-11);
+        }
+    }
+}

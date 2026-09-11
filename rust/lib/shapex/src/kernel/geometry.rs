@@ -7,6 +7,10 @@ use super::{
     ParameterRange,
 };
 
+#[cfg(test)]
+#[path = "geometry_tests.rs"]
+mod tests;
+
 fn finite_point(point: Point3) -> bool {
     point.x.is_finite() && point.y.is_finite() && point.z.is_finite()
 }
@@ -325,28 +329,29 @@ impl NurbsCurve2 {
             )));
         }
         let parameter = parameter.clamp(start, end);
-        let controls = self.homogeneous_controls();
-        let value = de_boor_vec3(self.degree, &self.knots, &controls, parameter)?;
+        let [value, first, second] = homogeneous_curve_jet(
+            self.degree,
+            &self.knots,
+            self.control_points.len(),
+            parameter,
+            |index| {
+                let point = self.control_points[index];
+                let weight = self.weights[index];
+                Vec3::new(point.x * weight, point.y * weight, weight)
+            },
+        );
+        if ![value, first, second].into_iter().all(finite_vector) {
+            return Err(KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                "2D NURBS evaluation produced a non-finite value",
+            ));
+        }
         if value.z == 0.0 {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
                 "2D NURBS has zero homogeneous weight",
             ));
         }
-        let first_curve = derivative_controls3(self.degree, &self.knots, &controls);
-        let first = if let Some((degree, knots, controls)) = first_curve.as_ref() {
-            de_boor_vec3(*degree, knots, controls, parameter)?
-        } else {
-            Vec3::new(0.0, 0.0, 0.0)
-        };
-        let second_curve = first_curve
-            .as_ref()
-            .and_then(|(degree, knots, controls)| derivative_controls3(*degree, knots, controls));
-        let second = if let Some((degree, knots, controls)) = second_curve.as_ref() {
-            de_boor_vec3(*degree, knots, controls, parameter)?
-        } else {
-            Vec3::new(0.0, 0.0, 0.0)
-        };
         let point_vector = value.truncate() / value.z;
         let first_derivative = (first.truncate() - point_vector * first.z) / value.z;
         let second_derivative =
@@ -976,21 +981,6 @@ impl NurbsCurve3 {
         }
     }
 
-    fn homogeneous_controls(&self) -> Vec<Vec4> {
-        self.control_points
-            .iter()
-            .zip(&self.weights)
-            .map(|(point, weight)| {
-                Vec4::new(
-                    point.x * weight,
-                    point.y * weight,
-                    point.z * weight,
-                    *weight,
-                )
-            })
-            .collect()
-    }
-
     fn evaluate(&self, parameter: f64) -> KernelResult<CurveEvaluation> {
         if !parameter.is_finite() {
             return Err(invalid("curve parameter must be finite"));
@@ -1007,28 +997,31 @@ impl NurbsCurve3 {
             )));
         }
         let parameter = parameter.clamp(domain_start, domain_end);
-        let controls = self.homogeneous_controls();
-        let value = de_boor_vec4(self.degree, &self.knots, &controls, parameter)?;
+        let [value, first, second] = homogeneous_curve_jet(
+            self.degree,
+            &self.knots,
+            self.control_points.len(),
+            parameter,
+            |index| {
+                let point = self.control_points[index];
+                let weight = self.weights[index];
+                Vec4::new(point.x * weight, point.y * weight, point.z * weight, weight)
+            },
+        );
+        if ![value, first, second].into_iter().all(|v| {
+            v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && v.w.is_finite()
+        }) {
+            return Err(KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                "NURBS evaluation produced a non-finite value",
+            ));
+        }
         if value.w == 0.0 {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
                 "NURBS has zero homogeneous weight",
             ));
         }
-        let first_curve = derivative_controls(self.degree, &self.knots, &controls);
-        let first = if let Some((degree, knots, controls)) = first_curve.as_ref() {
-            de_boor_vec4(*degree, knots, controls, parameter)?
-        } else {
-            Vec4::new(0.0, 0.0, 0.0, 0.0)
-        };
-        let second_curve = first_curve
-            .as_ref()
-            .and_then(|(degree, knots, controls)| derivative_controls(*degree, knots, controls));
-        let second = if let Some((degree, knots, controls)) = second_curve.as_ref() {
-            de_boor_vec4(*degree, knots, controls, parameter)?
-        } else {
-            Vec4::new(0.0, 0.0, 0.0, 0.0)
-        };
 
         let point_vector = value.truncate() / value.w;
         let first_derivative = (first.truncate() - point_vector * first.w) / value.w;
@@ -1184,6 +1177,65 @@ fn find_span(degree: usize, knots: &[f64], control_count: usize, parameter: f64)
         middle = (low + high) / 2;
     }
     middle
+}
+
+/// Evaluate a homogeneous curve and its first two derivatives on the active
+/// knot span. Only degree + 1 controls can contribute at a parameter; building
+/// whole derivative curves here makes every sample linear in model size.
+/// The same local evaluator serves rational 2D trims and 3D geometry. Common
+/// degrees use stack storage; arbitrary higher degrees remain supported.
+fn homogeneous_curve_jet<V: cgmath::VectorSpace<Scalar = f64>>(
+    degree: usize,
+    knots: &[f64],
+    control_count: usize,
+    parameter: f64,
+    mut control: impl FnMut(usize) -> V,
+) -> [V; 3] {
+    let span = find_span(degree, knots, control_count, parameter);
+    let first = span - degree;
+    let mut knots = &knots[first..first + 2 * degree + 2];
+    let count = degree + 1;
+    let mut stack = [V::zero(); 32];
+    let mut spill = Vec::new();
+    let storage = if count <= 16 {
+        &mut stack[..count * 2]
+    } else {
+        spill.resize(count * 2, V::zero());
+        spill.as_mut_slice()
+    };
+    let (controls, values) = storage.split_at_mut(count);
+    for (index, value) in controls.iter_mut().enumerate() {
+        *value = control(first + index);
+    }
+    let mut jet = [V::zero(); 3];
+    for (order, result) in jet.iter_mut().enumerate().take(degree.min(2) + 1) {
+        let current_degree = degree - order;
+        values[..=current_degree].copy_from_slice(&controls[..=current_degree]);
+        for level in 1..=current_degree {
+            for j in (level..=current_degree).rev() {
+                let denominator = knots[j + current_degree + 1 - level] - knots[j];
+                values[j] = if denominator == 0.0 {
+                    values[j - 1]
+                } else {
+                    let alpha = (parameter - knots[j]) / denominator;
+                    values[j - 1] * (1.0 - alpha) + values[j] * alpha
+                };
+            }
+        }
+        *result = values[current_degree];
+        if order < 2 && current_degree > 0 {
+            for j in 0..current_degree {
+                let denominator = knots[j + current_degree + 1] - knots[j + 1];
+                controls[j] = if denominator == 0.0 {
+                    V::zero()
+                } else {
+                    (controls[j + 1] - controls[j]) * (current_degree as f64 / denominator)
+                };
+            }
+            knots = &knots[1..knots.len() - 1];
+        }
+    }
+    jet
 }
 
 fn de_boor_vec4(
@@ -1423,8 +1475,37 @@ type IntersectionEvaluation = ([f64; 4], Option<[f64; 4]>);
 
 #[derive(Clone)]
 struct ParameterEvaluationCache<T>(
-    std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, T>>>,
+    std::sync::Arc<std::sync::Mutex<ParameterCacheEntries<T>>>,
 );
+
+const PARAMETER_CACHE_SETS: usize = 128;
+const PARAMETER_CACHE_WAYS: usize = 4;
+
+/// Small set-associative cache: constant lookup cost, no per-entry allocation,
+/// and local eviction instead of periodically discarding every reusable value.
+/// Storage is allocated only on the first successful evaluation.
+struct ParameterCacheEntries<T> {
+    sets: Vec<Option<Box<ParameterCacheSet<T>>>>,
+}
+
+struct ParameterCacheSet<T> {
+    slots: [Option<(u64, T)>; PARAMETER_CACHE_WAYS],
+    next: usize,
+}
+
+impl<T> Default for ParameterCacheEntries<T> {
+    fn default() -> Self {
+        Self { sets: Vec::new() }
+    }
+}
+
+fn parameter_cache_set(mut bits: u64) -> usize {
+    // Avalanche both the exponent and mantissa. Neighboring floating-point
+    // samples often differ only in their low bits, or share many trailing zeros.
+    bits = (bits ^ (bits >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    bits = (bits ^ (bits >> 27)).wrapping_mul(0x94d049bb133111eb);
+    ((bits ^ (bits >> 31)) as usize) & (PARAMETER_CACHE_SETS - 1)
+}
 
 impl<T> Default for ParameterEvaluationCache<T> {
     fn default() -> Self {
@@ -1443,14 +1524,39 @@ impl<T> PartialEq for ParameterEvaluationCache<T> {
 }
 impl<T: Copy> ParameterEvaluationCache<T> {
     fn get(&self, parameter: f64) -> Option<T> {
-        self.0.lock().ok()?.get(&parameter.to_bits()).copied()
+        let entries = self.0.lock().ok()?;
+        let bits = parameter.to_bits();
+        entries.sets.get(parameter_cache_set(bits))?.as_ref()?
+            .slots
+            .iter()
+            .flatten()
+            .find(|(key, _)| *key == bits)
+            .map(|(_, value)| *value)
     }
     fn insert(&self, parameter: f64, value: T) {
         if let Ok(mut entries) = self.0.lock() {
-            if entries.len() >= 512 && !entries.contains_key(&parameter.to_bits()) {
-                entries.clear();
+            if entries.sets.is_empty() {
+                entries.sets.resize_with(PARAMETER_CACHE_SETS, || None);
             }
-            entries.insert(parameter.to_bits(), value);
+            let bits = parameter.to_bits();
+            // Most newly created supports are sampled at only a few parameters.
+            // Allocate four entries at a time instead of reserving 512 large
+            // differential records for every short-lived geometry object.
+            let set = entries.sets[parameter_cache_set(bits)].get_or_insert_with(|| {
+                Box::new(ParameterCacheSet {
+                    slots: [None; PARAMETER_CACHE_WAYS],
+                    next: 0,
+                })
+            });
+            if let Some(slot) = set.slots.iter_mut()
+                .find(|slot| slot.is_some_and(|(key, _)| key == bits))
+            {
+                *slot = Some((bits, value));
+                return;
+            }
+            let way = set.next;
+            set.slots[way] = Some((bits, value));
+            set.next = (way + 1) % PARAMETER_CACHE_WAYS;
         }
     }
 }
@@ -4047,7 +4153,24 @@ pub struct EdgeBlendSurface3 {
 struct BlendSection {
     first: (Point3, Vec3),
     second: (Point3, Vec3),
-    center: Option<(Point3, Vec3)>,
+    circular: Option<CircularBlendSection>,
+}
+
+/// Prepared differential data shared by every transverse sample of a section.
+/// Geometry validation and the circular frame depend on the rail parameter,
+/// not on the position across the fillet.
+#[derive(Clone, Copy)]
+struct CircularBlendSection {
+    center_point: Point3,
+    center_tangent: Vec3,
+    first_unit: Vec3,
+    second_unit: Vec3,
+    first_derivative: Vec3,
+    second_derivative: Vec3,
+    angle: f64,
+    sine: f64,
+    angle_cosine: f64,
+    angle_derivative: f64,
 }
 
 /// Circular-section compatibility name for the shared edge blend support.
@@ -4217,30 +4340,20 @@ impl EdgeBlendSurface3 {
         let section = BlendSection {
             first,
             second,
-            center,
+            circular: center
+                .map(|center| self.circular_section(first, second, center))
+                .transpose()?,
         };
         self.sections.insert(parameter, section);
         Ok(section)
     }
 
-    fn first_order(&self, parameter: f64, blend: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
-        if !self.center_range.contains(parameter, self.tolerance) || !blend.is_finite() {
-            return Err(invalid("rolling-ball parameter lies outside its domain"));
-        }
-        let BlendSection {
-            first,
-            second,
-            center,
-        } = self.section(parameter)?;
-        if self.ruled {
-            return Ok((
-                first.0 + (second.0 - first.0) * blend,
-                first.1 * (1.0 - blend) + second.1 * blend,
-                second.0 - first.0,
-            ));
-        }
-        let (center_point, center_tangent) =
-            center.expect("circular sections include their center");
+    fn circular_section(
+        &self,
+        first: (Point3, Vec3),
+        second: (Point3, Vec3),
+        (center_point, center_tangent): (Point3, Vec3),
+    ) -> KernelResult<CircularBlendSection> {
         let first_radial = first.0 - center_point;
         let second_radial = second.0 - center_point;
         let scale = center_point
@@ -4282,12 +4395,54 @@ impl EdgeBlendSurface3 {
         let cosine_derivative =
             first_derivative.dot(second_unit) + first_unit.dot(second_derivative);
         let angle_derivative = -cosine_derivative / sine;
+        Ok(CircularBlendSection {
+            center_point,
+            center_tangent,
+            first_unit,
+            second_unit,
+            first_derivative,
+            second_derivative,
+            angle,
+            sine,
+            angle_cosine: angle.cos(),
+            angle_derivative,
+        })
+    }
+
+    fn first_order(&self, parameter: f64, blend: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
+        if !self.center_range.contains(parameter, self.tolerance) || !blend.is_finite() {
+            return Err(invalid("rolling-ball parameter lies outside its domain"));
+        }
+        let BlendSection {
+            first,
+            second,
+            circular,
+        } = self.section(parameter)?;
+        if self.ruled {
+            return Ok((
+                first.0 + (second.0 - first.0) * blend,
+                first.1 * (1.0 - blend) + second.1 * blend,
+                second.0 - first.0,
+            ));
+        }
+        let CircularBlendSection {
+            center_point,
+            center_tangent,
+            first_unit,
+            second_unit,
+            first_derivative,
+            second_derivative,
+            angle,
+            sine,
+            angle_cosine,
+            angle_derivative,
+        } = circular.expect("circular sections include their prepared frame");
         let weight = |fraction: f64, fraction_derivative: f64| {
             let numerator = (fraction * angle).sin();
             let numerator_theta = fraction * (fraction * angle).cos();
             let value = numerator / sine;
             let theta_derivative =
-                (numerator_theta * sine - numerator * angle.cos()) / sine.powi(2);
+                (numerator_theta * sine - numerator * angle_cosine) / sine.powi(2);
             let blend_derivative = fraction_derivative * angle * (fraction * angle).cos() / sine;
             (value, theta_derivative, blend_derivative)
         };

@@ -304,6 +304,37 @@ impl Kernel {
             ));
         }
 
+        // Unwrapping makes each loop continuous, but its first coedge can
+        // still select a different periodic copy from the outer boundary.
+        // Place holes on the outer loop's sheet before planar triangulation.
+        let bounds_center = |ring: &[BoundaryVertex]| {
+            let mut min = Point2::new(f64::INFINITY, f64::INFINITY);
+            let mut max = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+            for vertex in ring {
+                min.x = min.x.min(vertex.uv.x);
+                min.y = min.y.min(vertex.uv.y);
+                max.x = max.x.max(vertex.uv.x);
+                max.y = max.y.max(vertex.uv.y);
+            }
+            Point2::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5)
+        };
+        let outer_center = bounds_center(&rings[0]);
+        let domains = tessellation_surface.domains();
+        for ring in rings.iter_mut().skip(1) {
+            let center = bounds_center(ring);
+            let offset = crate::Vec2::new(
+                domains[0]
+                    .period
+                    .map_or(0.0, |p| ((outer_center.x - center.x) / p).round() * p),
+                domains[1]
+                    .period
+                    .map_or(0.0, |p| ((outer_center.y - center.y) / p).round() * p),
+            );
+            for vertex in ring {
+                vertex.uv += offset;
+            }
+        }
+
         let mut flat_uv = Vec::new();
         let mut uvs = Vec::new();
         let mut positions = Vec::new();
@@ -1676,6 +1707,69 @@ fn sample_interval(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn periodic_hole_mesh_is_independent_of_its_parameter_sheet() {
+        use super::super::{Plane3, Profile, TrimmedCurve2, Wire2};
+        let tolerance = ModelTolerance::default();
+        let circle = |radius| {
+            Profile::new(
+                Wire2::new(
+                    [TrimmedCurve2::circle(Point2::new(0.0, 0.0), radius).unwrap()],
+                    tolerance,
+                ).unwrap(),
+                [],
+                tolerance,
+            ).unwrap()
+        };
+        let body = circle(10.0)
+            .extrude(Plane3::xy(), Vec3::unit_z() * 20.0)
+            .unwrap();
+        let cutter = circle(2.0)
+            .extrude(
+                Plane3::new(
+                    Point3::new(-15.0, 0.0, 10.0),
+                    Vec3::unit_y(),
+                    Vec3::unit_z(),
+                    tolerance,
+                ).unwrap(),
+                Vec3::unit_x() * 30.0,
+            ).unwrap();
+        let cut = body.difference(&cutter).unwrap();
+        let kernel = Kernel { tolerance, topology: cut.topology().clone() };
+        let (face_id, face) = kernel.topology.faces().find(|(_, face)| {
+            face.surface().domains()[0].period.is_some()
+                && face.loops().iter().any(|id| kernel.topology.loop_(*id).unwrap().kind() == super::super::LoopKind::Inner)
+        }).expect("cylindrical face with a hole");
+        let options = TessellationOptions::new(0.1, 0.1, 24).unwrap();
+        let area = |mesh: &TriangleMesh| mesh.triangles.iter().map(|triangle| {
+            let [a, b, c] = triangle.map(|index| mesh.positions[index]);
+            (b - a).cross(c - a).magnitude() * 0.5
+        }).sum::<f64>();
+        let expected = area(&kernel.tessellate_face(face_id, options).unwrap());
+        let period = face.surface().domains()[0].period.unwrap();
+        for turns in [-2.0, -1.0, 1.0, 2.0] {
+            let mut shifted = Kernel { tolerance, topology: kernel.topology.clone() };
+            for loop_id in face.loops() {
+                if kernel.topology.loop_(*loop_id).unwrap().kind() != super::super::LoopKind::Inner {
+                    continue;
+                }
+                for id in kernel.topology.loop_coedges(*loop_id).unwrap() {
+                    let coedge = shifted.topology.coedges.get_mut(id).unwrap();
+                    coedge.pcurve = super::super::boolean::translate_pcurve(
+                        &coedge.pcurve,
+                        crate::Vec2::new(turns * period, 0.0),
+                        tolerance,
+                    ).unwrap();
+                }
+            }
+            let actual = area(&shifted.tessellate_face(face_id, options).unwrap());
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "hole must remain open after a {turns}-period chart shift: {actual} vs {expected}"
+            );
+        }
+    }
 
     #[test]
     fn blend_strip_preserves_straight_and_curved_boundary_samples() {

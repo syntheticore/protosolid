@@ -177,12 +177,13 @@ export class Feature {
         this.document.top().findChild(this.componentId)
       const transform = component && worldTransform(component)
       const center = transform ? gizmo.center.clone().applyMatrix4(transform) : gizmo.center
+      const direction = transform ? gizmo.direction.clone().transformDirection(transform) : gizmo.direction
       if(this.distanceGizmo) {
         this.distanceGizmo().startPosition.copy(center)
         this.distanceGizmo().translationSnapOrigin.copy(center)
+        this.distanceGizmo().direction.copy(direction)
         this.distanceGizmo().set(gizmo.distance, gizmo.side)
       } else {
-        const direction = transform ? gizmo.direction.clone().transformDirection(transform) : gizmo.direction
         const distanceGizmo = markRaw(new LengthGizmo(center, direction, gizmo.distance, gizmo.side, gizmo.cb))
         this.distanceGizmo = () => distanceGizmo
         window.alcRenderer.addGizmo(distanceGizmo)
@@ -1592,7 +1593,7 @@ export class ExtrudeFeature extends Feature {
   }
 
   getGizmo() {
-    const profile = this.profiles()[0].getItem()
+    const profile = this.profiles().at(-1).getItem()
     const center = profile.center().clone().addScaledVector(profile.normal(), this.offset * (this.side == 'reverse' ? -1 : 1))
     return {
       distance: {
@@ -1799,10 +1800,15 @@ export class DraftFeature extends Feature {
 
   updateGizmos() {
     if(this.isComplete()) {
+      const center = this.faces().at(-1).getItem().center().clone()
+      const component = this.document.top().findChild(this.componentOccurrenceId) ||
+        this.document.top().findChild(this.componentId)
+      if(component) center.applyMatrix4(worldTransform(component))
       if(this.angleGizmo) {
+        this.angleGizmo.startPosition.copy(center)
+        this.angleGizmo.dummy.position.copy(center)
         this.angleGizmo.set(this.angle)
       } else {
-        const center = new THREE.Vector3()
         this.angleGizmo = markRaw(new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
           this.setExpression('angle', null)
           this.angle = angle
@@ -1898,7 +1904,7 @@ export class FilletFeature extends Feature {
   getGizmo() {
     return {
       distance: {
-        center: this.edges()[0].getItem().center(),
+        center: this.edges().at(-1).getItem().center(),
         direction: new THREE.Vector3(0,1,0),
         distance: this.radius,
         side: true,
@@ -1951,7 +1957,7 @@ export class ChamferFeature extends Feature {
   getGizmo() {
     return {
       distance: {
-        center: this.edges()[0].getItem().center(),
+        center: this.edges().at(-1).getItem().center(),
         direction: new THREE.Vector3(0,1,0),
         distance: this.distance,
         side: true,

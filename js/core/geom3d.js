@@ -236,11 +236,96 @@ export class Profile {
       face = transformGeometry(face, new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z)).Shape()
     }
     const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyQuaternion(rot))
-    let prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true) //XXX use BRepFeat_MakePrism to allow extrusion up to limit face
+    const prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true)
     // const args = new window.oc.oc.TopTools_ListOfShape_1()
     // args.Append_1(face)
     // const history = new window.oc.oc.BRepTools_History_2(args, prism)
     return this.makeCompound(componentId, prism.Shape(), 'extrude-' + featureId)
+  }
+
+  extrudeUpToFace(componentId, target, featureId, offset = 0) {
+    const oc = window.oc.oc
+    const fail = msg => { throw { type: 'error', msg } }
+    if(!target) fail('Select a face to extrude up to')
+
+    const direction = this.normal().normalize()
+    const origin = this.center()
+    const plane = target.getPlane()
+    if(plane) {
+      const normal = normalFromMatrix(plane)
+      const denominator = normal.dot(direction)
+      if(Math.abs(denominator) <= oc.Precision.Angular()) fail('The target plane is parallel to the extrusion direction')
+      // The location of the trimmed face is irrelevant: use the intersection
+      // with its underlying plane to choose the extrusion direction.
+      const distance = new THREE.Vector3().setFromMatrixPosition(plane).sub(origin).dot(normal) / denominator
+      if(distance < 0) direction.negate()
+    } else if(target.center().sub(origin).dot(direction) < 0) {
+      direction.negate()
+    }
+
+    // Work along local +Z with the offset start at the origin.
+    const frame = rotationFromNormal(direction).setPosition(origin.clone().addScaledVector(direction, offset))
+    const inverseFrame = frame.clone().invert()
+    const planeGeometry = plane && ocPlnFromMatrix(inverseFrame.clone().multiply(plane))
+    const planeBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(planeGeometry)
+    const targetTransform = !plane && transformGeometry(target.solid.geom(), inverseFrame)
+    const targetShape = planeBuilder ? planeBuilder.Face() : targetTransform.ModifiedShape(target.geom())
+    const baseTransform = transformGeometry(this.makeFace(), frame.clone().setPosition(origin).invert())
+    const base = baseTransform.Shape()
+    const prismDirection = ocDirFromVec(new THREE.Vector3(0, 0, 1))
+    const sketchFace = new oc.TopoDS_Face()
+    // Mode 2 returns just the extrusion; Feature applies the chosen Boolean.
+    // Curved limits need their owning solid as the basis for face selection.
+    const prism = new oc.BRepFeat_MakePrism_2(
+      targetTransform ? targetTransform.Shape() : base, base, sketchFace, prismDirection, 2, false,
+    )
+    const originals = this.rings.flatMap(ring => ring.segments)
+    try {
+      prism.Perform_2(targetShape)
+      if(!prism.IsDone()) fail('The selected face could not trim the extrusion')
+
+      const candidates = collectShapes(prism.Shape(), 'solid').filter(solid =>
+        collectShapes(solid, 'face').some(face => face.IsSame(base))
+      )
+      if(candidates.length != 1) fail(plane ?
+        'The target plane must lie entirely beyond the extrusion start' :
+        'The selected face must cover the entire extrusion beyond its start')
+
+      const result = new Compound(componentId, candidates[0])
+      if(result.center().z <= EPSILON) fail('The selected face is behind the extrusion start')
+      const solid = result.solids()[0]
+      const sources = collectShapes(base, 'edge').map((edge, index) => ({
+        id: '/extrude-' + featureId + '/swept/' + this.getBaseId(originals[index]),
+        edge,
+      }))
+      solid.faces().forEach(face => {
+        if(face.geom().IsSame(base)) {
+          face.id = '/extrude-' + featureId + '/bottom'
+          return
+        }
+        // Generated() can retain the untrimmed sides for curved limits.
+        // The unchanged base edges identify their actual adjacent side faces.
+        const edges = collectShapes(face.geom(), 'edge')
+        const source = sources.find(source => edges.some(edge => edge.IsSame(source.edge)))
+        face.id = source?.id || '/extrude-' + featureId + '/top'
+      })
+      const namesUsed = {}
+      solid.edges().forEach(edge => {
+        const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
+        namesUsed[name] = (namesUsed[name] || 0) + 1
+        edge.id = name + '/' + namesUsed[name]
+      })
+      if(!result.validate() || result.volume() <= EPSILON) fail('Up to face produced no valid extrusion volume')
+      return result.transform(frame)
+    } finally {
+      prism.delete()
+      sketchFace.delete()
+      prismDirection.delete()
+      if(planeBuilder) planeBuilder.delete()
+      if(planeGeometry) planeGeometry.delete()
+      if(targetTransform) targetTransform.delete()
+      baseTransform.delete()
+    }
   }
 
   revolve(componentId, axis, angle, featureId) {

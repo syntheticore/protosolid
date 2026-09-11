@@ -1521,6 +1521,14 @@ export class ExtrudeFeature extends Feature {
   static icon = 'layer-group'
   constructor(doc) {
     super(doc, true, 'Extrusion', {
+      extent: {
+        title: 'Extent',
+        type: 'select',
+        options: {
+          distance: { title: 'Distance', icon: 'ruler-vertical' },
+          face: { title: 'Up to face', icon: 'sign-in-alt' },
+        },
+      },
       profiles: {
         title: 'Profiles',
         type: 'profile',
@@ -1530,26 +1538,27 @@ export class ExtrudeFeature extends Feature {
         title: '(Axis)',
         type: 'axis',
         optional: true,
+        when: feature => feature.extent == 'distance',
       },
       distance: {
         title: 'Distance',
         type: 'length',
+        when: feature => feature.extent == 'distance',
+      },
+      limitFace: {
+        title: 'Up to face',
+        type: 'face',
+        when: feature => feature.extent == 'face',
       },
       offset: {
         title: 'Offset',
         type: 'length',
         allowNegative: true,
       },
-      // limit: {
-      //   type: 'OR',
-      //   settings: [
-      //     { title: 'Distance', type: 'length' },
-      //     { title: '(Up to)', type: 'surface|point' },
-      //   ]
-      // },
       side: {
         title: 'Side',
         type: 'select',
+        when: feature => feature.extent == 'distance',
         options: {
           forward: { title: 'Forward', icon: 'caret-up' },
           reverse: { title: 'Reverse', icon: 'caret-down' },
@@ -1558,6 +1567,8 @@ export class ExtrudeFeature extends Feature {
       },
     })
 
+    this.extent = 'distance'
+    this.limitFace = null
     this.profiles = null
     this.axis = null
     this.distance = 1.0
@@ -1569,6 +1580,7 @@ export class ExtrudeFeature extends Feature {
     // Preserve the direction of documents saved with the old boolean toggle.
     super.setValues({
       ...values,
+      extent: values.extent || 'distance',
       side: typeof values.side == 'boolean' ? (values.side ? 'forward' : 'reverse') : (values.side || 'forward'),
     })
   }
@@ -1579,20 +1591,23 @@ export class ExtrudeFeature extends Feature {
     const comp = tree.findChild(this.componentId)
 
     let tool = new Compound(this.componentId)
-    references.profiles.forEach(profile => {
-      try {
-        const extrusion = profile.extrude(this.componentId, distance, this.id, offset)
-        tool = tool.boolean(extrusion, 'join')
-      } catch(err) { this.error = err || this.error }
-    })
+    this.previewBody = null
     try {
+      for(const profile of references.profiles) {
+        const extrusion = this.extent == 'face' ?
+          profile.extrudeUpToFace(this.componentId, references.limitFace, this.id, this.offset) :
+          profile.extrude(this.componentId, distance, this.id, offset)
+        tool = tool.boolean(extrusion, 'join')
+      }
       comp.compound = comp.compound.boolean(tool, this.operation)
-    } catch(err) { this.error = err || this.error }
-
-    this.previewBody = tool
+      this.previewBody = tool
+    } catch(err) {
+      this.error = err?.msg ? err : { type: 'error', msg: 'Extrusion could not be created' }
+    }
   }
 
   getGizmo() {
+    if(this.extent == 'face') return
     const profile = this.profiles().at(-1).getItem()
     const center = profile.center().clone().addScaledVector(profile.normal(), this.offset * (this.side == 'reverse' ? -1 : 1))
     return {
@@ -1617,6 +1632,19 @@ export class ExtrudeFeature extends Feature {
     })
     this.profiles = () => newProfiles
     this.error = null
+  }
+
+  updateGizmos() {
+    if(this.extent == 'face') {
+      if(this.distanceGizmo) window.alcRenderer.removeGizmo(this.distanceGizmo())
+      this.distanceGizmo = null
+      return
+    }
+    super.updateGizmos()
+  }
+
+  preview() {
+    return this.isComplete() && this.error?.type != 'error' ? this.previewBody : null
   }
 }
 

@@ -84,7 +84,7 @@
             v-if="setting.type == 'select'"
             :items="setting.options"
             v-model:chosen="activeFeature[key]"
-            @update:chosen="update"
+            @update:chosen="updateSetting"
           )
 
           button.button.file-input(
@@ -629,6 +629,7 @@
       previewFeature: function() {
         const preview = this.activeFeature.preview()
         if(preview) this.bus.emit('preview-feature', preview, this.activeFeature.operation == 'cut')
+        else this.bus.emit('unpreview-feature')
       },
 
       confirm: function() {

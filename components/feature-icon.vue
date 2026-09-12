@@ -4,6 +4,7 @@
     :title="featureTitle"
     :class="featureStyle"
     :draggable="true"
+    :aria-disabled="document.isRegenerating"
     @dragstart="dragstart"
     @dragenter="dragenter"
     @dragleave="dragleave"
@@ -195,7 +196,11 @@
       openFeature() {
         if(!this.canEdit) return
         this.bus.emit('close-feature')
-        setTimeout(() => this.document.activateFeature(this.feature) )
+        setTimeout(async () => {
+          // Closing a temporary feature can itself enqueue regeneration.
+          await this.document.regenerationQueue
+          this.document.activateFeature(this.feature)
+        })
       },
 
       deleteFeature() {

@@ -504,6 +504,7 @@
         setTimeout(() => {
           if(tool.feature) {
             this.feature = new tool.feature(this.document)
+            this.document.creatingFeature = this.feature
             this.document.addFeature(this.feature)
 
           } else if(tool.action) {
@@ -527,6 +528,7 @@
       },
 
       closeFeature: function() {
+        this.document.creatingFeature = null
         this.feature = null
       },
 

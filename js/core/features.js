@@ -227,8 +227,13 @@ export class Feature {
 
   setValues(values) {
     Object.keys(values).forEach(key => {
+      const setting = this.settings[key]
+      // Ignore settings that are not supported by this version. This lets
+      // documents survive feature options being removed or renamed.
+      if(!setting) return
+
       const value = values[key]
-      this[key] = (value && this.isPickerSetting(this.settings[key]) ? () => value : value)
+      this[key] = (value && this.isPickerSetting(setting) ? () => value : value)
     })
   }
 
@@ -253,7 +258,9 @@ export class Feature {
     feature.componentId = dump.componentId
     feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     feature.setValues(dump.values)
-    feature.expressions = dump.expressions || {}
+    feature.expressions = Object.fromEntries(
+      Object.entries(dump.expressions || {}).filter(([key]) => feature.settings[key])
+    )
     return feature
   }
 }

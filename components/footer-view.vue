@@ -9,9 +9,17 @@
     //-   | Bring up actions
 
     transition(name="fade")
-      .selection-info.bordered(v-if="toast || document.selection.items.length")
+      .selection-info.bordered(v-if="calculation || toast || document.selection.items.length")
 
-        template(v-if="toast")
+        template(v-if="calculation")
+          div
+            span {{ calculation.title }}
+            span &nbsp;{{ calculation.detail }}
+          div(v-if="calculation.current && calculation.total")
+            span Feature
+            span {{ calculation.current }} / {{ calculation.total }}
+
+        template(v-else-if="toast")
           div
             span Rejected
             span.warn &nbsp;{{ toast }}
@@ -136,10 +144,19 @@
     data() {
       return{
         toast: null,
+        calculation: null,
       }
     },
 
     mounted() {
+      this.bus.on('calculation', (calculation) => {
+        this.calculation = calculation
+      })
+
+      this.bus.on('calculation-finished', (id) => {
+        if(this.calculation?.id == id) this.calculation = null
+      })
+      
       this.bus.on('toast', (msg) => {
         this.toast = msg
         setTimeout(() => this.toast = null, 5000)

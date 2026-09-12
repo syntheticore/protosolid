@@ -17,7 +17,7 @@
         fixed-width
       )
 
-      .box(:class="{ active: component === document.activeComponent, selected: document.selection.has(component) }")
+      .box(:class="{ active: component.id === document.activeComponent?.id, selected: document.selection.has(component) }")
 
         header
 

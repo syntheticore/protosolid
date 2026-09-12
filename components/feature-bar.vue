@@ -1,6 +1,9 @@
 <template lang="pug">
 
-  footer.feature-bar.bordered
+  footer.feature-bar.bordered(
+    :aria-busy="document.isRegenerating"
+    :class="{ calculating: document.isRegenerating }"
+  )
 
     nav.controls
 
@@ -76,6 +79,12 @@
     color: $bright2
     display: flex
     // align-items: center
+
+    &.calculating
+      pointer-events: none
+
+      :deep(*)
+        pointer-events: none !important
 
   .controls
     border-right: 1px solid $dark1

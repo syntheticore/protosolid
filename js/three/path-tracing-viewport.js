@@ -48,15 +48,6 @@ export default class PathTracingViewport {
     if(this.environment || !this.cubeEnvironment) return
 
     const cubeTexture = this.cubeEnvironment
-    // HDRCubeTextureLoader stores DataTexture objects as cube faces in this
-    // Three.js release. The converter expects dimensions directly on each
-    // face, so expose the nested image values before conversion.
-    cubeTexture.images.forEach(face => {
-      if(!face?.image) return
-      face.width = face.image.width
-      face.height = face.image.height
-    })
-
     const generator = new CubeToEquirectGenerator(this.renderer)
     this.environment = generator.generate(cubeTexture)
     generator._quad.material.dispose()
@@ -134,6 +125,7 @@ export default class PathTracingViewport {
       )
       mesh.matrixAutoUpdate = false
       mesh.matrix.copy(source.matrixWorld)
+      mesh.matrixWorldNeedsUpdate = true
       scene.add(mesh)
     })
     return scene
@@ -194,10 +186,7 @@ export default class PathTracingViewport {
   dispose() {
     this.stop()
     if(this.pathTracer) {
-      // three-gpu-pathtracer 0.0.23 has a typo in its public dispose method,
-      // so dispose the owned resources directly until the app upgrades Three.
-      this.pathTracer._quad.dispose()
-      this.pathTracer._pathTracer.dispose()
+      this.pathTracer.dispose()
       this.pathTracer._lowResPathTracer.dispose()
       this.pathTracer._internalBackground?.dispose()
       this.pathTracer._colorBackground?.dispose()

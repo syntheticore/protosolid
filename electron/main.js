@@ -258,6 +258,7 @@ function openPreferencesWindow() {
   }
 
   preferencesWindow = new BrowserWindow({
+    parent: mainWindow,
     width: 760,
     height: 560,
     minWidth: 680,
@@ -265,13 +266,14 @@ function openPreferencesWindow() {
     title: 'Settings',
     backgroundColor: '#1c2127',
     show: false,
-    frame: true,
-    titleBarStyle: isMac ? 'hiddenInset' : 'default',
+    frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       scrollBounce: true,
     },
   })
+
+  preferencesWindow.setMenu(null)
 
   preferencesWindow.loadFile('app/index.html', {
     query: { window: 'preferences' },
@@ -418,6 +420,13 @@ ipcMain.on('restart', function() {
 });
 
 ipcMain.on('open-preferences', openPreferencesWindow)
+
+ipcMain.on('close-preferences', function(event) {
+  if(preferencesWindow && !preferencesWindow.isDestroyed()
+    && preferencesWindow.webContents.id === event.sender.id) {
+    preferencesWindow.close()
+  }
+})
 
 ipcMain.on('preferences-updated', function(event, preferences) {
   BrowserWindow.getAllWindows().forEach(window => {

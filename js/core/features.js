@@ -1527,6 +1527,7 @@ export class ExtrudeFeature extends Feature {
         options: {
           distance: { title: 'Distance', icon: 'ruler-vertical' },
           face: { title: 'Up to face', icon: 'sign-in-alt' },
+          through: { title: 'Through all', icon: 'infinity' },
         },
       },
       profiles: {
@@ -1554,15 +1555,16 @@ export class ExtrudeFeature extends Feature {
         title: 'Offset',
         type: 'length',
         allowNegative: true,
+        when: feature => feature.extent != 'through',
       },
       side: {
         title: 'Side',
         type: 'select',
-        when: feature => feature.extent == 'distance',
+        when: feature => feature.extent != 'face',
         options: {
           forward: { title: 'Forward', icon: 'caret-up' },
           reverse: { title: 'Reverse', icon: 'caret-down' },
-          both: { title: 'Both directions (distance per side)', icon: 'arrows-alt-v' },
+          both: { title: 'Both directions', icon: 'arrows-alt-v' },
         },
       },
     })
@@ -1596,7 +1598,9 @@ export class ExtrudeFeature extends Feature {
       for(const profile of references.profiles) {
         const extrusion = this.extent == 'face' ?
           profile.extrudeUpToFace(this.componentId, references.limitFace, this.id, this.offset) :
-          profile.extrude(this.componentId, distance, this.id, offset)
+          this.extent == 'through' ?
+            profile.extrudeThroughAll(this.componentId, comp.compound, this.id, this.side) :
+            profile.extrude(this.componentId, distance, this.id, offset)
         tool = tool.boolean(extrusion, 'join', this.id)
       }
       comp.compound = comp.compound.boolean(tool, this.operation, this.id)
@@ -1607,7 +1611,7 @@ export class ExtrudeFeature extends Feature {
   }
 
   getGizmo() {
-    if(this.extent == 'face') return
+    if(this.extent != 'distance') return
     const profile = this.profiles().at(-1).getItem()
     const center = profile.center().clone().addScaledVector(profile.normal(), this.offset * (this.side == 'reverse' ? -1 : 1))
     return {
@@ -1635,7 +1639,7 @@ export class ExtrudeFeature extends Feature {
   }
 
   updateGizmos() {
-    if(this.extent == 'face') {
+    if(this.extent != 'distance') {
       if(this.distanceGizmo) window.alcRenderer.removeGizmo(this.distanceGizmo())
       this.distanceGizmo = null
       return

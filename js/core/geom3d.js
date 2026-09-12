@@ -5,6 +5,8 @@ import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarR
 import { makeID } from './id.js'
 import { Line } from './geom2d.js'
 import { ShapexGeometry } from '../kernels/shapex.js'
+import Expression from './expression.js'
+import preferences from '../preferences.js'
 import {
   arrayRange,
   rotationFromNormal,
@@ -24,6 +26,38 @@ import {
   transformGeometry,
   EPSILON,
 } from './utils.js'
+
+const DEFAULT_TESSELLATION_TOLERANCE = 0.4
+const DEFAULT_ANGULAR_TESSELLATION_TOLERANCE = 0.2
+const EDGE_LINEAR_TESSELLATION_RATIO = 0.25
+const EDGE_ANGULAR_TESSELLATION_RATIO = 0.5
+
+export function getViewportTessellationTolerance() {
+  try {
+    const tolerance = new Expression(preferences.tessellationTolerance).getBase()
+    return Number.isFinite(tolerance) && tolerance > 0
+      ? tolerance
+      : DEFAULT_TESSELLATION_TOLERANCE
+  } catch(_) {
+    return DEFAULT_TESSELLATION_TOLERANCE
+  }
+}
+
+export function getViewportAngularTessellationTolerance() {
+  try {
+    const degrees = new Expression(
+      preferences.tessellationAngularTolerance,
+      [],
+      'angle',
+    ).getBase()
+    const tolerance = THREE.MathUtils.degToRad(degrees)
+    return Number.isFinite(tolerance) && tolerance > 0
+      ? tolerance
+      : DEFAULT_ANGULAR_TESSELLATION_TOLERANCE
+  } catch(_) {
+    return DEFAULT_ANGULAR_TESSELLATION_TOLERANCE
+  }
+}
 
 
 export class Wire {
@@ -250,6 +284,91 @@ export class Profile {
     // args.Append_1(face)
     // const history = new window.oc.oc.BRepTools_History_2(args, prism)
     return this.makeCompound(componentId, prism.Shape(), 'extrude-' + featureId)
+  }
+
+  extrudeThroughAll(componentId, support, featureId, side = 'forward') {
+    const oc = window.oc.oc
+    const fail = msg => { throw { type: 'error', msg } }
+    if(!support?.geom || !support.solids().length) fail('Through all requires an existing body')
+
+    const profileDirection = this.normal().normalize()
+    const extrudeSide = sign => {
+      const base = this.makeFace()
+      const directionVector = profileDirection.clone().multiplyScalar(sign)
+      const direction = ocDirFromVec(directionVector)
+      const sketchFace = new oc.TopoDS_Face()
+      // Ask OpenCascade to cut the support directly. Its feature-only mode can
+      // report success while returning no solid when the profile belongs to a
+      // detached sketch, so recover the exact swept tool as the material that
+      // the direct cut removed from the support.
+      const prism = new oc.BRepFeat_MakePrism_2(
+        support.geom(), base, sketchFace, direction, 0, false,
+      )
+      try {
+        prism.PerformUntilEnd()
+        if(!prism.IsDone()) return
+
+        const remainder = new Compound(componentId, prism.Shape())
+        const result = support.boolean(remainder, 'cut')
+        if(!result.solids().length || result.volume() <= EPSILON) return
+
+        const baseFace = new Face(null, oc.TopoDS.Face_1(base))
+        const baseCenter = baseFace.center()
+        const baseArea = baseFace.area()
+        const isBase = face => {
+          if(face.IsSame(base)) return true
+          const candidate = new Face(null, oc.TopoDS.Face_1(face))
+          return candidate.center().distanceTo(baseCenter) <= EPSILON &&
+            Math.abs(candidate.area() - baseArea) <= EPSILON * Math.max(1, baseArea)
+        }
+        const sharesSurface = (a, b) => {
+          const first = oc.BRep_Tool.Surface_2(oc.TopoDS.Face_1(a))
+          const second = oc.BRep_Tool.Surface_2(oc.TopoDS.Face_1(b))
+          try { return first.get().isAliasOf(second.get()) }
+          finally { first.delete(); second.delete() }
+        }
+        const originals = this.rings.flatMap(ring => ring.segments)
+        const sources = collectShapes(base, 'edge').map((edge, index) => ({
+          id: '/extrude-' + featureId + '/swept/' + this.getBaseId(originals[index]),
+          generated: arrayFromOcList(prism.Generated(edge)),
+        }))
+        const origin = this.center()
+        const faceNamesUsed = {}
+        result.solids().forEach(solid => {
+          solid.faces().forEach(face => {
+            const source = sources.find(source =>
+              source.generated.some(generated => sharesSurface(face.geom(), generated))
+            )
+            const cap = isBase(face.geom()) ? (sign > 0 ? 'bottom' : 'top') :
+              (face.center().sub(origin).dot(profileDirection) < 0 ? 'bottom' : 'top')
+            const name = source?.id || '/extrude-' + featureId + '/' + cap
+            faceNamesUsed[name] = (faceNamesUsed[name] || 0) + 1
+            face.id = name + (faceNamesUsed[name] > 1 ? '/' + faceNamesUsed[name] : '')
+          })
+        })
+
+        const edgeNamesUsed = {}
+        result.solids().flatMap(solid => solid.edges()).forEach(edge => {
+          const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
+          edgeNamesUsed[name] = (edgeNamesUsed[name] || 0) + 1
+          edge.id = name + '/' + edgeNamesUsed[name]
+        })
+        return result
+      } finally {
+        prism.delete()
+        sketchFace.delete()
+        direction.delete()
+      }
+    }
+
+    const signs = side == 'both' ? [1, -1] : [side == 'reverse' ? -1 : 1]
+    const halves = signs.map(extrudeSide).filter(Boolean)
+    if(!halves.length) fail('Through all does not intersect an existing body in the selected direction')
+    const result = halves.slice(1).reduce((combined, half) => combined.boolean(half, 'join'), halves[0]).repair()
+    if(!result.solids().length || !result.validate() || result.volume() <= EPSILON) {
+      fail('Through all produced no valid extrusion volume')
+    }
+    return result
   }
 
   extrudeUpToFace(componentId, target, featureId, offset = 0) {
@@ -762,9 +881,9 @@ export class Shape {
 
     new window.oc.oc.BRepMesh_IncrementalMesh_2(
       geom,
-      0.4, // linear deflection
+      getViewportTessellationTolerance(), // linear deflection
       false,
-      0.2, // angular deflection
+      getViewportAngularTessellationTolerance(),
       false
     )
 
@@ -1785,8 +1904,8 @@ function meshAreaAndCenter(mesh) {
 
 function tesselateCurve(geom) {
   const deflection = new window.oc.oc.GCPnts_TangentialDeflection_2(geom,
-    0.1, // curvature deflection
-    0.1, // angular deflection
+    getViewportAngularTessellationTolerance() * EDGE_ANGULAR_TESSELLATION_RATIO,
+    getViewportTessellationTolerance() * EDGE_LINEAR_TESSELLATION_RATIO,
     2, // min points
     1.0e-9, 1.0e-7
   )

@@ -83,6 +83,7 @@ export class TransformGizmo extends THREE.Object3D {
 
   dispose() {
     this.controls.forEach(control => control.dispose())
+    super.dispose()
   }
 }
 

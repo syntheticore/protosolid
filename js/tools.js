@@ -19,6 +19,7 @@ import {
 import {
   Edge,
   Solid,
+  getViewportTessellationTolerance,
 } from './core/geom3d.js'
 import { PlaneHelper, PointHelper } from './core/helpers.js'
 
@@ -433,9 +434,8 @@ export class InterferenceTool extends Tool {
           .applyMatrix4(transform)
       )
     }
-    // Tessellation is generated with a 0.4 linear deflection. Expanding by
-    // that amount keeps this broad-phase check conservative around curves.
-    return bounds.expandByScalar(0.4)
+    // Keep this broad-phase check conservative around tessellated curves.
+    return bounds.expandByScalar(getViewportTessellationTolerance())
   }
 
   worldCompound(part) {

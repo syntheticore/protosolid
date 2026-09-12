@@ -588,6 +588,8 @@ class TransformControls extends Object3D {
 
   dispose() {
 
+    super.dispose();
+
     this.domElement.removeEventListener( 'pointerdown', this._onPointerDown );
     this.domElement.removeEventListener( 'pointermove', this._onPointerHover );
     this.domElement.ownerDocument.removeEventListener( 'pointermove', this._onPointerMove );

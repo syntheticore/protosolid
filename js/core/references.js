@@ -82,17 +82,26 @@ class TopoReference extends Reference {
   static undump(dump) {
     return new this(null, dump.componentId, dump.solidId, dump.topoId)
   }
+
+  updateTopology(tree, collection, label) {
+    const solids = tree.findChild(this.componentId)?.compound?.solids() || []
+    const preferred = solids.find(solid => solid.id == this.solidId)
+    let item = preferred?.[collection]().find(item => item.isSame(this.topoId))
+    if(!item) {
+      // Solid IDs encode their position in the compound. Deleting an unrelated
+      // body can change that position while the topology's stable name survives.
+      const matches = solids.filter(solid => solid !== preferred)
+        .flatMap(solid => solid[collection]().filter(item => item.isSame(this.topoId)))
+      if(matches.length == 1) item = matches[0]
+    }
+    this.item = item || null
+    if(!item) return { type: 'error', msg: `${label} reference was lost` }
+  }
 }
 
 export class FaceReference extends TopoReference {
   update(tree) {
-    const comp = tree.findChild(this.componentId)
-    const solid = comp.compound.solids().find(solid => solid.id == this.solidId )
-    const error = { type: 'error', msg: "Face reference was lost" }
-    if(!solid) return error
-    const face = solid.faces().find(face => face.isSame(this.topoId) )
-    if(!face) return error
-    this.item = face
+    return this.updateTopology(tree, 'faces', 'Face')
   }
 }
 Serialize.register(FaceReference, 'FaceReference')
@@ -100,18 +109,13 @@ Serialize.register(FaceReference, 'FaceReference')
 
 export class EdgeReference extends TopoReference {
   update(tree) {
-    const comp = tree.findChild(this.componentId)
-    const solid = comp.compound.solids().find(solid => solid.id == this.solidId )
-
     // const labelMap = new window.oc.oc.TDF_LabelMap_1()
     // this.selector.Solve(labelMap)
     // const ns = this.selector.NamedShape().get()
     // const shape = ns.Get()
-
-    const edge = solid.edges().find(edge => edge.isSame(this.topoId) )
     // const edge = solid.edges().find(edge => edge.geom().IsSame(shape) )
-    if(!edge) return { type: 'error', msg: "Edge reference was lost" }
-    this.item = edge
+
+    return this.updateTopology(tree, 'edges', 'Edge')
   }
 }
 Serialize.register(EdgeReference, 'EdgeReference')

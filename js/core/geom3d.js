@@ -328,9 +328,13 @@ export class Profile {
     }
   }
 
-  revolve(componentId, axis, angle, featureId) {
+  revolve(componentId, axis, angle, featureId, offset = 0) {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
-    const face = this.makeFace()
+    let face = this.makeFace()
+    if(offset) {
+      const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(offset)).multiply(axis.clone().invert())
+      face = transformGeometry(face, turn).Shape()
+    }
     const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
 
@@ -348,7 +352,7 @@ export class Profile {
     return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId, originals)
   }
 
-  revolveUpToFace(componentId, axis, target, featureId, forward = true) {
+  revolveUpToFace(componentId, axis, target, featureId, forward = true, from = null) {
     const oc = window.oc.oc
     const fail = msg => { throw { type: 'error', msg } }
     if(!target) fail('Select a face to revolve up to')
@@ -411,6 +415,9 @@ export class Profile {
     const planeBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(planeGeometry)
     const targetTransform = !plane && transformGeometry(target.solid.geom(), inverseAxis)
     const targetShape = planeBuilder ? planeBuilder.Face() : targetTransform.ModifiedShape(target.geom())
+    const fromTransform = from && (from.solid.geom().IsSame(target.solid.geom()) ? targetTransform :
+      transformGeometry(from.solid.geom(), inverseAxis))
+    const fromShape = fromTransform && fromTransform.ModifiedShape(from.geom())
     const baseTransform = transformGeometry(this.makeFace(), inverseAxis)
     const base = baseTransform.Shape()
     const startPlane = plane && ocPlnFromMatrix(localStart)
@@ -418,14 +425,18 @@ export class Profile {
     const startShape = startBuilder ? startBuilder.Face() : base
     const rotationAxis = ocAx1FromMatrix(new THREE.Matrix4())
     const sketchFace = new oc.TopoDS_Face()
+    const support = fromTransform && fromTransform != targetTransform ? new Compound(componentId, targetTransform.Shape())
+      .merge([new Compound(componentId, fromTransform.Shape())]).geom() :
+      targetTransform ? targetTransform.Shape() : base
     // Return the revolved tool only; the feature applies Join/Cut/Intersect.
     const revolution = new oc.BRepFeat_MakeRevol_2(
-      targetTransform ? targetTransform.Shape() : base, base, sketchFace, rotationAxis, 2, false,
+      support, base, sketchFace, rotationAxis, 2, false,
     )
     try {
       // The single-limit planar path in this kernel ignores feature-only mode.
       // The two-plane overload honors it and avoids adding the target body.
-      if(plane) revolution.Perform_3(startShape, targetShape)
+      if(fromShape) revolution.Perform_3(fromShape, targetShape)
+      else if(plane) revolution.Perform_3(startShape, targetShape)
       else revolution.Perform_2(targetShape)
       if(!revolution.IsDone()) fail('The selected face could not trim the revolution')
 
@@ -439,6 +450,7 @@ export class Profile {
         finally { first.delete(); second.delete() }
       }
       const isStart = face => {
+        if(fromShape) return sharesSurface(face, fromShape)
         if(face.IsSame(base)) return true
         if(!plane) return false
         const cap = new Face(null, face)
@@ -447,10 +459,14 @@ export class Profile {
         return cap.center().distanceTo(baseCenter) <= EPSILON &&
           Math.abs(cap.area() - baseArea) <= EPSILON * Math.max(1, baseArea)
       }
-      const candidates = collectShapes(revolution.Shape(), 'solid').filter(solid =>
-        collectShapes(solid, 'face').some(isStart)
-      )
-      if(candidates.length != 1) fail('The selected face must cap the entire profile along the revolution')
+      // The two-limit builder can also return pieces outside the limits.
+      // Keep only a solid with a cap on each selected surface.
+      const candidates = collectShapes(revolution.Shape(), 'solid').filter(solid => {
+        const faces = collectShapes(solid, 'face')
+        return faces.some(isStart) && (!fromShape || faces.some(face => sharesSurface(face, targetShape)))
+      })
+      if(candidates.length != 1) fail(fromShape ? 'The limiting faces do not enclose a valid revolution' :
+        'The selected face must cap the entire profile along the revolution')
 
       const result = new Compound(componentId, candidates[0])
       if(!result.validate() || result.volume() <= EPSILON) fail('Up to face produced no valid revolution volume')
@@ -480,7 +496,9 @@ export class Profile {
         namesUsed[name] = (namesUsed[name] || 0) + 1
         edge.id = name + '/' + namesUsed[name]
       })
-      return result.transform(frame)
+      // Merge the two-limit sweep at the profile plane before transforming
+      // its periodic surface; repair also fixes the unified face's seam.
+      return (fromShape ? result.repair() : result).transform(frame)
     } finally {
       revolution.delete()
       sketchFace.delete()
@@ -489,9 +507,77 @@ export class Profile {
       if(planeBuilder) planeBuilder.delete()
       if(planeGeometry) planeGeometry.delete()
       if(targetTransform) targetTransform.delete()
+      if(fromTransform && fromTransform != targetTransform) fromTransform.delete()
       if(startBuilder) startBuilder.delete()
       if(startPlane) startPlane.delete()
     }
+  }
+
+  revolveBetweenFaces(componentId, axis, from, until, featureId, forward = true) {
+    const fail = msg => { throw { type: 'error', msg } }
+    if(!from || !until) fail('Select both limiting faces')
+    if(from.geom().IsSame(until.geom())) fail('Choose different starting and ending faces')
+    // Build curved limits together: subtracting independent periodic sweeps
+    // can lose their coincident side faces and falsely report crossing limits.
+    if(!from.getPlane() && !until.getPlane()) {
+      return this.revolveUpToFace(componentId, axis, until, featureId, forward, from)
+    }
+
+    const startsAtSketch = face => {
+      const plane = face.getPlane()
+      if(!plane) return false
+      const normal = normalFromMatrix(this.sketch.workplane)
+      const origin = new THREE.Vector3().setFromMatrixPosition(this.sketch.workplane)
+      const position = new THREE.Vector3().setFromMatrixPosition(plane)
+      return Math.abs(normal.dot(normalFromMatrix(plane))) >= 1 - EPSILON &&
+        Math.abs(position.sub(origin).dot(normal)) <= EPSILON
+    }
+    const fromAtSketch = startsAtSketch(from)
+    const untilAtSketch = startsAtSketch(until)
+    if(fromAtSketch && untilAtSketch) fail('The limiting planes coincide')
+
+    // Compose the validated single-limit sweeps. This also handles mixed
+    // planar/curved limits, which the native two-limit overload rejects.
+    const start = fromAtSketch ? null : this.revolveUpToFace(componentId, axis, from, featureId + '/from', forward)
+    const end = untilAtSketch ? null : this.revolveUpToFace(componentId, axis, until, featureId + '/until', forward)
+    let result
+    if(!start) {
+      result = end
+    } else if(!end) {
+      result = this.revolve(componentId, axis, forward ? 2 * Math.PI : -2 * Math.PI, featureId).boolean(start, 'cut')
+    } else {
+      const startOutsideEnd = start.boolean(end, 'cut')
+      const endOutsideStart = end.boolean(start, 'cut')
+      if(!startOutsideEnd.solids().length) {
+        result = endOutsideStart
+      } else if(!endOutsideStart.solids().length) {
+        // The end is reached after passing the sketch again.
+        result = this.revolve(componentId, axis, forward ? 2 * Math.PI : -2 * Math.PI, featureId)
+          .boolean(start, 'cut').boolean(end, 'join')
+      } else {
+        fail('The limiting faces cross within the revolved profile')
+      }
+    }
+    if(result.solids().length != 1 || !result.validate() || result.volume() <= EPSILON) {
+      fail('The limiting faces do not enclose a valid revolution')
+    }
+
+    const prefix = '/revolve-' + featureId
+    const solid = result.solids()[0]
+    solid.faces().forEach(face => {
+      face.id = face.id.replace(prefix + '/from/top', prefix + '/bottom')
+        .replace(prefix + '/from/bottom', prefix + '/top')
+        .replace(prefix + '/until/top', prefix + '/top')
+        .replace(prefix + '/from/', prefix + '/')
+        .replace(prefix + '/until/', prefix + '/')
+    })
+    const namesUsed = {}
+    solid.edges().forEach(edge => {
+      const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
+      namesUsed[name] = (namesUsed[name] || 0) + 1
+      edge.id = name + '/' + namesUsed[name]
+    })
+    return result.repair()
   }
 
   loft(componentId, others, untwist) {

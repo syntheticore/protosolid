@@ -1661,6 +1661,7 @@ export class RevolveFeature extends Feature {
         options: {
           angle: { title: 'Angle', icon: 'drafting-compass' },
           face: { title: 'Up to face', icon: 'sign-in-alt' },
+          between: { title: 'Between faces', icon: 'exchange-alt' },
         },
       },
       profiles: {
@@ -1677,10 +1678,21 @@ export class RevolveFeature extends Feature {
         type: 'angle',
         when: feature => feature.extent == 'angle',
       },
+      offset: {
+        title: 'Offset',
+        type: 'angle',
+        allowNegative: true,
+        when: feature => feature.extent == 'angle',
+      },
+      fromFace: {
+        title: 'From face',
+        type: 'face',
+        when: feature => feature.extent == 'between',
+      },
       limitFace: {
         title: 'Up to face',
         type: 'face',
-        when: feature => feature.extent == 'face',
+        when: feature => feature.extent != 'angle',
       },
       side: {
         title: 'Side',
@@ -1692,22 +1704,27 @@ export class RevolveFeature extends Feature {
     this.profiles = null
     this.axis = null
     this.extent = 'angle'
+    this.fromFace = null
     this.limitFace = null
     this.angle = 180.0
+    this.offset = 0
     this.side = true
   }
 
   updateFeature(tree, references) {
     const angle = this.angle * (this.side ? 1 : -1)
+    const offset = this.offset * (this.side ? 1 : -1)
 
     let tool = new Compound(this.componentId)
     this.previewBody = null
     const comp = tree.findChild(this.componentId)
     try {
       for(const profile of references.profiles) {
-        const revolution = this.extent == 'face' ?
+        const revolution = this.extent == 'between' ?
+          profile.revolveBetweenFaces(this.componentId, references.axis, references.fromFace, references.limitFace, this.id, this.side) :
+          this.extent == 'face' ?
           profile.revolveUpToFace(this.componentId, references.axis, references.limitFace, this.id, this.side) :
-          profile.revolve(this.componentId, references.axis, rad(angle), this.id)
+          profile.revolve(this.componentId, references.axis, rad(angle), this.id, rad(offset))
         tool = tool.boolean(revolution, 'join')
       }
       comp.compound = comp.compound.boolean(tool, this.operation)

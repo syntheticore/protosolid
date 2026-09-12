@@ -253,13 +253,10 @@ fn same_curve_support(
         (super::Curve3::Circle(first), super::Curve3::Circle(second)) => {
             first.center().distance(second.center()) <= tolerance.linear
                 && (first.radius() - second.radius()).abs() <= tolerance.linear
-                && first
-                    .normal()
-                    .dot(second.normal())
-                    .abs()
-                    .clamp(-1.0, 1.0)
-                    .acos()
-                    <= tolerance.angular
+                // acos(dot) amplifies roundoff near parallel normals: even
+                // identical circles can appear farther apart than the angular
+                // tolerance and lose their edge lineage after a Boolean.
+                && first.normal().cross(second.normal()).magnitude() <= tolerance.angular
         }
         (super::Curve3::Nurbs(first), super::Curve3::Nurbs(second)) => {
             let compatible = first.degree() == second.degree()

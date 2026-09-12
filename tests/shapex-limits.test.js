@@ -42,6 +42,17 @@ function near(actual, expected) {
   assert.ok(Math.abs(actual - expected) < 1e-5 * Math.max(1, Math.abs(expected)), `${actual} != ${expected}`)
 }
 
+test('circle on a cylinder cap extrudes back to the opposite planar face', () => {
+  const body = circle(2.6559596628004023, 5.6499505320061365, 41.458176985310196,
+    rotationFromNormal(new THREE.Vector3(1, 0, 0))).extrude('c', 38, 'body')
+  const source = circle(10.202437506387206, 7.213174143629522, 20.834734325948986,
+    cap(body, 'top').getPlane())
+  const result = source.extrudeUpToFace('c', cap(body, 'bottom'), 'limit')
+  near(result.volume(), Math.PI * 20.834734325948986 ** 2 * 38)
+  assert.ok(result.validate())
+  near(body.boolean(result, 'cut').volume(), body.volume() - result.volume())
+})
+
 test('extrusion limits use the infinite plane, support offsets and reverse direction', () => {
   const source = rectangle(-1, -1, 1, 1)
   const target = rectangle(20, 20, 21, 21).extrude('c', 10, 'target')

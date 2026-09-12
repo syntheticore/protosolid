@@ -374,6 +374,39 @@ mod tests {
     }
 
     #[test]
+    fn face_limited_circular_extrusion_preserves_start_rim() {
+        let tol = ModelTolerance::default();
+        let profile = Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(
+                    Point2::new(10.202437506387206, 7.213174143629522),
+                    20.834734325948986,
+                )
+                .unwrap()],
+                tol,
+            )
+            .unwrap(),
+            [],
+            tol,
+        )
+        .unwrap();
+        let plane = Plane3::new(
+            Point3::new(38.0, 0.0, 0.0),
+            -Vec3::unit_z(),
+            Vec3::unit_y(),
+            tol,
+        )
+        .unwrap();
+        let body = profile.extrude(plane, -Vec3::unit_x() * 38.0).unwrap();
+        let limit_plane = shifted(plane, -Vec3::unit_x() * 38.0, tol).unwrap();
+        let limit = cap(&body, limit_plane).unwrap();
+        let result = profile
+            .extrude_up_to_face(plane, &body, &limit, 0.0)
+            .unwrap();
+        near(result.volume(), PI * 20.834734325948986_f64.powi(2) * 38.0);
+    }
+
+    #[test]
     fn face_limited_extrusion_offset_and_invalid_start() {
         let profile = rectangle(-1.0, -1.0, 1.0, 1.0);
         let plane = Plane3::xy();

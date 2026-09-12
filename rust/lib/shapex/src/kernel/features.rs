@@ -1004,8 +1004,38 @@ fn trim_offset_edge(
         }
         Ok(projection)
     };
-    let first = project_endpoint(vertices[&first_vertex])?;
-    let second = project_endpoint(vertices[&second_vertex])?;
+    let mut first = project_endpoint(vertices[&first_vertex])?;
+    let mut second = project_endpoint(vertices[&second_vertex])?;
+    // A bounded intersection curve can close at its chart seam without
+    // declaring a periodic domain. Projection may choose either coincident
+    // endpoint due to roundoff. Choose the endpoint that lets the trim follow
+    // the source edge, instead of traversing the complementary arc.
+    let domain = edge.curve.domain();
+    if domain.period.is_none() {
+        if let super::DomainBounds::Bounded(bounds) = domain.bounds {
+            let start = edge.curve.evaluate(bounds.start)?;
+            let end = edge.curve.evaluate(bounds.end)?;
+            if start.point.distance(end.point) <= tolerance.linear {
+                for (projection, source_parameter, is_first) in [
+                    (&mut first, source.range().start, true),
+                    (&mut second, source.range().end, false),
+                ] {
+                    if projection.point.distance(start.point) > tolerance.linear {
+                        continue;
+                    }
+                    let tangent = source.curve().evaluate(source_parameter)?.first_derivative
+                        * source.range().span().signum();
+                    let forward =
+                        tangent.dot(start.first_derivative) * bounds.span().signum() >= 0.0;
+                    projection.parameter = if forward == is_first {
+                        bounds.start
+                    } else {
+                        bounds.end
+                    };
+                }
+            }
+        }
+    }
     let mut range = ParameterRange::new(first.parameter, second.parameter)?;
     if let Some(period) = edge.curve.domain().period {
         let source_midpoint = source

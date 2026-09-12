@@ -61,6 +61,68 @@ fn certified_properties(kernel: &Kernel, body: BodyId) -> MassProperties {
 }
 
 #[test]
+fn shell_twice_filleted_sector() {
+    let tol = ModelTolerance::default();
+    let a = Point2::new(100.0, 0.0);
+    let b = Point2::new(100.0, 28.86751397086674);
+    let c = Point2::new(84.1506348326489, 38.01814937882426);
+    let d = Point2::new(75.0, 43.3012709563001);
+    let e = Point2::new(52.754440335806734, 16.36634224401021);
+    let wire = Wire2::new(
+        [
+            TrimmedCurve2::line(a, b).unwrap(),
+            TrimmedCurve2::line(b, c).unwrap(),
+            TrimmedCurve2::line(c, d).unwrap(),
+            TrimmedCurve2::arc_through(d, Point2::new(61.448374625936175, 31.839790317286276), e)
+                .unwrap(),
+            TrimmedCurve2::line(e, a).unwrap(),
+        ],
+        tol,
+    )
+    .unwrap();
+    let body = Profile::new(wire, [], tol)
+        .unwrap()
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 38.0))
+        .unwrap();
+    let rim = body
+        .edges()
+        .find(|edge| {
+            matches!(edge.curve(), Curve3::Circle(_)) && edge.endpoints().unwrap()[0].z > 37.0
+        })
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[rim], 8.0).unwrap();
+    let corner = body
+        .edges()
+        .find(|edge| {
+            let p = edge.endpoints().unwrap();
+            matches!(edge.curve(), Curve3::Line(_))
+                && (p[0].x - 75.0).abs() < 1e-5
+                && (p[1].x - 75.0).abs() < 1e-5
+        })
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[corner], 5.0).unwrap();
+    let opening = body
+        .faces()
+        .find(|face| match face.surface() {
+            Surface3::Plane(p) => {
+                p.normal().z.abs() < 0.1 && p.normal().x.abs() > 0.1 && p.normal().x.abs() < 0.4
+            }
+            _ => false,
+        })
+        .unwrap()
+        .clone();
+    for thickness in [1.0, 2.0] {
+        let shell = body.shell(&[opening.clone()], -thickness).unwrap();
+        assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+        shell
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap();
+    }
+}
+
+#[test]
 fn shelled_cylinder_deeper_offset_circle_cut() {
     // Reproduce untitled(7).cad: a 60 mm cylinder, a 14 mm top fillet,
     // a 5 mm inward shell, and an offset circular cut from the open end.

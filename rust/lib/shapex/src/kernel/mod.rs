@@ -24,6 +24,7 @@ mod physical;
 mod polyhedron;
 mod profile;
 mod sweep;
+mod sweep_limits;
 mod sweeps;
 mod tessellation;
 mod tolerance;

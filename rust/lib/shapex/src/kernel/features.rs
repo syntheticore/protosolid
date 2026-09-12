@@ -1501,7 +1501,7 @@ fn rebuild_supports(
     ))
 }
 
-fn face_patch(topology: &Topology, face_id: FaceId, reverse: bool) -> KernelResult<BrepPatch> {
+pub(crate) fn face_patch(topology: &Topology, face_id: FaceId, reverse: bool) -> KernelResult<BrepPatch> {
     let face = topology.face(face_id)?;
     let mut loops = Vec::new();
     for loop_id in face.loops() {

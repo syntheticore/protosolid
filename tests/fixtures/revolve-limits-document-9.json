@@ -1,0 +1,658 @@
+[
+  {
+    "id": "id-5",
+    "type": "CreateSketchFeature",
+    "values": {
+      "plane": {
+        "$class": "PlanarReference",
+        "item": {
+          "$class": "HelperReference",
+          "componentId": "id-0",
+          "helperId": "id-0/XZ"
+        }
+      }
+    },
+    "sketchId": "id-6",
+    "elements": [
+      {
+        "$class": "Circle",
+        "id": "id-7",
+        "_center": {
+          "$class": "Vector3",
+          "elements": [
+            -23.61389560011505,
+            9.513164485593606,
+            0
+          ]
+        },
+        "radius": 20,
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-10",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              44.19017168491189,
+              49.88186507061719,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              180.02001605513482,
+              49.88186507061719,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-11",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              180.02001605513482,
+              49.88186507061719,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              180.02001605513482,
+              -23.728570731280954,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-12",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              180.02001605513482,
+              -23.728570731280954,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              44.19017168491189,
+              -23.728570731280954,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-13",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              44.19017168491189,
+              -23.728570731280954,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              44.19017168491189,
+              49.88186507061719,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-37",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              26.49354390191479,
+              68.45286216623794,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              34.56264356747255,
+              -61.459642455738184,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      }
+    ]
+  },
+  {
+    "id": "id-53",
+    "type": "ExtrudeFeature",
+    "values": {
+      "extent": "distance",
+      "profiles": [
+        {
+          "$class": "ProfileReference",
+          "id": "id-50",
+          "sketchId": "id-6",
+          "rings": [
+            [
+              "id-13",
+              "id-12",
+              "id-11",
+              "id-10"
+            ]
+          ]
+        }
+      ],
+      "axis": null,
+      "distance": 128,
+      "limitFace": null,
+      "offset": 0,
+      "side": "forward",
+      "operation": "join"
+    },
+    "sketchId": null,
+    "elements": null
+  },
+  {
+    "id": "id-3733",
+    "type": "CreateSketchFeature",
+    "values": {
+      "plane": {
+        "$class": "PlanarReference",
+        "item": {
+          "$class": "FaceReference",
+          "componentId": "id-0",
+          "solidId": "id-0/solid/0",
+          "topoId": "/extrude-id-53/swept/id-10"
+        }
+      }
+    },
+    "sketchId": "id-3734",
+    "elements": [
+      {
+        "$class": "Spline",
+        "id": "id-3771",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              137.80435932379862,
+              -31.752511261917917,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              46.965475801696556,
+              25.533271139407766,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              165.62888220444262,
+              103.68744570121633,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              44.51037084163971,
+              145.01504586217268,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-3809",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              44.51037084163971,
+              145.01504586217268,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              -72.19280582114749,
+              145.01504586217268,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-3811",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              -72.19280582114749,
+              145.01504586217268,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              -76.50276353016889,
+              -157.11517903614077,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-3814",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              -76.50276353016889,
+              -157.11517903614077,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              137.80435932379862,
+              -31.752511261917917,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Spline",
+        "id": "id-20296",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              162.35540892436683,
+              -27.251485501813743,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              70.87331025848803,
+              19.42492660074398,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              167.92365564135562,
+              54.830915795796656,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              95.24920668281388,
+              144.60586170216317,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-20342",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              95.24920668281388,
+              144.60586170216317,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              191.31689850237254,
+              147.45551252928263,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-20344",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              191.31689850237254,
+              147.45551252928263,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              202.75925920931505,
+              -46.456012293223154,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-20355",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              202.75925920931505,
+              -46.456012293223154,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              154.20382390545947,
+              -136.02596598718438,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-20366",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              154.20382390545947,
+              -136.02596598718438,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              162.35540892436683,
+              -27.251485501813743,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      }
+    ]
+  },
+  {
+    "id": "id-3826",
+    "type": "ExtrudeFeature",
+    "values": {
+      "extent": "distance",
+      "profiles": [
+        {
+          "$class": "ProfileReference",
+          "id": "id-3825",
+          "sketchId": "id-3734",
+          "rings": [
+            [
+              "id-3814",
+              "id-3771",
+              "id-3809",
+              "id-3811"
+            ]
+          ]
+        },
+        {
+          "$class": "ProfileReference",
+          "id": "id-20665",
+          "sketchId": "id-3734",
+          "rings": [
+            [
+              "id-20366",
+              "id-20355",
+              "id-20344",
+              "id-20342",
+              "id-20296"
+            ]
+          ]
+        }
+      ],
+      "axis": null,
+      "distance": 91,
+      "limitFace": null,
+      "offset": 0,
+      "side": "both",
+      "operation": "cut"
+    },
+    "sketchId": null,
+    "elements": null
+  },
+  {
+    "id": "id-42629",
+    "type": "CreateSketchFeature",
+    "values": {
+      "plane": {
+        "$class": "PlanarReference",
+        "item": {
+          "$class": "HelperReference",
+          "componentId": "id-0",
+          "helperId": "id-0/XY"
+        }
+      }
+    },
+    "sketchId": "id-42630",
+    "elements": [
+      {
+        "$class": "Spline",
+        "id": "id-42703",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              -102.68630243985827,
+              -75.05002357528167,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              -32.6186594006202,
+              -26.488290775809737,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              21.526512486995706,
+              -58.63012427391142,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              43.563408352900865,
+              1.634039930808811,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-42704",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              43.563408352900865,
+              1.634039930808811,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              164.40322795723728,
+              -83.72176157518734,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-42706",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              164.40322795723728,
+              -83.72176157518734,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              69.36097947827082,
+              -113.55254029486298,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-42708",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              69.36097947827082,
+              -113.55254029486298,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              -78.05856652012606,
+              -130.54914677467818,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      },
+      {
+        "$class": "Line",
+        "id": "id-42710",
+        "points": [
+          {
+            "$class": "Vector3",
+            "elements": [
+              -78.05856652012606,
+              -130.54914677467818,
+              0
+            ]
+          },
+          {
+            "$class": "Vector3",
+            "elements": [
+              -102.68630243985827,
+              -75.05002357528167,
+              0
+            ]
+          }
+        ],
+        "isReference": false
+      }
+    ]
+  },
+  {
+    "id": "id-42724",
+    "type": "ExtrudeFeature",
+    "values": {
+      "extent": "distance",
+      "profiles": [
+        {
+          "$class": "ProfileReference",
+          "id": "id-42723",
+          "sketchId": "id-42630",
+          "rings": [
+            [
+              "id-42710",
+              "id-42708",
+              "id-42706",
+              "id-42704",
+              "id-42703"
+            ]
+          ]
+        }
+      ],
+      "axis": null,
+      "distance": 76,
+      "limitFace": null,
+      "offset": 0,
+      "side": "both",
+      "operation": "join"
+    },
+    "sketchId": null,
+    "elements": null
+  }
+]

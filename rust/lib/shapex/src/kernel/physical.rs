@@ -1292,8 +1292,16 @@ fn validate_prism_side_incidence(
             }) {
                 return Ok(false);
             }
-        } else if !matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_)) {
-            return Ok(false);
+        } else {
+            // Incidence alone does not make a prism: a transverse cylindrical
+            // limit can connect equal end sections while bowing between them.
+            // Every side support must be invariant along the proposed sweep.
+            let direction = sweep.normalize();
+            match face.surface() {
+                Surface3::Plane(plane) if plane.normal().dot(direction).abs() <= tolerance.angular => {}
+                Surface3::Cylinder(cylinder) if cylinder.axis().normalize().cross(direction).magnitude() <= tolerance.angular => {}
+                _ => return Ok(false),
+            }
         }
         let edges = face_edges(topology, *face_id)?;
         let on_first = edges.intersection(first_cap.edges).count();

@@ -253,7 +253,11 @@ export class Profile {
   }
 
   extrudeUpToFace(componentId, target, featureId, offset = 0) {
-    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('extrusion up to face')
+    if(window.kernel.modeling.id == 'shapex') {
+      if(!target) throw { type: 'error', msg: 'Select a face to extrude up to' }
+      return new Compound(componentId, window.kernel.modeling.extrudeUpToFace(this, target, offset))
+        .inheritShapexTopology([], 'extrude', featureId).nameShapexExtrusion(this, featureId)
+    }
     const oc = window.oc.oc
     const fail = msg => { throw { type: 'error', msg } }
     if(!target) fail('Select a face to extrude up to')
@@ -370,7 +374,11 @@ export class Profile {
   }
 
   revolveUpToFace(componentId, axis, target, featureId, forward = true, from = null) {
-    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('revolution up to face')
+    if(window.kernel.modeling.id == 'shapex') {
+      if(!target) throw { type: 'error', msg: 'Select a face to revolve up to' }
+      return new Compound(componentId, window.kernel.modeling.revolveUpToFace(this, axis, target, forward))
+        .inheritShapexTopology([], 'revolve', featureId)
+    }
     const oc = window.oc.oc
     const fail = msg => { throw { type: 'error', msg } }
     if(!target) fail('Select a face to revolve up to')
@@ -532,9 +540,12 @@ export class Profile {
   }
 
   revolveBetweenFaces(componentId, axis, from, until, featureId, forward = true) {
-    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('revolution between faces')
     const fail = msg => { throw { type: 'error', msg } }
     if(!from || !until) fail('Select both limiting faces')
+    if(window.kernel.modeling.id == 'shapex') {
+      return new Compound(componentId, window.kernel.modeling.revolveBetweenFaces(this, axis, from, until, forward))
+        .inheritShapexTopology([], 'revolve', featureId)
+    }
     if(from.geom().IsSame(until.geom())) fail('Choose different starting and ending faces')
     // Build curved limits together: subtracting independent periodic sweeps
     // can lose their coincident side faces and falsely report crossing limits.

@@ -39,6 +39,7 @@ struct DirectedPiece {
     end_node: usize,
     start_uv: Point2,
     end_uv: Point2,
+    parameter_seam: bool,
 }
 
 impl DirectedPiece {
@@ -51,6 +52,7 @@ impl DirectedPiece {
             end_node: self.start_node,
             start_uv: self.end_uv,
             end_uv: self.start_uv,
+            parameter_seam: self.parameter_seam,
         }
     }
 }
@@ -125,7 +127,11 @@ impl OperandClassifier<'_> {
         for face in self.faces {
             if !matches!(
                 face.surface,
-                Surface3::Plane(_) | Surface3::Cylinder(_) | Surface3::Cone(_) | Surface3::Torus(_)
+                Surface3::Plane(_)
+                    | Surface3::Cylinder(_)
+                    | Surface3::Cone(_)
+                    | Surface3::Torus(_)
+                    | Surface3::Nurbs(_)
             ) {
                 continue;
             }
@@ -306,12 +312,14 @@ pub(crate) fn boolean_brep(
             for intersection in intersections {
                 let first_pcurve = align_pcurve_to_face_chart(
                     &intersection.first_pcurve,
+                    None,
                     first_face.surface(),
                     first_boundary,
                     tolerance,
                 )?;
                 let second_pcurve = align_pcurve_to_face_chart(
                     &intersection.second_pcurve,
+                    None,
                     second_face.surface(),
                     second_boundary,
                     tolerance,
@@ -390,6 +398,13 @@ pub(crate) fn boolean_brep(
     // have different trim loops.  Overlay both complete boundary graphs on
     // each support; otherwise a union of coplanar faces would leave each
     // operand holding only an open fragment of the result outline.
+    // Include intersections imprinted by other faces, not just original trim
+    // edges. The opposite shared-support face is skipped during publication,
+    // so omitting its intersections loses material boundaries (for example
+    // where a torus crosses its start plane again after half a turn).
+    // Intersections already represented by either trim boundary are excluded:
+    // projecting them again can introduce differently subdivided duplicates.
+    let imprinted_curves = face_curves.clone();
     for (first_index, first_face) in first_faces.iter().enumerate() {
         for (second_index, second_face) in second_faces.iter().enumerate() {
             let coincident = first_face
@@ -401,7 +416,25 @@ pub(crate) fn boolean_brep(
             }
             let first_boundary = &original_curves[&(0, first_index)];
             let second_boundary = &original_curves[&(1, second_index)];
-            for source in second_boundary {
+            for (index, source) in imprinted_curves[&(1, second_index)].iter().enumerate() {
+                if index >= second_boundary.len()
+                    && (boundary_curve_for_intersection(
+                        &source.curve,
+                        source.range,
+                        first_boundary,
+                        tolerance,
+                    )?
+                    .is_some()
+                        || boundary_curve_for_intersection(
+                            &source.curve,
+                            source.range,
+                            second_boundary,
+                            tolerance,
+                        )?
+                        .is_some())
+                {
+                    continue;
+                }
                 let projected: Curve2 = if first_face.surface() == second_face.surface() {
                     source.pcurve.clone()
                 } else {
@@ -416,6 +449,7 @@ pub(crate) fn boolean_brep(
                 };
                 let projected = align_pcurve_to_face_chart(
                     &projected,
+                    Some(source.range),
                     first_face.surface(),
                     first_boundary,
                     tolerance,
@@ -432,7 +466,25 @@ pub(crate) fn boolean_brep(
                         parameter_seam: source.parameter_seam,
                     });
             }
-            for source in first_boundary {
+            for (index, source) in imprinted_curves[&(0, first_index)].iter().enumerate() {
+                if index >= first_boundary.len()
+                    && (boundary_curve_for_intersection(
+                        &source.curve,
+                        source.range,
+                        first_boundary,
+                        tolerance,
+                    )?
+                    .is_some()
+                        || boundary_curve_for_intersection(
+                            &source.curve,
+                            source.range,
+                            second_boundary,
+                            tolerance,
+                        )?
+                        .is_some())
+                {
+                    continue;
+                }
                 let projected: Curve2 = if first_face.surface() == second_face.surface() {
                     source.pcurve.clone()
                 } else {
@@ -447,6 +499,7 @@ pub(crate) fn boolean_brep(
                 };
                 let projected = align_pcurve_to_face_chart(
                     &projected,
+                    Some(source.range),
                     second_face.surface(),
                     second_boundary,
                     tolerance,
@@ -520,6 +573,7 @@ pub(crate) fn boolean_brep(
                             if other_index != index {
                                 curve.pcurve = align_pcurve_to_face_chart(
                                     &curve.pcurve,
+                                    Some(curve.range),
                                     face.surface(),
                                     &original,
                                     tolerance,
@@ -548,7 +602,7 @@ pub(crate) fn boolean_brep(
             )?);
         }
     }
-    super::euler::conform_brep_boundaries(&mut patches, tolerance)?;
+    super::euler::conform_brep_interfaces(&mut patches, tolerance)?;
     deduplicate_patches(&mut patches, tolerance)?;
     // Let the Euler weld choose the simplest exact representation when more
     // than two supports meet on one edge (for example a planar line tangent to
@@ -602,7 +656,10 @@ fn patch_complexity_key(patch: &BrepPatch) -> (u8, u8) {
         Surface3::Cylinder(_) | Surface3::Cone(_) | Surface3::Sphere(_) | Surface3::Torus(_) => 1,
         Surface3::Revolved(_) => 2,
         Surface3::Nurbs(_) => 3,
-        Surface3::Swept(_) | Surface3::Offset(_) | Surface3::RollingBall(_) | Surface3::Ruled(_) => 4,
+        Surface3::Swept(_)
+        | Surface3::Offset(_)
+        | Surface3::RollingBall(_)
+        | Surface3::Ruled(_) => 4,
     };
     (boundary_complexity, surface_complexity)
 }
@@ -693,6 +750,7 @@ fn intersection_chart_copies(
 
 fn align_pcurve_to_face_chart(
     pcurve: &Curve2,
+    trim: Option<ParameterRange>,
     surface: &Surface3,
     boundary: &[FaceCurve],
     tolerance: ModelTolerance,
@@ -709,7 +767,10 @@ fn align_pcurve_to_face_chart(
             bounds[1].y = bounds[1].y.max(point.y);
         }
     }
-    let parameter = match pcurve.domain().bounds {
+    let parameter = match trim
+        .map(super::DomainBounds::Bounded)
+        .unwrap_or(pcurve.domain().bounds)
+    {
         super::DomainBounds::Bounded(range) => (range.start + range.end) * 0.5,
         _ => 0.0,
     };
@@ -1056,7 +1117,10 @@ fn boundary_curve_for_intersection(
         for index in 0..=8 {
             let parameter = range.start + range.span() * index as f64 / 8.0;
             let point = intersection.evaluate(parameter)?.point;
-            let Ok(projection) = candidate.curve.project(point, tolerance) else {
+            let Ok(projection) = candidate
+                .curve
+                .project_on_trim(point, candidate.range, tolerance)
+            else {
                 matches = false;
                 break;
             };
@@ -1076,24 +1140,19 @@ fn boundary_curve_for_intersection(
             parameters.push(projected);
         }
         if matches {
-            let replacement_range = ParameterRange::new(
-                *parameters
-                    .first()
-                    .expect("intersection samples are nonempty"),
-                *parameters
-                    .last()
-                    .expect("intersection samples are nonempty"),
-            )?;
-            if replacement_range.span().abs() > tolerance.parameter {
-                return Ok(Some(FaceCurve {
-                    curve: candidate.curve.clone(),
-                    pcurve: candidate.pcurve.clone(),
-                    range: replacement_range,
-                    loop_end: false,
-                    loop_kind: candidate.loop_kind,
-                    parameter_seam: candidate.parameter_seam,
-                }));
+            let start = parameters[0];
+            let end = parameters[parameters.len() - 1];
+            if (end - start).abs() <= tolerance.parameter {
+                continue;
             }
+            return Ok(Some(FaceCurve {
+                curve: candidate.curve.clone(),
+                pcurve: candidate.pcurve.clone(),
+                range: ParameterRange::new(start, end)?,
+                loop_end: false,
+                loop_kind: candidate.loop_kind,
+                parameter_seam: candidate.parameter_seam,
+            }));
         }
     }
     Ok(None)
@@ -1251,7 +1310,7 @@ fn curve_intersections(
 ) -> KernelResult<Vec<(f64, f64)>> {
     let endpoint_hits = || -> KernelResult<Vec<(f64, f64)>> {
         let fit = |curve: &Curve3, range: ParameterRange, point: Point3| -> Option<f64> {
-            let projection = curve.project(point, tolerance).ok()?;
+            let projection = curve.project_on_trim(point, range, tolerance).ok()?;
             let mut parameter = projection.parameter;
             if let Some(period) = curve.domain().period {
                 let center = (range.start + range.end) * 0.5;
@@ -1289,6 +1348,20 @@ fn curve_intersections(
         });
         hits
     };
+    if let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) =
+        (&first.curve, &second.curve)
+    {
+        if (coincident_supports(a.first_surface(), b.first_surface(), tolerance)?
+            && coincident_supports(a.second_surface(), b.second_surface(), tolerance)?)
+            || (coincident_supports(a.first_surface(), b.second_surface(), tolerance)?
+                && coincident_supports(a.second_surface(), b.first_surface(), tolerance)?)
+        {
+            // Two guides of the same regular support intersection can overlap.
+            // Intersecting their approximation splines invents crossings along
+            // that overlap; only trim endpoints subdivide the common curve.
+            return Ok(deduplicate(endpoint_hits()?));
+        }
+    }
     if matches!(first.curve, Curve3::Line(_) | Curve3::Circle(_))
         && matches!(second.curve, Curve3::Line(_) | Curve3::Circle(_))
     {
@@ -1462,6 +1535,14 @@ fn arrange_face(
         Ok(direct)
     };
     let orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
+        if surface
+            .domains()
+            .iter()
+            .enumerate()
+            .any(|(axis, domain)| domain.period.is_none() && !domain.contains(uv[axis], 0.0))
+        {
+            return Ok(None);
+        }
         if !has_coincident_support && !point_in_trim(uv, original_boundary)? {
             return Ok(None);
         }
@@ -1602,6 +1683,7 @@ fn arrange_face(
                 end_node,
                 start_uv,
                 end_uv,
+                parameter_seam: curve.parameter_seam,
             });
         }
     }
@@ -1636,7 +1718,9 @@ fn arrange_face(
         let mut probe = classification_offset;
         for curve in curves {
             let Ok(projection) =
-                curve.curve.project_on_trim(surface_value.point, curve.range, tolerance)
+                curve
+                    .curve
+                    .project_on_trim(surface_value.point, curve.range, tolerance)
             else {
                 continue;
             };
@@ -1694,19 +1778,21 @@ fn arrange_face(
                     && candidate.end_node == piece.end_node)
                     || (candidate.start_node == piece.end_node
                         && candidate.end_node == piece.start_node);
-                let projected_match =
-                    candidate
-                        .curve
-                        .project(middle, tolerance)
-                        .is_ok_and(|projection| {
-                            let mut parameter = projection.parameter;
-                            if let Some(period) = candidate.curve.domain().period {
-                                let center = (candidate.range.start + candidate.range.end) * 0.5;
-                                parameter += ((center - parameter) / period).round() * period;
-                            }
-                            projection.distance <= tolerance.linear * 16.0
-                                && candidate.range.contains(parameter, tolerance)
-                        });
+                if !same_nodes {
+                    return false;
+                }
+                let projected_match = candidate
+                    .curve
+                    .project_on_trim(middle, candidate.range, tolerance)
+                    .is_ok_and(|projection| {
+                        let mut parameter = projection.parameter;
+                        if let Some(period) = candidate.curve.domain().period {
+                            let center = (candidate.range.start + candidate.range.end) * 0.5;
+                            parameter += ((center - parameter) / period).round() * period;
+                        }
+                        projection.distance <= tolerance.linear * 16.0
+                            && candidate.range.contains(parameter, tolerance)
+                    });
                 let candidate_middle = candidate
                     .curve
                     .evaluate(candidate.range.start + candidate.range.span() * 0.5);
@@ -1835,6 +1921,66 @@ fn add_periodic_seams(
     for piece in selected.iter() {
         *degree.entry(piece.start_node).or_default() += 1;
         *degree.entry(piece.end_node).or_default() += 1;
+    }
+    // Imprinting a touching face can subdivide a chart seam while leaving
+    // the entire cylindrical wall unchanged. Reconnect the complete seam
+    // chain: its intermediate nodes have degree zero, so looking only for a
+    // single edge between odd-degree endpoints would discard the wall.
+    let endpoints = degree
+        .iter()
+        .filter_map(|(node, degree)| (degree % 2 == 1).then_some(*node))
+        .collect::<Vec<_>>();
+    for start in endpoints {
+        if degree[&start] % 2 == 0 {
+            continue;
+        }
+        let mut queue = std::collections::VecDeque::from([start]);
+        let mut previous = BTreeMap::new();
+        let mut visited = BTreeSet::from([start]);
+        let mut end = None;
+        while let Some(node) = queue.pop_front() {
+            if node != start && degree.get(&node).copied().unwrap_or(0) % 2 == 1 {
+                end = Some(node);
+                break;
+            }
+            for (index, seam) in arrangement
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.parameter_seam)
+            {
+                if selected.iter().any(|piece| {
+                    (piece.start_node == seam.start_node && piece.end_node == seam.end_node)
+                        || (piece.start_node == seam.end_node && piece.end_node == seam.start_node)
+                }) {
+                    continue;
+                }
+                let next = if seam.start_node == node {
+                    seam.end_node
+                } else if seam.end_node == node {
+                    seam.start_node
+                } else {
+                    continue;
+                };
+                let next_degree = degree.get(&next).copied().unwrap_or(0);
+                if next_degree > 0 && next_degree % 2 == 0 {
+                    continue;
+                }
+                if visited.insert(next) {
+                    previous.insert(next, (node, index));
+                    queue.push_back(next);
+                }
+            }
+        }
+        if let Some(mut node) = end {
+            while node != start {
+                let (parent, index) = previous[&node];
+                let seam = &arrangement[index];
+                selected.push(seam.clone());
+                *degree.entry(seam.start_node).or_default() += 1;
+                *degree.entry(seam.end_node).or_default() += 1;
+                node = parent;
+            }
+        }
     }
     for candidate in arrangement {
         if degree.get(&candidate.start_node).copied().unwrap_or(0) % 2 == 0
@@ -2147,7 +2293,7 @@ fn point_in_polygon(point: Point2, polygon: &[Point2]) -> bool {
     inside
 }
 
-fn patch_edge_samples(patch: &BrepPatch) -> KernelResult<Vec<[Point3; 3]>> {
+pub(crate) fn patch_edge_samples(patch: &BrepPatch) -> KernelResult<Vec<[Point3; 3]>> {
     patch
         .loops
         .iter()
@@ -2165,7 +2311,7 @@ fn patch_edge_samples(patch: &BrepPatch) -> KernelResult<Vec<[Point3; 3]>> {
         .collect()
 }
 
-fn same_unoriented_edge(first: [Point3; 3], second: [Point3; 3], linear: f64) -> bool {
+pub(crate) fn same_unoriented_edge(first: [Point3; 3], second: [Point3; 3], linear: f64) -> bool {
     let first_closed = first[0].distance(first[2]) <= linear;
     let second_closed = second[0].distance(second[2]) <= linear;
     if first_closed && second_closed {
@@ -2221,7 +2367,7 @@ fn deduplicate_patches(
     Ok(())
 }
 
-fn coincident_supports(
+pub(crate) fn coincident_supports(
     first: &Surface3,
     second: &Surface3,
     tolerance: ModelTolerance,
@@ -2230,6 +2376,10 @@ fn coincident_supports(
         return Ok(true);
     }
     match (first, second) {
+        (Surface3::Torus(_), Surface3::Torus(_)) => Ok(matches!(
+            first.intersect_surface(second, tolerance),
+            Ok(IntersectionSet::Coincident)
+        )),
         (Surface3::Plane(first), Surface3::Plane(second)) => {
             Ok(
                 first.normal().dot(second.normal()).abs() >= 1.0 - tolerance.angular * 8.0
@@ -2299,6 +2449,19 @@ fn patch_components(
         .map(patch_edge_samples)
         .collect::<KernelResult<Vec<_>>>()?;
     let linear = tolerance.linear * 32.0;
+    // Equivalent exact intersection curves can have different parameterizations.
+    // Their parameter midpoints need not coincide in space; test containment on
+    // both trimmed curves before treating the faces as separate components.
+    let segments = patches
+        .iter()
+        .map(|patch| {
+            patch
+                .loops
+                .iter()
+                .flat_map(|l| &l.segments)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
     let mut remaining = (0..patches.len()).collect::<BTreeSet<_>>();
     let mut components = Vec::new();
     while let Some(seed) = remaining.iter().next().copied() {
@@ -2310,10 +2473,30 @@ fn patch_components(
                 .iter()
                 .copied()
                 .filter(|candidate| {
-                    samples[current].iter().any(|first| {
-                        samples[*candidate]
-                            .iter()
-                            .any(|second| same_unoriented_edge(*first, *second, linear))
+                    samples[current].iter().enumerate().any(|(i, first)| {
+                        samples[*candidate].iter().enumerate().any(|(j, second)| {
+                            same_unoriented_edge(*first, *second, linear)
+                                || (((first[0].distance(second[0]) <= linear
+                                    && first[2].distance(second[2]) <= linear)
+                                    || (first[0].distance(second[2]) <= linear
+                                        && first[2].distance(second[0]) <= linear))
+                                    && segments[current][i]
+                                        .curve
+                                        .project_on_trim(
+                                            second[1],
+                                            segments[current][i].range,
+                                            tolerance,
+                                        )
+                                        .is_ok_and(|p| p.distance <= linear)
+                                    && segments[*candidate][j]
+                                        .curve
+                                        .project_on_trim(
+                                            first[1],
+                                            segments[*candidate][j].range,
+                                            tolerance,
+                                        )
+                                        .is_ok_and(|p| p.distance <= linear))
+                        })
                     })
                 })
                 .collect::<Vec<_>>();
@@ -2394,7 +2577,11 @@ mod tests {
                     .unwrap()
                     .point;
                 assert!(
-                    surface.evaluate(uv.x, uv.y).unwrap().point.distance(spatial)
+                    surface
+                        .evaluate(uv.x, uv.y)
+                        .unwrap()
+                        .point
+                        .distance(spatial)
                         < tolerance.linear
                 );
             }

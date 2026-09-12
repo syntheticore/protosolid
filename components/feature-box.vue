@@ -406,6 +406,7 @@
       this.bus.off('keydown', this.onKeydown)
       this.document.off('deactivate-feature', this.deactivateFeature)
       this.bus.emit('unpreview-feature')
+      this.bus.emit('clear-pickers')
       this.bus.emit('activate-tool', ManipulationTool)
       this.destroyed = true
     },
@@ -615,6 +616,7 @@
         this.activeFeature.updateGizmos()
         this.refreshError()
         this.previewFeature()
+        this.updatePaths()
       },
 
       updateSetting: function() {

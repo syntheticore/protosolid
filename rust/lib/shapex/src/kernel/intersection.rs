@@ -742,7 +742,35 @@ impl Surface3 {
         other: &Self,
         tolerance: ModelTolerance,
     ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+        // A trimmed feature cap can retain the very same spline or procedural
+        // support as its target. This is an overlap, not an isolated curve;
+        // tracing the identical equations is singular and loses the cap loop.
+        if self == other {
+            return Ok(IntersectionSet::Coincident);
+        }
         match (self, other) {
+            (Self::Torus(first), Self::Torus(second)) => {
+                let linear = tolerance.linear_at_scale(
+                    first
+                        .center()
+                        .to_vec()
+                        .magnitude()
+                        .max(second.center().to_vec().magnitude()),
+                );
+                let first_axis = first.x_major().cross(first.y_major()).normalize();
+                let second_axis = second.x_major().cross(second.y_major()).normalize();
+                if first.center().distance(second.center()) <= linear
+                    && (first.major_radius() - second.major_radius()).abs() <= linear
+                    && (first.minor_radius() - second.minor_radius()).abs() <= linear
+                    && first_axis.dot(second_axis).abs() >= 1.0 - tolerance.angular
+                {
+                    Ok(IntersectionSet::Coincident)
+                } else {
+                    Err(unsupported(
+                        "this torus/torus intersection pair is not yet certified",
+                    ))
+                }
+            }
             (Self::Plane(first), Self::Plane(second)) => plane_plane(*first, *second, tolerance),
             (Self::Plane(first), Self::Cylinder(second)) => {
                 plane_cylinder(*first, *second, tolerance)
@@ -1099,6 +1127,53 @@ fn plane_torus(
     torus: super::Torus3,
     tolerance: ModelTolerance,
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let linear = tolerance.linear_at_scale(
+        torus
+            .center()
+            .to_vec()
+            .magnitude()
+            .max(torus.major_radius()),
+    );
+    if plane.normal().dot(torus.normal()).abs() <= tolerance.angular
+        && plane.project(torus.center())?.distance <= linear
+    {
+        // A plane through the rotation axis cuts two exact meridian circles.
+        // Tracing these as general intersections creates duplicate spline
+        // guides along existing circular sketch caps.
+        let radial = torus.normal().cross(plane.normal()).normalize();
+        let mut curves = Vec::new();
+        for radial in [radial, -radial] {
+            let center = torus.center() + radial * torus.major_radius();
+            let circle = Circle3::new(
+                center,
+                radial * torus.minor_radius(),
+                torus.normal() * torus.minor_radius(),
+                tolerance,
+            )?;
+            let uv = plane.project(center)?.parameters;
+            let angle = radial
+                .dot(torus.y_major().normalize())
+                .atan2(radial.dot(torus.x_major().normalize()));
+            curves.push(SurfaceSurfaceCurve {
+                curve: circle.into(),
+                first_pcurve: SurfaceProjectionPcurve2::new(
+                    circle.into(),
+                    plane.into(),
+                    super::Circle2::new(
+                        Point2::new(uv.0, uv.1),
+                        torus.minor_radius() / plane.u().magnitude(),
+                    )?
+                    .into(),
+                    super::ParameterRange::new(0.0, std::f64::consts::TAU)?,
+                    tolerance,
+                )?
+                .into(),
+                second_pcurve: Line2::new(Point2::new(angle, 0.0), crate::Vec2::unit_y())?.into(),
+                achieved_error: plane.project(center)?.distance,
+            });
+        }
+        return Ok(IntersectionSet::Isolated(curves));
+    }
     // Keep the general intersection dispatch's existing chart eligibility:
     // widening it changes Boolean split ordering and saved edge identities.
     let scale = plane
@@ -2005,7 +2080,8 @@ fn correct_surface_pair(
         // Each pass fixes at least one of the four parameters.
         for _ in 0..=4 {
             let normal = multiply_3x4_by_transpose(jacobian);
-            let Some(lambda) = solve_linear_3(normal, [-residual.x, -residual.y, -residual.z]) else {
+            let Some(lambda) = solve_linear_3(normal, [-residual.x, -residual.y, -residual.z])
+            else {
                 return Ok(None);
             };
             delta = std::array::from_fn(|column| {

@@ -75,10 +75,13 @@ export class ShapexBackend {
     )
     this.capabilities = Object.freeze({
       extrude: true,
+      extrudeUpToFace: true,
       boolean: true,
       transform: true,
       tessellate: true,
       revolve: true,
+      revolveUpToFace: true,
+      revolveBetweenFaces: true,
       loft: true,
       sweep: true,
       fillet: true,
@@ -206,6 +209,38 @@ export class ShapexBackend {
     return featureResult('sweep', () => this.profile(profile).sweep(
       this.plane(profile.sketch.workplane), this.plane(rail.sketch.workplane), this.segment(rail),
     ))
+  }
+
+  extrudeUpToFace(profile, target, offset) {
+    const body = shapexValue(target.solid.geom()).toCompound()
+    try {
+      return featureResult('extrusion up to face', () => this.profile(profile).extrudeUpToFace(
+        this.plane(profile.sketch.workplane), body, shapexValue(target.geom()), offset,
+      ))
+    } finally { body.free() }
+  }
+
+  revolveUpToFace(profile, axis, target, forward) {
+    const { origin, normal } = planeFrame(axis)
+    const body = shapexValue(target.solid.geom()).toCompound()
+    try {
+      return featureResult('revolution up to face', () => this.profile(profile).revolveUpToFace(
+        this.plane(profile.sketch.workplane), this.api.Axis3.new(this.point3(origin), this.vector3(normal)),
+        body, shapexValue(target.geom()), forward,
+      ))
+    } finally { body.free() }
+  }
+
+  revolveBetweenFaces(profile, axis, from, until, forward) {
+    const { origin, normal } = planeFrame(axis)
+    const fromBody = shapexValue(from.solid.geom()).toCompound()
+    const untilBody = shapexValue(until.solid.geom()).toCompound()
+    try {
+      return featureResult('revolution between faces', () => this.profile(profile).revolveBetweenFaces(
+        this.plane(profile.sketch.workplane), this.api.Axis3.new(this.point3(origin), this.vector3(normal)),
+        fromBody, shapexValue(from.geom()), untilBody, shapexValue(until.geom()), forward,
+      ))
+    } finally { fromBody.free(); untilBody.free() }
   }
 
   loft(profiles, alignSections) {

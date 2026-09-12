@@ -1129,7 +1129,6 @@
       },
 
       unpreviewFeature: function() {
-        this.clearPaths()
         this.renderer.remove(this.previewMesh)
         this.renderer.render()
       },

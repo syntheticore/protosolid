@@ -146,6 +146,23 @@ pub(crate) fn conform_brep_boundaries(
     patches: &mut [BrepPatch],
     tolerance: ModelTolerance,
 ) -> KernelResult<()> {
+    conform_brep_boundaries_impl(patches, tolerance, true)
+}
+
+// Cells already have paired edges inside each shell. Match subdivisions across
+// those shells as well before removing their common faces and sewing them.
+pub(crate) fn conform_brep_interfaces(
+    patches: &mut [BrepPatch],
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    conform_brep_boundaries_impl(patches, tolerance, false)
+}
+
+fn conform_brep_boundaries_impl(
+    patches: &mut [BrepPatch],
+    tolerance: ModelTolerance,
+    preserve_paired: bool,
+) -> KernelResult<()> {
     let segments = patches
         .iter()
         .flat_map(|p| &p.loops)
@@ -178,6 +195,9 @@ pub(crate) fn conform_brep_boundaries(
         .iter()
         .enumerate()
         .map(|(i, a)| {
+            if !preserve_paired {
+                return false;
+            }
             ends.iter().enumerate().any(|(j, b)| {
                 if i == j {
                     return false;
@@ -188,7 +208,7 @@ pub(crate) fn conform_brep_boundaries(
                     return close(middles[i], middles[j])
                         || segments[i]
                             .curve
-                            .project(middles[j], tolerance)
+                            .project_on_trim(middles[j], segments[i].range, tolerance)
                             .is_ok_and(|p| {
                                 let mut t = p.parameter;
                                 if let Some(period) = segments[i].curve.domain().period {
@@ -217,7 +237,7 @@ pub(crate) fn conform_brep_boundaries(
             })
         })
         .collect::<Vec<_>>();
-    if paired.iter().all(|p| *p) {
+    if preserve_paired && paired.iter().all(|p| *p) {
         return Ok(());
     }
     let mut vertices = Vec::new();
@@ -232,7 +252,7 @@ pub(crate) fn conform_brep_boundaries(
         for segment in std::mem::take(&mut loop_.segments) {
             let current = index;
             index += 1;
-            if paired[current] {
+            if preserve_paired && paired[current] {
                 conformed.push(segment);
                 continue;
             }
@@ -241,7 +261,11 @@ pub(crate) fn conform_brep_boundaries(
                 if ends[current].iter().any(|end| close(*end, *point)) {
                     continue;
                 }
-                let Ok(projection) = segment.curve.project(*point, tolerance) else {
+                let Ok(projection) =
+                    segment
+                        .curve
+                        .project_on_trim(*point, segment.range, tolerance)
+                else {
                     continue;
                 };
                 if !close(projection.point, *point) {
@@ -1149,12 +1173,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 if (delta - offset).magnitude() > self.kernel.tolerance.parameter * 16.0 {
                     continue;
                 }
-                candidate = Some((
-                    edge_id,
-                    second_loop.face,
-                    second_use.loop_id,
-                    offset,
-                ));
+                candidate = Some((edge_id, second_loop.face, second_use.loop_id, offset));
                 break;
             }
             let Some((edge, removed_face, removed_loop, offset)) = candidate else {
@@ -2338,7 +2357,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                         let middle_matches = candidate.middle.distance(middle) <= linear * 64.0
                             || candidate
                                 .curve
-                                .project(middle, self.kernel.tolerance)
+                                .project_on_trim(middle, candidate.range, self.kernel.tolerance)
                                 .is_ok_and(|projection| {
                                     projection.distance <= linear * 64.0
                                         && candidate
@@ -4638,7 +4657,11 @@ impl<'kernel> EulerTransaction<'kernel> {
             })?;
         let mut projection = edge.curve.project(point, self.kernel.tolerance)?;
         if let Some(period) = edge.curve.domain().period {
-            let reference = if endpoint == 0 { edge.range.start } else { edge.range.end };
+            let reference = if endpoint == 0 {
+                edge.range.start
+            } else {
+                edge.range.end
+            };
             projection.parameter += ((reference - projection.parameter) / period).round() * period;
         }
         let allowed = self

@@ -656,6 +656,29 @@ export function createShapex(bindings) {
         profileDto(this), new Float64Array(plane._values()), new Float64Array(axis._values()), angle,
       )))
     }
+    extrudeUpToFace(plane, target, limit, offset = 0) {
+      instance(plane, Plane3, 'plane'); instance(target, Compound, 'target'); instance(limit, Face, 'limit')
+      return nativeCall(() => new Compound(bindings.extrudeUpToFace(
+        profileDto(this), new Float64Array(plane._values()), target._raw(), limit._raw(), finite(offset, 'offset'),
+      )))
+    }
+    revolveUpToFace(plane, axis, target, limit, forward = true) {
+      instance(plane, Plane3, 'plane'); instance(axis, Axis3, 'axis')
+      instance(target, Compound, 'target'); instance(limit, Face, 'limit')
+      return nativeCall(() => new Compound(bindings.revolveUpToFace(
+        profileDto(this), new Float64Array(plane._values()), new Float64Array(axis._values()),
+        target._raw(), limit._raw(), Boolean(forward),
+      )))
+    }
+    revolveBetweenFaces(plane, axis, fromBody, from, untilBody, until, forward = true) {
+      instance(plane, Plane3, 'plane'); instance(axis, Axis3, 'axis')
+      instance(fromBody, Compound, 'fromBody'); instance(from, Face, 'from')
+      instance(untilBody, Compound, 'untilBody'); instance(until, Face, 'until')
+      return nativeCall(() => new Compound(bindings.revolveBetweenFaces(
+        profileDto(this), new Float64Array(plane._values()), new Float64Array(axis._values()),
+        fromBody._raw(), from._raw(), untilBody._raw(), until._raw(), Boolean(forward),
+      )))
+    }
     sweep(plane, railPlane, rail) {
       instance(plane, Plane3, 'plane'); instance(railPlane, Plane3, 'railPlane')
       instance(rail, TrimmedCurve2, 'rail')

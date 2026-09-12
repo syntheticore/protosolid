@@ -1220,6 +1220,20 @@ impl Compound {
         self.with_geometric_parents(&[parent], role, extra_origins)
     }
 
+    pub(crate) fn with_creation_roles(
+        mut self,
+        roles: impl IntoIterator<Item = (PersistentId, super::CreationRole)>,
+    ) -> Self {
+        let history = Arc::make_mut(&mut self.history);
+        for (name, role) in roles {
+            history.created_as(name, role);
+        }
+        for solid in &mut self.solids {
+            solid.history = Arc::clone(&self.history);
+        }
+        self
+    }
+
     pub fn union(&self, other: &Self) -> KernelResult<Self> {
         self.boolean(other, BooleanKind::Union)
     }

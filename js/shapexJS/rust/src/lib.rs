@@ -290,6 +290,61 @@ pub fn revolve(
         .map_err(js_error)
 }
 
+#[wasm_bindgen(js_name = extrudeUpToFace)]
+pub fn extrude_up_to_face(
+    description: JsValue,
+    plane_values: &[f64],
+    target: &NativeCompound,
+    limit: &NativeFace,
+    offset: f64,
+) -> Result<NativeCompound, JsValue> {
+    let profile = profile(description)?;
+    profile
+        .extrude_up_to_face(plane(plane_values, profile.tolerance())?, &target.inner, &limit.inner, offset)
+        .map(|inner| NativeCompound { inner })
+        .map_err(js_error)
+}
+
+#[wasm_bindgen(js_name = revolveUpToFace)]
+pub fn revolve_up_to_face(
+    description: JsValue,
+    plane_values: &[f64],
+    axis_values: &[f64],
+    target: &NativeCompound,
+    limit: &NativeFace,
+    forward: bool,
+) -> Result<NativeCompound, JsValue> {
+    let profile = profile(description)?;
+    profile
+        .revolve_up_to_face(
+            plane(plane_values, profile.tolerance())?, axis(axis_values)?,
+            &target.inner, &limit.inner, forward,
+        )
+        .map(|inner| NativeCompound { inner })
+        .map_err(js_error)
+}
+
+#[wasm_bindgen(js_name = revolveBetweenFaces)]
+pub fn revolve_between_faces(
+    description: JsValue,
+    plane_values: &[f64],
+    axis_values: &[f64],
+    from_body: &NativeCompound,
+    from: &NativeFace,
+    until_body: &NativeCompound,
+    until: &NativeFace,
+    forward: bool,
+) -> Result<NativeCompound, JsValue> {
+    let profile = profile(description)?;
+    profile
+        .revolve_between_faces(
+            plane(plane_values, profile.tolerance())?, axis(axis_values)?,
+            &from_body.inner, &from.inner, &until_body.inner, &until.inner, forward,
+        )
+        .map(|inner| NativeCompound { inner })
+        .map_err(js_error)
+}
+
 #[wasm_bindgen(js_name = sweep)]
 pub fn sweep(
     description: JsValue,

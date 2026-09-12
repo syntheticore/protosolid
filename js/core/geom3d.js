@@ -287,11 +287,30 @@ export class Profile {
   }
 
   extrudeThroughAll(componentId, support, featureId, side = 'forward') {
-    const oc = window.oc.oc
     const fail = msg => { throw { type: 'error', msg } }
     if(!support?.geom || !support.solids().length) fail('Through all requires an existing body')
 
     const profileDirection = this.normal().normalize()
+    if(window.kernel.modeling.id == 'shapex') {
+      const origin = new THREE.Vector3().setFromMatrixPosition(this.sketch.workplane)
+      const [minimum, maximum] = window.kernel.modeling.extrusionRange(
+        support.kernelGeometry, origin, profileDirection,
+      )
+      const start = side == 'forward' ? 0 : Math.min(0, minimum)
+      const end = side == 'reverse' ? 0 : Math.max(0, maximum)
+      if(end - start <= EPSILON) fail('Through all does not intersect an existing body in the selected direction')
+      // Match OCC's removed-material tool, including separated bodies and
+      // curved exit faces. A single prism avoids an internal seam for both sides.
+      const tool = this.extrude(componentId, end - start, featureId, start)
+      const result = tool.boolean(support, 'intersect', featureId).repair()
+      if(!result.solids().length || result.volume() <= EPSILON) {
+        fail('Through all does not intersect an existing body in the selected direction')
+      }
+      if(!result.validate()) fail('Through all produced no valid extrusion volume')
+      return result
+    }
+
+    const oc = window.oc.oc
     const extrudeSide = sign => {
       const base = this.makeFace()
       const directionVector = profileDirection.clone().multiplyScalar(sign)

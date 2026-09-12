@@ -196,6 +196,26 @@ export class ShapexBackend {
     }
   }
 
+  extrusionRange(geometry, origin, direction) {
+    // This mesh only sizes a disposable prism; the Boolean uses the original
+    // analytic body. Pad beyond the tessellation's chord tolerance so curved
+    // extrema between samples cannot leave the end cap inside the body.
+    const mesh = geometryValue(geometry).tessellate(this.tessellationOptions)
+    let minimum = Infinity
+    let maximum = -Infinity
+    for(const point of mesh.positions) {
+      const distance = new THREE.Vector3(...point.toArray()).sub(origin).dot(direction)
+      minimum = Math.min(minimum, distance)
+      maximum = Math.max(maximum, distance)
+    }
+    if(!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
+      throw { type: 'error', msg: 'Through all could not determine the body extent' }
+    }
+    const padding = Math.max(this.tessellationOptions.chordTolerance * 4,
+      this.tolerance.linear * 16, (maximum - minimum) * 0.01)
+    return [minimum - padding, maximum + padding]
+  }
+
   revolve(profile, axis, angle) {
     const { origin, normal } = planeFrame(axis)
     return featureResult('revolve', () => this.profile(profile).revolve(

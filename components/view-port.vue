@@ -118,6 +118,8 @@
 
   canvas
     display: block
+    // Keep the active tool cursor when OrbitControls writes an inline cursor.
+    cursor: inherit !important
     background: radial-gradient(farthest-corner at 50% 150%, #333333, #1c2127)
 
   .drawpad

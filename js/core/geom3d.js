@@ -4,6 +4,8 @@ import earcut from 'earcut'
 import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference, PointReference } from './references.js'
 import { makeID } from './id.js'
 import { Line } from './geom2d.js'
+import Expression from './expression.js'
+import preferences from '../preferences.js'
 import {
   arrayRange,
   rotationFromNormal,
@@ -23,6 +25,38 @@ import {
   transformGeometry,
   EPSILON,
 } from './utils.js'
+
+const DEFAULT_TESSELLATION_TOLERANCE = 0.4
+const DEFAULT_ANGULAR_TESSELLATION_TOLERANCE = 0.2
+const EDGE_LINEAR_TESSELLATION_RATIO = 0.25
+const EDGE_ANGULAR_TESSELLATION_RATIO = 0.5
+
+export function getViewportTessellationTolerance() {
+  try {
+    const tolerance = new Expression(preferences.tessellationTolerance).getBase()
+    return Number.isFinite(tolerance) && tolerance > 0
+      ? tolerance
+      : DEFAULT_TESSELLATION_TOLERANCE
+  } catch(_) {
+    return DEFAULT_TESSELLATION_TOLERANCE
+  }
+}
+
+export function getViewportAngularTessellationTolerance() {
+  try {
+    const degrees = new Expression(
+      preferences.tessellationAngularTolerance,
+      [],
+      'angle',
+    ).getBase()
+    const tolerance = THREE.MathUtils.degToRad(degrees)
+    return Number.isFinite(tolerance) && tolerance > 0
+      ? tolerance
+      : DEFAULT_ANGULAR_TESSELLATION_TOLERANCE
+  } catch(_) {
+    return DEFAULT_ANGULAR_TESSELLATION_TOLERANCE
+  }
+}
 
 
 export class Wire {
@@ -719,9 +753,9 @@ export class Shape {
 
     new window.oc.oc.BRepMesh_IncrementalMesh_2(
       geom,
-      0.4, // linear deflection
+      getViewportTessellationTolerance(), // linear deflection
       false,
-      0.2, // angular deflection
+      getViewportAngularTessellationTolerance(),
       false
     )
 
@@ -1448,8 +1482,8 @@ export class Compound extends Volumetric {
 
 function tesselateCurve(geom) {
   const deflection = new window.oc.oc.GCPnts_TangentialDeflection_2(geom,
-    0.1, // curvature deflection
-    0.1, // angular deflection
+    getViewportAngularTessellationTolerance() * EDGE_ANGULAR_TESSELLATION_RATIO,
+    getViewportTessellationTolerance() * EDGE_LINEAR_TESSELLATION_RATIO,
     2, // min points
     1.0e-9, 1.0e-7
   )

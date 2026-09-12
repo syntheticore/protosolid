@@ -12,9 +12,9 @@
 
     "build-oc": "cd assets/oc && docker run --rm -it -v \"$(pwd):/src\" -u \"$(id -u):$(id -g)\" donalffons/opencascade.js oc.yml",
     "build-oc-win": "cd assets/oc && docker run --rm -it -v \".\\:/src\" donalffons/opencascade.js oc.yml",
-    "build-app": "npm run clean && npm run generate && mv -v .output/public/* electron/app",
+    "build-app": "npm run clean && npm run generate && node scripts/copy-generated-app.mjs",
     "generate": "nuxt generate",
-    "clean": "rm -rf .output electron/app/*",
+    "clean": "node scripts/clean.mjs",
 
     "postinstall": "nuxt prepare"
   },

@@ -15,8 +15,8 @@ const preferences = {
   zoomToCursor: true,
   cacheTesselation: true,
   centerOfMassTolerance: '0.01mm',
-  tessellationTolerance: '0.0001mm',
-  curveFittingTolerance: '0.001mm',
+  tessellationTolerance: '0.4mm',
+  tessellationAngularTolerance: '0.2rad',
 }
 
 function savePreferences() {
@@ -28,6 +28,8 @@ function savePreferences() {
 function loadPreferences() {
   try {
     const prefs = JSON.parse(window.localStorage.getItem('preferences')) || {}
+    // The old value was only a placeholder and was never applied to viewport meshes.
+    if(prefs.tessellationTolerance === '0.0001mm') prefs.tessellationTolerance = '0.4mm'
     applyPreferences(prefs)
   } catch(error) {
     console.warn('Could not load preferences', error)

@@ -1,5 +1,12 @@
 <template lang="pug">
   .preferences-view
+    button.window-close(
+      title="Close settings"
+      aria-label="Close settings"
+      @click="close"
+    )
+      Icon(icon="window-close")
+
     aside.sidebar
       nav(aria-label="Settings sections")
         button(
@@ -105,15 +112,23 @@
 
           label
             span.setting-label
-              strong Curve and surface tessellation
+              strong Linear tessellation
               small Maximum deviation of the display mesh
-            input.input.measurement(type="text" v-model="preferences.tessellationTolerance")
+            input.input.measurement(
+              type="text"
+              v-model="preferences.tessellationTolerance"
+              @change="restartRequired = true"
+            )
 
           label
             span.setting-label
-              strong Curve fitting accuracy
-              small Maximum error when fitting generated curves
-            input.input.measurement(type="text" v-model="preferences.curveFittingTolerance")
+              strong Angular tessellation
+              small Maximum angular deviation of the display mesh
+            input.input.measurement(
+              type="text"
+              v-model="preferences.tessellationAngularTolerance"
+              @change="restartRequired = true"
+            )
 
       transition(name="fade")
         .restart(v-if="restartRequired")
@@ -135,7 +150,7 @@
     color: $bright1
     background: $dark2 * 0.8
 
-    [data-platform="darwin"] &::before
+    &::before
       content: ''
       position: absolute
       z-index: 2
@@ -144,6 +159,24 @@
       left: 0
       height: 28px
       -webkit-app-region: drag
+
+  .window-close
+    position: absolute
+    z-index: 3
+    top: 0
+    right: 0
+    width: 44px
+    height: 32px
+    padding: 0
+    border: 0
+    color: $bright2
+    background: transparent
+    font-size: 12px
+    -webkit-app-region: no-drag
+
+    &:hover
+      color: white
+      background: #b70f0f
 
   .sidebar
     background: $dark2 * 1.25
@@ -321,6 +354,14 @@
     },
 
     methods: {
+      close: function() {
+        if(window.ipc) {
+          window.ipc.send('close-preferences')
+        } else {
+          window.close()
+        }
+      },
+
       restart: function() {
         if(window.ipc) window.ipc.send('restart')
       },

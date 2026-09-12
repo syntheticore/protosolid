@@ -517,8 +517,7 @@ mod tests {
         assert_eq!(body.intersection(&tool).unwrap().solids().len(), 0);
     }
 
-    #[test]
-    fn face_limited_torus_to_spline_document_9() {
+    fn torus_to_spline_document_9() -> (Profile, Plane3, Axis3, Compound, Compound) {
         let tol = ModelTolerance::default();
         let region = |controls: [[f64; 2]; 4], closure: &[[f64; 2]]| {
             let points = controls.map(|p| Point2::new(p[0], p[1]));
@@ -638,6 +637,46 @@ mod tests {
             Point3::new(34.56264356747255, 0.0, 61.459642455738184),
         )
         .unwrap();
+        (profile, plane, axis, upper, lower)
+    }
+
+    #[test]
+    fn fillet_revolved_spline_junction_document_9() {
+        let (profile, plane, axis, upper, _) = torus_to_spline_document_9();
+        let face = upper
+            .faces()
+            .filter(|f| matches!(f.surface(), Surface3::Nurbs(_)))
+            .nth(1)
+            .unwrap();
+        let tool = profile
+            .revolve_up_to_face(plane, axis, &upper, face, false)
+            .unwrap();
+        let joined = upper.union(&tool).unwrap();
+        let rim = joined
+            .edges()
+            .find(|edge| {
+                let faces = edge.connected_faces().unwrap();
+                faces
+                    .iter()
+                    .any(|f| matches!(f.surface(), Surface3::Torus(_)))
+                    && faces
+                        .iter()
+                        .any(|f| matches!(f.surface(), Surface3::Nurbs(_)))
+            })
+            .unwrap()
+            .clone();
+        for radius in [0.5, 1.0, 2.0, 5.0] {
+            joined
+                .fillet(&[rim.clone()], radius)
+                .unwrap_or_else(|error| {
+                    panic!("radius {radius}: {error}");
+                });
+        }
+    }
+
+    #[test]
+    fn face_limited_torus_to_spline_document_9() {
+        let (profile, plane, axis, upper, lower) = torus_to_spline_document_9();
         let mut failures = Vec::new();
         let body = upper.combined(&[lower.clone()]).unwrap();
         let from = upper

@@ -74,6 +74,7 @@ struct BlendSpine {
     endpoint_seeds: [f64; 2],
     provisional_range: ParameterRange,
     shared_seam: Option<VertexId>,
+    local_guide: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -809,6 +810,7 @@ impl EulerTransaction<'_> {
             parent_surfaces[0].offset(offset_distance(faces[0])?, tolerance)?,
             parent_surfaces[1].offset(offset_distance(faces[1])?, tolerance)?,
         ];
+        let mut local_guide = false;
         let candidates = if let Some(shared) = shared {
             vec![shared.center.clone()]
         } else {
@@ -841,6 +843,7 @@ impl EulerTransaction<'_> {
                     ))
                 }
                 Err(_) => {
+                    local_guide = true;
                     vec![self.local_offset_intersection(
                         uses,
                         &offsets,
@@ -872,18 +875,17 @@ impl EulerTransaction<'_> {
         let endpoint_seeds = edge
             .vertices
             .iter()
-            .map(|vertex| {
-                center
-                    .curve
-                    .project(self.working.vertex(*vertex)?.point, tolerance)
-                    .and_then(|projection| {
-                        blend_parameter_near(
-                            &center.curve,
-                            projection.parameter,
-                            middle_parameter,
-                            tolerance,
-                        )
-                    })
+            .enumerate()
+            .map(|(index, vertex)| {
+                let point = self.working.vertex(*vertex)?.point;
+                let projection = if local_guide {
+                    project_local_blend_endpoint(&center.curve, point, index, tolerance)
+                } else {
+                    center.curve.project(point, tolerance).map(|p| p.parameter)
+                };
+                projection.and_then(|projection| {
+                    blend_parameter_near(&center.curve, projection, middle_parameter, tolerance)
+                })
             })
             .collect::<KernelResult<Vec<_>>>()?;
         let endpoint_seeds = [endpoint_seeds[0], endpoint_seeds[1]];
@@ -941,6 +943,7 @@ impl EulerTransaction<'_> {
             endpoint_seeds,
             provisional_range,
             shared_seam: shared.map(|spine| spine.edge.vertices[0]),
+            local_guide,
         })
     }
 
@@ -2778,11 +2781,20 @@ impl EulerTransaction<'_> {
                     ends.push(BlendPatchEnd::Junction(vertex));
                     continue;
                 }
-                let projected = spine
-                    .center
-                    .curve
-                    .project(junction.center, tolerance)?
-                    .parameter;
+                let projected = if spine.local_guide {
+                    project_local_blend_endpoint(
+                        &spine.center.curve,
+                        junction.center,
+                        endpoint_index,
+                        tolerance,
+                    )?
+                } else {
+                    spine
+                        .center
+                        .curve
+                        .project(junction.center, tolerance)?
+                        .parameter
+                };
                 let mut parameter = if spine.shared_seam.is_some() {
                     projected + (spine.endpoint_seeds[endpoint_index] - projected).round()
                 } else {
@@ -4441,6 +4453,37 @@ impl EulerTransaction<'_> {
             achieved_error: tolerance.linear,
         })
     }
+}
+
+fn project_local_blend_endpoint(
+    curve: &Curve3,
+    point: Point3,
+    endpoint: usize,
+    tolerance: ModelTolerance,
+) -> KernelResult<f64> {
+    // Local guides follow the source edge from zero to one. Their continuations
+    // can overlap on nearly closed edges, so retain the endpoint's own branch.
+    let DomainBounds::Bounded(range) = curve.domain().bounds else {
+        return curve.project(point, tolerance).map(|p| p.parameter);
+    };
+    let range = if endpoint == 0 {
+        ParameterRange::new(range.start, 0.5)?
+    } else {
+        ParameterRange::new(0.5, range.end)?
+    };
+    let projected = curve.project(point, tolerance)?;
+    if projected.parameter >= range.start && projected.parameter <= range.end {
+        return Ok(projected.parameter);
+    }
+    let local = curve.project_on_trim(point, range, tolerance)?;
+    let allowed = tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0));
+    // A short edge can legitimately move past its midpoint as it is trimmed.
+    // Prefer the local chart only when it supplies an equivalent projection.
+    Ok(if local.distance <= projected.distance + allowed {
+        local.parameter
+    } else {
+        projected.parameter
+    })
 }
 
 // Bounded implicit intersections can describe a complete closed section without

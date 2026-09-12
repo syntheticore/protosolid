@@ -173,14 +173,17 @@ export class Feature {
       if(!gizmo) return
       gizmo = gizmo.distance
       if(!gizmo) return
+      const component = this.document.top().findChild(this.componentOccurrenceId) ||
+        this.document.top().findChild(this.componentId)
+      const transform = component && worldTransform(component)
+      const center = transform ? gizmo.center.clone().applyMatrix4(transform) : gizmo.center
+      const direction = transform ? gizmo.direction.clone().transformDirection(transform) : gizmo.direction
       if(this.distanceGizmo) {
+        this.distanceGizmo().startPosition.copy(center)
+        this.distanceGizmo().translationSnapOrigin.copy(center)
+        this.distanceGizmo().direction.copy(direction)
         this.distanceGizmo().set(gizmo.distance, gizmo.side)
       } else {
-        const component = this.document.top().findChild(this.componentOccurrenceId) ||
-          this.document.top().findChild(this.componentId)
-        const transform = component && worldTransform(component)
-        const center = transform ? gizmo.center.clone().applyMatrix4(transform) : gizmo.center
-        const direction = transform ? gizmo.direction.clone().transformDirection(transform) : gizmo.direction
         const distanceGizmo = markRaw(new LengthGizmo(center, direction, gizmo.distance, gizmo.side, gizmo.cb))
         this.distanceGizmo = () => distanceGizmo
         window.alcRenderer.addGizmo(distanceGizmo)
@@ -1518,6 +1521,14 @@ export class ExtrudeFeature extends Feature {
   static icon = 'layer-group'
   constructor(doc) {
     super(doc, true, 'Extrusion', {
+      extent: {
+        title: 'Extent',
+        type: 'select',
+        options: {
+          distance: { title: 'Distance', icon: 'ruler-vertical' },
+          face: { title: 'Up to face', icon: 'sign-in-alt' },
+        },
+      },
       profiles: {
         title: 'Profiles',
         type: 'profile',
@@ -1527,61 +1538,88 @@ export class ExtrudeFeature extends Feature {
         title: '(Axis)',
         type: 'axis',
         optional: true,
+        when: feature => feature.extent == 'distance',
       },
       distance: {
         title: 'Distance',
         type: 'length',
+        when: feature => feature.extent == 'distance',
       },
-      // limit: {
-      //   type: 'OR',
-      //   settings: [
-      //     { title: 'Distance', type: 'length' },
-      //     { title: '(Up to)', type: 'surface|point' },
-      //   ]
-      // },
+      limitFace: {
+        title: 'Up to face',
+        type: 'face',
+        when: feature => feature.extent == 'face',
+      },
+      offset: {
+        title: 'Offset',
+        type: 'length',
+        allowNegative: true,
+      },
       side: {
         title: 'Side',
-        type: 'bool',
-        icons: ['caret-up', 'caret-down']
+        type: 'select',
+        when: feature => feature.extent == 'distance',
+        options: {
+          forward: { title: 'Forward', icon: 'caret-up' },
+          reverse: { title: 'Reverse', icon: 'caret-down' },
+          both: { title: 'Both directions (distance per side)', icon: 'arrows-alt-v' },
+        },
       },
     })
 
+    this.extent = 'distance'
+    this.limitFace = null
     this.profiles = null
     this.axis = null
     this.distance = 1.0
-    this.side = true
+    this.offset = 0
+    this.side = 'forward'
+  }
+
+  setValues(values) {
+    // Preserve the direction of documents saved with the old boolean toggle.
+    super.setValues({
+      ...values,
+      extent: values.extent || 'distance',
+      side: typeof values.side == 'boolean' ? (values.side ? 'forward' : 'reverse') : (values.side || 'forward'),
+    })
   }
 
   updateFeature(tree, references) {
-    const distance = this.distance * (this.side ? 1 : -1)
+    const distance = this.distance * (this.side == 'reverse' ? -1 : this.side == 'both' ? 2 : 1)
+    const offset = this.offset * (this.side == 'reverse' ? -1 : 1) - (this.side == 'both' ? this.distance : 0)
     const comp = tree.findChild(this.componentId)
 
     let tool = new Compound(this.componentId)
-    references.profiles.forEach(profile => {
-      try {
-        const extrusion = profile.extrude(this.componentId, distance, this.id)
-        tool = tool.boolean(extrusion, 'join', this.id)
-      } catch(err) { this.error = err || this.error }
-    })
+    this.previewBody = null
     try {
+      for(const profile of references.profiles) {
+        const extrusion = this.extent == 'face' ?
+          profile.extrudeUpToFace(this.componentId, references.limitFace, this.id, this.offset) :
+          profile.extrude(this.componentId, distance, this.id, offset)
+        tool = tool.boolean(extrusion, 'join', this.id)
+      }
       comp.compound = comp.compound.boolean(tool, this.operation, this.id)
-    } catch(err) { this.error = this.error || err }
-
-    this.previewBody = tool
+      this.previewBody = tool
+    } catch(err) {
+      this.error = err?.msg ? err : { type: 'error', msg: 'Extrusion could not be created' }
+    }
   }
 
   getGizmo() {
-    const profile = this.profiles()[0].getItem()
+    if(this.extent == 'face') return
+    const profile = this.profiles().at(-1).getItem()
+    const center = profile.center().clone().addScaledVector(profile.normal(), this.offset * (this.side == 'reverse' ? -1 : 1))
     return {
       distance: {
-        center: profile.center(),
+        center,
         direction: (this.axis && this.axis()) || profile.normal(),
         distance: this.distance,
-        side: this.side,
+        side: this.side != 'reverse',
         cb: (dist, side) => {
           this.setExpression('distance', null)
           this.distance = dist
-          this.side = side
+          if(this.side != 'both') this.side = side ? 'forward' : 'reverse'
         },
       }
     }
@@ -1595,6 +1633,19 @@ export class ExtrudeFeature extends Feature {
     this.profiles = () => newProfiles
     this.error = null
   }
+
+  updateGizmos() {
+    if(this.extent == 'face') {
+      if(this.distanceGizmo) window.alcRenderer.removeGizmo(this.distanceGizmo())
+      this.distanceGizmo = null
+      return
+    }
+    super.updateGizmos()
+  }
+
+  preview() {
+    return this.isComplete() && this.error?.type != 'error' ? this.previewBody : null
+  }
 }
 
 Serialize.register(ExtrudeFeature, 'ExtrudeFeature')
@@ -1604,6 +1655,15 @@ export class RevolveFeature extends Feature {
   static icon = 'wave-square'
   constructor(document) {
     super(document, true, 'Revolution', {
+      extent: {
+        title: 'Extent',
+        type: 'select',
+        options: {
+          angle: { title: 'Angle', icon: 'drafting-compass' },
+          face: { title: 'Up to face', icon: 'sign-in-alt' },
+          between: { title: 'Between faces', icon: 'exchange-alt' },
+        },
+      },
       profiles: {
         title: 'Profiles',
         type: 'profile',
@@ -1616,6 +1676,23 @@ export class RevolveFeature extends Feature {
       angle: {
         title: 'Angle',
         type: 'angle',
+        when: feature => feature.extent == 'angle',
+      },
+      offset: {
+        title: 'Offset',
+        type: 'angle',
+        allowNegative: true,
+        when: feature => feature.extent == 'angle',
+      },
+      fromFace: {
+        title: 'From face',
+        type: 'face',
+        when: feature => feature.extent == 'between',
+      },
+      limitFace: {
+        title: 'Up to face',
+        type: 'face',
+        when: feature => feature.extent != 'angle',
       },
       side: {
         title: 'Side',
@@ -1626,27 +1703,39 @@ export class RevolveFeature extends Feature {
 
     this.profiles = null
     this.axis = null
+    this.extent = 'angle'
+    this.fromFace = null
+    this.limitFace = null
     this.angle = 180.0
+    this.offset = 0
     this.side = true
   }
 
   updateFeature(tree, references) {
     const angle = this.angle * (this.side ? 1 : -1)
+    const offset = this.offset * (this.side ? 1 : -1)
 
     let tool = new Compound(this.componentId)
-    references.profiles.forEach(profile => {
-      try {
-        const revolution = profile.revolve(this.componentId, references.axis, rad(angle), this.id)
-        tool = tool.boolean(revolution, 'join', this.id)
-      } catch(err) { this.error = err || this.error }
-    })
-
+    this.previewBody = null
     const comp = tree.findChild(this.componentId)
     try {
+      for(const profile of references.profiles) {
+        const revolution = this.extent == 'between' ?
+          profile.revolveBetweenFaces(this.componentId, references.axis, references.fromFace, references.limitFace, this.id, this.side) :
+          this.extent == 'face' ?
+          profile.revolveUpToFace(this.componentId, references.axis, references.limitFace, this.id, this.side) :
+          profile.revolve(this.componentId, references.axis, rad(angle), this.id, rad(offset))
+        tool = tool.boolean(revolution, 'join', this.id)
+      }
       comp.compound = comp.compound.boolean(tool, this.operation, this.id)
-    } catch(err) { this.error = err || this.error }
+      this.previewBody = tool
+    } catch(err) {
+      this.error = err?.msg ? err : { type: 'error', msg: 'Revolution could not be created' }
+    }
+  }
 
-    this.previewBody = tool
+  preview() {
+    return this.isComplete() && this.error?.type != 'error' ? this.previewBody : null
   }
 }
 
@@ -1782,10 +1871,15 @@ export class DraftFeature extends Feature {
 
   updateGizmos() {
     if(this.isComplete()) {
+      const center = this.faces().at(-1).getItem().center().clone()
+      const component = this.document.top().findChild(this.componentOccurrenceId) ||
+        this.document.top().findChild(this.componentId)
+      if(component) center.applyMatrix4(worldTransform(component))
       if(this.angleGizmo) {
+        this.angleGizmo.startPosition.copy(center)
+        this.angleGizmo.dummy.position.copy(center)
         this.angleGizmo.set(this.angle)
       } else {
-        const center = new THREE.Vector3()
         this.angleGizmo = markRaw(new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
           this.setExpression('angle', null)
           this.angle = angle
@@ -1899,7 +1993,7 @@ export class FilletFeature extends Feature {
   getGizmo() {
     return {
       distance: {
-        center: this.edges()[0].getItem().center(),
+        center: this.edges().at(-1).getItem().center(),
         direction: new THREE.Vector3(0,1,0),
         distance: this.radius,
         side: true,
@@ -1965,7 +2059,7 @@ export class ChamferFeature extends Feature {
   getGizmo() {
     return {
       distance: {
-        center: this.edges()[0].getItem().center(),
+        center: this.edges().at(-1).getItem().center(),
         direction: new THREE.Vector3(0,1,0),
         distance: this.distance,
         side: true,

@@ -385,8 +385,9 @@ mainBuild:
 
     - symbol: BRepFeat_SplitShape
     # - symbol: BRepFeat_RibSlot
-    # - symbol: BRepFeat_MakeRevol
-    # - symbol: BRepFeat_MakePrism
+    - symbol: BRepFeat_MakeRevol
+    - symbol: BRepFeat_Form
+    - symbol: BRepFeat_MakePrism
     # - symbol: BRepFeat_MakePipe
     # - symbol: BRepFeat_MakeLinearForm
     # - symbol: BRepFeat_Gluer

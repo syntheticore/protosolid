@@ -155,11 +155,12 @@
       },
 
       onBlur() {
-        if(this.autoFocus) {
-          this.focusInput()
-        } else if(this.allowBlur) {
-          this.commit(true)
-        }
+        // Let the newly focused input take ownership before restoring focus.
+        setTimeout(() => {
+          if(!this.$refs.input) return
+          if(this.autoFocus) this.focusInput()
+          else if(this.allowBlur) this.commit(true)
+        })
       },
     },
   }

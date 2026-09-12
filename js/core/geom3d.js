@@ -228,26 +228,132 @@ export class Profile {
     return compound
   }
 
-  extrude(componentId, height, featureId) {
+  extrude(componentId, height, featureId, offset = 0) {
     if(!height) throw { type: 'error', msg: 'Extrusion has no volume' }
-    const geometry = window.kernel.modeling.extrude(this, height)
-    if(geometry instanceof ShapexGeometry) {
+    if(window.kernel.modeling.id == 'shapex') {
+      const geometry = window.kernel.modeling.extrude(this, height)
       const compound = new Compound(componentId, geometry)
       compound.nameShapexExtrusion(this, featureId)
-      return compound
+      if(!offset) return compound
+      const translation = this.normal().normalize().multiplyScalar(offset)
+      return compound.transform(new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z))
     }
-    return this.makeCompound(componentId, geometry, 'extrude-' + featureId)
+    let face = this.makeFace()
+    const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
+    if(offset) {
+      const translation = new THREE.Vector3(0, 0, offset).applyQuaternion(rot)
+      face = transformGeometry(face, new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z)).Shape()
+    }
+    const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyQuaternion(rot))
+    const prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true)
+    // const args = new window.oc.oc.TopTools_ListOfShape_1()
+    // args.Append_1(face)
+    // const history = new window.oc.oc.BRepTools_History_2(args, prism)
+    return this.makeCompound(componentId, prism.Shape(), 'extrude-' + featureId)
   }
 
-  revolve(componentId, axis, angle, featureId) {
+  extrudeUpToFace(componentId, target, featureId, offset = 0) {
+    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('extrusion up to face')
+    const oc = window.oc.oc
+    const fail = msg => { throw { type: 'error', msg } }
+    if(!target) fail('Select a face to extrude up to')
+
+    const direction = this.normal().normalize()
+    const origin = this.center()
+    const plane = target.getPlane()
+    if(plane) {
+      const normal = normalFromMatrix(plane)
+      const denominator = normal.dot(direction)
+      if(Math.abs(denominator) <= oc.Precision.Angular()) fail('The target plane is parallel to the extrusion direction')
+      // The location of the trimmed face is irrelevant: use the intersection
+      // with its underlying plane to choose the extrusion direction.
+      const distance = new THREE.Vector3().setFromMatrixPosition(plane).sub(origin).dot(normal) / denominator
+      if(distance < 0) direction.negate()
+    } else if(target.center().sub(origin).dot(direction) < 0) {
+      direction.negate()
+    }
+
+    // Work along local +Z with the offset start at the origin.
+    const frame = rotationFromNormal(direction).setPosition(origin.clone().addScaledVector(direction, offset))
+    const inverseFrame = frame.clone().invert()
+    const planeGeometry = plane && ocPlnFromMatrix(inverseFrame.clone().multiply(plane))
+    const planeBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(planeGeometry)
+    const targetTransform = !plane && transformGeometry(target.solid.geom(), inverseFrame)
+    const targetShape = planeBuilder ? planeBuilder.Face() : targetTransform.ModifiedShape(target.geom())
+    const baseTransform = transformGeometry(this.makeFace(), frame.clone().setPosition(origin).invert())
+    const base = baseTransform.Shape()
+    const prismDirection = ocDirFromVec(new THREE.Vector3(0, 0, 1))
+    const sketchFace = new oc.TopoDS_Face()
+    // Mode 2 returns just the extrusion; Feature applies the chosen Boolean.
+    // Curved limits need their owning solid as the basis for face selection.
+    const prism = new oc.BRepFeat_MakePrism_2(
+      targetTransform ? targetTransform.Shape() : base, base, sketchFace, prismDirection, 2, false,
+    )
+    const originals = this.rings.flatMap(ring => ring.segments)
+    try {
+      prism.Perform_2(targetShape)
+      if(!prism.IsDone()) fail('The selected face could not trim the extrusion')
+
+      const candidates = collectShapes(prism.Shape(), 'solid').filter(solid =>
+        collectShapes(solid, 'face').some(face => face.IsSame(base))
+      )
+      if(candidates.length != 1) fail(plane ?
+        'The target plane must lie entirely beyond the extrusion start' :
+        'The selected face must cover the entire extrusion beyond its start')
+
+      const result = new Compound(componentId, candidates[0])
+      if(result.center().z <= EPSILON) fail('The selected face is behind the extrusion start')
+      const solid = result.solids()[0]
+      const sources = collectShapes(base, 'edge').map((edge, index) => ({
+        id: '/extrude-' + featureId + '/swept/' + this.getBaseId(originals[index]),
+        edge,
+      }))
+      solid.faces().forEach(face => {
+        if(face.geom().IsSame(base)) {
+          face.id = '/extrude-' + featureId + '/bottom'
+          return
+        }
+        // Generated() can retain the untrimmed sides for curved limits.
+        // The unchanged base edges identify their actual adjacent side faces.
+        const edges = collectShapes(face.geom(), 'edge')
+        const source = sources.find(source => edges.some(edge => edge.IsSame(source.edge)))
+        face.id = source?.id || '/extrude-' + featureId + '/top'
+      })
+      const namesUsed = {}
+      solid.edges().forEach(edge => {
+        const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
+        namesUsed[name] = (namesUsed[name] || 0) + 1
+        edge.id = name + '/' + namesUsed[name]
+      })
+      if(!result.validate() || result.volume() <= EPSILON) fail('Up to face produced no valid extrusion volume')
+      return result.transform(frame)
+    } finally {
+      prism.delete()
+      sketchFace.delete()
+      prismDirection.delete()
+      if(planeBuilder) planeBuilder.delete()
+      if(planeGeometry) planeGeometry.delete()
+      if(targetTransform) targetTransform.delete()
+      baseTransform.delete()
+    }
+  }
+
+  revolve(componentId, axis, angle, featureId, offset = 0) {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
     if(window.kernel.modeling.id == 'shapex') {
       const geometry = window.kernel.modeling.revolve(this, axis, angle)
-      return new Compound(componentId, geometry).inheritShapexTopology([], 'revolve', featureId)
+      const compound = new Compound(componentId, geometry).inheritShapexTopology([], 'revolve', featureId)
+      if(!offset) return compound
+      const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(offset)).multiply(axis.clone().invert())
+      return compound.transform(turn)
     }
-    const face = this.makeFace()
+    let face = this.makeFace()
+    if(offset) {
+      const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(offset)).multiply(axis.clone().invert())
+      face = transformGeometry(face, turn).Shape()
+    }
     const ax = ocAx1FromMatrix(axis)
-    let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true) //XXX BRepFeat_MakeRevol
+    let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
 
     // A profile segment lying on the revolution axis collapses instead of
     // producing a swept face. Exclude it from the positional face-name map.
@@ -261,6 +367,236 @@ export class Profile {
       }))
 
     return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId, originals)
+  }
+
+  revolveUpToFace(componentId, axis, target, featureId, forward = true, from = null) {
+    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('revolution up to face')
+    const oc = window.oc.oc
+    const fail = msg => { throw { type: 'error', msg } }
+    if(!target) fail('Select a face to revolve up to')
+
+    const frame = axis.clone()
+    if(!forward) frame.multiply(new THREE.Matrix4().makeRotationX(Math.PI))
+    const inverseAxis = frame.clone().invert()
+    const plane = target.getPlane()
+    const localStart = inverseAxis.clone().multiply(this.sketch.workplane)
+    const localPlane = plane && inverseAxis.clone().multiply(plane)
+    if(localPlane) {
+      // The two-plane overload expects matching crossing orientations at
+      // both limits. Orient the target using the first forward intersection.
+      const center = this.center().applyMatrix4(inverseAxis)
+      const normal = normalFromMatrix(localPlane)
+      const point = new THREE.Vector3().setFromMatrixPosition(localPlane)
+      const a = normal.x * center.x + normal.y * center.y
+      const b = -normal.x * center.y + normal.y * center.x
+      const c = normal.z * center.z - normal.dot(point)
+      const radius = Math.hypot(a, b)
+      if(radius <= EPSILON || Math.abs(c) >= radius) fail('The target plane does not cross the revolution')
+      const phase = Math.atan2(b, a)
+      const delta = Math.acos(-c / radius)
+      const angles = [phase - delta, phase + delta].map(angle => (angle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI))
+      const angle = Math.min(...angles)
+      if(angle <= oc.Precision.Angular()) fail('The target plane intersects the starting profile')
+      const startNormal = normalFromMatrix(localStart)
+      const startPoint = new THREE.Vector3().setFromMatrixPosition(localStart)
+      if(Math.abs(normal.z) <= oc.Precision.Angular() && Math.abs(normal.dot(point)) <= EPSILON &&
+         Math.abs(startNormal.z) <= oc.Precision.Angular() && Math.abs(startNormal.dot(startPoint)) <= EPSILON) {
+        // Radial planes define an exact angle, including profiles touching
+        // the axis where the limited-feature algorithm can lose the start cap.
+        return this.revolve(componentId, axis, forward ? angle : -angle, featureId)
+      }
+      if(angle > Math.PI) {
+        // An infinite start plane also intersects the sweep at 180 degrees.
+        // Advance past that ambiguity only when the first half misses the limit.
+        const first = this.revolve(componentId, axis, forward ? Math.PI : -Math.PI, featureId)
+        const limitPlane = ocPlnFromMatrix(plane)
+        const section = new oc.BRepAlgoAPI_Section_5(first.geom(), limitPlane, true)
+        try {
+          if(!section.IsDone() || collectShapes(section.Shape(), 'vertex').length) {
+            fail('The target plane crosses the profile at incompatible revolution angles')
+          }
+        } finally {
+          section.delete()
+          limitPlane.delete()
+        }
+        const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(Math.PI)).multiply(axis.clone().invert())
+        const remaining = this.clone()
+        remaining.sketch = { workplane: turn.clone().multiply(this.sketch.workplane) }
+        remaining.makeFace = () => oc.TopoDS.Face_1(transformGeometry(this.makeFace(), turn).Shape())
+        return first.boolean(remaining.revolveUpToFace(componentId, axis, target, featureId, forward), 'join').repair()
+      }
+      const crossing = -a * Math.sin(angle) + b * Math.cos(angle)
+      const startCrossing = normalFromMatrix(localStart).dot(new THREE.Vector3(-center.y, center.x, 0))
+      if(crossing * startCrossing < 0) localPlane.multiply(new THREE.Matrix4().makeRotationX(Math.PI))
+    }
+    const planeGeometry = plane && ocPlnFromMatrix(localPlane)
+    const planeBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(planeGeometry)
+    const targetTransform = !plane && transformGeometry(target.solid.geom(), inverseAxis)
+    const targetShape = planeBuilder ? planeBuilder.Face() : targetTransform.ModifiedShape(target.geom())
+    const fromTransform = from && (from.solid.geom().IsSame(target.solid.geom()) ? targetTransform :
+      transformGeometry(from.solid.geom(), inverseAxis))
+    const fromShape = fromTransform && fromTransform.ModifiedShape(from.geom())
+    const baseTransform = transformGeometry(this.makeFace(), inverseAxis)
+    const base = baseTransform.Shape()
+    const startPlane = plane && ocPlnFromMatrix(localStart)
+    const startBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(startPlane)
+    const startShape = startBuilder ? startBuilder.Face() : base
+    const rotationAxis = ocAx1FromMatrix(new THREE.Matrix4())
+    const sketchFace = new oc.TopoDS_Face()
+    const support = fromTransform && fromTransform != targetTransform ? new Compound(componentId, targetTransform.Shape())
+      .merge([new Compound(componentId, fromTransform.Shape())]).geom() :
+      targetTransform ? targetTransform.Shape() : base
+    // Return the revolved tool only; the feature applies Join/Cut/Intersect.
+    const revolution = new oc.BRepFeat_MakeRevol_2(
+      support, base, sketchFace, rotationAxis, 2, false,
+    )
+    try {
+      // The single-limit planar path in this kernel ignores feature-only mode.
+      // The two-plane overload honors it and avoids adding the target body.
+      if(fromShape) revolution.Perform_3(fromShape, targetShape)
+      else if(plane) revolution.Perform_3(startShape, targetShape)
+      else revolution.Perform_2(targetShape)
+      if(!revolution.IsDone()) fail('The selected face could not trim the revolution')
+
+      const baseFace = new Face(null, oc.TopoDS.Face_1(base))
+      const baseCenter = baseFace.center()
+      const baseArea = baseFace.area()
+      const sharesSurface = (a, b) => {
+        const first = oc.BRep_Tool.Surface_2(oc.TopoDS.Face_1(a))
+        const second = oc.BRep_Tool.Surface_2(oc.TopoDS.Face_1(b))
+        try { return first.get().isAliasOf(second.get()) }
+        finally { first.delete(); second.delete() }
+      }
+      const isStart = face => {
+        if(fromShape) return sharesSurface(face, fromShape)
+        if(face.IsSame(base)) return true
+        if(!plane) return false
+        const cap = new Face(null, face)
+        const capPlane = cap.getPlane()
+        if(!capPlane || Math.abs(normalFromMatrix(capPlane).dot(normalFromMatrix(localStart))) < 1 - EPSILON) return false
+        return cap.center().distanceTo(baseCenter) <= EPSILON &&
+          Math.abs(cap.area() - baseArea) <= EPSILON * Math.max(1, baseArea)
+      }
+      // The two-limit builder can also return pieces outside the limits.
+      // Keep only a solid with a cap on each selected surface.
+      const candidates = collectShapes(revolution.Shape(), 'solid').filter(solid => {
+        const faces = collectShapes(solid, 'face')
+        return faces.some(isStart) && (!fromShape || faces.some(face => sharesSurface(face, targetShape)))
+      })
+      if(candidates.length != 1) fail(fromShape ? 'The limiting faces do not enclose a valid revolution' :
+        'The selected face must cap the entire profile along the revolution')
+
+      const result = new Compound(componentId, candidates[0])
+      if(!result.validate() || result.volume() <= EPSILON) fail('Up to face produced no valid revolution volume')
+      const originals = this.rings.flatMap(ring => ring.segments)
+      const sources = collectShapes(base, 'edge').map((edge, index) => ({
+        edge,
+        generated: arrayFromOcList(revolution.Generated(edge)),
+        id: '/revolve-' + featureId + '/swept/' + this.getBaseId(originals[index]),
+      })).filter(source => source.generated.length)
+      const solid = result.solids()[0]
+      const faceNamesUsed = {}
+      solid.faces().forEach(face => {
+        if(isStart(face.geom())) {
+          face.id = '/revolve-' + featureId + '/bottom'
+          return
+        }
+        const edges = collectShapes(face.geom(), 'edge')
+        const source = sources.find(source => edges.some(edge => edge.IsSame(source.edge)) ||
+          source.generated.some(shape => sharesSurface(face.geom(), shape)))
+        const name = source?.id || '/revolve-' + featureId + '/top'
+        faceNamesUsed[name] = (faceNamesUsed[name] || 0) + 1
+        face.id = name + (faceNamesUsed[name] > 1 ? '/' + faceNamesUsed[name] : '')
+      })
+      const namesUsed = {}
+      solid.edges().forEach(edge => {
+        const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
+        namesUsed[name] = (namesUsed[name] || 0) + 1
+        edge.id = name + '/' + namesUsed[name]
+      })
+      // Merge the two-limit sweep at the profile plane before transforming
+      // its periodic surface; repair also fixes the unified face's seam.
+      return (fromShape ? result.repair() : result).transform(frame)
+    } finally {
+      revolution.delete()
+      sketchFace.delete()
+      rotationAxis.delete()
+      baseTransform.delete()
+      if(planeBuilder) planeBuilder.delete()
+      if(planeGeometry) planeGeometry.delete()
+      if(targetTransform) targetTransform.delete()
+      if(fromTransform && fromTransform != targetTransform) fromTransform.delete()
+      if(startBuilder) startBuilder.delete()
+      if(startPlane) startPlane.delete()
+    }
+  }
+
+  revolveBetweenFaces(componentId, axis, from, until, featureId, forward = true) {
+    if(window.kernel.modeling.id == 'shapex') window.kernel.modeling.unsupported('revolution between faces')
+    const fail = msg => { throw { type: 'error', msg } }
+    if(!from || !until) fail('Select both limiting faces')
+    if(from.geom().IsSame(until.geom())) fail('Choose different starting and ending faces')
+    // Build curved limits together: subtracting independent periodic sweeps
+    // can lose their coincident side faces and falsely report crossing limits.
+    if(!from.getPlane() && !until.getPlane()) {
+      return this.revolveUpToFace(componentId, axis, until, featureId, forward, from)
+    }
+
+    const startsAtSketch = face => {
+      const plane = face.getPlane()
+      if(!plane) return false
+      const normal = normalFromMatrix(this.sketch.workplane)
+      const origin = new THREE.Vector3().setFromMatrixPosition(this.sketch.workplane)
+      const position = new THREE.Vector3().setFromMatrixPosition(plane)
+      return Math.abs(normal.dot(normalFromMatrix(plane))) >= 1 - EPSILON &&
+        Math.abs(position.sub(origin).dot(normal)) <= EPSILON
+    }
+    const fromAtSketch = startsAtSketch(from)
+    const untilAtSketch = startsAtSketch(until)
+    if(fromAtSketch && untilAtSketch) fail('The limiting planes coincide')
+
+    // Compose the validated single-limit sweeps. This also handles mixed
+    // planar/curved limits, which the native two-limit overload rejects.
+    const start = fromAtSketch ? null : this.revolveUpToFace(componentId, axis, from, featureId + '/from', forward)
+    const end = untilAtSketch ? null : this.revolveUpToFace(componentId, axis, until, featureId + '/until', forward)
+    let result
+    if(!start) {
+      result = end
+    } else if(!end) {
+      result = this.revolve(componentId, axis, forward ? 2 * Math.PI : -2 * Math.PI, featureId).boolean(start, 'cut')
+    } else {
+      const startOutsideEnd = start.boolean(end, 'cut')
+      const endOutsideStart = end.boolean(start, 'cut')
+      if(!startOutsideEnd.solids().length) {
+        result = endOutsideStart
+      } else if(!endOutsideStart.solids().length) {
+        // The end is reached after passing the sketch again.
+        result = this.revolve(componentId, axis, forward ? 2 * Math.PI : -2 * Math.PI, featureId)
+          .boolean(start, 'cut').boolean(end, 'join')
+      } else {
+        fail('The limiting faces cross within the revolved profile')
+      }
+    }
+    if(result.solids().length != 1 || !result.validate() || result.volume() <= EPSILON) {
+      fail('The limiting faces do not enclose a valid revolution')
+    }
+
+    const prefix = '/revolve-' + featureId
+    const solid = result.solids()[0]
+    solid.faces().forEach(face => {
+      face.id = face.id.replace(prefix + '/from/top', prefix + '/bottom')
+        .replace(prefix + '/from/bottom', prefix + '/top')
+        .replace(prefix + '/until/top', prefix + '/top')
+        .replace(prefix + '/from/', prefix + '/')
+        .replace(prefix + '/until/', prefix + '/')
+    })
+    const namesUsed = {}
+    solid.edges().forEach(edge => {
+      const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
+      namesUsed[name] = (namesUsed[name] || 0) + 1
+      edge.id = name + '/' + namesUsed[name]
+    })
+    return result.repair()
   }
 
   loft(componentId, others, untwist, featureId) {

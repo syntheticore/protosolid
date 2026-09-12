@@ -208,7 +208,7 @@
   }
 
   function loadDocument() {
-    const doc = new Document()
+    const doc = new Document(bus)
     doc.load().then(() => {
       // Close untouched documents on load
       if(activeDocument.value.isFresh) deleteDocument(activeDocument.value)

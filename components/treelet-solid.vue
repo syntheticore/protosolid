@@ -57,12 +57,11 @@
     props.component.creator.itemsHidden[props.solid.id] = !isHidden.value
   }
 
-  function removeSolid() {
+  async function removeSolid() {
     if(props.component.readOnly) return
     const feature = new RemoveSolidsFeature(props.document)
     feature.solids = () => [props.solid.reference()]
-    props.document.addFeature(feature)
-    props.document.regenerate()
+    await props.document.addFeature(feature)
   }
 
   function convertToComponent() {

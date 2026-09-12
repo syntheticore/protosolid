@@ -50,7 +50,7 @@
   template(v-for="helper in component.helpers")
 
     HelperProxy(
-      v-if="!component.isItemHidden(helper.id) && (component === document.activeComponent || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper))"
+      v-if="!component.isItemHidden(helper.id) && (component.id === document.activeComponent?.id || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper))"
       :key="helper.id"
       :document="document"
       :component="component"
@@ -116,7 +116,7 @@
 
   const highlight = inject('highlight')
 
-  const active = computed(() => props.parentActive || props.component == props.document.activeComponent || props.document.activeFeature instanceof JointFeature )
+  const active = computed(() => props.parentActive || props.component.id == props.document.activeComponent?.id || props.document.activeFeature instanceof JointFeature )
   const highlighted = computed(() => props.parentHighlighted || props.component == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.component) )
   const projecting = computed(() => props.activeTool instanceof ProjectTool )

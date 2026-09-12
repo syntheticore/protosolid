@@ -16,10 +16,15 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+let nextCalculationId = 0
+
 export default class Document extends Emitter {
-  constructor() {
+  constructor(bus) {
     super()
 
+    this.bus = bus
+    this.regenerationQueue = Promise.resolve()
+    this.pendingRegenerations = 0
     this.filePath = null
     this.timeline = new Timeline()
     this.materials = []
@@ -29,6 +34,7 @@ export default class Document extends Emitter {
     this.activeComponent = this.top()
     this.activeSketch = null
     this.activeFeature = null
+    this.creatingFeature = null
     this.activeSimulation = null
     this.activeSimulationPicker = false
     this.activeExportConfig = null
@@ -84,6 +90,10 @@ export default class Document extends Emitter {
     return this.timeline.tree(at)
   }
 
+  get isRegenerating() {
+    return this.pendingRegenerations > 0
+  }
+
   isTreeletExpanded(key, defaultValue = this.treeletsExpandedByDefault) {
     if(!this.treeletExpansion.has(key)) {
       this.treeletExpansion.set(key, defaultValue)
@@ -100,26 +110,26 @@ export default class Document extends Emitter {
     this.isFresh = false
   }
 
-  createComponent(parent) {
+  async createComponent(parent) {
     if(parent.readOnly) return
     const feature = new CreateComponentFeature(this, parent.sourceId())
-    this.addFeature(feature)
+    await this.addFeature(feature)
     const newComp = this.top().findChild(feature.id)
     this.activateComponent(newComp)
   }
 
-  createComponentInstance(component) {
+  async createComponentInstance(component) {
     if(!component.parent || component.readOnly) return
     const feature = new CreateComponentInstanceFeature(this, component.sourceId(), component.parent.id)
-    this.addFeature(feature)
+    await this.addFeature(feature)
   }
 
-  convertBodyToComponent(component, body) {
+  async convertBodyToComponent(component, body) {
     if(component.readOnly) return
     const feature = new ConvertBodyToComponentFeature(this)
     feature.componentId = component.sourceId()
     feature.body = () => body.reference()
-    this.addFeature(feature)
+    await this.addFeature(feature)
   }
 
   keepPose() {
@@ -143,29 +153,30 @@ export default class Document extends Emitter {
     return this.top().findChild(id)
   }
 
-  addFeature(feature) {
+  async addFeature(feature) {
     this.activateSimulation(null)
-    this.activateFeature(null, true, false)
+    await this.activateFeature(null, true, false)
     if(!(feature instanceof PoseFeature)) this.top().resetPose()
-    this.timeline.insertFeature(feature)
+    this.timeline.insertFeature(feature, false)
+    await this.regenerate()
     this.reactivateActiveComponent()
   }
 
-  moveMarker(i) {
-    this.activateFeature(null, true, false)
-    this.regenerate(i)
+  async moveMarker(i) {
+    await this.activateFeature(null, true, false)
+    return this.regenerate(i)
   }
 
   reorder(feature, other, after) {
     this.timeline.reorder(feature, other, after)
-    this.regenerate()
+    return this.regenerate()
   }
 
   regenerate(at) {
+    this.pendingRegenerations++
     // Runtime poses never belong to cached timeline states. A pose only
     // crosses a marker after keepPose() has turned it into a PoseFeature.
     this.top().resetPose()
-    const oldTop = this.top()
     if(at !== undefined) {
       if(at instanceof Feature) {
         this.timeline.moveMarkerToFeature(at)
@@ -173,10 +184,35 @@ export default class Document extends Emitter {
         this.timeline.marker = at
       }
     }
-    const compIds = this.timeline.evaluate()
-    this.reactivateActiveComponent()
-    this.selection.clear()
-    this.emit('regenerated')
+    const run = async () => {
+      const calculationId = ++nextCalculationId
+      try {
+        const onFeature = (feature, index, total) => {
+          if(feature.id === this.activeFeature?.id || feature.id === this.creatingFeature?.id) {
+            this.bus.emit('calculation-finished', calculationId)
+            return
+          }
+          this.bus.emit('calculation', {
+            id: calculationId,
+            title: 'Calculating',
+            detail: feature.title,
+            current: index + 1,
+            total,
+          })
+        }
+        // Superseded passes must finish the latest edit before their callers
+        // refresh errors, activate components, or confirm a picked feature.
+        while(await this.timeline.evaluateAsync(onFeature) === null) {}
+        this.reactivateActiveComponent()
+        this.selection.clear()
+        this.emit('regenerated')
+      } finally {
+        this.pendingRegenerations--
+        this.bus.emit('calculation-finished', calculationId)
+      }
+    }
+    this.regenerationQueue = this.regenerationQueue.catch(() => {}).then(run)
+    return this.regenerationQueue
   }
 
   activateSimulation(simulation) {
@@ -199,12 +235,12 @@ export default class Document extends Emitter {
   // cached timeline trees. Invalidate the timeline before regenerating so
   // every feature that may consume an expression referencing a parameter is
   // evaluated again.
-  regenerateParameters() {
+  async regenerateParameters() {
     const activeFeature = this.activeFeature
     const activeSketch = this.activeSketch
     const firstFeature = this.timeline.features[0]
     if(firstFeature) this.timeline.invalidateFeature(firstFeature)
-    this.regenerate()
+    await this.regenerate()
 
     // regenerate() reactivates the active component, which intentionally
     // clears sketch-editing state. Parameter edits must not close an active
@@ -292,15 +328,15 @@ export default class Document extends Emitter {
 
   removeFeature(feature) {
     this.timeline.removeFeature(feature)
-    this.regenerate()
+    return this.regenerate()
   }
 
-  activateFeature(feature, doReset, resetMarker) {
+  async activateFeature(feature, doReset, resetMarker) {
     if(feature) {
       this.activateSimulation(null)
 
       // Deactivate old active feature
-      if(this.activeFeature) this.activateFeature(null, true, false)
+      if(this.activeFeature) await this.activateFeature(null, true, false)
 
       // Store marker, visibility and active component
       this.previousMarker = this.timeline.marker
@@ -311,7 +347,7 @@ export default class Document extends Emitter {
       comps.forEach(comp => this.oldVisibility[comp.id] = comp.creator.hidden )
 
       // Regenerate at feature position
-      if(!this.timeline.isCurrentFeature(feature)) this.regenerate(feature)
+      if(!this.timeline.isCurrentFeature(feature)) await this.regenerate(feature)
 
       // Activate matching component
       this.activeComponent = this.getComponent(feature.componentId)
@@ -363,7 +399,7 @@ export default class Document extends Emitter {
         )
 
         // Restore marker
-        if(resetMarker && this.previousMarker != this.timeline.marker) this.regenerate(this.previousMarker)
+        if(resetMarker && this.previousMarker != this.timeline.marker) await this.regenerate(this.previousMarker)
 
         // Restore active component
         if(this.previousComponent) this.activateComponent(this.getComponent(this.previousComponent.id))
@@ -468,12 +504,12 @@ export default class Document extends Emitter {
     })
   }
 
-  activateView(view) {
+  async activateView(view) {
     this.restoreViewPreview()
     this.activeView = view
     this.previewView = null
     this.dirtyView = null
-    if(view.marker !== undefined && view.marker !== null) this.moveMarker(view.marker)
+    if(view.marker !== undefined && view.marker !== null) await this.moveMarker(view.marker)
     if(view.activeComponentId) {
       const component = this.getComponent(view.activeComponentId)
       if(component) this.activateComponent(component)
@@ -531,22 +567,41 @@ export default class Document extends Emitter {
       if(error != 'canceled') alert(error)
       throw error
     }
-    this.filePath = file.path
-    this.isFresh = false
-    this.treeletsExpandedByDefault = false
-    const dump = Serialize.parse(file.data, { document: this, sketches: {} })
-    setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
-    this.timeline = dump.timeline
-    this.timeline.evaluate()
-    this.activeComponent = this.top()
-    if(Array.isArray(dump.views)) this.views = dump.views
-    this.activeView = null
-    this.previewView = null
-    this.dirtyView = null
-    this.viewPreviewSnapshot = null
-    const homeView = this.views.find(view => view.system && view.title == 'Home') ||
-      this.views.find(view => view.position && view.target)
-    if(homeView) this.currentCameraView = cloneCameraView(homeView)
+    const calculationId = ++nextCalculationId
+    this.bus.emit('calculation', {
+      id: calculationId,
+      title: 'Opening document',
+      detail: file.path?.split(/[\\/]/).pop() || 'Document',
+    })
+    await yieldToBrowser()
+    try {
+      this.filePath = file.path
+      this.isFresh = false
+      this.treeletsExpandedByDefault = false
+      const dump = Serialize.parse(file.data, { document: this, sketches: {} })
+      setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
+      this.timeline = dump.timeline
+      await this.timeline.evaluateAsync((feature, index, total) => {
+        this.bus.emit('calculation', {
+          id: calculationId,
+          title: 'Calculating',
+          detail: feature.title,
+          current: index + 1,
+          total,
+        })
+      })
+      this.activeComponent = this.top()
+      if(Array.isArray(dump.views)) this.views = dump.views
+      this.activeView = null
+      this.previewView = null
+      this.dirtyView = null
+      this.viewPreviewSnapshot = null
+      const homeView = this.views.find(view => view.system && view.title == 'Home') ||
+        this.views.find(view => view.position && view.target)
+      if(homeView) this.currentCameraView = cloneCameraView(homeView)
+    } finally {
+      this.bus.emit('calculation-finished', calculationId)
+    }
   }
 }
 
@@ -558,4 +613,10 @@ function cloneCameraView(view) {
     position: view.position.clone(),
     target: view.target.clone(),
   }
+}
+
+function yieldToBrowser() {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => setTimeout(resolve, 0))
+  })
 }

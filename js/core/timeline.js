@@ -14,13 +14,14 @@ export class Timeline {
     this.marker = 0
     this.last_change_index = 0
     this.last_eval_index = 0
+    this.change_version = 0
     // removal_modifications: Vec<CompRef>,
   }
 
   tree(at = this.marker) {
     if(at instanceof Feature) at = this.features.indexOf(at) + 1
     // Return last state if current feature hasn't been executed yet
-    return this.cache[at]// || this.cache[this.marker - 1]
+    return this.cache[Math.min(at, this.cache.length - 1)]
   }
 
   moveMarkerToFeature(feature) {
@@ -36,16 +37,22 @@ export class Timeline {
     return this.features[i - 1]
   }
 
-  insertFeature(feature) {
+  insertFeature(feature, evaluate = true) {
+    // A removed or canceled feature may have left a result cached directly
+    // after the marker. Never expose that stale result for the new feature
+    // while its evaluation is pending.
+    this.cache.length = Math.min(this.cache.length, this.marker + 1)
     this.features.splice(this.marker, 0, feature)
     this.last_change_index = Math.min(this.last_change_index, this.marker)
+    this.change_version++
     // console.log('insertFeature', this.last_change_index, this.marker)
     this.marker++
-    this.evaluate()
+    if(evaluate) this.evaluate()
   }
 
   invalidateFeature(feature) {
     this.last_change_index = Math.min(this.features.indexOf(feature), this.last_change_index)
+    this.change_version++
     // console.log('invalidating -> last_change_index', this.last_change_index)
   }
 
@@ -68,6 +75,7 @@ export class Timeline {
     }
     // this.last_change_index = Math.max(0, Math.min(this.last_change_index, index))
     this.last_change_index = Math.min(this.last_change_index, index)
+    this.change_version++
     // console.log('removeFeature', this.last_change_index, this.features)
   }
 
@@ -78,6 +86,16 @@ export class Timeline {
     const [from, to] = ordered(this.last_eval_index, this.marker)
     this.last_eval_index = this.marker
     return this.componentsModified(Math.min(from, last_change), to)
+  }
+
+  async evaluateAsync(onFeature) {
+    const lastChange = this.last_change_index
+    const marker = this.marker
+    const completed = await this.regenerateAsync(Math.min(lastChange, marker), marker, onFeature)
+    if(!completed) return null
+    const [from, to] = ordered(this.last_eval_index, marker)
+    this.last_eval_index = marker
+    return this.componentsModified(Math.min(from, lastChange), to)
   }
 
   regenerate(from, to) {
@@ -110,6 +128,32 @@ export class Timeline {
     // console.log('after regenerate', from, to, this.cache)
   }
 
+  async regenerateAsync(from, to, onFeature) {
+    const version = this.change_version
+    for(let i = from; i < to; i++) {
+      const feature = this.features[i]
+      onFeature(feature, i, to)
+      await yieldToBrowser()
+
+      // A newer edit or structural change supersedes this pass. In
+      // particular, do not republish a feature that was canceled while this
+      // task was yielding.
+      if(this.change_version != version) return false
+
+      const newComp = this.cache[i].deepClone()
+      const j = i + 1
+      this.cache[j] = newComp
+      feature.execute(newComp)
+      syncComponentInstances(newComp)
+      if(feature.error && feature.error.type == 'error') {
+        this.cache[j] = this.cache[i].deepClone()
+      }
+
+      this.last_change_index = j
+    }
+    return true
+  }
+
   reorder(feature, other, after) {
     const sourceIndex = this.features.indexOf(feature)
     this.features = this.features.filter(f => f != feature )
@@ -117,6 +161,7 @@ export class Timeline {
     const targetIndex = otherIndex + (after ? 1 : 0)
     this.features.splice(targetIndex, 0, feature)
     this.last_change_index = Math.min(this.last_change_index, sourceIndex, targetIndex)
+    this.change_version++
   }
 
   componentsModified(from, to) {
@@ -243,4 +288,10 @@ function ordered(a, b) {
 function hasChild(comp, id) {
   const child = comp.findChild(id)
   return child && !child == comp
+}
+
+function yieldToBrowser() {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => setTimeout(resolve, 0))
+  })
 }

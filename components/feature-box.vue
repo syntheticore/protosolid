@@ -117,6 +117,7 @@
       button.cancel(
         title="Cancel"
         v-if="!isSketchFeature || !showHeader"
+        :disabled="busy"
         @click="close"
       )
         Icon(icon="times-circle")
@@ -334,10 +335,14 @@
         activePicker: null,
         focusedSetting: null,
         status: null,
+        pendingUpdates: 0,
       }
     },
 
     computed: {
+      busy() {
+        return this.document.isRegenerating || this.pendingUpdates > 0
+      },
       autoFocusSetting() {
         const keys = Object.keys(this.orderedSettings).filter(key => {
           const setting = this.orderedSettings[key]
@@ -356,7 +361,7 @@
       },
 
       canConfirm: function() {
-        return this.activeFeature.isComplete() && !(this.error && this.error.type == 'error')
+        return !this.busy && this.activeFeature.isComplete() && !(this.error && this.error.type == 'error')
       },
 
       isSketchFeature: function() {
@@ -508,7 +513,8 @@
 
             this.cancelPick()
             // Regenerate feature once unsuppressed
-            if(!repick) this.update()
+            if(!repick) await this.update()
+            if(this.destroyed) return resolve()
             this.updatePaths()
 
             // Auto-close or auto-repick
@@ -610,21 +616,28 @@
         return { pickerPos, color }
       },
 
-      update: function() {
-        this.document.timeline.invalidateFeature(this.activeFeature)
-        this.document.regenerate()
-        this.activeFeature.updateGizmos()
-        this.refreshError()
-        this.previewFeature()
-        this.updatePaths()
+      update: async function() {
+        this.pendingUpdates++
+        try {
+          this.document.timeline.invalidateFeature(this.activeFeature)
+          await this.document.regenerate()
+          if(this.destroyed) return
+          this.activeFeature.updateGizmos()
+          this.refreshError()
+          this.previewFeature()
+          this.updatePaths()
+        } finally {
+          this.pendingUpdates--
+        }
       },
 
-      updateSetting: function() {
+      updateSetting: async function() {
         if(this.activePicker && !this.activeFeature.needsPicker(this.activePicker, true)) {
           this.cancelPick()
           this.activateBaseTool()
         }
-        this.update()
+        await this.update()
+        if(this.destroyed) return
         if(!this.activePicker) this.$nextTick(() => this.pickAll())
       },
 
@@ -665,6 +678,7 @@
       },
 
       onEscape: function() {
+        if(this.busy) return
         const wasPicking = !!this.activePicker
         this.cancelPick()
         if(this.activeTool.constructor === DummyTool || this.activeTool.constructor === ManipulationTool) {

@@ -1385,27 +1385,51 @@ fn trace_surface_intersections_in_domains(
         .fold(1.0_f64, f64::max);
     let mut seeds = Vec::<[f64; 4]>::new();
     let mut try_seed = |guess: [f64; 4]| -> KernelResult<()> {
-        let Some(parameters) = correct_surface_pair(
+        let mut candidates = Vec::new();
+        if let Some(parameters) = correct_surface_pair(
             first,
             second,
             guess,
             first_domains,
             second_domains,
             tolerance,
-        )?
-        else {
-            return Ok(());
-        };
-        let point = first.evaluate(parameters[0], parameters[1])?.point;
-        if seeds.iter().any(|existing| {
-            first.evaluate(existing[0], existing[1]).is_ok_and(|value| {
-                value.point.distance(point)
-                    <= tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 16.0
-            })
-        }) {
-            return Ok(());
+        )? {
+            candidates.push(parameters);
         }
-        seeds.push(parameters);
+        // A short branch can enter through a periodic chart seam and leave
+        // through another trim before any interior grid seed reaches it.
+        // Keep boundary guesses on their boundary during correction so they
+        // cannot all drift onto a different branch of the intersection.
+        for (index, range) in first_domains.iter().chain(&second_domains).enumerate() {
+            if guess[index] != range.start && guess[index] != range.end {
+                continue;
+            }
+            let mut gauge = [0.0; 4];
+            gauge[index] = 1.0;
+            if let Some(parameters) = correct_surface_pair_with_gauge(
+                first,
+                second,
+                guess,
+                gauge,
+                first_domains,
+                second_domains,
+                tolerance,
+            )? {
+                candidates.push(parameters);
+            }
+        }
+        for parameters in candidates {
+            let point = first.evaluate(parameters[0], parameters[1])?.point;
+            if seeds.iter().any(|existing| {
+                first.evaluate(existing[0], existing[1]).is_ok_and(|value| {
+                    value.point.distance(point)
+                        <= tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 16.0
+                })
+            }) {
+                continue;
+            }
+            seeds.push(parameters);
+        }
         Ok(())
     };
 
@@ -1530,6 +1554,20 @@ fn trace_surface_intersections_in_domains(
         // converged trace can still sit next to a trim corner. A nearby box
         // endpoint is usable only if it is a common point of both supports.
         let snap = |values: &mut [f64; 4]| -> KernelResult<()> {
+            // Retain any trim already reached while snapping toward a nearby
+            // corner. Moving off it can collapse a short seam-to-cap branch.
+            let preserves_bounds = |candidate: [f64; 4], original: [f64; 4]| {
+                first_domains
+                    .iter()
+                    .chain(&second_domains)
+                    .enumerate()
+                    .all(|(index, range)| {
+                        [range.start, range.end].into_iter().all(|bound| {
+                            (original[index] - bound).abs() > tolerance.parameter
+                                || (candidate[index] - bound).abs() <= tolerance.parameter
+                        })
+                    })
+            };
             // Correct all remaining coordinates with a nearby trim coordinate
             // fixed. Projecting a clamped point onto just the other support can
             // accept a tangential residual while leaving an endpoint short of
@@ -1560,7 +1598,9 @@ fn trace_surface_intersections_in_domains(
                         second_domains,
                         tolerance,
                     )? {
-                        if parameter_distance(endpoint, *values) <= base_step * 0.1 {
+                        if parameter_distance(endpoint, *values) <= base_step * 0.1
+                            && preserves_bounds(endpoint, *values)
+                        {
                             *values = endpoint;
                         }
                     }
@@ -1601,6 +1641,7 @@ fn trace_surface_intersections_in_domains(
             };
             if let Some((point, distance)) = projection {
                 if distance <= f64::EPSILON * point.to_vec().magnitude().max(1.0) * 256.0
+                    && preserves_bounds(candidate, *values)
                     && parameters_in_ranges(
                         candidate,
                         first_domains,

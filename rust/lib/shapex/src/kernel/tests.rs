@@ -60,6 +60,73 @@ fn certified_properties(kernel: &Kernel, body: BodyId) -> MassProperties {
         .properties
 }
 
+#[test]
+fn shelled_cylinder_deeper_offset_circle_cut() {
+    // Reproduce untitled(7).cad: a 60 mm cylinder, a 14 mm top fillet,
+    // a 5 mm inward shell, and an offset circular cut from the open end.
+    // Just beyond 48 mm the outer fillet intersection crosses the cutter's
+    // parameter seam, leaving a short branch between the seam and the cap.
+    let tol = ModelTolerance::default();
+    let circle_profile = |center, radius| {
+        Profile::new(
+            Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tol).unwrap(),
+            [],
+            tol,
+        )
+        .unwrap()
+    };
+    let plane = Plane3::new(
+        Point3::new(-30.0, 0.0, 0.0),
+        -Vec3::unit_z(),
+        Vec3::unit_y(),
+        tol,
+    )
+    .unwrap();
+    let body = circle_profile(
+        Point2::new(12.076566694315764, 15.0800651467881),
+        31.27066987074541,
+    )
+    .extrude(plane, Vec3::new(60.0, 0.0, 0.0))
+    .unwrap();
+    let rim = body
+        .edges()
+        .find(|edge| edge.endpoints().unwrap().iter().all(|p| p.x > 29.9))
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[rim], 14.0).unwrap();
+    let opening = body
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(p) if p.origin().x < -29.9))
+        .unwrap()
+        .clone();
+    let body = body.shell(&[opening], -5.0).unwrap();
+    let cut_plane = *body
+        .faces()
+        .find_map(|face| match face.surface() {
+            Surface3::Plane(p) if p.origin().x < -29.9 => Some(p),
+            _ => None,
+        })
+        .unwrap();
+    let mut previous_volume = body.volume();
+    for distance in [48.0, 48.05, 49.0, 50.0] {
+        let tool = circle_profile(
+            Point2::new(35.878129354641324, 17.976990818287497),
+            22.946161555129095,
+        )
+        .extrude(cut_plane, cut_plane.normal() * distance)
+        .unwrap();
+        let result = body
+            .difference(&tool)
+            .unwrap_or_else(|error| panic!("cut {distance}: {error}"));
+        assert_eq!(result.solids().len(), 1);
+        assert!(result.volume() > 0.0 && result.volume() < previous_volume);
+        previous_volume = result.volume();
+        result
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap_or_else(|error| panic!("cut {distance} mesh: {error}"));
+    }
+}
+
 fn owned_cuboid(minimum: Point3, maximum: Point3) -> super::Compound {
     let tolerance = ModelTolerance::default();
     let size = maximum - minimum;

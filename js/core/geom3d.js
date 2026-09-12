@@ -332,7 +332,7 @@ export class Profile {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
     const face = this.makeFace()
     const ax = ocAx1FromMatrix(axis)
-    let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true) //XXX BRepFeat_MakeRevol
+    let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
 
     // A profile segment lying on the revolution axis collapses instead of
     // producing a swept face. Exclude it from the positional face-name map.
@@ -346,6 +346,152 @@ export class Profile {
       }))
 
     return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId, originals)
+  }
+
+  revolveUpToFace(componentId, axis, target, featureId, forward = true) {
+    const oc = window.oc.oc
+    const fail = msg => { throw { type: 'error', msg } }
+    if(!target) fail('Select a face to revolve up to')
+
+    const frame = axis.clone()
+    if(!forward) frame.multiply(new THREE.Matrix4().makeRotationX(Math.PI))
+    const inverseAxis = frame.clone().invert()
+    const plane = target.getPlane()
+    const localStart = inverseAxis.clone().multiply(this.sketch.workplane)
+    const localPlane = plane && inverseAxis.clone().multiply(plane)
+    if(localPlane) {
+      // The two-plane overload expects matching crossing orientations at
+      // both limits. Orient the target using the first forward intersection.
+      const center = this.center().applyMatrix4(inverseAxis)
+      const normal = normalFromMatrix(localPlane)
+      const point = new THREE.Vector3().setFromMatrixPosition(localPlane)
+      const a = normal.x * center.x + normal.y * center.y
+      const b = -normal.x * center.y + normal.y * center.x
+      const c = normal.z * center.z - normal.dot(point)
+      const radius = Math.hypot(a, b)
+      if(radius <= EPSILON || Math.abs(c) >= radius) fail('The target plane does not cross the revolution')
+      const phase = Math.atan2(b, a)
+      const delta = Math.acos(-c / radius)
+      const angles = [phase - delta, phase + delta].map(angle => (angle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI))
+      const angle = Math.min(...angles)
+      if(angle <= oc.Precision.Angular()) fail('The target plane intersects the starting profile')
+      const startNormal = normalFromMatrix(localStart)
+      const startPoint = new THREE.Vector3().setFromMatrixPosition(localStart)
+      if(Math.abs(normal.z) <= oc.Precision.Angular() && Math.abs(normal.dot(point)) <= EPSILON &&
+         Math.abs(startNormal.z) <= oc.Precision.Angular() && Math.abs(startNormal.dot(startPoint)) <= EPSILON) {
+        // Radial planes define an exact angle, including profiles touching
+        // the axis where the limited-feature algorithm can lose the start cap.
+        return this.revolve(componentId, axis, forward ? angle : -angle, featureId)
+      }
+      if(angle > Math.PI) {
+        // An infinite start plane also intersects the sweep at 180 degrees.
+        // Advance past that ambiguity only when the first half misses the limit.
+        const first = this.revolve(componentId, axis, forward ? Math.PI : -Math.PI, featureId)
+        const limitPlane = ocPlnFromMatrix(plane)
+        const section = new oc.BRepAlgoAPI_Section_5(first.geom(), limitPlane, true)
+        try {
+          if(!section.IsDone() || collectShapes(section.Shape(), 'vertex').length) {
+            fail('The target plane crosses the profile at incompatible revolution angles')
+          }
+        } finally {
+          section.delete()
+          limitPlane.delete()
+        }
+        const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(Math.PI)).multiply(axis.clone().invert())
+        const remaining = this.clone()
+        remaining.sketch = { workplane: turn.clone().multiply(this.sketch.workplane) }
+        remaining.makeFace = () => oc.TopoDS.Face_1(transformGeometry(this.makeFace(), turn).Shape())
+        return first.boolean(remaining.revolveUpToFace(componentId, axis, target, featureId, forward), 'join').repair()
+      }
+      const crossing = -a * Math.sin(angle) + b * Math.cos(angle)
+      const startCrossing = normalFromMatrix(localStart).dot(new THREE.Vector3(-center.y, center.x, 0))
+      if(crossing * startCrossing < 0) localPlane.multiply(new THREE.Matrix4().makeRotationX(Math.PI))
+    }
+    const planeGeometry = plane && ocPlnFromMatrix(localPlane)
+    const planeBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(planeGeometry)
+    const targetTransform = !plane && transformGeometry(target.solid.geom(), inverseAxis)
+    const targetShape = planeBuilder ? planeBuilder.Face() : targetTransform.ModifiedShape(target.geom())
+    const baseTransform = transformGeometry(this.makeFace(), inverseAxis)
+    const base = baseTransform.Shape()
+    const startPlane = plane && ocPlnFromMatrix(localStart)
+    const startBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(startPlane)
+    const startShape = startBuilder ? startBuilder.Face() : base
+    const rotationAxis = ocAx1FromMatrix(new THREE.Matrix4())
+    const sketchFace = new oc.TopoDS_Face()
+    // Return the revolved tool only; the feature applies Join/Cut/Intersect.
+    const revolution = new oc.BRepFeat_MakeRevol_2(
+      targetTransform ? targetTransform.Shape() : base, base, sketchFace, rotationAxis, 2, false,
+    )
+    try {
+      // The single-limit planar path in this kernel ignores feature-only mode.
+      // The two-plane overload honors it and avoids adding the target body.
+      if(plane) revolution.Perform_3(startShape, targetShape)
+      else revolution.Perform_2(targetShape)
+      if(!revolution.IsDone()) fail('The selected face could not trim the revolution')
+
+      const baseFace = new Face(null, oc.TopoDS.Face_1(base))
+      const baseCenter = baseFace.center()
+      const baseArea = baseFace.area()
+      const sharesSurface = (a, b) => {
+        const first = oc.BRep_Tool.Surface_2(oc.TopoDS.Face_1(a))
+        const second = oc.BRep_Tool.Surface_2(oc.TopoDS.Face_1(b))
+        try { return first.get().isAliasOf(second.get()) }
+        finally { first.delete(); second.delete() }
+      }
+      const isStart = face => {
+        if(face.IsSame(base)) return true
+        if(!plane) return false
+        const cap = new Face(null, face)
+        const capPlane = cap.getPlane()
+        if(!capPlane || Math.abs(normalFromMatrix(capPlane).dot(normalFromMatrix(localStart))) < 1 - EPSILON) return false
+        return cap.center().distanceTo(baseCenter) <= EPSILON &&
+          Math.abs(cap.area() - baseArea) <= EPSILON * Math.max(1, baseArea)
+      }
+      const candidates = collectShapes(revolution.Shape(), 'solid').filter(solid =>
+        collectShapes(solid, 'face').some(isStart)
+      )
+      if(candidates.length != 1) fail('The selected face must cap the entire profile along the revolution')
+
+      const result = new Compound(componentId, candidates[0])
+      if(!result.validate() || result.volume() <= EPSILON) fail('Up to face produced no valid revolution volume')
+      const originals = this.rings.flatMap(ring => ring.segments)
+      const sources = collectShapes(base, 'edge').map((edge, index) => ({
+        edge,
+        generated: arrayFromOcList(revolution.Generated(edge)),
+        id: '/revolve-' + featureId + '/swept/' + this.getBaseId(originals[index]),
+      })).filter(source => source.generated.length)
+      const solid = result.solids()[0]
+      const faceNamesUsed = {}
+      solid.faces().forEach(face => {
+        if(isStart(face.geom())) {
+          face.id = '/revolve-' + featureId + '/bottom'
+          return
+        }
+        const edges = collectShapes(face.geom(), 'edge')
+        const source = sources.find(source => edges.some(edge => edge.IsSame(source.edge)) ||
+          source.generated.some(shape => sharesSurface(face.geom(), shape)))
+        const name = source?.id || '/revolve-' + featureId + '/top'
+        faceNamesUsed[name] = (faceNamesUsed[name] || 0) + 1
+        face.id = name + (faceNamesUsed[name] > 1 ? '/' + faceNamesUsed[name] : '')
+      })
+      const namesUsed = {}
+      solid.edges().forEach(edge => {
+        const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
+        namesUsed[name] = (namesUsed[name] || 0) + 1
+        edge.id = name + '/' + namesUsed[name]
+      })
+      return result.transform(frame)
+    } finally {
+      revolution.delete()
+      sketchFace.delete()
+      rotationAxis.delete()
+      baseTransform.delete()
+      if(planeBuilder) planeBuilder.delete()
+      if(planeGeometry) planeGeometry.delete()
+      if(targetTransform) targetTransform.delete()
+      if(startBuilder) startBuilder.delete()
+      if(startPlane) startPlane.delete()
+    }
   }
 
   loft(componentId, others, untwist) {

@@ -1655,6 +1655,14 @@ export class RevolveFeature extends Feature {
   static icon = 'wave-square'
   constructor(document) {
     super(document, true, 'Revolution', {
+      extent: {
+        title: 'Extent',
+        type: 'select',
+        options: {
+          angle: { title: 'Angle', icon: 'drafting-compass' },
+          face: { title: 'Up to face', icon: 'sign-in-alt' },
+        },
+      },
       profiles: {
         title: 'Profiles',
         type: 'profile',
@@ -1667,6 +1675,12 @@ export class RevolveFeature extends Feature {
       angle: {
         title: 'Angle',
         type: 'angle',
+        when: feature => feature.extent == 'angle',
+      },
+      limitFace: {
+        title: 'Up to face',
+        type: 'face',
+        when: feature => feature.extent == 'face',
       },
       side: {
         title: 'Side',
@@ -1677,6 +1691,8 @@ export class RevolveFeature extends Feature {
 
     this.profiles = null
     this.axis = null
+    this.extent = 'angle'
+    this.limitFace = null
     this.angle = 180.0
     this.side = true
   }
@@ -1685,19 +1701,24 @@ export class RevolveFeature extends Feature {
     const angle = this.angle * (this.side ? 1 : -1)
 
     let tool = new Compound(this.componentId)
-    references.profiles.forEach(profile => {
-      try {
-        const revolution = profile.revolve(this.componentId, references.axis, rad(angle), this.id)
-        tool = tool.boolean(revolution, 'join')
-      } catch(err) { this.error = err || this.error }
-    })
-
+    this.previewBody = null
     const comp = tree.findChild(this.componentId)
     try {
+      for(const profile of references.profiles) {
+        const revolution = this.extent == 'face' ?
+          profile.revolveUpToFace(this.componentId, references.axis, references.limitFace, this.id, this.side) :
+          profile.revolve(this.componentId, references.axis, rad(angle), this.id)
+        tool = tool.boolean(revolution, 'join')
+      }
       comp.compound = comp.compound.boolean(tool, this.operation)
-    } catch(err) { this.error = err || this.error }
+      this.previewBody = tool
+    } catch(err) {
+      this.error = err?.msg ? err : { type: 'error', msg: 'Revolution could not be created' }
+    }
+  }
 
-    this.previewBody = tool
+  preview() {
+    return this.isComplete() && this.error?.type != 'error' ? this.previewBody : null
   }
 }
 

@@ -41,9 +41,9 @@
     "pluralize": "^8.0.0",
     "pug": "^3.0.3",
     "stylus": "^0.63.0",
-    "three": "^0.167.1",
-    "three-gpu-pathtracer": "0.0.23",
-    "three-mesh-bvh": "0.8.0",
+    "three": "^0.186.0",
+    "three-gpu-pathtracer": "0.0.24",
+    "three-mesh-bvh": "0.9.15",
     "vite-plugin-electron": "^0.28.7",
     "vite-plugin-electron-renderer": "^0.14.5",
     "xatlas-web": "0.1.0"

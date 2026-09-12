@@ -37,9 +37,8 @@ export default class Renderer {
       // logarithmicDepthBuffer: true,
     })
 
-    this.renderer.outputEncoding = THREE.sRGBEncoding
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.physicallyCorrectLights = true
     this.renderer.shadowMap.autoUpdate = false
     this.renderer.shadowMap.enabled = preferences.shadowMaps
 

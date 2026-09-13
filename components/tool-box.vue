@@ -280,6 +280,7 @@
     TangentConstraintTool,
     FixConstraintTool,
     DimensionTool,
+    OffsetTool,
     ProjectTool,
     DiagnosticShadingTool,
     InterferenceTool,
@@ -375,7 +376,7 @@
               { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
               { title: 'Break', icon: 'layer-group' },
               { title: 'Extend', icon: 'layer-group' },
-              { title: 'Offset', icon: 'layer-group' },
+              { title: 'Offset', tool: OffsetTool },
               { title: 'Project', tool: ProjectTool, hotKey: 'P', keyCode: 80 },
               { title: 'Intersect', icon: 'layer-group' },
             ]

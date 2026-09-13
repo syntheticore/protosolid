@@ -78,7 +78,7 @@
 
 <script setup>
 
-  import { Circle } from '../js/core/geom2d.js'
+  import { Circle, OffsetCurve } from '../js/core/geom2d.js'
   import { ProjectedPoint } from '../js/core/sketch.js'
 
   const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
@@ -116,7 +116,7 @@
           id: elem.id + i,
           elem,
           index: i,
-          readonly: elem == origin || !!elem.projection,
+          readonly: elem == origin || !!elem.projection || elem instanceof OffsetCurve,
         }
       })
     })

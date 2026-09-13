@@ -1,7 +1,7 @@
 import * as THREE from 'three'
-import { Line, Circle, Arc, Spline, supportsPointOnCurveConstraint } from './core/geom2d.js'
+import { Line, Circle, Arc, Spline, OffsetCurve, supportsPointOnCurveConstraint } from './core/geom2d.js'
 import { vecFromOc } from './core/utils.js'
-import { CoincidentConstraint, FixConstraint, HorVertConstraint } from './core/sketch.js'
+import { CoincidentConstraint, FixConstraint, HorVertConstraint, ProfileOffsetConstraint } from './core/sketch.js'
 
 const snapDistance = 14 // px
 const maxSnapReferences = 5
@@ -12,6 +12,7 @@ function positiveAngle(angle) {
 }
 
 function closestPointOnCurve(elem, point) {
+  if(elem instanceof OffsetCurve) return elem.closestFrame(point).point
   if(elem instanceof Spline) {
     const parameter = elem.unsample(point)
     if(parameter === undefined) return
@@ -57,7 +58,7 @@ function curveGuideIntersections(elem, guidePoint, axis) {
   // Curve snapping is exact for splines, but guide/spline intersections
   // require a separate unbounded-line projection. Leave guide snapping out
   // rather than falling through to the circle-specific center/radius path.
-  if(elem instanceof Spline) return []
+  if(elem instanceof Spline || elem instanceof OffsetCurve) return []
 
   if(elem instanceof Line) {
     const [start, end] = elem.endpoints()
@@ -123,6 +124,12 @@ export default class Snapper {
       connected.add(point.elem)
 
       this.viewport.document.activeSketch.constraints.forEach(constraint => {
+        // A source cannot attach to its own generated offset: that would
+        // create a circular dependency while dragging its control points.
+        if(constraint instanceof ProfileOffsetConstraint && constraint.items.slice(0, constraint.sourceCount)
+          .some(item => item.curve() == point.elem)) {
+          constraint.outputs().forEach(curve => connected.add(curve))
+        }
         if(visitedConstraints.has(constraint) || !constraint.items.some(item =>
           item.curve() == point.elem && item.index == point.index
         )) return
@@ -166,7 +173,7 @@ export default class Snapper {
     )
     const isFixedPoint = item => {
       const curve = item.curve()
-      if(curve == sketch.origin() || curve.projection) return true
+      if(curve == sketch.origin() || curve.projection || curve instanceof OffsetCurve) return true
       return sketch.constraints.some(constraint => constraint instanceof FixConstraint &&
         constraint.items.some(fixed => fixed.curve() == curve &&
           (fixed.index === undefined || fixed.index == item.index)

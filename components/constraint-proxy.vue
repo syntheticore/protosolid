@@ -17,6 +17,7 @@
     :style="{ top: projectedProxies[0].coords.y + 'px', left: projectedProxies[0].coords.x + 'px' }"
     @click.stop="select"
     @dblclick="constraint.active = true"
+    @keydown.enter.stop.prevent
   )
 
     .dim-value(

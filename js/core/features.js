@@ -1093,7 +1093,9 @@ export class CreateSketchFeature extends Feature {
       plane = relativeComponentTransform(source, target).multiply(plane)
     }
     this.sketch.workplane = plane
-    tree.findChild(this.componentId).sketches.push(this.sketch)
+    // Solving can create curve references before the sketch's UI is mounted.
+    this.sketch.component = tree.findChild(this.componentId)
+    this.sketch.component.sketches.push(this.sketch)
     this.sketch.solve(tree)
   }
 

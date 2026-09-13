@@ -22,7 +22,11 @@ export default class DimensionControls extends THREE.Object3D {
     const isAngular = constraint.isAngular()
 
     // Offset between concentric circles
-    if(isCircleOffset) {
+    if(constraint.dimensionPoints) {
+      const [start, end] = constraint.dimensionPoints()
+      makeOffsetDimension(this, renderer, start, end, constraint.position)
+
+    } else if(isCircleOffset) {
       const circles = constraint.items.map(item => item.curve())
       const center = circles[0].center()
       const direction = constraint.position.clone().sub(center)
@@ -170,6 +174,16 @@ export default class DimensionControls extends THREE.Object3D {
 
 function makeArrow(pos, dir) {
   return new THREE.ArrowHelper(dir, pos, 0.0, 'darkgray', 1.5, 0.75)
+}
+
+function makeOffsetDimension(controls, renderer, start, end, position) {
+  const direction = end.clone().sub(start).normalize()
+  const labelDistance = position.clone().sub(start).dot(direction)
+  const lineStart = start.clone().addScaledVector(direction, Math.min(0, labelDistance))
+  const lineEnd = start.clone().addScaledVector(direction, Math.max(start.distanceTo(end), labelDistance))
+  controls.add(renderer.convertLine([lineStart.toArray(), lineEnd.toArray()], materials.wire))
+  controls.add(makeArrow(start, direction.clone().negate()))
+  controls.add(makeArrow(end, direction))
 }
 
 function makeLinearDimension(controls, renderer, start, end, position) {

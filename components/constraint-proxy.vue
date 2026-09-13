@@ -82,8 +82,7 @@
       position: absolute
 
     .dim-value
-      margin-top: -12px
-      margin-left: -28px
+      transform: translate(-50%, -50%)
       background: $bright2
       padding: 0.25rem 0.5rem
       border-radius: 99px

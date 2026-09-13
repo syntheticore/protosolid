@@ -158,7 +158,7 @@
     compound.solids().flatMap(solid => solid.faces()).forEach(face => {
       // A pre-existing face may lie exactly on the cutting plane (notably when
       // sketching on a face). Only newly generated cut caps should be hatched.
-      if(originalFaces.some(original => original.geom().IsSame(face.geom()))) return
+      if(originalFaces.some(original => original.isSame(face))) return
       const facePlane = face.getPlane()
       if(!facePlane) return
       const origin = new THREE.Vector3().setFromMatrixPosition(facePlane)

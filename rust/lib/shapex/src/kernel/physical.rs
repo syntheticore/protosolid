@@ -428,18 +428,19 @@ fn brep_shell_properties(
                 point.y.powi(2) * point.z * normal.y / 2.0,
             ])
         };
-        // Offset blends need the rail derivatives to evaluate their normals.
-        // Integrating across v first reuses one section throughout the inner
-        // quadrature. Keep the established path for cheaper un-offset supports.
+        // Blend normals need the contact-rail derivatives even without an
+        // offset. Integrating across v first keeps the rail parameter fixed
+        // and reuses its section throughout the inner quadrature, avoiding
+        // repeated support-intersection solves along the rail.
         // Green's theorem permits either Q dv or -P du with the same targets.
         let mut support = face.surface();
         while let Surface3::Offset(offset) = support {
             support = offset.base();
         }
-        let primitive_axis = usize::from(
-            matches!(face.surface(), Surface3::Offset(_))
-                && matches!(support, Surface3::RollingBall(_) | Surface3::Ruled(_)),
-        );
+        let primitive_axis = usize::from(matches!(
+            support,
+            Surface3::RollingBall(_) | Surface3::Ruled(_)
+        ));
         let primitive_domain = face.surface().domains()[primitive_axis];
         let domain_origin = match primitive_domain.bounds {
             DomainBounds::Bounded(range) => range.start,

@@ -89,6 +89,8 @@
       :parent-selected="selected"
       :parent-transform="transform"
       :active-tool="activeTool"
+      :section-plane="sectionPlane"
+      :section-side="sectionSide"
       @handleMouseUp="handleMouseUp"
       @handleMouseDown="handleMouseDown"
       @handleMouseMove="handleMouseMove"
@@ -110,7 +112,7 @@
   import { PointHelper } from '../js/core/helpers.js'
   import { ProjectTool } from '../js/tools.js'
 
-  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'sectionPlane', 'sectionSide'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
@@ -128,13 +130,45 @@
   })
 
   const compound = computed(() => {
-    // Slice model using visible section views
+    // Slice model using all visible saved sections and, while sketching,
+    // the active sketch plane expressed in this component's local space.
     const sections = getSections(props.component).filter(sec => !sec.hidden )
+    if(props.sectionPlane) {
+      sections.push({
+        getTransform: () => transform.value.clone().invert().multiply(props.sectionPlane),
+        side: props.sectionSide,
+      })
+    }
     if(!sections.length) return props.component.compound
-    const section = sections[0]
-    const cut = props.component.compound.halfCut(section.getTransform(), section.side)
+    const originalFaces = props.component.compound.solids().flatMap(solid => solid.faces())
+    const planes = sections.map(section => section.getTransform())
+    const cut = sections.reduce((shape, section, index) =>
+      shape.halfCut(planes[index], section.side),
+      props.component.compound,
+    )
+    markSectionFaces(cut, planes, originalFaces)
     return cut
   })
+
+  function markSectionFaces(compound, planes, originalFaces) {
+    const sectionPlanes = planes.map(plane => ({
+      origin: new THREE.Vector3().setFromMatrixPosition(plane),
+      normal: new THREE.Vector3().setFromMatrixColumn(plane, 2).normalize(),
+    }))
+    compound.solids().flatMap(solid => solid.faces()).forEach(face => {
+      // A pre-existing face may lie exactly on the cutting plane (notably when
+      // sketching on a face). Only newly generated cut caps should be hatched.
+      if(originalFaces.some(original => original.geom().IsSame(face.geom()))) return
+      const facePlane = face.getPlane()
+      if(!facePlane) return
+      const origin = new THREE.Vector3().setFromMatrixPosition(facePlane)
+      const normal = new THREE.Vector3().setFromMatrixColumn(facePlane, 2).normalize()
+      face.sectionSurface = sectionPlanes.some(section =>
+        Math.abs(normal.dot(section.normal)) > 1 - 1e-6 &&
+        Math.abs(section.normal.dot(origin.clone().sub(section.origin))) < 1e-5
+      )
+    })
+  }
 
   function getSections(comp) {
     if(!comp) return []

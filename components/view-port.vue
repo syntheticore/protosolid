@@ -64,6 +64,8 @@
         :component="document.top()"
         :display-mode="displayMode"
         :color-mode="colorMode"
+        :section-plane="sketchSectionPlane"
+        :section-side="sketchSectionSide"
         :active-handle="activeHandle"
         :active-tool="activeTool"
         @handleMouseUp="mouseUp"
@@ -266,6 +268,7 @@
       displayMode: String,
       colorMode: String,
       projectionMode: String,
+      sketchSection: Boolean,
     },
 
     data() {
@@ -290,6 +293,7 @@
         cameraUnpreviewFrame: null,
         thermalProbe: null,
         exportPreviewMesh: null,
+        sketchSectionSide: false,
       }
     },
 
@@ -309,7 +313,12 @@
         }
         this.renderer.sketchPlane.setSketch(sketch)
         this.renderer.sketchPlane.visible = !!sketch
+        this.updateSketchSectionSide()
         this.renderer.render()
+      },
+
+      sketchSection: function() {
+        this.updateSketchSectionSide()
       },
 
       activeView: function(view) {
@@ -344,6 +353,11 @@
     computed: {
       activeComponentTransform: function() {
         return this.document.activeSketch ? worldTransform(this.document.activeComponent) : null
+      },
+
+      sketchSectionPlane: function() {
+        if(!this.sketchSection || !this.document.activeSketch) return null
+        return worldTransform(this.document.activeComponent).multiply(this.document.activeSketch.workplane)
       },
 
       exportPreview: function() {
@@ -399,6 +413,7 @@
       this.renderer.setProjectionMode(this.projectionMode)
       this.renderer.on('render', () => {
         this.frame++
+        this.updateSketchSectionSide()
         this.syncSelectionTransformGizmo()
         this.updateWidgets()
       })
@@ -497,6 +512,14 @@
     },
 
     methods: {
+      updateSketchSectionSide: function() {
+        if(!this.renderer || !this.sketchSectionPlane) return
+        const normal = new THREE.Vector3().setFromMatrixColumn(this.sketchSectionPlane, 2).normalize()
+        const cameraDirection = this.renderer.activeCamera.getWorldDirection(new THREE.Vector3())
+        const dot = cameraDirection.dot(normal)
+        if(Math.abs(dot) > 1e-6) this.sketchSectionSide = dot < 0
+      },
+
       applyView: function(view) {
         const baseView = this.document.dirtyView || this.document.currentCameraView
         if(!view?.position || !view?.target) {

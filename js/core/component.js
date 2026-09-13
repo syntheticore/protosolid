@@ -27,6 +27,7 @@ export class ComponentDefinition {
     this.color = color
     this.compMaterial = materials.surface.clone()
     this.compLineMaterial = materials.wire.clone()
+    this.compSectionMaterial = materials.makeSectionSurface(color)
     this.updateMaterials()
   }
 
@@ -67,10 +68,20 @@ export class ComponentDefinition {
   updateMaterials() {
     this.compMaterial.color.set(this.color)
     this.compLineMaterial.color.set(this.color)
+    const sectionHsl = this.compMaterial.color.getHSL({})
+    this.compSectionMaterial.color.setHSL(
+      sectionHsl.h,
+      sectionHsl.s * 0.55,
+      sectionHsl.l * 0.45,
+    )
   }
 
   dump() {
-    return Object.assign({}, this, { compMaterial: undefined, compLineMaterial: undefined })
+    return Object.assign({}, this, {
+      compMaterial: undefined,
+      compLineMaterial: undefined,
+      compSectionMaterial: undefined,
+    })
   }
 
   static undump(dump) {

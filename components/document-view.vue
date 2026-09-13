@@ -8,6 +8,7 @@
       :display-mode="effectiveDisplayMode"
       :color-mode="effectiveColorMode"
       :projection-mode="effectiveProjectionMode"
+      :sketch-section="sketchSection"
       @update:projection-mode="projectionMode = $event"
       v-model:active-tool="activeTool"
       v-model:highlight="highlight"
@@ -116,6 +117,11 @@
             @hover="previewColorMode = $event"
             @unhover="previewColorMode = null"
           )
+
+        .display-row(v-if="document.activeSketch")
+          label.display-toggle(title="Section the model at the active sketch plane")
+            input(type="checkbox" v-model="sketchSection")
+            span Section
 
       .pose(:class="{ hidden: !document.top().hasPoseChange() }")
 
@@ -237,6 +243,15 @@
           margin-bottom: 0
           min-width: 0
 
+        .display-toggle
+          display: flex
+          gap: 0.35rem
+          grid-column: 2
+
+          span
+            font-size: 14px
+            font-weight: bold
+
     .pose
       transition: all 0.25s
       height: 85px
@@ -342,6 +357,7 @@
         previewDisplayMode: null,
         colorMode: 'material',
         previewColorMode: null,
+        sketchSection: true,
       }
     },
 

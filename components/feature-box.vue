@@ -133,6 +133,9 @@
     &::before
       left: 24px
 
+  .main
+    overflow: hidden
+
   header
     display: flex
     flex-direction: column

@@ -131,7 +131,7 @@ export class AngleGizmo extends ArrowControls {
     this.set(startValue)
 
     this.addEventListener('rotation', (e) => {
-      cb(THREE.MathUtils.radToDeg(Math.abs(e.value.z)))
+      cb(THREE.MathUtils.radToDeg(e.value.z))
     })
   }
 

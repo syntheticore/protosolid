@@ -42,7 +42,7 @@
         .buttons
 
           .view-row
-            .view-label Zoom
+            .side-label Zoom
 
             .flex.gap
 
@@ -72,7 +72,7 @@
               )
 
           .view-row
-            .view-label Nearest Plane
+            .side-label Nearest Plane
 
             IconButton(
               icon="solar-panel"
@@ -88,7 +88,7 @@
         h1 DISPLAY
 
         .display-row
-          .display-label Projection
+          .side-label Projection
           RadioBar(
             :items="projectionModes"
             hot-key="O"
@@ -98,7 +98,7 @@
           )
 
         .display-row
-          .display-label Shading
+          .side-label Shading
           RadioBar(
             :items="displayModes"
             hot-key="W"
@@ -108,7 +108,7 @@
           )
 
         .display-row
-          .display-label Material
+          .side-label Material
           RadioBar(
             :items="colorModes"
             hot-key="M"
@@ -191,27 +191,30 @@
         pointer-events: auto
 
         &:hover
-          .view-label
-          .display-label
+          .side-label
             opacity: 1
 
       .view-chooser
       .radio-bar
         margin-bottom: 0.5rem
 
-      .view-row
+      .buttons
       .display-row
         align-items: center
         align-self: flex-end
         display: grid
-        gap: 0.5rem
-        grid-template-columns: 64px 110px
+        column-gap: 0.5rem
+        grid-template-columns: 72px 110px
 
-      .view-label
-      .display-label
+      .view-row
+        display: contents
+
+      .side-label
         color: $bright2
         font-size: 11px
+        justify-self: end
         opacity: 0
+        pointer-events: none
         text-align: right
         transition: opacity 0.15s
         white-space: nowrap
@@ -222,6 +225,10 @@
 
         .button
           min-width: 0
+
+      .buttons
+        pointer-events: auto
+        row-gap: 0.25rem
 
       .display-row
         margin-bottom: 0.5rem
@@ -242,12 +249,6 @@
 
       h1
         margin-top: 0.5rem
-
-  .buttons
-    pointer-events: auto
-    display: flex
-    flex-direction: column
-    gap: 0.25rem
 
   .view-port
     width: 100%

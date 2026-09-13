@@ -147,11 +147,12 @@ export default class Renderer {
   }
 
   setActiveCamera(camera) {
+    const rotateEnabled = this.viewControls?.enableRotate || false
     if(this.viewControls) this.viewControls.dispose()
 
     const target = this.viewControls && this.viewControls.target
     this.viewControls = new OrbitControls(camera, this.renderer.domElement)
-    this.viewControls.enableRotate = false
+    this.viewControls.enableRotate = rotateEnabled
     this.viewControls.enableDamping = true
     this.viewControls.dampingFactor = 0.6
     this.viewControls.panSpeed = 1.0

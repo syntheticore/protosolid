@@ -470,10 +470,7 @@
       this.bus.on('keydown', this.keyDown)
       this.bus.on('keyup', this.keyUp)
 
-      bus.on('alt-pressed', (pressed) => {
-        this.renderer.viewControls.enableRotate = pressed
-        this.isOrbiting = pressed
-      })
+      this.bus.on('alt-pressed', this.setOrbiting)
 
       this.registerDocument(this.document)
       const initialView = this.document.dirtyView || this.document.previewView || this.activeView || this.document.activeView
@@ -492,6 +489,7 @@
       this.bus.off('resize', this.onWindowResize)
       this.bus.off('thermal-result', this.updateFluxArrows)
       this.bus.off('joint-picked', this.jointPicked)
+      this.bus.off('alt-pressed', this.setOrbiting)
       this.clearFluxArrows()
       this.clearExportPreview()
       this.clearSelectionTransformGizmo()
@@ -770,6 +768,9 @@
 
       mouseDown: function(e) {
         document.activeElement.blur() // Necessary since THREE R123
+        // The pointer event is the authoritative modifier state for this drag.
+        // This also updates controls recreated while Alt was already held.
+        this.setOrbiting(e.altKey)
         if(e.button != 0) return
         if(this.renderer.isGizmoHovered()) return
         this.isPanning = e.shiftKey
@@ -787,6 +788,11 @@
         }
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, coords, e)
+      },
+
+      setOrbiting: function(pressed) {
+        this.renderer.viewControls.enableRotate = pressed
+        this.isOrbiting = pressed
       },
 
       handleMouseDown: function(e, handle) {

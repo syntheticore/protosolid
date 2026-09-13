@@ -457,8 +457,9 @@
       pick: function(type, key, restart) {
         // Toggle picker off if active
         if(this.activePicker) {
+          const previousPicker = this.activePicker
           this.onEscape()
-          if(restart) this.pick(type, key)
+          if(!this.activePicker && (restart || previousPicker != key)) this.pick(type, key)
           return
         }
         const setting = this.activeFeature.settings[key]

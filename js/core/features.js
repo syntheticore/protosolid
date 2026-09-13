@@ -1537,6 +1537,16 @@ export class ExtrudeFeature extends Feature {
           through: { title: 'Through all', icon: 'infinity' },
         },
       },
+      side: {
+        title: 'Side',
+        type: 'select',
+        when: feature => feature.extent != 'face',
+        options: {
+          forward: { title: 'Forward', icon: 'caret-up' },
+          reverse: { title: 'Reverse', icon: 'caret-down' },
+          both: { title: 'Both directions', icon: 'arrows-alt-v' },
+        },
+      },
       profiles: {
         title: 'Profiles',
         type: 'profile',
@@ -1563,16 +1573,6 @@ export class ExtrudeFeature extends Feature {
         type: 'length',
         allowNegative: true,
         when: feature => feature.extent != 'through',
-      },
-      side: {
-        title: 'Side',
-        type: 'select',
-        when: feature => feature.extent != 'face',
-        options: {
-          forward: { title: 'Forward', icon: 'caret-up' },
-          reverse: { title: 'Reverse', icon: 'caret-down' },
-          both: { title: 'Both directions', icon: 'arrows-alt-v' },
-        },
       },
     })
 

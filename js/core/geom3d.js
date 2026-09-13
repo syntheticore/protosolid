@@ -874,7 +874,7 @@ export class Shape {
 
   area() {
     if(!this.geom) return 0
-    if(this.solid?.compound?.isShapex || this.compound?.isShapex) {
+    if(this.isShapex || this.solid?.compound?.isShapex || this.compound?.isShapex) {
       return meshAreaAndCenter(this.tesselate()).area
     }
     const gprops = new window.oc.oc.GProp_GProps_1()

@@ -117,7 +117,6 @@
       button.cancel(
         title="Cancel"
         v-if="!isSketchFeature || !showHeader"
-        :disabled="busy"
         @click="close"
       )
         Icon(icon="times-circle")
@@ -361,7 +360,7 @@
       },
 
       canConfirm: function() {
-        return !this.busy && this.activeFeature.isComplete() && !(this.error && this.error.type == 'error')
+        return this.activeFeature.isComplete() && !(this.error && this.error.type == 'error')
       },
 
       isSketchFeature: function() {
@@ -648,7 +647,7 @@
       },
 
       confirm: function() {
-        if(!this.canConfirm) return
+        if(this.busy || !this.canConfirm) return
         this.status = 'confirmed'
         if(this.error) this.activeFeature.repair()
         if(!this.showHeader) this.activeFeature.confirm()
@@ -657,6 +656,7 @@
       },
 
       close: function() {
+        if(this.busy && this.status !== 'confirmed') return
         this.$emit('close')
       },
 

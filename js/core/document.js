@@ -398,6 +398,12 @@ export default class Document extends Emitter {
           this.getComponent(id).creator.hidden = this.oldVisibility[id]
         )
 
+        // Regeneration yields to rendering. Leave sketch mode before exposing
+        // the restored timeline, so it cannot section the finished model using
+        // the sketch that has just been closed.
+        this.activeSketch = null
+        this.activeFeature = null
+
         // Restore marker
         if(resetMarker && this.previousMarker != this.timeline.marker) await this.regenerate(this.previousMarker)
 

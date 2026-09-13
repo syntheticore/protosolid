@@ -898,16 +898,21 @@ export class Shape {
       solid: Solid,
     }
 
+    const chordTolerance = getViewportTessellationTolerance()
     new window.oc.oc.BRepMesh_IncrementalMesh_2(
       geom,
-      getViewportTessellationTolerance(), // linear deflection
+      chordTolerance, // linear deflection
       false,
       getViewportAngularTessellationTolerance(),
       false
     )
 
     return collectShapes(geom, type)
-      .map(item => new constructors[type](this, item) )
+      .map(item => {
+        const shape = new constructors[type](this, item)
+        shape.tessellationChordTolerance = chordTolerance
+        return shape
+      })
   }
 }
 
@@ -1094,6 +1099,7 @@ export class Face extends Shape {
     this.cachedTesselation = {
       positions,
       normals,
+      chordTolerance: this.tessellationChordTolerance,
     }
     return this.cachedTesselation
   }
@@ -1831,7 +1837,7 @@ export class Compound extends Volumetric {
         return new Compound(this.componentId, geometry)
           .inheritShapexTopology([this], side ? 'split-left' : 'split-right', featureId)
       } catch(error) {
-        throw new Error(`Shapex section view failed: ${error?.message || error}`)
+        throw new Error(`Shapex section view failed: ${error?.message || error?.msg || error}`, { cause: error })
       }
     }
     let box = new window.oc.oc.BRepPrimAPI_MakeBox_2(1000, 1000, side ? 1000 : -1000).Shape() //XXX determine bounding box automatically

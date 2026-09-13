@@ -2080,15 +2080,14 @@ impl Profile {
 }
 
 /// A finite half-space proxy enclosing the operand, with margin beyond its
-/// certified display envelope. Only the plane itself can intersect the body.
+/// conservative geometric enclosure. Only the plane itself can intersect the body.
 fn half_space_cutter(source: &Compound, plane: Plane3) -> KernelResult<Compound> {
     let tolerance = source.tolerance();
-    let options = TessellationOptions::default();
-    let mesh = source.tessellate(options)?;
+    let bounds = super::bounds::compound(source)?;
     let mut minimum = crate::Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
     let mut maximum = -minimum;
     let plane = Plane3::from_origin_normal(plane.origin(), plane.normal())?;
-    for point in mesh.positions {
+    for point in bounds.corners() {
         let delta = point - plane.origin();
         let local = crate::Vec3::new(
             delta.dot(plane.u()),
@@ -2100,7 +2099,7 @@ fn half_space_cutter(source: &Compound, plane: Plane3) -> KernelResult<Compound>
             maximum[axis] = maximum[axis].max(local[axis]);
         }
     }
-    let margin = (maximum - minimum).magnitude().max(1.0) + options.chord_tolerance * 4.0;
+    let margin = (maximum - minimum).magnitude().max(1.0) + tolerance.linear * 64.0;
     let wire = Wire2::polygon(
         [
             Point2::new(minimum.x - margin, minimum.y - margin),

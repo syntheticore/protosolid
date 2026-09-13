@@ -7,6 +7,7 @@
 
 mod arena;
 mod boolean;
+mod bounds;
 mod domain;
 mod edge_blend;
 mod error;

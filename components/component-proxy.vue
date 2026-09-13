@@ -2,7 +2,7 @@
 
   //- Solids
 
-  template(v-for="solid in compound.solids()")
+  template(v-for="solid in compound ? compound.solids() : []")
 
     SolidProxy(
       v-if="!component.isItemHidden(solid.id)"
@@ -111,6 +111,7 @@
   import { JointFeature } from '../js/core/features.js'
   import { PointHelper } from '../js/core/helpers.js'
   import { ProjectTool } from '../js/tools.js'
+  import { sectionBounds, sectionPlaneRelation } from '../js/core/section-bounds.js'
 
   const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'sectionPlane', 'sectionSide'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
@@ -129,6 +130,8 @@
       .multiply(props.component.localTransform())
   })
 
+  const bounds = computed(() => sectionBounds(props.component.compound))
+
   const compound = computed(() => {
     // Slice model using all visible saved sections and, while sketching,
     // the active sketch plane expressed in this component's local space.
@@ -142,11 +145,19 @@
     if(!sections.length) return props.component.compound
     const originalFaces = props.component.compound.solids().flatMap(solid => solid.faces())
     const planes = sections.map(section => section.getTransform())
-    const cut = sections.reduce((shape, section, index) =>
-      shape.halfCut(planes[index], section.side),
-      props.component.compound,
-    )
-    markSectionFaces(cut, planes, originalFaces)
+    const cut = sections.reduce((shape, section, index) => {
+      if(!shape) return null
+      // Every subsequent cut is a subset of the original compound. Its cached
+      // enclosure remains safe, without meshing intermediate Boolean results.
+      const relation = sectionPlaneRelation(bounds.value, planes[index])
+      if(relation) {
+        const keepsShape = section.side ? relation < 0 : relation > 0
+        return keepsShape ? shape : null
+      }
+      return shape.halfCut(planes[index], section.side)
+    }, props.component.compound)
+    if(!cut) return null
+    if(cut !== props.component.compound) markSectionFaces(cut, planes, originalFaces)
     return cut
   })
 

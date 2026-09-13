@@ -544,7 +544,10 @@ export class ShapexBackend {
         options.maximumDepth ?? MAXIMUM_TESSELLATION_DEPTH,
       )
       : this.tessellationOptions
-    return meshFromShapex(value.tessellate(tessellationOptions))
+    return {
+      ...meshFromShapex(value.tessellate(tessellationOptions)),
+      chordTolerance: tessellationOptions.chordTolerance,
+    }
   }
 
   edgePolyline(raw) {

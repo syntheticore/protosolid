@@ -8,44 +8,11 @@ use crate::{Point3, Vec3};
 use super::euler::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
-    BodyId, BooleanKind, ChangeKind, Curve3, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel,
+    BodyId, BooleanKind, ChangeKind, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel,
     KernelError, KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin,
     PersistentId, Plane3, Profile, RigidTransform3, Surface3, Tessellate, TessellationOptions,
     Topology, TriangleMesh,
 };
-
-#[derive(Clone, Copy)]
-struct ConservativeBounds3 {
-    minimum: Point3,
-    maximum: Point3,
-}
-
-impl ConservativeBounds3 {
-    fn empty() -> Self {
-        Self {
-            minimum: Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
-            maximum: Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
-        }
-    }
-
-    fn include(&mut self, point: Point3) {
-        self.minimum.x = self.minimum.x.min(point.x);
-        self.minimum.y = self.minimum.y.min(point.y);
-        self.minimum.z = self.minimum.z.min(point.z);
-        self.maximum.x = self.maximum.x.max(point.x);
-        self.maximum.y = self.maximum.y.max(point.y);
-        self.maximum.z = self.maximum.z.max(point.z);
-    }
-
-    fn separated(self, other: Self, tolerance: f64) -> bool {
-        self.maximum.x < other.minimum.x - tolerance
-            || other.maximum.x < self.minimum.x - tolerance
-            || self.maximum.y < other.minimum.y - tolerance
-            || other.maximum.y < self.minimum.y - tolerance
-            || self.maximum.z < other.minimum.z - tolerance
-            || other.maximum.z < self.minimum.z - tolerance
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 struct LineageEntry {
@@ -977,10 +944,13 @@ impl Compound {
     fn boolean_single(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
         debug_assert_eq!(self.solids.len(), 1);
         debug_assert_eq!(other.solids.len(), 1);
-        if self
-            .conservative_bounds()
-            .separated(other.conservative_bounds(), self.tolerance().linear * 8.0)
-        {
+        // Bounds are an optional shortcut here. Unsupported enclosures must
+        // still go through the exact Boolean, not make the operation fail.
+        let separated = match (super::bounds::compound(self), super::bounds::compound(other)) {
+            (Ok(first), Ok(second)) => first.separated(second, self.tolerance().linear * 8.0),
+            _ => false,
+        };
+        if separated {
             let result = match kind {
                 BooleanKind::Union => {
                     combine_compounds(vec![self.clone(), other.clone()], self.tolerance())?
@@ -996,52 +966,6 @@ impl Compound {
             return result.with_boolean_parents(self, other, role);
         }
         super::boolean::boolean_brep(self, other, kind)
-    }
-
-    /// A conservative analytic enclosure used only to prove separation. Circle
-    /// extents are closed-form and positive-weight NURBS lie in the convex hull
-    /// of their control points, so a reported gap cannot hide an intersection.
-    fn conservative_bounds(&self) -> ConservativeBounds3 {
-        let mut bounds = ConservativeBounds3::empty();
-        for vertex in self.vertices() {
-            bounds.include(vertex.point());
-        }
-        for edge in self.edges() {
-            match edge.curve() {
-                Curve3::Line(_) => {}
-                Curve3::Circle(circle) => {
-                    let x = circle.x_radius();
-                    let y = circle.y_radius();
-                    let amplitude = Vec3::new(x.x.hypot(y.x), x.y.hypot(y.y), x.z.hypot(y.z));
-                    bounds.include(circle.center() - amplitude);
-                    bounds.include(circle.center() + amplitude);
-                }
-                Curve3::Nurbs(curve) => {
-                    for point in curve.control_points() {
-                        bounds.include(*point);
-                    }
-                }
-                Curve3::SurfaceIntersection(_) | Curve3::SurfaceCurve(_) => {
-                    // The curve is bounded by its trimmed range, but deriving a
-                    // tight interval enclosure from two retained supports is a
-                    // separate certified operation. An infinite enclosure is
-                    // conservative and merely disables the separation shortcut.
-                    bounds.minimum =
-                        Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
-                    bounds.maximum = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-                }
-            }
-        }
-        for face in self.faces() {
-            if let Surface3::Nurbs(surface) = face.surface() {
-                for row in surface.control_points() {
-                    for point in row {
-                        bounds.include(*point);
-                    }
-                }
-            }
-        }
-        bounds
     }
 
     fn with_geometric_parents(

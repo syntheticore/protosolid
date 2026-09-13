@@ -1585,6 +1585,10 @@ export class ExtrudeFeature extends Feature {
     this.side = 'forward'
   }
 
+  settingChanged(key, value) {
+    if(key == 'extent' && value == 'through') this.operation = 'cut'
+  }
+
   setValues(values) {
     // Preserve the direction of documents saved with the old boolean toggle.
     super.setValues({

@@ -84,7 +84,7 @@
             v-if="setting.type == 'select'"
             :items="setting.options"
             v-model:chosen="activeFeature[key]"
-            @update:chosen="updateSetting"
+            @update:chosen="updateSetting(key, $event)"
           )
 
           button.button.file-input(
@@ -631,7 +631,8 @@
         }
       },
 
-      updateSetting: async function() {
+      updateSetting: async function(key, value) {
+        this.activeFeature.settingChanged?.(key, value)
         if(this.activePicker && !this.activeFeature.needsPicker(this.activePicker, true)) {
           this.cancelPick()
           this.activateBaseTool()

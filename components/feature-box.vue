@@ -646,8 +646,16 @@
         else this.bus.emit('unpreview-feature')
       },
 
-      confirm: function() {
-        if(this.busy || !this.canConfirm) return
+      confirm: async function() {
+        if(this.status === 'confirmed') return
+        // Enter can commit a focused input and start regeneration before the
+        // global enter handler reaches the feature box. Preserve that confirm
+        // request until the committed value has finished updating.
+        if(this.busy) {
+          await this.document.regenerationQueue.catch(() => {})
+          if(this.destroyed || this.status === 'confirmed') return
+        }
+        if(!this.canConfirm) return
         this.status = 'confirmed'
         if(this.error) this.activeFeature.repair()
         if(!this.showHeader) this.activeFeature.confirm()

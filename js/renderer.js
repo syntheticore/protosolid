@@ -149,6 +149,12 @@ export default class Renderer {
   setActiveCamera(camera) {
     const rotateEnabled = this.viewControls?.enableRotate || false
     if(this.viewControls) this.viewControls.dispose()
+    // Disposing controls mid-gesture does not emit their 'end' event.
+    if(this.viewInteracting) {
+      this.viewInteracting = false
+      this.updateGizmoEnabled()
+      this.endAnimation()
+    }
 
     const target = this.viewControls && this.viewControls.target
     this.viewControls = new OrbitControls(camera, this.renderer.domElement)

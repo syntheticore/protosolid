@@ -8,7 +8,32 @@ import { Profile } from '../js/core/geom3d.js'
 import { rotationFromNormal } from '../js/core/utils.js'
 
 const api = await initShapex({ wasm: await readFile(new URL('../js/shapexJS/pkg/shapex_js_wasm_bg.wasm', import.meta.url)) })
-globalThis.window = { kernel: { modeling: new ShapexBackend(api) } }
+// Saved fixture sketches contain control points without live OC geometry.
+// Build their native splines here; production only consumes live sketch curves.
+class FixtureBackend extends ShapexBackend {
+  splineGeometry(source) {
+    const count = source.points.length
+    const degree = Math.min(5, count - 1)
+    const interior = count - degree - 1
+    const end = interior + 1
+    const knots = [
+      ...Array(degree + 1).fill(0),
+      ...Array.from({ length: interior }, (_, index) => index + 1),
+      ...Array(degree + 1).fill(end),
+    ]
+    return this.api.TrimmedCurve2.new(
+      this.api.NurbsCurve2.new(
+        degree,
+        source.points.map(point => this.point2(point)),
+        Array(count).fill(1),
+        knots,
+      ),
+      this.api.ParameterRange.new(knots[degree], knots[count]),
+    )
+  }
+}
+
+globalThis.window = { kernel: { modeling: new FixtureBackend(api) } }
 
 function rectangle(x0, y0, x1, y1, workplane = new THREE.Matrix4()) {
   const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => new THREE.Vector3(x, y, 0))

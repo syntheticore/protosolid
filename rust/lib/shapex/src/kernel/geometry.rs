@@ -1238,65 +1238,6 @@ fn homogeneous_curve_jet<V: cgmath::VectorSpace<Scalar = f64>>(
     jet
 }
 
-fn de_boor_vec4(
-    degree: usize,
-    knots: &[f64],
-    controls: &[Vec4],
-    parameter: f64,
-) -> KernelResult<Vec4> {
-    if degree == 0 {
-        let span = find_span(0, knots, controls.len(), parameter);
-        return Ok(controls[span]);
-    }
-    let span = find_span(degree, knots, controls.len(), parameter);
-    let mut values: Vec<Vec4> = (0..=degree).map(|j| controls[span - degree + j]).collect();
-    for level in 1..=degree {
-        for j in (level..=degree).rev() {
-            let index = span - degree + j;
-            let denominator = knots[index + degree + 1 - level] - knots[index];
-            if denominator == 0.0 {
-                values[j] = values[j - 1];
-            } else {
-                let alpha = (parameter - knots[index]) / denominator;
-                values[j] = values[j - 1] * (1.0 - alpha) + values[j] * alpha;
-            }
-        }
-    }
-    let result = values[degree];
-    if !result.x.is_finite()
-        || !result.y.is_finite()
-        || !result.z.is_finite()
-        || !result.w.is_finite()
-    {
-        return Err(KernelError::new(
-            DiagnosticKind::NumericalFailure,
-            "NURBS evaluation produced a non-finite value",
-        ));
-    }
-    Ok(result)
-}
-
-fn derivative_controls(
-    degree: usize,
-    knots: &[f64],
-    controls: &[Vec4],
-) -> Option<(usize, Vec<f64>, Vec<Vec4>)> {
-    if degree == 0 || controls.len() < 2 {
-        return None;
-    }
-    let derivative = (0..controls.len() - 1)
-        .map(|index| {
-            let denominator = knots[index + degree + 1] - knots[index + 1];
-            if denominator == 0.0 {
-                Vec4::new(0.0, 0.0, 0.0, 0.0)
-            } else {
-                (controls[index + 1] - controls[index]) * (degree as f64 / denominator)
-            }
-        })
-        .collect();
-    Some((degree - 1, knots[1..knots.len() - 1].to_vec(), derivative))
-}
-
 fn de_boor_vec3(
     degree: usize,
     knots: &[f64],
@@ -3134,6 +3075,29 @@ impl NurbsSurface3 {
         Ok(patches)
     }
 
+    fn homogeneous_jet(&self, u: f64, v: f64) -> [[Vec4; 3]; 3] {
+        std::array::from_fn(|order| {
+            homogeneous_curve_jet(
+                self.degrees.1,
+                &self.knots.1,
+                self.control_points.len(),
+                v,
+                |row| {
+                    homogeneous_curve_jet(
+                        self.degrees.0,
+                        &self.knots.0,
+                        self.control_points[row].len(),
+                        u,
+                        |column| {
+                            let point = self.control_points[row][column];
+                            let weight = self.weights[row][column];
+                            Vec4::new(point.x * weight, point.y * weight, point.z * weight, weight)
+                        },
+                    )[order]
+                },
+            )
+        })
+    }
     fn evaluate(&self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {
         let domains = self.domains();
         let in_domain = |domain: ParameterDomain, value: f64| match domain.bounds {
@@ -3158,26 +3122,21 @@ impl NurbsSurface3 {
                 "NURBS surface parameters lie outside its natural domain",
             ));
         };
-        let rows = self.homogeneous_rows();
-        let along_u: Vec<Vec4> = rows
-            .iter()
-            .map(|row| de_boor_vec4(self.degrees.0, &self.knots.0, row, u))
-            .collect::<KernelResult<_>>()?;
-        let value = de_boor_vec4(self.degrees.1, &self.knots.1, &along_u, v)?;
-
-        let u_rows: Vec<Vec4> = rows
-            .iter()
-            .map(|row| evaluate_derivative_vec4(self.degrees.0, &self.knots.0, row, u, 1))
-            .collect::<KernelResult<_>>()?;
-        let uu_rows: Vec<Vec4> = rows
-            .iter()
-            .map(|row| evaluate_derivative_vec4(self.degrees.0, &self.knots.0, row, u, 2))
-            .collect::<KernelResult<_>>()?;
-        let du = de_boor_vec4(self.degrees.1, &self.knots.1, &u_rows, v)?;
-        let duu = de_boor_vec4(self.degrees.1, &self.knots.1, &uu_rows, v)?;
-        let dv = evaluate_derivative_vec4(self.degrees.1, &self.knots.1, &along_u, v, 1)?;
-        let dvv = evaluate_derivative_vec4(self.degrees.1, &self.knots.1, &along_u, v, 2)?;
-        let duv = evaluate_derivative_vec4(self.degrees.1, &self.knots.1, &u_rows, v, 1)?;
+        // A tensor-product NURBS only depends on the active controls in each
+        // direction. Reuse the curve evaluator instead of constructing whole
+        // derivative control nets for every surface sample.
+        let jet = self.homogeneous_jet(u, v);
+        if !jet.iter().flatten().all(|value| {
+            value.x.is_finite() && value.y.is_finite() && value.z.is_finite() && value.w.is_finite()
+        }) {
+            return Err(KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                "NURBS surface evaluation produced a non-finite value",
+            ));
+        }
+        let [value, dv, dvv] = jet[0];
+        let [du, duv, _] = jet[1];
+        let duu = jet[2][0];
         if value.w == 0.0 {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
@@ -3303,32 +3262,6 @@ impl NurbsSurface3 {
             distance: projected.distance(point),
         })
     }
-}
-
-fn evaluate_derivative_vec4(
-    degree: usize,
-    knots: &[f64],
-    controls: &[Vec4],
-    parameter: f64,
-    order: usize,
-) -> KernelResult<Vec4> {
-    if order == 0 {
-        return de_boor_vec4(degree, knots, controls, parameter);
-    }
-    let mut current_degree = degree;
-    let mut current_knots = knots.to_vec();
-    let mut current_controls = controls.to_vec();
-    for _ in 0..order {
-        let Some((next_degree, next_knots, next_controls)) =
-            derivative_controls(current_degree, &current_knots, &current_controls)
-        else {
-            return Ok(Vec4::new(0.0, 0.0, 0.0, 0.0));
-        };
-        current_degree = next_degree;
-        current_knots = next_knots;
-        current_controls = next_controls;
-    }
-    de_boor_vec4(current_degree, &current_knots, &current_controls, parameter)
 }
 
 impl Cylinder3 {

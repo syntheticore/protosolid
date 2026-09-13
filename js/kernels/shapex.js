@@ -21,7 +21,7 @@ function featureResult(operation, create) {
   try {
     return new ShapexGeometry(create())
   } catch(error) {
-    throw { type: 'error', msg: `Shapex ${operation} failed: ${error?.message || error}`, kernel: 'shapex' }
+    throw { type: 'error', msg: `Shapex ${operation} failed: ${error?.message || error?.msg || error}`, kernel: 'shapex' }
   }
 }
 
@@ -145,27 +145,103 @@ export class ShapexBackend {
         this.point2(source.sample(1.0)),
       )
     }
-    if(type == 'Spline') {
-      const count = source.points.length
-      const degree = Math.min(5, count - 1)
-      const interior = count - degree - 1
-      const end = interior + 1
-      const knots = [
-        ...Array(degree + 1).fill(0),
-        ...Array.from({ length: interior }, (_, index) => index + 1),
-        ...Array(degree + 1).fill(end),
-      ]
-      return this.api.TrimmedCurve2.new(
-        this.api.NurbsCurve2.new(
-          degree,
-          source.points.map(point => this.point2(point)),
-          Array(count).fill(1),
-          knots,
-        ),
-        this.api.ParameterRange.new(knots[degree], knots[count]),
-      )
-    }
+    if(type == 'Spline') return this.splineGeometry(source)
+    if(type == 'Offset Curve') return this.offsetGeometry(source)
     unsupported(`${type.toLowerCase()} profile curves`)
+  }
+
+  splineGeometry(source) {
+    // Profile splitting stores only endpoints on the SketchElement. Transfer
+    // the actual B-spline poles and trim, including reversed profile edges.
+    const geom = source.geom().get()
+    let basis = geom
+    const oc = window.oc.oc
+    while(basis instanceof oc.Geom2d_TrimmedCurve) basis = basis.BasisCurve().get()
+    const knots = []
+    for(let i = 1; i <= basis.NbKnots(); i++) {
+      knots.push(...Array(basis.Multiplicity(i)).fill(basis.Knot(i)))
+    }
+    const points = [], weights = []
+    for(let i = 1; i <= basis.NbPoles(); i++) {
+      const point = basis.Pole(i)
+      points.push(this.api.Point2.new(point.X(), point.Y()))
+      weights.push(basis.Weight(i))
+      point.delete()
+    }
+    return this.api.TrimmedCurve2.new(
+      this.api.NurbsCurve2.new(basis.Degree(), points, weights, knots),
+      this.api.ParameterRange.new(geom.FirstParameter(), geom.LastParameter()),
+    )
+  }
+
+  offsetGeometry(source) {
+    const oc = window.oc.oc
+    let basis = source.geom().get()
+    while(basis instanceof oc.Geom2d_TrimmedCurve || basis instanceof oc.Geom2d_OffsetCurve) {
+      basis = basis.BasisCurve().get()
+    }
+    if(basis instanceof oc.Geom2d_Line) {
+      return this.api.TrimmedCurve2.line(...source.endpoints().map(point => this.point2(point)))
+    }
+    if(basis instanceof oc.Geom2d_Circle) {
+      const arc = this.api.TrimmedCurve2.arcThrough(
+        this.point2(source.sample(0)), this.point2(source.sample(0.25)), this.point2(source.sample(0.5)),
+      )
+      return this.api.TrimmedCurve2.new(arc.curve(), this.api.ParameterRange.new(
+        arc.range().start, arc.range().start + 2 * (arc.range().end - arc.range().start),
+      ))
+    }
+    // An offset of a spline is generally not rational. Approximate its exact
+    // OC evaluator with adaptive cubic Hermite spans at model tolerance, as
+    // one NURBS edge (not a faceted wire). Endpoints remain exact.
+    const geom = source.geom().get()
+    const start = geom.FirstParameter(), end = geom.LastParameter()
+    const at = u => {
+      const point = geom.Value(u), tangent = geom.DN(u, 1)
+      const result = { p: new THREE.Vector2(point.X(), point.Y()), d: new THREE.Vector2(tangent.X(), tangent.Y()) }
+      point.delete()
+      tangent.delete()
+      return result
+    }
+    const spans = []
+    const fit = (a, b, left, right, depth) => {
+      const controls = [left.p, left.p.clone().addScaledVector(left.d, (b - a) / 3),
+        right.p.clone().addScaledVector(right.d, -(b - a) / 3), right.p]
+      const accurate = [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875].every(t => {
+        const s = 1 - t
+        const point = controls[0].clone().multiplyScalar(s ** 3)
+          .addScaledVector(controls[1], 3 * s * s * t)
+          .addScaledVector(controls[2], 3 * s * t * t)
+          .addScaledVector(controls[3], t ** 3)
+        return point.distanceTo(at(a + t * (b - a)).p) <= this.tolerance.linear * 0.25
+      })
+      if(accurate) { spans.push({ b, controls }); return }
+      if(depth >= 20) throw new Error('Offset curve could not be fitted within model tolerance')
+      const middle = (a + b) / 2, sample = at(middle)
+      fit(a, middle, left, sample, depth + 1)
+      fit(middle, b, sample, right, depth + 1)
+    }
+    // Start at each basis knot so short spans cannot hide between fit probes.
+    const breaks = [start]
+    if(basis instanceof oc.Geom2d_BSplineCurve) {
+      for(let i = 1; i <= basis.NbKnots(); i++) {
+        const knot = basis.Knot(i)
+        if(knot > start && knot < end) breaks.push(knot)
+      }
+    }
+    breaks.push(end)
+    for(let i = 1; i < breaks.length; i++) {
+      fit(breaks[i - 1], breaks[i], at(breaks[i - 1]), at(breaks[i]), 0)
+    }
+    const controls = [spans[0].controls[0]], knots = Array(4).fill(start)
+    spans.forEach((span, index) => {
+      controls.push(...span.controls.slice(1))
+      knots.push(...Array(index == spans.length - 1 ? 4 : 3).fill(span.b))
+    })
+    return this.api.TrimmedCurve2.new(
+      this.api.NurbsCurve2.new(3, controls.map(point => this.point2(point)), Array(controls.length).fill(1), knots),
+      this.api.ParameterRange.new(source.forward === false ? end : start, source.forward === false ? start : end),
+    )
   }
 
   wire(source) {
@@ -191,7 +267,7 @@ export class ShapexBackend {
     } catch(error) {
       throw {
         type: 'error',
-        msg: `Shapex extrusion failed: ${error?.message || error}`,
+        msg: `Shapex extrusion failed: ${error?.message || error?.msg || error}`,
       }
     }
   }

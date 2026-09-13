@@ -413,8 +413,18 @@ fn validate_segment_is_simple(
         ));
     }
     pieces.sort_by(|first, second| first.0.start.total_cmp(&second.0.start));
+    let bounds = pieces
+        .iter()
+        .map(|(_, controls)| homogeneous_bounds(controls))
+        .collect::<Vec<_>>();
     for first in 0..pieces.len() {
         for second in first + 1..pieces.len() {
+            // Positive-weight rational Bézier curves stay inside their control
+            // hulls. Reject disjoint pairs before cloning and decomposing the
+            // entire parent NURBS for each pair of spans.
+            if bounds_separated(bounds[first], bounds[second], tolerance.linear) {
+                continue;
+            }
             let first_curve = TrimmedCurve2::new(curve.clone(), pieces[first].0)?;
             let second_curve = TrimmedCurve2::new(curve.clone(), pieces[second].0)?;
             let intersection = nurbs_nurbs_intersection(&first_curve, &second_curve, tolerance)?;
@@ -424,7 +434,10 @@ fn validate_segment_is_simple(
                 || intersection
                     .hits
                     .iter()
-                    .any(|hit| !adjacent || hit.point.distance(shared) > tolerance.linear)
+                    // Use the same root acceptance band as adjacent wire
+                    // edges: the generic solver can return an endpoint root
+                    // a few linear tolerances away from the shared point.
+                    .any(|hit| !adjacent || hit.point.distance(shared) > tolerance.linear * 8.0)
             {
                 return Err(invalid("wire must not self-intersect"));
             }
@@ -1267,8 +1280,18 @@ fn nurbs_nurbs_intersection(
         unreachable!()
     };
     let mut stack = Vec::new();
-    for first_span in trimmed_bezier_spans(first_curve, first.range())? {
-        for second_span in trimmed_bezier_spans(second_curve, second.range())? {
+    let first_spans = trimmed_bezier_spans(first_curve, first.range())?;
+    let second_spans = trimmed_bezier_spans(second_curve, second.range())?;
+    let second_bounds = second_spans
+        .iter()
+        .map(|(_, controls)| homogeneous_bounds(controls))
+        .collect::<Vec<_>>();
+    for first_span in first_spans {
+        let first_bounds = homogeneous_bounds(&first_span.1);
+        for (second_span, second_bounds) in second_spans.iter().zip(&second_bounds) {
+            if bounds_separated(first_bounds, *second_bounds, tolerance.linear) {
+                continue;
+            }
             stack.push((
                 first_span.0,
                 first_span.1.clone(),

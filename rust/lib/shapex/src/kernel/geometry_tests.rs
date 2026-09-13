@@ -174,3 +174,160 @@ fn check_jet(degree: usize, knots: Vec<f64>) {
         }
     }
 }
+
+// Full-control-net reference evaluators for the local spline evaluation tests.
+fn de_boor_vec4(
+    degree: usize,
+    knots: &[f64],
+    controls: &[Vec4],
+    parameter: f64,
+) -> KernelResult<Vec4> {
+    if degree == 0 {
+        let span = find_span(0, knots, controls.len(), parameter);
+        return Ok(controls[span]);
+    }
+    let span = find_span(degree, knots, controls.len(), parameter);
+    let mut values: Vec<Vec4> = (0..=degree).map(|j| controls[span - degree + j]).collect();
+    for level in 1..=degree {
+        for j in (level..=degree).rev() {
+            let index = span - degree + j;
+            let denominator = knots[index + degree + 1 - level] - knots[index];
+            if denominator == 0.0 {
+                values[j] = values[j - 1];
+            } else {
+                let alpha = (parameter - knots[index]) / denominator;
+                values[j] = values[j - 1] * (1.0 - alpha) + values[j] * alpha;
+            }
+        }
+    }
+    let result = values[degree];
+    if !result.x.is_finite()
+        || !result.y.is_finite()
+        || !result.z.is_finite()
+        || !result.w.is_finite()
+    {
+        return Err(KernelError::new(
+            DiagnosticKind::NumericalFailure,
+            "NURBS evaluation produced a non-finite value",
+        ));
+    }
+    Ok(result)
+}
+
+fn derivative_controls(
+    degree: usize,
+    knots: &[f64],
+    controls: &[Vec4],
+) -> Option<(usize, Vec<f64>, Vec<Vec4>)> {
+    if degree == 0 || controls.len() < 2 {
+        return None;
+    }
+    let derivative = (0..controls.len() - 1)
+        .map(|index| {
+            let denominator = knots[index + degree + 1] - knots[index + 1];
+            if denominator == 0.0 {
+                Vec4::new(0.0, 0.0, 0.0, 0.0)
+            } else {
+                (controls[index + 1] - controls[index]) * (degree as f64 / denominator)
+            }
+        })
+        .collect();
+    Some((degree - 1, knots[1..knots.len() - 1].to_vec(), derivative))
+}
+
+fn evaluate_derivative_vec4(
+    degree: usize,
+    knots: &[f64],
+    controls: &[Vec4],
+    parameter: f64,
+    order: usize,
+) -> KernelResult<Vec4> {
+    if order == 0 {
+        return de_boor_vec4(degree, knots, controls, parameter);
+    }
+    let mut current_degree = degree;
+    let mut current_knots = knots.to_vec();
+    let mut current_controls = controls.to_vec();
+    for _ in 0..order {
+        let Some((next_degree, next_knots, next_controls)) =
+            derivative_controls(current_degree, &current_knots, &current_controls)
+        else {
+            return Ok(Vec4::new(0.0, 0.0, 0.0, 0.0));
+        };
+        current_degree = next_degree;
+        current_knots = next_knots;
+        current_controls = next_controls;
+    }
+    de_boor_vec4(current_degree, &current_knots, &current_controls, parameter)
+}
+
+#[test]
+fn local_surface_jet_matches_full_rational_derivative_nets() {
+    for degrees in [(1, 1), (3, 2), (2, 3), (17, 2)] {
+        let knots = |degree| {
+            let mut values = vec![0.0; degree + 1];
+            values.extend([0.3, 0.3, 0.7]);
+            values.extend(vec![1.0; degree + 1]);
+            values
+        };
+        let points = (0..degrees.1 + 4)
+            .map(|row| {
+                (0..degrees.0 + 4)
+                    .map(|column| {
+                        Point3::new(
+                            column as f64,
+                            row as f64,
+                            ((column * 7 + row * 3) as f64).sin(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let weights = points
+            .iter()
+            .enumerate()
+            .map(|(row, points)| {
+                points
+                    .iter()
+                    .enumerate()
+                    .map(|(column, _)| 0.5 + ((row + column * 3) % 7) as f64 / 5.0)
+                    .collect()
+            })
+            .collect();
+        let surface = NurbsSurface3::new(
+            degrees,
+            points,
+            weights,
+            (knots(degrees.0), knots(degrees.1)),
+        )
+        .unwrap();
+        let rows = surface.homogeneous_rows();
+        for u in [0.0, 0.1, 0.3 - 1e-9, 0.3, 0.3 + 1e-9, 0.7, 1.0] {
+            for v in [0.0, 0.1, 0.3 - 1e-9, 0.3, 0.3 + 1e-9, 0.7, 1.0] {
+                let jet = surface.homogeneous_jet(u, v);
+                for u_order in 0..3 {
+                    let along_u = rows
+                        .iter()
+                        .map(|row| {
+                            evaluate_derivative_vec4(degrees.0, &surface.knots.0, row, u, u_order)
+                                .unwrap()
+                        })
+                        .collect::<Vec<_>>();
+                    for v_order in 0..3 {
+                        let expected = evaluate_derivative_vec4(
+                            degrees.1,
+                            &surface.knots.1,
+                            &along_u,
+                            v,
+                            v_order,
+                        )
+                        .unwrap();
+                        assert!((jet[u_order][v_order] - expected).magnitude()
+                            <= 1e-10 * expected.magnitude().max(1.0),
+                            "degrees {degrees:?}, parameter ({u}, {v}), derivative ({u_order}, {v_order})");
+                    }
+                }
+            }
+        }
+    }
+}

@@ -17,6 +17,7 @@
     :style="{ top: projectedProxies[0].coords.y + 'px', left: projectedProxies[0].coords.x + 'px' }"
     @click.stop="select"
     @dblclick="constraint.active = true"
+    @keydown.enter.stop.prevent
   )
 
     .dim-value(
@@ -81,8 +82,7 @@
       position: absolute
 
     .dim-value
-      margin-top: -12px
-      margin-left: -28px
+      transform: translate(-50%, -50%)
       background: $bright2
       padding: 0.25rem 0.5rem
       border-radius: 99px

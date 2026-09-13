@@ -8,6 +8,7 @@
       :display-mode="effectiveDisplayMode"
       :color-mode="effectiveColorMode"
       :projection-mode="effectiveProjectionMode"
+      :sketch-section="sketchSection"
       @update:projection-mode="projectionMode = $event"
       v-model:active-tool="activeTool"
       v-model:highlight="highlight"
@@ -42,7 +43,7 @@
         .buttons
 
           .view-row
-            .view-label Zoom
+            .side-label Zoom
 
             .flex.gap
 
@@ -72,7 +73,7 @@
               )
 
           .view-row
-            .view-label Nearest Plane
+            .side-label Nearest Plane
 
             IconButton(
               icon="solar-panel"
@@ -88,7 +89,7 @@
         h1 DISPLAY
 
         .display-row
-          .display-label Projection
+          .side-label Projection
           RadioBar(
             :items="projectionModes"
             hot-key="O"
@@ -98,7 +99,7 @@
           )
 
         .display-row
-          .display-label Shading
+          .side-label Shading
           RadioBar(
             :items="displayModes"
             hot-key="W"
@@ -108,7 +109,7 @@
           )
 
         .display-row
-          .display-label Material
+          .side-label Material
           RadioBar(
             :items="colorModes"
             hot-key="M"
@@ -116,6 +117,11 @@
             @hover="previewColorMode = $event"
             @unhover="previewColorMode = null"
           )
+
+        .display-row(v-if="document.activeSketch")
+          label.display-toggle(title="Section the model at the active sketch plane")
+            input(type="checkbox" v-model="sketchSection")
+            span Section
 
       .pose(:class="{ hidden: !document.top().hasPoseChange() }")
 
@@ -191,27 +197,30 @@
         pointer-events: auto
 
         &:hover
-          .view-label
-          .display-label
+          .side-label
             opacity: 1
 
       .view-chooser
       .radio-bar
         margin-bottom: 0.5rem
 
-      .view-row
+      .buttons
       .display-row
         align-items: center
         align-self: flex-end
         display: grid
-        gap: 0.5rem
-        grid-template-columns: 64px 110px
+        column-gap: 0.5rem
+        grid-template-columns: 72px 110px
 
-      .view-label
-      .display-label
+      .view-row
+        display: contents
+
+      .side-label
         color: $bright2
         font-size: 11px
+        justify-self: end
         opacity: 0
+        pointer-events: none
         text-align: right
         transition: opacity 0.15s
         white-space: nowrap
@@ -223,12 +232,25 @@
         .button
           min-width: 0
 
+      .buttons
+        pointer-events: auto
+        row-gap: 0.25rem
+
       .display-row
         margin-bottom: 0.5rem
 
         .radio-bar
           margin-bottom: 0
           min-width: 0
+
+        .display-toggle
+          display: flex
+          gap: 0.35rem
+          grid-column: 2
+
+          span
+            font-size: 14px
+            font-weight: bold
 
     .pose
       transition: all 0.25s
@@ -242,12 +264,6 @@
 
       h1
         margin-top: 0.5rem
-
-  .buttons
-    pointer-events: auto
-    display: flex
-    flex-direction: column
-    gap: 0.25rem
 
   .view-port
     width: 100%
@@ -341,6 +357,7 @@
         previewDisplayMode: null,
         colorMode: 'material',
         previewColorMode: null,
+        sketchSection: true,
       }
     },
 

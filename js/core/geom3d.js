@@ -154,7 +154,7 @@ export class Wire {
     this.segments.forEach(seg => {
       const geom = seg.geom()
       const plane = new window.oc.oc.gp_Pln_1()
-      const curve = window.oc.oc.GeomAPI.To3d(geom, plane)
+      const curve = seg.to3d ? seg.to3d(plane) : window.oc.oc.GeomAPI.To3d(geom, plane)
       const edge = new window.oc.oc.BRepBuilderAPI_MakeEdge_24(curve).Edge()
       wire.Add_1(edge)
     })

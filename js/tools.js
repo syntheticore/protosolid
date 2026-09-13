@@ -13,11 +13,13 @@ import {
   Circle,
   Arc,
   Spline,
+  OffsetCurve,
   SketchPoint,
 } from './core/geom2d.js'
 
 import {
   Edge,
+  Profile,
   Solid,
   getViewportTessellationTolerance,
 } from './core/geom3d.js'
@@ -34,6 +36,8 @@ import {
   TangentConstraint,
   FixConstraint,
   Dimension,
+  OffsetConstraint,
+  ProfileOffsetConstraint,
   Projection,
   ProjectedPoint,
   SketchOrigin,
@@ -45,6 +49,7 @@ import {
 } from './core/assembly.js'
 import { EPSILON } from './core/utils.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
+import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffsetFrame, buildOffsetCurves } from './core/sketch-offset.js'
 
 const dragThreshold = 2
 const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
@@ -116,6 +121,7 @@ function isConstrainablePoint(elem, index) {
   if(elem instanceof Circle) return index == 0
   if(elem instanceof Arc) return index >= 0 && index <= 2
   if(elem instanceof Spline) return index == 0 || index == elem.handles().length - 1
+  if(elem instanceof OffsetCurve) return index == 0 || index == 1
   return false
 }
 
@@ -492,7 +498,7 @@ class HighlightTool extends Tool {
       if(handle && this.realSelectors.includes('point') && !this.preferPointObjects) {
         items.unshift(new ElemRef(handle.elem, handle.index))
       }
-      const acceptsInput = this.acceptsInput ||
+      const acceptsInput = this.acceptsInput?.bind(this) ||
         this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
       if(acceptsInput) items = items.filter(item => acceptsInput(item))
       items = this.orderItems(items)
@@ -576,7 +582,7 @@ export class ManipulationTool extends HighlightTool {
       !object.projection
     ) {
       const selectedElements = this.viewport.document.selection.items.filter(item =>
-        this.viewport.document.activeSketch.elements.includes(item)
+        this.viewport.document.activeSketch.elements.includes(item) && !(item instanceof OffsetCurve)
       )
       const group = selectedElements.includes(object) && selectedElements.length > 1 ?
         selectedElements.map(elem => ({
@@ -846,7 +852,7 @@ export class TrimTool extends Tool {
   curveAt(coords) {
     const object = this.viewport.renderer.objectsAtScreen(coords, ['curve'])[0]
     const curve = object && object.alcObject
-    return curve && curve.sketch == this.sketch && !curve.projection ? curve : null
+    return curve && curve.sketch == this.sketch && !curve.projection && !(curve instanceof OffsetCurve) ? curve : null
   }
 
   click(vec, coords) {
@@ -1707,7 +1713,7 @@ export class ConstraintTool extends HighlightTool {
     super(component, viewport, [])
     this.setSelectors(this.constructor.selectors)
     this.sketch = sketch
-    this.acceptsInput = item => this.acceptsItem(item)
+    this.acceptsInput = item => (!(item instanceof OffsetCurve) || this.constructor.constraintType == TouchConstraint) && this.acceptsItem(item)
     this.items = []
     this.cursor = 'crosshair'
   }
@@ -1762,7 +1768,8 @@ export class TouchConstraintTool extends ConstraintTool {
     if(item instanceof ElemRef) {
       return isTouchPoint(item.curve(), item.index)
     }
-    return item instanceof Line || item instanceof Circle || item instanceof Arc
+    return item instanceof Line || item instanceof Circle || item instanceof Arc ||
+      (item instanceof OffsetCurve && !!item.geom && !item.invalid)
   }
 
   canConstrain(items) {
@@ -1840,8 +1847,133 @@ export class TangentConstraintTool extends ConstraintTool {
   }
 }
 
+export class OffsetTool extends HighlightTool {
+  static icon = 'layer-group'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, ['curve', 'profile'])
+    this.sketch = sketch
+    this.localSpace = true
+    this.cursor = 'crosshair'
+  }
+
+  acceptsInput(item) {
+    return item.sketch == this.sketch && (supportsOffset(item) ||
+      (item instanceof Profile && item.rings.every(ring => ring.segments.every(supportsOffset))))
+  }
+
+  orderItems(items) {
+    return items.some(supportsOffset) ? items.filter(supportsOffset) : items
+  }
+
+  async mouseDown(vec, coords) {
+    super.mouseDown(vec, coords)
+    if(!vec) return
+    if(!this.source) {
+      this.source = await this.getObject(coords)
+      if(!this.source) return
+      try {
+        const elements = [...this.sketch.elements, ...this.sketch.projections.map(projection => projection.geometry()).filter(Boolean)]
+        this.groups = this.source instanceof Profile ? profileOffsetGroups(this.source, elements) :
+          [connectedOffsetChain(this.source, elements)]
+        this.items = this.groups.flat().map(entry => entry.curve)
+      } catch(error) {
+        window.bus.emit('toast', error.message)
+        this.source = null
+      }
+      return
+    }
+    if(!this.updatePreview(vec)) {
+      if(this.previewError) window.bus.emit('toast', this.previewError)
+      return
+    }
+    this.sketch.addConstraint(this.constraint)
+    this.constraint.active = true
+    this.source = null
+    this.curve = null
+    this.curves = []
+    this.groups = null
+    this.items = []
+    this.constraint = null
+    this.viewport.dimensionPreview = null
+    this.viewport.updateRegions(true)
+  }
+
+  mouseMove(vec, coords) {
+    if(!this.source) return super.mouseMove(vec, coords)
+    if(vec) this.updatePreview(vec)
+  }
+
+  updatePreview(position) {
+    this.clearPreview()
+    const source = this.source
+    if(source instanceof Profile || source instanceof Spline || this.groups.flat().length > 1) {
+      try {
+        const frame = nearestOffsetFrame(this.groups, position)
+        const distance = position.clone().sub(frame.point).dot(frame.normal)
+        this.curves = buildOffsetCurves(this.groups, distance)
+        this.curves.forEach(curve => {
+          curve.isReference = this.groups[0][0].curve.isReference
+          this.sketch.add(curve)
+        })
+        this.constraint = new ProfileOffsetConstraint(this.groups, this.curves, position.clone(), distance)
+      } catch(error) {
+        this.clearPreview()
+        this.previewError = error.message || 'Offset could not be created'
+        return false
+      }
+    } else if(source instanceof Line) {
+      const direction = source.direction().normalize()
+      const normal = new THREE.Vector3(-direction.y, direction.x, 0)
+      const distance = position.clone().sub(source.points[0]).dot(normal)
+      if(!Number.isFinite(distance) || Math.abs(distance) <= EPSILON || source.length() <= EPSILON) return false
+      const translation = normal.multiplyScalar(distance)
+      this.curve = new Line(...source.points.map(point => point.clone().add(translation)))
+    } else {
+      const radius = position.distanceTo(source.center())
+      if(!Number.isFinite(radius) || radius <= EPSILON || Math.abs(radius - source.radius) <= EPSILON) return false
+      this.curve = source instanceof Circle ? new Circle(source.center(), radius) :
+        Arc.fromPoints([0, 0.5, 1].map(u => source.sample(u).sub(source.center())
+          .multiplyScalar(radius / source.radius).add(source.center())))
+      if(!this.curve) return false
+    }
+    if(this.curve) {
+      this.curve.isReference = source.isReference
+      this.sketch.add(this.curve)
+      this.constraint = new OffsetConstraint([source, this.curve], position.clone())
+    }
+    this.previewError = null
+    this.constraint.sketch = this.sketch
+    this.viewport.dimensionPreview = this.constraint
+    this.viewport.renderer.render()
+    return true
+  }
+
+  clearPreview() {
+    const curves = [...(this.curves || []), ...(this.curve ? [this.curve] : [])]
+    curves.forEach(curve => {
+      this.sketch.remove(curve)
+      curve.clear()
+    })
+    this.curves = []
+    this.curve = null
+    this.constraint = null
+    this.viewport.dimensionPreview = null
+    this.viewport.renderer.render()
+  }
+
+  dispose() {
+    this.clearPreview()
+    this.source = null
+    this.groups = null
+    this.items = []
+  }
+}
+
 export class DimensionTool extends HighlightTool {
   static icon = 'ruler'
+
+  acceptsInput(item) { return !(item instanceof OffsetCurve) }
 
   constructor(component, viewport, sketch) {
     super(component, viewport, ['curve', 'point'])

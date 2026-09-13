@@ -376,11 +376,11 @@ export class Circle extends SketchElement {
   }
 
   axialReference() {
-    return new AxialReference(this)
+    return new AxialReference(new CurveReference(this))
   }
 
   getAxis() {
-    return this.sketch.workplane.clone()
+    return new THREE.Matrix4().setPosition(this._center).premultiply(this.sketch.workplane)
   }
 
   _clone() {
@@ -575,7 +575,8 @@ Serialize.register(Arc, 'Arc')
 
 // Keep snapping and solver point-on-curve support on the same boundary.
 export function supportsPointOnCurveConstraint(elem) {
-  return elem instanceof Line || elem instanceof Circle || elem instanceof Arc || elem instanceof Spline
+  return elem instanceof Line || elem instanceof Circle || elem instanceof Arc || elem instanceof Spline ||
+    (elem instanceof OffsetCurve && !!elem.geom && !elem.invalid)
 }
 
 
@@ -691,6 +692,82 @@ export class Spline extends SketchElement {
 }
 
 Serialize.register(Spline, 'Spline')
+
+// Exact, derived geometry owned by a sketch offset constraint. It has no
+// independent control points: edits go through its source curves or value pill.
+export class OffsetCurve extends SketchElement {
+  constructor(geom) {
+    super()
+    if(geom) this.update(new window.oc.oc.Handle_Geom2d_Curve_2(geom))
+  }
+
+  typename() { return 'Offset Curve' }
+  handles() { return this.geom && !this.invalid ? this.endpoints() : [] }
+  snapPoints() { return this.handles() }
+  closestFrame(point) {
+    const geom = this.geom().get()
+    const projected = this.unsample(point)
+    const parameters = [geom.FirstParameter(), geom.LastParameter(), projected].filter(Number.isFinite)
+    const parameter = parameters.minMaxBy(Math.min, value => vecFromOc(geom.Value(value)).distanceToSquared(point))
+    return {
+      point: vecFromOc(geom.Value(parameter)),
+      tangent: vecFromOc(geom.DN(parameter, 1)).normalize(),
+    }
+  }
+  center() { return this.sample(0.5) }
+  isClosed() { return !this.invalid && !!this.geom && this.endpoints()[0].almost(this.endpoints()[1]) }
+  length() { return this.invalid ? 0 : super.length() }
+  sample(u) { return super.sample(this.forward === false ? 1 - u : u) }
+  tesselate() {
+    const vertices = this.invalid ? undefined : super.tesselate()
+    return this.forward === false ? vertices?.reverse() : vertices
+  }
+  geometry() { return null }
+
+  to3d(plane) {
+    const oc = window.oc.oc
+    const convert = handle => {
+      const curve = handle.get()
+      if(curve instanceof oc.Geom2d_OffsetCurve) {
+        return new oc.Handle_Geom_Curve_2(new oc.Geom_OffsetCurve(
+          convert(curve.BasisCurve()), curve.Offset(), new oc.gp_Dir_4(0, 0, 1), false,
+        ))
+      }
+      if(curve instanceof oc.Geom2d_TrimmedCurve) {
+        return new oc.Handle_Geom_Curve_2(new oc.Geom_TrimmedCurve(
+          convert(curve.BasisCurve()), curve.FirstParameter(), curve.LastParameter(), true, true,
+        ))
+      }
+      return oc.GeomAPI.To3d(handle, plane)
+    }
+    return convert(this.geom())
+  }
+
+  // Like Arc, orient the logical edge without reversing an OC offset basis:
+  // reversing its derivative can also change the side of the offset.
+  flip() { this.forward = this.forward === false }
+
+  _clone() {
+    // Wire construction reverses its copies. A trimmed view would share the
+    // offset's basis and could reverse the live sketch curve along with it.
+    const curve = new OffsetCurve(this.geom().get().Copy().get())
+    curve.forward = this.forward
+    return curve
+  }
+
+  static fromGeometry(geom, id) {
+    const curve = new OffsetCurve(geom)
+    curve.id = id || curve.id
+    return curve
+  }
+
+  dump() { return { id: this.id, isReference: this.isReference, forward: this.forward } }
+
+  static undump(dump) {
+    return Object.assign(new OffsetCurve(), dump)
+  }
+}
+Serialize.register(OffsetCurve, 'OffsetCurve')
 
 
 function tesselateCurveFixed(geom, steps) {

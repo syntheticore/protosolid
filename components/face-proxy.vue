@@ -44,7 +44,7 @@
 
   renderNeeded.value = true
 
-  watch(() => [highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
+  watch(() => [props.face, highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
     updateAnalysisGeometry()
     faceMesh.visible = props.displayMode != 'exportPreview'
     faceMesh.alcPathTracingMaterial = getSurfaceMaterial()
@@ -54,6 +54,7 @@
   }, { immediate: true })
 
   function getSurfaceMaterial() {
+    if(props.face.sectionSurface) return props.component.creator.compSectionMaterial
     if(props.colorMode == 'thermal' || props.colorMode == 'static') return materials.thermalSurface
     if(props.colorMode == 'interference') return materials.interferenceSurface
     if(props.colorMode.startsWith('diagnostic:')) {
@@ -122,6 +123,7 @@
 
   function getMaterial() {
     if(props.displayMode == 'exportPreview') return materials.invisibleSurface
+    if(props.face.sectionSurface) return props.component.creator.compSectionMaterial
     if(props.displayMode == 'pathTraced') return getSurfaceMaterial()
     if((props.colorMode == 'thermal' || props.colorMode == 'static') && !props.document.activeSimulationPicker) {
       return props.parentActive ? materials.thermalSurface : materials.ghostSurface

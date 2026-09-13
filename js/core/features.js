@@ -1093,7 +1093,9 @@ export class CreateSketchFeature extends Feature {
       plane = relativeComponentTransform(source, target).multiply(plane)
     }
     this.sketch.workplane = plane
-    tree.findChild(this.componentId).sketches.push(this.sketch)
+    // Solving can create curve references before the sketch's UI is mounted.
+    this.sketch.component = tree.findChild(this.componentId)
+    this.sketch.component.sketches.push(this.sketch)
     this.sketch.solve(tree)
   }
 
@@ -1537,6 +1539,16 @@ export class ExtrudeFeature extends Feature {
           through: { title: 'Through all', icon: 'infinity' },
         },
       },
+      side: {
+        title: 'Side',
+        type: 'select',
+        when: feature => feature.extent != 'face',
+        options: {
+          forward: { title: 'Forward', icon: 'caret-up' },
+          reverse: { title: 'Reverse', icon: 'caret-down' },
+          both: { title: 'Both directions', icon: 'arrows-alt-v' },
+        },
+      },
       profiles: {
         title: 'Profiles',
         type: 'profile',
@@ -1564,16 +1576,6 @@ export class ExtrudeFeature extends Feature {
         allowNegative: true,
         when: feature => feature.extent != 'through',
       },
-      side: {
-        title: 'Side',
-        type: 'select',
-        when: feature => feature.extent != 'face',
-        options: {
-          forward: { title: 'Forward', icon: 'caret-up' },
-          reverse: { title: 'Reverse', icon: 'caret-down' },
-          both: { title: 'Both directions', icon: 'arrows-alt-v' },
-        },
-      },
     })
 
     this.extent = 'distance'
@@ -1583,6 +1585,10 @@ export class ExtrudeFeature extends Feature {
     this.distance = 1.0
     this.offset = 0
     this.side = 'forward'
+  }
+
+  settingChanged(key, value) {
+    if(key == 'extent' && value == 'through') this.operation = 'cut'
   }
 
   setValues(values) {

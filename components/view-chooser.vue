@@ -36,6 +36,7 @@
     transition(name="fade" mode="out-in")
 
       .controls(
+        v-show="!!document.dirtyView"
         :class="{ settingsOpen, saveCamera: saveCamera && settingsOpen }"
         @mouseenter="unhover"
       )
@@ -165,7 +166,7 @@
   .delete-btn
     padding: 0.25rem
     margin-left: auto
-    margin-right: -0.5rem
+    margin-right: -2.5rem
     border-radius: 3px
     transition: all 0.25s
 
@@ -174,7 +175,7 @@
       transition: none
 
     .active &
-      margin-right: -2.5rem
+      margin-right: -0.5rem
 
   .hidden
     opacity: 0

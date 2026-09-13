@@ -147,11 +147,12 @@ export default class Renderer {
   }
 
   setActiveCamera(camera) {
+    const rotateEnabled = this.viewControls?.enableRotate || false
     if(this.viewControls) this.viewControls.dispose()
 
     const target = this.viewControls && this.viewControls.target
     this.viewControls = new OrbitControls(camera, this.renderer.domElement)
-    this.viewControls.enableRotate = false
+    this.viewControls.enableRotate = rotateEnabled
     this.viewControls.enableDamping = true
     this.viewControls.dampingFactor = 0.6
     this.viewControls.panSpeed = 1.0
@@ -288,7 +289,7 @@ export default class Renderer {
   }
 
   zoomToFit(objects, report=true, view=null) {
-    const fitPadding = 0.9
+    const fitPadding = 1.25
     objects ||= [this.world]
     const box = new THREE.Box3()
     objects.forEach(obj => box.expandByObject(obj) )

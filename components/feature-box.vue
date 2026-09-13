@@ -84,7 +84,7 @@
             v-if="setting.type == 'select'"
             :items="setting.options"
             v-model:chosen="activeFeature[key]"
-            @update:chosen="updateSetting"
+            @update:chosen="updateSetting(key, $event)"
           )
 
           button.button.file-input(
@@ -132,6 +132,9 @@
 
     &::before
       left: 24px
+
+  .main
+    overflow: hidden
 
   header
     display: flex
@@ -457,8 +460,9 @@
       pick: function(type, key, restart) {
         // Toggle picker off if active
         if(this.activePicker) {
+          const previousPicker = this.activePicker
           this.onEscape()
-          if(restart) this.pick(type, key)
+          if(!this.activePicker && (restart || previousPicker != key)) this.pick(type, key)
           return
         }
         const setting = this.activeFeature.settings[key]
@@ -630,7 +634,8 @@
         }
       },
 
-      updateSetting: async function() {
+      updateSetting: async function(key, value) {
+        this.activeFeature.settingChanged?.(key, value)
         if(this.activePicker && !this.activeFeature.needsPicker(this.activePicker, true)) {
           this.cancelPick()
           this.activateBaseTool()
@@ -646,8 +651,16 @@
         else this.bus.emit('unpreview-feature')
       },
 
-      confirm: function() {
-        if(this.busy || !this.canConfirm) return
+      confirm: async function() {
+        if(this.status === 'confirmed') return
+        // Enter can commit a focused input and start regeneration before the
+        // global enter handler reaches the feature box. Preserve that confirm
+        // request until the committed value has finished updating.
+        if(this.busy) {
+          await this.document.regenerationQueue.catch(() => {})
+          if(this.destroyed || this.status === 'confirmed') return
+        }
+        if(!this.canConfirm) return
         this.status = 'confirmed'
         if(this.error) this.activeFeature.repair()
         if(!this.showHeader) this.activeFeature.confirm()

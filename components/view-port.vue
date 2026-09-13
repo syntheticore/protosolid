@@ -64,6 +64,8 @@
         :component="document.top()"
         :display-mode="displayMode"
         :color-mode="colorMode"
+        :section-plane="sketchSectionPlane"
+        :section-side="sketchSectionSide"
         :active-handle="activeHandle"
         :active-tool="activeTool"
         @handleMouseUp="mouseUp"
@@ -266,6 +268,7 @@
       displayMode: String,
       colorMode: String,
       projectionMode: String,
+      sketchSection: Boolean,
     },
 
     data() {
@@ -290,6 +293,7 @@
         cameraUnpreviewFrame: null,
         thermalProbe: null,
         exportPreviewMesh: null,
+        sketchSectionSide: false,
       }
     },
 
@@ -309,7 +313,12 @@
         }
         this.renderer.sketchPlane.setSketch(sketch)
         this.renderer.sketchPlane.visible = !!sketch
+        this.updateSketchSectionSide()
         this.renderer.render()
+      },
+
+      sketchSection: function() {
+        this.updateSketchSectionSide()
       },
 
       activeView: function(view) {
@@ -344,6 +353,11 @@
     computed: {
       activeComponentTransform: function() {
         return this.document.activeSketch ? worldTransform(this.document.activeComponent) : null
+      },
+
+      sketchSectionPlane: function() {
+        if(!this.sketchSection || !this.document.activeSketch) return null
+        return worldTransform(this.document.activeComponent).multiply(this.document.activeSketch.workplane)
       },
 
       exportPreview: function() {
@@ -399,6 +413,7 @@
       this.renderer.setProjectionMode(this.projectionMode)
       this.renderer.on('render', () => {
         this.frame++
+        this.updateSketchSectionSide()
         this.syncSelectionTransformGizmo()
         this.updateWidgets()
       })
@@ -470,10 +485,7 @@
       this.bus.on('keydown', this.keyDown)
       this.bus.on('keyup', this.keyUp)
 
-      bus.on('alt-pressed', (pressed) => {
-        this.renderer.viewControls.enableRotate = pressed
-        this.isOrbiting = pressed
-      })
+      this.bus.on('alt-pressed', this.setOrbiting)
 
       this.registerDocument(this.document)
       const initialView = this.document.dirtyView || this.document.previewView || this.activeView || this.document.activeView
@@ -492,6 +504,7 @@
       this.bus.off('resize', this.onWindowResize)
       this.bus.off('thermal-result', this.updateFluxArrows)
       this.bus.off('joint-picked', this.jointPicked)
+      this.bus.off('alt-pressed', this.setOrbiting)
       this.clearFluxArrows()
       this.clearExportPreview()
       this.clearSelectionTransformGizmo()
@@ -499,6 +512,14 @@
     },
 
     methods: {
+      updateSketchSectionSide: function() {
+        if(!this.renderer || !this.sketchSectionPlane) return
+        const normal = new THREE.Vector3().setFromMatrixColumn(this.sketchSectionPlane, 2).normalize()
+        const cameraDirection = this.renderer.activeCamera.getWorldDirection(new THREE.Vector3())
+        const dot = cameraDirection.dot(normal)
+        if(Math.abs(dot) > 1e-6) this.sketchSectionSide = dot < 0
+      },
+
       applyView: function(view) {
         const baseView = this.document.dirtyView || this.document.currentCameraView
         if(!view?.position || !view?.target) {
@@ -770,6 +791,9 @@
 
       mouseDown: function(e) {
         document.activeElement.blur() // Necessary since THREE R123
+        // The pointer event is the authoritative modifier state for this drag.
+        // This also updates controls recreated while Alt was already held.
+        this.setOrbiting(e.altKey)
         if(e.button != 0) return
         if(this.renderer.isGizmoHovered()) return
         this.isPanning = e.shiftKey
@@ -787,6 +811,11 @@
         }
         const [vec, coords] = this.snap(e)
         if(vec) this.activeTool.mouseDown(vec, coords, e)
+      },
+
+      setOrbiting: function(pressed) {
+        this.renderer.viewControls.enableRotate = pressed
+        this.isOrbiting = pressed
       },
 
       handleMouseDown: function(e, handle) {
@@ -899,6 +928,7 @@
       mouseMove: function(e) {
         if(e.button != 0) return
         if(this.renderer.isGizmoDragging()) return
+        if(this.renderer.viewInteracting) return
         if(this.isPanning) return
         if(this.isOrbiting) return
         if(this.isZooming) return

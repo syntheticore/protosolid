@@ -276,6 +276,28 @@ class Materials {
     }
   }
 
+  makeSectionSurface(color) {
+    const material = new THREE.MeshBasicMaterial({
+      side: THREE.DoubleSide,
+      color,
+    })
+    material.customProgramCacheKey = () => 'section-hatching-v2'
+    material.onBeforeCompile = shader => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `
+          float hatchPosition = (gl_FragCoord.x + gl_FragCoord.y) / 18.0;
+          float hatchDistance = abs(fract(hatchPosition) - 0.5);
+          float hatchWidth = max(fwidth(hatchPosition) * 0.8, 0.06);
+          float hatch = 1.0 - smoothstep(hatchWidth, hatchWidth * 1.8, hatchDistance);
+          outgoingLight = mix(outgoingLight, outgoingLight * 0.65, hatch);
+          #include <opaque_fragment>
+        `
+      )
+    }
+    return material
+  }
+
   makeDiagnosticSurface(mode, direction) {
     const material = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,

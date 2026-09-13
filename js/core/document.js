@@ -427,7 +427,10 @@ export default class Document extends Emitter {
     this.clearViewPreview()
     const [view] = this.views.splice(index, 1)
     if(!view) return
-    if(this.activeView?.id == view.id) this.activeView = null
+    if(this.activeView?.id == view.id) {
+      this.activeView = null
+      this.dirtyView = cloneCameraView(this.currentCameraView)
+    }
     if(this.previewView?.id == view.id) this.previewView = null
     this.markChanged()
   }

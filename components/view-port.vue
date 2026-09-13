@@ -899,6 +899,7 @@
       mouseMove: function(e) {
         if(e.button != 0) return
         if(this.renderer.isGizmoDragging()) return
+        if(this.renderer.viewInteracting) return
         if(this.isPanning) return
         if(this.isOrbiting) return
         if(this.isZooming) return

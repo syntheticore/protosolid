@@ -302,7 +302,8 @@ function createWindow() {
     show: false,
     frame: isMac,
     // vibrancy: isMac ? 'dark' : undefined,
-    transparent: !isMac,
+    // Windows needs an opaque window to retain native minimize/maximize animations.
+    // transparent: !isMac,
     // opacity: 0.9,
     // fullscreenWindowTitle: true,
     webPreferences: {

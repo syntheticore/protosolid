@@ -376,11 +376,11 @@ export class Circle extends SketchElement {
   }
 
   axialReference() {
-    return new AxialReference(this)
+    return new AxialReference(new CurveReference(this))
   }
 
   getAxis() {
-    return this.sketch.workplane.clone()
+    return new THREE.Matrix4().setPosition(this._center).premultiply(this.sketch.workplane)
   }
 
   _clone() {

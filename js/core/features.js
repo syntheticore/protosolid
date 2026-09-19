@@ -2099,7 +2099,7 @@ export class ChamferFeature extends Feature {
 Serialize.register(ChamferFeature, 'ChamferFeature')
 
 
-export class OffsetFeature extends Feature {
+export class ShellFeature extends Feature {
   static icon = 'dot-circle'
   constructor(doc) {
     super(doc, false, 'Shell', {
@@ -2130,8 +2130,52 @@ export class OffsetFeature extends Feature {
     const comp = tree.findChild(this.componentId)
 
     try {
-      comp.compound = comp.compound.offset(references.faces, thickness)
+      comp.compound = comp.compound.shell(references.faces, thickness)
     } catch(err) { this.error = err || this.error }
+  }
+}
+
+Serialize.register(ShellFeature, 'ShellFeature')
+
+
+export class OffsetFeature extends Feature {
+  static icon = 'arrows-alt'
+  constructor(doc) {
+    super(doc, false, 'Offset', {
+      faces: {
+        title: 'Faces',
+        type: 'face',
+        multi: true,
+      },
+      distance: {
+        title: 'Distance',
+        type: 'length',
+        allowNegative: true,
+      },
+      side: {
+        title: 'Side',
+        type: 'bool',
+        icons: ['caret-up', 'caret-down'],
+      },
+    })
+
+    this.faces = null
+    this.distance = 1.0
+    this.side = true
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    const distance = this.distance * (this.side ? 1 : -1)
+    try {
+      comp.compound = comp.compound.offsetFaces(references.faces, distance, this.id)
+    } catch(err) { this.error = err || this.error }
+  }
+
+  static undump(dump, context) {
+    // Older documents stored the hollowing operation as OffsetFeature.
+    if(Object.hasOwn(dump.values || {}, 'thickness')) return ShellFeature.undump(dump, context)
+    return super.undump(dump, context)
   }
 }
 

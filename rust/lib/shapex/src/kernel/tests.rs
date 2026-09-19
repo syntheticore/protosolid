@@ -239,6 +239,17 @@ fn join_offset_cylinder_shell_from_open_end() {
     joined
         .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
         .unwrap();
+    // Round the outer bottom rim, then chamfer the two inner rim edges.
+    // Their junction creates a revolved corner with a collapsed boundary.
+    let rim = joined.edges().next().unwrap().clone();
+    let filleted = joined.fillet(&[rim], 4.0).unwrap();
+    let edges: Vec<_> = filleted.edges().skip(1).take(2).cloned().collect();
+    let chamfered = filleted
+        .chamfer_with_tangent_propagation(&edges, 1.0, true)
+        .unwrap();
+    chamfered
+        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .expect("two-edge chamfer must mesh across its collapsed corner");
 }
 
 #[test]

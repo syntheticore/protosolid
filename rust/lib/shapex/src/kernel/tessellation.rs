@@ -1105,6 +1105,25 @@ fn unwrap_periodic_ring(
     if !domains.iter().any(|domain| domain.period.is_some()) {
         return Ok(());
     }
+    // A pole can join distant angular representatives at the same 3D point.
+    // Cut the traversal there, so unwrapping follows the regular boundary all
+    // the way around instead of introducing a full-turn jump on its closing
+    // edge. The collapsed edge itself does not constrain the angular span.
+    for index in 1..ring.len() {
+        if ring[index - 1].point.distance(ring[index].point) > tolerance.linear
+            || ring[index - 1].uv.distance(ring[index].uv) <= tolerance.parameter
+        {
+            continue;
+        }
+        let uv = ring[index].uv;
+        let (_, du, dv) = surface.first_order(uv.x, uv.y)?;
+        if (domains[0].period.is_some() && du.magnitude() <= tolerance.linear)
+            || (domains[1].period.is_some() && dv.magnitude() <= tolerance.linear)
+        {
+            ring.rotate_left(index);
+            break;
+        }
+    }
     // Retained p-curves already select a surface chart. Only project a
     // boundary point when that chart does not reproduce its exact 3D position;
     // a global inverse search is especially expensive on swept/blend supports.

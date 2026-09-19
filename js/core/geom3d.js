@@ -1234,17 +1234,12 @@ export class Solid extends Volumetric {
   }
 
   shapexFaceTessellation(face) {
-    if(!this.cachedShapexFaceTessellations) {
-      const faces = this.faces()
-      // Shapex tessellates each exact face with its analytical surface
-      // normals. Do not average those normals across topological edges: doing
-      // so rounds genuine CAD creases, and history is not a geometric
-      // continuity test. Smooth cylinders and NURBS faces are already smooth
-      // within their own tessellation.
-      this.cachedShapexFaceTessellations = new Map(faces.map(candidate => [
-        candidate.kernelId,
-        window.kernel.modeling.mesh(candidate.geom()),
-      ]))
+    this.cachedShapexFaceTessellations ??= new Map()
+    if(!this.cachedShapexFaceTessellations.has(face.kernelId)) {
+      // Mesh only the requested face, retaining its exact surface normals.
+      // Failure must not prevent other faces from being displayed or cached.
+      const mesh = window.kernel.modeling.mesh(face.geom())
+      this.cachedShapexFaceTessellations.set(face.kernelId, mesh)
     }
     return this.cachedShapexFaceTessellations.get(face.kernelId)
   }

@@ -524,25 +524,47 @@ impl Kernel {
         options: TessellationOptions,
     ) -> KernelResult<EdgePolyline> {
         let edge = self.topology().edge(edge_id)?;
-        sample_edge_with_normal_constraint(edge, options, &|first, last| {
-            let mut largest = 0.0_f64;
+        sample_edge_with_surface_constraint(edge, options, &|first, last| {
+            let mut chord_error = 0.0_f64;
+            let mut angular_error = 0.0_f64;
             for coedge_id in edge.coedges() {
                 let coedge = self.topology().coedge(*coedge_id)?;
                 let loop_value = self.topology().loop_(coedge.loop_id())?;
                 let face = self.topology().face(loop_value.face())?;
-                let normal_at = |parameter: f64| -> KernelResult<Vec3> {
+                let uv_at = |parameter: f64| -> KernelResult<Point2> {
                     let alpha = if coedge.is_forward() {
                         (parameter - edge.range().start) / edge.range().span()
                     } else {
                         (edge.range().end - parameter) / edge.range().span()
                     };
                     let pcurve_parameter = coedge.range().start + alpha * coedge.range().span();
-                    let uv = coedge.pcurve().evaluate(pcurve_parameter)?.point;
+                    Ok(coedge.pcurve().evaluate(pcurve_parameter)?.point)
+                };
+                let normal_at = |parameter| -> KernelResult<Vec3> {
+                    let uv = uv_at(parameter)?;
                     surface_point_normal(face.surface(), uv.x, uv.y).map(|value| value.1)
                 };
-                largest = largest.max(normal_at(first)?.angle(normal_at(last)?).0);
+                angular_error = angular_error.max(
+                    normal_at(first + (last - first) * 0.25)?
+                        .angle(normal_at(first + (last - first) * 0.75)?)
+                        .0,
+                );
+                // Interior refinement keeps shared boundary segments fixed.
+                // Their straight UV chords must therefore satisfy the same
+                // surface error policy as interior edges. A 3D edge can be
+                // almost straight while its support's parameterization is not.
+                let uvs = [uv_at(first)?, uv_at(last)?];
+                let positions = [
+                    curve_sample(edge.curve(), first)?.point,
+                    curve_sample(edge.curve(), last)?.point,
+                ];
+                let (chord, angle) = surface_edge_error(
+                    face.surface(), face.orientation(), (0, 1), &uvs, &positions,
+                )?;
+                chord_error = chord_error.max(chord);
+                angular_error = angular_error.max(angle);
             }
-            Ok(largest)
+            Ok((chord_error, angular_error))
         })
     }
 
@@ -1596,13 +1618,13 @@ impl TessellationOptions {
 }
 
 fn sample_edge(edge: &Edge, options: TessellationOptions) -> KernelResult<EdgePolyline> {
-    sample_edge_with_normal_constraint(edge, options, &|_, _| Ok(0.0))
+    sample_edge_with_surface_constraint(edge, options, &|_, _| Ok((0.0, 0.0)))
 }
 
-fn sample_edge_with_normal_constraint(
+fn sample_edge_with_surface_constraint(
     edge: &Edge,
     options: TessellationOptions,
-    normal_angle: &dyn Fn(f64, f64) -> KernelResult<f64>,
+    surface_error: &dyn Fn(f64, f64) -> KernelResult<(f64, f64)>,
 ) -> KernelResult<EdgePolyline> {
     let start = curve_sample(edge.curve(), edge.range().start)?;
     let end = curve_sample(edge.curve(), edge.range().end)?;
@@ -1615,7 +1637,7 @@ fn sample_edge_with_normal_constraint(
         end,
         0,
         options,
-        normal_angle,
+        surface_error,
         &mut samples,
     )?;
     let (parameters, points): (Vec<_>, Vec<_>) = samples.into_iter().unzip();
@@ -1631,7 +1653,7 @@ fn sample_interval(
     end: CurveSample,
     depth: u8,
     options: TessellationOptions,
-    normal_angle: &dyn Fn(f64, f64) -> KernelResult<f64>,
+    surface_error: &dyn Fn(f64, f64) -> KernelResult<(f64, f64)>,
     output: &mut Vec<(f64, Point3)>,
 ) -> KernelResult<()> {
     let middle_parameter = (start_parameter + end_parameter) * 0.5;
@@ -1662,12 +1684,13 @@ fn sample_interval(
             .angle(third_quarter.first_derivative)
             .0
     };
-    let adjacent_normal_angle = normal_angle(first_quarter_parameter, third_quarter_parameter)?;
+    let (surface_chord_error, adjacent_normal_angle) = surface_error(start_parameter, end_parameter)?;
     // The interior samples span the middle half of the interval. Limiting
     // their turn to half the requested angle bounds the complete segment
     // without evaluating potentially ambiguous two-sided endpoint tangents.
     let interior_angular_tolerance = options.angular_tolerance * 0.5;
     if deviation <= options.chord_tolerance
+        && surface_chord_error <= options.chord_tolerance
         && tangent_angle <= interior_angular_tolerance
         && adjacent_normal_angle <= interior_angular_tolerance
     {
@@ -1688,7 +1711,7 @@ fn sample_interval(
         middle,
         depth + 1,
         options,
-        normal_angle,
+        surface_error,
         output,
     )?;
     sample_interval(
@@ -1699,7 +1722,7 @@ fn sample_interval(
         end,
         depth + 1,
         options,
-        normal_angle,
+        surface_error,
         output,
     )
 }

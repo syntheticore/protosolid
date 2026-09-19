@@ -249,6 +249,7 @@
     RevolveFeature,
     SweepFeature,
     OffsetFeature,
+    ShellFeature,
     DissolveFeature,
     SplitFeature,
     BooleanFeature,
@@ -412,6 +413,7 @@
           {
             title: 'Edit Solid',
             tools: [
+              { title: 'Shell', feature: ShellFeature },
               { title: 'Offset', feature: OffsetFeature },
               { title: 'Boolean', feature: BooleanFeature },
               { title: 'Move', feature: MoveFeature, hotKey: 'Q', keyCode: 81, disabled: true },

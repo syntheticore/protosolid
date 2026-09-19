@@ -1387,7 +1387,46 @@ export class Compound extends Volumetric {
     }
   }
 
-  offset(openFaces, distance) {
+  offsetFaces(faces, distance, featureId) {
+    const fail = msg => { throw { type: 'error', msg } }
+    if(!faces?.length) fail('Select one or more faces to offset')
+    if(!Number.isFinite(distance)) fail('Offset distance must be finite')
+    if(distance == 0) return this
+    const oc = window.oc.oc
+    if(!oc.OCJS_FaceOffset) fail('Face offset requires an updated geometry kernel')
+
+    try {
+      const solids = this.solids()
+      if(faces.some(face => !solids.some(solid => solid.faces().includes(face)))) {
+        fail('Selected faces must belong to this component')
+      }
+      const results = solids.map(solid => {
+        const selected = faces.filter(face => solid.faces().includes(face))
+        const source = this.cloneCached(solid.geom(), [solid])
+        if(!selected.length) return source
+        const offset = new oc.OCJS_FaceOffset()
+        const selectedShapes = ocListOfShapeFromArray(selected.map(face => face.geom()))
+        try {
+          // Keep all other surfaces at zero offset and intersect adjoining
+          // surfaces to rebuild a closed solid, without adding an inner wall.
+          offset.Perform(solid.geom(), selectedShapes, distance)
+          if(!offset.IsDone() || offset.Shape().IsNull()) throw null
+          const result = source.track(offset, 'offset-faces', null, featureId)
+          if(result.solids().length != 1 || !result.validate() || result.volume() <= EPSILON) throw null
+          return result
+        } finally {
+          selectedShapes.delete()
+          offset.delete()
+        }
+      })
+      return results[0].merge(results.slice(1))
+    } catch(err) {
+      if(err?.type == 'error') throw err
+      fail('Selected faces could not be offset by this distance')
+    }
+  }
+
+  shell(openFaces, distance) {
     openFaces ||= []
     // Offset each affected solid individually
     try {
@@ -1416,7 +1455,7 @@ export class Compound extends Volumetric {
       return thickened[0].merge(thickened.slice(1))
 
     } catch(_) {
-      throw { type: 'error', msg: "Offset could not be built" }
+      throw { type: 'error', msg: "Shell could not be built" }
     }
   }
 

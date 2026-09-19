@@ -564,6 +564,7 @@ mainBuild:
 
     # - symbol: CustomClass
     - symbol: OCJS
+    - symbol: OCJS_FaceOffset
 
   emccFlags:
     # Improve performance & build size
@@ -587,6 +588,38 @@ mainBuild:
 
 additionalCppCode: |
   #include <iostream>
+  #include <BRepOffset_MakeOffset.hxx>
+  #include <TopoDS.hxx>
+  #include <TopTools_ListOfShape.hxx>
+
+  // BRepOffset_MakeOffset is excluded by the OCJS binding generator because
+  // GetAnalyse has an unresolved symbol. Bind only the face-offset API we use.
+  class OCJS_FaceOffset {
+  public:
+    OCJS_FaceOffset() {}
+
+    void Perform(const TopoDS_Shape& shape, const TopTools_ListOfShape& faces,
+                 Standard_Real distance) {
+      myOffset.Initialize(shape, 0.0, 1.0e-6, BRepOffset_Skin,
+                          false, false, GeomAbs_Intersection, false, false);
+      for (TopTools_ListOfShape::Iterator it(faces); it.More(); it.Next()) {
+        myOffset.SetOffsetOnFace(TopoDS::Face(it.Value()), distance);
+      }
+      myOffset.MakeOffsetShape(Message_ProgressRange());
+    }
+
+    Standard_Boolean IsDone() const { return myOffset.IsDone(); }
+    const TopoDS_Shape& Shape() const { return myOffset.Shape(); }
+    const TopTools_ListOfShape& Modified(const TopoDS_Shape& shape) {
+      return myOffset.Modified(shape);
+    }
+    const TopTools_ListOfShape& Generated(const TopoDS_Shape& shape) {
+      return myOffset.Generated(shape);
+    }
+
+  private:
+    BRepOffset_MakeOffset myOffset;
+  };
 
   // class CustomClass {
   // public:

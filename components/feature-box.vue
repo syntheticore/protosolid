@@ -383,6 +383,7 @@
       this.bus.on('resize', this.updatePaths)
       this.bus.on('keydown', this.onKeydown)
       this.document.on('deactivate-feature', this.deactivateFeature)
+      this.document.on('regenerated', this.refreshError)
       this.startValues = this.activeFeature.getValues()
       this.startExpressions = { ...this.activeFeature.expressions }
       this.activateBaseTool()
@@ -412,6 +413,7 @@
       this.bus.off('resize', this.updatePaths)
       this.bus.off('keydown', this.onKeydown)
       this.document.off('deactivate-feature', this.deactivateFeature)
+      this.document.off('regenerated', this.refreshError)
       this.bus.emit('unpreview-feature')
       this.bus.emit('clear-pickers')
       this.bus.emit('activate-tool', ManipulationTool)

@@ -4204,6 +4204,31 @@ impl EulerTransaction<'_> {
             let second_surface = self.working.face(faces[1])?.surface.clone();
             if first_surface == second_surface {
                 self.kef(edge, faces[1])?;
+            } else if let (Surface3::Cone(first), Surface3::Cone(second)) =
+                (&first_surface, &second_surface)
+            {
+                // Independently constructed chamfer patches can describe the
+                // same cone chart with slightly different rounded coefficients.
+                // Compare the chart, not just its cone angle: existing p-curves
+                // must remain valid on the surviving support without remapping.
+                let tolerance = self.kernel.tolerance;
+                let same_vector = |a: Vec3, b: Vec3| {
+                    (a - b).magnitude()
+                        <= tolerance.relative.max(f64::EPSILON * 64.0)
+                            * a.magnitude().max(b.magnitude()).max(1.0)
+                };
+                if first.apex().distance(second.apex()) <= tolerance.linear
+                    && same_vector(first.axis(), second.axis())
+                    && same_vector(first.x_radius(), second.x_radius())
+                    && same_vector(first.y_radius(), second.y_radius())
+                    && self.working.face(faces[0])?.orientation
+                        == self.working.face(faces[1])?.orientation
+                {
+                    // KEF validates the combined boundary on the survivor and
+                    // rolls back atomically if the charts are not interchangeable
+                    // over this face's actual extent.
+                    let _ = self.kef(edge, faces[1]);
+                }
             }
         }
         for face in modified_faces {

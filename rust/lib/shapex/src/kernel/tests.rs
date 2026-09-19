@@ -244,12 +244,22 @@ fn join_offset_cylinder_shell_from_open_end() {
     let rim = joined.edges().next().unwrap().clone();
     let filleted = joined.fillet(&[rim], 4.0).unwrap();
     let edges: Vec<_> = filleted.edges().skip(1).take(2).cloned().collect();
-    let chamfered = filleted
-        .chamfer_with_tangent_propagation(&edges, 1.0, true)
-        .unwrap();
-    chamfered
-        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
-        .expect("two-edge chamfer must mesh across its collapsed corner");
+    for distance in [1.0, 2.5] {
+        let chamfered = filleted
+            .chamfer_with_tangent_propagation(&edges, distance, true)
+            .unwrap();
+        assert_eq!(
+            chamfered
+                .faces()
+                .filter(|face| matches!(face.surface(), Surface3::Cone(_)))
+                .count(),
+            2,
+            "each circular chamfer must have one cone face despite coefficient roundoff"
+        );
+        chamfered
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .expect("two-edge chamfer must mesh across its collapsed corner");
+    }
 }
 
 #[test]

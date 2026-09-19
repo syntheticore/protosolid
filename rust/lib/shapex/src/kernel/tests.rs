@@ -180,6 +180,68 @@ fn shell_twice_filleted_sector() {
 }
 
 #[test]
+fn join_offset_cylinder_shell_from_open_end() {
+    let tol = ModelTolerance::default();
+    let circle = |center, radius| {
+        Profile::new(
+            Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tol).unwrap(),
+            [],
+            tol,
+        )
+        .unwrap()
+    };
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tol,
+    )
+    .unwrap();
+    let body = circle(
+        Point2::new(7.071384583473251, 8.184680835253655),
+        31.40489826969949,
+    )
+    .extrude(plane, Vec3::unit_y() * 37.0)
+    .unwrap();
+    let rim = body
+        .edges()
+        .find(|edge| edge.endpoints().unwrap().iter().all(|p| p.y > 36.9))
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[rim], 6.0).unwrap();
+    let side = body
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+        .unwrap()
+        .clone();
+    let body = body.offset_faces(&[side], 5.0).unwrap();
+    let opening = body
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(p) if p.origin().y.abs() < 1e-7))
+        .unwrap()
+        .clone();
+    let body = body.shell(&[opening], -3.0).unwrap();
+    let tool = circle(
+        Point2::new(13.481018952106044, 11.006242526665803),
+        35.35671545346585,
+    )
+    .extrude(plane, Vec3::unit_y() * 14.0)
+    .unwrap();
+    let joined = body
+        .union(&tool)
+        .expect("join final extrusion in untitled(17).cad");
+    assert_eq!(joined.solids().len(), 1);
+    assert!(joined.volume() > body.volume());
+    let reversed = tool.union(&body).expect("union in reverse operand order");
+    assert!((joined.volume() - reversed.volume()).abs() < joined.volume() * 1e-8);
+    let cut = body.difference(&tool).expect("original cut operation");
+    assert!((joined.volume() - tool.volume() - cut.volume()).abs() < joined.volume() * 1e-8);
+    joined
+        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .unwrap();
+}
+
+#[test]
 fn shelled_cylinder_deeper_offset_circle_cut() {
     // Reproduce untitled(7).cad: a 60 mm cylinder, a 14 mm top fillet,
     // a 5 mm inward shell, and an offset circular cut from the open end.

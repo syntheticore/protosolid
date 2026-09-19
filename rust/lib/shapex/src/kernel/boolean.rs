@@ -1849,12 +1849,15 @@ fn arrange_face(
                 continue;
             }
             let polygon = loop_polyline(&loop_)?;
-            let sample = Point2::from_vec(
-                polygon
-                    .iter()
-                    .fold(Vec2::new(0.0, 0.0), |sum, point| sum + point.to_vec())
-                    / polygon.len() as f64,
-            );
+            // A concave loop's centroid may lie outside it, even inside a
+            // disjoint larger loop. Test nesting from the boundary itself:
+            // arrangement loops cannot cross, so an interior point of any
+            // boundary segment lies inside every enclosing loop.
+            let segment = &loop_[0];
+            let sample = segment
+                .pcurve
+                .evaluate(segment.range.start + segment.range.span() * 0.5)?
+                .point;
             let depth = classified
                 .iter()
                 .filter(|(_, enclosing, enclosing_area, _)| {

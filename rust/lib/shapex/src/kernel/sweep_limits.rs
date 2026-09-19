@@ -674,6 +674,69 @@ mod tests {
     }
 
     #[test]
+    fn shell_revolved_spline_junction_document_5() {
+        // untitled(5).cad.cad.cad.cad.cad.cad has the same source sketches
+        // as document 9. Cover the saved body first, then its rounded variant.
+        let (profile, plane, axis, upper, lower) = torus_to_spline_document_9();
+        let from = upper
+            .faces()
+            .filter(|f| matches!(f.surface(), Surface3::Nurbs(_)))
+            .nth(1)
+            .unwrap();
+        let until = lower
+            .faces()
+            .find(|f| matches!(f.surface(), Surface3::Nurbs(_)))
+            .unwrap();
+        let tool = profile
+            .revolve_between_faces(plane, axis, &upper, from, &lower, until, true)
+            .unwrap();
+        let joined = upper.combined(&[lower]).unwrap().union(&tool).unwrap();
+        let closed = joined.shell(&[], -1.0).expect("unfilleted closed shell");
+        assert_eq!(closed.solids().len(), 1);
+        assert!(closed.volume() > 0.0 && closed.volume() < joined.volume());
+        closed
+            .tessellate(super::super::TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap();
+        for opening in joined
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface3::Plane(_)))
+        {
+            let shell = joined
+                .shell(&[opening.clone()], -1.0)
+                .unwrap_or_else(|error| panic!("unfilleted opening {:?}: {error}", opening.surface()));
+            assert_eq!(shell.solids().len(), 1);
+            assert!(shell.volume() > 0.0 && shell.volume() < joined.volume());
+            shell
+                .tessellate(super::super::TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                .unwrap();
+        }
+        let rims = joined
+            .edges()
+            .filter(|edge| {
+                let faces = edge.connected_faces().unwrap();
+                faces.iter().any(|f| matches!(f.surface(), Surface3::Torus(_)))
+                    && faces.iter().any(|f| matches!(f.surface(), Surface3::Nurbs(_)))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(rims.len(), 8); // Four edge spans around each junction.
+        let rounded = joined.fillet(&rims, 2.0).unwrap();
+        for opening in rounded
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface3::Plane(_)))
+        {
+            let shell = rounded
+                .shell(&[opening.clone()], -1.0)
+                .unwrap_or_else(|error| panic!("opening {:?}: {error}", opening.surface()));
+            assert_eq!(shell.solids().len(), 1);
+            assert!(shell.volume() > 0.0 && shell.volume() < rounded.volume());
+            shell
+                .tessellate(super::super::TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn fillet_revolved_spline_junction_document_9() {
         let (profile, plane, axis, upper, _) = torus_to_spline_document_9();
         let face = upper

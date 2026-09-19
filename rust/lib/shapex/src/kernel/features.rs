@@ -279,6 +279,33 @@ fn exact_surface_curve(
     range: ParameterRange,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Curve3> {
+    // A projected latitude circle is still an exact circle after a torus
+    // offset. Preserve its periodic support so a seam endpoint can move past
+    // its old trim when the neighboring face is offset.
+    if let (Surface3::Torus(torus), Curve2::SurfaceProjection(projection)) = (surface, pcurve) {
+        if let (Surface3::Torus(parent), Curve3::Circle(circle)) =
+            (projection.surface(), projection.curve())
+        {
+            let axis = parent.normal();
+            let delta = circle.center() - parent.center();
+            if torus.center() == parent.center()
+                && torus.x_major() == parent.x_major()
+                && torus.y_major() == parent.y_major()
+                && (delta - axis * delta.dot(axis)).magnitude() <= tolerance.linear
+                && circle.normal().cross(axis).magnitude() <= tolerance.angular
+            {
+                let v = pcurve.evaluate((range.start + range.end) * 0.5)?.point.y;
+                let radius = torus.major_radius() + torus.minor_radius() * v.cos();
+                return super::Circle3::new(
+                    torus.center() + axis * (torus.minor_radius() * v.sin()),
+                    circle.x_radius().normalize() * radius,
+                    circle.y_radius().normalize() * radius,
+                    tolerance,
+                )
+                .map(Into::into);
+            }
+        }
+    }
     // A meridian seam on a cylinder is spatially a line even though it is
     // represented as a one-face surface curve in topology. Preserve that
     // simplest exact form so the seam can extend to newly offset end caps;
@@ -286,6 +313,23 @@ fn exact_surface_curve(
     // seam to the source face's axial extent.
     if let Curve2::Line(line) = pcurve {
         let direction = line.direction();
+        if let Surface3::Torus(torus) = surface {
+            if direction.y.abs() <= tolerance.parameter
+                && (direction.x.abs() - 1.0).abs() <= tolerance.parameter
+            {
+                let uv = line.origin();
+                let radius = torus.major_radius() + torus.minor_radius() * uv.y.cos();
+                let x = torus.x_major().normalize();
+                let y = torus.y_major().normalize();
+                return super::Circle3::new(
+                    torus.center() + torus.normal() * (torus.minor_radius() * uv.y.sin()),
+                    (x * uv.x.cos() + y * uv.x.sin()) * radius,
+                    (-x * uv.x.sin() + y * uv.x.cos()) * (radius * direction.x),
+                    tolerance,
+                )
+                .map(Into::into);
+            }
+        }
         if matches!(surface, Surface3::Plane(_))
             || (matches!(surface, Surface3::Cylinder(_) | Surface3::Cone(_))
                 && direction.x.abs() <= tolerance.parameter * direction.y.abs().max(1.0))
@@ -1149,12 +1193,12 @@ fn projected_pcurve(
     )
 }
 
-fn expanded_offset_bounds(
+fn offset_parameter_padding(
     surface: &Surface3,
     bounds: [ParameterRange; 2],
     distance: f64,
     tolerance: super::ModelTolerance,
-) -> KernelResult<[ParameterRange; 2]> {
+) -> KernelResult<[f64; 2]> {
     let mut minimum_rates = [f64::INFINITY; 2];
     for first_index in 0..=2 {
         for second_index in 0..=2 {
@@ -1171,16 +1215,30 @@ fn expanded_offset_bounds(
             }
         }
     }
+    Ok(minimum_rates.map(|rate| {
+        if rate.is_finite() {
+            distance.abs() * 2.0 / rate + tolerance.parameter * 64.0
+        } else {
+            0.0
+        }
+    }))
+}
+
+fn expanded_offset_bounds(
+    surface: &Surface3,
+    bounds: [ParameterRange; 2],
+    distance: f64,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<[ParameterRange; 2]> {
+    let padding = offset_parameter_padding(surface, bounds, distance, tolerance)?;
     let domains = surface.domains();
     let mut expanded = bounds;
     for axis in 0..2 {
-        let rate = minimum_rates[axis];
-        if !rate.is_finite() {
+        if padding[axis] == 0.0 {
             continue;
         }
-        let padding = distance.abs() * 2.0 / rate + tolerance.parameter * 64.0;
-        let minimum = bounds[axis].start.min(bounds[axis].end) - padding;
-        let maximum = bounds[axis].start.max(bounds[axis].end) + padding;
+        let minimum = bounds[axis].start.min(bounds[axis].end) - padding[axis];
+        let maximum = bounds[axis].start.max(bounds[axis].end) + padding[axis];
         expanded[axis] = if let Some(period) = domains[axis].period {
             if maximum - minimum >= period {
                 let center = (bounds[axis].start + bounds[axis].end) * 0.5;
@@ -1215,16 +1273,23 @@ fn offset_body(
     let mut bounds = BTreeMap::new();
     for face_id in &source_faces {
         let face = topology.face(*face_id)?;
+        let face_bounds = face_parameter_bounds(topology, *face_id, tolerance)?;
+        let mut base = face.surface().clone();
+        if let Surface3::Nurbs(surface) = &base {
+            // Continue the exact support before offsetting it: a retained
+            // opening may intersect beyond the source spline's natural ends.
+            let padding = offset_parameter_padding(&base, face_bounds, distance, tolerance)?;
+            base = surface.extended_bezier(padding)?.into();
+        }
         let surface = if openings.contains(face_id) {
-            face.surface().clone()
+            base
         } else {
             let orientation = match face.orientation() {
                 FaceOrientation::Forward => 1.0,
                 FaceOrientation::Reversed => -1.0,
             };
-            face.surface().offset(distance * orientation, tolerance)?
+            base.offset(distance * orientation, tolerance)?
         };
-        let face_bounds = face_parameter_bounds(topology, *face_id, tolerance)?;
         let expanded = expanded_offset_bounds(&surface, face_bounds, distance, tolerance)?;
         supports.insert(*face_id, surface);
         bounds.insert(*face_id, expanded);

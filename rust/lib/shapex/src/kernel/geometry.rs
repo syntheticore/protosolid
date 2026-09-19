@@ -2977,6 +2977,76 @@ impl NurbsSurface3 {
             .collect()
     }
 
+    /// Continue a single rational Bezier patch without changing its parameter
+    /// chart or its values on the original domain. Shell openings can require
+    /// an intersection just beyond a spline's original endpoint.
+    pub(crate) fn extended_bezier(&self, padding: [f64; 2]) -> KernelResult<Self> {
+        let (p, q) = self.degrees;
+        if self.control_points[0].len() != p + 1 || self.control_points.len() != q + 1 {
+            return Ok(self.clone());
+        }
+        let ranges = [
+            ParameterRange::new(self.knots.0[p], self.knots.0[p + 1])?,
+            ParameterRange::new(self.knots.1[q], self.knots.1[q + 1])?,
+        ];
+        for (axis, knots, degree) in [(0, &self.knots.0, p), (1, &self.knots.1, q)] {
+            if knots[..=degree].iter().any(|k| *k != ranges[axis].start)
+                || knots[degree + 1..].iter().any(|k| *k != ranges[axis].end)
+            {
+                return Ok(self.clone());
+            }
+        }
+        // Blossom evaluation gives the controls on any affine subinterval,
+        // including an interval extending beyond [0, 1], in homogeneous space.
+        let extend = |controls: &[Vec4], axis: usize| -> Vec<Vec4> {
+            let degree = controls.len() - 1;
+            let a = -padding[axis] / ranges[axis].span();
+            let b = 1.0 - a;
+            (0..=degree)
+                .map(|index| {
+                    let mut work = controls.to_vec();
+                    for step in 0..degree {
+                        let t = if step < degree - index { a } else { b };
+                        for j in 0..degree - step {
+                            work[j] = work[j] * (1.0 - t) + work[j + 1] * t;
+                        }
+                    }
+                    work[0]
+                })
+                .collect()
+        };
+        let mut net = self
+            .homogeneous_rows()
+            .iter()
+            .map(|row| extend(row, 0))
+            .collect::<Vec<_>>();
+        for column in 0..=p {
+            let controls = net.iter().map(|row| row[column]).collect::<Vec<_>>();
+            for (row, value) in extend(&controls, 1).into_iter().enumerate() {
+                net[row][column] = value;
+            }
+        }
+        let knots = |axis: usize, degree: usize| {
+            let mut knots = vec![ranges[axis].start - padding[axis]; degree + 1];
+            knots.extend(vec![ranges[axis].end + padding[axis]; degree + 1]);
+            knots
+        };
+        Self::new(
+            self.degrees,
+            net.iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|v| Point3::new(v.x / v.w, v.y / v.w, v.z / v.w))
+                        .collect()
+                })
+                .collect(),
+            net.iter()
+                .map(|row| row.iter().map(|v| v.w).collect())
+                .collect(),
+            (knots(0, p), knots(1, q)),
+        )
+    }
+
     /// Extract exact rational Bézier patches by knot insertion in both
     /// parameter directions. This changes representation only; it is used for
     /// convex-hull intersection isolation and never tessellates the surface.

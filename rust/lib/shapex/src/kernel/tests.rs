@@ -61,6 +61,63 @@ fn certified_properties(kernel: &Kernel, body: BodyId) -> MassProperties {
 }
 
 #[test]
+fn shell_support_extension_preserves_rational_surface_chart() {
+    let surface = NurbsSurface3::new(
+        (2, 1),
+        vec![
+            vec![
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 2.0, 0.0),
+                Point3::new(3.0, 0.0, 0.0),
+            ],
+            vec![
+                Point3::new(0.0, 0.0, 4.0),
+                Point3::new(1.0, 2.0, 4.0),
+                Point3::new(3.0, 0.0, 4.0),
+            ],
+        ],
+        vec![vec![1.0, 0.8, 1.0]; 2],
+        (
+            vec![2.0, 2.0, 2.0, 5.0, 5.0, 5.0],
+            vec![-1.0, -1.0, 1.0, 1.0],
+        ),
+    )
+    .unwrap();
+    let extended: Surface3 = surface.extended_bezier([0.2, 0.3]).unwrap().into();
+    let original: Surface3 = surface.into();
+    for u in [2.0, 2.1, 3.0, 4.9, 5.0] {
+        for v in [-1.0, 0.0, 1.0] {
+            let a = original.evaluate(u, v).unwrap();
+            let b = extended.evaluate(u, v).unwrap();
+            assert!(a.point.distance(b.point) < 1e-12);
+            for delta in [
+                a.du - b.du,
+                a.dv - b.dv,
+                a.duu - b.duu,
+                a.duv - b.duv,
+                a.dvv - b.dvv,
+            ] {
+                assert!(delta.magnitude() < 1e-12);
+            }
+        }
+    }
+    // Independently evaluate the rational quadratic outside its former range.
+    for u in [1.8, 5.2] {
+        let t: f64 = (u - 2.0) / 3.0;
+        let weights = [(1.0 - t).powi(2), 1.6 * t * (1.0 - t), t * t];
+        let denominator: f64 = weights.iter().sum();
+        for v in [-1.3, 1.3] {
+            let expected = Point3::new(
+                (weights[1] + 3.0 * weights[2]) / denominator,
+                2.0 * weights[1] / denominator,
+                2.0 * (v + 1.0),
+            );
+            assert!(extended.evaluate(u, v).unwrap().point.distance(expected) < 1e-12);
+        }
+    }
+}
+
+#[test]
 fn shell_twice_filleted_sector() {
     let tol = ModelTolerance::default();
     let a = Point2::new(100.0, 0.0);

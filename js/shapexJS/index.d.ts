@@ -293,6 +293,7 @@ export interface Compound extends NativeValue {
   difference(other: Compound): Compound
   intersection(other: Compound): Compound
   combined(others: Iterable<Compound>): Compound
+  offsetFaces(faces: Iterable<Face>, distance: number): Compound
   shell(openings: Iterable<Face>, distance: number): Compound
   fillet(edges: Iterable<Edge>, radius: number): Compound
   filletWithOptions(edges: Iterable<Edge>, options: FilletOptions): Compound

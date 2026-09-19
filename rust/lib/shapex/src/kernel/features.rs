@@ -2038,6 +2038,40 @@ fn assemble_shell_boundary(
     ))
 }
 
+pub(crate) fn offset_faces(
+    source: &Compound,
+    faces: &[FaceHandle],
+    distance: f64,
+) -> KernelResult<Compound> {
+    let selected = faces
+        .iter()
+        .map(FaceHandle::persistent_id)
+        .collect::<BTreeSet<_>>();
+    let retained = source
+        .faces()
+        .filter(|face| !selected.contains(&face.persistent_id()))
+        .map(|face| face.topology_id())
+        .collect();
+    // Rebuild only the offset skin; shelling additionally adds the source skin
+    // and opening rims to create a wall.
+    let (result, sources) = offset_body(source, &retained, distance)?;
+    if result.solids().len() != 1 || result.volume() <= source.tolerance().linear.powi(3) {
+        return Err(invalid("face offset must preserve a nonempty solid"));
+    }
+    if result.faces().count() != sources.len() {
+        return Err(KernelError::new(
+            DiagnosticKind::TopologyInvariant,
+            "offset face count does not match its source-face correspondence",
+        ));
+    }
+    let origins = result
+        .faces()
+        .zip(sources)
+        .map(|(face, origin)| (face.persistent_id(), vec![origin]))
+        .collect();
+    result.with_feature_parent(source, "offset-faces", &origins)
+}
+
 pub(crate) fn shell(
     source: &Compound,
     openings: &[FaceHandle],

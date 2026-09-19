@@ -1165,6 +1165,57 @@ impl Compound {
         self.boolean(other, BooleanKind::Intersection)
     }
 
+    /// Offset selected faces along their outward normals, extending adjacent
+    /// supports to keep each affected solid closed.
+    pub fn offset_faces(&self, faces: &[FaceHandle], distance: f64) -> KernelResult<Self> {
+        if !distance.is_finite() {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "offset distance must be finite",
+            ));
+        }
+        if faces.is_empty()
+            || faces
+                .iter()
+                .any(|face| !self.faces().any(|available| *available == *face))
+            || faces
+                .iter()
+                .map(FaceHandle::persistent_id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != faces.len()
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "offset needs distinct faces from this compound revision",
+            ));
+        }
+        if distance == 0.0 {
+            return Ok(self.clone());
+        }
+        if distance.abs() <= self.tolerance().linear {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "offset distance must exceed model tolerance",
+            ));
+        }
+        let mut results = Vec::new();
+        for solid in &self.solids {
+            let local = faces
+                .iter()
+                .filter(|face| solid.faces().any(|available| *available == **face))
+                .cloned()
+                .collect::<Vec<_>>();
+            let body = solid.to_compound();
+            results.push(if local.is_empty() {
+                body
+            } else {
+                super::features::offset_faces(&body, &local, distance)?
+            });
+        }
+        combine_compounds(results, self.tolerance())
+    }
+
     pub fn shell(&self, openings: &[FaceHandle], distance: f64) -> KernelResult<Self> {
         if !distance.is_finite() || distance.abs() <= self.tolerance().linear {
             return Err(KernelError::new(

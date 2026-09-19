@@ -1034,6 +1034,13 @@ impl NativeCompound {
             .map(|inner| Self { inner })
             .map_err(js_error)
     }
+    #[wasm_bindgen(js_name = offsetFaces)]
+    pub fn offset_faces(&self, faces: &NativeFaceList, distance: f64) -> Result<Self, JsValue> {
+        self.inner
+            .offset_faces(&faces.values, distance)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
     pub fn shell(&self, openings: &NativeFaceList, distance: f64) -> Result<Self, JsValue> {
         self.inner
             .shell(&openings.values, distance)

@@ -366,6 +366,10 @@ export class ShapexBackend {
     )
   }
 
+  offsetFaces(geometry, selected, distance) {
+    return featureResult('face offset', () => geometryValue(geometry).offsetFaces(selected.map(shapexValue), distance))
+  }
+
   shell(geometry, selected, distance) {
     try {
       return new ShapexGeometry(

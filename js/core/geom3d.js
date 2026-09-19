@@ -1668,6 +1668,13 @@ export class Compound extends Volumetric {
     if(!faces?.length) fail('Select one or more faces to offset')
     if(!Number.isFinite(distance)) fail('Offset distance must be finite')
     if(distance == 0) return this
+    if(this.isShapex) {
+      const geometry = window.kernel.modeling.offsetFaces(
+        this.kernelGeometry, faces.map(face => face.geom()), distance,
+      )
+      return new Compound(this.componentId, geometry)
+        .inheritShapexTopology([this], 'offset-faces', featureId)
+    }
     const oc = window.oc.oc
     if(!oc.OCJS_FaceOffset) fail('Face offset requires an updated geometry kernel')
 

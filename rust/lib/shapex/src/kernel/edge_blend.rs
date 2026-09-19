@@ -2134,6 +2134,11 @@ impl EulerTransaction<'_> {
                                     .max(1.0),
                             ) * 8.0
                 }
+                // Boolean intersections can retain separate parameter guides
+                // on either side of a periodic seam. Their charts need not be
+                // identical: the incident faces and endpoint tangents below
+                // identify the continuation geometrically.
+                (Curve3::SurfaceIntersection(_), Curve3::SurfaceIntersection(_)) => true,
                 _ => spine.edge.curve == candidate.curve,
             };
             if candidate.coedges.len() != 2
@@ -4328,10 +4333,6 @@ impl EulerTransaction<'_> {
         } else {
             2
         };
-        let support_range = ParameterRange::new(
-            -f64::from(extension) / 16.0,
-            1.0 + f64::from(extension) / 16.0,
-        )?;
         let closed = source.vertices[0] == source.vertices[1];
         let extrapolated = |side: usize, index: i32| -> KernelResult<Point2> {
             if closed {
@@ -4358,8 +4359,31 @@ impl EulerTransaction<'_> {
                 boundary_parameters[side][index as usize]
             })
         };
+        // Do not extend a guide past a bounded support. The local corrector
+        // clamps those seeds to its natural domain, producing repeated points
+        // and a stationary (or folded) spine outside the original edge.
+        let in_domains = |index| -> KernelResult<bool> {
+            for side in 0..2 {
+                let uv = extrapolated(side, index)?;
+                for axis in 0..2 {
+                    if !offsets[side].domains()[axis].contains(uv[axis], tolerance.parameter) {
+                        return Ok(false);
+                    }
+                }
+            }
+            Ok(true)
+        };
+        let mut first_index = 0;
+        let mut last_index = 16;
+        while first_index > -extension && in_domains(first_index - 1)? {
+            first_index -= 1;
+        }
+        while last_index < 16 + extension && in_domains(last_index + 1)? {
+            last_index += 1;
+        }
+        let support_range = ParameterRange::new(first_index as f64 / 16.0, last_index as f64 / 16.0)?;
         let mut parameters: [Vec<Point2>; 2] = [Vec::with_capacity(49), Vec::with_capacity(49)];
-        for index in -extension..=16 + extension {
+        for index in first_index..=last_index {
             let first = extrapolated(0, index)?;
             let second = extrapolated(1, index)?;
             let corrected = if let Some((side, axis)) = angular_coordinate {

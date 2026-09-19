@@ -1073,8 +1073,13 @@ impl NurbsCurve3 {
             let evaluation = self.evaluate(parameter)?;
             let residual = evaluation.point - point;
             let function = residual.dot(evaluation.first_derivative);
-            let derivative = evaluation.first_derivative.magnitude2()
+            let mut derivative = evaluation.first_derivative.magnitude2()
                 + residual.dot(evaluation.second_derivative);
+            // Newton's stationary-point Hessian can be negative away from
+            // the nearest point. Use a descent direction in that region.
+            if derivative <= 0.0 {
+                derivative = evaluation.first_derivative.magnitude2();
+            }
             if derivative.abs() <= f64::EPSILON {
                 break;
             }

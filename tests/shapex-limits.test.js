@@ -191,7 +191,7 @@ test('document 8: cutting with a circle ending on the cylinder leaves the cylind
   near(body.boolean(tool, 'join', 'feature').volume(), body.volume() + tool.volume())
 })
 
-test('document 9: revolve circle to both spline surfaces in both directions', async () => {
+async function revolveLimitsFixture() {
   const features = JSON.parse(await readFile(new URL('./fixtures/revolve-limits-document-9.json', import.meta.url)))
   const sketches = new Map()
   let body
@@ -234,6 +234,40 @@ test('document 9: revolve circle to both spline surfaces in both directions', as
   const start = vector(line.points[0]).applyMatrix4(sketch.plane)
   const end = vector(line.points[1]).applyMatrix4(sketch.plane)
   const axis = rotationFromNormal(end.sub(start).normalize()).setPosition(start)
+  return { body, source, axis }
+}
+
+test('document 9: fillet joined revolution and bounded spline edges', async () => {
+  const { body, source, axis } = await revolveLimitsFixture()
+  const upper = body.faces().find(face => face.id == '/extrude-id-3826/swept/id-20296')
+  const lower = body.faces().find(face => face.id == '/extrude-id-42724/swept/id-42703')
+  const tool = source.revolveBetweenFaces('c', axis, upper, lower, 'id-67306', true)
+  const joined = body.boolean(tool, 'join', 'id-67306')
+  const edges = joined.solids().flatMap(solid => solid.edges()).filter(edge =>
+    edge.connectedFaces().length == 2)
+  // These two curved rims need continuation past the spline's natural end;
+  // that endpoint-extension case is separate from the bounded-guide fix.
+  const unsupportedRims = new Set([
+    '(/extrude-id-42724/top|/extrude-id-42724/swept/id-42703)/1',
+    '(/extrude-id-42724/bottom|/extrude-id-42724/swept/id-42703)/1',
+  ])
+  assert.equal(edges.filter(edge => unsupportedRims.has(edge.id)).length, 2)
+  assert.equal(edges.filter(edge => edge.id.includes('revolve')).length, 4)
+  const errors = []
+  for(const edge of edges.filter(edge => !unsupportedRims.has(edge.id))) {
+    for(const radius of [0.25, 0.5, 1, 2, 5]) {
+      try {
+        const result = joined.fillet([edge], radius)
+        assert.ok(result.volume() > 0)
+        for(const face of result.faces()) window.kernel.modeling.mesh(face.geom())
+      } catch(error) { errors.push({ edge: edge.id, radius, error }) }
+    }
+  }
+  assert.deepEqual(errors, [])
+})
+
+test('document 9: revolve circle to both spline surfaces in both directions', async () => {
+  const { body, source, axis } = await revolveLimitsFixture()
   const full = source.revolve('c', axis, 2 * Math.PI, 'full')
   assert.ok(full.volume() > 0)
   const targets = body.faces().filter(face => !face.getPlane())

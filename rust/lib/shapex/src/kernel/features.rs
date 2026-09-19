@@ -389,6 +389,21 @@ fn offset_edge(
     let second = faces[1];
     let source = topology.edge(edge)?;
     let source_range = source.range();
+    // Keep the original parameterization when neither support moved. Recasting
+    // a periodic edge as a bounded surface curve can lose its full-turn trim.
+    if faces.iter().all(|face| {
+        topology.face(*face).is_ok_and(|value| value.surface() == &supports[face])
+    }) {
+        return Ok(OffsetEdge {
+            curve: source.curve().clone(),
+            pcurves: source
+                .coedges()
+                .iter()
+                .map(|id| Ok((*id, topology.coedge(*id)?.pcurve().clone())))
+                .collect::<KernelResult<_>>()?,
+            range: source_range,
+        });
+    }
     let carried_curve = |face: FaceId, pcurve: &Curve2| -> KernelResult<Curve3> {
         let mut range = source_range;
         if let Curve2::Line(line) = pcurve {
@@ -1262,6 +1277,7 @@ fn offset_body(
     source: &Compound,
     openings: &BTreeSet<FaceId>,
     distance: f64,
+    adjust_blends: bool,
 ) -> KernelResult<(Compound, Vec<PersistentId>)> {
     let topology = source.topology();
     let tolerance = source.tolerance();
@@ -1295,6 +1311,9 @@ fn offset_body(
         bounds.insert(*face_id, expanded);
     }
 
+    if adjust_blends {
+        adjust_offset_blends(source, openings, distance, &mut supports)?;
+    }
     rebuild_supports(source, supports, bounds)
 }
 
@@ -1583,7 +1602,7 @@ fn rebuild_supports(
     let mut transaction = kernel.begin_operation();
     let mut bodies = Vec::new();
     let mut patch_sources = Vec::new();
-    for patches_and_sources in patches_by_shell.into_values() {
+        for patches_and_sources in patches_by_shell.into_values() {
         let (patches, sources): (Vec<_>, Vec<_>) = patches_and_sources.into_iter().unzip();
         bodies.push(transaction.brep_shell(&patches)?);
         patch_sources.extend(sources);
@@ -2038,6 +2057,179 @@ fn assemble_shell_boundary(
     ))
 }
 
+// Solve contact-normal constraints with a minimum-length solution in the
+// unconstrained directions. Reorthogonalization also handles repeated normals
+// along straight contact edges without making the system singular.
+fn solve_blend_contacts(
+    equations: &[([f64; 4], f64)],
+    change_radius: bool,
+    tolerance: super::ModelTolerance,
+) -> Option<[f64; 4]> {
+    let mut basis = Vec::<([f64; 4], f64)>::new();
+    for &(mut row, mut rhs) in equations {
+        if !change_radius {
+            row[3] = 0.0;
+        }
+        for _ in 0..2 {
+            for (normal, value) in &basis {
+                let projection: f64 = row.iter().zip(normal).map(|(a, b)| a * b).sum();
+                for i in 0..4 {
+                    row[i] -= projection * normal[i];
+                }
+                rhs -= projection * value;
+            }
+        }
+        let length = row.iter().map(|value| value * value).sum::<f64>().sqrt();
+        if length <= tolerance.angular * 8.0 {
+            if rhs.abs() > tolerance.linear * 8.0 {
+                return None;
+            }
+        } else {
+            for value in &mut row {
+                *value /= length;
+            }
+            basis.push((row, rhs / length));
+        }
+    }
+    let mut result = [0.0; 4];
+    for (normal, value) in basis {
+        for i in 0..4 {
+            result[i] += normal[i] * value;
+        }
+    }
+    result
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(result)
+}
+
+fn adjust_offset_blends(
+    source: &Compound,
+    retained: &BTreeSet<FaceId>,
+    distance: f64,
+    supports: &mut BTreeMap<FaceId, Surface3>,
+) -> KernelResult<()> {
+    let topology = source.topology();
+    let tolerance = source.tolerance();
+    let mut replacements = Vec::new();
+    for face_id in retained {
+        let face = topology.face(*face_id)?;
+        if matches!(face.surface(), Surface3::Plane(_)) {
+            continue;
+        }
+        let edges = topology.face_edges(*face_id)?;
+        let adjacent = edges
+            .iter()
+            .map(|edge| topology.edge_faces(*edge))
+            .collect::<KernelResult<Vec<_>>>()?;
+        if adjacent.iter().flatten().all(|id| retained.contains(id)) {
+            continue;
+        }
+        let orientation = if face.orientation() == FaceOrientation::Forward {
+            1.0
+        } else {
+            -1.0
+        };
+        let mut neighbors = BTreeSet::new();
+        let mut contacts = Vec::new();
+        for (edge_id, adjacent) in edges.into_iter().zip(adjacent) {
+            let Some(&neighbor) = adjacent.iter().find(|id| *id != face_id) else {
+                continue;
+            };
+            let other = topology.face(neighbor)?;
+            let other_orientation = if other.orientation() == FaceOrientation::Forward {
+                1.0
+            } else {
+                -1.0
+            };
+            let edge = topology.edge(edge_id)?;
+            let mut samples = Vec::new();
+            // Sample the contact curve, not just a vertex at which two sharp
+            // faces could happen to share a normal.
+            for fraction in [0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95] {
+                let point = edge
+                    .curve()
+                    .evaluate(edge.range().start + edge.range().span() * fraction)?
+                    .point;
+                let uv = face.surface().project(point, tolerance)?.parameters;
+                let normal = face.surface().normal(uv.0, uv.1)? * orientation;
+                let other_uv = other.surface().project(point, tolerance)?.parameters;
+                let other_normal =
+                    other.surface().normal(other_uv.0, other_uv.1)? * other_orientation;
+                if (normal - other_normal).magnitude() > tolerance.angular * 8.0 {
+                    samples.clear();
+                    break;
+                }
+                samples.push((neighbor, point, normal));
+            }
+            if !samples.is_empty() {
+                neighbors.insert(neighbor);
+                contacts.extend(samples);
+            }
+        }
+        if neighbors.len() < 2 || neighbors.iter().all(|id| retained.contains(id)) {
+            continue;
+        }
+        let equations = contacts
+            .iter()
+            .map(|(neighbor, _, normal)| {
+                (
+                    [normal.x, normal.y, normal.z, 1.0],
+                    if retained.contains(neighbor) {
+                        0.0
+                    } else {
+                        distance
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        // Prefer preserving the blend radius. When varying contact normals
+        // prevent a translation alone, also solve for a uniform normal offset.
+        let adjustment = solve_blend_contacts(&equations, false, tolerance)
+            .or_else(|| solve_blend_contacts(&equations, true, tolerance))
+            .ok_or_else(|| unsupported("blend adjustment for incompatible face offsets"))?;
+        let translation = crate::Vec3::new(adjustment[0], adjustment[1], adjustment[2]);
+        let offset = adjustment[3];
+        let surface = if offset.abs() > tolerance.linear {
+            supports[face_id].offset(offset * orientation, tolerance)?
+        } else {
+            supports[face_id].clone()
+        };
+        let surface = super::transform::transform_surface(
+            surface,
+            RigidTransform3::new(crate::Matrix3::identity(), translation, tolerance)?,
+            tolerance,
+        )?;
+        // The normal equations are only a candidate construction on curved
+        // supports. Check the actual moved contacts against the exact target
+        // surfaces before allowing topology reconstruction to publish a solid.
+        for (neighbor, point, normal) in contacts {
+            let moved = point + normal * offset + translation;
+            let target = &supports[&neighbor];
+            let projection = target.project(moved, tolerance)?;
+            let allowed = tolerance.linear_at_scale(moved.to_vec().magnitude()) * 8.0;
+            let other = topology.face(neighbor)?;
+            let sign = if other.orientation() == FaceOrientation::Forward {
+                1.0
+            } else {
+                -1.0
+            };
+            let target_normal =
+                target.normal(projection.parameters.0, projection.parameters.1)? * sign;
+            if projection.distance > allowed
+                || (target_normal - normal).magnitude() > tolerance.angular * 8.0
+            {
+                return Err(unsupported(
+                    "blend adjustment that cannot preserve tangent contacts",
+                ));
+            }
+        }
+        replacements.push((*face_id, surface));
+    }
+    supports.extend(replacements);
+    Ok(())
+}
+
 pub(crate) fn offset_faces(
     source: &Compound,
     faces: &[FaceHandle],
@@ -2045,16 +2237,16 @@ pub(crate) fn offset_faces(
 ) -> KernelResult<Compound> {
     let selected = faces
         .iter()
-        .map(FaceHandle::persistent_id)
+        .map(FaceHandle::topology_id)
         .collect::<BTreeSet<_>>();
     let retained = source
         .faces()
-        .filter(|face| !selected.contains(&face.persistent_id()))
+        .filter(|face| !selected.contains(&face.topology_id()))
         .map(|face| face.topology_id())
         .collect();
     // Rebuild only the offset skin; shelling additionally adds the source skin
     // and opening rims to create a wall.
-    let (result, sources) = offset_body(source, &retained, distance)?;
+    let (result, sources) = offset_body(source, &retained, distance, true)?;
     if result.solids().len() != 1 || result.volume() <= source.tolerance().linear.powi(3) {
         return Err(invalid("face offset must preserve a nonempty solid"));
     }
@@ -2086,7 +2278,7 @@ pub(crate) fn shell(
         .iter()
         .map(FaceHandle::topology_id)
         .collect::<BTreeSet<_>>();
-    let (raw_offset, patch_sources) = offset_body(source, &opening_ids, distance)?;
+    let (raw_offset, patch_sources) = offset_body(source, &opening_ids, distance, false)?;
     let (raw_shell, shell_sources) =
         assemble_shell_boundary(source, &raw_offset, &patch_sources, &opening_ids, distance)?;
     if raw_shell.faces().count() != shell_sources.len() {

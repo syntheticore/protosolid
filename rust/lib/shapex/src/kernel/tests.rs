@@ -2390,6 +2390,178 @@ fn analytical_shell_can_leave_adjacent_faces_open_without_shared_rim_geometry() 
 }
 
 #[test]
+fn face_offset_adjusts_a_cylinder_fillet_for_selected_supports() {
+    let tolerance = ModelTolerance::default();
+    let profile = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 10.0).unwrap()],
+            tolerance,
+        )
+        .unwrap(),
+        [],
+        tolerance,
+    )
+    .unwrap();
+    let oblique =
+        Plane3::from_origin_normal(Point3::new(4.0, -2.0, 7.0), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    for (plane, axis) in [
+        (Plane3::xy(), Vec3::unit_z()),
+        (Plane3::xy(), -Vec3::unit_z()),
+        (oblique, oblique.normal()),
+    ] {
+        let height = |point: Point3| (point - plane.origin()).dot(axis);
+        let cylinder = profile.extrude(plane, axis * 20.0).unwrap();
+        let top_edge = cylinder
+            .edges()
+            .find(|edge| {
+                edge.endpoints()
+                    .unwrap()
+                    .iter()
+                    .all(|point| height(*point) > 19.9)
+            })
+            .unwrap()
+            .clone();
+        let rounded = cylinder.fillet(&[top_edge], 2.0).unwrap();
+        for (body, is_rounded) in [(&cylinder, false), (&rounded, true)] {
+            let side = body
+                .faces()
+                .find(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+                .unwrap()
+                .clone();
+            let top = body
+                .faces()
+                .find(|face| matches!(face.surface(), Surface3::Plane(cap) if height(cap.origin()) > 19.9))
+                .unwrap()
+                .clone();
+            for (move_side, move_top, move_fillet) in [
+                (true, false, false),
+                (false, true, false),
+                (true, true, false),
+                (true, true, true),
+            ] {
+                for distance in [-1.0, 1.0] {
+                    let mut selected = Vec::new();
+                    if move_side {
+                        selected.push(side.clone());
+                    }
+                    if move_top {
+                        selected.push(top.clone());
+                    }
+                    if move_fillet {
+                        selected.extend(
+                            body.faces()
+                                .filter(|face| matches!(face.surface(), Surface3::Torus(_)))
+                                .cloned(),
+                        );
+                    }
+                    let side_offset = if move_side { distance } else { 0.0 };
+                    let top_offset = if move_top { distance } else { 0.0 };
+                    let result = body.offset_faces(&selected, distance).unwrap_or_else(|error| panic!(
+                    "axis={axis:?}, rounded={is_rounded}, side={move_side}, top={move_top}, fillet={move_fillet}, distance={distance}: {error}"
+                ));
+                    assert_eq!(result.solids().len(), 1);
+                    assert_eq!(result.faces().count(), body.faces().count());
+                    let mut cap_heights = result
+                        .faces()
+                        .filter_map(|face| match face.surface() {
+                            Surface3::Plane(plane) => Some(height(plane.origin())),
+                            Surface3::Cylinder(cylinder) => {
+                                assert!((cylinder.radius() - (10.0 + side_offset)).abs() < 1e-7);
+                                None
+                            }
+                            Surface3::Torus(torus) => {
+                                assert!((torus.minor_radius() - (2.0 + side_offset)).abs() < 1e-7);
+                                assert!((torus.major_radius() - 8.0).abs() < 1e-7);
+                                assert!(
+                                    (height(torus.center()) - (18.0 + top_offset - side_offset))
+                                        .abs()
+                                        < 1e-7
+                                );
+                                None
+                            }
+                            _ => panic!("unexpected offset support"),
+                        })
+                        .collect::<Vec<_>>();
+                    cap_heights.sort_by(f64::total_cmp);
+                    // The bottom stays fixed and the top moves only when selected.
+                    assert!((cap_heights[0]).abs() < 1e-7);
+                    assert!((cap_heights[1] - (20.0 + top_offset)).abs() < 1e-7);
+                    let radius = 10.0 + side_offset;
+                    let fillet = 2.0 + side_offset;
+                    let pi = std::f64::consts::PI;
+                    let expected = if is_rounded {
+                        pi * (radius.powi(2) * (20.0 + top_offset - fillet)
+                            + 64.0 * fillet
+                            + 4.0 * pi * fillet.powi(2)
+                            + 2.0 * fillet.powi(3) / 3.0)
+                    } else {
+                        pi * radius.powi(2) * (20.0 + top_offset)
+                    };
+                    assert!(
+                    (result.volume() - expected).abs() < expected * 1e-8,
+                    "axis={axis:?}, rounded={is_rounded}, offset={distance}: volume={}, expected={expected}",
+                    result.volume()
+                );
+                    result.tessellate(TessellationOptions::default()).unwrap();
+                }
+            }
+            if is_rounded {
+                assert!(body.offset_faces(&[side.clone()], -2.0).is_err());
+                assert!(body.offset_faces(&[side], -3.0).is_err());
+            }
+        }
+    }
+}
+
+#[test]
+fn face_offset_adjusts_a_fillet_between_planar_supports() {
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let edge = block
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|point| point.x.abs() < 1e-7 && point.y.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let rounded = block.fillet(&[edge], 1.0).unwrap();
+    let x_face = rounded
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(plane)
+        if plane.normal().x.abs() > 0.9 && plane.origin().x.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let y_face = rounded
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(plane)
+        if plane.normal().y.abs() > 0.9 && plane.origin().y.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    for both in [false, true] {
+        for distance in [-0.25, 0.25] {
+            let selected = if both {
+                vec![x_face.clone(), y_face.clone()]
+            } else {
+                vec![x_face.clone()]
+            };
+            let result = rounded.offset_faces(&selected, distance).unwrap();
+            assert_eq!(result.solids().len(), 1);
+            assert_eq!(result.faces().count(), rounded.faces().count());
+            let expected = (20.0 + distance) * (10.0 + if both { distance } else { 0.0 }) * 5.0
+                - (1.0 - std::f64::consts::PI / 4.0) * 5.0;
+            assert!((result.volume() - expected).abs() < expected * 1e-8);
+            result.tessellate(TessellationOptions::default()).unwrap();
+        }
+    }
+}
+
+#[test]
 fn analytical_shell_offsets_a_closed_cylinder() {
     let tolerance = ModelTolerance::default();
     let profile = Profile::new(

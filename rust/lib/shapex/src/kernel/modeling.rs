@@ -1166,7 +1166,7 @@ impl Compound {
     }
 
     /// Offset selected faces along their outward normals, extending adjacent
-    /// supports to keep each affected solid closed.
+    /// supports and adjusting tangent blends to keep each solid closed.
     pub fn offset_faces(&self, faces: &[FaceHandle], distance: f64) -> KernelResult<Self> {
         if !distance.is_finite() {
             return Err(KernelError::new(

@@ -215,7 +215,7 @@ fn transform_curve(
     })
 }
 
-fn transform_surface(
+pub(crate) fn transform_surface(
     surface: Surface3,
     transform: RigidTransform3,
     tolerance: ModelTolerance,

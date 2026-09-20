@@ -1375,8 +1375,7 @@ mod tests {
         assert!(result.volume() < cylinder.volume());
         mesh(&result);
     }
-    #[test]
-    fn shell_filleted_asymmetric_chamfer() {
+    fn filleted_asymmetric_chamfer() -> Compound {
         let body = rectangle(
             -37.04944282031129,
             -21.764692712619542,
@@ -1428,7 +1427,12 @@ mod tests {
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(edges.len(), 6);
-        let body = body.fillet(&edges, 6.0).unwrap();
+        body.fillet(&edges, 6.0).unwrap()
+    }
+
+    #[test]
+    fn shell_filleted_asymmetric_chamfer() {
+        let body = filleted_asymmetric_chamfer();
         for face in body
             .faces()
             .filter(|f| matches!(f.surface(), Surface3::Sphere(_)))
@@ -1456,6 +1460,41 @@ mod tests {
                     mesh(&result);
                 }
             }
+        }
+    }
+    #[test]
+    fn cut_shelled_asymmetric_chamfer() {
+        let body = filleted_asymmetric_chamfer();
+        let opening = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.normal().z.abs() > 0.99 && p.origin().z.abs() < 1e-6)).unwrap().clone();
+        let body = body.shell(&[opening], 5.0).unwrap();
+        let tol = body.tolerance();
+        let profile = Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(
+                    Point2::new(-21.08780917145651, 5.736491377054718),
+                    32.892404807198155,
+                )
+                .unwrap()],
+                tol,
+            )
+            .unwrap(),
+            [],
+            tol,
+        )
+        .unwrap();
+        let mut previous_volume = body.volume();
+        for distance in [5.0, 10.0, 10.99, 11.0, 11.01, 12.0, 15.0, 20.0, 30.0, 40.0] {
+            let tool = profile
+                .extrude(upper(39.0), Vec3::new(0.0, 0.0, -distance))
+                .unwrap();
+            let cut = body
+                .difference(&tool)
+                .unwrap_or_else(|e| panic!("distance {distance}: {e}"));
+            assert_eq!(cut.solids().len(), if distance < 39.0 { 1 } else { 2 });
+            assert!(cut.volume() > 0.0 && cut.volume() < body.volume());
+            assert!(cut.volume() <= previous_volume + 1e-5);
+            previous_volume = cut.volume();
+            mesh(&cut);
         }
     }
     #[test]

@@ -2181,17 +2181,34 @@ fn trace_surface_intersection_direction(
         } else {
             tangent = tangent.map(|value| value * direction);
         }
-        let predicted = std::array::from_fn(|index| current[index] + tangent[index] * step);
-        let Some(next) = correct_surface_pair_with_gauge(
-            first,
-            second,
-            predicted,
-            tangent,
-            first_domains,
-            second_domains,
-            tolerance,
-        )?
-        else {
+        // Near a turn, the tangent plane can meet the intersection far beyond
+        // the predictor. Keep corrections local so the guide does not skip
+        // that turn and acquire a nearly singular parameterization.
+        let mut local_step = step;
+        let mut next = None;
+        for _ in 0..16 {
+            let predicted =
+                std::array::from_fn(|index| current[index] + tangent[index] * local_step);
+            let corrected = correct_surface_pair_with_gauge(
+                first,
+                second,
+                predicted,
+                tangent,
+                first_domains,
+                second_domains,
+                tolerance,
+            )?;
+            match corrected {
+                Some(value) if parameter_distance(value, current) > local_step * 2.0 => {
+                    local_step *= 0.5;
+                }
+                value => {
+                    next = value;
+                    break;
+                }
+            }
+        }
+        let Some(next) = next else {
             // Complete the intersection at a box boundary by solving both
             // surfaces with that parameter fixed. Clamping a prediction and
             // projecting onto only one support does not give a common point.

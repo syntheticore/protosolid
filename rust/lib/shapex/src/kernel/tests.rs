@@ -4624,6 +4624,113 @@ fn torus_sections_preserve_exact_circles_in_scaled_and_skewed_plane_charts() {
     }
 }
 
+fn circular_cut_on_offset_rounded_shell() -> (super::Compound, super::EdgeHandle) {
+    let tol = ModelTolerance::default();
+    let circle = |center, radius| {
+        Profile::new(
+            Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tol).unwrap(),
+            [],
+            tol,
+        )
+        .unwrap()
+    };
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tol,
+    )
+    .unwrap();
+    let body = circle(Point2::new(0.0, 0.0), 39.239171029721085)
+        .extrude(plane, Vec3::unit_y() * 36.0)
+        .unwrap();
+    let rim = body
+        .edges()
+        .find(|edge| edge.endpoints().unwrap().iter().all(|p| p.y > 35.9))
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[rim], 10.0).unwrap();
+    let side = body
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+        .unwrap()
+        .clone();
+    let body = body.offset_faces(&[side], 2.0).unwrap();
+    let opening = body
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(p) if p.origin().y.abs() < 1e-7))
+        .unwrap()
+        .clone();
+    let body = body.shell(&[opening], -4.0).unwrap();
+    let tool = circle(
+        Point2::new(-57.10808714585003, -13.339295246420402),
+        46.57594303983382,
+    )
+    .extrude(plane, Vec3::unit_y() * 33.0)
+    .unwrap();
+    let cut = body.difference(&tool).unwrap();
+    let rim = cut
+        .edges()
+        .find(|edge| {
+            let faces = edge.connected_faces().unwrap();
+            faces.iter().any(|face| matches!(face.surface(), Surface3::Torus(_)))
+                && faces.iter().any(|face| {
+                    matches!(face.surface(), Surface3::Plane(p) if (p.origin().y - 33.0).abs() < 1e-7)
+                })
+        })
+        .unwrap()
+        .clone();
+    (cut, rim)
+}
+
+#[test]
+fn fillet_circular_cut_on_offset_rounded_shell() {
+    let (cut, rim) = circular_cut_on_offset_rounded_shell();
+    let volume = cut.volume();
+    for radius in [0.01, 0.05, 0.1, 0.3, 0.5, 0.6, 0.8, 1.0, 1.2, 1.4, 1.49] {
+        let result = cut
+            .fillet(std::slice::from_ref(&rim), radius)
+            .unwrap_or_else(|error| panic!("radius {radius}: {error}"));
+        assert_eq!(result.solids().len(), 1);
+        assert_eq!(result.faces().count(), cut.faces().count() + 1);
+        assert!(result.volume() > 0.0 && result.volume() < volume * (1.0 + 1e-5));
+        let mesh = result
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap_or_else(|error| panic!("radius {radius} mesh: {error}"));
+        assert!(!mesh.triangles.is_empty());
+    }
+    for radius in [1.5, 1.6, 2.0] {
+        assert!(cut.fillet(std::slice::from_ref(&rim), radius).is_err());
+    }
+}
+
+#[test]
+fn chamfer_circular_cut_on_offset_rounded_shell() {
+    let (cut, rim) = circular_cut_on_offset_rounded_shell();
+    let volume = cut.volume();
+    for distance in [
+        0.01, 0.05, 0.1, 0.3, 0.5, 0.6, 0.8, 1.0, 1.5, 2.0, 3.0, 3.5, 3.9,
+    ] {
+        let result = cut
+            .chamfer_with_tangent_propagation(std::slice::from_ref(&rim), distance, true)
+            .unwrap_or_else(|error| panic!("distance {distance}: {error}"));
+        assert_eq!(result.solids().len(), 1);
+        assert_eq!(result.faces().count(), cut.faces().count() + 1);
+        // The volume integrator's error can exceed the material removed by
+        // the smallest setbacks; allow that small relative integration error.
+        assert!(result.volume() > 0.0 && result.volume() < volume * (1.0 + 1e-5));
+        let mesh = result
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap_or_else(|error| panic!("distance {distance} mesh: {error}"));
+        assert!(!mesh.triangles.is_empty());
+    }
+    for distance in [4.0, 5.0] {
+        assert!(cut
+            .chamfer_with_tangent_propagation(std::slice::from_ref(&rim), distance, true)
+            .is_err());
+    }
+}
+
 #[test]
 fn small_fillet_on_rounded_torus_cutout() {
     let tol = ModelTolerance::default();

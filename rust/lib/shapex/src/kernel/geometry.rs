@@ -316,6 +316,58 @@ impl NurbsCurve2 {
         Ok(spans)
     }
 
+    /// Continue the terminal rational polynomial spans without changing the
+    /// curve or its parameterization anywhere in the original domain.
+    pub(crate) fn extended(&self, range: ParameterRange) -> KernelResult<Self> {
+        let mut spans = self.bezier_spans()?;
+        let last = spans.len() - 1;
+        for (index, (span, controls)) in spans.iter_mut().enumerate() {
+            let start = if index == 0 {
+                range.start.min(span.start)
+            } else {
+                span.start
+            };
+            let end = if index == last {
+                range.end.max(span.end)
+            } else {
+                span.end
+            };
+            let a = (start - span.start) / span.span();
+            let b = (end - span.start) / span.span();
+            if a != 0.0 || b != 1.0 {
+                *controls = (0..=self.degree)
+                    .map(|index| {
+                        let mut work = controls.clone();
+                        for step in 0..self.degree {
+                            let t = if step < self.degree - index { a } else { b };
+                            for j in 0..self.degree - step {
+                                work[j] = work[j] * (1.0 - t) + work[j + 1] * t;
+                            }
+                        }
+                        work[0]
+                    })
+                    .collect();
+                *span = ParameterRange::new(start, end)?;
+            }
+        }
+        let mut controls = spans[0].1.clone();
+        let mut knots = vec![spans[0].0.start; self.degree + 1];
+        for (span, next) in spans.iter().skip(1) {
+            knots.extend(vec![span.start; self.degree]);
+            controls.extend_from_slice(&next[1..]);
+        }
+        knots.extend(vec![spans[last].0.end; self.degree + 1]);
+        Self::new(
+            self.degree,
+            controls
+                .iter()
+                .map(|p| Point2::new(p.x / p.z, p.y / p.z))
+                .collect(),
+            controls.iter().map(|p| p.z).collect(),
+            knots,
+        )
+    }
+
     fn evaluate(&self, parameter: f64) -> KernelResult<Curve2Evaluation> {
         if !parameter.is_finite() {
             return Err(invalid("curve parameter must be finite"));
@@ -441,6 +493,52 @@ pub enum Curve2 {
 }
 
 impl Curve2 {
+    pub(crate) fn extended(&self, range: ParameterRange) -> KernelResult<Self> {
+        if self.domain().contains_range(range, 0.0) {
+            return Ok(self.clone());
+        }
+        match self {
+            Self::Nurbs(curve) => Ok(curve.extended(range)?.into()),
+            Self::SurfaceIntersection(pcurve) => {
+                Ok(Self::SurfaceIntersection(SurfaceIntersectionPcurve2 {
+                    curve: Box::new(pcurve.curve.extended(range)?),
+                    first: pcurve.first,
+                }))
+            }
+            Self::SurfaceProjection(pcurve) => {
+                let Curve3::SurfaceIntersection(curve) = pcurve.curve.as_ref() else {
+                    return Err(invalid(
+                        "projection extension requires an exact intersection curve",
+                    ));
+                };
+                let range = ParameterRange::new(
+                    range.start.min(pcurve.range.start),
+                    range.end.max(pcurve.range.end),
+                )?;
+                let extended = curve.extended(range)?;
+                // Boolean trimming can wrap an intersection's own exact
+                // p-curve in a projection. Reuse that retained chart when
+                // extending: extrapolating the fitted projection guide can
+                // wander by a full period and introduce a seam jump.
+                if pcurve.surface.as_ref() == curve.first_surface() {
+                    return Ok(extended.exact_pcurves()[0].clone());
+                }
+                if pcurve.surface.as_ref() == curve.second_surface() {
+                    return Ok(extended.exact_pcurves()[1].clone());
+                }
+                Ok(SurfaceProjectionPcurve2::new(
+                    extended.into(),
+                    *pcurve.surface.clone(),
+                    pcurve.guide.extended(range)?,
+                    range,
+                    pcurve.tolerance,
+                )?
+                .into())
+            }
+            _ => Err(invalid("curve cannot cover its extension")),
+        }
+    }
+
     pub(crate) fn third_derivative(&self, parameter: f64) -> KernelResult<Vec2> {
         match self {
             Self::Line(_) => Ok(Vec2::new(0.0, 0.0)),
@@ -1888,6 +1986,22 @@ impl From<SurfaceProjectionPcurve2> for Curve2 {
 }
 
 impl SurfaceIntersectionCurve {
+    pub(crate) fn extended(&self, range: ParameterRange) -> KernelResult<Self> {
+        let range = ParameterRange::new(
+            range.start.min(self.range.start),
+            range.end.max(self.range.end),
+        )?;
+        Self::new(
+            *self.first_surface.clone(),
+            *self.second_surface.clone(),
+            self.first_pcurve.extended(range)?,
+            self.second_pcurve.extended(range)?,
+            range,
+            self.tolerance,
+            self.achieved_error,
+        )
+    }
+
     pub fn new(
         first_surface: Surface3,
         second_surface: Surface3,

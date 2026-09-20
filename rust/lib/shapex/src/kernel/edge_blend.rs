@@ -1057,7 +1057,7 @@ impl EulerTransaction<'_> {
     }
 
     fn prepare_blend_endpoint(
-        &self,
+        &mut self,
         spine: &BlendSpine,
         endpoint_index: usize,
     ) -> KernelResult<BlendEndpoint> {
@@ -1094,9 +1094,61 @@ impl EulerTransaction<'_> {
                 tolerance,
             )?
             .into();
-            let adjacent_edge = self
-                .working
-                .edge(self.working.coedge(adjacent_uses[parent_index])?.edge)?;
+            let adjacent_edge_id = self.working.coedge(adjacent_uses[parent_index])?.edge;
+            let adjacent_edge = self.working.edge(adjacent_edge_id)?;
+            // A concave termination can grow a Boolean intersection edge past
+            // its traced domain. Continue both exact support p-curves before
+            // solving the contact; changing only the topological trim leaves
+            // the curve/curve solver clamped to the old endpoint.
+            if let Curve3::SurfaceIntersection(curve) = &adjacent_edge.curve {
+                let endpoint = if adjacent_edge.vertices[0] == old_vertex {
+                    adjacent_edge.range.start
+                } else {
+                    adjacent_edge.range.end
+                };
+                let value = adjacent_edge.curve.evaluate(endpoint)?;
+                let target = contact_curve.evaluate(spine.endpoint_seeds[endpoint_index])?.point;
+                let delta = (target - value.point).dot(value.first_derivative)
+                    / value.first_derivative.magnitude2();
+                let range = curve.range();
+                let outside_start =
+                    (endpoint - range.start).abs() <= tolerance.parameter && delta < 0.0;
+                let outside_end = (endpoint - range.end).abs() <= tolerance.parameter && delta > 0.0;
+                if outside_start || outside_end {
+                    let padding =
+                        4.0 * target.distance(value.point) / value.first_derivative.magnitude();
+                    let extended = curve.extended(ParameterRange::new(
+                        range.start - if outside_start { padding } else { 0.0 },
+                        range.end + if outside_end { padding } else { 0.0 },
+                    )?)?;
+                    let uses = adjacent_edge
+                        .coedges
+                        .iter()
+                        .map(|id| {
+                            let coedge = self.working.coedge(*id)?;
+                            let map = |parameter| {
+                                let fraction = (parameter - adjacent_edge.range.start)
+                                    / adjacent_edge.range.span();
+                                let fraction = if coedge.forward {
+                                    fraction
+                                } else {
+                                    1.0 - fraction
+                                };
+                                coedge.range.start + coedge.range.span() * fraction
+                            };
+                            let start = map(extended.range().start);
+                            let end = map(extended.range().end);
+                            let range = ParameterRange::new(start.min(end), start.max(end))?;
+                            Ok((*id, coedge.pcurve.extended(range)?))
+                        })
+                        .collect::<KernelResult<Vec<_>>>()?;
+                    for (id, pcurve) in uses {
+                        self.working.coedges.get_mut(id)?.pcurve = pcurve;
+                    }
+                    self.working.edges.get_mut(adjacent_edge_id)?.curve = extended.into();
+                }
+            }
+            let adjacent_edge = self.working.edge(adjacent_edge_id)?;
             let adjacent_seed = if adjacent_edge.vertices[0] == old_vertex {
                 adjacent_edge.range.start
             } else {
@@ -2876,14 +2928,26 @@ impl EulerTransaction<'_> {
         let center_domain = spine.center.curve.domain();
         let blend_support_range = match center_domain.bounds {
             _ if center_domain.period.is_some() => {
-                ParameterRange::new(minimum, maximum).map_err(|_| {
+                let range = ParameterRange::new(minimum, maximum).map_err(|_| {
                     KernelError::new(
                         DiagnosticKind::GeometryInvariant,
                         format!(
                             "blend rolling support collapsed to zero span ({minimum} to {maximum})",
                         ),
                     )
-                })?
+                })?;
+                // A curved end boundary can bow past both contact endpoints.
+                // Leave a radius-sized collar on the rolling support; the
+                // contact and end p-curves still define the actual face trim.
+                let speed = spine
+                    .center
+                    .curve
+                    .evaluate(minimum)?
+                    .first_derivative
+                    .magnitude()
+                    .min(spine.center.curve.evaluate(maximum)?.first_derivative.magnitude());
+                let padding = spine.offset / speed;
+                ParameterRange::new(range.start - padding, range.end + padding)?
             }
             DomainBounds::Bounded(range) => range,
             _ => {

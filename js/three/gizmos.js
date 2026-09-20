@@ -112,6 +112,12 @@ export class LengthGizmo extends ArrowControls {
     if(!this.dragging) this.updateOrientation()
   }
 
+  setFrame(center, direction) {
+    this.startPosition.copy(center)
+    this.translationSnapOrigin.copy(center)
+    this.direction.copy(direction)
+  }
+
   updateOrientation() {
     this.dummy.rotation.setFromRotationMatrix(rotationFromNormal(this.direction.clone().multiplyScalar(this.sign)))
   }
@@ -121,6 +127,12 @@ export class LengthGizmo extends ArrowControls {
 export class AngleGizmo extends ArrowControls {
   constructor(startPosition, startRotation, startValue, cb) {
     super(startPosition, startRotation)
+    // Snap the measured angle independently of the face/component rotation.
+    this.frame = new THREE.Object3D()
+    window.alcRenderer.scene.add(this.frame)
+    this.frame.add(this.dummy)
+    this.dummy.position.set(0, 0, 0)
+    this.setFrame(startPosition, startRotation)
 
     this.space = 'local'
     this.setMode('rotate')
@@ -130,12 +142,98 @@ export class AngleGizmo extends ArrowControls {
 
     this.set(startValue)
 
-    this.addEventListener('rotation', (e) => {
-      cb(THREE.MathUtils.radToDeg(e.value.z))
+    this.addEventListener('objectChange', () => {
+      cb(THREE.MathUtils.radToDeg(this.dummy.rotation.z))
     })
+  }
+
+  setFrame(center, rotation) {
+    this.startPosition.copy(center)
+    this.frame.position.copy(center)
+    this.frame.rotation.copy(rotation)
   }
 
   set(value) {
     this.dummy.rotation.set(0.0, 0.0, THREE.MathUtils.degToRad(value))
+  }
+
+  dispose() {
+    super.dispose()
+    window.alcRenderer.scene.remove(this.frame)
+  }
+}
+
+
+// Work from the displayed polyline and triangles; placement needs no kernel
+// surface evaluation. The nearest triangle also gives the inward direction
+// on concave faces and hole boundaries, where a face centroid would not.
+export function edgeGizmoFrame(points, faceMeshes) {
+  const middle = Math.floor((points.length - 1) / 2)
+  const a = new THREE.Vector3().fromArray(points[middle])
+  const b = new THREE.Vector3().fromArray(points[middle + 1])
+  const center = a.clone().lerp(b, 0.5)
+  const tangent = b.sub(a).normalize()
+  const directions = faceMeshes.map(({ positions }) => {
+    const triangle = new THREE.Triangle()
+    const nearest = new THREE.Triangle()
+    const point = new THREE.Vector3()
+    let closest = Infinity
+    for(let i = 0; i < positions.length; i += 9) {
+      triangle.a.fromArray(positions, i)
+      triangle.b.fromArray(positions, i + 3)
+      triangle.c.fromArray(positions, i + 6)
+      const distance = triangle.closestPointToPoint(center, point).distanceToSquared(center)
+      if(distance < closest) {
+        closest = distance
+        nearest.copy(triangle)
+      }
+    }
+    const direction = nearest.getNormal(new THREE.Vector3()).cross(tangent).normalize()
+    if(direction.dot(nearest.getMidpoint(point).sub(center)) < 0) direction.negate()
+    return direction
+  })
+  return { center, directions }
+}
+
+
+export class FeatureGizmos {
+  constructor() {
+    this.controls = new Map()
+  }
+
+  update(descriptors, transform) {
+    const renderer = window.alcRenderer
+    for(const [key, control] of this.controls) {
+      if(!descriptors[key]) {
+        renderer.removeGizmo(control)
+        this.controls.delete(key)
+      }
+    }
+    for(const [key, descriptor] of Object.entries(descriptors)) {
+      const { type, value, cb } = descriptor
+      const center = descriptor.center.clone().applyMatrix4(transform)
+      const orientation = type == 'angle' ?
+        new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().extractRotation(transform)
+          .multiply(descriptor.rotation)) : descriptor.direction.clone().transformDirection(transform)
+      let control = this.controls.get(key)
+      if(!control) {
+        control = type == 'angle' ? new AngleGizmo(center, orientation, value, cb) :
+          new LengthGizmo(center, orientation, value, true, cb)
+        this.controls.set(key, control)
+        control.addEventListener('dragging-changed', event => {
+          for(const other of this.controls.values()) {
+            if(other != control) other.enabled = control.enabled && !event.value
+          }
+        })
+        renderer.addGizmo(control)
+      }
+      control.setFrame(center, orientation)
+      control.set(value, true)
+    }
+  }
+
+  dispose() {
+    for(const control of this.controls.values()) window.alcRenderer.removeGizmo(control)
+    this.controls.clear()
   }
 }

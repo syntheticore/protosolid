@@ -9,7 +9,7 @@ import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, ocCatch, rad } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
-import { LengthGizmo, AngleGizmo, TransformGizmo } from '../three/gizmos.js'
+import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame } from '../three/gizmos.js'
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
 import {
@@ -1888,8 +1888,7 @@ export class DraftFeature extends Feature {
         this.document.top().findChild(this.componentId)
       if(component) center.applyMatrix4(worldTransform(component))
       if(this.angleGizmo) {
-        this.angleGizmo.startPosition.copy(center)
-        this.angleGizmo.dummy.position.copy(center)
+        this.angleGizmo.setFrame(center, new THREE.Euler())
         this.angleGizmo.set(this.angle)
       } else {
         this.angleGizmo = markRaw(new AngleGizmo(center, new THREE.Euler(), this.angle, (angle) => {
@@ -2019,37 +2018,92 @@ export class ChamferFeature extends Feature {
         type: 'edge',
         multi: true,
       },
+      chamferType: {
+        title: 'Mode',
+        type: 'select',
+        options: {
+          equal: { title: 'Equal distances', icon: 'equals' },
+          'two-distances': { title: 'Two distances', icon: 'not-equal' },
+          'distance-angle': { title: 'Distance + angle', icon: 'drafting-compass' },
+        },
+      },
       distance: {
         title: 'Distance',
         type: 'length',
         gizmo: true,
       },
+      distance2: {
+        title: 'Distance 2',
+        type: 'length',
+        gizmo: true,
+        when: feature => feature.chamferType == 'two-distances',
+      },
+      angle: {
+        title: 'Angle',
+        type: 'angle',
+        when: feature => feature.chamferType == 'distance-angle',
+        gizmo: true,
+      },
+      flipSides: {
+        title: 'Flip sides',
+        type: 'bool',
+        icons: ['exchange-alt', 'exchange-alt'],
+        when: feature => feature.chamferType != 'equal',
+      },
     })
 
     this.edges = null
     this.distance = 1.0
+    this.chamferType = 'equal'
+    this.distance2 = 1.0
+    this.angle = 45
+    this.flipSides = false
   }
 
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      comp.compound = comp.compound.chamfer(references.edges, this.distance)
+      comp.compound = comp.compound.chamfer(references.edges, this.distance, {
+        type: this.chamferType,
+        distance2: this.distance2,
+        angle: rad(this.angle),
+        flipSides: this.flipSides,
+      })
     } catch(err) { this.error = err || this.error }
   }
 
   getGizmo() {
-    return {
-      distance: {
-        center: this.edges().at(-1).getItem().center(),
-        direction: new THREE.Vector3(0,1,0),
-        distance: this.distance,
-        side: true,
-        cb: (dist, _side) => {
-          this.setExpression('distance', null)
-          this.distance = dist
+    const edge = this.edges().at(-1).getItem()
+    const faces = edge.connectedFaces().sort((a, b) => a.id.localeCompare(b.id))
+    if(this.chamferType != 'equal' && this.flipSides) faces.reverse()
+    const { center, directions: [first, second] } = edgeGizmoFrame(edge.tesselate(), faces.map(face => face.tesselate()))
+    const distance = (key, direction) => ({
+      type: 'length', center, direction, value: this[key],
+      cb: value => {
+        this.setExpression(key, null)
+        this[key] = value
+      },
+    })
+    const gizmos = { distance: distance('distance', first) }
+    if(this.chamferType == 'two-distances') gizmos.distance2 = distance('distance2', second)
+    if(this.chamferType == 'distance-angle') {
+      // Measure at the first setback, from the reference face toward the
+      // chamfer, in the cross-section perpendicular to the selected edge.
+      const x = first.clone().negate()
+      const z = x.clone().cross(second).normalize()
+      const y = z.clone().cross(x)
+      gizmos.angle = {
+        type: 'angle',
+        center: center.clone().addScaledVector(first, this.distance),
+        rotation: new THREE.Matrix4().makeBasis(x, y, z),
+        value: this.angle,
+        cb: angle => {
+          this.setExpression('angle', null)
+          this.angle = angle
         },
       }
     }
+    return gizmos
   }
 
   repair() {
@@ -2057,6 +2111,19 @@ export class ChamferFeature extends Feature {
     const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
     this.edges = () => remainingEdges
     this.error = null
+  }
+
+  updateGizmos() {
+    this.chamferGizmos ||= markRaw(new FeatureGizmos())
+    const component = this.document.top().findChild(this.componentOccurrenceId) ||
+      this.document.top().findChild(this.componentId)
+    this.chamferGizmos.update(this.isComplete() ? this.getGizmo() : {}, worldTransform(component))
+  }
+
+  dispose() {
+    super.dispose()
+    this.chamferGizmos?.dispose()
+    this.chamferGizmos = null
   }
 }
 

@@ -1372,12 +1372,21 @@ export class Compound extends Volumetric {
     }
   }
 
-  chamfer(edges, distance) {
+  chamfer(edges, distance, { type = 'equal', distance2 = distance, angle = Math.PI / 4, flipSides = false } = {}) {
     const chamfer = new window.oc.oc.BRepFilletAPI_MakeChamfer(this.geom())
-    edges.forEach(edge => {
-      chamfer.Add_2(distance, edge.geom())
-    })
     try {
+      edges.forEach(edge => {
+        // OCC propagates each selection along its tangent contour.
+        if(chamfer.Contour(edge.geom())) return
+        if(type == 'equal') {
+          chamfer.Add_2(distance, edge.geom())
+          return
+        }
+        const faces = edge.connectedFaces().sort((a, b) => a.id.localeCompare(b.id))
+        const face = faces[flipSides ? 1 : 0].geom()
+        if(type == 'two-distances') chamfer.Add_3(distance, distance2, edge.geom(), face)
+        else chamfer.AddDA(distance, angle, edge.geom(), face)
+      })
       chamfer.Build(new window.oc.oc.Message_ProgressRange_1())
       if(!chamfer.IsDone()) throw null
       return this.track(chamfer, 'chamfer')

@@ -294,7 +294,7 @@ export interface Compound extends NativeValue {
   intersection(other: Compound): Compound
   combined(others: Iterable<Compound>): Compound
   offsetFaces(faces: Iterable<Face>, distance: number): Compound
-  shell(openings: Iterable<Face>, distance: number): Compound
+  shell(openings: Iterable<Face>, distance: number, joinType?: 'sharp' | 'rounded'): Compound
   fillet(edges: Iterable<Edge>, radius: number): Compound
   filletWithOptions(edges: Iterable<Edge>, options: FilletOptions): Compound
   chamfer(edges: Iterable<Edge>, distance: number, followTangentEdges?: boolean): Compound

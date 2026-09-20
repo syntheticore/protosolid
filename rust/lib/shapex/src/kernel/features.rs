@@ -2271,6 +2271,7 @@ pub(crate) fn shell(
     source: &Compound,
     openings: &[FaceHandle],
     distance: f64,
+    join_type: &str,
 ) -> KernelResult<Compound> {
     if !distance.is_finite() || distance.abs() <= source.tolerance().linear {
         return Err(invalid(
@@ -2294,7 +2295,104 @@ pub(crate) fn shell(
     for (face, source_name) in raw_shell.faces().zip(shell_sources) {
         origins.insert(face.persistent_id(), vec![source_name]);
     }
-    raw_shell.with_feature_parent(source, "shell", &origins)
+    let shell = raw_shell.with_feature_parent(source, "shell", &origins)?;
+    if join_type == "sharp" {
+        return Ok(shell);
+    }
+
+    // A rolling ball of radius |distance| between the diverging offset
+    // supports has its center on their original edge. Only convex edges of
+    // the offset skin need these joins; converging offsets remain intersected.
+    // Exclude the unchanged source skin and the opening rims.
+    let opening_names = openings
+        .iter()
+        .map(FaceHandle::persistent_id)
+        .collect::<BTreeSet<_>>();
+    let offset_surfaces = raw_offset
+        .faces()
+        .zip(patch_sources.iter())
+        .filter(|(_, name)| !opening_names.contains(name))
+        .map(|(face, _)| face.surface().clone())
+        .collect::<Vec<_>>();
+    // Classify the original edge, not an offset intersection: numerical
+    // support reconstruction must not turn a tangent seam into a new join.
+    let topology = source.topology();
+    let mut divergent = BTreeSet::new();
+    for (_, edge) in topology.edges() {
+        if edge.coedges().len() != 2 {
+            continue;
+        }
+        let uses = edge
+            .coedges()
+            .iter()
+            .map(|id| topology.coedge(*id))
+            .collect::<KernelResult<Vec<_>>>()?;
+        let faces = uses
+            .iter()
+            .map(|coedge| topology.face(topology.loop_(coedge.loop_id())?.face()))
+            .collect::<KernelResult<Vec<_>>>()?;
+        if faces
+            .iter()
+            .any(|face| opening_names.contains(&face.name()))
+        {
+            continue;
+        }
+        let parameter = (edge.range().start + edge.range().end) * 0.5;
+        let sample = edge.curve().evaluate(parameter)?;
+        let tangent = sample.first_derivative.normalize() * uses[0].range().span().signum();
+        let normals = faces
+            .iter()
+            .map(|face| {
+                let uv = face
+                    .surface()
+                    .project(sample.point, source.tolerance())?
+                    .parameters;
+                let normal = face.surface().normal(uv.0, uv.1)?.normalize();
+                Ok(if face.orientation() == FaceOrientation::Reversed {
+                    -normal
+                } else {
+                    normal
+                })
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        if tangent.dot(normals[0].cross(normals[1])) * distance.signum()
+            > source.tolerance().angular
+        {
+            let mut pair = [faces[0].name(), faces[1].name()];
+            pair.sort();
+            divergent.insert(pair);
+        }
+    }
+    let topology = shell.topology();
+    let mut joins = Vec::new();
+    for handle in shell.edges() {
+        let Some(super::EntityId::Edge(edge_id)) = topology.entity(handle.persistent_id()) else {
+            return Err(invalid("shell join edge is missing from its topology"));
+        };
+        let faces = topology.edge_faces(edge_id)?;
+        if faces.len() != 2 {
+            continue;
+        }
+        let faces = [topology.face(faces[0])?, topology.face(faces[1])?];
+        if faces
+            .iter()
+            .any(|face| !offset_surfaces.contains(face.surface()))
+        {
+            continue;
+        }
+        let mut pair = [origins[&faces[0].name()][0], origins[&faces[1].name()][0]];
+        pair.sort();
+        if divergent.contains(&pair) {
+            joins.push(handle.clone());
+        }
+    }
+    if joins.is_empty() {
+        return Ok(shell);
+    }
+    shell.fillet_with_options(
+        &joins,
+        super::FilletOptions::new(distance.abs()).with_tangent_propagation(false),
+    )
 }
 
 pub(crate) fn split(source: &Compound, plane: Plane3, keep: &str) -> KernelResult<Compound> {

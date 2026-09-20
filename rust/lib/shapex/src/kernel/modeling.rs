@@ -1217,6 +1217,22 @@ impl Compound {
     }
 
     pub fn shell(&self, openings: &[FaceHandle], distance: f64) -> KernelResult<Self> {
+        self.shell_with_join(openings, distance, "rounded")
+    }
+
+    /// Offset a skin with either intersected (sharp) or thickness-radius joins.
+    pub fn shell_with_join(
+        &self,
+        openings: &[FaceHandle],
+        distance: f64,
+        join_type: &str,
+    ) -> KernelResult<Self> {
+        if !matches!(join_type, "sharp" | "rounded") {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "shell join type must be sharp or rounded",
+            ));
+        }
         if !distance.is_finite() || distance.abs() <= self.tolerance().linear {
             return Err(KernelError::new(
                 DiagnosticKind::InvalidInput,
@@ -1264,11 +1280,15 @@ impl Compound {
                 debug_assert!(local
                     .iter()
                     .all(|face| selected.contains(&face.persistent_id())));
-                results.push(solid.to_compound().shell(&local, distance)?);
+                results.push(
+                    solid
+                        .to_compound()
+                        .shell_with_join(&local, distance, join_type)?,
+                );
             }
             return combine_compounds(results, self.state.tolerance());
         }
-        super::features::shell(self, openings, distance)
+        super::features::shell(self, openings, distance, join_type)
     }
 
     pub fn fillet(&self, edges: &[EdgeHandle], radius: f64) -> KernelResult<Self> {

@@ -1041,9 +1041,14 @@ impl NativeCompound {
             .map(|inner| Self { inner })
             .map_err(js_error)
     }
-    pub fn shell(&self, openings: &NativeFaceList, distance: f64) -> Result<Self, JsValue> {
+    pub fn shell(
+        &self,
+        openings: &NativeFaceList,
+        distance: f64,
+        join_type: &str,
+    ) -> Result<Self, JsValue> {
         self.inner
-            .shell(&openings.values, distance)
+            .shell_with_join(&openings.values, distance, join_type)
             .map(|inner| Self { inner })
             .map_err(js_error)
     }

@@ -827,11 +827,12 @@ export function createShapex(bindings) {
         return nativeCall(() => new Compound(this._raw().offsetFaces(list, finite(distance, 'distance'))))
       } finally { free(list) }
     }
-    shell(openings, distance) {
+    shell(openings, distance, joinType = 'rounded') {
+      if(!['sharp', 'rounded'].includes(joinType)) throw new TypeError('Shell join type must be sharp or rounded')
       const list = new bindings.NativeFaceList()
       try {
         array(openings, 'openings').forEach((face, index) => list.add(instance(face, Face, `openings[${index}]`)._raw()))
-        return nativeCall(() => new Compound(this._raw().shell(list, finite(distance, 'distance'))))
+        return nativeCall(() => new Compound(this._raw().shell(list, finite(distance, 'distance'), joinType)))
       } finally { free(list) }
     }
     fillet(edges, radius) { return this.filletWithOptions(edges, FilletOptions.new(radius)) }

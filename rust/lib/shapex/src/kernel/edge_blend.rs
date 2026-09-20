@@ -87,6 +87,10 @@ struct BlendJunction {
 
 #[derive(Debug, Clone)]
 enum BlendJunctionKind {
+    Miter {
+        seam_edge: EdgeId,
+        wall_faces: [FaceId; 2],
+    },
     RimCorner {
         carrier_face: FaceId,
         seam_edge: EdgeId,
@@ -350,6 +354,27 @@ impl EulerTransaction<'_> {
                         }
                     }
                     let incident_degree = self.working.vertex_edges(vertex)?.len();
+                    if kind == EdgeBlendKind::Fillet && selected_degree == 2 && incident_degree == 3
+                    {
+                        let seam_edge = self
+                            .working
+                            .vertex_edges(vertex)?
+                            .into_iter()
+                            .find(|edge| !selected.contains(edge))
+                            .expect("one unselected seam");
+                        let walls = self.working.edge_faces(seam_edge)?;
+                        if walls.len() == 2 {
+                            junction_kinds.insert(
+                                vertex,
+                                BlendJunctionKind::Miter {
+                                    seam_edge,
+                                    wall_faces: [walls[0], walls[1]],
+                                },
+                            );
+                            junction_sources.insert(vertex, spine.edge_id);
+                            continue;
+                        }
+                    }
                     if selected_degree == 3 && incident_degree == 3 {
                         let incident = self.working.vertex_edges(vertex)?;
                         let first_concavity = spines[&incident[0]].concave;
@@ -387,6 +412,13 @@ impl EulerTransaction<'_> {
             if selected.len() == previous {
                 let mut junctions = BTreeMap::new();
                 for (vertex, junction_kind) in &junction_kinds {
+                    if matches!(junction_kind, BlendJunctionKind::Miter { .. }) {
+                        junctions.insert(
+                            *vertex,
+                            self.prepare_miter_junction(*vertex, junction_kind.clone(), &spines)?,
+                        );
+                        continue;
+                    }
                     let spine = spines.get(&junction_sources[vertex]).ok_or_else(|| {
                         KernelError::new(
                             DiagnosticKind::TopologyInvariant,
@@ -495,11 +527,19 @@ impl EulerTransaction<'_> {
                                 )
                                 .map(|plane| (*vertex, Surface3::from(plane)));
                             }
-                            let polar = (radials[0]
-                                + radials[1] * std::f64::consts::SQRT_2
-                                + radials[2] * std::f64::consts::PI)
-                                .normalize();
-                            let frame = Frame3::from_z(junction.center, polar)?;
+                            // Keep the spherical corner near the equator and
+                            // away from the longitude seam. A pole inside the
+                            // patch makes its single UV loop wind around a
+                            // chart singularity instead of bounding the corner.
+                            let equator = (radials[0] + radials[1] + radials[2]).normalize();
+                            let across = radials[1] - radials[0];
+                            let across = (across - equator * across.dot(equator)).normalize();
+                            let frame = Frame3::new(
+                                junction.center,
+                                equator,
+                                across,
+                                self.kernel.tolerance,
+                            )?;
                             Sphere3::new(
                                 junction.center,
                                 frame.x() * radius,
@@ -519,7 +559,7 @@ impl EulerTransaction<'_> {
                         _ => None,
                     })
                     .collect::<KernelResult<BTreeMap<_, _>>>()?;
-                let patches = spines
+                let mut patches = spines
                     .into_values()
                     .map(|spine| {
                         self.prepare_blend_patch(
@@ -531,6 +571,47 @@ impl EulerTransaction<'_> {
                         )
                     })
                     .collect::<KernelResult<Vec<_>>>()?;
+                // At a non-tangent two-edge corner the rolling patches meet
+                // along their exact intersection, not a constant-angle arc.
+                for (vertex, junction) in &junctions {
+                    if !matches!(junction.kind, BlendJunctionKind::Miter { .. }) {
+                        continue;
+                    }
+                    let incident = patches
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, patch)| {
+                            patch
+                                .ends
+                                .iter()
+                                .position(
+                                    |end| matches!(end, BlendPatchEnd::Junction(v) if v == vertex),
+                                )
+                                .map(|end| (index, end))
+                        })
+                        .collect::<Vec<_>>();
+                    if incident.len() != 2 {
+                        return Err(KernelError::new(
+                            DiagnosticKind::TopologyInvariant,
+                            "a miter needs two rolling patches",
+                        ));
+                    }
+                    for side in 0..2 {
+                        let (index, end) = incident[side];
+                        let other = patches[incident[1 - side].0].blend_surface.clone();
+                        let patch = &mut patches[index];
+                        let uv = other
+                            .project(patch.contact_points[end][0], self.kernel.tolerance)?
+                            .parameters;
+                        patch.end_boundaries[end] = self.prepare_end_boundary(
+                            &patch.blend_surface,
+                            other,
+                            patch.end_boundaries[end].blend_pcurve.clone(),
+                            patch.contact_points[end],
+                            Point2::new(uv.0, uv.1),
+                        )?;
+                    }
+                }
                 self.certify_blend_contact_trims(&patches)?;
                 return self.rewrite_blend_network(&patches, &junctions, &junction_surfaces, kind);
             }
@@ -1320,6 +1401,70 @@ impl EulerTransaction<'_> {
             contact_points,
             allow_adjacent_extension,
             cap: None,
+        })
+    }
+
+    fn prepare_miter_junction(
+        &self,
+        vertex: VertexId,
+        kind: BlendJunctionKind,
+        spines: &BTreeMap<EdgeId, BlendSpine>,
+    ) -> KernelResult<BlendJunction> {
+        let BlendJunctionKind::Miter { seam_edge, .. } = kind else {
+            unreachable!()
+        };
+        let tolerance = self.kernel.tolerance;
+        let seam = self.working.edge(seam_edge)?;
+        let seam_seed = if seam.vertices[0] == vertex {
+            seam.range.start
+        } else {
+            seam.range.end
+        };
+        let faces = self.working.vertex_faces(vertex)?;
+        let mut contact_points = BTreeMap::new();
+        for face in &faces {
+            let mut rails = spines
+                .values()
+                .filter(|spine| spine.edge.vertices.contains(&vertex) && spine.faces.contains(face))
+                .map(|spine| {
+                    let parent = usize::from(spine.faces[0] != *face);
+                    let endpoint = usize::from(spine.edge.vertices[0] != vertex);
+                    let pcurve = if parent == 0 {
+                        &spine.center.first_pcurve
+                    } else {
+                        &spine.center.second_pcurve
+                    };
+                    Ok((
+                        Curve3::from(SurfaceCurve3::new(
+                            spine.parent_surfaces[parent].clone(),
+                            pcurve.clone(),
+                            spine.provisional_range,
+                            tolerance,
+                        )?),
+                        spine.endpoint_seeds[endpoint],
+                    ))
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            if rails.len() == 1 {
+                rails.push((seam.curve.clone(), seam_seed));
+            }
+            if rails.len() != 2 {
+                return Err(KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "miter contact needs two incident curves",
+                ));
+            }
+            let hit =
+                rails[0]
+                    .0
+                    .intersect_curve_near(&rails[1].0, rails[0].1, rails[1].1, tolerance)?;
+            contact_points.insert(*face, hit.point);
+        }
+        Ok(BlendJunction {
+            faces,
+            center: self.working.vertex(vertex)?.point,
+            contact_points,
+            kind,
         })
     }
 
@@ -2807,8 +2952,9 @@ impl EulerTransaction<'_> {
                     ends.push(BlendPatchEnd::Junction(vertex));
                     continue;
                 }
-                if kind == EdgeBlendKind::Chamfer
-                    && matches!(junction.kind, BlendJunctionKind::Trihedral)
+                if (kind == EdgeBlendKind::Chamfer
+                    && matches!(junction.kind, BlendJunctionKind::Trihedral))
+                    || matches!(junction.kind, BlendJunctionKind::Miter { .. })
                 {
                     for parent in 0..2 {
                         let point = junction.contact_points[&spine.faces[parent]];
@@ -2829,7 +2975,7 @@ impl EulerTransaction<'_> {
                         {
                             return Err(KernelError::new(
                                 DiagnosticKind::GeometryInvariant,
-                                "chamfer corner misses its incident contact rail",
+                                "blend corner misses its incident contact rail",
                             ));
                         }
                         contact_parameters[endpoint_index][parent] = projection.parameter;
@@ -3313,10 +3459,10 @@ impl EulerTransaction<'_> {
                 (vertex, *carrier_face, None)
             }
             Some(BlendJunctionKind::Smooth { tangent_faces, .. })
-                if tangent_faces.contains(&face) =>
-            {
-                (vertex, tangent_faces[0], None)
-            }
+            | Some(BlendJunctionKind::Miter {
+                wall_faces: tangent_faces,
+                ..
+            }) if tangent_faces.contains(&face) => (vertex, tangent_faces[0], None),
             Some(BlendJunctionKind::Smooth {
                 second_seam: Some((_, pair)),
                 ..
@@ -3496,13 +3642,17 @@ impl EulerTransaction<'_> {
         }
 
         for (old_vertex, junction) in junctions {
-            let BlendJunctionKind::Smooth {
-                seam_edge,
-                tangent_faces,
-                second_seam,
-            } = junction.kind
-            else {
-                continue;
+            let (seam_edge, tangent_faces, second_seam) = match junction.kind {
+                BlendJunctionKind::Smooth {
+                    seam_edge,
+                    tangent_faces,
+                    second_seam,
+                } => (seam_edge, tangent_faces, second_seam),
+                BlendJunctionKind::Miter {
+                    seam_edge,
+                    wall_faces,
+                } => (seam_edge, wall_faces, None),
+                _ => continue,
             };
             let new_vertex = contact_vertices[&(*old_vertex, tangent_faces[0], None)];
             self.retarget_edge_endpoint(
@@ -3734,7 +3884,9 @@ impl EulerTransaction<'_> {
                 if let BlendPatchEnd::Junction(vertex) = &patch.ends[endpoint_index] {
                     if matches!(
                         junctions[vertex].kind,
-                        BlendJunctionKind::Smooth { .. } | BlendJunctionKind::TangentChain { .. }
+                        BlendJunctionKind::Smooth { .. }
+                            | BlendJunctionKind::TangentChain { .. }
+                            | BlendJunctionKind::Miter { .. }
                     ) {
                         let vertices = [
                             contact_vertices

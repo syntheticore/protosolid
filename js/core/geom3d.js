@@ -1716,6 +1716,7 @@ export class Compound extends Volumetric {
         this.kernelGeometry,
         openFaces.map(face => face.geom()),
         distance,
+        joinType,
       )
       return new Compound(this.componentId, geometry)
         .inheritShapexTopology([this], 'shell')

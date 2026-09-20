@@ -2431,7 +2431,9 @@ fn analytical_shell_offsets_a_closed_polyhedral_skin() {
         Resolution::Split(ref faces) if faces.len() == 2
     ));
 
-    let outward = cube.shell(&[], 1.0).expect("outward shell");
+    let outward = cube
+        .shell_with_join(&[], 1.0, "sharp")
+        .expect("outward sharp shell");
     assert_eq!(outward.solids().len(), 1);
     assert!((outward.volume() - 728.0).abs() < 1.0e-7);
 }
@@ -2447,6 +2449,152 @@ fn analytical_shell_can_leave_a_face_open() {
     assert_eq!(shelled.faces().count(), 11);
     assert!((shelled.volume() - 424.0).abs() < 1.0e-7);
     assert!(matches!(shelled.resolve(&opening), Resolution::Modified(_)));
+}
+
+#[test]
+fn rounded_shell_joins_outward_box_edges() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let shell = cube.shell(&[], 1.0).expect("rounded outward shell");
+    let expected = 600.0 + 30.0 * std::f64::consts::PI + 4.0 * std::f64::consts::PI / 3.0;
+    // Curved patch mass properties use numerical quadrature.
+    assert!((shell.volume() - expected).abs() < expected * 1.0e-5);
+    assert_eq!(
+        shell
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface3::Sphere(_)))
+            .count(),
+        8
+    );
+    shell.tessellate(TessellationOptions::default()).unwrap();
+}
+
+#[test]
+fn rounded_shell_joins_open_and_disconnected_boxes() {
+    let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let opening = cube
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(p) if p.origin().z > 9.9))
+        .unwrap()
+        .clone();
+    let open = cube.shell(&[opening.clone()], 1.0).unwrap();
+    assert_eq!(open.solids().len(), 1);
+    open.tessellate(TessellationOptions::default()).unwrap();
+    let other = owned_cuboid(Point3::new(30.0, 0.0, 0.0), Point3::new(40.0, 10.0, 10.0));
+    let combined = cube.combined(&[other]).unwrap();
+    for mode in ["sharp", "rounded"] {
+        let result = combined
+            .shell_with_join(&[opening.clone()], 1.0, mode)
+            .unwrap();
+        assert_eq!(result.solids().len(), 2);
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+    assert!(cube.shell_with_join(&[], 1.0, "invalid").is_err());
+}
+
+#[test]
+fn rounded_shell_joins_circle_and_plane_in_both_directions() {
+    let tolerance = ModelTolerance::default();
+    let polygon = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(-110.53131546434899, 0.0),
+                Point2::new(45.77629428845431, 0.0),
+                Point2::new(262.1306769872058, 187.68455648216442),
+                Point2::new(-110.53131546434899, 187.68455648216442),
+            ],
+            tolerance,
+        )
+        .unwrap(),
+        [],
+        tolerance,
+    )
+    .unwrap();
+    let circle = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(
+                Point2::new(-1.8302127961054384, 6.925129498777356),
+                48.10755590722806,
+            )
+            .unwrap()],
+            tolerance,
+        )
+        .unwrap(),
+        [],
+        tolerance,
+    )
+    .unwrap();
+    let extrusion = Vec3::new(0.0, 0.0, 60.0);
+    let source = polygon
+        .extrude(Plane3::xy(), extrusion)
+        .unwrap()
+        .union(&circle.extrude(Plane3::xy(), extrusion).unwrap())
+        .unwrap();
+    let corner = source
+        .edges()
+        .find(|edge| {
+            edge.endpoints().is_ok_and(|points| {
+                points
+                    .iter()
+                    .all(|p| (p.x - 262.1306769872058).abs() < 1.0e-6)
+            })
+        })
+        .unwrap()
+        .clone();
+    let source = source.fillet(&[corner], 56.0).unwrap();
+    let opening = source.faces().find(|face|
+        matches!(face.surface(), Surface3::Plane(p) if p.normal().z.abs() > 0.9 && p.origin().z.abs() < 1.0e-6)
+    ).unwrap().clone();
+    let sharp = source
+        .shell_with_join(&[opening.clone()], -9.0, "sharp")
+        .unwrap();
+    for thickness in [1.0, 3.0, 9.0] {
+        let outward = source
+            .shell(&[opening.clone()], thickness)
+            .expect("outward rounded fixture");
+        let sharp_outward = source
+            .shell_with_join(&[opening.clone()], thickness, "sharp")
+            .unwrap();
+        assert_eq!(outward.solids().len(), 1);
+        assert!(outward.volume() > 0.0 && outward.volume() < sharp_outward.volume());
+        outward.tessellate(TessellationOptions::default()).unwrap();
+    }
+    source
+        .shell(&[], 9.0)
+        .expect("closed outward rounded fixture")
+        .tessellate(TessellationOptions::default())
+        .unwrap();
+    let rounded = source.shell(&[opening], -9.0).unwrap();
+    assert!(rounded.faces().count() > sharp.faces().count());
+    assert!(rounded.volume() < sharp.volume());
+    assert!(rounded.faces().any(|face| match face.surface() {
+        Surface3::Cylinder(c) => (c.radius() - 9.0).abs() < 1.0e-6,
+        Surface3::RollingBall(s) => (s.radius() - 9.0).abs() < 1.0e-6,
+        _ => false,
+    }));
+    for face in rounded.faces() {
+        let Surface3::RollingBall(join) = face.surface() else {
+            continue;
+        };
+        if (join.radius() - 9.0).abs() > 1.0e-6 {
+            continue;
+        }
+        for fraction in [0.25, 0.5, 0.75] {
+            let range = join.center_range();
+            let center = join
+                .center_curve()
+                .evaluate(range.start + fraction * range.span())
+                .unwrap()
+                .point;
+            assert!(
+                source.edges().any(|edge| edge
+                    .curve()
+                    .project(center, tolerance)
+                    .is_ok_and(|projection| projection.distance < 1.0e-6)),
+                "join center must lie on the original edge"
+            );
+        }
+    }
+    rounded.tessellate(TessellationOptions::default()).unwrap();
 }
 
 #[test]
@@ -2676,7 +2824,9 @@ fn analytical_shell_offsets_a_closed_cylinder() {
         .clone();
     let opened = cylinder.shell(&[top], -1.0).expect("open cylinder shell");
     assert!((opened.volume() - 106.0 * std::f64::consts::PI).abs() < 1.0e-7);
-    let outward = cylinder.shell(&[], 1.0).expect("outward cylinder shell");
+    let outward = cylinder
+        .shell_with_join(&[], 1.0, "sharp")
+        .expect("outward sharp cylinder shell");
     assert!((outward.volume() - 182.0 * std::f64::consts::PI).abs() < 1.0e-7);
 }
 
@@ -4493,9 +4643,11 @@ fn shell_rounded_chamfered_torus() {
     assert_eq!(planar.len(), 2);
     for thickness in [1.0, 0.5, 2.0] {
         for openings in [vec![], vec![planar[0].clone()], vec![planar[1].clone()]] {
-            let result = body.shell(&openings, -thickness).unwrap_or_else(|error| {
-                panic!("shell {thickness}, {} openings: {error:?}", openings.len())
-            });
+            let result = body
+                .shell_with_join(&openings, -thickness, "sharp")
+                .unwrap_or_else(|error| {
+                    panic!("shell {thickness}, {} openings: {error:?}", openings.len())
+                });
             assert_eq!(result.solids().len(), 1);
             assert!(result.volume() > 0.0 && result.volume() < body.volume());
             result

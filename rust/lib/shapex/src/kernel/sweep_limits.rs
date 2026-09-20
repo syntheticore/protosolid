@@ -691,7 +691,9 @@ mod tests {
             .revolve_between_faces(plane, axis, &upper, from, &lower, until, true)
             .unwrap();
         let joined = upper.combined(&[lower]).unwrap().union(&tool).unwrap();
-        let closed = joined.shell(&[], -1.0).expect("unfilleted closed shell");
+        let closed = joined
+            .shell_with_join(&[], -1.0, "sharp")
+            .expect("unfilleted closed shell");
         assert_eq!(closed.solids().len(), 1);
         assert!(closed.volume() > 0.0 && closed.volume() < joined.volume());
         closed
@@ -702,8 +704,10 @@ mod tests {
             .filter(|face| matches!(face.surface(), Surface3::Plane(_)))
         {
             let shell = joined
-                .shell(&[opening.clone()], -1.0)
-                .unwrap_or_else(|error| panic!("unfilleted opening {:?}: {error}", opening.surface()));
+                .shell_with_join(&[opening.clone()], -1.0, "sharp")
+                .unwrap_or_else(|error| {
+                    panic!("unfilleted opening {:?}: {error}", opening.surface())
+                });
             assert_eq!(shell.solids().len(), 1);
             assert!(shell.volume() > 0.0 && shell.volume() < joined.volume());
             shell
@@ -726,7 +730,7 @@ mod tests {
             .filter(|face| matches!(face.surface(), Surface3::Plane(_)))
         {
             let shell = rounded
-                .shell(&[opening.clone()], -1.0)
+                .shell_with_join(&[opening.clone()], -1.0, "sharp")
                 .unwrap_or_else(|error| panic!("opening {:?}: {error}", opening.surface()));
             assert_eq!(shell.solids().len(), 1);
             assert!(shell.volume() > 0.0 && shell.volume() < rounded.volume());

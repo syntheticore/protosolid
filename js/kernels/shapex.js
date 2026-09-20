@@ -370,10 +370,10 @@ export class ShapexBackend {
     return featureResult('face offset', () => geometryValue(geometry).offsetFaces(selected.map(shapexValue), distance))
   }
 
-  shell(geometry, selected, distance) {
+  shell(geometry, selected, distance, joinType = 'rounded') {
     try {
       return new ShapexGeometry(
-        geometryValue(geometry).shell(selected.map(shapexValue), distance)
+        geometryValue(geometry).shell(selected.map(shapexValue), distance, joinType)
       )
     } catch(error) {
       throw {

@@ -26,7 +26,7 @@
   .menu-button
     // position: relative
     display: inline-block
-    margin: 4px 5px
+    margin: 4px
 
     .fullscreen .tab-bar &
     .maximized .tab-bar &

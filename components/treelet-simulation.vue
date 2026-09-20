@@ -113,6 +113,7 @@
 <script>
   import { ManipulationTool, StaticProbeTool, ThermalProbeTool } from '../js/tools.js'
   import { worldTransform } from '../js/core/assembly.js'
+  import PickerSession from '../js/picker-session.js'
 
   const configurations = {
     thermal: {
@@ -192,6 +193,14 @@
     },
 
     mounted() {
+      this.pickerSession = new PickerSession(this.bus, {
+        available: key => this.expanded && !this.document.activeFeature &&
+          this.configuration.pickers.some(picker => picker.key == key),
+        defaultKey: () => this.configuration.pickers[0]?.key,
+        activate: this.activatePicker,
+        select: this.selectPickedFace,
+        deactivate: this.deactivatePicker,
+      })
       this.bus.on('resize', this.updatePaths)
       this.bus.on('tree-layout', this.updatePaths)
       this.bus.on('escape', this.onEscape)
@@ -208,7 +217,7 @@
     },
 
     beforeUnmount() {
-      this.cancelPick()
+      this.pickerSession.dispose()
       this.bus.off('resize', this.updatePaths)
       this.bus.off('tree-layout', this.updatePaths)
       this.bus.off('escape', this.onEscape)
@@ -247,39 +256,20 @@
         this.solve()
       },
 
-      pick(key) {
-        if(this.activePicker) {
-          const activePicker = this.activePicker
+      async pick(key) {
+        if(this.activePicker == key) {
           this.cancelPick()
-          if(activePicker != key) this.pick(key)
           return
         }
+        if(!await this.pickerSession.start(key)) return
+        const pickerIndex = this.configuration.pickers.findIndex(picker => picker.key == key)
+        const nextPicker = this.configuration.pickers[pickerIndex + 1]
+        if(nextPicker) this.pick(nextPicker.key)
+      },
 
+      activatePicker(key) {
         this.activePicker = key
         this.document.activeSimulationPicker = true
-        this.bus.off('picked')
-        this.bus.once('picked', (face, repick) => {
-          const references = this.simulation[key]
-          const existing = references.find(reference =>
-            reference.componentId == face.solid.compound.componentId &&
-            reference.solidId == face.solid.id &&
-            reference.topoId == face.id
-          )
-          if(existing) references.splice(references.indexOf(existing), 1)
-          else references.push(face.faceReference())
-
-          this.cancelPick()
-          this.document.hasChanges = true
-          this.solve()
-          const pickerIndex = this.configuration.pickers.findIndex(picker => picker.key == key)
-          const nextPicker = this.configuration.pickers[pickerIndex + 1]
-          setTimeout(() => {
-            if(repick) this.pick(key)
-            else if(nextPicker) this.pick(nextPicker.key)
-            else this.bus.emit('activate-tool', this.configuration.probeTool)
-          })
-        })
-
         this.updatePicker = () => {
           const { pickerPos, color } = this.getPickerInfo(key)
           this.bus.emit('pick', 'face', pickerPos, color)
@@ -287,9 +277,25 @@
         this.updatePicker()
       },
 
+      selectPickedFace(key, face) {
+        const references = this.simulation[key]
+        const existing = references.find(reference =>
+          reference.componentId == face.solid.compound.componentId &&
+          reference.solidId == face.solid.id &&
+          reference.topoId == face.id
+        )
+        if(existing) references.splice(references.indexOf(existing), 1)
+        else references.push(face.faceReference())
+        this.document.hasChanges = true
+        this.solve()
+      },
+
       cancelPick() {
-        if(this.activePicker) this.bus.emit('activate-tool', this.configuration.probeTool)
-        this.bus.off('picked')
+        this.pickerSession.cancel()
+      },
+
+      deactivatePicker() {
+        this.bus.emit('activate-tool', this.configuration.probeTool)
         this.document.activeSimulationPicker = false
         this.activePicker = null
         this.updatePicker = null

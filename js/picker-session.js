@@ -16,9 +16,10 @@ export default class PickerSession {
     }
     this.onModifier = pressed => {
       if(pressed) {
-        if(!this.active && this.lastKey && callbacks.available(this.lastKey)) {
-          this.start(this.lastKey)
-        }
+        if(this.active) return
+        const key = this.lastKey && callbacks.available(this.lastKey)
+          ? this.lastKey : callbacks.defaultKey?.()
+        if(key) this.start(key)
       } else if(this.active) {
         this.finish(false)
       }

@@ -385,6 +385,9 @@
       this.bus.on('keydown', this.onKeydown)
       this.pickerSession = new PickerSession(this.bus, {
         available: key => !this.destroyed && this.activeFeature.needsPicker(key, true),
+        defaultKey: () => Object.keys(this.orderedSettings).find(key =>
+          this.activeFeature.needsPicker(key, true)
+        ),
         activate: this.activatePicker,
         select: this.selectPickedItem,
         deactivate: this.deactivatePicker,

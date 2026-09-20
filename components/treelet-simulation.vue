@@ -196,6 +196,7 @@
       this.pickerSession = new PickerSession(this.bus, {
         available: key => this.expanded && !this.document.activeFeature &&
           this.configuration.pickers.some(picker => picker.key == key),
+        defaultKey: () => this.configuration.pickers[0]?.key,
         activate: this.activatePicker,
         select: this.selectPickedFace,
         deactivate: this.deactivatePicker,

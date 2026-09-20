@@ -560,9 +560,11 @@ impl EulerTransaction<'_> {
                             let equator = (radials[0] + radials[1] + radials[2]).normalize();
                             let across = radials[1] - radials[0];
                             let across = (across - equator * across.dot(equator)).normalize();
+                            // Center the patch at longitude PI, not at the
+                            // projection seam where longitude wraps to zero.
                             let frame = Frame3::new(
                                 junction.center,
-                                equator,
+                                -equator,
                                 across,
                                 self.kernel.tolerance,
                             )?;

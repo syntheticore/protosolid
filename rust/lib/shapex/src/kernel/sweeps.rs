@@ -1376,6 +1376,89 @@ mod tests {
         mesh(&result);
     }
     #[test]
+    fn shell_filleted_asymmetric_chamfer() {
+        let body = rectangle(
+            -37.04944282031129,
+            -21.764692712619542,
+            78.94647629000909,
+            47.585532703500046,
+        )
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 34.0))
+        .unwrap();
+        let edge = body
+            .edges()
+            .find(|e| {
+                e.endpoints()
+                    .unwrap()
+                    .iter()
+                    .all(|p| p.x > 41.0 && p.y < -21.0)
+            })
+            .unwrap()
+            .clone();
+        let reference = edge
+            .connected_faces()
+            .unwrap()
+            .into_iter()
+            .find(|f| {
+                let p = f
+                    .surface()
+                    .project(Point3::new(0.0, -21.764692712619542, 0.0), body.tolerance())
+                    .unwrap();
+                p.distance < 1e-6
+            })
+            .unwrap();
+        let body = body
+            .chamfer_with_options(
+                &[edge],
+                &[reference],
+                11.0,
+                ChamferMode::DistanceAngle(55.0_f64.to_radians()),
+                true,
+            )
+            .unwrap();
+        let edges = body
+            .edges()
+            .filter(|e| {
+                let p = e.endpoints().unwrap();
+                let top = p.iter().all(|p| (p.z - 34.0).abs() < 1e-6);
+                (top && p.iter().all(|p| p.x > 25.0 || p.y < -20.0))
+                    || (p[0].z - p[1].z).abs() > 33.0
+                        && (p[0].x > 25.0 && p[0].y < -5.0 || p[0].x < -37.0 && p[0].y > 25.0)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(edges.len(), 6);
+        let body = body.fillet(&edges, 6.0).unwrap();
+        for face in body
+            .faces()
+            .filter(|f| matches!(f.surface(), Surface3::Sphere(_)))
+        {
+            assert_eq!(
+                body.topology()
+                    .face(face.topology_id())
+                    .unwrap()
+                    .orientation(),
+                super::super::FaceOrientation::Forward
+            );
+        }
+        let opening = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.normal().z.abs() > 0.99 && p.origin().z.abs() < 1e-6)).unwrap().clone();
+        for openings in [vec![], vec![opening]] {
+            for distance in [-2.0, -1.0, -0.5, 0.5, 1.0, 2.0] {
+                for join in ["sharp", "rounded"] {
+                    let result = body
+                        .shell_with_join(&openings, distance, join)
+                        .unwrap_or_else(|error| {
+                            panic!(
+                                "openings {:?}, distance {distance}, join {join}: {error}",
+                                openings.iter().map(|f| f.topology_id()).collect::<Vec<_>>()
+                            )
+                        });
+                    mesh(&result);
+                }
+            }
+        }
+    }
+    #[test]
     fn feature_asymmetric_chamfer() {
         let body = rectangle(0.0, 0.0, 20.0, 20.0)
             .extrude(Plane3::xy(), Vec3::new(3.0, 2.0, 10.0))

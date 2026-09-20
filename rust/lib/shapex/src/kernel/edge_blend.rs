@@ -4629,15 +4629,18 @@ impl EulerTransaction<'_> {
         // Retain an angular chart through rounded supports. A least-norm
         // correction can slide across the section and choose another inverse
         // branch, especially where a cylindrical corner meets a torus.
+        // Between cylinders, use the smaller cylinder's angle to follow its
+        // tighter turn instead of extrapolating across the other cylinder.
         let angular_coordinate = offsets.iter().enumerate().find_map(|(side, surface)| {
             let axis = match surface {
-                Surface3::Cylinder(_)
+                Surface3::Cylinder(cylinder)
                     if cylindrical_chart
                         && source.vertices[0] != source.vertices[1]
                         && (boundary_parameters[side][16].x - boundary_parameters[side][0].x)
                             .abs()
                             < std::f64::consts::PI
-                        && matches!(offsets[1 - side], Surface3::Torus(_)) =>
+                        && (matches!(offsets[1 - side], Surface3::Torus(_))
+                            || matches!(&offsets[1 - side], Surface3::Cylinder(other) if cylinder.radius() < other.radius())) =>
                 {
                     0
                 }

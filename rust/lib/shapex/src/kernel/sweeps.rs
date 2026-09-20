@@ -1495,6 +1495,21 @@ mod tests {
             assert!(cut.volume() <= previous_volume + 1e-5);
             previous_volume = cut.volume();
             mesh(&cut);
+            if [10.0, 12.0, 20.0].contains(&distance) {
+                let edge = cut
+                    .edges()
+                    .find(|e| matches!(e.curve(), Curve3::Circle(c)
+                        if (c.center().z - 39.0).abs() < 1e-6
+                            && (c.radius() - 32.892404807198155).abs() < 1e-6))
+                    .unwrap()
+                    .clone();
+                let rounded = cut
+                    .fillet(&[edge], 1.0)
+                    .unwrap_or_else(|e| panic!("fillet distance {distance}: {e}"));
+                assert_eq!(rounded.solids().len(), 1);
+                assert!(rounded.volume() > 0.0 && rounded.volume() < cut.volume());
+                mesh(&rounded);
+            }
         }
     }
     #[test]

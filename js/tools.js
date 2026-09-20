@@ -894,13 +894,14 @@ class PickTool extends HighlightTool {
     this.chooseAmongItems = false
   }
 
-  async mouseDown(vec, coords, event) {
+  async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    const repick = event.ctrlKey || event.metaKey
     const object = await this.getObject(coords, !this.chooseAmongItems)
-    if(!object) return
-    this.callback(object, repick)
+    if(!object || this.disposed) return
+    this.callback(object)
   }
+
+  dispose() { this.disposed = true }
 }
 
 
@@ -979,7 +980,7 @@ export class JointPickTool extends PickTool {
     super(component, viewport, ['joint'], callback)
   }
 
-  pick(joint, repick = false) { this.callback(joint, repick) }
+  pick(joint) { if(!this.disposed) this.callback(joint) }
 }
 
 export class PatternInputPickTool extends PickTool {

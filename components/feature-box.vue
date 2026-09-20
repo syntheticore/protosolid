@@ -23,7 +23,7 @@
             v-if="activeFeature.needsPicker(key, true)"
             :ref="key"
             :class="{ active: activePicker == key, filled: activeFeature[key] }"
-            @click="pick(setting.type, key)"
+            @click="pick(key)"
           )
 
           NumberInput(
@@ -318,6 +318,7 @@
   import { CreateSketchFeature } from './../js/core/features.js'
   import { CurveReference, JointReference, PatternInputReference } from './../js/core/references.js'
   import { referenceComponentId, worldTransform } from './../js/core/assembly.js'
+  import PickerSession from './../js/picker-session.js'
 
   export default {
     name: 'FeatureBox',
@@ -382,6 +383,17 @@
       this.bus.on('escape', this.onEscape)
       this.bus.on('resize', this.updatePaths)
       this.bus.on('keydown', this.onKeydown)
+      this.pickerSession = new PickerSession(this.bus, {
+        available: key => !this.destroyed && this.activeFeature.needsPicker(key, true),
+        activate: this.activatePicker,
+        select: this.selectPickedItem,
+        deactivate: this.deactivatePicker,
+        complete: async (key, changed, current) => {
+          await this.update()
+          if(!current() || this.destroyed) return
+          if(changed && this.activeFeature.settings[key].autoConfirm) this.confirm()
+        },
+      })
       this.document.on('deactivate-feature', this.deactivateFeature)
       this.document.on('regenerated', this.refreshError)
       this.startValues = this.activeFeature.getValues()
@@ -402,7 +414,7 @@
     },
 
     beforeUnmount: function() {
-      this.cancelPick()
+      this.pickerSession.dispose()
       // Remove temporary feature when feature creation was not completed
       if(this.status !== 'confirmed' && !this.showHeader) {
         this.document.removeFeature(this.activeFeature)
@@ -421,18 +433,17 @@
     },
 
     methods: {
-      pickAll: function() {
+      pickAll: async function() {
         const inputs = Object.entries(this.activeFeature.settings).filter(([key, setting]) =>
           !this.activeFeature[key] && (
             this.activeFeature.needsPicker(key) ||
             (!this.showHeader && setting.type == 'file' && setting.autoActivate)
           )
         )
-        let chain = Promise.resolve()
         for(const [key, setting] of inputs) {
-          chain = chain.then(() => setting.type == 'file' ?
-            this.chooseFile(key) : this.pick(setting.type, key)
-          )
+          if(this.destroyed) return
+          if(setting.type == 'file') await this.chooseFile(key)
+          else if(!await this.pick(key)) return
         }
       },
 
@@ -459,101 +470,92 @@
         this.error = errors.find(error => error.type == 'error') || errors[0] || null
       },
 
-      pick: function(type, key, restart) {
-        // Toggle picker off if active
-        if(this.activePicker) {
-          const previousPicker = this.activePicker
-          this.onEscape()
-          if(!this.activePicker && (restart || previousPicker != key)) this.pick(type, key)
-          return
+      pick: function(key, restart) {
+        if(this.activePicker == key && !restart) {
+          this.cancelPick()
+          this.update()
+          return Promise.resolve(false)
         }
+        return this.pickerSession.start(key)
+      },
+
+      selectPickedItem: function(key, item) {
         const setting = this.activeFeature.settings[key]
+        const type = setting.type
+        // Build reference of requested type from item
+        let itemRef
+        if(type == 'profile' || type == 'solid') {
+          itemRef = item.reference()
+        } else if(type == 'patternInput') {
+          itemRef = PatternInputReference.fromItem(item)
+        } else if(type == 'point') {
+          itemRef = item.pointReference()
+        } else if(type == 'componentRef') {
+          itemRef = item.componentReference()
+        } else if(type == 'face') {
+          itemRef = item.faceReference()
+        } else if(type == 'edge') {
+          itemRef = item.edgeReference()
+        } else if(type == 'plane') {
+          itemRef = item.planarReference()
+        } else if(type == 'axis') {
+          itemRef = item.axialReference()
+        } else if(type == 'curve') {
+          itemRef = new CurveReference(item)
+        } else if(type == 'joint') {
+          itemRef = new JointReference(item)
+        }
 
-        return new Promise((resolve) => {
-          this.bus.off('picked')
-
-          this.bus.once('picked', async (item, repick) => {
-            // Build reference of requested type from item
-            let itemRef;
-            if(type == 'profile' || type == 'solid') {
-              itemRef = item.reference()
-            } else if(type == 'patternInput') {
-              itemRef = PatternInputReference.fromItem(item)
-            } else if(type == 'point') {
-              itemRef = item.pointReference()
-            } else if(type == 'componentRef') {
-              itemRef = item.componentReference()
-            } else if(type == 'face') {
-              itemRef = item.faceReference()
-            } else if(type == 'edge') {
-              itemRef = item.edgeReference()
-            } else if(type == 'plane') {
-              itemRef = item.planarReference()
-            } else if(type == 'axis') {
-              itemRef = item.axialReference()
-            } else if(type == 'curve') {
-              itemRef = new CurveReference(item)
-            } else if(type == 'joint') {
-              itemRef = new JointReference(item)
-            }
-
-            // Add item reference to feature
-            if(setting.multi) {
-              // Toggle items in multi select mode
-              const currentItems = (this.activeFeature[key] && [...this.activeFeature[key]()]) || []
-              this.activeFeature[key] = () => currentItems
-              const oldItem = currentItems.find(otherRef => {
-                return otherRef.matches ? otherRef.matches(item) : otherRef.item.id == item.id
-              })
-              if(oldItem) {
-                currentItems.splice(currentItems.indexOf(oldItem), 1)
-              } else {
-                currentItems.push(itemRef)
-              }
-            } else {
-              // Hide heavy data from Vue in a closure
-              this.activeFeature[key] = () => itemRef
-            }
-            this.activeFeature.pickedInput?.(key, itemRef, item)
-
-            this.cancelPick()
-            // Regenerate feature once unsuppressed
-            if(!repick) await this.update()
-            if(this.destroyed) return resolve()
-            this.updatePaths()
-
-            // Auto-close or auto-repick
-            if(setting.autoConfirm) this.confirm()
-            if(repick) await this.pick(type, key)
-
-            resolve()
+        // Add item reference to feature
+        if(setting.multi) {
+          // Toggle items in multi select mode
+          const currentItems = (this.activeFeature[key] && [...this.activeFeature[key]()]) || []
+          this.activeFeature[key] = () => currentItems
+          const oldItem = currentItems.find(otherRef => {
+            return otherRef.matches ? otherRef.matches(item) : otherRef.item.id == item.id
           })
-
-          // Show old model state while picker is active
-          this.activeFeature.suppressUpdate = true
-          if(this.activeFeature.isComplete()) this.update() // Don't regenerate for fresh features
-
-          // Generate picker curve
-          this.activePicker = key
-          this.bus.featurePickerActive = type == 'patternInput'
-          this.bus.componentPickerActive = type == 'componentRef' || type == 'patternInput'
-          this.bus.jointPickerActive = type == 'joint'
-          this.updatePicker = () => {
-            const { pickerPos, color } = this.getPickerInfo(key)
-            this.bus.emit('pick', type, pickerPos, color, item => this.activeFeature.acceptsInput(item))
+          if(oldItem) {
+            currentItems.splice(currentItems.indexOf(oldItem), 1)
+          } else {
+            currentItems.push(itemRef)
           }
-          this.updatePicker()
-        })
+        } else {
+          // Hide heavy data from Vue in a closure
+          this.activeFeature[key] = () => itemRef
+        }
+        this.activeFeature.pickedInput?.(key, itemRef, item)
+        this.updatePaths()
+      },
+
+      activatePicker: function(key) {
+        const type = this.activeFeature.settings[key].type
+        // Show old model state while picker is active
+        this.activeFeature.suppressUpdate = true
+        if(this.activeFeature.isComplete()) this.update() // Don't regenerate for fresh features
+
+        this.activePicker = key
+        this.bus.featurePickerActive = type == 'patternInput'
+        this.bus.componentPickerActive = type == 'componentRef' || type == 'patternInput'
+        this.bus.jointPickerActive = type == 'joint'
+        this.updatePicker = () => {
+          const { pickerPos, color } = this.getPickerInfo(key)
+          this.bus.emit('pick', type, pickerPos, color, item => this.activeFeature.acceptsInput(item))
+        }
+        this.updatePicker()
       },
 
       cancelPick: function() {
-        this.bus.off('picked')
+        this.pickerSession.cancel()
+      },
+
+      deactivatePicker: function() {
         this.activePicker = null
         this.updatePicker = null
         this.activeFeature.suppressUpdate = false
         this.bus.featurePickerActive = false
         this.bus.componentPickerActive = false
         this.bus.jointPickerActive = false
+        this.activateBaseTool()
       },
 
       // Activate pickers using number keys
@@ -565,8 +567,7 @@
           .filter(([key, _]) => this.activeFeature.needsPicker(key, true) )
           [key - 1]
         if(!entry) return
-        const [name, setting] = entry
-        this.pick(setting.type, name, true)
+        this.pick(entry[0], true)
       },
 
       updatePaths: function() {
@@ -640,7 +641,6 @@
         this.activeFeature.settingChanged?.(key, value)
         if(this.activePicker && !this.activeFeature.needsPicker(this.activePicker, true)) {
           this.cancelPick()
-          this.activateBaseTool()
         }
         await this.update()
         if(this.destroyed) return
@@ -694,13 +694,13 @@
 
       onEscape: function() {
         if(this.busy) return
-        const wasPicking = !!this.activePicker
-        this.cancelPick()
-        if(this.activeTool.constructor === DummyTool || this.activeTool.constructor === ManipulationTool) {
+        if(this.activePicker) {
+          this.cancelPick()
+          this.update()
+        } else if(this.activeTool.constructor === DummyTool || this.activeTool.constructor === ManipulationTool) {
           this.close()
         } else {
           this.activateBaseTool()
-          if(wasPicking) this.update() // Regenerate with full feature applied
         }
       },
 

@@ -980,10 +980,8 @@
         if(this.activeTool) this.activeTool.dispose()
         this.resetProxyInteraction()
         this.pickingPath = { target: null, color, origin: pickerCoords }
-        const tool = new Tool(this.document.activeComponent, this, (item, repick) => {
-          this.bus.emit('picked', item, repick)
-          this.bus.emit('activate-tool', DummyTool)
-          this.pickingPath = null
+        const tool = new Tool(this.document.activeComponent, this, (item) => {
+          this.bus.emit('picked', item)
         })
         tool.acceptsInput = acceptsInput
         this.$emit('update:active-tool', tool)
@@ -1058,8 +1056,11 @@
       },
 
       updatePath: function(path) {
+        // Picker centers are window coordinates; the drawpad uses viewport coordinates.
+        const rect = this.$refs.drawpad.getBoundingClientRect()
+        const origin = { x: path.origin.x - rect.left, y: path.origin.y - rect.top }
         path.targetPos = this.renderer.toScreen(path.target)
-        path.data = this.buildPath(path.origin, path.targetPos)
+        path.data = this.buildPath(origin, path.targetPos)
       },
 
       buildPath: function(origin, pos) {

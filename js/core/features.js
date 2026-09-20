@@ -2118,11 +2118,20 @@ export class ShellFeature extends Feature {
         type: 'bool',
         icons: ['caret-up', 'caret-down']
       },
+      joinType: {
+        title: 'Corners',
+        type: 'select',
+        options: {
+          sharp: { title: 'Sharp', icon: 'square' },
+          rounded: { title: 'Rounded', icon: 'circle' },
+        },
+      },
     })
 
     this.faces = null
     this.thickness = 1.0
     this.side = false
+    this.joinType = 'rounded'
   }
 
   updateFeature(tree, references) {
@@ -2130,7 +2139,7 @@ export class ShellFeature extends Feature {
     const comp = tree.findChild(this.componentId)
 
     try {
-      comp.compound = comp.compound.shell(references.faces, thickness)
+      comp.compound = comp.compound.shell(references.faces, thickness, this.joinType)
     } catch(err) { this.error = err || this.error }
   }
 }

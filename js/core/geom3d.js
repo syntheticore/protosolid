@@ -1709,7 +1709,7 @@ export class Compound extends Volumetric {
     }
   }
 
-  shell(openFaces, distance) {
+  shell(openFaces, distance, joinType = 'rounded') {
     openFaces ||= []
     if(this.isShapex) {
       const geometry = window.kernel.modeling.shell(
@@ -1736,7 +1736,9 @@ export class Compound extends Volumetric {
           // window.oc.oc.BRepOffset_Mode.BRepOffset_RectoVerso,
           false,
           false,
-          window.oc.oc.GeomAbs_JoinType.GeomAbs_Arc,
+          joinType == 'sharp'
+            ? window.oc.oc.GeomAbs_JoinType.GeomAbs_Intersection
+            : window.oc.oc.GeomAbs_JoinType.GeomAbs_Arc,
           false,
           new window.oc.oc.Message_ProgressRange_1()
         )

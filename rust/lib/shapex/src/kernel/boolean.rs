@@ -621,7 +621,7 @@ pub(crate) fn boolean_brep(
         bodies.push(transaction.brep_shell(component)?);
     }
     transaction.nest_brep_shells(&bodies, options)?;
-    transaction.merge_periodic_face_partitions()?;
+    transaction.unify_same_domain()?;
     let committed = transaction.finish()?;
     let role = match kind {
         BooleanKind::Union => "boolean.union",

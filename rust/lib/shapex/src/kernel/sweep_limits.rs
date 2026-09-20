@@ -151,7 +151,7 @@ fn join_cells(
     let mut transaction = kernel.begin_operation();
     let body = transaction.brep_shell(&patches)?;
     transaction.nest_brep_shells(&[body], TessellationOptions::default())?;
-    transaction.merge_periodic_face_partitions()?;
+    transaction.unify_same_domain()?;
     let committed = transaction.finish()?;
     Ok(Some(
         Compound::from_operation(kernel, committed, [first, second])?.with_boolean_parents(
@@ -719,7 +719,7 @@ mod tests {
             })
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(rims.len(), 8); // Four edge spans around each junction.
+        assert_eq!(rims.len(), 7); // The redundant subdivision of one closed junction is unified.
         let rounded = joined.fillet(&rims, 2.0).unwrap();
         for opening in rounded
             .faces()

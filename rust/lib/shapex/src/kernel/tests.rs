@@ -4684,6 +4684,169 @@ fn circular_cut_on_offset_rounded_shell() -> (super::Compound, super::EdgeHandle
 }
 
 #[test]
+fn unifies_subdivided_straight_edges_but_preserves_box_corners() {
+    let source = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let patches = source
+        .faces()
+        .map(|face| {
+            let mut patch =
+                super::features::face_patch(source.topology(), face.topology_id(), false).unwrap();
+            for loop_ in &mut patch.loops {
+                loop_.segments = loop_
+                    .segments
+                    .iter()
+                    .flat_map(|segment| {
+                        (0..3)
+                            .map(|index| {
+                                let start =
+                                    segment.range.start + segment.range.span() * index as f64 / 3.0;
+                                let end = segment.range.start
+                                    + segment.range.span() * (index + 1) as f64 / 3.0;
+                                let a = segment.curve.evaluate(start).unwrap().point;
+                                let b = segment.curve.evaluate(end).unwrap().point;
+                                let uv_a = segment.pcurve.evaluate(start).unwrap().point;
+                                let uv_b = segment.pcurve.evaluate(end).unwrap().point;
+                                // Each span uses its own shifted, reversed and scaled chart.
+                                let range = ParameterRange::new(7.0, -3.0).unwrap();
+                                let direction = (b - a) / range.span();
+                                let uv_direction = (uv_b - uv_a) / range.span();
+                                super::euler::BrepPatchSegment {
+                                    curve: Line3::new(a - direction * range.start, direction)
+                                        .unwrap()
+                                        .into(),
+                                    pcurve: super::Line2::new(
+                                        uv_a - uv_direction * range.start,
+                                        uv_direction,
+                                    )
+                                    .unwrap()
+                                    .into(),
+                                    range,
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+            }
+            patch
+        })
+        .collect::<Vec<_>>();
+    let mut kernel = Kernel::new(source.tolerance()).unwrap();
+    let mut transaction = kernel.begin_operation();
+    transaction.brep_shell(&patches).unwrap();
+    assert_eq!(transaction.working.edges().count(), 36);
+    transaction.unify_same_domain_edges().unwrap();
+    assert_eq!(transaction.working.edges().count(), 12);
+    assert_eq!(transaction.working.vertices().count(), 8);
+    assert_eq!(transaction.working.faces().count(), 6);
+    transaction.unify_same_domain_edges().unwrap();
+    assert_eq!(transaction.working.edges().count(), 12);
+    transaction.finish().unwrap();
+}
+
+#[test]
+fn unifies_periodic_edges_with_bounded_projection_pcurves() {
+    let tol = ModelTolerance::default();
+    let source = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 10.0).unwrap()],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap()
+    .extrude(Plane3::xy(), Vec3::unit_z() * 5.0)
+    .unwrap();
+    let mut patches = source
+        .faces()
+        .map(|face| {
+            super::features::face_patch(source.topology(), face.topology_id(), false).unwrap()
+        })
+        .collect::<Vec<_>>();
+    for patch in &mut patches {
+        for loop_ in &mut patch.loops {
+            let mut segments = Vec::new();
+            for segment in &loop_.segments {
+                for index in 0..3 {
+                    let range = ParameterRange::new(
+                        segment.range.start + segment.range.span() * index as f64 / 3.0,
+                        segment.range.start + segment.range.span() * (index + 1) as f64 / 3.0,
+                    )
+                    .unwrap();
+                    segments.push(super::euler::BrepPatchSegment {
+                        curve: segment.curve.clone(),
+                        pcurve: super::SurfaceProjectionPcurve2::new(
+                            segment.curve.clone(),
+                            patch.surface.clone(),
+                            segment.pcurve.clone(),
+                            range,
+                            tol,
+                        )
+                        .unwrap()
+                        .into(),
+                        range,
+                    });
+                }
+            }
+            loop_.segments = segments;
+        }
+    }
+    let mut baseline_kernel = Kernel::new(tol).unwrap();
+    let mut baseline_transaction = baseline_kernel.begin_operation();
+    baseline_transaction.brep_shell(&patches).unwrap();
+    let baseline_committed = baseline_transaction.finish().unwrap();
+    let baseline =
+        super::Compound::from_operation(baseline_kernel, baseline_committed, []).unwrap();
+    baseline
+        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .expect("before unification");
+    let mut kernel = Kernel::new(tol).unwrap();
+    let mut transaction = kernel.begin_operation();
+    transaction.brep_shell(&patches).unwrap();
+    transaction.unify_same_domain_edges().unwrap();
+    let circles = transaction
+        .working
+        .edges()
+        .filter(|(_, edge)| matches!(edge.curve, Curve3::Circle(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(circles.len(), 2);
+    assert!(circles
+        .iter()
+        .all(|(_, edge)| edge.vertices[0] == edge.vertices[1]));
+    let committed = transaction.finish().unwrap();
+    let result = super::Compound::from_operation(kernel, committed, []).unwrap();
+    assert!((result.volume() - source.volume()).abs() < 1e-6);
+    result
+        .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .unwrap();
+}
+
+#[test]
+fn boolean_unifies_circular_rims_across_the_old_seam() {
+    let (cut, _) = circular_cut_on_offset_rounded_shell();
+    let rims = cut
+        .edges()
+        .filter(|edge| {
+            matches!(edge.curve(), Curve3::Circle(circle)
+            if circle.center().to_vec().magnitude() < 1e-7)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rims.len(), 2, "each bottom rim should be one circular arc");
+    for edge in rims {
+        let ends = edge.endpoints().unwrap();
+        assert!(ends[0].distance(ends[1]) > 1.0);
+        assert!(
+            ends.iter().all(|p| p.x < -1.0),
+            "old x=0 seam vertex survived"
+        );
+        assert_eq!(edge.connected_faces().unwrap().len(), 2);
+    }
+    cut.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+        .unwrap();
+}
+
+#[test]
 fn fillet_circular_cut_on_offset_rounded_shell() {
     let (cut, rim) = circular_cut_on_offset_rounded_shell();
     let volume = cut.volume();

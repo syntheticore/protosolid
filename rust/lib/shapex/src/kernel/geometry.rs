@@ -506,9 +506,47 @@ impl Curve2 {
                 }))
             }
             Self::SurfaceProjection(pcurve) => {
+                // A trimmed projection may end at a periodic chart seam even
+                // though its exact source circle or line continues beyond it.
+                if !matches!(pcurve.curve.as_ref(), Curve3::SurfaceIntersection(_))
+                    && pcurve.curve.domain().contains_range(range, 0.0)
+                {
+                    let mut points = (0..=32)
+                        .map(|index| {
+                            let t = range.start + range.span() * index as f64 / 32.0;
+                            let point = pcurve.curve.evaluate(t)?.point;
+                            let uv = pcurve.surface.project(point, pcurve.tolerance)?.parameters;
+                            Ok(Point2::new(uv.0, uv.1))
+                        })
+                        .collect::<KernelResult<Vec<_>>>()?;
+                    super::intersection::unwrap_periodic_points(
+                        &mut points,
+                        pcurve.surface.domains(),
+                    );
+                    let guide = super::intersection::smooth_nurbs_guide(&points, range)?;
+                    let anchor = (pcurve.range.start + pcurve.range.end) * 0.5;
+                    let previous = self.evaluate(anchor)?.point;
+                    let current = guide.evaluate(anchor)?.point;
+                    for (axis, domain) in pcurve.surface.domains().iter().enumerate() {
+                        if let Some(period) = domain.period {
+                            let shift = ((previous[axis] - current[axis]) / period).round() * period;
+                            for point in &mut points {
+                                point[axis] += shift;
+                            }
+                        }
+                    }
+                    return Ok(SurfaceProjectionPcurve2::new(
+                        *pcurve.curve.clone(),
+                        *pcurve.surface.clone(),
+                        super::intersection::smooth_nurbs_guide(&points, range)?.into(),
+                        range,
+                        pcurve.tolerance,
+                    )?
+                    .into());
+                }
                 let Curve3::SurfaceIntersection(curve) = pcurve.curve.as_ref() else {
                     return Err(invalid(
-                        "projection extension requires an exact intersection curve",
+                        "projection source cannot cover its extension",
                     ));
                 };
                 let range = ParameterRange::new(
@@ -1843,9 +1881,13 @@ impl SurfaceProjectionPcurve2 {
 
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<(f64, f64)> {
         let mut parameter = parameter;
-        if let Some(period) = self.domain().period {
-            let center = (self.range.start + self.range.end) * 0.5;
-            parameter += ((center - parameter) / period).round() * period;
+        // Preserve both ends of a full-turn UV chart. Recentring an already
+        // valid endpoint can exchange 0 and 2π and create a seam jump.
+        if !self.range.contains(parameter, self.tolerance) {
+            if let Some(period) = self.domain().period {
+                let center = (self.range.start + self.range.end) * 0.5;
+                parameter += ((center - parameter) / period).round() * period;
+            }
         }
         if !self.range.contains(parameter, self.tolerance) {
             return Err(invalid(

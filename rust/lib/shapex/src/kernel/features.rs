@@ -906,9 +906,7 @@ fn retarget_offset_intersection_endpoints(
         return Ok(());
     };
     let source = topology.edge(edge_id)?;
-    if source.vertices()[0] == source.vertices()[1] {
-        return Ok(());
-    }
+    let closed = source.vertices()[0] == source.vertices()[1];
     let curve_range = intersection.range();
     let exact = intersection.exact_pcurves();
     let mut first_points = Vec::new();
@@ -919,7 +917,7 @@ fn retarget_offset_intersection_endpoints(
         second_points.push(exact[1].evaluate(parameter)?.point);
     }
     let endpoint_window = curve_range.span().abs() * 0.05 + tolerance.parameter * 64.0;
-    for vertex in source.vertices() {
+    for (side, vertex) in source.vertices().into_iter().enumerate() {
         let point = vertices[&vertex];
         let projection = edge.curve.project(point, tolerance)?;
         let support_distance = intersection
@@ -932,7 +930,12 @@ fn retarget_offset_intersection_endpoints(
                     .project(point, tolerance)?
                     .distance,
             );
-        let endpoint = if projection.distance > tolerance.linear
+        let endpoint = if closed {
+            // A unified intersection can close at both ends of a bounded
+            // chart. Retarget both guides to its offset vertex; projection
+            // alone chooses only one of the coincident endpoints.
+            Some(side * 32)
+        } else if projection.distance > tolerance.linear
             && support_distance <= tolerance.linear * 8.0
         {
             if (projection.parameter - curve_range.start).abs()

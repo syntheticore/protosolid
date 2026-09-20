@@ -8,8 +8,6 @@
     :class="{ fullscreen, maximized, blurry }"
   )
 
-    DocumentView(:document="activeDocument")
-
     TabBar(
       :documents="documents"
       v-model:active-document="activeDocument"
@@ -20,6 +18,8 @@
       @save-document-as="saveDocumentAs"
       @delete-document="closeDocument"
     )
+
+    DocumentView(:document="activeDocument")
 
 </template>
 
@@ -34,12 +34,10 @@
     cursor: default
     overflow: hidden
     color: $bright1
+    display: flex
+    flex-direction: column
 
   .tab-bar
-    position: absolute
-    top: 1px
-    left: 1px
-    right: 1px
     height: 38px
 
     .fullscreen &
@@ -49,11 +47,7 @@
 
   .document-view
     grid-area: main
-    position: absolute
-    left: 1px
-    right: 1px
-    top: 1px
-    bottom: 1px
+    height: 100%
 
 </style>
 

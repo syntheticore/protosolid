@@ -32,6 +32,7 @@
     .grab-handle.fixed
 
     .window-controls
+
       button(@click="minimize")
         Icon(icon="window-minimize")
 
@@ -61,7 +62,8 @@
 
     .blurry &
       // backdrop-filter: blur(32px)
-      background: rgba($dark2, 0.925)
+      // background: rgba($dark2, 0.925)
+      background: $dark2
 
     [data-platform="darwin"] &
       border-radius: 4px 4px 0px 0px
@@ -91,6 +93,9 @@
   .app-menu-btn
     // color: #ff9f90
     color: $highlight * 1.2
+
+    :deep(.button)
+      border-radius: 4px
 
     [data-platform="darwin"] &
       display: none

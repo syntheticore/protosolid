@@ -9,6 +9,7 @@ use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::euler::EulerTransaction;
 use super::history::ChangeKind;
+use super::modeling::{ChamferMode, ChamferSettings};
 use super::topology::{Edge, Vertex};
 use super::validation::{validate, ValidationMode};
 use super::wire::{curve_loop_contains_point, curve_pair_intersection};
@@ -70,6 +71,7 @@ struct BlendSpine {
     parent_surfaces: [Surface3; 2],
     concave: bool,
     offset: f64,
+    offsets: [f64; 2],
     center: SurfaceSurfaceCurve,
     endpoint_seeds: [f64; 2],
     provisional_range: ParameterRange,
@@ -175,6 +177,7 @@ impl EulerTransaction<'_> {
         radius: f64,
         follow_tangent_edges: bool,
         kind: EdgeBlendKind,
+        chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<()> {
         let snapshot = self.working.clone();
         let history_snapshot = self.history.clone();
@@ -185,6 +188,7 @@ impl EulerTransaction<'_> {
             radius,
             follow_tangent_edges,
             kind,
+            chamfer,
         );
         let result = result.and_then(|_| {
             validate(
@@ -209,6 +213,7 @@ impl EulerTransaction<'_> {
         radius: f64,
         follow_tangent_edges: bool,
         kind: EdgeBlendKind,
+        chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<()> {
         // General rolling supports must share one chart before their temporary
         // arcs are built, otherwise structurally different guides prevent KEF.
@@ -216,18 +221,39 @@ impl EulerTransaction<'_> {
         for edge in &selected {
             let value = self.working.edge(*edge)?;
             if value.vertices[0] == value.vertices[1] {
-                if let Ok(spine) = self.prepare_blend_spine(*edge, radius, kind, None, None) {
+                if let Ok(spine) =
+                    self.prepare_blend_spine(*edge, radius, kind, None, None, chamfer)
+                {
                     if matches!(spine.center.curve, Curve3::SurfaceIntersection(_)) {
                         closed_spines.push(spine);
                     }
                 }
             }
         }
+        let sources = selected
+            .iter()
+            .map(|edge| self.working.edge(*edge).cloned())
+            .collect::<KernelResult<Vec<_>>>()?;
         selected = self.subdivide_closed_blend_edges(&selected, kind)?;
+        let mut chamfer = chamfer.cloned();
+        if let Some(settings) = &mut chamfer {
+            for edge in &selected {
+                let value = self.working.edge(*edge)?;
+                if !settings.reference_faces.contains_key(&value.name) {
+                    let source = sources
+                        .iter()
+                        .find(|source| source.curve == value.curve)
+                        .expect("subdivided chamfer edge retains its source curve");
+                    settings
+                        .reference_faces
+                        .insert(value.name, settings.reference_faces[&source.name]);
+                }
+            }
+        }
         let mut junction_kinds = BTreeMap::<VertexId, BlendJunctionKind>::new();
         let mut junction_sources = BTreeMap::<VertexId, EdgeId>::new();
         let mut spines = BTreeMap::<EdgeId, BlendSpine>::new();
-        let mut propagated_offsets = BTreeMap::<EdgeId, f64>::new();
+        let mut propagated_offsets = BTreeMap::<EdgeId, (BlendSpine, [FaceId; 2])>::new();
         let mut regular_endpoints = BTreeMap::<(EdgeId, usize), Option<BlendEndpoint>>::new();
         loop {
             let missing = selected
@@ -249,7 +275,8 @@ impl EulerTransaction<'_> {
                         radius,
                         kind,
                         shared,
-                        propagated_offsets.get(&edge).copied(),
+                        propagated_offsets.get(&edge),
+                        chamfer.as_ref(),
                     )?,
                 );
             }
@@ -276,7 +303,7 @@ impl EulerTransaction<'_> {
                             additions.insert(continuation);
                             propagated_offsets
                                 .entry(continuation)
-                                .or_insert(spine.offset);
+                                .or_insert_with(|| (spine.clone(), tangent_faces));
                             continue;
                         } else if let Some((seam_edge, continuation, tangent_faces)) =
                             self.smooth_blend_continuation(vertex, spine.edge_id, &selected)?
@@ -293,7 +320,7 @@ impl EulerTransaction<'_> {
                             additions.insert(continuation);
                             propagated_offsets
                                 .entry(continuation)
-                                .or_insert(spine.offset);
+                                .or_insert_with(|| (spine.clone(), tangent_faces));
                             continue;
                         }
                     }
@@ -433,10 +460,9 @@ impl EulerTransaction<'_> {
                     {
                         let junction = self.prepare_smooth_fillet_junction(
                             *vertex,
-                            spine.offset,
+                            spine,
                             *seam_edge,
                             *tangent_faces,
-                            spine.concave,
                         );
                         match junction {
                             Ok(junction) => {
@@ -817,7 +843,8 @@ impl EulerTransaction<'_> {
         size: f64,
         kind: EdgeBlendKind,
         shared: Option<&BlendSpine>,
-        propagated_offset: Option<f64>,
+        propagated: Option<&(BlendSpine, [FaceId; 2])>,
+        chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<BlendSpine> {
         let tolerance = self.kernel.tolerance;
         let edge = self.working.edge(edge_id)?.clone();
@@ -854,11 +881,26 @@ impl EulerTransaction<'_> {
         // Equal setbacks on planar supports correspond to r = d cot(theta/2),
         // where theta is the angle between outward normals. Perpendicular rims
         // retain r = d, including plane/cylinder tangent chains.
-        let radius = if let Some(offset) = propagated_offset {
+        let offsets = if let Some((source, tangent_faces)) = propagated {
             // A propagated rolling chamfer must retain its source offset across
             // smooth support seams. Recomputing it at each edge midpoint makes
             // the contact rails disagree at their shared endpoint.
-            offset
+            faces.map(|face| {
+                let index = source
+                    .faces
+                    .iter()
+                    .position(|candidate| *candidate == face)
+                    .unwrap_or_else(|| {
+                        source
+                            .faces
+                            .iter()
+                            .position(|candidate| {
+                                tangent_faces.contains(candidate) == tangent_faces.contains(&face)
+                            })
+                            .unwrap()
+                    });
+                source.offsets[index]
+            })
         } else if kind == EdgeBlendKind::Chamfer {
             let normals = (0..2)
                 .map(|index| {
@@ -876,20 +918,64 @@ impl EulerTransaction<'_> {
                 })
                 .collect::<KernelResult<Vec<_>>>()?;
             let cosine = normals[0].dot(normals[1]).clamp(-1.0, 1.0);
-            size * ((1.0 + cosine) / (1.0 - cosine)).sqrt()
+            if let Some(settings) = chamfer {
+                let reference = settings.reference_faces.get(&edge.name).ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::InvalidInput,
+                        "chamfer edge has no reference face",
+                    )
+                })?;
+                let first = faces
+                    .iter()
+                    .position(|face| {
+                        self.working
+                            .face(*face)
+                            .is_ok_and(|face| face.name == *reference)
+                    })
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            DiagnosticKind::InvalidInput,
+                            "chamfer reference face must border its edge",
+                        )
+                    })?;
+                let sine = (1.0 - cosine * cosine).sqrt();
+                let second = match settings.mode {
+                    ChamferMode::TwoDistances(distance) => distance,
+                    ChamferMode::DistanceAngle(angle) => {
+                        let denominator = sine * angle.cos() - cosine * angle.sin();
+                        if denominator <= tolerance.angular {
+                            return Err(KernelError::new(
+                                DiagnosticKind::InvalidInput,
+                                "chamfer angle does not intersect the opposite face",
+                            ));
+                        }
+                        size * angle.sin() / denominator
+                    }
+                };
+                // The spine's projections onto the supports are the two
+                // setback rails. Solve their two normal offsets separately.
+                let mut offsets = [0.0; 2];
+                offsets[first] = (second + cosine * size) / sine;
+                offsets[1 - first] = (size + cosine * second) / sine;
+                offsets
+            } else {
+                [size * ((1.0 + cosine) / (1.0 - cosine)).sqrt(); 2]
+            }
         } else {
-            size
+            [size; 2]
         };
-        let offset_distance = |face: FaceId| -> KernelResult<f64> {
-            let outward = match self.working.face(face)?.orientation {
-                FaceOrientation::Forward => radius,
-                FaceOrientation::Reversed => -radius,
+        let radius = offsets[0].abs().max(offsets[1].abs());
+        let offset_distance = |index: usize| -> KernelResult<f64> {
+            let outward = match self.working.face(faces[index])?.orientation {
+                FaceOrientation::Forward => offsets[index],
+                FaceOrientation::Reversed => -offsets[index],
             };
             Ok(if concave { outward } else { -outward })
         };
+        let offset_values = offsets;
         let offsets = [
-            parent_surfaces[0].offset(offset_distance(faces[0])?, tolerance)?,
-            parent_surfaces[1].offset(offset_distance(faces[1])?, tolerance)?,
+            parent_surfaces[0].offset(offset_distance(0)?, tolerance)?,
+            parent_surfaces[1].offset(offset_distance(1)?, tolerance)?,
         ];
         let mut local_guide = false;
         let candidates = if let Some(shared) = shared {
@@ -1020,6 +1106,7 @@ impl EulerTransaction<'_> {
             parent_surfaces,
             concave,
             offset: radius,
+            offsets: offset_values,
             center,
             endpoint_seeds,
             provisional_range,
@@ -1788,7 +1875,7 @@ impl EulerTransaction<'_> {
                 let bridge = self.insert_blend_transition_bridge(vertex, cross, selected)?;
                 let mut selected = selected.clone();
                 selected.insert(bridge);
-                self.blend_network_unchecked(selected, radius, follow, EdgeBlendKind::Fillet)
+                self.blend_network_unchecked(selected, radius, follow, EdgeBlendKind::Fillet, None)
             })();
             if attempt.is_ok() {
                 return attempt;
@@ -1948,12 +2035,20 @@ impl EulerTransaction<'_> {
     fn prepare_smooth_fillet_junction(
         &self,
         vertex: VertexId,
-        radius: f64,
+        spine: &BlendSpine,
         seam_edge: EdgeId,
         tangent_faces: [FaceId; 2],
-        concave: bool,
     ) -> KernelResult<BlendJunction> {
         let tolerance = self.kernel.tolerance;
+        let concave = spine.concave;
+        let tangent_index = spine
+            .faces
+            .iter()
+            .position(|face| tangent_faces.contains(face))
+            .unwrap();
+        let tangent_radius = spine.offsets[tangent_index];
+        let common_radius = spine.offsets[1 - tangent_index];
+        let radius = spine.offset;
         let vertex_faces = self.working.vertex_faces(vertex)?;
         let other_faces = vertex_faces
             .iter()
@@ -2020,8 +2115,8 @@ impl EulerTransaction<'_> {
             })?;
         let seam_pcurve = self.working.coedge(tangent_use)?.pcurve.clone();
         let tangent_outward = match self.working.face(tangent_face)?.orientation {
-            FaceOrientation::Forward => radius,
-            FaceOrientation::Reversed => -radius,
+            FaceOrientation::Forward => tangent_radius,
+            FaceOrientation::Reversed => -tangent_radius,
         };
         let tangent_distance = if concave {
             tangent_outward
@@ -2030,8 +2125,8 @@ impl EulerTransaction<'_> {
         };
         let common_surface = self.working.face(common_face)?.surface.clone();
         let common_outward = match self.working.face(common_face)?.orientation {
-            FaceOrientation::Forward => radius,
-            FaceOrientation::Reversed => -radius,
+            FaceOrientation::Forward => common_radius,
+            FaceOrientation::Reversed => -common_radius,
         };
         let common_distance = if concave {
             common_outward
@@ -2150,8 +2245,11 @@ impl EulerTransaction<'_> {
             .point;
         let allowed =
             tolerance.linear_at_scale(center.to_vec().magnitude().max(radius).max(1.0)) * 16.0;
-        for contact in [seam_contact, common_contact] {
-            if (contact.distance(center) - radius).abs() > allowed {
+        for (contact, offset) in [
+            (seam_contact, tangent_radius),
+            (common_contact, common_radius),
+        ] {
+            if (contact.distance(center) - offset.abs()).abs() > allowed {
                 return Err(KernelError::new(
                     DiagnosticKind::GeometryInvariant,
                     "smooth blend junction contact is not at the requested rolling-ball radius",
@@ -2531,7 +2629,7 @@ impl EulerTransaction<'_> {
             }
         }
         Ok((
-            RollingBallSurface3::new(
+            RollingBallSurface3::with_section(
                 spine.center.curve.clone(),
                 spine.parent_surfaces[0].clone(),
                 spine.parent_surfaces[1].clone(),
@@ -2544,8 +2642,8 @@ impl EulerTransaction<'_> {
                 },
                 spine.offset,
                 tolerance,
+                true,
             )?
-            .into_ruled()
             .into(),
             BlendSurfaceParameterization::CONTACT_RAILS,
         ))

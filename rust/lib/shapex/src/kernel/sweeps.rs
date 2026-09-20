@@ -1184,6 +1184,30 @@ mod tests {
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(edges.len(), 3);
+        for mode in [
+            ChamferMode::TwoDistances(2.0),
+            ChamferMode::DistanceAngle(0.6),
+        ] {
+            for flip in [false, true] {
+                let references = edges.iter().map(|edge| edge.connected_faces().unwrap().into_iter()
+                    .find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.normal().z.abs() > 0.9) != flip)
+                    .unwrap()).collect::<Vec<_>>();
+                let all = body
+                    .chamfer_with_options(&edges, &references, 1.0, mode, true)
+                    .unwrap();
+                for (edge, face) in edges.iter().zip(&references) {
+                    let following = body
+                        .chamfer_with_options(&[edge.clone()], &[face.clone()], 1.0, mode, true)
+                        .unwrap();
+                    assert!((following.volume() - all.volume()).abs() < 1e-5);
+                    mesh(&following);
+                    let selected = body
+                        .chamfer_with_options(&[edge.clone()], &[face.clone()], 1.0, mode, false)
+                        .unwrap();
+                    assert!(selected.volume() > following.volume());
+                }
+            }
+        }
         for distance in [1.0, 11.0] {
             for selection in [
                 vec![edges[0].clone(), edges[1].clone()],
@@ -1352,6 +1376,108 @@ mod tests {
         mesh(&result);
     }
     #[test]
+    fn feature_asymmetric_chamfer() {
+        let body = rectangle(0.0, 0.0, 20.0, 20.0)
+            .extrude(Plane3::xy(), Vec3::new(3.0, 2.0, 10.0))
+            .unwrap();
+        for edge in body.edges() {
+            for reference in edge.connected_faces().unwrap() {
+                for mode in [
+                    ChamferMode::TwoDistances(2.0),
+                    ChamferMode::DistanceAngle(0.6),
+                ] {
+                    let result = body
+                        .chamfer_with_options(
+                            &[edge.clone()],
+                            &[reference.clone()],
+                            1.0,
+                            mode,
+                            false,
+                        )
+                        .unwrap();
+                    let bevel = result
+                        .faces()
+                        .find(|face| {
+                            body.faces()
+                                .all(|old| old.persistent_id() != face.persistent_id())
+                        })
+                        .unwrap();
+                    let mut setbacks = Vec::new();
+                    for boundary in bevel.boundary_edges().unwrap() {
+                        let points = boundary.endpoints().unwrap();
+                        let midpoint =
+                            Point3::from_vec((points[0].to_vec() + points[1].to_vec()) * 0.5);
+                        if (points[1] - points[0])
+                            .normalize()
+                            .cross(edge.endpoints().unwrap()[1] - edge.endpoints().unwrap()[0])
+                            .magnitude()
+                            < 1e-6
+                        {
+                            let distance = edge
+                                .curve()
+                                .project(midpoint, body.tolerance())
+                                .unwrap()
+                                .distance;
+                            if reference
+                                .surface()
+                                .project(midpoint, body.tolerance())
+                                .unwrap()
+                                .distance
+                                < 1e-6
+                            {
+                                assert!((distance - 1.0).abs() < 1e-6);
+                            }
+                            setbacks.push(distance);
+                        }
+                    }
+                    assert_eq!(setbacks.len(), 2);
+                    if let ChamferMode::TwoDistances(_) = mode {
+                        setbacks.sort_by(f64::total_cmp);
+                        assert!(
+                            (setbacks[0] - 1.0).abs() < 1e-6 && (setbacks[1] - 2.0).abs() < 1e-6
+                        );
+                    } else {
+                        let n0 = reference.surface().normal(0.0, 0.0).unwrap();
+                        let n1 = bevel.surface().normal(0.0, 0.0).unwrap();
+                        assert!((n0.dot(n1).abs().clamp(-1.0, 1.0).acos() - 0.6).abs() < 1e-6);
+                    }
+                    mesh(&result);
+                }
+            }
+        }
+        let cylinder = circle(10.0)
+            .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0))
+            .unwrap();
+        let edge = cylinder
+            .edges()
+            .find(|edge| matches!(edge.curve(), Curve3::Circle(_)))
+            .unwrap();
+        for reference in edge.connected_faces().unwrap() {
+            for mode in [
+                ChamferMode::TwoDistances(2.0),
+                ChamferMode::DistanceAngle(0.6),
+            ] {
+                let second = match mode {
+                    ChamferMode::TwoDistances(d) => d,
+                    _ => 0.6_f64.tan(),
+                };
+                let (radial, axial) = if matches!(reference.surface(), Surface3::Plane(_)) {
+                    (1.0, second)
+                } else {
+                    (second, 1.0)
+                };
+                let result = cylinder
+                    .chamfer_with_options(&[edge.clone()], &[reference.clone()], 1.0, mode, true)
+                    .unwrap();
+                let removed =
+                    std::f64::consts::PI * axial * (10.0 * radial - radial * radial / 3.0);
+                assert!((cylinder.volume() - result.volume() - removed).abs() < 1e-5);
+                mesh(&result);
+            }
+        }
+    }
+
+    #[test]
     fn feature_concave_chamfer() {
         let tolerance = ModelTolerance::default();
         let outer = rectangle(0.0, 0.0, 10.0, 10.0);
@@ -1371,6 +1497,14 @@ mod tests {
             })
             .unwrap()
             .clone();
+        for reference in edge.connected_faces().unwrap() {
+            for mode in [ChamferMode::TwoDistances(2.0), ChamferMode::DistanceAngle(0.6)] {
+                let second = match mode { ChamferMode::TwoDistances(d) => d, _ => 0.6_f64.tan() };
+                let result = body.chamfer_with_options(&[edge.clone()], &[reference.clone()], 1.0, mode, false).unwrap();
+                assert!((result.volume() - body.volume() - 5.0 * second).abs() < 1e-5);
+                mesh(&result);
+            }
+        }
         let result = body.chamfer(&[edge], 1.0).unwrap();
         assert!((result.volume() - 845.0).abs() < 1.0e-5);
         mesh(&result);

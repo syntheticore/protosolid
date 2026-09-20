@@ -602,8 +602,8 @@ export function createShapex(bindings) {
       throw new TypeError(`outdated ShapexJS transport: missing ${method}; rebuild the WASM package`)
     }
   }
-  if(bindings.NativeCompound.prototype.chamfer.length < 3) {
-    throw new TypeError('outdated ShapexJS transport: chamfer propagation is unavailable; rebuild the WASM package')
+  if(bindings.NativeCompound.prototype.chamfer.length < 6) {
+    throw new TypeError('outdated ShapexJS transport: chamfer modes are unavailable; rebuild the WASM package')
   }
 
   function mesh(raw) {
@@ -844,12 +844,14 @@ export function createShapex(bindings) {
         return nativeCall(() => new Compound(this._raw().fillet(list, options.radius, options.followTangentEdges)))
       } finally { free(list) }
     }
-    chamfer(edges, distance, followTangentEdges=false) {
+    chamfer(edges, distance, followTangentEdges=false, { type = 'equal', referenceFaces = [], value = distance } = {}) {
       const list = new bindings.NativeEdgeList()
+      const faces = new bindings.NativeFaceList()
       try {
         array(edges, 'edges').forEach((edge, index) => list.add(instance(edge, Edge, `edges[${index}]`)._raw()))
-        return nativeCall(() => new Compound(this._raw().chamfer(list, finite(distance, 'distance'), Boolean(followTangentEdges))))
-      } finally { free(list) }
+        array(referenceFaces, 'referenceFaces').forEach((face, index) => faces.add(instance(face, Face, `referenceFaces[${index}]`)._raw()))
+        return nativeCall(() => new Compound(this._raw().chamfer(list, finite(distance, 'distance'), Boolean(followTangentEdges), faces, type, finite(value, 'value'))))
+      } finally { free(list); free(faces) }
     }
     draft(faces, plane, angle) {
       instance(plane, Plane3, 'plane')

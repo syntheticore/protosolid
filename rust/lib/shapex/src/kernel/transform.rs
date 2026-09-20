@@ -315,7 +315,7 @@ pub(crate) fn transform_surface(
         )?
         .into(),
         Surface3::RollingBall(surface) | Surface3::Ruled(surface) => {
-            let transformed = RollingBallSurface3::new(
+            RollingBallSurface3::with_section(
                 transform_curve(surface.center_curve().clone(), transform, tolerance)?,
                 transform_surface(surface.first_surface().clone(), transform, tolerance)?,
                 transform_surface(surface.second_surface().clone(), transform, tolerance)?,
@@ -324,12 +324,8 @@ pub(crate) fn transform_surface(
                 surface.center_range(),
                 surface.radius(),
                 tolerance,
-            )?;
-            if surface.is_ruled() {
-                transformed.into_ruled()
-            } else {
-                transformed
-            }
+                surface.is_ruled(),
+            )?
             .into()
         }
     })

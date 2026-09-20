@@ -2051,7 +2051,6 @@ export class ChamferFeature extends Feature {
       chamferType: {
         title: 'Mode',
         type: 'select',
-        when: () => window.kernel.id != 'shapex',
         options: {
           equal: { title: 'Equal distances', icon: 'equals' },
           'two-distances': { title: 'Two distances', icon: 'not-equal' },

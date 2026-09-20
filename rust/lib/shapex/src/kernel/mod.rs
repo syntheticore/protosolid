@@ -60,8 +60,8 @@ pub use intersection::{
 };
 pub use mass_properties::MassProperties;
 pub use modeling::{
-    Compound, EdgeHandle, FaceHandle, FilletOptions, Resolution, ResolvableEntity, Solid,
-    VertexHandle,
+    ChamferMode, Compound, EdgeHandle, FaceHandle, FilletOptions, Resolution, ResolvableEntity,
+    Solid, VertexHandle,
 };
 pub use naming::PersistentId;
 pub use polyhedron::PolyhedralMesh;

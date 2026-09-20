@@ -398,8 +398,11 @@ export class ShapexBackend {
     }
   }
 
-  chamfer(geometry, selected, distance, followTangentEdges=true) {
-    return featureResult('chamfer', () => geometryValue(geometry).chamfer(selected.map(shapexValue), distance, followTangentEdges))
+  chamfer(geometry, selected, distance, followTangentEdges=true, { type = 'equal', referenceFaces = [], value = distance } = {}) {
+    return featureResult('chamfer', () => geometryValue(geometry).chamfer(
+      selected.map(shapexValue), distance, followTangentEdges,
+      { type, referenceFaces: referenceFaces.map(shapexValue), value },
+    ))
   }
 
   draft(geometry, selected, plane, angle) {

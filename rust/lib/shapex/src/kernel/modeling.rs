@@ -597,6 +597,19 @@ pub struct Solid {
     revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
 }
 
+/// The second measurement of an asymmetric chamfer; angles are in radians.
+#[derive(Debug, Clone, Copy)]
+pub enum ChamferMode {
+    TwoDistances(f64),
+    DistanceAngle(f64),
+}
+
+#[derive(Clone)]
+pub(crate) struct ChamferSettings {
+    pub mode: ChamferMode,
+    pub reference_faces: BTreeMap<PersistentId, PersistentId>,
+}
+
 /// Controls rolling-ball edge fillet construction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FilletOptions {
@@ -1305,6 +1318,7 @@ impl Compound {
             options.radius,
             options.follow_tangent_edges,
             super::edge_blend::EdgeBlendKind::Fillet,
+            None,
         )
     }
 
@@ -1314,6 +1328,7 @@ impl Compound {
         size: f64,
         follow_tangent_edges: bool,
         kind: super::edge_blend::EdgeBlendKind,
+        chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<Self> {
         if !size.is_finite() || size <= self.tolerance().linear {
             return Err(KernelError::new(
@@ -1359,7 +1374,7 @@ impl Compound {
                 results.push(if local.is_empty() {
                     local_compound
                 } else {
-                    local_compound.blend_edges(&local, size, follow_tangent_edges, kind)?
+                    local_compound.blend_edges(&local, size, follow_tangent_edges, kind, chamfer)?
                 });
             }
             return combine_compounds(results, self.tolerance());
@@ -1381,9 +1396,9 @@ impl Compound {
             .collect::<KernelResult<Vec<_>>>()?;
         let mut transaction = kernel.begin_operation();
         if let Err(error) =
-            transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind)
+            transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind, chamfer)
         {
-            let mixed_trihedral = (edges.len() == 3)
+            let mixed_trihedral = (edges.len() == 3 && chamfer.is_none())
                 .then(|| {
                     error.diagnostics().iter().find(|diagnostic| {
                         diagnostic.operation.as_deref() == Some("blend.mixed-trihedral-setback")
@@ -1461,7 +1476,8 @@ impl Compound {
                         )),
                     })
                     .collect::<KernelResult<Vec<_>>>();
-                match resolved.and_then(|resolved| result.blend_edges(&resolved, size, true, kind))
+                match resolved
+                    .and_then(|resolved| result.blend_edges(&resolved, size, true, kind, None))
                 {
                     Ok(next) => result = next,
                     Err(error) => {
@@ -1525,6 +1541,44 @@ impl Compound {
             distance,
             follow_tangent_edges,
             super::edge_blend::EdgeBlendKind::Chamfer,
+            None,
+        )
+    }
+
+    pub fn chamfer_with_options(
+        &self,
+        edges: &[EdgeHandle],
+        reference_faces: &[FaceHandle],
+        distance: f64,
+        mode: ChamferMode,
+        follow_tangent_edges: bool,
+    ) -> KernelResult<Self> {
+        let valid = match mode {
+            ChamferMode::TwoDistances(value) => {
+                value.is_finite() && value > self.tolerance().linear
+            }
+            ChamferMode::DistanceAngle(value) => {
+                value.is_finite() && value > 0.0 && value < std::f64::consts::FRAC_PI_2
+            }
+        };
+        if !valid || reference_faces.len() != edges.len() {
+            return Err(KernelError::new(DiagnosticKind::InvalidInput,
+                "chamfer needs a positive second distance or an angle between 0 and 90 degrees, and one reference face per edge"));
+        }
+        let settings = ChamferSettings {
+            mode,
+            reference_faces: edges
+                .iter()
+                .zip(reference_faces)
+                .map(|(edge, face)| (edge.persistent_id(), face.persistent_id()))
+                .collect(),
+        };
+        self.blend_edges(
+            edges,
+            distance,
+            follow_tangent_edges,
+            super::edge_blend::EdgeBlendKind::Chamfer,
+            Some(&settings),
         )
     }
     pub fn draft(&self, faces: &[FaceHandle], plane: Plane3, angle: f64) -> KernelResult<Self> {

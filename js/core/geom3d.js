@@ -1643,9 +1643,11 @@ export class Compound extends Volumetric {
 
   chamfer(edges, distance, { type = 'equal', distance2 = distance, angle = Math.PI / 4, flipSides = false, followTangentEdges = true } = {}) {
     if(this.isShapex) {
-      if(type != 'equal') throw { type: 'error', msg: 'Shapex supports only equal-distance chamfers' }
+      const referenceFaces = type == 'equal' ? [] : edges.map(edge =>
+        edge.connectedFaces().sort((a, b) => a.id.localeCompare(b.id))[flipSides ? 1 : 0].geom())
       const geometry = window.kernel.modeling.chamfer(
         this.kernelGeometry, edges.map(edge => edge.geom()), distance, followTangentEdges,
+        { type, referenceFaces, value: type == 'distance-angle' ? angle : distance2 },
       )
       return new Compound(this.componentId, geometry)
         .inheritShapexTopology([this], 'chamfer')

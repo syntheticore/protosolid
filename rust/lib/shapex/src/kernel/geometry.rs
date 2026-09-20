@@ -4352,6 +4352,31 @@ impl EdgeBlendSurface3 {
         radius: f64,
         tolerance: ModelTolerance,
     ) -> KernelResult<Self> {
+        Self::with_section(
+            center_curve,
+            first_surface,
+            second_surface,
+            first_pcurve,
+            second_pcurve,
+            center_range,
+            radius,
+            tolerance,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_section(
+        center_curve: Curve3,
+        first_surface: Surface3,
+        second_surface: Surface3,
+        first_pcurve: Curve2,
+        second_pcurve: Curve2,
+        center_range: ParameterRange,
+        radius: f64,
+        tolerance: ModelTolerance,
+        ruled: bool,
+    ) -> KernelResult<Self> {
         tolerance.validate()?;
         if !radius.is_finite() || radius <= tolerance.linear {
             return Err(invalid(
@@ -4381,7 +4406,7 @@ impl EdgeBlendSurface3 {
                     && first.curve.as_ref() == center && second.curve.as_ref() == center
         );
         let surface = Self {
-            ruled: false,
+            ruled,
             shared_intersection,
             center_curve: Box::new(center_curve),
             first_surface: Box::new(first_surface),
@@ -4403,14 +4428,6 @@ impl EdgeBlendSurface3 {
             }
         }
         Ok(surface)
-    }
-
-    /// Join the retained contact rails with straight generators. The rails,
-    /// domains, projection and differential evaluation are shared with fillets.
-    pub(crate) fn into_ruled(mut self) -> Self {
-        self.ruled = true;
-        self.sections = ParameterEvaluationCache::default();
-        self
     }
 
     pub(crate) fn is_ruled(&self) -> bool {

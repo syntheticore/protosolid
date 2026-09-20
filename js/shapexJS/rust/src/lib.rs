@@ -12,9 +12,9 @@ use shapex::kernel::{
     RigidTransform3, Surface3,
 };
 use shapex::{
-    Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3, ModelTolerance, Plane3,
-    Point2, Point3, Profile, ProfileBoundary, Resolution, Solid, TessellationOptions, TriangleMesh,
-    TrimmedCurve2, Vec2, Vec3, VertexHandle, Wire2,
+    ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
+    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, Solid,
+    TessellationOptions, TriangleMesh, TrimmedCurve2, Vec2, Vec3, VertexHandle, Wire2,
 };
 use wasm_bindgen::prelude::*;
 
@@ -1071,11 +1071,30 @@ impl NativeCompound {
         edges: &NativeEdgeList,
         distance: f64,
         follow_tangent_edges: bool,
+        reference_faces: &NativeFaceList,
+        mode: &str,
+        value: f64,
     ) -> Result<Self, JsValue> {
-        self.inner
-            .chamfer_with_tangent_propagation(&edges.values, distance, follow_tangent_edges)
-            .map(|inner| Self { inner })
-            .map_err(js_error)
+        let result = match mode {
+            "equal" => self.inner.chamfer_with_tangent_propagation(
+                &edges.values,
+                distance,
+                follow_tangent_edges,
+            ),
+            "two-distances" | "distance-angle" => self.inner.chamfer_with_options(
+                &edges.values,
+                &reference_faces.values,
+                distance,
+                if mode == "two-distances" {
+                    ChamferMode::TwoDistances(value)
+                } else {
+                    ChamferMode::DistanceAngle(value)
+                },
+                follow_tangent_edges,
+            ),
+            _ => return Err(JsValue::from_str("Unknown chamfer mode")),
+        };
+        result.map(|inner| Self { inner }).map_err(js_error)
     }
     pub fn draft(
         &self,

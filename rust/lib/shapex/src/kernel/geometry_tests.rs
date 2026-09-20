@@ -73,7 +73,19 @@ fn prepared_blend_sections_preserve_circular_and_ruled_differentials() {
         tolerance,
     )
     .unwrap();
-    let ruled = surface.clone().into_ruled();
+    let ruled = EdgeBlendSurface3::with_section(
+        surface.center_curve().clone(),
+        surface.first_surface().clone(),
+        Plane3::new(Point3::new(0.0, 3.0, 0.0), Vec3::unit_z(), Vec3::unit_x(), tolerance)
+            .unwrap().into(),
+        surface.first_pcurve().clone(),
+        surface.second_pcurve().clone(),
+        surface.center_range(),
+        surface.radius(),
+        tolerance,
+        true,
+    )
+    .unwrap();
     let angle = std::f64::consts::FRAC_PI_2;
     for u in [0.0, 0.3, 1.0] {
         for v in [-0.2, 0.0, 0.25, 0.5, 1.0, 1.2] {
@@ -90,9 +102,9 @@ fn prepared_blend_sections_preserve_circular_and_ruled_differentials() {
                 (value.dvv + Vec3::new(cos, sin, 0.0) * (2.0 * angle * angle)).magnitude() < 1e-8
             );
             let (point, du, dv) = ruled.first_order(u, v).unwrap();
-            assert!(point.distance(Point3::new(2.0 * (1.0 - v), 2.0 * v, u)) < 1e-12);
+            assert!(point.distance(Point3::new(2.0 * (1.0 - v), 3.0 * v, u)) < 1e-12);
             assert_eq!(du, Vec3::unit_z());
-            assert_eq!(dv, Vec3::new(-2.0, 2.0, 0.0));
+            assert_eq!(dv, Vec3::new(-2.0, 3.0, 0.0));
         }
     }
 }

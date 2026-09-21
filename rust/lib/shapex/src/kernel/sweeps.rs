@@ -1430,8 +1430,7 @@ mod tests {
         body.fillet(&edges, 6.0).unwrap()
     }
 
-    #[test]
-    fn oversized_shell_rim_fillet_document_23() {
+    fn shell_rim_document_23() -> (Compound, super::super::EdgeHandle) {
         // untitled(23).cad: 70 x 50 x 34, an 11 mm / 55 degree chamfer,
         // six 6 mm fillets, a rounded 6 mm outward shell, then its bottom rim.
         let x0 = -28.352029411716757;
@@ -1507,6 +1506,45 @@ mod tests {
             })
             .unwrap()
             .clone();
+        (body, edge)
+    }
+
+    #[test]
+    fn second_shell_rim_fillet_document_23() {
+        let (body, edge) = shell_rim_document_23();
+        let body = body.fillet(&[edge], 3.0).unwrap();
+        // The remaining inner rim is a 6 mm corner arc and two straight
+        // edges. At either end it meets a concave edge of the first fillet.
+        let edges = body.edges().filter(|edge| {
+            let points = edge.endpoints().unwrap();
+            points.iter().all(|p| p.z.abs() < 1e-6)
+                && (points.iter().all(|p| (p.x + 28.352029411716757).abs() < 1e-6)
+                    || points.iter().all(|p| (p.y - 27.562484038636214).abs() < 1e-6)
+                    || matches!(edge.curve(), Curve3::Circle(c)
+                        if c.center().distance(Point3::new(-22.352029411716757, 21.562484038636214, 0.0)) < 1e-6
+                            && (c.radius() - 6.0).abs() < 1e-6))
+        }).cloned().collect::<Vec<_>>();
+        assert_eq!(edges.len(), 3);
+        // At 3 mm the two terminating arcs are consumed completely.
+        for radius in [0.25, 0.5, 1.0, 2.0, 2.999, 3.0] {
+            let mut expected_volume: Option<f64> = None;
+            for edge in &edges {
+                let result = body
+                    .fillet(&[edge.clone()], radius)
+                    .unwrap_or_else(|error| panic!("second rim fillet {radius}: {error}"));
+                assert!(result.volume() < body.volume());
+                if let Some(volume) = expected_volume {
+                    assert!((result.volume() - volume).abs() < 1e-6);
+                }
+                expected_volume = Some(result.volume());
+                mesh(&result);
+            }
+        }
+    }
+
+    #[test]
+    fn oversized_shell_rim_fillet_document_23() {
+        let (body, edge) = shell_rim_document_23();
         let original_volume = body.volume();
         for radius in [1.0, 4.0, 5.99, 6.0, 6.01, 7.0, 11.0, 12.0] {
             let result = body.fillet(&[edge.clone()], radius);

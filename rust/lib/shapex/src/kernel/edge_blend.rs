@@ -306,7 +306,7 @@ impl EulerTransaction<'_> {
                                 .or_insert_with(|| (spine.clone(), tangent_faces));
                             continue;
                         } else if let Some((seam_edge, continuation, tangent_faces)) =
-                            self.smooth_blend_continuation(vertex, spine.edge_id, &selected)?
+                            self.smooth_blend_continuation(vertex, spine, &selected)?
                         {
                             junction_kinds.insert(
                                 vertex,
@@ -350,7 +350,7 @@ impl EulerTransaction<'_> {
                         }
                     }
                     if let Some((seam_edge, continuation, tangent_faces)) =
-                        self.smooth_blend_continuation(vertex, spine.edge_id, &selected)?
+                        self.smooth_blend_continuation(vertex, spine, &selected)?
                     {
                         if selected.contains(&continuation) {
                             junction_kinds.insert(
@@ -1266,11 +1266,31 @@ impl EulerTransaction<'_> {
             .into();
             let adjacent_edge_id = self.working.coedge(adjacent_uses[parent_index])?.edge;
             let adjacent_edge = self.working.edge(adjacent_edge_id)?;
-            // A concave termination can grow a Boolean intersection edge past
-            // its traced domain. Continue both exact support p-curves before
-            // solving the contact; changing only the topological trim leaves
-            // the curve/curve solver clamped to the old endpoint.
-            if let Curve3::SurfaceIntersection(curve) = &adjacent_edge.curve {
+            let adjacent_seed = if adjacent_edge.vertices[0] == old_vertex {
+                adjacent_edge.range.start
+            } else {
+                adjacent_edge.range.end
+            };
+            // Termination can grow a retained intersection or contact rail
+            // past its old domain. Continue its exact supports before solving
+            // the contact, so projection is not clamped to the old endpoint.
+            let adjacent_range = match &adjacent_edge.curve {
+                Curve3::SurfaceIntersection(curve) => Some(curve.range()),
+                Curve3::SurfaceCurve(curve)
+                    if contact_curve
+                        .intersect_curve_near(
+                            &adjacent_edge.curve,
+                            spine.endpoint_seeds[endpoint_index],
+                            adjacent_seed,
+                            tolerance,
+                        )
+                        .is_err() =>
+                {
+                    Some(curve.range())
+                }
+                _ => None,
+            };
+            if let Some(range) = adjacent_range {
                 let endpoint = if adjacent_edge.vertices[0] == old_vertex {
                     adjacent_edge.range.start
                 } else {
@@ -1280,17 +1300,29 @@ impl EulerTransaction<'_> {
                 let target = contact_curve.evaluate(spine.endpoint_seeds[endpoint_index])?.point;
                 let delta = (target - value.point).dot(value.first_derivative)
                     / value.first_derivative.magnitude2();
-                let range = curve.range();
                 let outside_start =
                     (endpoint - range.start).abs() <= tolerance.parameter && delta < 0.0;
                 let outside_end = (endpoint - range.end).abs() <= tolerance.parameter && delta > 0.0;
                 if outside_start || outside_end {
                     let padding =
                         4.0 * target.distance(value.point) / value.first_derivative.magnitude();
-                    let extended = curve.extended(ParameterRange::new(
+                    let extended_range = ParameterRange::new(
                         range.start - if outside_start { padding } else { 0.0 },
                         range.end + if outside_end { padding } else { 0.0 },
-                    )?)?;
+                    )?;
+                    let extended: Curve3 = match &adjacent_edge.curve {
+                        Curve3::SurfaceIntersection(curve) => {
+                            curve.extended(extended_range)?.into()
+                        }
+                        Curve3::SurfaceCurve(curve) => SurfaceCurve3::new(
+                            curve.surface().clone(),
+                            curve.pcurve().extended(extended_range)?,
+                            extended_range,
+                            tolerance,
+                        )?
+                        .into(),
+                        _ => unreachable!(),
+                    };
                     let uses = adjacent_edge
                         .coedges
                         .iter()
@@ -1306,8 +1338,8 @@ impl EulerTransaction<'_> {
                                 };
                                 coedge.range.start + coedge.range.span() * fraction
                             };
-                            let start = map(extended.range().start);
-                            let end = map(extended.range().end);
+                            let start = map(extended_range.start);
+                            let end = map(extended_range.end);
                             let range = ParameterRange::new(start.min(end), start.max(end))?;
                             Ok((*id, coedge.pcurve.extended(range)?))
                         })
@@ -1315,15 +1347,10 @@ impl EulerTransaction<'_> {
                     for (id, pcurve) in uses {
                         self.working.coedges.get_mut(id)?.pcurve = pcurve;
                     }
-                    self.working.edges.get_mut(adjacent_edge_id)?.curve = extended.into();
+                    self.working.edges.get_mut(adjacent_edge_id)?.curve = extended;
                 }
             }
             let adjacent_edge = self.working.edge(adjacent_edge_id)?;
-            let adjacent_seed = if adjacent_edge.vertices[0] == old_vertex {
-                adjacent_edge.range.start
-            } else {
-                adjacent_edge.range.end
-            };
             let (seed, rail_seed) = (0..=32)
                 .map(|index| {
                     let parameter = spine.provisional_range.start
@@ -1357,6 +1384,34 @@ impl EulerTransaction<'_> {
                 adjacent_seed,
                 tolerance,
             );
+            // At a tangent endpoint, correction on a circular support can
+            // select the other side of the circle. Search the retained arc and
+            // contact rail before extending either past the selected edge.
+            let retained_contact = ParameterRange {
+                start: spine.endpoint_seeds[0],
+                end: spine.endpoint_seeds[1],
+            };
+            let local_hit = match local_hit {
+                original @ Err(_) if matches!(adjacent_edge.curve, Curve3::Circle(_)) => {
+                    contact_curve
+                        .intersect_curve_near(
+                            &adjacent_edge.curve,
+                            spine.endpoint_seeds[endpoint_index],
+                            (adjacent_edge.range.start + adjacent_edge.range.end) * 0.5,
+                            tolerance,
+                        )
+                        .ok()
+                        .filter(|hit| {
+                            retained_contact.contains(hit.first_parameter, tolerance)
+                                && adjacent_edge
+                                    .range
+                                    .contains(hit.second_parameter, tolerance)
+                        })
+                        .map(Ok)
+                        .unwrap_or(original)
+                }
+                original => original,
+            };
             let (contact_parameter, rail_parameter, contact_point) = if let Ok(hit) = local_hit {
                 (hit.first_parameter, hit.second_parameter, hit.point)
             } else if rail_seed.distance <= seed_allowed {
@@ -2479,9 +2534,14 @@ impl EulerTransaction<'_> {
     fn smooth_blend_continuation(
         &self,
         vertex: VertexId,
-        current_edge: EdgeId,
+        spine: &BlendSpine,
         selected: &BTreeSet<EdgeId>,
     ) -> KernelResult<Option<(EdgeId, EdgeId, [FaceId; 2])>> {
+        let current_edge = spine.edge_id;
+        let current = self.working.edge(current_edge)?;
+        let current_tangent = current
+            .endpoint_tangent(usize::from(current.vertices[1] == vertex))?
+            .normalize();
         let point = self.working.vertex(vertex)?.point;
         let current_faces = self.working.edge_faces(current_edge)?;
         let incident = self.working.vertex_edges(vertex)?;
@@ -2519,6 +2579,9 @@ impl EulerTransaction<'_> {
             }
             // A chamfer over a rounded corner has two smooth seams at this
             // vertex. Continue along the sharp rim, never along the other seam.
+            // Tangent supports can also meet at a cusp where a convex rim
+            // becomes a concave cavity edge. That is a termination, not a
+            // continuation of the same rolling blend.
             let continuation = incident.iter().copied().find(|edge| {
                 if *edge == seam || *edge == current_edge {
                     return false;
@@ -2526,6 +2589,12 @@ impl EulerTransaction<'_> {
                 let Ok(value) = self.working.edge(*edge) else {
                     return false;
                 };
+                let Ok(tangent) = value.endpoint_tangent(usize::from(value.vertices[1] == vertex))
+                else {
+                    return false;
+                };
+                let continues_direction = current_tangent.dot(tangent.normalize())
+                    <= -1.0 + self.kernel.tolerance.angular.max(f64::EPSILON.sqrt()) * 8.0;
                 let Ok(faces) = self.working.edge_faces(*edge) else {
                     return false;
                 };
@@ -2551,7 +2620,7 @@ impl EulerTransaction<'_> {
                     &supports,
                     midpoint.point,
                 )
-                .is_ok()
+                .is_ok_and(|concave| continues_direction || concave == spine.concave)
             });
             if let Some(continuation) = continuation {
                 return Ok(Some((seam, continuation, [faces[0], faces[1]])));
@@ -3668,6 +3737,7 @@ impl EulerTransaction<'_> {
         }
 
         let mut contact_vertices = BTreeMap::<(VertexId, FaceId, Option<EdgeId>), VertexId>::new();
+        let mut collapsed_edges = BTreeMap::<EdgeId, VertexId>::new();
         for patch in patches {
             for endpoint_index in 0..2 {
                 let old_vertex = patch.spine.edge.vertices[endpoint_index];
@@ -3679,6 +3749,29 @@ impl EulerTransaction<'_> {
                         continue;
                     }
                     let point = patch.contact_points[endpoint_index][parent_index];
+                    if let BlendPatchEnd::Boundary(endpoint) = &patch.ends[endpoint_index] {
+                        let edge_id = self
+                            .working
+                            .coedge(endpoint.adjacent_uses[parent_index])?
+                            .edge;
+                        let edge = self.working.edge(edge_id)?;
+                        let opposite = if edge.vertices[0] == old_vertex {
+                            edge.vertices[1]
+                        } else {
+                            edge.vertices[0]
+                        };
+                        if !endpoint.cap.is_some_and(|(free, _)| free == parent_index)
+                            && opposite != old_vertex
+                            && point.distance(self.working.vertex(opposite)?.point)
+                                <= tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0))
+                        {
+                            // The new contact consumes this whole boundary edge.
+                            // Reuse its far vertex so the remaining faces stay sewn.
+                            contact_vertices.insert(key, opposite);
+                            collapsed_edges.insert(edge_id, opposite);
+                            continue;
+                        }
+                    }
                     let name = self.names.next_for(&kind.role("contact.vertex"))?;
                     let vertex = self.make_vertex(name, point);
                     self.history.derived(
@@ -3723,6 +3816,12 @@ impl EulerTransaction<'_> {
                     }
                     let contact_vertex = contact_vertices
                         [&Self::contact_vertex_key(patch, endpoint_index, parent_index, junctions)];
+                    if let Some(vertex) = collapsed_edges.get(&adjacent_edge) {
+                        // Keep the loop-gap handles alive until the new boundary
+                        // is inserted, then remove this consumed edge and its uses.
+                        self.working.edges.get_mut(adjacent_edge)?.vertices = [*vertex; 2];
+                        continue;
+                    }
                     if endpoint.allow_adjacent_extension[parent_index] {
                         self.retarget_edge_endpoint_allow_extension(
                             adjacent_edge,
@@ -4459,6 +4558,19 @@ impl EulerTransaction<'_> {
                     FaceOrientation::Reversed
                 },
             )?;
+        }
+
+        for edge in collapsed_edges.keys().copied() {
+            let uses = self.working.edge(edge)?.coedges.clone();
+            for use_id in &uses {
+                let coedge = self.working.coedge(*use_id)?.clone();
+                self.working.coedges.get_mut(coedge.previous)?.next = coedge.next;
+                self.working.coedges.get_mut(coedge.next)?.previous = coedge.previous;
+                if self.working.loop_(coedge.loop_id)?.first == Some(*use_id) {
+                    self.working.loops.get_mut(coedge.loop_id)?.first = Some(coedge.next);
+                }
+            }
+            self.delete_edge_and_uses(edge, &uses)?;
         }
 
         let mut old_vertices = BTreeSet::new();

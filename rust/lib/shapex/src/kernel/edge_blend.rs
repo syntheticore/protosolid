@@ -2185,13 +2185,14 @@ impl EulerTransaction<'_> {
             let (center, derivative, contact) = offset_seam(parameters[0])?;
             let common = common_offset.evaluate(parameters[1], parameters[2])?;
             let residual = center - common.point;
-            let allowed = tolerance.linear_at_scale(
-                center
+            // The adjoining edges share this vertex. Converge their common
+            // center beyond model tolerance before projecting its contacts.
+            let allowed = f64::EPSILON * 2048.0
+                * center
                     .to_vec()
                     .magnitude()
                     .max(common.point.to_vec().magnitude())
-                    .max(1.0),
-            );
+                    .max(1.0);
             if residual.magnitude() <= allowed {
                 solution = Some((
                     Point3::from_vec((center.to_vec() + common.point.to_vec()) * 0.5),
@@ -4631,6 +4632,8 @@ impl EulerTransaction<'_> {
         // branch, especially where a cylindrical corner meets a torus.
         // Between cylinders, use the smaller cylinder's angle to follow its
         // tighter turn instead of extrapolating across the other cylinder.
+        // A bounded circular revolution needs its profile angle retained at
+        // the ends, where it meets the neighboring blend supports.
         let angular_coordinate = offsets.iter().enumerate().find_map(|(side, surface)| {
             let axis = match surface {
                 Surface3::Cylinder(cylinder)
@@ -4646,7 +4649,9 @@ impl EulerTransaction<'_> {
                 }
                 Surface3::Offset(offset)
                     if matches!(offset.base(), Surface3::RollingBall(blend)
-                    if matches!(blend.center_curve(), Curve3::Line(_))) =>
+                    if matches!(blend.center_curve(), Curve3::Line(_)))
+                        || matches!(offset.base(), Surface3::Revolved(surface)
+                            if matches!(surface.profile(), Curve2::Circle(_))) =>
                 {
                     1
                 }

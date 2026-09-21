@@ -1464,51 +1464,71 @@ mod tests {
     }
     #[test]
     fn cut_shelled_asymmetric_chamfer() {
-        let body = filleted_asymmetric_chamfer();
-        let opening = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.normal().z.abs() > 0.99 && p.origin().z.abs() < 1e-6)).unwrap().clone();
-        let body = body.shell(&[opening], 5.0).unwrap();
-        let tol = body.tolerance();
-        let profile = Profile::new(
-            Wire2::new(
-                [TrimmedCurve2::circle(
-                    Point2::new(-21.08780917145651, 5.736491377054718),
-                    32.892404807198155,
+        for thickness in [5.0, 6.0] {
+            let body = filleted_asymmetric_chamfer();
+            let opening = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.normal().z.abs() > 0.99 && p.origin().z.abs() < 1e-6)).unwrap().clone();
+            let body = body.shell(&[opening], thickness).unwrap();
+            let tol = body.tolerance();
+            let profile = Profile::new(
+                Wire2::new(
+                    [TrimmedCurve2::circle(
+                        Point2::new(-21.08780917145651, 5.736491377054718),
+                        32.892404807198155,
+                    )
+                    .unwrap()],
+                    tol,
                 )
-                .unwrap()],
+                .unwrap(),
+                [],
                 tol,
             )
-            .unwrap(),
-            [],
-            tol,
-        )
-        .unwrap();
-        let mut previous_volume = body.volume();
-        for distance in [5.0, 10.0, 10.99, 11.0, 11.01, 12.0, 15.0, 20.0, 30.0, 40.0] {
-            let tool = profile
-                .extrude(upper(39.0), Vec3::new(0.0, 0.0, -distance))
-                .unwrap();
-            let cut = body
-                .difference(&tool)
-                .unwrap_or_else(|e| panic!("distance {distance}: {e}"));
-            assert_eq!(cut.solids().len(), if distance < 39.0 { 1 } else { 2 });
-            assert!(cut.volume() > 0.0 && cut.volume() < body.volume());
-            assert!(cut.volume() <= previous_volume + 1e-5);
-            previous_volume = cut.volume();
-            mesh(&cut);
-            if [10.0, 12.0, 20.0].contains(&distance) {
-                let edge = cut
-                    .edges()
-                    .find(|e| matches!(e.curve(), Curve3::Circle(c)
-                        if (c.center().z - 39.0).abs() < 1e-6
-                            && (c.radius() - 32.892404807198155).abs() < 1e-6))
-                    .unwrap()
-                    .clone();
-                let rounded = cut
-                    .fillet(&[edge], 1.0)
-                    .unwrap_or_else(|e| panic!("fillet distance {distance}: {e}"));
-                assert_eq!(rounded.solids().len(), 1);
-                assert!(rounded.volume() > 0.0 && rounded.volume() < cut.volume());
-                mesh(&rounded);
+            .unwrap();
+            let mut previous_volume = body.volume();
+            let distances: &[f64] = if thickness == 5.0 {
+                &[5.0, 10.0, 10.99, 11.0, 11.01, 12.0, 15.0, 20.0, 30.0, 40.0]
+            } else {
+                &[14.0]
+            };
+            for &distance in distances {
+                let tool = profile
+                    .extrude(upper(34.0 + thickness), Vec3::new(0.0, 0.0, -distance))
+                    .unwrap();
+                let cut = body
+                    .difference(&tool)
+                    .unwrap_or_else(|e| panic!("distance {distance}: {e}"));
+                assert_eq!(
+                    cut.solids().len(),
+                    if distance < (34.0 + thickness) { 1 } else { 2 }
+                );
+                assert!(cut.volume() > 0.0 && cut.volume() < body.volume());
+                assert!(cut.volume() <= previous_volume + 1e-5);
+                previous_volume = cut.volume();
+                mesh(&cut);
+                if thickness == 5.0 && [10.0, 12.0, 20.0].contains(&distance)
+                    || thickness == 6.0 && distance == 14.0
+                {
+                    for radius in if thickness == 5.0 {
+                        vec![1.0]
+                    } else {
+                        vec![0.05, 0.1, 0.25]
+                    } {
+                        let edge = cut
+                            .edges()
+                            .find(|e| {
+                                matches!(e.curve(), Curve3::Circle(c)
+                        if (c.center().z - (34.0 + thickness)).abs() < 1e-6
+                            && (c.radius() - 32.892404807198155).abs() < 1e-6)
+                            })
+                            .unwrap()
+                            .clone();
+                        let rounded = cut
+                            .fillet(&[edge], radius)
+                            .unwrap_or_else(|e| panic!("shell {thickness}, cut {distance}, fillet {radius}: {e}"));
+                        assert_eq!(rounded.solids().len(), 1);
+                        assert!(rounded.volume() > 0.0 && rounded.volume() < cut.volume());
+                        mesh(&rounded);
+                    }
+                }
             }
         }
     }

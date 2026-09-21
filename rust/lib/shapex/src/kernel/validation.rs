@@ -87,7 +87,71 @@ pub(crate) fn validate_structure(
         validate_shell_euler_characteristic(topology, &mut report);
     }
     validate_geometry(topology, tolerance, mode, &mut report);
+    if mode.is_published() {
+        validate_planar_face_regions(topology, tolerance, &mut report);
+    }
     report
+}
+
+/// A closed edge graph and correctly wound loops do not guarantee a valid
+/// trimmed face: a hole can cross or lie outside its outer boundary. Validate
+/// exact planar p-curves even when the rest of the body contains curved faces.
+fn validate_planar_face_regions(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    report: &mut ValidationReport,
+) {
+    for (_, face) in topology.faces() {
+        let super::Surface3::Plane(plane) = face.surface() else {
+            continue;
+        };
+        let e = plane.u().magnitude2();
+        let f = plane.u().dot(plane.v());
+        let g = plane.v().magnitude2();
+        let minimum_metric = ((e + g - ((e - g).powi(2) + 4.0 * f * f).sqrt()) * 0.5).sqrt();
+        let uv_tolerance = ModelTolerance {
+            linear: tolerance.parameter.max(tolerance.linear / minimum_metric),
+            ..tolerance
+        };
+        let result = (|| -> KernelResult<()> {
+            let mut outer = None;
+            let mut holes = Vec::new();
+            for loop_id in face.loops() {
+                let segments = topology
+                    .loop_coedges(*loop_id)?
+                    .into_iter()
+                    .map(|id| {
+                        let coedge = topology.coedge(id)?;
+                        super::TrimmedCurve2::new(coedge.pcurve().clone(), coedge.range())
+                    })
+                    .collect::<KernelResult<Vec<_>>>()?;
+                let wire = super::Wire2::new(segments, uv_tolerance)?;
+                match topology.loop_(*loop_id)?.kind() {
+                    LoopKind::Outer => outer = Some(wire),
+                    LoopKind::Inner => holes.push(wire),
+                }
+            }
+            let outer = outer.ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "planar face has no outer boundary",
+                )
+            })?;
+            super::Profile::new(outer, holes, uv_tolerance)?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            for diagnostic in error.diagnostics() {
+                report.error(
+                    Diagnostic::new(
+                        DiagnosticKind::GeometryInvariant,
+                        format!("invalid planar face region: {}", diagnostic.message),
+                    )
+                    .with_entity(face.name),
+                );
+            }
+        }
+    }
 }
 
 fn validate_physical_volumes(

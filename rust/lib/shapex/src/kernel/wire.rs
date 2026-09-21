@@ -29,9 +29,12 @@ impl TrimmedCurve2 {
             .map(|period| (range.span().abs() - period).abs() <= f64::EPSILON * 64.0)
             .unwrap_or(false);
         if !closed_period && start == end {
-            // A clamped NURBS can describe a closed loop without a periodic
-            // basis. Distinguish that valid trim from a collapsed curve.
-            let closed_nurbs = if matches!(curve, Curve2::Nurbs(_)) {
+            // A spline or a retained surface p-curve can describe a closed
+            // loop without a periodic basis. Distinguish it from a collapse.
+            let closed_curve = if matches!(
+                curve,
+                Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)
+            ) {
                 let mut distinct = false;
                 for fraction in [0.25, 0.5, 0.75] {
                     distinct |=
@@ -41,7 +44,7 @@ impl TrimmedCurve2 {
             } else {
                 false
             };
-            if !closed_nurbs {
+            if !closed_curve {
                 return Err(invalid("an open trimmed curve needs distinct endpoints"));
             }
         }
@@ -806,6 +809,26 @@ fn line_line_intersection(
     let cross = |left: Vec2, right: Vec2| left.x * right.y - left.y * right.x;
     let denominator = cross(b - a, d - c);
     if denominator.abs() <= tolerance.linear.powi(2) {
+        let direction = b - a;
+        let length = direction.magnitude();
+        let unit = direction / length;
+        let c_distance = (c - a).dot(unit);
+        let d_distance = (d - a).dot(unit);
+        let low = 0.0_f64.max(c_distance.min(d_distance));
+        let high = length.min(c_distance.max(d_distance));
+        if high - low <= tolerance.linear {
+            let point = a + unit * ((low + high) * 0.5);
+            return Ok(CurvePairIntersection {
+                hits: vec![CurvePairHit {
+                    point,
+                    first_parameter: first.range().start
+                        + first.range().span() * (point - a).dot(direction) / direction.magnitude2(),
+                    second_parameter: second.range().start
+                        + second.range().span() * (point - c).dot(d - c) / (d - c).magnitude2(),
+                }],
+                coincident: false,
+            });
+        }
         return Ok(CurvePairIntersection {
             coincident: true,
             ..Default::default()

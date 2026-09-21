@@ -1431,6 +1431,101 @@ mod tests {
     }
 
     #[test]
+    fn oversized_shell_rim_fillet_document_23() {
+        // untitled(23).cad: 70 x 50 x 34, an 11 mm / 55 degree chamfer,
+        // six 6 mm fillets, a rounded 6 mm outward shell, then its bottom rim.
+        let x0 = -28.352029411716757;
+        let y0 = -22.437515961363786;
+        let x1 = x0 + 70.0;
+        let y1 = y0 + 50.0;
+        let body = rectangle(x0, y0, 70.0, 50.0)
+            .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 34.0))
+            .unwrap();
+        let edge = body
+            .edges()
+            .find(|e| {
+                e.endpoints()
+                    .unwrap()
+                    .iter()
+                    .all(|p| (p.x - x1).abs() < 1e-6 && (p.y - y0).abs() < 1e-6)
+            })
+            .unwrap()
+            .clone();
+        let reference = edge
+            .connected_faces()
+            .unwrap()
+            .into_iter()
+            .find(|f| {
+                f.surface()
+                    .project(Point3::new(0.0, y0, 0.0), body.tolerance())
+                    .unwrap()
+                    .distance
+                    < 1e-6
+            })
+            .unwrap();
+        let body = body
+            .chamfer_with_options(
+                &[edge],
+                &[reference],
+                11.0,
+                ChamferMode::DistanceAngle(55.0_f64.to_radians()),
+                true,
+            )
+            .unwrap();
+        let edges = body
+            .edges()
+            .filter(|e| {
+                let p = e.endpoints().unwrap();
+                let top = p.iter().all(|p| (p.z - 34.0).abs() < 1e-6);
+                (top && p.iter().all(|p| p.x > x1 - 17.0 || p.y < y0 + 1.0))
+                    || (p[0].z - p[1].z).abs() > 33.0
+                        && (p[0].x > x1 - 17.0 && p[0].y < y0 + 17.0
+                            || p[0].x < x0 + 1e-6 && p[0].y > y1 - 1e-6)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(edges.len(), 6);
+        let body = body.fillet(&edges, 6.0).unwrap();
+        let opening = body
+            .faces()
+            .find(|f| {
+                matches!(f.surface(), Surface3::Plane(p)
+            if p.normal().z.abs() > 0.99 && p.origin().z.abs() < 1e-6)
+            })
+            .unwrap()
+            .clone();
+        let body = body.shell_with_join(&[opening], 6.0, "rounded").unwrap();
+        let edge = body
+            .edges()
+            .find(|e| {
+                let p = e.endpoints().unwrap();
+                p.iter()
+                    .all(|p| p.z.abs() < 1e-6 && p.x > x1 - 17.0 && p.y < y0 + 17.0)
+                    && matches!(e.curve(), Curve3::Line(_))
+                    && (p[0].x - p[1].x).abs() > 1.0
+                    && (p[0].y - p[1].y).abs() > 1.0
+            })
+            .unwrap()
+            .clone();
+        let original_volume = body.volume();
+        for radius in [1.0, 4.0, 5.99, 6.0, 6.01, 7.0, 11.0, 12.0] {
+            let result = body.fillet(&[edge.clone()], radius);
+            if radius < 6.0 {
+                mesh(&result.unwrap());
+            } else {
+                let error =
+                    result.expect_err(&format!("radius {radius} published invalid geometry"));
+                assert!(error
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.kind
+                        == super::super::DiagnosticKind::GeometryInvariant));
+            }
+            assert_eq!(body.volume(), original_volume);
+        }
+    }
+
+    #[test]
     fn shell_filleted_asymmetric_chamfer() {
         let body = filleted_asymmetric_chamfer();
         for face in body

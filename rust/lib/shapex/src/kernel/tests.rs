@@ -242,7 +242,9 @@ fn join_offset_cylinder_shell_from_open_end() {
     // Round the outer bottom rim, then chamfer the two inner rim edges.
     // Their junction creates a revolved corner with a collapsed boundary.
     let rim = joined.edges().next().unwrap().clone();
-    let filleted = joined.fillet(&[rim], 4.0).unwrap();
+    // A 4 mm fillet would cross the inner boundary of the 3 mm shell wall.
+    assert!(joined.fillet(&[rim.clone()], 4.0).is_err());
+    let filleted = joined.fillet(&[rim], 0.25).unwrap();
     let edges: Vec<_> = filleted.edges().skip(1).take(2).cloned().collect();
     for distance in [1.0, 2.5] {
         let chamfered = filleted

@@ -142,9 +142,8 @@
   function solve() {
     const activeHandle = props.activeHandle
     const releasedHandle = !activeHandle && props.sketch.solveHandle
-    const handle = activeHandle || releasedHandle
-    props.sketch.solve(props.document.top(), handle, {
-      refreshFullyConstrained: !!releasedHandle,
+    props.sketch.solve(props.document.top(), activeHandle, {
+      applyResults: !releasedHandle,
     })
   }
 

@@ -530,7 +530,7 @@ export default class Snapper {
     if(snapTarget && snapTarget.pointTarget) {
       const pointTarget = snapTarget.pointTarget
       const snapVec = pointTarget.point.clone()
-      this.snapped = { x: snapVec, y: snapVec, pointTarget }
+      this.snapped = { point: snapVec, x: snapVec, y: snapVec, pointTarget }
       if(tangent && tangent.point.almost(snapVec)) this.showTangentSnap(tangent)
       this.showSnapGuides(this.guidesAtPoint(guides, snapVec), snapVec)
       this.snapped.x = snapVec
@@ -541,7 +541,7 @@ export default class Snapper {
 
     if(snapTarget && snapTarget.elem) {
       if(tangent) {
-        this.snapped = { curve: snapTarget.elem }
+        this.snapped = { curve: snapTarget.elem, point: tangent.point }
         this.showTangentSnap(tangent)
         this.showSnapGuides(this.guidesAtPoint(guides, tangent.point), tangent.point)
         this.setSnapAnchor(tangent.point, 'tangent-' + tangent.elem.id)
@@ -549,7 +549,7 @@ export default class Snapper {
       }
       const guideSnap = this.closestGuideSnap(guides, screenVec, snapTarget.elem)
       const snapVec = guideSnap ? guideSnap.point : snapTarget.point
-      this.snapped = { curve: snapTarget.elem }
+      this.snapped = { curve: snapTarget.elem, point: snapVec }
       if(guideSnap) this.showSnapGuides(guideSnap.guides, snapVec)
       this.setSnapAnchor(snapVec, 'curve-' + snapTarget.elem.id)
       return snapVec

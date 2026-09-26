@@ -765,9 +765,8 @@
         if(!this.regionsDirty && !force) return
         this.updateSketch()
         if(this.document.activeSketch) {
-          // Vue processes the final solve after activeHandle is cleared. Keep
-          // the just-dragged handle available so releasing the pointer does
-          // not let under-constrained geometry drift to a different solution.
+          // Mark the release so Vue refreshes constraint status and profiles
+          // without applying another solution to the accepted drag geometry.
           this.document.activeSketch.solveHandle = solveHandle
           this.document.activeSketch.profileUpdateNeeded = true
         }

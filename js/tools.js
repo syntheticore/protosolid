@@ -150,15 +150,15 @@ function pointTargetsAtPosition(sketch, position, excludedElem) {
   )
 }
 
-function constrainCoincidentPoints(sketch, elem, index, targetElem, targetIndex) {
-  if(elem instanceof SketchPoint && sketch.dissolvePoint(elem, targetElem, targetIndex)) return elem
-  if(targetElem instanceof SketchPoint && sketch.dissolvePoint(targetElem, elem, index)) return targetElem
+function constrainCoincidentPoints(sketch, elem, index, targetElem, targetIndex, preservePoints=false) {
+  if(!preservePoints && elem instanceof SketchPoint && sketch.dissolvePoint(elem, targetElem, targetIndex)) return elem
+  if(!preservePoints && targetElem instanceof SketchPoint && sketch.dissolvePoint(targetElem, elem, index)) return targetElem
   return sketch.addConstraint(
     new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(targetElem, targetIndex))
   )
 }
 
-function addCapturedSnapConstraint(sketch, snap, elem, index) {
+function addCapturedSnapConstraint(sketch, snap, elem, index, preservePoints=false) {
   if(!isConstrainablePoint(elem, index)) return
 
   // Explicit points retain priority even if another overlapping target won
@@ -167,13 +167,13 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
   const positionTargets = pointTargetsAtPosition(sketch, position, elem)
   const explicitTarget = positionTargets.find(target => target.elem instanceof SketchPoint)
   if(explicitTarget) return constrainCoincidentPoints(
-    sketch, elem, index, explicitTarget.elem, explicitTarget.index
+    sketch, elem, index, explicitTarget.elem, explicitTarget.index, preservePoints
   )
 
   if(snap && snap.intersection) {
     const point = sketch.findOrCreateIntersectionPoint(snap.intersection, snap.point)
     if(point == elem) return point
-    return constrainCoincidentPoints(sketch, elem, index, point, 0)
+    return constrainCoincidentPoints(sketch, elem, index, point, 0, preservePoints)
   }
   if(snap && snap.midpoint && snap.elem instanceof Line && snap.elem != elem) return sketch.addConstraint(
     new MidpointConstraint(new ElemRef(elem, index), snap.elem)
@@ -194,7 +194,7 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
         new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(target.elem, target.index))
       )
     }
-    return constrainCoincidentPoints(sketch, elem, index, snap.elem, snap.index)
+    return constrainCoincidentPoints(sketch, elem, index, snap.elem, snap.index, preservePoints)
   }
 
   // Only use another coincident handle as a positional fallback when no
@@ -202,7 +202,7 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
   // can mask the point the user just snapped to.
   const positionTarget = positionTargets[0]
   if(positionTarget) return constrainCoincidentPoints(
-    sketch, elem, index, positionTarget.elem, positionTarget.index
+    sketch, elem, index, positionTarget.elem, positionTarget.index, preservePoints
   )
 }
 
@@ -592,20 +592,16 @@ export class ManipulationTool extends HighlightTool {
         selectedElements.map(elem => ({
           elem,
           handles: elem.handles().map(handle => handle.clone()),
-          radius: elem.radius,
         }))
         : null
       this.curveDrag = {
-        elem: object,
         pointer: vec.clone(),
         coords: coords.clone(),
         handles: object.handles().map(handle => handle.clone()),
         group,
       }
-      // Reuse the solver's temporary pointer-driving constraint. Lines use
-      // one endpoint while circles and arcs use their center; the remaining
-      // parameters start from the dragged geometry and are then allowed to
-      // respond to the sketch's constraints.
+      // Keep the pointer gesture separate from the sketch. mouseMove supplies
+      // point or radius objectives and the solver commits accepted geometry.
       this.viewport.activeHandle = {
         type: 'curve',
         elem: object,
@@ -634,7 +630,6 @@ export class ManipulationTool extends HighlightTool {
     this.pointerDown = false
     const boxDrag = this.boxDrag
     const boxSelecting = boxDrag && coords.distanceTo(boxDrag.start) > dragThreshold
-    // this.mouseMove(vec, coords)
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'
@@ -645,13 +640,19 @@ export class ManipulationTool extends HighlightTool {
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
     if(sketch && handle && !handle.curveDrag) {
-      addCapturedSnapConstraint(sketch, captureSnap(this.viewport.snapper), handle.elem, handle.index)
-      const replacement = handle.elem.dissolvedTo
-      if(replacement && !sketch.elements.includes(handle.elem)) {
-        // Viewport keeps this handle for the post-drag solve. Redirect it so
-        // the solver does not receive the explicit point that was removed.
-        handle.elem = replacement.elem
-        handle.index = replacement.index
+      const snap = captureSnap(this.viewport.snapper)
+      const position = handle.elem.handles()[handle.index]
+      // A blocked pointer target must not create a constraint at a position
+      // the geometry never reached. Drag release never dissolves points.
+      if(snap?.point && position.distanceTo(snap.point) <= EPSILON) {
+        const constraints = [...sketch.constraints]
+        const elements = [...sketch.elements]
+        addCapturedSnapConstraint(sketch, snap, handle.elem, handle.index, true)
+        if(sketch.solve(this.viewport.document.top(), undefined, { applyResults: false }) === false) {
+          sketch.constraints = constraints
+          sketch.elements.filter(elem => !elements.includes(elem)).forEach(elem => elem.clear())
+          sketch.elements = elements
+        }
       }
     }
     if(boxSelecting) this.selectBox(boxDrag.start, coords)
@@ -688,41 +689,28 @@ export class ManipulationTool extends HighlightTool {
       const originalHandles = this.curveDrag.handles
       if(this.curveDrag.group) {
         const delta = vec.clone().sub(this.curveDrag.pointer)
-        this.curveDrag.group.forEach(item => {
-          const handles = item.handles.map(point => point.clone().add(delta))
-          if(item.elem instanceof Arc) {
-            item.elem.setSolvedHandles(handles, item.radius)
-          } else {
-            item.elem.setHandles(handles, false)
-          }
-        })
+        handle.targets = this.curveDrag.group.flatMap(item => item.handles.map((point, index) => ({
+          elem: item.elem, index, point: point.clone().add(delta),
+        })))
       } else if(handle.elem instanceof Line) {
         const delta = vec.clone().sub(this.curveDrag.pointer)
-        handle.elem.setHandles(originalHandles.map(point => point.clone().add(delta)), false)
+        handle.targets = originalHandles.map((point, index) => ({
+          elem: handle.elem, index, point: point.clone().add(delta),
+        }))
       } else {
         const center = originalHandles[0].clone()
         const radius = center.distanceTo(vec)
         if(radius <= EPSILON) return
-        if(handle.elem instanceof Arc) {
-          const endpoints = originalHandles.slice(1).map(point =>
-            point.clone().sub(center).normalize().multiplyScalar(radius).add(center)
-          )
-          handle.elem.setSolvedHandles([center, ...endpoints], radius)
-        } else {
-          handle.elem.setHandles([center, vec.clone()], false)
-        }
+        handle.targets = [
+          { elem: handle.elem, index: 0, point: center },
+          { elem: handle.elem, radius },
+        ]
       }
       this.viewport.updateSketch(true)
 
     // Drag Handles
     } else if(handle) {
-      if(handle.elem instanceof Arc && handle.index > 0) {
-        handle.elem.setEndpoint(handle.index, vec)
-      } else {
-        let handles = handle.elem.handles()
-        handles[handle.index] = vec//.toArray()
-        handle.elem.setHandles(handles, false)
-      }
+      handle.targets = [{ elem: handle.elem, index: handle.index, point: vec.clone() }]
       this.viewport.updateSketch(true)
 
     // Drag Dimensions

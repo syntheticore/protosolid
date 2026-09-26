@@ -1973,7 +1973,16 @@ export class OffsetTool extends HighlightTool {
 export class DimensionTool extends HighlightTool {
   static icon = 'ruler'
 
-  acceptsInput(item) { return !(item instanceof OffsetCurve) }
+  acceptsInput(item) {
+    const isPoint = item instanceof ElemRef && item.index !== undefined
+    const first = this.items[0]
+    if(first instanceof ElemRef) return isPoint || item instanceof Circle
+    if(first instanceof Line) return item instanceof Line
+    if(first instanceof Circle) {
+      return item instanceof Circle || (isPoint && item.curve() != first)
+    }
+    return isPoint || item instanceof Line || item instanceof Circle || item instanceof Arc
+  }
 
   constructor(component, viewport, sketch) {
     super(component, viewport, ['curve', 'point'])
@@ -1988,10 +1997,6 @@ export class DimensionTool extends HighlightTool {
     if(this.items.length == 0 ||
       (!this.isReadyToPlace() && !(this.items.length == 1 && this.items[0] instanceof Circle))) {
       const curve = await this.getObject(coords)
-      // if(!curve || !(curve instanceof Line)) {
-      //   this.items = []
-      //   return
-      // }
       if(!curve) return
       this.items.push(curve)
       if(this.canPlaceDimension()) this.updatePreview(vec)

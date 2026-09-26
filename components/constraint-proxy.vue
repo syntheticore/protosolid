@@ -138,7 +138,7 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, EqualConstraint } from '../js/core/sketch.js'
   import { Line, Circle, Arc } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
   import { tangentPoint } from '../js/three/constraint-icons.js'
@@ -217,6 +217,13 @@
       pos: transformPosition(tangentPoint(props.constraint), sketch),
       offset: { x: 11, y: -11 },
     }]
+
+    if(props.constraint instanceof EqualConstraint) return props.constraint.items.map(item => {
+      const curve = item.curve()
+      return {
+        pos: transformPosition(curve instanceof Line ? curve.midpoint() : curve.sample(0.5), sketch),
+      }
+    })
 
     if(props.constraint instanceof TouchConstraint ||
       props.constraint instanceof MidpointConstraint ||

@@ -233,23 +233,13 @@
             Volume: {
               title: 'Volume',
               unit: 'cm³',
-              value: item.compound.volume() / 1000.0,
-            },
-            ...item.children.length && { TotalVolume: {
-              title: 'Total Volume',
-              unit: 'cm³',
               value: item.getVolume() / 1000.0,
-            } },
+            },
             Area: {
               title: 'Surface Area',
               unit: 'cm²',
-              value: item.compound.area() / 100.0,
-            },
-            ...item.children.length && { TotalArea: {
-              title: 'Total Surface Area',
-              unit: 'cm²',
               value: item.getArea() / 100.0,
-            } },
+            },
           }
         } else if(type == 'Line' || type == 'Spline') {
           return {

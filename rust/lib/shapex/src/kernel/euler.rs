@@ -134,6 +134,7 @@ pub(crate) struct BrepPatchLoop {
 
 #[derive(Debug, Clone)]
 pub(crate) struct BrepPatch {
+    pub sources: Vec<super::PersistentId>,
     pub surface: Surface3,
     pub orientation: FaceOrientation,
     pub loops: Vec<BrepPatchLoop>,
@@ -1229,6 +1230,18 @@ impl<'kernel> EulerTransaction<'kernel> {
         }
         self.history
             .changed(keep_face_name, ChangeKind::Merged, [keep_face_name]);
+        // A merge within a primitive's construction keeps its authored role,
+        // such as the extrusion side formed by joining two half cylinders.
+        if !matches!(
+            self.history.origin(keep_face_name),
+            Some(super::Origin::Created { role: Some(_) })
+        ) {
+            let sources = [keep_face_name, remove_face_name]
+                .into_iter()
+                .flat_map(|name| self.history.source_roots(name))
+                .collect::<BTreeSet<_>>();
+            self.history.derived(keep_face_name, sources, "kef.face");
+        }
         Ok(KefResult {
             surviving_face: keep_face,
             loop_id: keep_loop,
@@ -2623,6 +2636,10 @@ impl<'kernel> EulerTransaction<'kernel> {
                 patch.surface.clone(),
                 patch.orientation,
             )?;
+            if !patch.sources.is_empty() {
+                self.history
+                    .derived(face_name, patch.sources.iter().copied(), "brep.face");
+            }
             let outer_index = patch
                 .loops
                 .iter()
@@ -5238,7 +5255,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         self.finish().map(|committed| committed.history)
     }
 
-    pub(crate) fn finish(self) -> KernelResult<CommittedOperation> {
+    pub(crate) fn finish(mut self) -> KernelResult<CommittedOperation> {
         super::validation::validate_structure(
             &self.working,
             self.kernel.tolerance,
@@ -5272,6 +5289,8 @@ impl<'kernel> EulerTransaction<'kernel> {
                 "a transaction may publish only topology owned by its operation namespace",
             ));
         }
+        self.history
+            .complete_retained(&self.kernel.topology, &self.working)?;
         self.kernel.topology = self.working;
         Ok(CommittedOperation {
             operation: self.namespace,

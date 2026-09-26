@@ -368,6 +368,7 @@ impl Profile {
                     FaceOrientation::Reversed
                 };
                 let mut patch = BrepPatch {
+                    sources: Vec::new(),
                     surface: surface.clone(),
                     orientation,
                     loops: vec![BrepPatchLoop {

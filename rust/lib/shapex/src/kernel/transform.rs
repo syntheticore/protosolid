@@ -116,8 +116,19 @@ impl Kernel {
         body: super::BodyId,
         transform: RigidTransform3,
     ) -> KernelResult<OperationHistory> {
+        let mut history = OperationHistory::default();
+        let kind = if transform == RigidTransform3::identity() {
+            ChangeKind::Unchanged
+        } else {
+            ChangeKind::Modified
+        };
+        for name in self.topology.body_entity_names(body)? {
+            history.changed(name, kind, [name]);
+        }
+        if kind == ChangeKind::Unchanged {
+            return Ok(history);
+        }
         let mut working = self.topology.clone();
-        let entity_names = working.body_entity_names(body)?;
         let shell_ids = working.body(body)?.shells().to_vec();
         let mut faces = BTreeSet::<FaceId>::new();
         let mut edges = BTreeSet::new();
@@ -157,10 +168,6 @@ impl Kernel {
         super::validation::validate(&working, self.tolerance, ValidationMode::Published)
             .into_result()?;
         self.topology = working;
-        let mut history = OperationHistory::default();
-        for name in entity_names {
-            history.changed(name, ChangeKind::Modified, [name]);
-        }
         Ok(history)
     }
 }

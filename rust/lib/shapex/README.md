@@ -47,7 +47,7 @@ let face = solid.faces().next().unwrap().clone();
 let first_cut = solid.difference(&first_tool)?;
 let second_cut = first_cut.difference(&second_tool)?;
 match second_cut.resolve(&face) {
-    Resolution::Preserved(face) => { /* same semantic entity and revision */ }
+    Resolution::Preserved(face) => { /* history retains this source revision */ }
     Resolution::Modified(face) => { /* same semantic entity, new revision */ }
     Resolution::Split(faces) => { /* one source has several descendants */ }
     Resolution::Merged(face) => { /* several sources contributed */ }

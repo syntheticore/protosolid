@@ -162,22 +162,22 @@
   })
 
   function markSectionFaces(compound, planes, originalFaces) {
+    const unchangedFaces = compound.preservedFaces(originalFaces)
     const sectionPlanes = planes.map(plane => ({
       origin: new THREE.Vector3().setFromMatrixPosition(plane),
       normal: new THREE.Vector3().setFromMatrixColumn(plane, 2).normalize(),
     }))
     compound.solids().flatMap(solid => solid.faces()).forEach(face => {
-      // A pre-existing face may lie exactly on the cutting plane (notably when
-      // sketching on a face). Only newly generated cut caps should be hatched.
-      if(originalFaces.some(original => original.isSame(face))) return
       const facePlane = face.getPlane()
       if(!facePlane) return
       const origin = new THREE.Vector3().setFromMatrixPosition(facePlane)
       const normal = new THREE.Vector3().setFromMatrixColumn(facePlane, 2).normalize()
-      face.sectionSurface = sectionPlanes.some(section =>
+      const onSectionPlane = sectionPlanes.some(section =>
         Math.abs(normal.dot(section.normal)) > 1 - 1e-6 &&
         Math.abs(section.normal.dot(origin.clone().sub(section.origin))) < 1e-5
       )
+      if(!onSectionPlane) return
+      face.sectionSurface = !unchangedFaces.has(face)
     })
   }
 

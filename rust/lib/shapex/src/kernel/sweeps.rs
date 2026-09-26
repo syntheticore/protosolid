@@ -88,6 +88,7 @@ pub(super) fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelRes
         });
     }
     let mut patch = BrepPatch {
+        sources: Vec::new(),
         surface: plane.into(),
         orientation: FaceOrientation::Forward,
         loops,
@@ -290,6 +291,7 @@ pub(super) fn revolve(
                 }
                 edges.sort_by_key(|(index, _)| *index);
                 let mut patch = BrepPatch {
+                    sources: Vec::new(),
                     surface: surface.clone(),
                     orientation: FaceOrientation::Forward,
                     loops: vec![BrepPatchLoop {
@@ -628,6 +630,7 @@ fn section_cap(
         })
         .collect::<KernelResult<Vec<_>>>()?;
     let mut patch = BrepPatch {
+        sources: Vec::new(),
         surface: plane.into(),
         orientation: FaceOrientation::Forward,
         loops: vec![BrepPatchLoop {
@@ -877,6 +880,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
         }
         edges.sort_by_key(|(i, _)| *i);
         let mut patch = BrepPatch {
+            sources: Vec::new(),
             surface,
             orientation: FaceOrientation::Forward,
             loops: vec![BrepPatchLoop {
@@ -1041,6 +1045,7 @@ mod tests {
                 .map(|handle| {
                     let face = topology.face(handle.topology_id()).unwrap();
                     BrepPatch {
+                        sources: Vec::new(),
                         surface: face.surface().clone(),
                         orientation: face.orientation(),
                         loops: face

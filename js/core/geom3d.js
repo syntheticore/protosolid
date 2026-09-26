@@ -1354,6 +1354,21 @@ export class Compound extends Volumetric {
     return this
   }
 
+  // Application IDs describe ancestry. Retention is a kernel-history query.
+  preservedFaces(originalFaces) {
+    const faces = this.faces()
+    if(!this.isShapex) {
+      return new Set(faces.filter(face =>
+        originalFaces.some(original => original.geom().IsSame(face.geom()))
+      ))
+    }
+    const preservedIds = new Set(originalFaces.flatMap(original => {
+      const resolution = window.kernel.modeling.resolveFace(this.geom(), original.geom())
+      return resolution.kind == 'preserved' ? resolution.entityIds : []
+    }))
+    return new Set(faces.filter(face => preservedIds.has(face.kernelId)))
+  }
+
   inheritShapexTopology(parents, operation, featureId) {
     if(!this.isShapex) return this
     const outputFaces = this.faces()

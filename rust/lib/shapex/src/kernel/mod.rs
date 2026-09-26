@@ -15,6 +15,7 @@ mod euler;
 mod features;
 mod geometry;
 mod history;
+mod history_geometry;
 mod identity;
 mod integration;
 mod intersection;

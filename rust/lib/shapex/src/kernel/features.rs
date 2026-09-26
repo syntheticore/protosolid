@@ -1640,6 +1640,7 @@ fn rebuild_supports(
         }
         patches_by_shell.entry(face.shell()).or_default().push((
             BrepPatch {
+                sources: Vec::new(),
                 surface: surface.clone(),
                 orientation: if preserve_orientation {
                     face.orientation()
@@ -1717,6 +1718,7 @@ pub(crate) fn face_patch(topology: &Topology, face_id: FaceId, reverse: bool) ->
         });
     }
     Ok(BrepPatch {
+        sources: vec![face.name()],
         surface: face.surface().clone(),
         orientation: if reverse {
             face.orientation().reversed()
@@ -1871,6 +1873,7 @@ fn rim_face_patch(
     }
     if !removed {
         return Ok(Some(BrepPatch {
+            sources: Vec::new(),
             surface: surface.clone(),
             orientation,
             loops: original.into(),
@@ -1947,6 +1950,7 @@ fn rim_face_patch(
         ));
     }
     Ok(Some(BrepPatch {
+        sources: Vec::new(),
         surface: surface.clone(),
         orientation,
         loops,
@@ -2445,7 +2449,7 @@ pub(crate) fn split(source: &Compound, plane: Plane3, keep: &str) -> KernelResul
         return Err(invalid("split keep mode must be left, right, or both"));
     }
     if source.solids().len() == 0 {
-        return Ok(source.clone());
+        return source.unchanged();
     }
     let cutter = half_space_cutter(source, plane)?;
     match keep {
@@ -2465,7 +2469,7 @@ pub(crate) fn move_faces(
     transform: RigidTransform3,
 ) -> KernelResult<Compound> {
     if transform == RigidTransform3::identity() {
-        return Ok(source.clone());
+        return source.unchanged();
     }
     if faces.len() == source.faces().count() {
         return source.transformed(transform);
@@ -3003,7 +3007,7 @@ pub(crate) fn draft(
         ));
     }
     if angle.abs() <= source.tolerance().angular {
-        return Ok(source.clone());
+        return source.unchanged();
     }
     let tolerance = source.tolerance();
     let selected = faces

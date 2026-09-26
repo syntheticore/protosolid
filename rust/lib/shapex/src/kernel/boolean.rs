@@ -584,7 +584,7 @@ pub(crate) fn boolean_brep(
                     }
                 }
             }
-            patches.extend(arrange_face(
+            let mut arranged = arrange_face(
                 operand,
                 face.surface(),
                 compound.topology().face(face.topology_id())?.orientation(),
@@ -599,7 +599,25 @@ pub(crate) fn boolean_brep(
                 kind,
                 classification_offset,
                 tolerance,
-            )?);
+            )?;
+            for patch in &mut arranged {
+                if has_coincident_support {
+                    // A shared-support arrangement can contain several disjoint
+                    // source faces. Attribute only the trimmed regions it uses.
+                    for parent in [first, second] {
+                        for candidate in parent.faces() {
+                            if coincident_supports(&patch.surface, candidate.surface(), tolerance)?
+                                && patch_uses_face(patch, parent, candidate, tolerance)?
+                            {
+                                patch.sources.push(candidate.persistent_id());
+                            }
+                        }
+                    }
+                } else {
+                    patch.sources.push(face.persistent_id());
+                }
+            }
+            patches.extend(arranged);
         }
     }
     super::euler::conform_brep_interfaces(&mut patches, tolerance)?;
@@ -1897,6 +1915,7 @@ fn arrange_face(
                 }
             }
             patches.push(BrepPatch {
+                sources: Vec::new(),
                 surface: surface.clone(),
                 orientation,
                 loops: patch_loops,
@@ -2134,6 +2153,7 @@ fn unchanged_face_patch(
         patch_loops.push(BrepPatchLoop { kind, segments });
     }
     Ok(BrepPatch {
+        sources: Vec::new(),
         surface: surface.clone(),
         orientation: output_orientation,
         loops: patch_loops,
@@ -2354,8 +2374,12 @@ fn deduplicate_patches(
                 continue;
             }
             if patch_contains_patch(&patches[first], &samples[second], tolerance)? {
+                let sources = patches[second].sources.clone();
+                patches[first].sources.extend(sources);
                 duplicate.insert(second);
             } else if patch_contains_patch(&patches[second], &samples[first], tolerance)? {
+                let sources = patches[first].sources.clone();
+                patches[second].sources.extend(sources);
                 duplicate.insert(first);
                 break;
             }
@@ -2406,6 +2430,116 @@ pub(crate) fn coincident_supports(
         }
         _ => Ok(false),
     }
+}
+
+/// Attribute a coincident arrangement by overlap of trimmed interiors, including
+/// containment. Split probes at boundary intersections so a short overlap cannot
+/// be missed by testing only the midpoint of an entire source edge.
+fn patch_uses_face(
+    patch: &BrepPatch,
+    parent: &Compound,
+    face: &super::FaceHandle,
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
+    let boundary = patch
+        .loops
+        .iter()
+        .flat_map(|loop_| {
+            loop_
+                .segments
+                .iter()
+                .enumerate()
+                .map(move |(index, segment)| FaceCurve {
+                    curve: segment.curve.clone(),
+                    pcurve: segment.pcurve.clone(),
+                    range: segment.range,
+                    loop_end: index + 1 == loop_.segments.len(),
+                    loop_kind: loop_.kind,
+                    parameter_seam: false,
+                })
+        })
+        .collect::<Vec<_>>();
+    let mut original = boundary_curves(parent, face.topology_id())?;
+    for curve in &mut original {
+        if face.surface() != &patch.surface {
+            curve.pcurve = super::SurfaceProjectionPcurve2::new(
+                curve.curve.clone(),
+                patch.surface.clone(),
+                curve.pcurve.clone(),
+                curve.range,
+                tolerance,
+            )?
+            .into();
+        }
+    }
+    let bounds = face_parameter_bounds(&boundary, tolerance)?;
+    let original_bounds = face_parameter_bounds(&original, tolerance)?;
+    let domains = patch.surface.domains();
+    let mut offset = Vec2::new(0.0, 0.0);
+    for axis in 0..2 {
+        if let Some(period) = domains[axis].period {
+            let center = (bounds[axis].start + bounds[axis].end) * 0.5;
+            let original_center = (original_bounds[axis].start + original_bounds[axis].end) * 0.5;
+            offset[axis] = ((center - original_center) / period).round() * period;
+        }
+    }
+    // Move the complete chart together. Shifting individual seam uses can
+    // collapse a full-period region into a zero-width boundary.
+    if offset.magnitude2() != 0.0 {
+        for curve in &mut original {
+            curve.pcurve = translate_pcurve(&curve.pcurve, offset, tolerance)?;
+        }
+    }
+    let original_bounds = face_parameter_bounds(&original, tolerance)?;
+    let inside = |mut point: Point2, curves: &[FaceCurve], bounds: [ParameterRange; 2]| {
+        for axis in 0..2 {
+            if let Some(period) = domains[axis].period {
+                let center = (bounds[axis].start + bounds[axis].end) * 0.5;
+                point[axis] += ((center - point[axis]) / period).round() * period;
+            }
+        }
+        point_in_trim(point, curves)
+    };
+    for (a, ab, b, bb) in [
+        (&boundary, bounds, &original, original_bounds),
+        (&original, original_bounds, &boundary, bounds),
+    ] {
+        for curve in a.iter().filter(|curve| !curve.parameter_seam) {
+            let mut parameters = vec![curve.range.start, curve.range.end];
+            for other in b {
+                parameters.extend(
+                    curve_intersections(curve, other, tolerance)?
+                        .into_iter()
+                        .map(|(parameter, _)| parameter),
+                );
+            }
+            parameters.sort_by(f64::total_cmp);
+            parameters.dedup_by(|a, b| (*a - *b).abs() <= tolerance.parameter);
+            for interval in parameters.windows(2) {
+                let (point, tangent) = curve
+                    .pcurve
+                    .first_order((interval[0] + interval[1]) * 0.5)?;
+                if tangent.magnitude2() == 0.0 {
+                    continue;
+                }
+                let normal = Vec2::new(-tangent.y, tangent.x).normalize();
+                let value = patch.surface.evaluate(point.x, point.y)?;
+                let scale = (value.du * normal.x + value.dv * normal.y).magnitude();
+                if scale == 0.0 {
+                    continue;
+                }
+                let step =
+                    tolerance.linear_at_scale(value.point.to_vec().magnitude()) * 8.0 / scale;
+                for sign in [-1.0, 1.0] {
+                    let probe = point + normal * step * sign;
+                    if inside(probe, a, ab)? && inside(probe, b, bb)? {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
 }
 
 fn patch_contains_patch(

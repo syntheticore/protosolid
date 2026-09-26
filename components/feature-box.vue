@@ -587,6 +587,7 @@
               const refs = Array.isArray(data()) ? data() : [data()]
               refs.forEach(ref => {
                 const item = ref.getItem()
+                if(!item) return // Lost references stay editable, but have no picker position.
                 this.bus.emit('show-picker', pickerPos, this.getCenter(item, ref), color)
                 // item.free()
               })

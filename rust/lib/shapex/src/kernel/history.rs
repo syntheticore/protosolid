@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::PersistentId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeKind {
+    /// The operation retains the input revision; tolerance-sized edits do not qualify.
+    Unchanged,
     Modified,
     Split,
     Merged,
@@ -47,6 +49,40 @@ pub struct OperationHistory {
 }
 
 impl OperationHistory {
+    pub(crate) fn identity(&self, names: impl IntoIterator<Item = PersistentId>) -> Self {
+        Self {
+            changes: names
+                .into_iter()
+                .map(|name| (name, (ChangeKind::Unchanged, vec![name])))
+                .collect(),
+            origins: self.origins.clone(),
+        }
+    }
+
+    pub(crate) fn source_roots(&self, entity: PersistentId) -> BTreeSet<PersistentId> {
+        let mut pending = vec![entity];
+        let mut visited = BTreeSet::new();
+        let mut roots = BTreeSet::new();
+        while let Some(current) = pending.pop() {
+            if !visited.insert(current) {
+                continue;
+            }
+            match self.origin(current) {
+                Some(Origin::Derived { sources, .. }) if !sources.is_empty() => {
+                    pending.extend(sources.iter().copied());
+                }
+                _ => {
+                    roots.insert(current);
+                }
+            }
+        }
+        if roots.is_empty() {
+            visited
+        } else {
+            roots
+        }
+    }
+
     pub fn changes(&self) -> &BTreeMap<PersistentId, (ChangeKind, Vec<PersistentId>)> {
         &self.changes
     }

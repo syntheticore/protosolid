@@ -32,17 +32,20 @@ enum EntityKind {
 /// current result. It stores names and relationships only, never old geometry.
 #[derive(Debug, Clone, Default)]
 struct Lineage {
-    entries: BTreeMap<(EntityKind, PersistentId), LineageEntry>,
+    entries: BTreeMap<(EntityKind, PersistentId, uuid::Uuid), LineageEntry>,
 }
 
 impl Lineage {
-    fn root(current: &BTreeMap<PersistentId, EntityKind>) -> Self {
+    fn root(
+        current: &BTreeMap<PersistentId, EntityKind>,
+        revisions: &BTreeMap<PersistentId, uuid::Uuid>,
+    ) -> Self {
         Self {
             entries: current
                 .iter()
                 .map(|(name, kind)| {
                     (
-                        (*kind, *name),
+                        (*kind, *name, revisions[name]),
                         LineageEntry {
                             descendants: BTreeSet::from([*name]),
                             changed: false,
@@ -58,17 +61,18 @@ impl Lineage {
         parents: impl IntoIterator<Item = Arc<Lineage>>,
         history: &OperationHistory,
         current: &BTreeMap<PersistentId, EntityKind>,
+        revisions: &BTreeMap<PersistentId, uuid::Uuid>,
     ) -> Self {
         let parents = parents.into_iter().collect::<Vec<_>>();
         if parents.is_empty() {
-            return Self::root(current);
+            return Self::root(current, revisions);
         }
 
         let generated = generated_index(history);
-        let mut entries = BTreeMap::<(EntityKind, PersistentId), LineageEntry>::new();
+        let mut entries = BTreeMap::<(EntityKind, PersistentId, uuid::Uuid), LineageEntry>::new();
         for parent in parents {
-            for ((kind, ancestor), previous) in &parent.entries {
-                let entry = entries.entry((*kind, *ancestor)).or_default();
+            for ((kind, ancestor, revision), previous) in &parent.entries {
+                let entry = entries.entry((*kind, *ancestor, *revision)).or_default();
                 entry.changed |= previous.changed;
                 entry.merged |= previous.merged;
                 for source in &previous.descendants {
@@ -81,13 +85,14 @@ impl Lineage {
         }
 
         for (current_name, kind) in current {
-            entries
-                .entry((*kind, *current_name))
-                .or_insert_with(|| LineageEntry {
+            entries.insert(
+                (*kind, *current_name, revisions[current_name]),
+                LineageEntry {
                     descendants: BTreeSet::from([*current_name]),
                     changed: false,
                     merged: false,
-                });
+                },
+            );
         }
         Self { entries }
     }
@@ -103,33 +108,6 @@ fn generated_index(history: &OperationHistory) -> BTreeMap<PersistentId, BTreeSe
         }
     }
     generated
-}
-
-fn semantic_roots(history: &OperationHistory, entity: PersistentId) -> BTreeSet<PersistentId> {
-    let mut pending = vec![entity];
-    let mut visited = BTreeSet::new();
-    let mut roots = BTreeSet::new();
-    while let Some(current) = pending.pop() {
-        if !visited.insert(current) {
-            continue;
-        }
-        match history.origin(current) {
-            Some(Origin::Derived { sources, .. }) if !sources.is_empty() => {
-                pending.extend(sources.iter().copied());
-            }
-            _ => {
-                roots.insert(current);
-            }
-        }
-    }
-    // Imported entities can participate in cyclic provenance when a no-op
-    // Boolean preserves their persistent IDs. The visited set is the finite
-    // semantic ancestry in that case; recursive expansion would be exponential.
-    if roots.is_empty() {
-        visited
-    } else {
-        roots
-    }
 }
 
 fn semantic_edge(history: &OperationHistory, edge: &EdgeHandle) -> bool {
@@ -154,8 +132,8 @@ fn semantic_edge(history: &OperationHistory, edge: &EdgeHandle) -> bool {
     ) {
         return false;
     }
-    let first_roots = semantic_roots(history, faces[0].persistent_id());
-    let second_roots = semantic_roots(history, faces[1].persistent_id());
+    let first_roots = history.source_roots(faces[0].persistent_id());
+    let second_roots = history.source_roots(faces[1].persistent_id());
     if first_roots.is_disjoint(&second_roots) {
         return true;
     }
@@ -311,25 +289,28 @@ fn same_surface_support(
     }
 }
 
-fn same_surface_support_set(
-    first: &[Surface3],
-    second: &[Surface3],
+fn trimmed_curves_overlap(
+    first: &super::Curve3,
+    first_range: super::ParameterRange,
+    second: &super::Curve3,
+    second_range: super::ParameterRange,
     tolerance: ModelTolerance,
-) -> bool {
-    if first.len() != second.len() {
-        return false;
+) -> KernelResult<bool> {
+    for (a, ar, b, br) in [
+        (first, first_range, second, second_range),
+        (second, second_range, first, first_range),
+    ] {
+        for parameter in [ar.start, (ar.start + ar.end) * 0.5, ar.end] {
+            let projection = b.project_on_trim(a.evaluate(parameter)?.point, br, tolerance)?;
+            if projection.distance <= tolerance.linear
+                && projection.parameter > br.start.min(br.end) + tolerance.parameter
+                && projection.parameter < br.start.max(br.end) - tolerance.parameter
+            {
+                return Ok(true);
+            }
+        }
     }
-    let mut used = vec![false; second.len()];
-    first.iter().all(|surface| {
-        second
-            .iter()
-            .enumerate()
-            .find(|(index, candidate)| {
-                !used[*index] && same_surface_support(surface, candidate, tolerance)
-            })
-            .map(|(index, _)| used[index] = true)
-            .is_some()
-    })
+    Ok(false)
 }
 
 fn direct_descendants(
@@ -346,7 +327,7 @@ fn direct_descendants(
                 .copied()
                 .filter(|output| current.get(output) == Some(&kind))
                 .collect(),
-            changed: true,
+            changed: change_kind != ChangeKind::Unchanged,
             merged: change_kind == ChangeKind::Merged,
         };
     }
@@ -548,7 +529,6 @@ macro_rules! impl_resolvable {
             fn resolve_in(&self, compound: &Compound) -> Resolution<Self> {
                 resolve_entity_from(
                     &compound.lineage,
-                    &compound.revisions,
                     EntityKind::$kind,
                     self.name,
                     self.revision,
@@ -563,7 +543,6 @@ macro_rules! impl_resolvable {
             fn resolve_in_solid(&self, solid: &Solid) -> Resolution<Self> {
                 resolve_entity_from(
                     &solid.lineage,
-                    &solid.revisions,
                     EntityKind::$kind,
                     self.name,
                     self.revision,
@@ -752,28 +731,30 @@ impl Compound {
     }
 
     fn from_parts<'a>(
-        kernel: Kernel,
+        kernel: impl Into<Arc<Kernel>>,
         operation: uuid::Uuid,
         bodies: Vec<BodyId>,
         history: OperationHistory,
         certificates: BTreeMap<BodyId, PhysicalCertificate>,
         parents: impl IntoIterator<Item = &'a Compound>,
     ) -> KernelResult<Self> {
+        let kernel = kernel.into();
         let parents = parents.into_iter().collect::<Vec<_>>();
         let current_entities = body_entities(&kernel, &bodies)?;
         let current_names = current_entities.keys().copied().collect::<BTreeSet<_>>();
-        let lineage = Arc::new(Lineage::compose(
-            parents.iter().map(|parent| Arc::clone(&parent.lineage)),
-            &history,
-            &current_entities,
-        ));
         let revisions = Arc::new(compose_revisions(
             &parents,
             &history,
             &current_names,
             operation,
         ));
-        let state = Arc::new(kernel);
+        let lineage = Arc::new(Lineage::compose(
+            parents.iter().map(|parent| Arc::clone(&parent.lineage)),
+            &history,
+            &current_entities,
+            &revisions,
+        ));
+        let state = kernel;
         let history = Arc::new(history);
         let mut solids = Vec::with_capacity(bodies.len());
         for body in bodies {
@@ -864,6 +845,9 @@ impl Compound {
 
     /// Rigidly transform every solid while retaining transitive entity lineage.
     pub fn transformed(&self, transform: RigidTransform3) -> KernelResult<Self> {
+        if transform == RigidTransform3::identity() {
+            return self.unchanged();
+        }
         let mut kernel = Kernel::new(self.state.tolerance())?;
         let mut bodies = Vec::with_capacity(self.solids.len());
         for solid in &self.solids {
@@ -993,59 +977,38 @@ impl Compound {
             .flat_map(|parent| parent.vertices())
             .map(|vertex| (vertex.persistent_id(), vertex.point()))
             .collect::<BTreeMap<_, _>>();
-        let mut source_edges = BTreeMap::new();
-        for parent in parents {
-            for edge in parent.edges() {
-                source_edges.insert(
-                    edge.persistent_id(),
-                    (
-                        edge.curve().clone(),
-                        edge.connected_faces()?
-                            .into_iter()
-                            .map(|face| face.surface().clone())
-                            .collect::<Vec<_>>(),
-                    ),
-                );
-            }
-        }
-        let source_faces = parents
+        let edge_geometry = |edge: &EdgeHandle| {
+            Ok((
+                edge.persistent_id(),
+                (
+                    edge.curve().clone(),
+                    edge.state.topology().edge(edge.edge)?.range(),
+                    edge.connected_faces()?
+                        .into_iter()
+                        .map(|face| face.persistent_id())
+                        .collect::<Vec<_>>(),
+                ),
+            ))
+        };
+        let source_edges = parents
             .iter()
-            .flat_map(|parent| parent.faces())
-            .map(|face| (face.persistent_id(), face.surface().clone()))
-            .collect::<BTreeMap<_, _>>();
+            .flat_map(|parent| parent.edges())
+            .map(edge_geometry)
+            .collect::<KernelResult<BTreeMap<_, _>>>()?;
         let output_vertices = self
             .vertices()
             .map(|vertex| (vertex.persistent_id(), vertex.point()))
             .collect::<BTreeMap<_, _>>();
         let output_edges = self
             .edges()
-            .map(|edge| {
-                Ok((
-                    edge.persistent_id(),
-                    (
-                        edge.curve().clone(),
-                        edge.connected_faces()?
-                            .into_iter()
-                            .map(|face| face.surface().clone())
-                            .collect::<Vec<_>>(),
-                    ),
-                ))
-            })
+            .map(edge_geometry)
             .collect::<KernelResult<BTreeMap<_, _>>>()?;
-        let output_faces = self
-            .faces()
-            .map(|face| (face.persistent_id(), face.surface().clone()))
-            .collect::<BTreeMap<_, _>>();
-        let mut kernel = Kernel::new(tolerance)?;
+        let kernel = &self.state;
         let bodies = self
             .solids
             .iter()
-            .map(|solid| {
-                kernel
-                    .topology
-                    .import_body(solid.state.topology(), solid.body)
-            })
-            .collect::<KernelResult<Vec<_>>>()?;
+            .map(|solid| solid.body)
+            .collect::<Vec<_>>();
         let outputs = body_entities(&kernel, &bodies)?;
         let mut sources = BTreeMap::new();
         for parent in parents {
@@ -1058,62 +1021,110 @@ impl Compound {
                     .collect::<Vec<_>>(),
             )?);
         }
-        let related = |kind: EntityKind, source: PersistentId, output: PersistentId| match kind {
-            EntityKind::Vertex => source_vertices
-                .get(&source)
-                .zip(output_vertices.get(&output))
-                .is_some_and(|(first, second)| first.distance(*second) <= tolerance.linear),
-            EntityKind::Edge => source_edges
-                .get(&source)
-                .zip(output_edges.get(&output))
-                .is_some_and(|(first, second)| {
-                    same_curve_support(&first.0, &second.0, tolerance)
-                        && same_surface_support_set(&first.1, &second.1, tolerance)
-                }),
-            EntityKind::Face => source_faces
-                .get(&source)
-                .zip(output_faces.get(&output))
-                .is_some_and(|(first, second)| same_surface_support(first, second, tolerance)),
-        };
-        let mut history = OperationHistory::default();
-        for (output, kind) in &outputs {
-            let mut contributors = sources
-                .iter()
-                .filter_map(|(source, source_kind)| {
-                    (source_kind == kind && related(*kind, *source, *output)).then_some(*source)
-                })
-                .collect::<Vec<_>>();
-            if contributors.is_empty() {
-                if let Some(sources) = extra_origins.get(output) {
-                    history.derived(*output, sources.iter().copied(), role);
+        // Face builders carry their source correspondence through sewing and
+        // merging. Supplied feature origins take precedence over all inference.
+        let face_sources = self
+            .faces()
+            .map(|face| {
+                let output = face.persistent_id();
+                let ancestors = if let Some(origins) = extra_origins.get(&output) {
+                    origins.iter().copied().collect()
+                } else if sources.get(&output) == Some(&EntityKind::Face) {
+                    BTreeSet::from([output])
                 } else {
-                    history.created(*output);
+                    self.history
+                        .source_roots(output)
+                        .into_iter()
+                        .filter(|name| sources.get(name) == Some(&EntityKind::Face))
+                        .collect()
+                };
+                (output, ancestors)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let related =
+            |kind: EntityKind, source: PersistentId, output: PersistentId| -> KernelResult<bool> {
+                if let Some(origins) = extra_origins.get(&output) {
+                    return Ok(origins.contains(&source));
                 }
-            } else {
-                history.derived(*output, contributors.drain(..), role);
+                Ok(match kind {
+                    EntityKind::Vertex => {
+                        source_vertices[&source].distance(output_vertices[&output])
+                            <= tolerance.linear
+                    }
+                    EntityKind::Edge => {
+                        let first = &source_edges[&source];
+                        let second = &output_edges[&output];
+                        // One neighboring face may be replaced by a Boolean cap while
+                        // the other retains this boundary interval.
+                        same_curve_support(&first.0, &second.0, tolerance)
+                            && first.2.iter().any(|face| {
+                                second
+                                    .2
+                                    .iter()
+                                    .any(|output_face| face_sources[output_face].contains(face))
+                            })
+                            && trimmed_curves_overlap(
+                                &first.0, first.1, &second.0, second.1, tolerance,
+                            )?
+                    }
+                    EntityKind::Face => face_sources[&output].contains(&source),
+                })
+            };
+        // Compare only established pairs, once, to distinguish retention from
+        // modification. Exact comparison cannot accumulate tolerance drift.
+        let output_geometry = super::history_geometry::entities(kernel.topology());
+        let mut unchanged = BTreeSet::new();
+        let mut descendants = BTreeMap::<PersistentId, BTreeSet<PersistentId>>::new();
+        let mut contributors = BTreeMap::<PersistentId, BTreeSet<PersistentId>>::new();
+        for parent in parents {
+            let input_geometry = super::history_geometry::entities(parent.topology());
+            for (source, kind) in &sources {
+                let Some(input) = input_geometry.get(source) else {
+                    continue;
+                };
+                for (output, output_kind) in &outputs {
+                    if kind == output_kind && related(*kind, *source, *output)? {
+                        descendants.entry(*source).or_default().insert(*output);
+                        contributors.entry(*output).or_default().insert(*source);
+                        if super::history_geometry::same_entity(
+                            parent.topology(),
+                            *input,
+                            kernel.topology(),
+                            output_geometry[output],
+                        )? {
+                            unchanged.insert((*source, *output));
+                        }
+                    }
+                }
             }
         }
-        for (source, kind) in sources {
-            let descendants = outputs
-                .iter()
-                .filter_map(|(output, output_kind)| {
-                    (output_kind == &kind
-                        && (related(kind, source, *output)
-                            || extra_origins
-                                .get(output)
-                                .is_some_and(|origins| origins.contains(&source))))
-                    .then_some(*output)
-                })
-                .collect::<Vec<_>>();
-            history.changed(
-                source,
-                match descendants.len() {
-                    0 => ChangeKind::Deleted,
-                    1 => ChangeKind::Modified,
-                    _ => ChangeKind::Split,
-                },
-                descendants,
-            );
+        let mut history = OperationHistory::default();
+        for output in outputs.keys() {
+            if let Some(sources) = extra_origins.get(output) {
+                history.derived(*output, sources.iter().copied(), role);
+            } else if let Some(sources) = contributors.get(output) {
+                history.derived(*output, sources.iter().copied(), role);
+            } else {
+                history.created(*output);
+            }
+        }
+        for source in sources.keys() {
+            let descendants = descendants.remove(source).unwrap_or_default();
+            let kind = match descendants.len() {
+                0 => ChangeKind::Deleted,
+                1 => {
+                    let output = *descendants.first().unwrap();
+                    if unchanged.contains(&(*source, output)) {
+                        ChangeKind::Unchanged
+                    } else if contributors[&output].len() > 1 {
+                        ChangeKind::Merged
+                    } else {
+                        ChangeKind::Modified
+                    }
+                }
+                _ => ChangeKind::Split,
+            };
+            history.changed(*source, kind, descendants);
         }
         // This operation only rebuilds stable names and lineage around an
         // unchanged, already-published exact BREP. Preserve its analytical
@@ -1127,7 +1138,7 @@ impl Compound {
             }))
             .collect::<BTreeMap<_, _>>();
         Self::from_parts(
-            kernel,
+            Arc::clone(&self.state),
             super::identity::fresh_uuid(),
             bodies,
             history,
@@ -1204,7 +1215,7 @@ impl Compound {
             ));
         }
         if distance == 0.0 {
-            return Ok(self.clone());
+            return self.unchanged();
         }
         if distance.abs() <= self.tolerance().linear {
             return Err(KernelError::new(
@@ -1499,28 +1510,56 @@ impl Compound {
         }))
     }
 
+    /// Publish an identity operation while sharing topology, certificates and lineage.
+    pub(crate) fn unchanged(&self) -> KernelResult<Self> {
+        let mut result = self.clone();
+        let mut names = Vec::new();
+        for solid in &self.solids {
+            names.extend(self.topology().body_entity_names(solid.body)?);
+        }
+        result.history = Arc::new(self.history.identity(names));
+        for solid in &mut result.solids {
+            solid.history = Arc::clone(&result.history);
+        }
+        Ok(result)
+    }
+
     pub fn combined(&self, others: &[Self]) -> KernelResult<Self> {
+        if others.is_empty() {
+            return self.unchanged();
+        }
         let parents = std::iter::once(self)
             .chain(others.iter())
             .collect::<Vec<_>>();
         let mut kernel = Kernel::new(self.state.tolerance())?;
         let mut bodies = Vec::new();
+        let mut history = OperationHistory::default();
+        let mut certificates = BTreeMap::new();
         for parent in &parents {
             ensure_compatible_tolerances(self.state.tolerance(), parent.state.tolerance())?;
             for solid in &parent.solids {
-                bodies.push(
-                    kernel
-                        .topology
-                        .import_body(solid.state.topology(), solid.body)?,
+                let body = kernel
+                    .topology
+                    .import_body(solid.state.topology(), solid.body)?;
+                bodies.push(body);
+                certificates.insert(
+                    body,
+                    PhysicalCertificate {
+                        properties: solid.mass_properties(),
+                    },
+                );
+                history.absorb(
+                    parent
+                        .history
+                        .identity(parent.topology().body_entity_names(solid.body)?),
                 );
             }
         }
-        let certificates = certify_bodies(&kernel, &bodies)?;
         Self::from_parts(
             kernel,
             super::identity::fresh_uuid(),
             bodies,
-            OperationHistory::default(),
+            history,
             certificates,
             parents,
         )
@@ -1634,21 +1673,34 @@ impl Compound {
             .collect::<BTreeSet<_>>();
         let mut kernel = Kernel::new(self.state.tolerance())?;
         let mut bodies = Vec::new();
+        let mut history = OperationHistory::default();
+        let mut certificates = BTreeMap::new();
         for solid in &self.solids {
+            for name in self.topology().body_entity_names(solid.body)? {
+                if removed.contains(&solid.body) {
+                    history.changed(name, ChangeKind::Deleted, []);
+                } else {
+                    history.changed(name, ChangeKind::Unchanged, [name]);
+                }
+            }
             if !removed.contains(&solid.body) {
-                bodies.push(
-                    kernel
-                        .topology
-                        .import_body(solid.state.topology(), solid.body)?,
+                let body = kernel
+                    .topology
+                    .import_body(solid.state.topology(), solid.body)?;
+                bodies.push(body);
+                certificates.insert(
+                    body,
+                    PhysicalCertificate {
+                        properties: solid.mass_properties(),
+                    },
                 );
             }
         }
-        let certificates = certify_bodies(&kernel, &bodies)?;
         Self::from_parts(
             kernel,
             super::identity::fresh_uuid(),
             bodies,
-            OperationHistory::default(),
+            history,
             certificates,
             [self],
         )
@@ -1761,13 +1813,12 @@ fn combine_compounds(
 
 fn resolve_entity_from<T: Clone>(
     lineage_graph: &Lineage,
-    revisions: &BTreeMap<PersistentId, uuid::Uuid>,
     kind: EntityKind,
     source: PersistentId,
     revision: uuid::Uuid,
     find: impl Fn(PersistentId) -> Option<T>,
 ) -> Resolution<T> {
-    let Some(lineage) = lineage_graph.entries.get(&(kind, source)) else {
+    let Some(lineage) = lineage_graph.entries.get(&(kind, source, revision)) else {
         return Resolution::Unrelated;
     };
     let descendants = lineage
@@ -1777,10 +1828,8 @@ fn resolve_entity_from<T: Clone>(
         .collect::<Vec<_>>();
     match descendants.len() {
         0 => Resolution::Deleted,
+        1 if !lineage.changed => Resolution::Preserved(descendants[0].clone()),
         1 if lineage.merged => Resolution::Merged(descendants[0].clone()),
-        1 if !lineage.changed && revisions.get(&source).copied() == Some(revision) => {
-            Resolution::Preserved(descendants[0].clone())
-        }
         1 => Resolution::Modified(descendants[0].clone()),
         _ => Resolution::Split(descendants),
     }
@@ -1940,27 +1989,46 @@ fn compose_revisions(
     current: &BTreeSet<PersistentId>,
     operation: uuid::Uuid,
 ) -> BTreeMap<PersistentId, uuid::Uuid> {
-    let generated = generated_index(history);
-    current
+    let inherited = parents
         .iter()
-        .copied()
-        .map(|name| {
-            let explicitly_changed = history.changes().contains_key(&name)
-                || history
-                    .changes()
-                    .values()
-                    .any(|(_, outputs)| outputs.contains(&name))
-                || generated.values().any(|outputs| outputs.contains(&name));
-            let inherited = (!explicitly_changed)
-                .then(|| {
-                    parents
-                        .iter()
-                        .find_map(|parent| parent.revisions.get(&name).copied())
-                })
-                .flatten();
-            (name, inherited.unwrap_or(operation))
+        .flat_map(|parent| {
+            parent
+                .revisions
+                .iter()
+                .map(|(name, revision)| (*name, *revision))
         })
-        .collect()
+        .collect::<BTreeMap<_, _>>();
+    let mut revisions = current
+        .iter()
+        .map(|name| (*name, inherited.get(name).copied().unwrap_or(operation)))
+        .collect::<BTreeMap<_, _>>();
+    for output in history.origins().keys() {
+        if let Some(revision) = revisions.get_mut(output) {
+            *revision = operation;
+        }
+    }
+    for (source, (kind, outputs)) in history.changes() {
+        if *kind != ChangeKind::Unchanged {
+            for name in std::iter::once(source).chain(outputs) {
+                if let Some(revision) = revisions.get_mut(name) {
+                    *revision = operation;
+                }
+            }
+        }
+    }
+    // Only an explicit retention record can carry a revision to a fresh name.
+    for (source, (kind, outputs)) in history.changes() {
+        if *kind == ChangeKind::Unchanged {
+            if let Some(previous) = inherited.get(source) {
+                for output in outputs {
+                    if let Some(revision) = revisions.get_mut(output) {
+                        *revision = *previous;
+                    }
+                }
+            }
+        }
+    }
+    revisions
 }
 
 fn certify_bodies(

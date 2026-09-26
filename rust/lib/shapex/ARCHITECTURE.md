@@ -170,6 +170,19 @@ geometrical `IsSame` guess.
 Resolution is transitive across arbitrary descendant operations and distinguishes
 preserved, modified, split, merged, deleted, and unrelated entities. Cross-type
 generation remains available separately, such as faces generated from an edge.
+Lineage is keyed by both persistent name and source revision, so an older modified
+handle and a handle to the current face remain distinct. Operation history is
+authoritative: transforms report motion directly, Euler publication completes only
+implicit retained/deleted records, and owned results consume those records without
+reclassifying geometry. Identity operations share their immutable geometry and
+physical certificates.
+
+Reconstruction carries face sources through BREP patches, sewing, and merging.
+Feature-supplied correspondences take precedence; coincident Boolean arrangements
+attribute their trimmed regions before publication. Edge correspondence uses those
+face sources and overlapping retained curve intervals. Exact retention checks apply
+only to established source/output pairs. They are conservative about representation
+changes and never turn a tolerance-sized edit into a permanently unchanged revision.
 Semantic creation roles identify extrusion caps and the profile segment behind
 each swept face without requiring caller-supplied kernel names.
 

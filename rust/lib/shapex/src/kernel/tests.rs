@@ -3174,6 +3174,13 @@ fn move_faces_relocates_a_hole_and_rejects_crossing_the_boundary() {
         |x| RigidTransform3::new(Matrix3::identity(), Vec3::new(x, 0.0, 0.0), tolerance).unwrap();
     let moved = body.move_faces(&[wall.clone()], motion(3.0)).unwrap();
     assert!((moved.volume() - body.volume()).abs() < 1e-6);
+    // Moving the hole changes the cap trims without changing their area.
+    for cap in body.faces().filter(|face| {
+        matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().z.abs() > 0.9)
+    }) {
+        assert!(matches!(moved.resolve(cap), Resolution::Modified(_)));
+    }
     assert!(moved.faces().any(|face| matches!(face.surface(), Surface3::Cylinder(cylinder) if (cylinder.origin().x - 3.0).abs() < 1e-7)));
     moved.tessellate(TessellationOptions::default()).unwrap();
     assert!(body.move_faces(&[wall], motion(9.0)).is_err());
@@ -4080,6 +4087,26 @@ fn circular_blind_pocket_in_cylinder_uses_valid_analytic_topology() {
         )
         .expect("cutter");
 
+    for extrusion in [&cylinder, &cutter] {
+        let wall = extrusion
+            .faces()
+            .find(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+            .unwrap();
+        assert!(
+            matches!(
+                extrusion.origin(wall),
+                Some(super::Origin::Created {
+                    role: Some(super::CreationRole::ExtrusionSide {
+                        boundary: super::ProfileBoundary::Outer,
+                        segment: 0,
+                        part: 0,
+                    }),
+                })
+            ),
+            "merging periodic side faces must retain the extrusion's semantic name"
+        );
+    }
+
     let pocket = cylinder.difference(&cutter).expect("circular blind pocket");
     let expected = std::f64::consts::PI * (10.0_f64.powi(2) * 20.0 - 7.0_f64.powi(2) * 17.0);
     assert!((pocket.volume() - expected).abs() < 1.0e-6);
@@ -4216,6 +4243,268 @@ fn owned_operations_resolve_entities_transitively_and_tessellate_them() {
         second_cut.resolve(unrelated_face),
         Resolution::Unrelated
     ));
+}
+
+#[test]
+fn history_does_not_accumulate_tolerance_as_unchanged_motion() {
+    let tolerance = ModelTolerance::default();
+    let cube = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let motion = RigidTransform3::new(
+        Matrix3::identity(),
+        Vec3::unit_z() * tolerance.linear * 0.75,
+        tolerance,
+    )
+    .unwrap();
+    let once = cube.transformed(motion).unwrap();
+    let twice = once.transformed(motion).unwrap();
+    for face in cube.faces() {
+        assert!(matches!(once.resolve(face), Resolution::Modified(_)));
+        assert!(matches!(twice.resolve(face), Resolution::Modified(_)));
+    }
+    let identity = twice.transformed(RigidTransform3::identity()).unwrap();
+    for face in twice.faces() {
+        assert!(matches!(identity.resolve(face), Resolution::Preserved(_)));
+    }
+    for face in cube.faces() {
+        assert!(matches!(identity.resolve(face), Resolution::Modified(_)));
+    }
+}
+
+#[test]
+fn boolean_history_keeps_disjoint_coplanar_face_sources_separate() {
+    let block = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let slot = owned_cuboid(Point3::new(4.0, -1.0, 5.0), Point3::new(6.0, 11.0, 11.0));
+    let slotted = block.difference(&slot).unwrap();
+    let tops = slotted
+        .faces()
+        .filter(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().z.abs() > 0.9 && (p.origin().z - 10.0).abs() < 1e-7)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(tops.len(), 2);
+    let cutter = owned_cuboid(Point3::new(-1.0, 5.0, -1.0), Point3::new(11.0, 11.0, 11.0));
+    let cut = slotted.difference(&cutter).unwrap();
+    let mut descendants = std::collections::BTreeSet::new();
+    for top in &tops {
+        match cut.resolve(top) {
+            Resolution::Modified(face) => {
+                descendants.insert(face.persistent_id());
+            }
+            other => panic!("each trimmed top has one distinct descendant: {other:?}"),
+        }
+    }
+    assert_eq!(descendants.len(), 2);
+}
+
+#[test]
+fn unchanged_history_distinguishes_section_caps_from_existing_faces() {
+    let cube = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let pocket = owned_cuboid(Point3::new(3.0, 3.0, 5.0), Point3::new(7.0, 7.0, 12.0));
+    let pocketed = cube.difference(&pocket).unwrap();
+    let floor = pocketed
+        .faces()
+        .find(|f| {
+            matches!(f.surface(), Surface3::Plane(p)
+        if p.normal().z.abs() > 0.9 && (p.origin().z - 5.0).abs() < 1e-7)
+        })
+        .unwrap();
+    let bottom = pocketed
+        .faces()
+        .find(|f| {
+            matches!(f.surface(), Surface3::Plane(p)
+        if p.normal().z.abs() > 0.9 && p.origin().z.abs() < 1e-7)
+        })
+        .unwrap();
+    let section = Plane3::from_origin_normal(Point3::new(0.0, 0.0, 5.0), Vec3::unit_z()).unwrap();
+    let cut = pocketed.split(section, "left").unwrap();
+    assert!(
+        matches!(
+            cut.resolve(floor),
+            Resolution::Modified(_) | Resolution::Merged(_)
+        ),
+        "expanded floor is a cut cap"
+    );
+    assert!(
+        matches!(cut.resolve(bottom), Resolution::Preserved(_)),
+        "bottom is untouched"
+    );
+    for face in cut.faces() {
+        assert!(
+            matches!(cut.resolve(face), Resolution::Preserved(_)),
+            "current revision resolves unchanged"
+        );
+    }
+    let untouched = cut.split(section, "left").unwrap();
+    for face in cut.faces() {
+        assert!(
+            matches!(untouched.resolve(face), Resolution::Preserved(_)),
+            "repeated section is unchanged"
+        );
+    }
+    assert!(
+        matches!(
+            untouched.resolve(floor),
+            Resolution::Modified(_) | Resolution::Merged(_)
+        ),
+        "older floor stays modified"
+    );
+    assert!(
+        matches!(untouched.resolve(bottom), Resolution::Preserved(_)),
+        "unchanged ancestry is transitive"
+    );
+}
+
+#[test]
+fn unchanged_history_covers_modeling_operations() {
+    let tolerance = ModelTolerance::default();
+    let cube = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let top = cube
+        .faces()
+        .find(|f| {
+            matches!(f.surface(), Surface3::Plane(p)
+        if p.normal().z.abs() > 0.9 && (p.origin().z - 10.0).abs() < 1e-7)
+        })
+        .unwrap();
+    let bottom = cube
+        .faces()
+        .find(|f| {
+            matches!(f.surface(), Surface3::Plane(p)
+        if p.normal().z.abs() > 0.9 && p.origin().z.abs() < 1e-7)
+        })
+        .unwrap();
+    let edge = cube
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|point| (point.z - 10.0).abs() < 1e-7)
+        })
+        .unwrap();
+    let translation = RigidTransform3::new(Matrix3::identity(), Vec3::unit_z(), tolerance).unwrap();
+    let results = [
+        ("fillet", cube.fillet(&[edge.clone()], 1.0).unwrap()),
+        ("chamfer", cube.chamfer(&[edge.clone()], 1.0).unwrap()),
+        ("offset", cube.offset_faces(&[top.clone()], 1.0).unwrap()),
+        (
+            "move",
+            cube.move_faces(&[top.clone()], translation).unwrap(),
+        ),
+        (
+            "draft",
+            cube.draft(&[top.clone()], Plane3::yz(), 0.1).unwrap(),
+        ),
+    ];
+    for (operation, result) in results {
+        assert!(
+            matches!(result.resolve(bottom), Resolution::Preserved(_)),
+            "{operation}: bottom"
+        );
+        assert!(
+            !matches!(result.resolve(top), Resolution::Preserved(_)),
+            "{operation}: changed top"
+        );
+    }
+    let distant = owned_cuboid(Point3::new(30.0, 0.0, 0.0), Point3::new(40.0, 10.0, 10.0));
+    let joined = cube.union(&distant).unwrap();
+    for face in cube.faces().chain(distant.faces()) {
+        assert!(
+            matches!(joined.resolve(face), Resolution::Preserved(_)),
+            "disjoint union"
+        );
+    }
+    for (operation, result) in [
+        (
+            "zero offset",
+            cube.offset_faces(&[top.clone()], 0.0).unwrap(),
+        ),
+        (
+            "zero move",
+            cube.move_faces(&[top.clone()], RigidTransform3::identity())
+                .unwrap(),
+        ),
+        (
+            "zero draft",
+            cube.draft(&[top.clone()], Plane3::yz(), 0.0).unwrap(),
+        ),
+        ("combine", cube.combined(&[]).unwrap()),
+    ] {
+        for face in cube.faces() {
+            assert_eq!(
+                result
+                    .topology_history()
+                    .change(face.persistent_id())
+                    .unwrap()
+                    .0,
+                super::ChangeKind::Unchanged,
+                "{operation}: explicit unchanged record"
+            );
+            assert!(
+                matches!(result.resolve(face), Resolution::Preserved(_)),
+                "{operation}"
+            );
+        }
+    }
+    let removed = joined.solids().nth(1).unwrap().clone();
+    let kept = joined.solids().next().unwrap();
+    let reduced = joined.without_solids(&[removed.clone()]).unwrap();
+    for face in kept.faces() {
+        assert_eq!(
+            reduced
+                .topology_history()
+                .change(face.persistent_id())
+                .unwrap()
+                .0,
+            super::ChangeKind::Unchanged
+        );
+        assert!(matches!(reduced.resolve(face), Resolution::Preserved(_)));
+    }
+    for face in removed.faces() {
+        assert_eq!(
+            reduced
+                .topology_history()
+                .change(face.persistent_id())
+                .unwrap()
+                .0,
+            super::ChangeKind::Deleted
+        );
+        assert!(matches!(reduced.resolve(face), Resolution::Deleted));
+    }
+}
+
+#[test]
+fn unchanged_history_is_reported_by_low_level_operations() {
+    let tolerance = ModelTolerance::default();
+    let mut kernel = Kernel::new(tolerance).unwrap();
+    let mut operation = kernel.begin_operation();
+    let body = operation
+        .sphere(
+            Point3::origin(),
+            Vec3::unit_x(),
+            Vec3::unit_y(),
+            Vec3::unit_z(),
+        )
+        .unwrap();
+    operation.commit().unwrap();
+    let names = kernel.topology().body_entity_names(body).unwrap();
+    let history = kernel
+        .transform_body(body, RigidTransform3::identity())
+        .unwrap();
+    for name in &names {
+        assert_eq!(
+            history.change(*name).unwrap().0,
+            super::ChangeKind::Unchanged
+        );
+    }
+    let history = kernel.begin_operation().commit().unwrap();
+    for name in names {
+        assert_eq!(
+            history.change(name).unwrap().0,
+            super::ChangeKind::Unchanged
+        );
+    }
 }
 
 #[test]

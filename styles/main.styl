@@ -182,15 +182,18 @@ input[type="color"]
     &::after
       content: ''
       position: absolute
-      inset: 0
+      inset: -1px
       z-index: -1
       pointer-events: none
       border-radius: inherit
+      border: 1px solid transparent
       background: rgba($dark2, 0.875)
+      background-clip: padding-box
       backdrop-filter: blur(32px)
 
 .tipped
   position: relative
+
   &::before
     content: ''
     display: block
@@ -207,6 +210,7 @@ input[type="color"]
 
 .tipped-bottom
   position: relative
+
   &::before
     content: ''
     display: block
@@ -220,6 +224,7 @@ input[type="color"]
     border-right: triWidth solid transparent
     border-top: triWidth solid $dark2
     filter: drop-shadow(0 1px 0px $dark1 * 1.7) drop-shadow(0 1px 0px $dark2 * 0.5)
+
   &.bright::before
     border-top-color: $dark1
     filter: drop-shadow(0 1px 0px $dark1) drop-shadow(0 1px 0px $dark2 * 0.5)
@@ -246,6 +251,7 @@ input[type="color"]
   align-items: center
   justify-content: center
   // pointer-events: auto
+
   &::before
     position: absolute
     display: block
@@ -256,6 +262,7 @@ input[type="color"]
     height: 7px
     border-radius: 99px
     background: white
+
   &::after
     position: absolute
     display: block

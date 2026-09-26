@@ -275,7 +275,7 @@
 
     &.top
       bottom: unset
-      top: (100 + 38)px
+      top: 170px
 
   .feature-bar
     position: absolute

@@ -1333,7 +1333,16 @@ fn plane_cylinder(
             return Ok(IntersectionSet::Empty);
         }
         let phase = b.atan2(a);
-        let offset = (-c / radial).clamp(-1.0, 1.0).acos();
+        // acos magnifies roundoff near a double root into two visibly
+        // non-tangent rails. Preserve an exact tangency within arithmetic
+        // precision, without merging distinct intersections at model tolerance.
+        let roundoff = f64::EPSILON * 64.0 * cylinder.origin().to_vec().magnitude()
+            .max(plane.origin().to_vec().magnitude()).max(radial).max(1.0);
+        let offset = if (c.abs() - radial).abs() <= roundoff {
+            if c < 0.0 { 0.0 } else { std::f64::consts::PI }
+        } else {
+            (-c / radial).clamp(-1.0, 1.0).acos()
+        };
         let parameters = if offset.sin().abs() <= tolerance.angular {
             vec![phase + offset]
         } else {

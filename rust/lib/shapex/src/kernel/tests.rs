@@ -2795,6 +2795,303 @@ fn face_offset_adjusts_a_fillet_between_planar_supports() {
 }
 
 #[test]
+fn move_faces_retrims_planar_neighbors_and_preserves_history() {
+    let tolerance = ModelTolerance::default();
+    let body = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let top = body
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().z.abs() > 0.9 && (p.origin().z - 5.0).abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let top_edge = body
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|p| (p.z - 5.0).abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    for angle in [0.0, 0.1, -0.1] {
+        let rotation = Matrix3::from_angle_y(cgmath::Rad(angle));
+        let pivot = Vec3::new(10.0, 5.0, 5.0);
+        let motion = RigidTransform3::new(
+            rotation,
+            pivot - rotation * pivot + Vec3::unit_z() * 2.0,
+            tolerance,
+        )
+        .unwrap();
+        let result = body.move_faces(&[top.clone()], motion).unwrap();
+        assert_eq!(result.faces().count(), 6);
+        assert!((result.volume() - 1400.0).abs() < 1e-5);
+        assert!(matches!(
+            result.resolve(&top),
+            Resolution::Preserved(_) | Resolution::Modified(_)
+        ));
+        assert!(matches!(
+            result.resolve(&top_edge),
+            Resolution::Preserved(_) | Resolution::Modified(_)
+        ));
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+    assert!((body.volume() - 1000.0).abs() < 1e-7);
+    let side = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().x.abs() > 0.9 && p.origin().x.abs() < 1e-7)).unwrap().clone();
+    let together = body.move_faces(&[top.clone(), side], RigidTransform3::new(
+        Matrix3::identity(), Vec3::new(-2.0, 0.0, 2.0), tolerance,
+    ).unwrap()).unwrap();
+    assert!((together.volume() - 1540.0).abs() < 1e-6);
+    assert!(body
+        .move_faces(
+            &[top.clone()],
+            RigidTransform3::new(Matrix3::identity(), -Vec3::unit_z() * 6.0, tolerance).unwrap()
+        )
+        .is_err());
+    assert!(body.move_faces(&[], RigidTransform3::identity()).is_err());
+    assert!(body
+        .move_faces(&[top.clone(), top.clone()], RigidTransform3::identity())
+        .is_err());
+    let other = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    assert!(other
+        .move_faces(&[top], RigidTransform3::identity())
+        .is_err());
+}
+
+#[test]
+fn move_faces_preserves_fillet_radius_when_translating_and_rotating_a_support() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let edge = block
+        .edges()
+        .find(|edge| {
+            edge.endpoints()
+                .unwrap()
+                .iter()
+                .all(|point| point.x.abs() < 1e-7 && point.y.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    let rounded = block.fillet(&[edge], 1.0).unwrap();
+    let side = rounded
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().x.abs() > 0.9 && p.origin().x.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    for angle in [0.0, 0.1, -0.1] {
+        let motion = RigidTransform3::new(
+            Matrix3::from_angle_z(cgmath::Rad(angle)),
+            Vec3::new(-0.25, 0.0, 0.0),
+            tolerance,
+        )
+        .unwrap();
+        let result = rounded
+            .move_faces(&[side.clone()], motion)
+            .unwrap_or_else(|e| panic!("angle {angle}: {e}"));
+        assert_eq!(result.faces().count(), rounded.faces().count());
+        let blend = result
+            .faces()
+            .find_map(|face| match face.surface() {
+                Surface3::Cylinder(cylinder) => Some(*cylinder),
+                _ => None,
+            })
+            .unwrap();
+        assert!((blend.radius() - 1.0).abs() < 1e-9);
+        if angle == 0.0 {
+            let expected = 20.25 * 10.0 * 5.0 - (1.0 - std::f64::consts::PI / 4.0) * 5.0;
+            assert!((result.volume() - expected).abs() < 1e-5);
+        }
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+}
+
+#[test]
+fn move_faces_resizes_round_slot_ends_between_parallel_walls() {
+    let tolerance = ModelTolerance::default();
+    let capsule = |radius: f64| {
+        Wire2::new([
+            TrimmedCurve2::line(Point2::new(0.0, -radius), Point2::new(20.0, -radius)).unwrap(),
+            TrimmedCurve2::arc_through(
+                Point2::new(20.0, -radius), Point2::new(20.0 + radius, 0.0),
+                Point2::new(20.0, radius),
+            ).unwrap(),
+            TrimmedCurve2::line(Point2::new(20.0, radius), Point2::new(0.0, radius)).unwrap(),
+            TrimmedCurve2::arc_through(
+                Point2::new(0.0, radius), Point2::new(-radius, 0.0),
+                Point2::new(0.0, -radius),
+            ).unwrap(),
+        ], tolerance).unwrap()
+    };
+    let body = Profile::new(capsule(5.0), [capsule(2.0)], tolerance).unwrap()
+        .extrude(Plane3::xz(), -Vec3::unit_y() * 4.0).unwrap();
+    let wall = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+        if plane.normal().z.abs() > 0.9 && (plane.origin().z - 2.0).abs() < 1e-7))
+        .unwrap().clone();
+    for distance in [1.305, -1.305] {
+        let motion = RigidTransform3::new(Matrix3::identity(), Vec3::unit_z() * distance, tolerance).unwrap();
+        let result = body.move_faces(&[wall.clone()], motion).unwrap();
+        let radius = 2.0 + distance / 2.0;
+        let expected = (200.0 + std::f64::consts::PI * 25.0
+            - 40.0 * radius - std::f64::consts::PI * radius * radius) * 4.0;
+        assert!((result.volume() - expected).abs() < 1e-5);
+        assert_eq!(result.faces().count(), body.faces().count());
+        assert_eq!(result.faces().filter(|face| matches!(face.surface(), Surface3::Cylinder(cylinder)
+            if (cylinder.radius() - radius).abs() < 1e-7
+                && (cylinder.origin().z - distance / 2.0).abs() < 1e-7)).count(), 2);
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+    assert!(body.move_faces(&[wall], RigidTransform3::new(
+        Matrix3::identity(), -Vec3::unit_z() * 4.1, tolerance,
+    ).unwrap()).is_err());
+}
+
+#[test]
+fn move_faces_extends_cylinder_and_its_rounded_cap() {
+    let tolerance = ModelTolerance::default();
+    let cylinder = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 5.0).unwrap()],
+            tolerance,
+        )
+        .unwrap(),
+        [],
+        tolerance,
+    )
+    .unwrap()
+    .extrude(Plane3::xy(), Vec3::unit_z() * 10.0)
+    .unwrap();
+    for rounded in [0, 1, 2] {
+        let body = if rounded > 0 {
+            let edges = cylinder
+                .edges()
+                .filter(|edge| {
+                    matches!(edge.curve(), Curve3::Circle(_))
+                        && (rounded == 2
+                            || edge
+                                .endpoints()
+                                .unwrap()
+                                .iter()
+                                .all(|p| (p.z - 10.0).abs() < 1e-7))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            cylinder.fillet(&edges, 1.0).unwrap()
+        } else {
+            cylinder.clone()
+        };
+        let cap = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p) if (p.origin().z - 10.0).abs() < 1e-7)).unwrap().clone();
+        let result = body
+            .move_faces(
+                &[cap],
+                RigidTransform3::new(Matrix3::identity(), Vec3::unit_z() * 3.0, tolerance).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(result.faces().count(), body.faces().count());
+        assert!((result.volume() - body.volume() - 75.0 * std::f64::consts::PI).abs() < 1e-5);
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+}
+
+#[test]
+fn move_faces_updates_connected_corner_fillets() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let edges = block.edges().cloned().collect::<Vec<_>>();
+    let rounded = block.fillet(&edges, 0.5).unwrap();
+    let side = rounded
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().x.abs() > 0.9 && p.origin().x.abs() < 1e-7)
+        })
+        .unwrap()
+        .clone();
+    for angle in [0.0, 0.08, -0.08] {
+        let motion = RigidTransform3::new(
+            Matrix3::from_angle_z(cgmath::Rad(angle)),
+            -Vec3::unit_x(),
+            tolerance,
+        )
+        .unwrap();
+        let result = rounded
+            .move_faces(&[side.clone()], motion)
+            .unwrap_or_else(|e| panic!("angle {angle}: {e}"));
+        assert_eq!(result.faces().count(), rounded.faces().count());
+        assert!(result.volume() > rounded.volume());
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+}
+
+#[test]
+fn move_faces_handles_whole_bodies_and_multiple_solids() {
+    let tolerance = ModelTolerance::default();
+    let first = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
+    let second = owned_cuboid(Point3::new(10.0, 0.0, 0.0), Point3::new(12.0, 2.0, 2.0));
+    let body = first.combined(&[second]).unwrap();
+    let selected = body
+        .solids()
+        .next()
+        .unwrap()
+        .faces()
+        .cloned()
+        .collect::<Vec<_>>();
+    let motion = RigidTransform3::new(
+        Matrix3::from_angle_z(cgmath::Rad(2.0)),
+        Vec3::new(0.0, 5.0, 0.0),
+        tolerance,
+    )
+    .unwrap();
+    let moved = body.move_faces(&selected, motion).unwrap();
+    assert_eq!(moved.solids().len(), 2);
+    assert!((moved.volume() - body.volume()).abs() < 1e-7);
+    moved.tessellate(TessellationOptions::default()).unwrap();
+}
+
+#[test]
+fn move_faces_relocates_a_hole_and_rejects_crossing_the_boundary() {
+    let tolerance = ModelTolerance::default();
+    let profile = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(-10.0, -10.0),
+                Point2::new(10.0, -10.0),
+                Point2::new(10.0, 10.0),
+                Point2::new(-10.0, 10.0),
+            ],
+            tolerance,
+        )
+        .unwrap(),
+        [Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 2.0).unwrap()],
+            tolerance,
+        )
+        .unwrap()],
+        tolerance,
+    )
+    .unwrap();
+    let body = profile.extrude(Plane3::xy(), Vec3::unit_z() * 5.0).unwrap();
+    let wall = body
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+        .unwrap()
+        .clone();
+    let motion =
+        |x| RigidTransform3::new(Matrix3::identity(), Vec3::new(x, 0.0, 0.0), tolerance).unwrap();
+    let moved = body.move_faces(&[wall.clone()], motion(3.0)).unwrap();
+    assert!((moved.volume() - body.volume()).abs() < 1e-6);
+    assert!(moved.faces().any(|face| matches!(face.surface(), Surface3::Cylinder(cylinder) if (cylinder.origin().x - 3.0).abs() < 1e-7)));
+    moved.tessellate(TessellationOptions::default()).unwrap();
+    assert!(body.move_faces(&[wall], motion(9.0)).is_err());
+    assert!((body.volume() - (400.0 - 4.0 * std::f64::consts::PI) * 5.0).abs() < 1e-6);
+}
+
+#[test]
 fn analytical_shell_offsets_a_closed_cylinder() {
     let tolerance = ModelTolerance::default();
     let profile = Profile::new(

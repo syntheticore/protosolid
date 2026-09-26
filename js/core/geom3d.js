@@ -1845,7 +1845,7 @@ export class Compound extends Volumetric {
     })
   }
 
-  moveFaces(faces, transform) {
+  moveFaces(faces, transform, featureId) {
     if(this.isShapex) {
       const geometry = window.kernel.modeling.moveFaces(
         this.kernelGeometry,
@@ -1853,13 +1853,9 @@ export class Compound extends Volumetric {
         transform,
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'move-faces')
+        .inheritShapexTopology([this], 'move-faces', featureId)
     }
-    return this.replaceShapes(
-      faces,
-      faces.map(face => transformGeometry(face.geom(), transform).Shape() ),
-      'move-faces',
-    )
+    throw { type: 'error', msg: 'Moving faces requires the ShapeX kernel' }
   }
 
   split(plane, keep, featureId) {

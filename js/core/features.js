@@ -6,7 +6,7 @@ import { Sketch } from './sketch.js'
 import { Compound } from './geom3d.js'
 import { Reference, PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
-import { normalFromMatrix, ocCatch, rad } from './utils.js'
+import { normalFromMatrix, rad } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame } from '../three/gizmos.js'
@@ -2370,21 +2370,80 @@ export class MoveFeature extends Feature {
         type: 'face',
         multi: true,
       },
-      // transform: {
-      //   title: 'Transform',
-      //   type: 'transform',
-      // },
+      x: { title: 'Translate X', type: 'length', allowNegative: true },
+      y: { title: 'Translate Y', type: 'length', allowNegative: true },
+      z: { title: 'Translate Z', type: 'length', allowNegative: true },
+      rx: { title: 'Rotate X', type: 'angle', allowNegative: true },
+      ry: { title: 'Rotate Y', type: 'angle', allowNegative: true },
+      rz: { title: 'Rotate Z', type: 'angle', allowNegative: true },
     })
 
     this.faces = null
-    this.transform = new THREE.Matrix4().makeTranslation(10, 0, 0)
+    this.x = this.y = this.z = this.rx = this.ry = this.rz = 0
+    this.moveCenter = new THREE.Vector3()
+  }
+
+  moveFrame() {
+    return new THREE.Matrix4().compose(
+      this.moveCenter.clone().add(new THREE.Vector3(this.x, this.y, this.z)),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rad(this.rx), rad(this.ry), rad(this.rz))),
+      new THREE.Vector3(1, 1, 1),
+    )
   }
 
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      comp.compound = comp.compound.moveFaces(references.faces, this.transform)
+      // Use the input revision so repeated previews rotate about a fixed point.
+      this.moveCenter = references.faces.reduce((center, face) => center.add(face.center()), new THREE.Vector3())
+        .divideScalar(references.faces.length)
+      const transform = this.moveFrame().multiply(new THREE.Matrix4().makeTranslation(
+        -this.moveCenter.x, -this.moveCenter.y, -this.moveCenter.z,
+      ))
+      comp.compound = comp.compound.moveFaces(references.faces, transform, this.id)
     } catch(err) { this.error = err || this.error }
+  }
+
+  updateGizmos() {
+    if(!this.isComplete()) {
+      this.clearMoveGizmo()
+      return
+    }
+    const component = this.document.top().findChild(this.componentOccurrenceId) ||
+      this.document.top().findChild(this.componentId)
+    const frame = worldTransform(component).multiply(this.moveFrame())
+    if(this.moveGizmo) {
+      if(!this.moveGizmo().dragging) this.moveGizmo().setTransform(frame)
+      return
+    }
+    const gizmo = markRaw(new TransformGizmo(frame, desiredWorld => {
+      const current = this.document.top().findChild(this.componentOccurrenceId) ||
+        this.document.top().findChild(this.componentId)
+      const local = worldTransform(current).invert().multiply(desiredWorld)
+      const position = new THREE.Vector3().setFromMatrixPosition(local).sub(this.moveCenter)
+      const rotation = new THREE.Euler().setFromRotationMatrix(local)
+      const values = { x: position.x, y: position.y, z: position.z,
+        rx: THREE.MathUtils.radToDeg(rotation.x), ry: THREE.MathUtils.radToDeg(rotation.y),
+        rz: THREE.MathUtils.radToDeg(rotation.z) }
+      for(const [key, value] of Object.entries(values)) {
+        this.setExpression(key, null)
+        this[key] = value
+      }
+      this.document.timeline.invalidateFeature(this)
+      this.document.regenerate()
+    }))
+    this.moveGizmo = () => gizmo
+    window.alcRenderer.addGizmo(gizmo)
+  }
+
+  clearMoveGizmo() {
+    if(this.moveGizmo) window.alcRenderer.removeGizmo(this.moveGizmo())
+    this.moveGizmo = null
+  }
+
+  dispose() {
+    this.clearMoveGizmo()
+    super.dispose()
   }
 }
 

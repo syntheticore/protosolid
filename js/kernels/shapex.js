@@ -78,6 +78,7 @@ export class ShapexBackend {
       extrudeUpToFace: true,
       boolean: true,
       transform: true,
+      moveFaces: true,
       tessellate: true,
       revolve: true,
       revolveUpToFace: true,
@@ -424,7 +425,7 @@ export class ShapexBackend {
   }
 
   moveFaces(geometry, selected, matrix) {
-    return new ShapexGeometry(
+    return featureResult('face movement', () =>
       geometryValue(geometry).moveFaces(selected.map(shapexValue), this.transformValue(matrix))
     )
   }

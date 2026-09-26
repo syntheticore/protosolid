@@ -1654,11 +1654,27 @@ impl Compound {
         )
     }
 
+    /// Transform selected face supports and reconstruct their shared boundary.
+    /// Tangent blends retain their radius where possible; rounded ends between
+    /// parallel walls resize with the wall spacing.
     pub fn move_faces(
         &self,
         faces: &[FaceHandle],
         transform: RigidTransform3,
     ) -> KernelResult<Self> {
+        let selected = faces
+            .iter()
+            .map(FaceHandle::persistent_id)
+            .collect::<BTreeSet<_>>();
+        if faces.is_empty()
+            || selected.len() != faces.len()
+            || faces.iter().any(|face| !self.faces().any(|candidate| candidate == face))
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::InvalidInput,
+                "move needs distinct faces from this compound revision",
+            ));
+        }
         if self.solids.len() > 1 {
             let mut results = Vec::new();
             for solid in &self.solids {

@@ -416,7 +416,8 @@
               { title: 'Shell', feature: ShellFeature },
               { title: 'Offset', feature: OffsetFeature },
               { title: 'Boolean', feature: BooleanFeature },
-              { title: 'Move', feature: MoveFeature, hotKey: 'Q', keyCode: 81, disabled: true },
+              { title: 'Move', feature: MoveFeature, hotKey: 'Q', keyCode: 81,
+                isDisabled: () => !window.kernel?.modeling.capabilities.moveFaces },
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', feature: ChamferFeature, hotKey: 'H', keyCode: 72 },
               { title: 'Replace', feature: ReplaceFeature, disabled: true },
@@ -501,6 +502,7 @@
       },
 
       activateTool: function(tool) {
+        if(tool.disabled || tool.isDisabled?.()) return
         // Don't activate features twice
         if(this.feature && this.feature.constructor === tool.feature) return
         this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))

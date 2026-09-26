@@ -395,7 +395,11 @@ fn offset_edge(
         topology.face(*face).is_ok_and(|value| value.surface() == &supports[face])
     }) {
         return Ok(OffsetEdge {
-            curve: source.curve().clone(),
+            curve: if let Curve3::SurfaceCurve(curve) = source.curve() {
+                exact_surface_curve(curve.surface(), curve.pcurve(), source_range, tolerance)?
+            } else {
+                source.curve().clone()
+            },
             pcurves: source
                 .coedges()
                 .iter()
@@ -459,6 +463,37 @@ fn offset_edge(
                 .collect::<KernelResult<Vec<_>>>()?,
         );
     }
+    // A spherical corner meets an equal-radius cylinder on a great circle.
+    // Keep its full periodic support: rotating a neighboring face can extend
+    // the contact past the old spherical patch's bounded parameter curve.
+    let pair = match (&supports[&first], &supports[&second]) {
+        (Surface3::Sphere(sphere), Surface3::Cylinder(cylinder))
+        | (Surface3::Cylinder(cylinder), Surface3::Sphere(sphere)) => Some((sphere, cylinder)),
+        _ => None,
+    };
+    if let Some((sphere, cylinder)) = pair {
+        let axis = cylinder.axis().normalize();
+        let delta = sphere.center() - cylinder.origin();
+        if (sphere.radius() - cylinder.radius()).abs() <= tolerance.linear
+            && (delta - axis * delta.dot(axis)).magnitude() <= tolerance.linear {
+            let curve: Curve3 = super::Circle3::new(sphere.center(), cylinder.x_radius(), cylinder.y_radius(), tolerance)?.into();
+            let range = ParameterRange::new(-std::f64::consts::TAU, 2.0 * std::f64::consts::TAU)?;
+            let mut pcurves = BTreeMap::new();
+            for id in source.coedges() {
+                let face = topology.loop_(topology.coedge(*id)?.loop_id())?.face();
+                let surface = &supports[&face];
+                let mut points = (0..=96).map(|index| {
+                    let point = curve.evaluate(range.start + range.span() * index as f64 / 96.0)?.point;
+                    let uv = surface.project(point, tolerance)?.parameters;
+                    Ok(Point2::new(uv.0, uv.1))
+                }).collect::<KernelResult<Vec<_>>>()?;
+                super::intersection::unwrap_periodic_points(&mut points, surface.domains());
+                let guide = super::intersection::smooth_nurbs_guide(&points, range)?.into();
+                pcurves.insert(*id, SurfaceProjectionPcurve2::new(curve.clone(), surface.clone(), guide, range, tolerance)?.into());
+            }
+            return Ok(OffsetEdge { curve, pcurves, range: source_range });
+        }
+    }
     // Equal normal offsets of tangent faces retain their source contact curve.
     // This curve is a singular surface/surface intersection, so routing it
     // through the regular intersection tracer would either reject it or stop
@@ -481,6 +516,38 @@ fn offset_edge(
                 pcurves: shared_pcurves,
                 range: source_range,
             });
+        }
+    }
+    // Tangent contacts may move along an invariant neighbor, changing its UV
+    // coordinates while retaining an exact rail on the other support. Such a
+    // rail cannot be recovered by a transverse surface-intersection solver.
+    if !tangent_contact(topology, edge, first, second, tolerance)?.is_empty() {
+        for coedge_id in source.coedges() {
+            let coedge = topology.coedge(*coedge_id)?;
+            let face = topology.loop_(coedge.loop_id())?.face();
+            let other = if face == first { second } else { first };
+            let curve = carried_curve(face, coedge.pcurve())?;
+            let mut points = Vec::new();
+            for index in 0..=32 {
+                let parameter = source_range.start + source_range.span() * index as f64 / 32.0;
+                let point = curve.evaluate(parameter)?.point;
+                let projection = supports[&other].project(point, tolerance)?;
+                if projection.distance > tolerance.linear_at_scale(point.to_vec().magnitude()) * 8.0 {
+                    points.clear();
+                    break;
+                }
+                points.push(Point2::new(projection.parameters.0, projection.parameters.1));
+            }
+            if points.is_empty() { continue; }
+            super::intersection::unwrap_periodic_points(&mut points, supports[&other].domains());
+            let guide = super::intersection::smooth_nurbs_guide(&points, source_range)?.into();
+            let projected: Curve2 = SurfaceProjectionPcurve2::new(
+                curve.clone(), supports[&other].clone(), guide, source_range, tolerance,
+            )?.into();
+            let pcurves = source.coedges().iter().map(|id| {
+                (*id, if id == coedge_id { coedge.pcurve().clone() } else { projected.clone() })
+            }).collect();
+            return Ok(OffsetEdge { curve, pcurves, range: source_range });
         }
     }
     let intersections = supports[&first]
@@ -1190,7 +1257,7 @@ fn projected_pcurve(
     range: ParameterRange,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Curve2> {
-    if guide.domain().contains_range(range, tolerance.parameter) {
+    if guide.domain().contains_range(range, f64::EPSILON * 64.0) {
         return Ok(guide.clone());
     }
     let mut points = Vec::new();
@@ -1317,13 +1384,14 @@ fn offset_body(
     if adjust_blends {
         adjust_offset_blends(source, openings, distance, &mut supports)?;
     }
-    rebuild_supports(source, supports, bounds)
+    rebuild_supports(source, supports, bounds, false)
 }
 
 fn rebuild_supports(
     source: &Compound,
     supports: BTreeMap<FaceId, Surface3>,
     bounds: BTreeMap<FaceId, [ParameterRange; 2]>,
+    preserve_orientation: bool,
 ) -> KernelResult<(Compound, Vec<PersistentId>)> {
     let topology = source.topology();
     let tolerance = source.tolerance();
@@ -1573,7 +1641,9 @@ fn rebuild_supports(
         patches_by_shell.entry(face.shell()).or_default().push((
             BrepPatch {
                 surface: surface.clone(),
-                orientation: {
+                orientation: if preserve_orientation {
+                    face.orientation()
+                } else {
                     let sample = topology.face_edges(face_id)?[0];
                     let edge = topology.edge(sample)?;
                     let point = edge
@@ -2139,32 +2209,7 @@ fn adjust_offset_blends(
             let Some(&neighbor) = adjacent.iter().find(|id| *id != face_id) else {
                 continue;
             };
-            let other = topology.face(neighbor)?;
-            let other_orientation = if other.orientation() == FaceOrientation::Forward {
-                1.0
-            } else {
-                -1.0
-            };
-            let edge = topology.edge(edge_id)?;
-            let mut samples = Vec::new();
-            // Sample the contact curve, not just a vertex at which two sharp
-            // faces could happen to share a normal.
-            for fraction in [0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95] {
-                let point = edge
-                    .curve()
-                    .evaluate(edge.range().start + edge.range().span() * fraction)?
-                    .point;
-                let uv = face.surface().project(point, tolerance)?.parameters;
-                let normal = face.surface().normal(uv.0, uv.1)? * orientation;
-                let other_uv = other.surface().project(point, tolerance)?.parameters;
-                let other_normal =
-                    other.surface().normal(other_uv.0, other_uv.1)? * other_orientation;
-                if (normal - other_normal).magnitude() > tolerance.angular * 8.0 {
-                    samples.clear();
-                    break;
-                }
-                samples.push((neighbor, point, normal));
-            }
+            let samples = tangent_contact(topology, edge_id, *face_id, neighbor, tolerance)?;
             if !samples.is_empty() {
                 neighbors.insert(neighbor);
                 contacts.extend(samples);
@@ -2415,14 +2460,455 @@ pub(crate) fn split(source: &Compound, plane: Plane3, keep: &str) -> KernelResul
 }
 
 pub(crate) fn move_faces(
-    _source: &Compound,
+    source: &Compound,
     faces: &[FaceHandle],
-    _transform: RigidTransform3,
+    transform: RigidTransform3,
 ) -> KernelResult<Compound> {
-    if faces.is_empty() {
-        return Err(invalid("moving faces needs at least one face"));
+    if transform == RigidTransform3::identity() {
+        return Ok(source.clone());
     }
-    Err(unsupported("face movement"))
+    if faces.len() == source.faces().count() {
+        return source.transformed(transform);
+    }
+    let topology = source.topology();
+    let tolerance = source.tolerance();
+    let selected = faces
+        .iter()
+        .map(FaceHandle::persistent_id)
+        .collect::<BTreeSet<_>>();
+    let mut supports = BTreeMap::new();
+    let mut bounds = BTreeMap::new();
+    let mut displacement = transform.translation().magnitude();
+    for face in faces {
+        for edge in topology.face_edges(face.topology_id())? {
+            for vertex in topology.edge(edge)?.vertices() {
+                let point = topology.vertex(vertex)?.point();
+                displacement = displacement.max(point.distance(transform.transform_point(point)));
+            }
+        }
+    }
+    for face in source.faces() {
+        let id = face.topology_id();
+        let original_bounds = face_parameter_bounds(topology, id, tolerance)?;
+        let mut surface = face.surface().clone();
+        if let Surface3::Nurbs(spline) = &surface {
+            let padding =
+                offset_parameter_padding(&surface, original_bounds, displacement, tolerance)?;
+            surface = spline.extended_bezier(padding)?.into();
+        }
+        if selected.contains(&face.persistent_id()) {
+            surface = super::transform::transform_surface(surface, transform, tolerance)?;
+        }
+        bounds.insert(
+            id,
+            expanded_offset_bounds(&surface, original_bounds, displacement, tolerance)?,
+        );
+        supports.insert(id, surface);
+    }
+    let contacts = move_blend_contacts(source)?;
+    adjust_move_blends(source, &selected, transform, &contacts, &mut supports)?;
+    let (result, sources) = rebuild_supports(source, supports, bounds, true)?;
+    // A valid closed shell alone does not certify that a former fillet is still
+    // tangent. Check the reconstructed contact rails before publishing it.
+    let origins = result
+        .faces()
+        .zip(sources)
+        .map(|(face, name)| (face.persistent_id(), name))
+        .collect::<BTreeMap<_, _>>();
+    let mut tangent_pairs = BTreeSet::new();
+    for (id, rails) in &contacts {
+        let name = topology.face(*id)?.name();
+        for (other, _, _) in rails {
+            tangent_pairs.insert((name, topology.face(*other)?.name()));
+        }
+    }
+    let result_topology = result.topology();
+    for (edge_id, _) in result_topology.edges() {
+        let adjacent = result_topology.edge_faces(edge_id)?;
+        let [first, second] = adjacent.as_slice() else {
+            continue;
+        };
+        let pair = (
+            origins[&result_topology.face(*first)?.name()],
+            origins[&result_topology.face(*second)?.name()],
+        );
+        if !tangent_pairs.contains(&pair) {
+            continue;
+        }
+        if tangent_contact(
+            result_topology,
+            edge_id,
+            *first,
+            *second,
+            tolerance,
+        )?
+        .is_empty()
+        {
+            return Err(unsupported(
+                "face movement that cannot preserve blend tangency",
+            ));
+        }
+    }
+    // Match moved edges and vertices by face incidence, since their old spatial
+    // supports no longer identify them. Ambiguous incidence is left unresolved.
+    let face_origins = origins;
+    let mut origins = face_origins
+        .iter()
+        .map(|(face, source)| (*face, vec![*source]))
+        .collect::<BTreeMap<_, _>>();
+    let mut source_edges = BTreeMap::<BTreeSet<PersistentId>, Vec<PersistentId>>::new();
+    for edge in source.edges() {
+        let faces = edge
+            .connected_faces()?
+            .iter()
+            .map(FaceHandle::persistent_id)
+            .collect();
+        source_edges
+            .entry(faces)
+            .or_default()
+            .push(edge.persistent_id());
+    }
+    for edge in result.edges() {
+        let faces = edge
+            .connected_faces()?
+            .iter()
+            .map(|face| face_origins[&face.persistent_id()])
+            .collect::<BTreeSet<_>>();
+        if let Some(names) = source_edges.get(&faces).filter(|names| names.len() == 1) {
+            origins.insert(edge.persistent_id(), names.clone());
+        }
+    }
+    let mut source_vertices = BTreeMap::<BTreeSet<PersistentId>, Vec<PersistentId>>::new();
+    for (id, vertex) in topology.vertices() {
+        let faces = topology
+            .vertex_faces(id)?
+            .iter()
+            .map(|face| topology.face(*face).map(|face| face.name()))
+            .collect::<KernelResult<BTreeSet<_>>>()?;
+        source_vertices
+            .entry(faces)
+            .or_default()
+            .push(vertex.name());
+    }
+    for (id, vertex) in result.topology().vertices() {
+        let faces = result
+            .topology()
+            .vertex_faces(id)?
+            .iter()
+            .map(|face| {
+                result
+                    .topology()
+                    .face(*face)
+                    .map(|face| face_origins[&face.name()])
+            })
+            .collect::<KernelResult<BTreeSet<_>>>()?;
+        if let Some(names) = source_vertices.get(&faces).filter(|names| names.len() == 1) {
+            origins.insert(vertex.name(), names.clone());
+        }
+    }
+    result.with_feature_parent(source, "move-faces", &origins)
+}
+
+type BlendContacts = BTreeMap<FaceId, Vec<(FaceId, Point3, crate::Vec3)>>;
+
+fn tangent_contact(
+    topology: &Topology,
+    edge: EdgeId,
+    first: FaceId,
+    second: FaceId,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<Vec<(FaceId, Point3, crate::Vec3)>> {
+    let edge = topology.edge(edge)?;
+    let first = topology.face(first)?;
+    let other = topology.face(second)?;
+    let mut contacts = Vec::new();
+    // Sample the contact curve, not just a vertex at which two sharp faces
+    // could happen to share a normal. Offset and Move use the same criterion.
+    for fraction in [0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95] {
+        let point = edge
+            .curve()
+            .evaluate(edge.range().start + edge.range().span() * fraction)?
+            .point;
+        let normal = |face: &super::topology::Face| -> KernelResult<crate::Vec3> {
+            let uv = face.surface().project(point, tolerance)?.parameters;
+            let sign = if face.orientation() == FaceOrientation::Forward {
+                1.0
+            } else {
+                -1.0
+            };
+            Ok(face.surface().normal(uv.0, uv.1)? * sign)
+        };
+        let n = normal(first)?;
+        if (n - normal(other)?).magnitude() > tolerance.angular * 8.0 {
+            return Ok(Vec::new());
+        }
+        contacts.push((second, point, n));
+    }
+    Ok(contacts)
+}
+
+fn move_blend_contacts(source: &Compound) -> KernelResult<BlendContacts> {
+    let topology = source.topology();
+    let mut contacts = BlendContacts::new();
+    for face in source.faces() {
+        let id = face.topology_id();
+        for edge in topology.face_edges(id)? {
+            for other in topology
+                .edge_faces(edge)?
+                .into_iter()
+                .filter(|other| *other != id)
+            {
+                contacts.entry(id).or_default().extend(tangent_contact(
+                    topology,
+                    edge,
+                    id,
+                    other,
+                    source.tolerance(),
+                )?);
+            }
+        }
+    }
+    Ok(contacts)
+}
+
+fn adjust_move_blends(
+    source: &Compound,
+    selected: &BTreeSet<PersistentId>,
+    transform: RigidTransform3,
+    contacts: &BlendContacts,
+    supports: &mut BTreeMap<FaceId, Surface3>,
+) -> KernelResult<()> {
+    let topology = source.topology();
+    let tolerance = source.tolerance();
+    let selected_faces = source
+        .faces()
+        .filter(|face| selected.contains(&face.persistent_id()))
+        .map(FaceHandle::topology_id)
+        .collect::<BTreeSet<_>>();
+    let mut blends = BTreeSet::new();
+    for face in source.faces() {
+        let id = face.topology_id();
+        if matches!(face.surface(), Surface3::Plane(_)) {
+            continue;
+        }
+        // A full cylindrical wall between rounded rims is a support, not a
+        // blend. Propagating through it would move the opposite end of a part.
+        if matches!(face.surface(), Surface3::Cylinder(_))
+            && face_parameter_bounds(topology, id, tolerance)?[0]
+                .span()
+                .abs()
+                >= std::f64::consts::TAU - tolerance.parameter * 8.0
+        {
+            continue;
+        }
+        blends.insert(id);
+    }
+    let mut pending = BTreeSet::new();
+    loop {
+        let additions = contacts
+            .iter()
+            .filter(|(id, rails)| {
+                !selected_faces.contains(*id)
+                    && !pending.contains(*id)
+                    && blends.contains(*id)
+                    && rails
+                        .iter()
+                        .map(|(other, _, _)| other)
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        >= 2
+                    && rails
+                        .iter()
+                        .any(|(other, _, _)| selected_faces.contains(other) || pending.contains(other))
+            })
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        if additions.is_empty() {
+            break;
+        }
+        pending.extend(additions);
+    }
+    while !pending.is_empty() {
+        let mut resolved = None;
+        for id in &pending {
+            let rails = contacts[id]
+                .iter()
+                .filter(|(other, _, _)| !pending.contains(other))
+                .copied()
+                .collect::<Vec<_>>();
+            if rails
+                .iter()
+                .map(|(other, _, _)| other)
+                .collect::<BTreeSet<_>>()
+                .len()
+                < 2
+            {
+                continue;
+            }
+            let original = topology.face(*id)?.surface();
+            let fits = |motion: RigidTransform3| -> KernelResult<bool> {
+                for (other, point, normal) in &rails {
+                    let point = motion.transform_point(*point);
+                    let projection = supports[other].project(point, tolerance)?;
+                    let uv = projection.parameters;
+                    let sign = if topology.face(*other)?.orientation() == FaceOrientation::Forward {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    if projection.distance
+                        > tolerance.linear_at_scale(point.to_vec().magnitude()) * 8.0
+                        || (supports[other].normal(uv.0, uv.1)? * sign
+                            - motion.transform_vector(*normal))
+                        .magnitude()
+                            > tolerance.angular * 8.0
+                    {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            };
+            // Moving an entire blend along an invariant neighboring support is
+            // exact (for example, raising a rounded cylindrical cap).
+            let surface = if fits(transform)? {
+                super::transform::transform_surface(original.clone(), transform, tolerance)?
+            } else if let Surface3::Cylinder(cylinder) = original {
+                let planes = rails
+                    .iter()
+                    .map(|(other, _, _)| *other)
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .filter(|other| matches!(supports[other], Surface3::Plane(_)))
+                    .collect::<Vec<_>>();
+                if planes.len() != 2 {
+                    continue;
+                }
+                let mut normals = Vec::new();
+                let mut equations = Vec::new();
+                for other in planes {
+                    let Surface3::Plane(old) = topology.face(other)?.surface() else {
+                        continue;
+                    };
+                    let Surface3::Plane(new) = supports[&other] else {
+                        unreachable!()
+                    };
+                    let normal = new.normal();
+                    let side = (cylinder.origin() - old.origin())
+                        .dot(old.normal())
+                        .signum();
+                    equations.push((
+                        [normal.x, normal.y, normal.z, -side],
+                        (new.origin() - cylinder.origin()).dot(normal) + side * cylinder.radius(),
+                    ));
+                    normals.push(normal);
+                }
+                if normals.len() != 2 {
+                    continue;
+                }
+                let axis = normals[0].cross(normals[1]);
+                let parallel = axis.magnitude() <= tolerance.angular;
+                // A semicircular slot end joins parallel walls. Moving one
+                // wall changes both its center and radius by half the width
+                // change; a fixed-radius fillet cannot satisfy both contacts.
+                let solution = solve_blend_contacts(&equations, false, tolerance).or_else(|| {
+                    if parallel {
+                        solve_blend_contacts(&equations, true, tolerance)
+                    } else {
+                        None
+                    }
+                });
+                let Some(solution) = solution else {
+                    continue;
+                };
+                let radius = cylinder.radius() + solution[3];
+                if radius <= tolerance.linear {
+                    return Err(invalid("moving these faces collapses the rounded end"));
+                }
+                let axis = if parallel {
+                    cylinder.axis().normalize()
+                } else {
+                    axis.normalize() * axis.dot(cylinder.axis()).signum()
+                };
+                let rotation = crate::Quaternion::from_arc(cylinder.axis().normalize(), axis, None);
+                let scale = radius / cylinder.radius();
+                super::Cylinder3::new(
+                    cylinder.origin() + crate::Vec3::new(solution[0], solution[1], solution[2]),
+                    axis * cylinder.axis().magnitude(),
+                    rotation.rotate_vector(cylinder.x_radius()) * scale,
+                    rotation.rotate_vector(cylinder.y_radius()) * scale,
+                    tolerance,
+                )?
+                .into()
+            } else if let Surface3::Sphere(sphere) = original {
+                // Equal-radius cylindrical edge blends meet a spherical corner
+                // with its center on all their axes, including after rotation.
+                let mut equations = Vec::new();
+                for other in rails
+                    .iter()
+                    .map(|(other, _, _)| *other)
+                    .collect::<BTreeSet<_>>()
+                {
+                    if let Surface3::Cylinder(cylinder) = &supports[&other] {
+                        if (cylinder.radius() - sphere.radius()).abs() > tolerance.linear {
+                            continue;
+                        }
+                        for normal in [
+                            cylinder.x_radius().normalize(),
+                            cylinder.y_radius().normalize(),
+                        ] {
+                            equations.push((
+                                [normal.x, normal.y, normal.z, 0.0],
+                                (cylinder.origin() - sphere.center()).dot(normal),
+                            ));
+                        }
+                    }
+                }
+                if equations.len() < 4 {
+                    continue;
+                }
+                let Some(solution) = solve_blend_contacts(&equations, false, tolerance) else {
+                    continue;
+                };
+                let motion = RigidTransform3::new(
+                    crate::Matrix3::identity(),
+                    crate::Vec3::new(solution[0], solution[1], solution[2]),
+                    tolerance,
+                )?;
+                super::transform::transform_surface(original.clone(), motion, tolerance)?
+            } else {
+                let equations = rails
+                    .iter()
+                    .map(|(other, point, normal)| {
+                        let projection = supports[other].project(*point, tolerance)?;
+                        Ok((
+                            [normal.x, normal.y, normal.z, 0.0],
+                            (projection.point - point).dot(*normal),
+                        ))
+                    })
+                    .collect::<KernelResult<Vec<_>>>()?;
+                let Some(solution) = solve_blend_contacts(&equations, false, tolerance) else {
+                    continue;
+                };
+                let motion = RigidTransform3::new(
+                    crate::Matrix3::identity(),
+                    crate::Vec3::new(solution[0], solution[1], solution[2]),
+                    tolerance,
+                )?;
+                if !fits(motion)? {
+                    continue;
+                }
+                super::transform::transform_surface(original.clone(), motion, tolerance)?
+            };
+            resolved = Some((*id, surface));
+            break;
+        }
+        let Some((id, surface)) = resolved else {
+            return Err(unsupported("face movement of this connected blend network"));
+        };
+        pending.remove(&id);
+        supports.insert(id, surface);
+    }
+    Ok(())
 }
 
 pub(crate) fn replace_face(
@@ -2615,7 +3101,7 @@ pub(crate) fn draft(
         );
         supports.insert(handle.topology_id(), surface);
     }
-    let (result, origins) = rebuild_supports(source, supports, bounds)?;
+    let (result, origins) = rebuild_supports(source, supports, bounds, false)?;
     let origins = result
         .faces()
         .zip(origins)

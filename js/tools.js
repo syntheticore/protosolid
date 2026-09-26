@@ -791,45 +791,24 @@ export class ProjectTool extends HighlightTool {
     this.cursor = 'copy'
   }
 
+  async mouseMove(vec, coords) {
+    const object = await this.getObject(coords, true)
+    this.viewport.$emit('update:highlight', object)
+  }
+
   async click(vec, coords) {
     const edge = await this.getObject(coords)
     if(!edge) return
     const projection = new Projection(edge)
+    projection.sketch = this.sketch
+    if(!projection.update(this.viewport.document.top())) {
+      this.viewport.bus.emit('toast', projection.error)
+      return
+    }
     this.sketch.addProjection(projection)
     this.viewport.updateRegions(true)
   }
 }
-
-
-// export class PlaneTool extends HighlightTool {
-//   constructor(component, viewport) {
-//     super(component, viewport, ['face'])
-//   }
-
-//   click(vec, coords) {
-//     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-//     if(face && face.alcObject.surface_type() == 'Planar') {
-//       const position = vecToThree(face.alcObject.origin())
-//       let rotation = rotationFromNormal(vecToThree(face.alcObject.normal()))
-
-//       this.viewport.renderer.sketchPlane.position = position
-//       this.viewport.renderer.sketchPlane.rotation.setFromRotationMatrix(rotation)
-
-//       rotation.setPosition(position)
-//       this.viewport.snapper.planeTransform = rotation
-//       this.component.real.sketch().set_workplane(matrixFromThree(rotation))
-
-//       this.viewport.regionsDirty = true
-//       this.viewport.updateRegions()
-//     }
-//     this.viewport.renderer.render()
-//   }
-
-//   mouseDown(vec, coords) {
-//     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-//     this.viewport.renderer.render()
-//   }
-// }
 
 
 export class TrimTool extends Tool {

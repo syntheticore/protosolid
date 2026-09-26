@@ -1034,17 +1034,32 @@ export class Projection {
     this.id = makeID()
     this.isReference = false
     this.itemRef = itemOrRef instanceof Edge ?
-      new EdgeReference(itemOrRef)
-      :
-      (itemOrRef instanceof AxisHelper || itemOrRef instanceof PointHelper ?
-        new HelperReference(itemOrRef)
-        :
+      new EdgeReference(itemOrRef) :
+      itemOrRef instanceof AxisHelper || itemOrRef instanceof PointHelper ?
+        new HelperReference(itemOrRef) :
         itemOrRef
-      )
   }
 
   update(tree) {
-    this.itemRef.update(tree)
+    this.error = null
+    const error = this.itemRef.update(tree)
+    if(error) return this.invalidate(error.msg)
+    try {
+      return this.projectGeometry(tree)
+    } catch(error) {
+      // OpenCascade throws numeric exception pointers for degenerate projections.
+      if(typeof error !== 'number') throw error
+      return this.invalidate('This geometry cannot be projected onto the sketch plane')
+    }
+  }
+
+  invalidate(message) {
+    if(this.output instanceof SketchElement) this.output.clear()
+    this.output = undefined
+    this.error = message
+  }
+
+  projectGeometry(tree) {
     const isElementPoint = this.itemRef instanceof ElemRef
     const item = isElementPoint ? this.itemRef.curve() : this.itemRef.getItem()
     const relative = this.relativeTransform(tree)
@@ -1062,7 +1077,6 @@ export class Projection {
 
     let curve
     if(item instanceof Edge) {
-      // BRep_Tool.Curve()
       const shape = transformGeometry(item.geom(), relative).Shape()
       curve = new window.oc.oc.BRepAdaptor_Curve_2(window.oc.oc.TopoDS.Edge_1(shape))
 
@@ -1080,38 +1094,32 @@ export class Projection {
     const project = new window.oc.oc.ProjLib_ProjectOnPlane_2(ax)
     project.Load(curve.ShallowCopy(), EPSILON, true) // ShallowCopy upcasts BRepAdaptor_Curve -> Adaptor3d_Curve
 
-    const projected = project.GetResult().get()
-    const [u1, u2] = [projected.FirstParameter(), projected.LastParameter()]
-
-    const plane = ocPlnFromMatrix(this.sketch.workplane)
-    let curve2d = window.oc.oc.GeomAPI.To2d(projected.Curve(), plane)
-    const handle = new window.oc.oc.Handle_Geom2d_Curve_2(curve2d.get())
-    const trimmed = new window.oc.oc.Geom2d_TrimmedCurve(handle, u1, u2, true, true)
-
-    const constructor = {
-      [window.oc.oc.GeomAbs_CurveType.GeomAbs_Line.constructor]: Line,
-      [window.oc.oc.GeomAbs_CurveType.GeomAbs_Circle.constructor]: Circle,
-    }[project.GetType().constructor]
-
-    if(constructor) {
-      const elem = constructor.fromGeometry(trimmed, item.id + '/projected')
-      return this.updateOutput(elem)
-
-    } else {
-      console.error(`Could not project ${project.getType().constructor} from ${curve.constructor}`)
+    const type = project.GetType()
+    const types = window.oc.oc.GeomAbs_CurveType
+    if(type !== types.GeomAbs_Line && type !== types.GeomAbs_Circle) {
+      return this.invalidate('This projection is not supported. Only points, lines, circles and circular arcs are supported')
     }
 
-    return this.output
+    const projected = project.GetResult().get()
+    // GetResult exposes the untrimmed basis curve; retain the source edge's bounds.
+    const [u1, u2] = [project.FirstParameter(), project.LastParameter()]
+
+    const plane = ocPlnFromMatrix(this.sketch.workplane)
+    const curve2d = window.oc.oc.GeomAPI.To2d(projected.Curve(), plane)
+    const trimmed = new window.oc.oc.Geom2d_TrimmedCurve(curve2d, u1, u2, true, true)
+
+    const constructor = type === types.GeomAbs_Line ? Line :
+      Math.abs(u2 - u1 - Math.PI * 2) <= EPSILON ? Circle : Arc
+    const elem = constructor.fromGeometry(trimmed, item.id + '/projected')
+    return this.updateOutput(elem)
   }
 
   updateOutput(elem) {
     const existing = this.output
+    if(existing instanceof SketchElement) existing.clear()
     if(existing && existing.constructor == elem.constructor) {
-      if(existing instanceof SketchElement) existing.clear()
       Object.assign(existing, elem)
       elem = existing
-    } else if(existing instanceof SketchElement) {
-      existing.clear()
     }
 
     elem.sketch = this.sketch

@@ -40,6 +40,7 @@
     .drag-handle.handle(
       v-for="{ handle, pos } in projectedHandles"
       :key="handle.id"
+      :class="{ highlighted: highlight instanceof ElemRef && highlight.curve() == handle.elem && highlight.index == handle.index }"
       :style="{ top: pos.y + 'px', left: pos.x + 'px' }"
       @mouseup="emit('handleMouseUp', $event, handle)"
       @mousedown="emit('handleMouseDown', $event, handle)"
@@ -56,22 +57,14 @@
 
   .drag-handle
     pointer-events: auto
-    // cursor: grab
 
-    &:hover
-
+    &:hover, &:active, &.highlighted
       &::before
         width: 5px
         height: 5px
 
-    &:active
-
-      &::before
-        width:  5px
-        height: 5px
-
-    // .orbiting &
-    //   pointer-events: none
+    &.highlighted::before
+      background: $highlight
 
 </style>
 
@@ -79,7 +72,7 @@
 <script setup>
 
   import { Circle, OffsetCurve } from '../js/core/geom2d.js'
-  import { ProjectedPoint } from '../js/core/sketch.js'
+  import { ProjectedPoint, ElemRef } from '../js/core/sketch.js'
   import { layoutConstraintIcons } from '../js/three/constraint-icons.js'
 
   const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])

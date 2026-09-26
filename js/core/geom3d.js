@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import earcut from 'earcut'
 
 import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference, PointReference } from './references.js'
 import { makeID } from './id.js'
@@ -185,17 +184,8 @@ export class Profile {
   tesselate() {
     let polyRings = this.rings.map(wire => wire.tesselate() )
 
-    const outerRing = polyRings[0].flatMap(p => [p[0], p[1]] )
-    let holeRings = polyRings.slice(1).map(ring => ring.flatMap(p => [p[0], p[1]]) )
-
-    let holeIndices = []
-    let indexOffset = outerRing.length / 2 // Each point has 2 coordinates (x, y)
-    for(let hole of holeRings) {
-      holeIndices.push(indexOffset)
-      indexOffset += hole.length / 2
-    }
-
-    let indices = earcut([...outerRing, ...holeRings.flat()], holeIndices, 2)
+    const contours = polyRings.map(ring => ring.map(p => new THREE.Vector2(p[0], p[1])))
+    const indices = THREE.ShapeUtils.triangulateShape(contours[0], contours.slice(1)).flat()
 
     // Map back to original positions
     const vertices = polyRings.flat()

@@ -100,6 +100,10 @@ class Tool {
 
   guideSnapPoints() { return [] }
 
+  lineSnapContext() { return null }
+
+  tangentSnapStart() { return null }
+
   snapExclusions() { return this.curve ? [this.curve] : [] }
 
   acceptsSnapElement(_elem) { return true }
@@ -108,9 +112,9 @@ class Tool {
 }
 
 function captureSnap(snapper) {
-  const { curve, pointTarget, intersection, point, x, y } = snapper.snapped || {}
-  if(!(curve || pointTarget || intersection || x || y)) return
-  return { ...pointTarget, curve, intersection, point, x, y }
+  const { curve, pointTarget, intersection, point, x, y, lineRelation, tangent } = snapper.snapped || {}
+  if(!(curve || pointTarget || intersection || x || y || lineRelation)) return
+  return { ...pointTarget, curve, intersection, point, x, y, lineRelation, tangent }
 }
 
 function isConstrainablePoint(elem, index) {
@@ -146,15 +150,15 @@ function pointTargetsAtPosition(sketch, position, excludedElem) {
   )
 }
 
-function constrainCoincidentPoints(sketch, elem, index, targetElem, targetIndex) {
-  if(elem instanceof SketchPoint && sketch.dissolvePoint(elem, targetElem, targetIndex)) return elem
-  if(targetElem instanceof SketchPoint && sketch.dissolvePoint(targetElem, elem, index)) return targetElem
+function constrainCoincidentPoints(sketch, elem, index, targetElem, targetIndex, preservePoints=false) {
+  if(!preservePoints && elem instanceof SketchPoint && sketch.dissolvePoint(elem, targetElem, targetIndex)) return elem
+  if(!preservePoints && targetElem instanceof SketchPoint && sketch.dissolvePoint(targetElem, elem, index)) return targetElem
   return sketch.addConstraint(
     new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(targetElem, targetIndex))
   )
 }
 
-function addCapturedSnapConstraint(sketch, snap, elem, index) {
+function addCapturedSnapConstraint(sketch, snap, elem, index, preservePoints=false) {
   if(!isConstrainablePoint(elem, index)) return
 
   // Explicit points retain priority even if another overlapping target won
@@ -163,13 +167,13 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
   const positionTargets = pointTargetsAtPosition(sketch, position, elem)
   const explicitTarget = positionTargets.find(target => target.elem instanceof SketchPoint)
   if(explicitTarget) return constrainCoincidentPoints(
-    sketch, elem, index, explicitTarget.elem, explicitTarget.index
+    sketch, elem, index, explicitTarget.elem, explicitTarget.index, preservePoints
   )
 
   if(snap && snap.intersection) {
     const point = sketch.findOrCreateIntersectionPoint(snap.intersection, snap.point)
     if(point == elem) return point
-    return constrainCoincidentPoints(sketch, elem, index, point, 0)
+    return constrainCoincidentPoints(sketch, elem, index, point, 0, preservePoints)
   }
   if(snap && snap.midpoint && snap.elem instanceof Line && snap.elem != elem) return sketch.addConstraint(
     new MidpointConstraint(new ElemRef(elem, index), snap.elem)
@@ -190,7 +194,7 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
         new CoincidentConstraint(new ElemRef(elem, index), new ElemRef(target.elem, target.index))
       )
     }
-    return constrainCoincidentPoints(sketch, elem, index, snap.elem, snap.index)
+    return constrainCoincidentPoints(sketch, elem, index, snap.elem, snap.index, preservePoints)
   }
 
   // Only use another coincident handle as a positional fallback when no
@@ -198,7 +202,7 @@ function addCapturedSnapConstraint(sketch, snap, elem, index) {
   // can mask the point the user just snapped to.
   const positionTarget = positionTargets[0]
   if(positionTarget) return constrainCoincidentPoints(
-    sketch, elem, index, positionTarget.elem, positionTarget.index
+    sketch, elem, index, positionTarget.elem, positionTarget.index, preservePoints
   )
 }
 
@@ -588,20 +592,16 @@ export class ManipulationTool extends HighlightTool {
         selectedElements.map(elem => ({
           elem,
           handles: elem.handles().map(handle => handle.clone()),
-          radius: elem.radius,
         }))
         : null
       this.curveDrag = {
-        elem: object,
         pointer: vec.clone(),
         coords: coords.clone(),
         handles: object.handles().map(handle => handle.clone()),
         group,
       }
-      // Reuse the solver's temporary pointer-driving constraint. Lines use
-      // one endpoint while circles and arcs use their center; the remaining
-      // parameters start from the dragged geometry and are then allowed to
-      // respond to the sketch's constraints.
+      // Keep the pointer gesture separate from the sketch. mouseMove supplies
+      // point or radius objectives and the solver commits accepted geometry.
       this.viewport.activeHandle = {
         type: 'curve',
         elem: object,
@@ -630,7 +630,6 @@ export class ManipulationTool extends HighlightTool {
     this.pointerDown = false
     const boxDrag = this.boxDrag
     const boxSelecting = boxDrag && coords.distanceTo(boxDrag.start) > dragThreshold
-    // this.mouseMove(vec, coords)
     super.mouseUp(vec, coords)
     this.snapToPoints = false
     this.cursor = 'auto'
@@ -641,13 +640,19 @@ export class ManipulationTool extends HighlightTool {
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
     if(sketch && handle && !handle.curveDrag) {
-      addCapturedSnapConstraint(sketch, captureSnap(this.viewport.snapper), handle.elem, handle.index)
-      const replacement = handle.elem.dissolvedTo
-      if(replacement && !sketch.elements.includes(handle.elem)) {
-        // Viewport keeps this handle for the post-drag solve. Redirect it so
-        // the solver does not receive the explicit point that was removed.
-        handle.elem = replacement.elem
-        handle.index = replacement.index
+      const snap = captureSnap(this.viewport.snapper)
+      const position = handle.elem.handles()[handle.index]
+      // A blocked pointer target must not create a constraint at a position
+      // the geometry never reached. Drag release never dissolves points.
+      if(snap?.point && position.distanceTo(snap.point) <= EPSILON) {
+        const constraints = [...sketch.constraints]
+        const elements = [...sketch.elements]
+        addCapturedSnapConstraint(sketch, snap, handle.elem, handle.index, true)
+        if(sketch.solve(this.viewport.document.top(), undefined, { applyResults: false }) === false) {
+          sketch.constraints = constraints
+          sketch.elements.filter(elem => !elements.includes(elem)).forEach(elem => elem.clear())
+          sketch.elements = elements
+        }
       }
     }
     if(boxSelecting) this.selectBox(boxDrag.start, coords)
@@ -684,41 +689,28 @@ export class ManipulationTool extends HighlightTool {
       const originalHandles = this.curveDrag.handles
       if(this.curveDrag.group) {
         const delta = vec.clone().sub(this.curveDrag.pointer)
-        this.curveDrag.group.forEach(item => {
-          const handles = item.handles.map(point => point.clone().add(delta))
-          if(item.elem instanceof Arc) {
-            item.elem.setSolvedHandles(handles, item.radius)
-          } else {
-            item.elem.setHandles(handles, false)
-          }
-        })
+        handle.targets = this.curveDrag.group.flatMap(item => item.handles.map((point, index) => ({
+          elem: item.elem, index, point: point.clone().add(delta),
+        })))
       } else if(handle.elem instanceof Line) {
         const delta = vec.clone().sub(this.curveDrag.pointer)
-        handle.elem.setHandles(originalHandles.map(point => point.clone().add(delta)), false)
+        handle.targets = originalHandles.map((point, index) => ({
+          elem: handle.elem, index, point: point.clone().add(delta),
+        }))
       } else {
         const center = originalHandles[0].clone()
         const radius = center.distanceTo(vec)
         if(radius <= EPSILON) return
-        if(handle.elem instanceof Arc) {
-          const endpoints = originalHandles.slice(1).map(point =>
-            point.clone().sub(center).normalize().multiplyScalar(radius).add(center)
-          )
-          handle.elem.setSolvedHandles([center, ...endpoints], radius)
-        } else {
-          handle.elem.setHandles([center, vec.clone()], false)
-        }
+        handle.targets = [
+          { elem: handle.elem, index: 0, point: center },
+          { elem: handle.elem, radius },
+        ]
       }
       this.viewport.updateSketch(true)
 
     // Drag Handles
     } else if(handle) {
-      if(handle.elem instanceof Arc && handle.index > 0) {
-        handle.elem.setEndpoint(handle.index, vec)
-      } else {
-        let handles = handle.elem.handles()
-        handles[handle.index] = vec//.toArray()
-        handle.elem.setHandles(handles, false)
-      }
+      handle.targets = [{ elem: handle.elem, index: handle.index, point: vec.clone() }]
       this.viewport.updateSketch(true)
 
     // Drag Dimensions
@@ -799,45 +791,24 @@ export class ProjectTool extends HighlightTool {
     this.cursor = 'copy'
   }
 
+  async mouseMove(vec, coords) {
+    const object = await this.getObject(coords, true)
+    this.viewport.$emit('update:highlight', object)
+  }
+
   async click(vec, coords) {
     const edge = await this.getObject(coords)
     if(!edge) return
     const projection = new Projection(edge)
+    projection.sketch = this.sketch
+    if(!projection.update(this.viewport.document.top())) {
+      this.viewport.bus.emit('toast', projection.error)
+      return
+    }
     this.sketch.addProjection(projection)
     this.viewport.updateRegions(true)
   }
 }
-
-
-// export class PlaneTool extends HighlightTool {
-//   constructor(component, viewport) {
-//     super(component, viewport, ['face'])
-//   }
-
-//   click(vec, coords) {
-//     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-//     if(face && face.alcObject.surface_type() == 'Planar') {
-//       const position = vecToThree(face.alcObject.origin())
-//       let rotation = rotationFromNormal(vecToThree(face.alcObject.normal()))
-
-//       this.viewport.renderer.sketchPlane.position = position
-//       this.viewport.renderer.sketchPlane.rotation.setFromRotationMatrix(rotation)
-
-//       rotation.setPosition(position)
-//       this.viewport.snapper.planeTransform = rotation
-//       this.component.real.sketch().set_workplane(matrixFromThree(rotation))
-
-//       this.viewport.regionsDirty = true
-//       this.viewport.updateRegions()
-//     }
-//     this.viewport.renderer.render()
-//   }
-
-//   mouseDown(vec, coords) {
-//     const face = this.viewport.renderer.objectsAtScreen(coords, this.selectors)[0]
-//     this.viewport.renderer.render()
-//   }
-// }
 
 
 export class TrimTool extends Tool {
@@ -847,6 +818,7 @@ export class TrimTool extends Tool {
     super(component, viewport)
     this.sketch = sketch
     this.localSpace = true
+    this.cursor = 'crosshair'
   }
 
   curveAt(coords) {
@@ -1005,6 +977,10 @@ export class SketchTool extends Tool {
     if(arguments.length < 3) snap = captureSnap(this.viewport.snapper)
     const captured = addCapturedSnapConstraint(this.sketch, snap, elem, index)
     const origin = this.originSnapConstraint(elem, index, snap)
+    if(snap?.tangent) this.sketch.addConstraint(new TangentConstraint(
+      elem instanceof Spline ? new ElemRef(elem, index) : elem,
+      snap.tangent,
+    ))
     return captured || origin
   }
 
@@ -1037,13 +1013,18 @@ export class SketchTool extends Tool {
 export class LineTool extends SketchTool {
   static icon = 'pen'
 
-  constructor(component, viewport, sketch) {
-    super(component, viewport, sketch)
-  }
-
   constrainCompletedLine(line, endSnap) {
     this.constrainPoint(line, 1, endSnap)
-    addInferredTangentConstraint(this.sketch, line, endSnap)
+    if(endSnap?.lineRelation) {
+      const { elem, perpendicular } = endSnap.lineRelation
+      const type = perpendicular ? PerpendicularConstraint : ParallelConstraint
+      this.sketch.addConstraint(new type(line, elem))
+      if(!(endSnap.curve || endSnap.elem || endSnap.intersection)) {
+        addCapturedGuideConstraints(this.sketch, endSnap, line, 1)
+      }
+      return
+    }
+    if(!endSnap?.tangent) addInferredTangentConstraint(this.sketch, line, endSnap)
     addInferredTangentConstraint(this.sketch, line, this.startSnap, 0)
   }
 
@@ -1063,6 +1044,7 @@ export class LineTool extends SketchTool {
       this.constrainCompletedLine(this.curve, snap)
       this.curve = null
       this.startSnap = null
+      this.previousSegment = null
     } else {
       this.curve = new Line(vec, vec)
       this.sketch.add(this.curve)
@@ -1077,13 +1059,12 @@ export class LineTool extends SketchTool {
         this.constrainCompletedLine(old, snap)
         const ySnapped = old.endpoints()[0].x.almost(vec.x)
         const xSnapped = old.endpoints()[0].y.almost(vec.y)
-        if(xSnapped || ySnapped) {
-          // const type = (xSnapped ? HorizontalConstraint : VerticalConstraint)
-          const type = HorVertConstraint
-          this.sketch.addConstraint(new type(old))
+        if(!snap?.lineRelation && (xSnapped || ySnapped)) {
+          this.sketch.addConstraint(new HorVertConstraint(old))
         }
       }
       this.startSnap = snap
+      this.previousSegment = old
     }
   }
 
@@ -1096,6 +1077,20 @@ export class LineTool extends SketchTool {
 
   guideSnapPoints() {
     return this.curve ? [this.curve.endpoints()[0]] : []
+  }
+
+  lineSnapContext() {
+    if(!this.curve) return null
+    const snap = this.startSnap
+    return {
+      start: this.curve.endpoints()[0],
+      perpendicularLines: [this.previousSegment, snap?.curve, snap?.elem, ...(snap?.intersection || [])]
+        .filter(elem => elem instanceof Line),
+    }
+  }
+
+  tangentSnapStart() {
+    return this.curve?.endpoints()[0]
   }
 
   dispose() {
@@ -1171,6 +1166,10 @@ export class SplineTool extends SketchTool {
   acceptsSnapElement(elem) {
     return this.mode != 'insert' ||
       (elem instanceof Spline && elem.sketch == this.sketch && !elem.projection)
+  }
+
+  tangentSnapStart() {
+    return this.mode == 'draw' && this.curve ? this.curve.handles().at(-2) : null
   }
 
   shiftConstraintIndices(spline, fromIndex, offset) {
@@ -1974,7 +1973,16 @@ export class OffsetTool extends HighlightTool {
 export class DimensionTool extends HighlightTool {
   static icon = 'ruler'
 
-  acceptsInput(item) { return !(item instanceof OffsetCurve) }
+  acceptsInput(item) {
+    const isPoint = item instanceof ElemRef && item.index !== undefined
+    const first = this.items[0]
+    if(first instanceof ElemRef) return isPoint || item instanceof Circle
+    if(first instanceof Line) return item instanceof Line
+    if(first instanceof Circle) {
+      return item instanceof Circle || (isPoint && item.curve() != first)
+    }
+    return isPoint || item instanceof Line || item instanceof Circle || item instanceof Arc
+  }
 
   constructor(component, viewport, sketch) {
     super(component, viewport, ['curve', 'point'])
@@ -1989,10 +1997,6 @@ export class DimensionTool extends HighlightTool {
     if(this.items.length == 0 ||
       (!this.isReadyToPlace() && !(this.items.length == 1 && this.items[0] instanceof Circle))) {
       const curve = await this.getObject(coords)
-      // if(!curve || !(curve instanceof Line)) {
-      //   this.items = []
-      //   return
-      // }
       if(!curve) return
       this.items.push(curve)
       if(this.canPlaceDimension()) this.updatePreview(vec)

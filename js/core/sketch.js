@@ -10,6 +10,7 @@ import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix, ocPntFromVec, trans
 import { Reference, CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
 import { relativeComponentTransform } from './assembly.js'
 import Expression from './expression.js'
+import { solveDrag, validGeometry } from './sketch-drag.js'
 
 function sameCurve(left, right) {
   if(left === right) return true
@@ -231,30 +232,57 @@ export class Sketch {
     replacements.filter(replacement => replacement != primary).forEach(replacement => replacement.id = makeID())
 
     const lostConstraints = new Set()
-    this.constraints.forEach(constraint => constraint.items.forEach(item => {
-      if(item.curve() != elem) return
+    const endpointTouches = new Set()
+    this.constraints.forEach(constraint => {
+      const touchPoint = constraint instanceof TouchConstraint &&
+        constraint.items.find(item => item.index !== undefined)
+      const contact = touchPoint && touchPoint.curve().handles()[touchPoint.index].clone()
+      constraint.items.forEach(item => {
+        if(item.curve() != elem) return
 
-      let replacement = primary
-      let replacementIndex = item.index
-      if(item.index !== undefined) {
-        const oldPoint = oldHandles[item.index]
-        const match = replacements
-          .map(curve => ({ curve, index: curve.handles().findIndex(point => point.almost(oldPoint)) }))
-          .find(candidate => candidate.index != -1)
-        if(!match) {
-          lostConstraints.add(constraint)
-          return
+        let replacement = primary
+        let replacementIndex = item.index
+        if(item.index !== undefined) {
+          const oldPoint = oldHandles[item.index]
+          const match = replacements
+            .map(curve => ({ curve, index: curve.handles().findIndex(point => point.almost(oldPoint)) }))
+            .find(candidate => candidate.index != -1)
+          if(!match) {
+            lostConstraints.add(constraint)
+            return
+          }
+          replacement = match.curve
+          replacementIndex = match.index
+        } else if(contact) {
+          // A contact at a new trim boundary must bind the endpoint, rather
+          // than allowing the point to slide along the underlying curve.
+          const endpoint = replacements
+            .filter(curve => !curve.isClosed() && curve.endpoints().some(point => point.almost(contact)))
+            .map(curve => ({ curve, index: curve.handles().findIndex(point => point.almost(contact)) }))
+            .find(candidate => candidate.index != -1)
+          if(endpoint) {
+            replacement = endpoint.curve
+            replacementIndex = endpoint.index
+            endpointTouches.add(constraint)
+          } else {
+            replacement = replacements.find(curve => curve.distanceTo(contact).almost(0.0))
+            if(!replacement) {
+              lostConstraints.add(constraint)
+              return
+            }
+          }
         }
-        replacement = match.curve
-        replacementIndex = match.index
-      }
 
-      item.curveRef.item = replacement
-      item.curveRef.itemId = replacement.id
-      item.index = replacementIndex
-    }))
+        item.curveRef.item = replacement
+        item.curveRef.itemId = replacement.id
+        item.index = replacementIndex
+      })
+    })
 
     this.constraints = this.constraints.filter(constraint => !lostConstraints.has(constraint))
+      .map(constraint => endpointTouches.has(constraint) ?
+        Object.assign(new CoincidentConstraint(...constraint.items), constraint) : constraint)
+    this.removeRedundantCoincidentConstraints()
     this.elements.splice(elementIndex, 1, ...replacements)
     this.elements.forEach(element => element.fullyConstrained = false)
     elem.clear()
@@ -454,7 +482,30 @@ export class Sketch {
   }
 
   solve(tree, draggedHandle, options={}) {
-    const { applyResults=true, refreshFullyConstrained=false, offsetIteration=0 } = options
+    if(draggedHandle && !options.transaction) {
+      const snapshot = this.elements.filter(elem => !(elem instanceof OffsetCurve)).map(elem => ({
+        elem, handles: elem.handles().map(point => point.clone()), radius: elem.radius,
+      }))
+      const restore = () => {
+        snapshot.forEach(({ elem, handles, radius }) => {
+          if(elem instanceof Arc) elem.setSolvedHandles(handles, radius)
+          else {
+            if(elem instanceof Circle) elem.radius = radius
+            elem.setHandles(handles)
+          }
+        })
+        this.constraints.filter(c => c instanceof ProfileOffsetConstraint)
+          .forEach(c => c.rebuild({ preserveTopology: true }))
+      }
+      let accepted = false
+      try {
+        accepted = this.solve(tree, draggedHandle, { ...options, transaction: true }) !== false
+        return accepted
+      } finally {
+        if(!accepted) restore()
+      }
+    }
+    const { applyResults=true, offsetIteration=0 } = options
     let id = 1
     const idMap = {}
     const solverElements = this.elements.filter(elem => !(elem instanceof OffsetCurve))
@@ -563,12 +614,12 @@ export class Sketch {
           constraint.isAngular() ? 'angle' : 'length',
         ).getBase()
       })
-    this.removeRedundantCoincidentConstraints()
 
     const offsets = this.constraints.filter(constraint => constraint instanceof ProfileOffsetConstraint)
     const hasOffsetReferences = this.constraints.some(constraint => !(constraint instanceof ProfileOffsetConstraint) &&
       constraint.items.some(item => item.curve() instanceof OffsetCurve))
-    if(applyResults && hasOffsetReferences) offsets.forEach(constraint => constraint.rebuild())
+    if(applyResults && hasOffsetReferences && offsets.some(constraint =>
+      !constraint.rebuild({ preserveTopology: !!draggedHandle }))) return false
     // Generated edges are read-only solver references. Their endpoints are
     // fixed points; curve contacts below use the exact curve's local tangent.
     this.elements.filter(elem => elem instanceof OffsetCurve).forEach(curve => {
@@ -625,6 +676,34 @@ export class Sketch {
       return { id: constraintId, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary }
     }
 
+    const tangentToRoundCurve = (curve, endpointIndices, tangentPrim, target, temporary) => {
+      const targetPrim = idMap[target.id].at(-1)
+      const index = endpointIndices.find(index => {
+        const connected = item => this.coincidentPointsConnected(curve, index, item.curve(), item.index)
+        return (target instanceof Arc && [1, 2].some(targetIndex =>
+          this.coincidentPointsConnected(curve, index, target, targetIndex)
+        )) || this.constraints.some(constraint =>
+          (constraint instanceof TouchConstraint || constraint instanceof IntersectionConstraint) &&
+          constraint.items.some(item => item.index === undefined && item.curve() == target) &&
+          constraint.items.some(item => item.index !== undefined && connected(item))
+        )
+      })
+      if(index !== undefined) {
+        // At an attached endpoint, point-on-circle and line-distance
+        // tangency have dependent gradients. Radius perpendicularity is
+        // independent of the contact equation and remains stable on drag.
+        const radial = {
+          id: `${id++}`, type: 'line', p1_id: targetPrim.c_id,
+          p2_id: pointPrimitive({ curve: () => curve, index }).id,
+        }
+        primitives.push(radial)
+        return { id: `${id++}`, type: 'perpendicular_ll', l1_id: tangentPrim.id, l2_id: radial.id, temporary }
+      }
+      return target instanceof Circle ?
+        { id: `${id++}`, type: 'tangent_lc', l_id: tangentPrim.id, c_id: targetPrim.id, temporary } :
+        { id: `${id++}`, type: 'tangent_la', l_id: tangentPrim.id, a_id: targetPrim.id, temporary }
+    }
+
     // An arc has independently stored center, endpoint, angle, and radius
     // parameters in PlaneGCS. Arc rules are the internal equations that keep
     // those parameters describing one coherent piece of geometry.
@@ -634,7 +713,6 @@ export class Sketch {
         id: `${id++}`,
         type: 'arc_rules',
         a_id: idMap[elem.id].slice(-1)[0].id,
-        temporary: true,
       }))
 
     // Projected point coordinates are fixed above, but PlaneGCS stores a
@@ -670,11 +748,15 @@ export class Sketch {
         const pointPrims = item.index !== undefined ?
           [pointPrimitive(item)]
           :
-          idMap[curve.id].slice(0, 2)
-        return pointPrims.flatMap(point => [
+          idMap[curve.id].filter(primitive => primitive.type == 'point')
+        const fixed = pointPrims.flatMap(point => [
           { id: `${id++}`, type: 'coordinate_x', p_id: point.id, x: point.x },
           { id: `${id++}`, type: 'coordinate_y', p_id: point.id, y: point.y },
         ])
+        if(item.index === undefined && curve instanceof Circle) fixed.push({
+          id: `${id++}`, type: 'circle_radius', c_id: idMap[curve.id].at(-1).id, radius: curve.radius,
+        })
+        return fixed
 
       } else if(c instanceof TouchConstraint) {
         const pointRef = c.items.find(item => item.index !== undefined )
@@ -745,11 +827,11 @@ export class Sketch {
         const curve = spline || c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc)
         if(!curve) throw new Error('Unsupported Tangent constraint geometry')
         const linePrim = line && idMap[line.curve().id].slice(-1)[0]
-        const curvePrim = idMap[curve.curve().id].slice(-1)[0]
         if(curve.curve() instanceof Spline) {
           const splineCurve = curve.curve()
           const other = line ? line.curve() : c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc).curve()
-          const endpoint = splineCurve.endpoints()
+          const endpoint = spline.index !== undefined ?
+            { index: spline.index == 0 ? 0 : 1 } : splineCurve.endpoints()
             .map((point, index) => ({ index, distance: other.distanceTo(point) }))
             .minMaxBy(Math.min, candidate => candidate.distance)
           const tangentPrim = idMap[splineCurve.id].find(primitive =>
@@ -759,16 +841,11 @@ export class Sketch {
             return { id: `${id++}`, type: 'parallel', l1_id: linePrim.id, l2_id: tangentPrim.id, temporary: c.temporary }
           }
           const target = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc).curve()
-          const targetPrim = idMap[target.id].slice(-1)[0]
-          return target instanceof Circle ?
-            { id: `${id++}`, type: 'tangent_lc', l_id: tangentPrim.id, c_id: targetPrim.id, temporary: c.temporary } :
-            { id: `${id++}`, type: 'tangent_la', l_id: tangentPrim.id, a_id: targetPrim.id, temporary: c.temporary }
+          return tangentToRoundCurve(splineCurve,
+            [endpoint.index == 0 ? 0 : splineCurve.points.length - 1], tangentPrim, target, c.temporary)
         }
         if(!line) throw new Error('Unsupported Tangent constraint geometry')
-        return curve.curve() instanceof Circle ?
-          { id: `${id++}`, type: 'tangent_lc', l_id: linePrim.id, c_id: curvePrim.id, temporary: c.temporary }
-          :
-          { id: `${id++}`, type: 'tangent_la', l_id: linePrim.id, a_id: curvePrim.id, temporary: c.temporary }
+        return tangentToRoundCurve(line.curve(), [0, 1], linePrim, curve.curve(), c.temporary)
 
       } else if(c instanceof CoincidentConstraint) {
         const constraintPrims = c.items.map(pointPrimitive)
@@ -845,37 +922,39 @@ export class Sketch {
       }
     }))
 
-    // Treat the pointer position as a temporary driving target. Without
-    // these constraints the dragged coordinates are only the solver's
-    // initial guess, so it is free to move the endpoint while satisfying a
-    // tangent (or any other) constraint, which makes the handle swim.
+    // Pointer targets are separate from the accepted geometry. The drag
+    // solver introduces them as temporary objectives in small trial steps.
+    const dragTargets = []
     if(draggedHandle) {
-      const dragPrim = pointPrimitive({
-        curve: () => draggedHandle.elem,
-        index: draggedHandle.index,
+      const targets = draggedHandle.targets || [{
+        elem: draggedHandle.elem, index: draggedHandle.index,
+        point: draggedHandle.elem.handles()[draggedHandle.index],
+      }]
+      targets.forEach(target => {
+        if(target.radius !== undefined) {
+          const primitive = idMap[target.elem.id].at(-1)
+          dragTargets.push({ id: primitive.id, type: primitive.type, property: 'radius', value: target.radius })
+        } else {
+          const primitive = pointPrimitive({ curve: () => target.elem, index: target.index })
+          for(const property of ['x', 'y']) dragTargets.push({
+            id: primitive.id, property, value: target.point[property],
+          })
+        }
       })
-      const target = draggedHandle.elem.handles()[draggedHandle.index]
-      if(dragPrim && target) constraints.push(
-        { id: `${id++}`, type: 'coordinate_x', p_id: dragPrim.id, x: target.x, temporary: true },
-        { id: `${id++}`, type: 'coordinate_y', p_id: dragPrim.id, y: target.y, temporary: true },
-      )
     }
 
     // Solve
     const parameterGroups = draggedHandle ? [] : solverElements.map(elem =>
       idMap[elem.id].map(primitive => primitive.id)
     )
-    const { results, conflicting, fullyConstrained } = window.oc.solveSystem(
-      [...primitives, ...constraints],
-      parameterGroups,
-    )
-
-    if(conflicting) {
-      window.bus.emit('toast', 'Sketch was over-constrained')
-      this.constraints.pop()
-      this.solve(tree, draggedHandle, options)
-      return
+    const solution = draggedHandle ?
+      solveDrag(primitives, constraints, dragTargets, system => window.oc.solveSystem(system)) :
+      window.oc.solveSystem([...primitives, ...constraints], parameterGroups)
+    if(solution.conflicting || solution.failed) {
+      if(!draggedHandle && applyResults) window.bus.emit('toast', solution.conflicting ? 'Sketch was over-constrained' : 'Could not solve sketch')
+      return false
     }
+    const { results, fullyConstrained } = solution
 
     // Pointer-driving constraints temporarily remove freedom while dragging;
     // retain each element's last structural state until a normal solve.
@@ -887,6 +966,7 @@ export class Sketch {
     // solver result: doing so can move the geometry away from the position
     // established by the temporary pointer-driving constraints.
     if(!applyResults) return
+    if(!validGeometry(results)) return false
 
     // Write back results
     const updatePrim = (prim) => results.find(res => res.id == prim.id )
@@ -896,37 +976,28 @@ export class Sketch {
       return new THREE.Vector3(updated.x, updated.y, 0.0)
     }
 
-    solverElements.forEach(elem => {
-      if(elem instanceof SketchPoint) {
-        elem.setHandles([vecFromPrim(idMap[elem.id][0])])
-
-      } else if(elem instanceof Line) {
-        const [p1, p2] = idMap[elem.id]
-        elem.setHandles([vecFromPrim(p1), vecFromPrim(p2)])
-
-      } else if(elem instanceof Circle) {
-        const [center, circle] = idMap[elem.id]
-        const solvedCenter = vecFromPrim(center)
-        const solvedRadius = Math.abs(updatePrim(circle).radius)
-        if([solvedCenter.x, solvedCenter.y, solvedCenter.z, solvedRadius].every(Number.isFinite) && solvedRadius > EPSILON) {
-          elem.radius = solvedRadius
-          elem.setHandles([solvedCenter])
-        }
-
-      } else if(elem instanceof Arc) {
-        const [start, end, center, arc] = idMap[elem.id]
-        elem.setSolvedHandles(
+    for(const elem of solverElements) {
+      const primitives = idMap[elem.id]
+      if(elem instanceof Arc) {
+        const [start, end, center, arc] = primitives
+        if(!elem.setSolvedHandles(
           [vecFromPrim(center), vecFromPrim(start), vecFromPrim(end)],
           updatePrim(arc).radius,
-        )
-
-      } else if(elem instanceof Spline) {
-        elem.setHandles(idMap[elem.id].filter(prim => prim.type == 'point').map(vecFromPrim))
+        )) return false
+      } else {
+        if(elem instanceof Circle) elem.radius = updatePrim(primitives.at(-1)).radius
+        elem.setHandles(primitives.filter(prim => prim.type == 'point').map(vecFromPrim))
       }
-    })
+    }
+    if(draggedHandle && this.constraints.some(constraint => {
+      if(!(constraint instanceof TouchConstraint || constraint instanceof IntersectionConstraint)) return false
+      const pointRef = constraint.items.find(item => item.index !== undefined)
+      const point = pointRef.curve().handles()[pointRef.index]
+      return constraint.items.some(item => item.index === undefined && item.curve() instanceof Spline &&
+        !(item.curve().distanceTo(point) <= EPSILON / 10))
+    })) return false
 
-    this.constraints.filter(constraint => constraint instanceof ProfileOffsetConstraint)
-      .forEach(constraint => constraint.rebuild())
+    if(offsets.some(constraint => !constraint.rebuild({ preserveTopology: !!draggedHandle }))) return false
 
     // PlaneGCS has no exact offset-curve primitive. Re-linearize contacts
     // against the regenerated curve until they meet the actual geometry,
@@ -945,11 +1016,8 @@ export class Sketch {
       }))
     if(contactMoved || endpointMoved) {
       if(offsetIteration < 15) return this.solve(tree, draggedHandle, { ...options, offsetIteration: offsetIteration + 1 })
-      window.bus?.emit('toast', 'Could not solve the attachment to the offset curve')
-    }
-
-    if(draggedHandle && refreshFullyConstrained) {
-      this.solve(tree, undefined, { applyResults: false })
+      if(!draggedHandle) window.bus?.emit('toast', 'Could not solve the attachment to the offset curve')
+      return false
     }
   }
 
@@ -993,17 +1061,32 @@ export class Projection {
     this.id = makeID()
     this.isReference = false
     this.itemRef = itemOrRef instanceof Edge ?
-      new EdgeReference(itemOrRef)
-      :
-      (itemOrRef instanceof AxisHelper || itemOrRef instanceof PointHelper ?
-        new HelperReference(itemOrRef)
-        :
+      new EdgeReference(itemOrRef) :
+      itemOrRef instanceof AxisHelper || itemOrRef instanceof PointHelper ?
+        new HelperReference(itemOrRef) :
         itemOrRef
-      )
   }
 
   update(tree) {
-    this.itemRef.update(tree)
+    this.error = null
+    const error = this.itemRef.update(tree)
+    if(error) return this.invalidate(error.msg)
+    try {
+      return this.projectGeometry(tree)
+    } catch(error) {
+      // OpenCascade throws numeric exception pointers for degenerate projections.
+      if(typeof error !== 'number') throw error
+      return this.invalidate('This geometry cannot be projected onto the sketch plane')
+    }
+  }
+
+  invalidate(message) {
+    if(this.output instanceof SketchElement) this.output.clear()
+    this.output = undefined
+    this.error = message
+  }
+
+  projectGeometry(tree) {
     const isElementPoint = this.itemRef instanceof ElemRef
     const item = isElementPoint ? this.itemRef.curve() : this.itemRef.getItem()
     const relative = this.relativeTransform(tree)
@@ -1021,7 +1104,6 @@ export class Projection {
 
     let curve
     if(item instanceof Edge) {
-      // BRep_Tool.Curve()
       const shape = transformGeometry(item.geom(), relative).Shape()
       curve = new window.oc.oc.BRepAdaptor_Curve_2(window.oc.oc.TopoDS.Edge_1(shape))
 
@@ -1039,38 +1121,32 @@ export class Projection {
     const project = new window.oc.oc.ProjLib_ProjectOnPlane_2(ax)
     project.Load(curve.ShallowCopy(), EPSILON, true) // ShallowCopy upcasts BRepAdaptor_Curve -> Adaptor3d_Curve
 
-    const projected = project.GetResult().get()
-    const [u1, u2] = [projected.FirstParameter(), projected.LastParameter()]
-
-    const plane = ocPlnFromMatrix(this.sketch.workplane)
-    let curve2d = window.oc.oc.GeomAPI.To2d(projected.Curve(), plane)
-    const handle = new window.oc.oc.Handle_Geom2d_Curve_2(curve2d.get())
-    const trimmed = new window.oc.oc.Geom2d_TrimmedCurve(handle, u1, u2, true, true)
-
-    const constructor = {
-      [window.oc.oc.GeomAbs_CurveType.GeomAbs_Line.constructor]: Line,
-      [window.oc.oc.GeomAbs_CurveType.GeomAbs_Circle.constructor]: Circle,
-    }[project.GetType().constructor]
-
-    if(constructor) {
-      const elem = constructor.fromGeometry(trimmed, item.id + '/projected')
-      return this.updateOutput(elem)
-
-    } else {
-      console.error(`Could not project ${project.getType().constructor} from ${curve.constructor}`)
+    const type = project.GetType()
+    const types = window.oc.oc.GeomAbs_CurveType
+    if(type !== types.GeomAbs_Line && type !== types.GeomAbs_Circle) {
+      return this.invalidate('This projection is not supported. Only points, lines, circles and circular arcs are supported')
     }
 
-    return this.output
+    const projected = project.GetResult().get()
+    // GetResult exposes the untrimmed basis curve; retain the source edge's bounds.
+    const [u1, u2] = [project.FirstParameter(), project.LastParameter()]
+
+    const plane = ocPlnFromMatrix(this.sketch.workplane)
+    const curve2d = window.oc.oc.GeomAPI.To2d(projected.Curve(), plane)
+    const trimmed = new window.oc.oc.Geom2d_TrimmedCurve(curve2d, u1, u2, true, true)
+
+    const constructor = type === types.GeomAbs_Line ? Line :
+      Math.abs(u2 - u1 - Math.PI * 2) <= EPSILON ? Circle : Arc
+    const elem = constructor.fromGeometry(trimmed, item.id + '/projected')
+    return this.updateOutput(elem)
   }
 
   updateOutput(elem) {
     const existing = this.output
+    if(existing instanceof SketchElement) existing.clear()
     if(existing && existing.constructor == elem.constructor) {
-      if(existing instanceof SketchElement) existing.clear()
       Object.assign(existing, elem)
       elem = existing
-    } else if(existing instanceof SketchElement) {
-      existing.clear()
     }
 
     elem.sketch = this.sketch
@@ -1380,12 +1456,13 @@ export class ProfileOffsetConstraint extends Dimension {
     return [frame.point, frame.point.clone().addScaledVector(frame.normal, this.side * this.distance)]
   }
 
-  rebuild() {
+  rebuild({ preserveTopology=false }={}) {
     let curves
     let accepted = true
     try {
       curves = buildOffsetCurves(this.sourceGroups(), this.side * this.distance)
     } catch(error) {
+      if(preserveTopology) return false
       accepted = false
       if(this.validDistance !== undefined) {
         this.distance = this.validDistance
@@ -1402,6 +1479,10 @@ export class ProfileOffsetConstraint extends Dimension {
       }
     }
     const previous = this.outputs()
+    if(preserveTopology && curves.length != previous.length) {
+      curves.forEach(curve => curve.clear())
+      return false
+    }
     const outputs = curves.map((curve, index) => {
       const existing = previous[index]
       if(existing) {

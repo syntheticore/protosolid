@@ -40,6 +40,7 @@
     .drag-handle.handle(
       v-for="{ handle, pos } in projectedHandles"
       :key="handle.id"
+      :class="{ highlighted: highlight instanceof ElemRef && highlight.curve() == handle.elem && highlight.index == handle.index }"
       :style="{ top: pos.y + 'px', left: pos.x + 'px' }"
       @mouseup="emit('handleMouseUp', $event, handle)"
       @mousedown="emit('handleMouseDown', $event, handle)"
@@ -56,22 +57,14 @@
 
   .drag-handle
     pointer-events: auto
-    // cursor: grab
 
-    &:hover
-
+    &:hover, &:active, &.highlighted
       &::before
         width: 5px
         height: 5px
 
-    &:active
-
-      &::before
-        width:  5px
-        height: 5px
-
-    // .orbiting &
-    //   pointer-events: none
+    &.highlighted::before
+      background: $highlight
 
 </style>
 
@@ -79,7 +72,8 @@
 <script setup>
 
   import { Circle, OffsetCurve } from '../js/core/geom2d.js'
-  import { ProjectedPoint } from '../js/core/sketch.js'
+  import { ProjectedPoint, ElemRef } from '../js/core/sketch.js'
+  import { layoutConstraintIcons } from '../js/three/constraint-icons.js'
 
   const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
@@ -87,6 +81,13 @@
 
   const highlight = inject('highlight')
   const frame = inject('frame')
+
+  const constraintIcons = shallowReactive(new Map())
+  const constraintIconLayout = computed(() => layoutConstraintIcons(
+    [...constraintIcons].map(([id, proxies]) => [id, proxies.value])
+  ))
+  provide('constraint-icons', constraintIcons)
+  provide('constraint-icon-layout', constraintIconLayout)
 
   const highlighted = computed(() => props.parentHighlighted || props.sketch == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.sketch) )
@@ -134,9 +135,8 @@
   function solve() {
     const activeHandle = props.activeHandle
     const releasedHandle = !activeHandle && props.sketch.solveHandle
-    const handle = activeHandle || releasedHandle
-    props.sketch.solve(props.document.top(), handle, {
-      refreshFullyConstrained: !!releasedHandle,
+    props.sketch.solve(props.document.top(), activeHandle, {
+      applyResults: !releasedHandle,
     })
   }
 

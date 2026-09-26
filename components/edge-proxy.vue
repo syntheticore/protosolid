@@ -2,6 +2,7 @@
 
 <script setup>
 
+  import { toRaw } from 'vue'
   import materials from '../js/materials.js'
 
   const props = defineProps(['component', 'edge', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
@@ -27,7 +28,7 @@
   window.alcRenderer.add(edgeMesh, props.parentActive)
   renderNeeded.value = true
 
-  watch(() => [highlight.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
+  watch(() => [props.edge, highlight.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
     edgeMesh.visible = props.displayMode != 'exportPreview' && props.colorMode != 'interference'
     edgeMesh.material = getMaterial()
     nextTick().then(() => renderNeeded.value = true )
@@ -35,7 +36,7 @@
 
   function getMaterial() {
     if(props.displayMode == 'exportPreview' || props.colorMode == 'interference') return materials.invisibleLine
-    return props.edge == highlight.value ?
+    return toRaw(props.edge) == toRaw(highlight.value) ?
       materials.highlightLine
       :
       ['shaded', 'pathTraced'].includes(props.displayMode) ?

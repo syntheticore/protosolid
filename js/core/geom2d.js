@@ -417,6 +417,10 @@ export class Arc extends SketchElement {
     this.bounds = bounds
     this.forward = forward
     this.update(geom)
+    // Imported and three-point arcs can use a rotated or counter-clockwise
+    // circle axis. Store bounds on the canonical circle used by geometry(),
+    // cloning and serialization, while preserving the logical traversal.
+    if(geom) this.setSolvedHandles(this.handles(), this.radius)
   }
 
   static fromPoints(points) {
@@ -502,12 +506,6 @@ export class Arc extends SketchElement {
     this.forward = clockwise
     this.update(new window.oc.oc.Handle_Geom2d_Curve_2(solved.trimmed))
     return true
-  }
-
-  setEndpoint(index, point) {
-    const endpoints = this.endpoints()
-    endpoints[index - 1] = point
-    return this.setPoints([endpoints[0], this.sample(0.5), endpoints[1]])
   }
 
   setPoints(points) {

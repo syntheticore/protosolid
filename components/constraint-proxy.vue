@@ -3,10 +3,11 @@
   //- Sketch constraint proxy
   Icon.constraint(
     v-if="!dimension"
-    v-for="proxy in projectedProxies"
+    v-for="proxy in arrangedProxies"
     :icon="(constraint.icon && constraint.icon()) ||constraint.constructor.icon"
     :class="{ selected, preview: preview || drawingToolActive }"
     :style="{ top: proxy.coords.y + 'px', left: proxy.coords.x + 'px' }"
+    @mouseup="$emit('dimensionMouseUp', $event, constraint)"
     @click.stop="select"
   )
 
@@ -137,9 +138,10 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, EqualConstraint } from '../js/core/sketch.js'
   import { Line, Circle, Arc } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
+  import { tangentPoint } from '../js/three/constraint-icons.js'
   import { SketchTool } from '../js/tools.js'
 
   const props = defineProps({
@@ -154,6 +156,8 @@
   const bus = inject('bus')
   const frame = inject('frame')
   const renderNeeded = inject('render-needed')
+  const constraintIcons = inject('constraint-icons', null)
+  const constraintIconLayout = inject('constraint-icon-layout', null)
 
   const selected = computed(() => props.document.selection.has(props.constraint) )
   const drawingToolActive = computed(() => props.activeTool instanceof SketchTool)
@@ -196,7 +200,6 @@
     // but applying that icon offset here moves point-to-point labels off the
     // dimension line.
     if(props.constraint instanceof Dimension) return [{
-      constraint: props.constraint,
       pos: transformPosition(props.constraint.position.clone(), sketch),
     }]
 
@@ -205,20 +208,28 @@
       // at every join would add noise rather than useful information.
       if(props.constraint.items.every(item => item.curve() instanceof Line)) return []
       return [{
-        constraint: props.constraint,
-        curve: props.constraint.items[0].curve(),
         pos: transformPosition(point(props.constraint.items[0], true), sketch),
         offset: { x: 11, y: -11 },
       }]
     }
+
+    if(props.constraint instanceof TangentConstraint) return [{
+      pos: transformPosition(tangentPoint(props.constraint), sketch),
+      offset: { x: 11, y: -11 },
+    }]
+
+    if(props.constraint instanceof EqualConstraint) return props.constraint.items.map(item => {
+      const curve = item.curve()
+      return {
+        pos: transformPosition(curve instanceof Line ? curve.midpoint() : curve.sample(0.5), sketch),
+      }
+    })
 
     if(props.constraint instanceof TouchConstraint ||
       props.constraint instanceof MidpointConstraint ||
       props.constraint instanceof IntersectionConstraint) {
       const item = props.constraint.items.find(item => item.index !== undefined)
       return [{
-        constraint: props.constraint,
-        curve: item.curve(),
         pos: transformPosition(point(item, true), sketch),
         offset: { x: 11, y: -11 },
       }]
@@ -230,8 +241,6 @@
       const otherCurve = other && other.curve()
       const common = otherCurve && otherCurve.handles && curve.commonHandle && curve.commonHandle(otherCurve)
       return {
-        constraint: props.constraint,
-        curve,
         offset: item.index !== undefined ? { x: 11, y: -11 } : undefined,
         pos: transformPosition((props.constraint.position && props.constraint.position.clone()) || (item.index !== undefined ?
           point(item, true)
@@ -265,11 +274,19 @@
     })
   })
 
+  if(constraintIcons && !(props.constraint instanceof Dimension)) {
+    constraintIcons.set(props.constraint.id, projectedProxies)
+  }
+  const arrangedProxies = computed(() =>
+    constraintIconLayout?.value.get(props.constraint.id) || projectedProxies.value
+  )
+
   function select() {
     props.document.selection.handle(props.constraint, bus.isCtrlPressed)
   }
 
   onUnmounted(() => {
+    constraintIcons?.delete(props.constraint.id)
     window.alcRenderer.remove(_dimension)
     renderNeeded.value = true
   })

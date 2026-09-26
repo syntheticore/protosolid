@@ -7,6 +7,7 @@
     :icon="(constraint.icon && constraint.icon()) ||constraint.constructor.icon"
     :class="{ selected, preview: preview || drawingToolActive }"
     :style="{ top: proxy.coords.y + 'px', left: proxy.coords.x + 'px' }"
+    @mouseup="$emit('dimensionMouseUp', $event, constraint)"
     @click.stop="select"
   )
 

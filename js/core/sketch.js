@@ -625,6 +625,34 @@ export class Sketch {
       return { id: constraintId, type: target[0], p_id: pointPrim.id, [target[1]]: curvePrim.id, temporary }
     }
 
+    const tangentToRoundCurve = (curve, endpointIndices, tangentPrim, target, temporary) => {
+      const targetPrim = idMap[target.id].at(-1)
+      const index = endpointIndices.find(index => {
+        const connected = item => this.coincidentPointsConnected(curve, index, item.curve(), item.index)
+        return (target instanceof Arc && [1, 2].some(targetIndex =>
+          this.coincidentPointsConnected(curve, index, target, targetIndex)
+        )) || this.constraints.some(constraint =>
+          (constraint instanceof TouchConstraint || constraint instanceof IntersectionConstraint) &&
+          constraint.items.some(item => item.index === undefined && item.curve() == target) &&
+          constraint.items.some(item => item.index !== undefined && connected(item))
+        )
+      })
+      if(index !== undefined) {
+        // At an attached endpoint, point-on-circle and line-distance
+        // tangency have dependent gradients. Radius perpendicularity is
+        // independent of the contact equation and remains stable on drag.
+        const radial = {
+          id: `${id++}`, type: 'line', p1_id: targetPrim.c_id,
+          p2_id: pointPrimitive({ curve: () => curve, index }).id,
+        }
+        primitives.push(radial)
+        return { id: `${id++}`, type: 'perpendicular_ll', l1_id: tangentPrim.id, l2_id: radial.id, temporary }
+      }
+      return target instanceof Circle ?
+        { id: `${id++}`, type: 'tangent_lc', l_id: tangentPrim.id, c_id: targetPrim.id, temporary } :
+        { id: `${id++}`, type: 'tangent_la', l_id: tangentPrim.id, a_id: targetPrim.id, temporary }
+    }
+
     // An arc has independently stored center, endpoint, angle, and radius
     // parameters in PlaneGCS. Arc rules are the internal equations that keep
     // those parameters describing one coherent piece of geometry.
@@ -745,11 +773,11 @@ export class Sketch {
         const curve = spline || c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc)
         if(!curve) throw new Error('Unsupported Tangent constraint geometry')
         const linePrim = line && idMap[line.curve().id].slice(-1)[0]
-        const curvePrim = idMap[curve.curve().id].slice(-1)[0]
         if(curve.curve() instanceof Spline) {
           const splineCurve = curve.curve()
           const other = line ? line.curve() : c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc).curve()
-          const endpoint = splineCurve.endpoints()
+          const endpoint = spline.index !== undefined ?
+            { index: spline.index == 0 ? 0 : 1 } : splineCurve.endpoints()
             .map((point, index) => ({ index, distance: other.distanceTo(point) }))
             .minMaxBy(Math.min, candidate => candidate.distance)
           const tangentPrim = idMap[splineCurve.id].find(primitive =>
@@ -759,16 +787,11 @@ export class Sketch {
             return { id: `${id++}`, type: 'parallel', l1_id: linePrim.id, l2_id: tangentPrim.id, temporary: c.temporary }
           }
           const target = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc).curve()
-          const targetPrim = idMap[target.id].slice(-1)[0]
-          return target instanceof Circle ?
-            { id: `${id++}`, type: 'tangent_lc', l_id: tangentPrim.id, c_id: targetPrim.id, temporary: c.temporary } :
-            { id: `${id++}`, type: 'tangent_la', l_id: tangentPrim.id, a_id: targetPrim.id, temporary: c.temporary }
+          return tangentToRoundCurve(splineCurve,
+            [endpoint.index == 0 ? 0 : splineCurve.points.length - 1], tangentPrim, target, c.temporary)
         }
         if(!line) throw new Error('Unsupported Tangent constraint geometry')
-        return curve.curve() instanceof Circle ?
-          { id: `${id++}`, type: 'tangent_lc', l_id: linePrim.id, c_id: curvePrim.id, temporary: c.temporary }
-          :
-          { id: `${id++}`, type: 'tangent_la', l_id: linePrim.id, a_id: curvePrim.id, temporary: c.temporary }
+        return tangentToRoundCurve(line.curve(), [0, 1], linePrim, curve.curve(), c.temporary)
 
       } else if(c instanceof CoincidentConstraint) {
         const constraintPrims = c.items.map(pointPrimitive)
@@ -849,13 +872,14 @@ export class Sketch {
     // these constraints the dragged coordinates are only the solver's
     // initial guess, so it is free to move the endpoint while satisfying a
     // tangent (or any other) constraint, which makes the handle swim.
+    const dragConstraints = []
     if(draggedHandle) {
       const dragPrim = pointPrimitive({
         curve: () => draggedHandle.elem,
         index: draggedHandle.index,
       })
       const target = draggedHandle.elem.handles()[draggedHandle.index]
-      if(dragPrim && target) constraints.push(
+      if(dragPrim && target) dragConstraints.push(
         { id: `${id++}`, type: 'coordinate_x', p_id: dragPrim.id, x: target.x, temporary: true },
         { id: `${id++}`, type: 'coordinate_y', p_id: dragPrim.id, y: target.y, temporary: true },
       )
@@ -865,17 +889,20 @@ export class Sketch {
     const parameterGroups = draggedHandle ? [] : solverElements.map(elem =>
       idMap[elem.id].map(primitive => primitive.id)
     )
-    const { results, conflicting, fullyConstrained } = window.oc.solveSystem(
-      [...primitives, ...constraints],
+    let solution = window.oc.solveSystem(
+      [...primitives, ...constraints, ...dragConstraints],
       parameterGroups,
     )
-
-    if(conflicting) {
-      window.bus.emit('toast', 'Sketch was over-constrained')
-      this.constraints.pop()
-      this.solve(tree, draggedHandle, options)
-      return
+    if((solution.conflicting || solution.failed) && dragConstraints.length) {
+      // The pointer may request an unreachable position. Release only its
+      // temporary coordinates and solve the unchanged structural sketch.
+      solution = window.oc.solveSystem([...primitives, ...constraints], parameterGroups)
     }
+    if(solution.conflicting || solution.failed) {
+      window.bus.emit('toast', solution.conflicting ? 'Sketch was over-constrained' : 'Could not solve sketch')
+      return false
+    }
+    const { results, fullyConstrained } = solution
 
     // Pointer-driving constraints temporarily remove freedom while dragging;
     // retain each element's last structural state until a normal solve.

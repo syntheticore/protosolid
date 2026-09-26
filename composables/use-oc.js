@@ -75,11 +75,18 @@ export async function useOC() {
       }
 
       const solver = makeSolver()
-      solver.solve()
+      const status = solver.solve()
+      const conflicting = solver.has_gcs_conflicting_constraints()
+      const failed = status >= 2
+      // Redundant equations can have a valid solution. They are not a
+      // reason to reject the sketch or discard a user's constraint.
+      if(conflicting || failed) {
+        solver.destroy_gcs_module()
+        return { results: [], conflicting, failed, fullyConstrained: [] }
+      }
       solver.apply_solution()
 
       const results = solver.sketch_index.get_primitives()
-      const conflicting = solver.has_gcs_conflicting_constraints() || solver.has_gcs_partially_redundant_constraints() || solver.has_gcs_redundant_constraints()
       const dof = solver.gcs.dof()
 
       // PlaneGCS only exposes total DOF. Probe whether each element owns any
@@ -115,7 +122,7 @@ export async function useOC() {
 
       solver.destroy_gcs_module()
 
-      return { results, conflicting, dof, fullyConstrained }
+      return { results, conflicting, failed, dof, fullyConstrained }
     },
   }
 }

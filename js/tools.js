@@ -102,6 +102,8 @@ class Tool {
 
   lineSnapContext() { return null }
 
+  tangentSnapStart() { return null }
+
   snapExclusions() { return this.curve ? [this.curve] : [] }
 
   acceptsSnapElement(_elem) { return true }
@@ -110,9 +112,9 @@ class Tool {
 }
 
 function captureSnap(snapper) {
-  const { curve, pointTarget, intersection, point, x, y, lineRelation } = snapper.snapped || {}
+  const { curve, pointTarget, intersection, point, x, y, lineRelation, tangent } = snapper.snapped || {}
   if(!(curve || pointTarget || intersection || x || y || lineRelation)) return
-  return { ...pointTarget, curve, intersection, point, x, y, lineRelation }
+  return { ...pointTarget, curve, intersection, point, x, y, lineRelation, tangent }
 }
 
 function isConstrainablePoint(elem, index) {
@@ -1007,6 +1009,10 @@ export class SketchTool extends Tool {
     if(arguments.length < 3) snap = captureSnap(this.viewport.snapper)
     const captured = addCapturedSnapConstraint(this.sketch, snap, elem, index)
     const origin = this.originSnapConstraint(elem, index, snap)
+    if(snap?.tangent) this.sketch.addConstraint(new TangentConstraint(
+      elem instanceof Spline ? new ElemRef(elem, index) : elem,
+      snap.tangent,
+    ))
     return captured || origin
   }
 
@@ -1050,7 +1056,7 @@ export class LineTool extends SketchTool {
       }
       return
     }
-    addInferredTangentConstraint(this.sketch, line, endSnap)
+    if(!endSnap?.tangent) addInferredTangentConstraint(this.sketch, line, endSnap)
     addInferredTangentConstraint(this.sketch, line, this.startSnap, 0)
   }
 
@@ -1113,6 +1119,10 @@ export class LineTool extends SketchTool {
       perpendicularLines: [this.previousSegment, snap?.curve, snap?.elem, ...(snap?.intersection || [])]
         .filter(elem => elem instanceof Line),
     }
+  }
+
+  tangentSnapStart() {
+    return this.curve?.endpoints()[0]
   }
 
   dispose() {
@@ -1188,6 +1198,10 @@ export class SplineTool extends SketchTool {
   acceptsSnapElement(elem) {
     return this.mode != 'insert' ||
       (elem instanceof Spline && elem.sketch == this.sketch && !elem.projection)
+  }
+
+  tangentSnapStart() {
+    return this.mode == 'draw' && this.curve ? this.curve.handles().at(-2) : null
   }
 
   shiftConstraintIndices(spline, fromIndex, offset) {

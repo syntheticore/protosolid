@@ -371,6 +371,43 @@ export default class Snapper {
     this.snapAnchor = { type: 'snap', pos: this.viewport.renderer.toScreen(vec), vec, id }
   }
 
+  closestTangentSnap(localVec, coords, target) {
+    const start = this.viewport.activeTool.tangentSnapStart()
+    if(!start || !target) return
+    const curves = [target.elem, target.pointTarget?.elem, ...(target.curves || [])]
+      .filter(elem => elem instanceof Circle || elem instanceof Arc)
+    let closest
+    curves.forEach(elem => {
+      const center = elem.center()
+      const delta = start.clone().sub(center)
+      const distanceSquared = delta.lengthSq()
+      const radiusSquared = elem.radius * elem.radius
+      if(distanceSquared <= radiusSquared) return
+      const base = center.clone().addScaledVector(delta, radiusSquared / distanceSquared)
+      const offset = new THREE.Vector3(-delta.y, delta.x, 0)
+        .multiplyScalar(elem.radius * Math.sqrt(distanceSquared - radiusSquared) / distanceSquared)
+      for(const sign of [-1, 1]) {
+        const point = base.clone().addScaledVector(offset, sign)
+        if(elem instanceof Arc && !closestPointOnCurve(elem, point).almost(point)) continue
+        const direction = point.clone().sub(start).normalize()
+        if(localVec.clone().sub(start).normalize().dot(direction) < Math.cos(lineSnapAngle)) continue
+        const distance = this.guideScreenPoint(point).distanceTo(coords)
+        if(distance >= snapDistance || (closest && distance >= closest.distance)) continue
+        closest = { elem, start, point, distance }
+      }
+    })
+    return closest
+  }
+
+  showTangentSnap(tangent) {
+    this.snapped.tangent = tangent.elem
+    this.guides.push({
+      id: 'tangent-' + tangent.elem.id,
+      start: this.guideScreenPoint(tangent.start),
+      end: this.guideScreenPoint(tangent.point),
+    })
+  }
+
   getSnapGuides(localVec, coords, snapTarget) {
     const guides = []
     const context = this.viewport.activeTool.lineSnapContext()
@@ -479,10 +516,12 @@ export default class Snapper {
 
     const screenVec = this.viewport.renderer.toScreen(vec)
     const guides = snapToGuides ? this.getSnapGuides(localVec, screenVec, snapTarget) : []
+    const tangent = snapToGuides && this.closestTangentSnap(localVec, screenVec, snapTarget)
 
     if(snapTarget && snapTarget.curves) {
       const snapVec = snapTarget.point
       this.snapped = { intersection: snapTarget.curves, point: snapVec }
+      if(tangent && tangent.point.almost(snapVec)) this.showTangentSnap(tangent)
       this.showSnapGuides(this.guidesAtPoint(guides, snapVec), snapVec)
       this.setSnapAnchor(snapVec, 'intersection-' + snapTarget.curves.map(curve => curve.id).join('-'))
       return snapVec
@@ -492,6 +531,7 @@ export default class Snapper {
       const pointTarget = snapTarget.pointTarget
       const snapVec = pointTarget.point.clone()
       this.snapped = { x: snapVec, y: snapVec, pointTarget }
+      if(tangent && tangent.point.almost(snapVec)) this.showTangentSnap(tangent)
       this.showSnapGuides(this.guidesAtPoint(guides, snapVec), snapVec)
       this.snapped.x = snapVec
       this.snapped.y = snapVec
@@ -500,6 +540,13 @@ export default class Snapper {
     }
 
     if(snapTarget && snapTarget.elem) {
+      if(tangent) {
+        this.snapped = { curve: snapTarget.elem }
+        this.showTangentSnap(tangent)
+        this.showSnapGuides(this.guidesAtPoint(guides, tangent.point), tangent.point)
+        this.setSnapAnchor(tangent.point, 'tangent-' + tangent.elem.id)
+        return tangent.point
+      }
       const guideSnap = this.closestGuideSnap(guides, screenVec, snapTarget.elem)
       const snapVec = guideSnap ? guideSnap.point : snapTarget.point
       this.snapped = { curve: snapTarget.elem }

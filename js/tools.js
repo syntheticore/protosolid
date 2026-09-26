@@ -818,6 +818,7 @@ export class TrimTool extends Tool {
     super(component, viewport)
     this.sketch = sketch
     this.localSpace = true
+    this.cursor = 'crosshair'
   }
 
   curveAt(coords) {

@@ -232,30 +232,57 @@ export class Sketch {
     replacements.filter(replacement => replacement != primary).forEach(replacement => replacement.id = makeID())
 
     const lostConstraints = new Set()
-    this.constraints.forEach(constraint => constraint.items.forEach(item => {
-      if(item.curve() != elem) return
+    const endpointTouches = new Set()
+    this.constraints.forEach(constraint => {
+      const touchPoint = constraint instanceof TouchConstraint &&
+        constraint.items.find(item => item.index !== undefined)
+      const contact = touchPoint && touchPoint.curve().handles()[touchPoint.index].clone()
+      constraint.items.forEach(item => {
+        if(item.curve() != elem) return
 
-      let replacement = primary
-      let replacementIndex = item.index
-      if(item.index !== undefined) {
-        const oldPoint = oldHandles[item.index]
-        const match = replacements
-          .map(curve => ({ curve, index: curve.handles().findIndex(point => point.almost(oldPoint)) }))
-          .find(candidate => candidate.index != -1)
-        if(!match) {
-          lostConstraints.add(constraint)
-          return
+        let replacement = primary
+        let replacementIndex = item.index
+        if(item.index !== undefined) {
+          const oldPoint = oldHandles[item.index]
+          const match = replacements
+            .map(curve => ({ curve, index: curve.handles().findIndex(point => point.almost(oldPoint)) }))
+            .find(candidate => candidate.index != -1)
+          if(!match) {
+            lostConstraints.add(constraint)
+            return
+          }
+          replacement = match.curve
+          replacementIndex = match.index
+        } else if(contact) {
+          // A contact at a new trim boundary must bind the endpoint, rather
+          // than allowing the point to slide along the underlying curve.
+          const endpoint = replacements
+            .filter(curve => !curve.isClosed() && curve.endpoints().some(point => point.almost(contact)))
+            .map(curve => ({ curve, index: curve.handles().findIndex(point => point.almost(contact)) }))
+            .find(candidate => candidate.index != -1)
+          if(endpoint) {
+            replacement = endpoint.curve
+            replacementIndex = endpoint.index
+            endpointTouches.add(constraint)
+          } else {
+            replacement = replacements.find(curve => curve.distanceTo(contact).almost(0.0))
+            if(!replacement) {
+              lostConstraints.add(constraint)
+              return
+            }
+          }
         }
-        replacement = match.curve
-        replacementIndex = match.index
-      }
 
-      item.curveRef.item = replacement
-      item.curveRef.itemId = replacement.id
-      item.index = replacementIndex
-    }))
+        item.curveRef.item = replacement
+        item.curveRef.itemId = replacement.id
+        item.index = replacementIndex
+      })
+    })
 
     this.constraints = this.constraints.filter(constraint => !lostConstraints.has(constraint))
+      .map(constraint => endpointTouches.has(constraint) ?
+        Object.assign(new CoincidentConstraint(...constraint.items), constraint) : constraint)
+    this.removeRedundantCoincidentConstraints()
     this.elements.splice(elementIndex, 1, ...replacements)
     this.elements.forEach(element => element.fullyConstrained = false)
     elem.clear()

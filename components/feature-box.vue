@@ -197,6 +197,9 @@
     > :not(span)
       margin-top: 6px
 
+    > .picker
+      margin-top: 8px
+
     .has-header &
       flex-direction: column-reverse
 

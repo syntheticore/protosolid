@@ -155,7 +155,7 @@
 
   .tool-box
     position: absolute
-    margin-top: (12 + 38)px
+    margin-top: 12px
     z-index: 2
 
   .side-bar
@@ -275,7 +275,7 @@
 
     &.top
       bottom: unset
-      top: 170px
+      top: 132px
 
   .feature-bar
     position: absolute

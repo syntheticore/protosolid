@@ -15,7 +15,7 @@
   )
 
   EdgeProxy(
-    v-if="parentActive || projectInactive"
+    v-if="parentActive || projectInactive || displayMode == 'wireframe'"
     v-for="edge in solid.edges()"
     :key="edge.tessId"
     :edge="edge"

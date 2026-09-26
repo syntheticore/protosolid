@@ -100,6 +100,8 @@ class Tool {
 
   guideSnapPoints() { return [] }
 
+  lineSnapContext() { return null }
+
   snapExclusions() { return this.curve ? [this.curve] : [] }
 
   acceptsSnapElement(_elem) { return true }
@@ -108,9 +110,9 @@ class Tool {
 }
 
 function captureSnap(snapper) {
-  const { curve, pointTarget, intersection, point, x, y } = snapper.snapped || {}
-  if(!(curve || pointTarget || intersection || x || y)) return
-  return { ...pointTarget, curve, intersection, point, x, y }
+  const { curve, pointTarget, intersection, point, x, y, lineRelation } = snapper.snapped || {}
+  if(!(curve || pointTarget || intersection || x || y || lineRelation)) return
+  return { ...pointTarget, curve, intersection, point, x, y, lineRelation }
 }
 
 function isConstrainablePoint(elem, index) {
@@ -1037,12 +1039,17 @@ export class SketchTool extends Tool {
 export class LineTool extends SketchTool {
   static icon = 'pen'
 
-  constructor(component, viewport, sketch) {
-    super(component, viewport, sketch)
-  }
-
   constrainCompletedLine(line, endSnap) {
     this.constrainPoint(line, 1, endSnap)
+    if(endSnap?.lineRelation) {
+      const { elem, perpendicular } = endSnap.lineRelation
+      const type = perpendicular ? PerpendicularConstraint : ParallelConstraint
+      this.sketch.addConstraint(new type(line, elem))
+      if(!(endSnap.curve || endSnap.elem || endSnap.intersection)) {
+        addCapturedGuideConstraints(this.sketch, endSnap, line, 1)
+      }
+      return
+    }
     addInferredTangentConstraint(this.sketch, line, endSnap)
     addInferredTangentConstraint(this.sketch, line, this.startSnap, 0)
   }
@@ -1063,6 +1070,7 @@ export class LineTool extends SketchTool {
       this.constrainCompletedLine(this.curve, snap)
       this.curve = null
       this.startSnap = null
+      this.previousSegment = null
     } else {
       this.curve = new Line(vec, vec)
       this.sketch.add(this.curve)
@@ -1077,13 +1085,12 @@ export class LineTool extends SketchTool {
         this.constrainCompletedLine(old, snap)
         const ySnapped = old.endpoints()[0].x.almost(vec.x)
         const xSnapped = old.endpoints()[0].y.almost(vec.y)
-        if(xSnapped || ySnapped) {
-          // const type = (xSnapped ? HorizontalConstraint : VerticalConstraint)
-          const type = HorVertConstraint
-          this.sketch.addConstraint(new type(old))
+        if(!snap?.lineRelation && (xSnapped || ySnapped)) {
+          this.sketch.addConstraint(new HorVertConstraint(old))
         }
       }
       this.startSnap = snap
+      this.previousSegment = old
     }
   }
 
@@ -1096,6 +1103,16 @@ export class LineTool extends SketchTool {
 
   guideSnapPoints() {
     return this.curve ? [this.curve.endpoints()[0]] : []
+  }
+
+  lineSnapContext() {
+    if(!this.curve) return null
+    const snap = this.startSnap
+    return {
+      start: this.curve.endpoints()[0],
+      perpendicularLines: [this.previousSegment, snap?.curve, snap?.elem, ...(snap?.intersection || [])]
+        .filter(elem => elem instanceof Line),
+    }
   }
 
   dispose() {

@@ -801,6 +801,14 @@ impl Surface3 {
             (Self::Torus(torus), Self::Plane(plane)) => {
                 Ok(swap_surface_curves(plane_torus(*plane, *torus, tolerance)?))
             }
+            (Self::Plane(plane), Self::RollingBall(blend)) => {
+                plane_blend_contact(*plane, blend, tolerance)
+            }
+            (Self::RollingBall(blend), Self::Plane(plane)) => {
+                Ok(swap_surface_curves(plane_blend_contact(
+                    *plane, blend, tolerance,
+                )?))
+            }
             (Self::Nurbs(_) | Self::Offset(_), Self::Nurbs(_) | Self::Offset(_)) => {
                 trace_regular_surface_intersections(self, other, tolerance)
             }
@@ -841,6 +849,47 @@ impl Surface3 {
             Err(error) => Err(error),
         }
     }
+}
+
+fn plane_blend_contact(
+    plane: Plane3,
+    blend: &super::RollingBallSurface3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    for (support, guide, side) in [
+        (blend.first_surface(), blend.first_pcurve(), 0.0),
+        (blend.second_surface(), blend.second_pcurve(), 1.0),
+    ] {
+        let Surface3::Plane(contact_plane) = support else {
+            continue;
+        };
+        if !matches!(
+            plane_plane(plane, *contact_plane, tolerance)?,
+            IntersectionSet::Coincident
+        ) {
+            continue;
+        }
+        // This plane is tangent to every rolling sphere. Its only intersection
+        // is the retained contact rail; tracing near it creates spurious curves.
+        let range = blend.center_range();
+        let curve: Curve3 =
+            super::SurfaceCurve3::new(support.clone(), guide.clone(), range, tolerance)?.into();
+        let first_pcurve = SurfaceProjectionPcurve2::new(
+            curve.clone(),
+            plane.into(),
+            guide.clone(),
+            range,
+            tolerance,
+        )?
+        .into();
+        return Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
+            curve,
+            first_pcurve,
+            second_pcurve: Line2::new(Point2::new(0.0, side), crate::Vec2::unit_x())?.into(),
+            achieved_error: 0.0,
+        }]));
+    }
+    Err(unsupported("plane is not a rolling-ball contact support"))
 }
 
 fn plane_cone(

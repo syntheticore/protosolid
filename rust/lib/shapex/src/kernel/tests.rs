@@ -2952,6 +2952,95 @@ fn move_faces_resizes_round_slot_ends_between_parallel_walls() {
 }
 
 #[test]
+fn section_of_chamfered_and_filleted_slot_frame() {
+    // Reduced from untitled(28).cad.cad: the face move is not needed to expose
+    // the missing offset-cone bounds or the tangent contact at the last sketch.
+    let tolerance = ModelTolerance::default();
+    let capsule = |left: f64, right: f64, y: f64, radius: f64| {
+        Wire2::new(
+            [
+                TrimmedCurve2::line(Point2::new(left, y - radius), Point2::new(right, y - radius))
+                    .unwrap(),
+                TrimmedCurve2::arc_through(
+                    Point2::new(right, y - radius),
+                    Point2::new(right + radius, y),
+                    Point2::new(right, y + radius),
+                )
+                .unwrap(),
+                TrimmedCurve2::line(Point2::new(right, y + radius), Point2::new(left, y + radius))
+                    .unwrap(),
+                TrimmedCurve2::arc_through(
+                    Point2::new(left, y + radius),
+                    Point2::new(left - radius, y),
+                    Point2::new(left, y - radius),
+                )
+                .unwrap(),
+            ],
+            tolerance,
+        )
+        .unwrap()
+    };
+    let plane = Plane3::new(Point3::origin(), Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
+    let body = Profile::new(
+        capsule(
+            -41.08804749448451,
+            39.24345469534933,
+            1.828938871626858,
+            22.669344768736725,
+        ),
+        [capsule(
+            -35.09044151977286,
+            32.38023301545568,
+            0.6921057784646116,
+            9.578459016090074,
+        )],
+        tolerance,
+    )
+    .unwrap()
+    .extrude(plane, Vec3::unit_y() * 14.0)
+    .unwrap();
+    let at_height = |edge: &super::EdgeHandle, heights: [f64; 2]| {
+        let points = edge.endpoints().unwrap();
+        heights.iter().any(|height| points.iter().all(|p| (p.y - height).abs() < 1e-7))
+    };
+    let rims = body.edges()
+        .filter(|edge| at_height(edge, [0.0, 14.0]))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(rims.len(), 16);
+    let chamfered = body
+        .chamfer_with_tangent_propagation(&rims, 1.0, true)
+        .unwrap();
+    let rims = chamfered.edges()
+        .filter(|edge| at_height(edge, [14.0, 1.0]))
+        .cloned()
+        .collect::<Vec<_>>();
+    let rounded = chamfered
+        .fillet_with_options(&rims, FilletOptions::new(0.75).with_tangent_propagation(true))
+        .unwrap();
+    let bounds = super::bounds::compound(&rounded).unwrap();
+    for (_, edge) in rounded.topology().edges() {
+        for step in 0..=16 {
+            let parameter = edge.range().start + edge.range().span() * step as f64 / 16.0;
+            let point = edge.curve().evaluate(parameter).unwrap().point;
+            assert!((0..3)
+                .all(|axis| point[axis] >= bounds.0[axis] && point[axis] <= bounds.1[axis]));
+        }
+    }
+    let section = Plane3::new(
+        Point3::new(0.0, 14.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tolerance,
+    )
+    .unwrap();
+    let retained = rounded.split(section, "left").unwrap();
+    assert_eq!(retained.solids().len(), 1);
+    assert!((retained.volume() - rounded.volume()).abs() < rounded.volume() * 1e-8);
+    assert_eq!(rounded.split(section, "right").unwrap().solids().len(), 0);
+}
+
+#[test]
 fn move_faces_extends_cylinder_and_its_rounded_cap() {
     let tolerance = ModelTolerance::default();
     let cylinder = Profile::new(

@@ -108,6 +108,22 @@ fn parameter_bounds(s: &Surface3, bounds: Bounds) -> KernelResult<Bounds> {
                 )
             })))
         }
+        Surface3::Cone(c) => {
+            let heights = Bounds::points(bounds.corners().map(|q| {
+                Point3::new(
+                    0.0,
+                    (q - c.apex()).dot(c.axis()) / c.axis().magnitude2(),
+                    0.0,
+                )
+            }));
+            Ok(Bounds(
+                Point3::new(f64::NEG_INFINITY, heights.0.y, 0.0),
+                Point3::new(f64::INFINITY, heights.1.y, 0.0),
+            ))
+        }
+        Surface3::Offset(offset) => {
+            parameter_bounds(offset.base(), bounds.expanded(offset.distance().abs()))
+        }
         _ => Err(unavailable()),
     }
 }
@@ -191,8 +207,67 @@ fn intersection(
             curve.evaluate(range.start)?.point,
             curve.evaluate(range.end)?.point,
         ])),
-        _ => Err(unavailable()),
+        _ => cone_intersection(first, second).or_else(|_| cone_intersection(second, first)),
     }
+}
+
+fn offset_base(mut surface: &Surface3) -> (&Surface3, f64) {
+    let mut distance = 0.0;
+    while let Surface3::Offset(offset) = surface {
+        distance += offset.distance().abs();
+        surface = offset.base();
+    }
+    (surface, distance)
+}
+
+fn cone_intersection(cone_support: &Surface3, other: &Surface3) -> KernelResult<Bounds> {
+    let (base, cone_offset) = offset_base(cone_support);
+    let Surface3::Cone(cone) = base else {
+        return Err(unavailable());
+    };
+    let (other, other_offset) = offset_base(other);
+    let padding = cone_offset + other_offset;
+    let radius = cone.x_radius().magnitude().max(cone.y_radius().magnitude());
+    // Bound the cone's axial parameter analytically. Offsets contribute a
+    // distance allowance to the supporting plane or cylindrical enclosure.
+    let (numerator, denominator) = match other {
+        Surface3::Plane(plane) => {
+            let normal = plane.normal().normalize();
+            let radial = normal
+                .dot(cone.x_radius())
+                .hypot(normal.dot(cone.y_radius()));
+            (
+                normal.dot(plane.origin() - cone.apex()).abs() + padding,
+                normal.dot(cone.axis()).abs() - radial,
+            )
+        }
+        Surface3::Cylinder(cylinder) => {
+            let axis = cylinder.axis().normalize();
+            let perpendicular = |v: Vec3| v - axis * v.dot(axis);
+            let radial = cone.x_radius().magnitude().min(cone.y_radius().magnitude())
+                * cone.axis().normalize().dot(axis).abs();
+            (
+                perpendicular(cone.apex() - cylinder.origin()).magnitude()
+                    + cylinder
+                        .x_radius()
+                        .magnitude()
+                        .max(cylinder.y_radius().magnitude())
+                    + padding,
+                radial - perpendicular(cone.axis()).magnitude(),
+            )
+        }
+        _ => return Err(unavailable()),
+    };
+    // A nonpositive denominator permits an unbounded intersection.
+    if denominator <= f64::EPSILON {
+        return Err(unavailable());
+    }
+    let height = numerator / denominator;
+    Ok(Bounds::points([
+        cone.apex() - cone.axis() * height,
+        cone.apex() + cone.axis() * height,
+    ])
+    .expanded(radius * height + cone_offset))
 }
 
 fn surface_patch(support: &Surface3, uv: Bounds) -> KernelResult<Bounds> {

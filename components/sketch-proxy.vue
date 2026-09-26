@@ -80,6 +80,7 @@
 
   import { Circle, OffsetCurve } from '../js/core/geom2d.js'
   import { ProjectedPoint } from '../js/core/sketch.js'
+  import { layoutConstraintIcons } from '../js/three/constraint-icons.js'
 
   const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
@@ -87,6 +88,13 @@
 
   const highlight = inject('highlight')
   const frame = inject('frame')
+
+  const constraintIcons = shallowReactive(new Map())
+  const constraintIconLayout = computed(() => layoutConstraintIcons(
+    [...constraintIcons].map(([id, proxies]) => [id, proxies.value])
+  ))
+  provide('constraint-icons', constraintIcons)
+  provide('constraint-icon-layout', constraintIconLayout)
 
   const highlighted = computed(() => props.parentHighlighted || props.sketch == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.sketch) )

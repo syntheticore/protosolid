@@ -290,7 +290,7 @@ export default class Renderer {
     const dir = (this.cameraTarget || this.activeCamera.position).clone().sub(controlsTarget).projectOnVector(normal)
     const position = controlsTarget.clone().add(dir)
     const target = controlsTarget.clone()
-    this.setView(position, target)
+    this.setView(position, target, plane)
     if(report) this.reportViewChange()
   }
 
@@ -323,13 +323,13 @@ export default class Renderer {
     if(report) this.reportViewChange()
   }
 
-  setView(position, target) {
+  setView(position, target, plane=null) {
     const camera = this.activeCamera
-    const polePosition = this.poleSafePosition(position, target)
+    const polePosition = this.poleSafePosition(position, target, plane)
     this.cameraTarget = polePosition || position
     this.viewControlsTarget = target
     this.dualCamera.retarget(target, this.cameraTarget)
-    if(polePosition) {
+    if(polePosition || this.cameraUpTarget) {
       camera.updateMatrixWorld()
       this.cameraTransitionUp = new THREE.Vector3()
         .setFromMatrixColumn(camera.matrixWorld, 1)
@@ -346,21 +346,29 @@ export default class Renderer {
     this.endAnimation()
   }
 
-  poleSafePosition(position, target) {
+  poleSafePosition(position, target, plane=null) {
     const offset = position.clone().sub(target)
     const distance = offset.length()
     if(!distance) return null
 
     // OrbitControls cannot preserve the camera roll when its view direction is
-    // exactly parallel to the world-up axis. Keep an imperceptible offset toward
-    // +Z so the top/bottom view has a stable orientation throughout the lerp.
+    // exactly parallel to the world-up axis. Keep an imperceptible offset so
+    // the top/bottom view has a stable orientation throughout the lerp.
     const worldUp = THREE.Object3D.DEFAULT_UP
-    const isAtPole = Math.abs(offset.dot(worldUp)) > distance * (1 - 1e-10)
+    const isAtPole = Math.abs(offset.dot(worldUp)) > distance * (1 - 1e-12)
     if(!isAtPole) return null
 
     const poleAxis = Math.abs(worldUp.z) < 0.9
       ? new THREE.Vector3(0, 0, 1)
       : new THREE.Vector3(1, 0, 0)
+    if(plane) {
+      const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.activeCamera.quaternion)
+      const xAxis = new THREE.Vector3().setFromMatrixColumn(plane, 0)
+      const yAxis = new THREE.Vector3().setFromMatrixColumn(plane, 1)
+      const up = Math.abs(currentUp.dot(xAxis)) > Math.abs(currentUp.dot(yAxis)) ? xAxis : yAxis
+      // Choose the offset sign so projected world-up matches the nearest axis.
+      poleAxis.copy(up).multiplyScalar(-Math.sign(offset.dot(worldUp)) * (Math.sign(currentUp.dot(up)) || 1))
+    }
     const poleOffset = poleAxis
       .projectOnPlane(worldUp)
       .normalize()

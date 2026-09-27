@@ -347,6 +347,7 @@ impl Profile {
                         let curve = super::sweeps::lift_curve(plane, section.curve(), tolerance)?;
                         let pcurve = Line2::new(Point2::new(0.0, a.y), Vec2::unit_x())?.into();
                         segments.push(BrepPatchSegment {
+                            provenance: Default::default(),
                             curve,
                             pcurve,
                             range: ParameterRange::new(a.x, b.x)?,
@@ -357,6 +358,7 @@ impl Profile {
                             .into()
                     };
                     segments.push(BrepPatchSegment {
+                        provenance: Default::default(),
                         curve,
                         pcurve,
                         range,
@@ -368,6 +370,7 @@ impl Profile {
                     FaceOrientation::Reversed
                 };
                 let mut patch = BrepPatch {
+                    preserved: Vec::new(),
                     sources: Vec::new(),
                     surface: surface.clone(),
                     orientation,
@@ -381,6 +384,7 @@ impl Profile {
                     patch.loops[0].segments.reverse();
                     for segment in &mut patch.loops[0].segments {
                         segment.range = segment.range.reversed();
+                        segment.provenance = segment.provenance.reversed();
                     }
                 }
                 patches.push(patch);

@@ -180,89 +180,6 @@ fn semantic_edge(history: &OperationHistory, edge: &EdgeHandle) -> bool {
     }
 }
 
-fn same_curve_support(
-    first: &super::Curve3,
-    second: &super::Curve3,
-    tolerance: ModelTolerance,
-) -> bool {
-    match (first, second) {
-        (super::Curve3::Line(first), super::Curve3::Line(second)) => {
-            let first_direction = first.direction().normalize();
-            let second_direction = second.direction().normalize();
-            first_direction.cross(second_direction).magnitude() <= tolerance.angular
-                && (second.origin() - first.origin())
-                    .cross(first_direction)
-                    .magnitude()
-                    <= tolerance.linear
-        }
-        (super::Curve3::Circle(first), super::Curve3::Circle(second)) => {
-            first.center().distance(second.center()) <= tolerance.linear
-                && (first.radius() - second.radius()).abs() <= tolerance.linear
-                // acos(dot) amplifies roundoff near parallel normals: even
-                // identical circles can appear farther apart than the angular
-                // tolerance and lose their edge lineage after a Boolean.
-                && first.normal().cross(second.normal()).magnitude() <= tolerance.angular
-        }
-        (super::Curve3::Nurbs(first), super::Curve3::Nurbs(second)) => {
-            let compatible = first.degree() == second.degree()
-                && first.control_points().len() == second.control_points().len()
-                && first.weights().len() == second.weights().len()
-                && first.knots().len() == second.knots().len();
-            if !compatible {
-                return false;
-            }
-            let normalized_knots = |knots: &[f64]| {
-                let start = knots[0];
-                let span = knots[knots.len() - 1] - start;
-                knots
-                    .iter()
-                    .map(|value| (value - start) / span)
-                    .collect::<Vec<_>>()
-            };
-            let first_knots = normalized_knots(first.knots());
-            let second_knots = normalized_knots(second.knots());
-            let same = |reversed: bool| {
-                let point = |index| {
-                    if reversed {
-                        second.control_points()[second.control_points().len() - 1 - index]
-                    } else {
-                        second.control_points()[index]
-                    }
-                };
-                let weight = |index| {
-                    if reversed {
-                        second.weights()[second.weights().len() - 1 - index]
-                    } else {
-                        second.weights()[index]
-                    }
-                };
-                let knot = |index| {
-                    if reversed {
-                        1.0 - second_knots[second_knots.len() - 1 - index]
-                    } else {
-                        second_knots[index]
-                    }
-                };
-                let weight_scale = weight(0) / first.weights()[0];
-                first
-                    .control_points()
-                    .iter()
-                    .enumerate()
-                    .all(|(index, value)| value.distance(point(index)) <= tolerance.linear)
-                    && first.weights().iter().enumerate().all(|(index, value)| {
-                        (value * weight_scale - weight(index)).abs() <= tolerance.parameter
-                    })
-                    && first_knots
-                        .iter()
-                        .enumerate()
-                        .all(|(index, value)| (value - knot(index)).abs() <= tolerance.parameter)
-            };
-            same(false) || same(true)
-        }
-        _ => first == second,
-    }
-}
-
 fn same_surface_support(
     first: &super::Surface3,
     second: &super::Surface3,
@@ -287,30 +204,6 @@ fn same_surface_support(
         }
         _ => first == second,
     }
-}
-
-fn trimmed_curves_overlap(
-    first: &super::Curve3,
-    first_range: super::ParameterRange,
-    second: &super::Curve3,
-    second_range: super::ParameterRange,
-    tolerance: ModelTolerance,
-) -> KernelResult<bool> {
-    for (a, ar, b, br) in [
-        (first, first_range, second, second_range),
-        (second, second_range, first, first_range),
-    ] {
-        for parameter in [ar.start, (ar.start + ar.end) * 0.5, ar.end] {
-            let projection = b.project_on_trim(a.evaluate(parameter)?.point, br, tolerance)?;
-            if projection.distance <= tolerance.linear
-                && projection.parameter > br.start.min(br.end) + tolerance.parameter
-                && projection.parameter < br.start.max(br.end) - tolerance.parameter
-            {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
 }
 
 fn direct_descendants(
@@ -965,158 +858,62 @@ impl Compound {
         super::boolean::boolean_brep(self, other, kind)
     }
 
-    fn with_geometric_parents(
-        &self,
-        parents: &[&Self],
-        role: &str,
-        extra_origins: &BTreeMap<PersistentId, Vec<PersistentId>>,
-    ) -> KernelResult<Self> {
-        let tolerance = self.tolerance();
-        let source_vertices = parents
-            .iter()
-            .flat_map(|parent| parent.vertices())
-            .map(|vertex| (vertex.persistent_id(), vertex.point()))
-            .collect::<BTreeMap<_, _>>();
-        let edge_geometry = |edge: &EdgeHandle| {
-            Ok((
-                edge.persistent_id(),
-                (
-                    edge.curve().clone(),
-                    edge.state.topology().edge(edge.edge)?.range(),
-                    edge.connected_faces()?
-                        .into_iter()
-                        .map(|face| face.persistent_id())
-                        .collect::<Vec<_>>(),
-                ),
-            ))
-        };
-        let source_edges = parents
-            .iter()
-            .flat_map(|parent| parent.edges())
-            .map(edge_geometry)
-            .collect::<KernelResult<BTreeMap<_, _>>>()?;
-        let output_vertices = self
-            .vertices()
-            .map(|vertex| (vertex.persistent_id(), vertex.point()))
-            .collect::<BTreeMap<_, _>>();
-        let output_edges = self
-            .edges()
-            .map(edge_geometry)
-            .collect::<KernelResult<BTreeMap<_, _>>>()?;
-        let kernel = &self.state;
+    /// Consume operator-authored correspondence; never match output geometry.
+    fn with_operation_parents(&self, parents: &[&Self], role: &str) -> KernelResult<Self> {
         let bodies = self
             .solids
             .iter()
             .map(|solid| solid.body)
             .collect::<Vec<_>>();
-        let outputs = body_entities(&kernel, &bodies)?;
+        let outputs = body_entities(&self.state, &bodies)?;
         let mut sources = BTreeMap::new();
         for parent in parents {
-            sources.extend(body_entities(
-                &parent.state,
-                &parent
-                    .solids
-                    .iter()
-                    .map(|solid| solid.body)
-                    .collect::<Vec<_>>(),
-            )?);
-        }
-        // Face builders carry their source correspondence through sewing and
-        // merging. Supplied feature origins take precedence over all inference.
-        let face_sources = self
-            .faces()
-            .map(|face| {
-                let output = face.persistent_id();
-                let ancestors = if let Some(origins) = extra_origins.get(&output) {
-                    origins.iter().copied().collect()
-                } else if sources.get(&output) == Some(&EntityKind::Face) {
-                    BTreeSet::from([output])
-                } else {
-                    self.history
-                        .source_roots(output)
-                        .into_iter()
-                        .filter(|name| sources.get(name) == Some(&EntityKind::Face))
-                        .collect()
-                };
-                (output, ancestors)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let related =
-            |kind: EntityKind, source: PersistentId, output: PersistentId| -> KernelResult<bool> {
-                if let Some(origins) = extra_origins.get(&output) {
-                    return Ok(origins.contains(&source));
-                }
-                Ok(match kind {
-                    EntityKind::Vertex => {
-                        source_vertices[&source].distance(output_vertices[&output])
-                            <= tolerance.linear
-                    }
-                    EntityKind::Edge => {
-                        let first = &source_edges[&source];
-                        let second = &output_edges[&output];
-                        // One neighboring face may be replaced by a Boolean cap while
-                        // the other retains this boundary interval.
-                        same_curve_support(&first.0, &second.0, tolerance)
-                            && first.2.iter().any(|face| {
-                                second
-                                    .2
-                                    .iter()
-                                    .any(|output_face| face_sources[output_face].contains(face))
-                            })
-                            && trimmed_curves_overlap(
-                                &first.0, first.1, &second.0, second.1, tolerance,
-                            )?
-                    }
-                    EntityKind::Face => face_sources[&output].contains(&source),
-                })
-            };
-        // Compare only established pairs, once, to distinguish retention from
-        // modification. Exact comparison cannot accumulate tolerance drift.
-        let output_geometry = super::history_geometry::entities(kernel.topology());
-        let mut unchanged = BTreeSet::new();
-        let mut descendants = BTreeMap::<PersistentId, BTreeSet<PersistentId>>::new();
-        let mut contributors = BTreeMap::<PersistentId, BTreeSet<PersistentId>>::new();
-        for parent in parents {
-            let input_geometry = super::history_geometry::entities(parent.topology());
-            for (source, kind) in &sources {
-                let Some(input) = input_geometry.get(source) else {
-                    continue;
-                };
-                for (output, output_kind) in &outputs {
-                    if kind == output_kind && related(*kind, *source, *output)? {
-                        descendants.entry(*source).or_default().insert(*output);
-                        contributors.entry(*output).or_default().insert(*source);
-                        if super::history_geometry::same_entity(
-                            parent.topology(),
-                            *input,
-                            kernel.topology(),
-                            output_geometry[output],
-                        )? {
-                            unchanged.insert((*source, *output));
-                        }
-                    }
-                }
+            for solid in &parent.solids {
+                sources.extend(body_entities(&parent.state, &[solid.body])?);
             }
         }
+        let mut descendants = BTreeMap::<PersistentId, BTreeMap<PersistentId, bool>>::new();
         let mut history = OperationHistory::default();
-        for output in outputs.keys() {
-            if let Some(sources) = extra_origins.get(output) {
-                history.derived(*output, sources.iter().copied(), role);
-            } else if let Some(sources) = contributors.get(output) {
-                history.derived(*output, sources.iter().copied(), role);
-            } else {
+        for (output, kind) in &outputs {
+            let mut records = self
+                .history
+                .construction
+                .get(output)
+                .cloned()
+                .unwrap_or_default();
+            if sources.get(output) == Some(kind) && !records.iter().any(|r| r.name == *output) {
+                let unchanged = matches!(
+                    self.history.change(*output),
+                    None | Some((ChangeKind::Unchanged, _))
+                );
+                records.push(super::history::EntitySource {
+                    name: *output,
+                    unchanged,
+                });
+            }
+            records.retain(|record| sources.get(&record.name) == Some(kind));
+            for record in &records {
+                descendants
+                    .entry(record.name)
+                    .or_default()
+                    .insert(*output, record.unchanged);
+            }
+            if records.is_empty() {
                 history.created(*output);
+            } else {
+                history.derived(*output, records.iter().map(|r| r.name), role);
+                history.record_construction(*output, records);
             }
         }
         for source in sources.keys() {
-            let descendants = descendants.remove(source).unwrap_or_default();
-            let kind = match descendants.len() {
+            let outputs = descendants.remove(source).unwrap_or_default();
+            let kind = match outputs.len() {
                 0 => ChangeKind::Deleted,
                 1 => {
-                    let output = *descendants.first().unwrap();
-                    if unchanged.contains(&(*source, output)) {
+                    let (output, unchanged) = outputs.first_key_value().unwrap();
+                    if *unchanged {
                         ChangeKind::Unchanged
-                    } else if contributors[&output].len() > 1 {
+                    } else if history.construction[output].len() > 1 {
                         ChangeKind::Merged
                     } else {
                         ChangeKind::Modified
@@ -1124,19 +921,15 @@ impl Compound {
                 }
                 _ => ChangeKind::Split,
             };
-            history.changed(*source, kind, descendants);
+            history.changed(*source, kind, outputs.keys().copied());
         }
-        // This operation only rebuilds stable names and lineage around an
-        // unchanged, already-published exact BREP. Preserve its analytical
-        // certificates instead of asking the primitive recognizers to
-        // reclassify a composite rational blend.
         let certificates = bodies
             .iter()
             .copied()
             .zip(self.solids.iter().map(|solid| PhysicalCertificate {
                 properties: solid.mass_properties(),
             }))
-            .collect::<BTreeMap<_, _>>();
+            .collect();
         Self::from_parts(
             Arc::clone(&self.state),
             super::identity::fresh_uuid(),
@@ -1153,16 +946,11 @@ impl Compound {
         second: &Self,
         role: &str,
     ) -> KernelResult<Self> {
-        self.with_geometric_parents(&[first, second], role, &BTreeMap::new())
+        self.with_operation_parents(&[first, second], role)
     }
 
-    pub(crate) fn with_feature_parent(
-        &self,
-        parent: &Self,
-        role: &str,
-        extra_origins: &BTreeMap<PersistentId, Vec<PersistentId>>,
-    ) -> KernelResult<Self> {
-        self.with_geometric_parents(&[parent], role, extra_origins)
+    pub(crate) fn with_feature_parent(&self, parent: &Self, role: &str) -> KernelResult<Self> {
+        self.with_operation_parents(&[parent], role)
     }
 
     pub(crate) fn with_creation_roles(

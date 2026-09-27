@@ -63,6 +63,25 @@ function cylinderLimit(angle) {
   return body.faces().find(face => !face.getPlane())
 }
 
+test('section hatching preserves the planar face around a circular boss', () => {
+  const base = rectangle(0, 0, 10, 10).extrude('c', 5, 'base')
+  const boss = circle(5, 5, 2).extrude('c', 8, 'boss')
+  const body = base.boolean(boss, 'join', 'join')
+  const plane = new THREE.Matrix4().makeTranslation(0, 0, 5)
+  const cut = body.halfCut(plane, true)
+  const originalTop = body.faces().find(face => {
+    const p = face.getPlane()
+    return p && Math.abs(p.elements[14] - 5) < 1e-7
+  })
+  const unchanged = cut.preservedFaces(body.faces())
+  assert.ok([...unchanged].some(face => face.id == originalTop.id))
+  const sectionFaces = cut.faces().filter(face => {
+    const p = face.getPlane()
+    return p && Math.abs(p.elements[14] - 5) < 1e-7 && !unchanged.has(face)
+  })
+  assert.equal(sectionFaces.length, 1)
+})
+
 function near(actual, expected) {
   assert.ok(Math.abs(actual - expected) < 1e-5 * Math.max(1, Math.abs(expected)), `${actual} != ${expected}`)
 }

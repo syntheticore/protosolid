@@ -58,6 +58,7 @@ fn reverse(patch: &mut BrepPatch) {
         loop_.segments.reverse();
         for edge in &mut loop_.segments {
             edge.range = edge.range.reversed();
+            edge.provenance = edge.provenance.reversed();
         }
     }
 }
@@ -72,6 +73,7 @@ pub(super) fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelRes
             .iter()
             .map(|segment| {
                 Ok(BrepPatchSegment {
+                    provenance: Default::default(),
                     curve: lift_curve(plane, segment.curve(), profile.tolerance())?,
                     pcurve: segment.curve().clone(),
                     range: segment.range(),
@@ -88,6 +90,7 @@ pub(super) fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelRes
         });
     }
     let mut patch = BrepPatch {
+        preserved: Vec::new(),
         sources: Vec::new(),
         surface: plane.into(),
         orientation: FaceOrientation::Forward,
@@ -273,6 +276,7 @@ pub(super) fn revolve(
                     edges.push((
                         if t == t0 { 0 } else { 2 },
                         BrepPatchSegment {
+                            provenance: Default::default(),
                             curve,
                             pcurve: Line2::new(Point2::new(0.0, t), Vec2::unit_x())?.into(),
                             range: range(start, end)?,
@@ -283,6 +287,7 @@ pub(super) fn revolve(
                     edges.push((
                         index,
                         BrepPatchSegment {
+                            provenance: Default::default(),
                             curve: lift_curve(section_plane(a)?, segment.curve(), tolerance)?,
                             pcurve: Line2::new(Point2::new(a, 0.0), Vec2::unit_y())?.into(),
                             range: range(start, end)?,
@@ -291,6 +296,7 @@ pub(super) fn revolve(
                 }
                 edges.sort_by_key(|(index, _)| *index);
                 let mut patch = BrepPatch {
+                    preserved: Vec::new(),
                     sources: Vec::new(),
                     surface: surface.clone(),
                     orientation: FaceOrientation::Forward,
@@ -623,6 +629,7 @@ fn section_cap(
         .iter()
         .map(|c| {
             Ok(BrepPatchSegment {
+                provenance: Default::default(),
                 curve: lift_curve(plane, &c.curve2()?, tolerance)?,
                 pcurve: c.curve2()?,
                 range: range(0.0, 1.0)?,
@@ -630,6 +637,7 @@ fn section_cap(
         })
         .collect::<KernelResult<Vec<_>>>()?;
     let mut patch = BrepPatch {
+        preserved: Vec::new(),
         sources: Vec::new(),
         surface: plane.into(),
         orientation: FaceOrientation::Forward,
@@ -851,6 +859,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             edges.push((
                 if i == 0 { 0 } else { 2 },
                 BrepPatchSegment {
+                    provenance: Default::default(),
                     curve: curves[i][index].curve3(sections[i].0)?,
                     pcurve: Line2::new(Point2::new(0.0, v), Vec2::unit_x())?.into(),
                     range: range(start, end)?,
@@ -868,6 +877,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             edges.push((
                 order,
                 BrepPatchSegment {
+                    provenance: Default::default(),
                     curve,
                     pcurve: Line2::new(
                         Point2::new(if u == 0 { 0.0 } else { 1.0 }, 0.0),
@@ -880,6 +890,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
         }
         edges.sort_by_key(|(i, _)| *i);
         let mut patch = BrepPatch {
+            preserved: Vec::new(),
             sources: Vec::new(),
             surface,
             orientation: FaceOrientation::Forward,
@@ -1045,6 +1056,7 @@ mod tests {
                 .map(|handle| {
                     let face = topology.face(handle.topology_id()).unwrap();
                     BrepPatch {
+                        preserved: Vec::new(),
                         sources: Vec::new(),
                         surface: face.surface().clone(),
                         orientation: face.orientation(),
@@ -1060,6 +1072,7 @@ mod tests {
                                     .map(|id| {
                                         let c = topology.coedge(*id).unwrap();
                                         BrepPatchSegment {
+                                            provenance: Default::default(),
                                             curve: topology.edge(c.edge()).unwrap().curve().clone(),
                                             pcurve: c.pcurve().clone(),
                                             range: c.range(),

@@ -5,7 +5,7 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec2};
 
-use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment};
+use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::{
     Compound, Curve2, Curve3, DiagnosticKind, FaceOrientation, IntersectionSet, Kernel,
     KernelError, KernelResult, LoopKind, ModelTolerance, ParameterRange, Surface3,
@@ -22,6 +22,7 @@ pub enum BooleanKind {
 
 #[derive(Debug, Clone)]
 struct FaceCurve {
+    provenance: SegmentProvenance,
     curve: Curve3,
     pcurve: Curve2,
     range: ParameterRange,
@@ -32,6 +33,7 @@ struct FaceCurve {
 
 #[derive(Debug, Clone)]
 struct DirectedPiece {
+    provenance: SegmentProvenance,
     curve: Curve3,
     pcurve: Curve2,
     range: ParameterRange,
@@ -45,6 +47,7 @@ struct DirectedPiece {
 impl DirectedPiece {
     fn reversed(&self) -> Self {
         Self {
+            provenance: self.provenance.reversed(),
             curve: self.curve.clone(),
             pcurve: self.pcurve.clone(),
             range: self.range.reversed(),
@@ -216,6 +219,17 @@ pub(crate) fn boolean_brep(
     second: &Compound,
     kind: BooleanKind,
 ) -> KernelResult<Compound> {
+    boolean_brep_with_face_boundaries(first, second, kind, false)
+}
+
+// Sections need the boundary between an existing coincident face and a new
+// cut cap, even when both regions have the same support and orientation.
+pub(crate) fn boolean_brep_with_face_boundaries(
+    first: &Compound,
+    second: &Compound,
+    kind: BooleanKind,
+    preserve_first_faces: bool,
+) -> KernelResult<Compound> {
     let tolerance = first.tolerance();
     let scale = first
         .vertices()
@@ -358,6 +372,7 @@ pub(crate) fn boolean_brep(
                                 tolerance,
                             )?
                             .unwrap_or_else(|| FaceCurve {
+                                provenance: Default::default(),
                                 curve: intersection.curve.clone(),
                                 pcurve: first_pcurve.clone(),
                                 range,
@@ -372,6 +387,7 @@ pub(crate) fn boolean_brep(
                                 tolerance,
                             )?
                             .unwrap_or_else(|| FaceCurve {
+                                provenance: Default::default(),
                                 curve: intersection.curve.clone(),
                                 pcurve: second_pcurve.clone(),
                                 range,
@@ -458,6 +474,7 @@ pub(crate) fn boolean_brep(
                     .get_mut(&(0, first_index))
                     .expect("face curve map is complete")
                     .push(FaceCurve {
+                        provenance: source.provenance.clone(),
                         curve: source.curve.clone(),
                         pcurve: projected,
                         range: source.range,
@@ -508,6 +525,7 @@ pub(crate) fn boolean_brep(
                     .get_mut(&(1, second_index))
                     .expect("face curve map is complete")
                     .push(FaceCurve {
+                        provenance: source.provenance.clone(),
                         curve: source.curve.clone(),
                         pcurve: projected,
                         range: source.range,
@@ -584,7 +602,35 @@ pub(crate) fn boolean_brep(
                     }
                 }
             }
-            let mut arranged = arrange_face(
+            let exclude_existing_faces = preserve_first_faces && has_coincident_support;
+            let mut arranged = Vec::new();
+            if exclude_existing_faces {
+                // A coincident half-space retains each existing face boundary.
+                // Arrange the remaining cut cap separately.
+                for (index, original_face) in first_faces.iter().enumerate() {
+                    if !coincident_supports(face.surface(), original_face.surface(), tolerance)? {
+                        continue;
+                    }
+                    let boundary = &original_curves[&(0, index)];
+                    arranged.extend(arrange_face(
+                        0,
+                        original_face.surface(),
+                        first
+                            .topology()
+                            .face(original_face.topology_id())?
+                            .orientation(),
+                        boundary,
+                        boundary,
+                        true,
+                        false,
+                        classifiers,
+                        kind,
+                        classification_offset,
+                        tolerance,
+                    )?);
+                }
+            }
+            arranged.extend(arrange_face(
                 operand,
                 face.surface(),
                 compound.topology().face(face.topology_id())?.orientation(),
@@ -595,11 +641,12 @@ pub(crate) fn boolean_brep(
                     &face_curves[&(operand, index)]
                 },
                 has_coincident_support,
+                exclude_existing_faces,
                 classifiers,
                 kind,
                 classification_offset,
                 tolerance,
-            )?;
+            )?);
             for patch in &mut arranged {
                 if has_coincident_support {
                     // A shared-support arrangement can contain several disjoint
@@ -610,18 +657,48 @@ pub(crate) fn boolean_brep(
                                 && patch_uses_face(patch, parent, candidate, tolerance)?
                             {
                                 patch.sources.push(candidate.persistent_id());
+                                if patch
+                                    .retains_boundary(parent.topology(), candidate.topology_id())?
+                                {
+                                    patch.preserved.push(candidate.persistent_id());
+                                }
                             }
                         }
                     }
                 } else {
                     patch.sources.push(face.persistent_id());
+                    if patch.retains_boundary(compound.topology(), face.topology_id())? {
+                        patch.preserved.push(face.persistent_id());
+                    }
                 }
             }
             patches.extend(arranged);
         }
     }
+    if preserve_first_faces {
+        for patch in &mut patches {
+            let Surface3::Plane(plane) = &patch.surface else {
+                continue;
+            };
+            for segment in patch.loops.iter_mut().flat_map(|loop_| &mut loop_.segments) {
+                if let Curve3::Line(line) = &segment.curve {
+                    let origin = plane.project(line.origin())?.parameters;
+                    let end = plane.project(line.origin() + line.direction())?.parameters;
+                    segment.pcurve = super::Line2::new(
+                        Point2::new(origin.0, origin.1),
+                        Vec2::new(end.0 - origin.0, end.1 - origin.1),
+                    )?
+                    .into();
+                }
+            }
+        }
+    }
     super::euler::conform_brep_interfaces(&mut patches, tolerance)?;
-    deduplicate_patches(&mut patches, tolerance)?;
+    // Section regions partition each shared support exactly once. Boundary-only
+    // containment would mistake a cap for a duplicate of its surrounding face.
+    if !preserve_first_faces {
+        deduplicate_patches(&mut patches, tolerance)?;
+    }
     // Let the Euler weld choose the simplest exact representation when more
     // than two supports meet on one edge (for example a planar line tangent to
     // a NURBS extrusion).  This is geometry canonicalization, independent of
@@ -1029,6 +1106,7 @@ fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec
             }
             previous = Some(pcurve.evaluate(coedge.range().end)?.point);
             curves.push(FaceCurve {
+                provenance: SegmentProvenance::from_coedge(topology, coedge_id)?,
                 curve: edge.curve().clone(),
                 pcurve,
                 range: coedge.range(),
@@ -1164,6 +1242,9 @@ fn boundary_curve_for_intersection(
                 continue;
             }
             return Ok(Some(FaceCurve {
+                provenance: candidate
+                    .provenance
+                    .trimmed(candidate.range, ParameterRange::new(start, end)?),
                 curve: candidate.curve.clone(),
                 pcurve: candidate.pcurve.clone(),
                 range: ParameterRange::new(start, end)?,
@@ -1254,6 +1335,7 @@ fn trim_to_faces(
         )
     };
     let first_curve = FaceCurve {
+        provenance: Default::default(),
         curve: curve.clone(),
         pcurve: first.clone(),
         range: domain,
@@ -1262,6 +1344,7 @@ fn trim_to_faces(
         parameter_seam: false,
     };
     let second_curve = FaceCurve {
+        provenance: Default::default(),
         curve: curve.clone(),
         pcurve: second.clone(),
         range: domain,
@@ -1503,6 +1586,7 @@ fn arrange_face(
     original_boundary: &[FaceCurve],
     curves: &[FaceCurve],
     has_coincident_support: bool,
+    exclude_existing_faces: bool,
     classifiers: [OperandClassifier<'_>; 2],
     kind: BooleanKind,
     classification_offset: f64,
@@ -1526,6 +1610,18 @@ fn arrange_face(
         * 5.0e-2;
     let classify_orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
         let value = surface.evaluate(uv.x, uv.y)?;
+        if exclude_existing_faces {
+            for face in classifiers[0].faces {
+                if !coincident_supports(surface, &face.surface, tolerance)? {
+                    continue;
+                }
+                let projection = face.surface.project(value.point, tolerance)?;
+                let uv = Point2::new(projection.parameters.0, projection.parameters.1);
+                if point_in_trim(uv, &face.boundary)? {
+                    return Ok(None);
+                }
+            }
+        }
         let parameter_normal = value.normal()?;
         if has_coincident_support {
             // On a shared support, exact oriented trims determine the local
@@ -1567,7 +1663,7 @@ fn arrange_face(
         classify_orientation_at(uv)
     };
 
-    if curves.len() == original_boundary.len() {
+    if !exclude_existing_faces && curves.len() == original_boundary.len() {
         // A periodic face can retain a same-face parameter seam in its loop.
         // That seam is not a material boundary, and its first listed use need
         // not have a meaningful "inside" side in the wrapped UV chart. Search
@@ -1694,6 +1790,7 @@ fn arrange_face(
             let start_node = weld_node(&mut nodes, start_uv)?;
             let end_node = weld_node(&mut nodes, end_uv)?;
             pieces.push(DirectedPiece {
+                provenance: curve.provenance.trimmed(curve.range, range),
                 curve: curve.curve.clone(),
                 pcurve: curve.pcurve.clone(),
                 range,
@@ -1791,7 +1888,7 @@ fn arrange_face(
                 .curve
                 .evaluate(piece.range.start + piece.range.span() * 0.5)?
                 .point;
-            let duplicate = unique.iter().any(|candidate| {
+            let duplicate = unique.iter().position(|candidate| {
                 let same_nodes = (candidate.start_node == piece.start_node
                     && candidate.end_node == piece.end_node)
                     || (candidate.start_node == piece.end_node
@@ -1831,7 +1928,24 @@ fn arrange_face(
                 };
                 same_nodes && (projected_match || sampled_match)
             });
-            if !duplicate {
+            if let Some(index) = duplicate {
+                let candidate = &mut unique[index];
+                let a = candidate
+                    .curve
+                    .evaluate(candidate.range.start + candidate.range.span() * 0.5)?
+                    .first_derivative
+                    * candidate.range.span();
+                let b = piece
+                    .curve
+                    .evaluate(piece.range.start + piece.range.span() * 0.5)?
+                    .first_derivative
+                    * piece.range.span();
+                candidate.provenance.weld(&if a.dot(b) >= 0.0 {
+                    piece.provenance.clone()
+                } else {
+                    piece.provenance.reversed()
+                });
+            } else {
                 unique.push(piece);
             }
         }
@@ -1915,6 +2029,7 @@ fn arrange_face(
                 }
             }
             patches.push(BrepPatch {
+                preserved: Vec::new(),
                 sources: Vec::new(),
                 surface: surface.clone(),
                 orientation,
@@ -2122,6 +2237,7 @@ fn unchanged_face_patch(
     for segment in boundary {
         current_kind.get_or_insert(segment.loop_kind);
         current.push(BrepPatchSegment {
+            provenance: segment.provenance.clone(),
             curve: segment.curve.clone(),
             // An unchanged face already has exact, chart-aligned coedges.
             // The edge's own p-curve may describe the other side of its seam.
@@ -2148,11 +2264,13 @@ fn unchanged_face_patch(
             segments.reverse();
             for segment in &mut segments {
                 segment.range = segment.range.reversed();
+                segment.provenance = segment.provenance.reversed();
             }
         }
         patch_loops.push(BrepPatchLoop { kind, segments });
     }
     Ok(BrepPatch {
+        preserved: Vec::new(),
         sources: Vec::new(),
         surface: surface.clone(),
         orientation: output_orientation,
@@ -2268,6 +2386,7 @@ fn patch_segments(loop_: &[DirectedPiece], surface: &Surface3) -> Vec<BrepPatchS
         .iter()
         .map(|piece| BrepPatchSegment {
             curve: piece.curve.clone(),
+            provenance: piece.provenance.clone(),
             pcurve: exact_pcurve_on_surface(&piece.curve, surface, &piece.pcurve),
             range: piece.range,
         })
@@ -2450,6 +2569,7 @@ fn patch_uses_face(
                 .iter()
                 .enumerate()
                 .map(move |(index, segment)| FaceCurve {
+                    provenance: Default::default(),
                     curve: segment.curve.clone(),
                     pcurve: segment.pcurve.clone(),
                     range: segment.range,
@@ -2552,6 +2672,7 @@ fn patch_contains_patch(
         .iter()
         .flat_map(|loop_| &loop_.segments)
         .map(|segment| FaceCurve {
+            provenance: Default::default(),
             curve: segment.curve.clone(),
             pcurve: segment.pcurve.clone(),
             range: segment.range,

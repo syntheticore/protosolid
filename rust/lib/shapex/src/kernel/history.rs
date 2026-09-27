@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::PersistentId;
+use super::{PersistentId, Topology};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeKind {
@@ -46,9 +46,51 @@ pub enum ProfileBoundary {
 pub struct OperationHistory {
     changes: BTreeMap<PersistentId, (ChangeKind, Vec<PersistentId>)>,
     origins: BTreeMap<PersistentId, Origin>,
+    // Immediate correspondence supplied by construction, including retention.
+    pub(crate) construction: BTreeMap<PersistentId, Vec<EntitySource>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EntitySource {
+    pub name: PersistentId,
+    pub unchanged: bool,
+}
+
+impl EntitySource {
+    pub fn preserved(name: PersistentId) -> Self {
+        Self {
+            name,
+            unchanged: true,
+        }
+    }
 }
 
 impl OperationHistory {
+    /// Fill untouched/deleted identities; explicit operator edits take precedence.
+    pub(crate) fn complete_retained(&mut self, before: &Topology, after: &Topology) {
+        fn names(topology: &Topology) -> impl Iterator<Item = PersistentId> + '_ {
+            topology
+                .vertices()
+                .map(|(_, value)| value.name())
+                .chain(topology.edges().map(|(_, value)| value.name()))
+                .chain(topology.coedges().map(|(_, value)| value.name()))
+                .chain(topology.loops().map(|(_, value)| value.name()))
+                .chain(topology.faces().map(|(_, value)| value.name()))
+                .chain(topology.shells().map(|(_, value)| value.name()))
+                .chain(topology.bodies().map(|(_, value)| value.name()))
+        }
+        let outputs = names(after).collect::<BTreeSet<_>>();
+        for source in names(before) {
+            self.changes.entry(source).or_insert_with(|| {
+                if outputs.contains(&source) {
+                    (ChangeKind::Unchanged, vec![source])
+                } else {
+                    (ChangeKind::Deleted, Vec::new())
+                }
+            });
+        }
+    }
+
     pub(crate) fn identity(&self, names: impl IntoIterator<Item = PersistentId>) -> Self {
         Self {
             changes: names
@@ -56,6 +98,7 @@ impl OperationHistory {
                 .map(|name| (name, (ChangeKind::Unchanged, vec![name])))
                 .collect(),
             origins: self.origins.clone(),
+            construction: self.construction.clone(),
         }
     }
 
@@ -145,6 +188,9 @@ impl OperationHistory {
         if old == new {
             return;
         }
+        if let Some(records) = self.construction.remove(&old) {
+            self.construction.insert(new, records);
+        }
         if let Some(origin) = self.origins.remove(&old) {
             self.origins.insert(new, origin);
         }
@@ -172,5 +218,37 @@ impl OperationHistory {
     pub(crate) fn absorb(&mut self, other: Self) {
         self.changes.extend(other.changes);
         self.origins.extend(other.origins);
+        self.construction.extend(other.construction);
+    }
+
+    pub(crate) fn record_construction(
+        &mut self,
+        output: PersistentId,
+        sources: impl IntoIterator<Item = EntitySource>,
+    ) {
+        let records = self.construction.entry(output).or_default();
+        for source in sources {
+            if let Some(existing) = records.iter_mut().find(|record| record.name == source.name) {
+                existing.unchanged |= source.unchanged;
+            } else {
+                records.push(source);
+            }
+        }
+    }
+
+    pub(crate) fn merge_construction(&mut self, removed: PersistentId, survivor: PersistentId) {
+        let removed = self.construction.remove(&removed).unwrap_or_default();
+        self.record_construction(survivor, removed);
+        if let Some(records) = self.construction.get_mut(&survivor) {
+            for source in records {
+                source.unchanged = false;
+            }
+        }
+    }
+
+    pub(crate) fn modified(&mut self, entity: PersistentId) {
+        if matches!(self.change(entity), None | Some((ChangeKind::Unchanged, _))) {
+            self.changed(entity, ChangeKind::Modified, [entity]);
+        }
     }
 }

@@ -124,6 +124,138 @@ pub(crate) struct BrepPatchSegment {
     pub curve: Curve3,
     pub pcurve: Curve2,
     pub range: ParameterRange,
+    pub provenance: SegmentProvenance,
+}
+
+/// Correspondence attached before intersection, trimming or reparameterization.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SegmentProvenance {
+    pub edges: Vec<super::history::EntitySource>,
+    pub vertices: [Vec<super::history::EntitySource>; 2],
+    pub boundaries: Vec<(super::PersistentId, ParameterRange, ParameterRange)>,
+}
+
+impl SegmentProvenance {
+    pub(crate) fn from_coedge(topology: &Topology, id: CoedgeId) -> KernelResult<Self> {
+        let coedge = topology.coedge(id)?;
+        let edge = topology.edge(coedge.edge())?;
+        let vertices = topology.coedge_vertices(id)?;
+        Ok(Self {
+            edges: vec![super::history::EntitySource::preserved(edge.name())],
+            vertices: [
+                vec![super::history::EntitySource::preserved(
+                    topology.vertex(vertices[0])?.name(),
+                )],
+                vec![super::history::EntitySource::preserved(
+                    topology.vertex(vertices[1])?.name(),
+                )],
+            ],
+            boundaries: vec![(coedge.name(), coedge.range(), coedge.range())],
+        })
+    }
+
+    pub(crate) fn trimmed(&self, original: ParameterRange, retained: ParameterRange) -> Self {
+        if original == retained.reversed() {
+            return self.reversed();
+        }
+        if original.span().signum() != retained.span().signum() {
+            return self.reversed().trimmed(original.reversed(), retained);
+        }
+        let mut result = self.clone();
+        if original != retained {
+            for edge in &mut result.edges {
+                edge.unchanged = false;
+            }
+            if original.start != retained.start {
+                result.vertices[0].clear();
+            }
+            if original.end != retained.end {
+                result.vertices[1].clear();
+            }
+            for (_, _, range) in &mut result.boundaries {
+                let start = if retained.start == original.start {
+                    range.start
+                } else {
+                    range.start
+                        + range.span() * ((retained.start - original.start) / original.span())
+                };
+                let end = if retained.end == original.end {
+                    range.end
+                } else {
+                    range.start + range.span() * ((retained.end - original.start) / original.span())
+                };
+                *range = ParameterRange { start, end };
+            }
+        }
+        result
+    }
+
+    pub(crate) fn reversed(&self) -> Self {
+        Self {
+            edges: self.edges.clone(),
+            vertices: [self.vertices[1].clone(), self.vertices[0].clone()],
+            boundaries: self
+                .boundaries
+                .iter()
+                .map(|(id, original, range)| (*id, *original, range.reversed()))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn modified(&self) -> Self {
+        let mut result = self.clone();
+        for source in result
+            .edges
+            .iter_mut()
+            .chain(result.vertices.iter_mut().flatten())
+        {
+            source.unchanged = false;
+        }
+        result.boundaries.clear();
+        result
+    }
+
+    pub(crate) fn weld(&mut self, other: &Self) {
+        for source in &other.edges {
+            if !self.edges.contains(source) {
+                self.edges.push(*source);
+            }
+        }
+        for end in 0..2 {
+            for source in &other.vertices[end] {
+                if !self.vertices[end].contains(source) {
+                    self.vertices[end].push(*source);
+                }
+            }
+        }
+        for boundary in &other.boundaries {
+            if !self.boundaries.contains(boundary) {
+                self.boundaries.push(*boundary);
+            }
+        }
+    }
+
+    pub(crate) fn through(&mut self, history: &OperationHistory) {
+        for records in std::iter::once(&mut self.edges).chain(self.vertices.iter_mut()) {
+            *records = records
+                .iter()
+                .flat_map(|record| {
+                    history.construction.get(&record.name).map_or_else(
+                        || vec![*record],
+                        |sources| {
+                            sources
+                                .iter()
+                                .map(|source| super::history::EntitySource {
+                                    name: source.name,
+                                    unchanged: record.unchanged && source.unchanged,
+                                })
+                                .collect()
+                        },
+                    )
+                })
+                .collect();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -135,9 +267,60 @@ pub(crate) struct BrepPatchLoop {
 #[derive(Debug, Clone)]
 pub(crate) struct BrepPatch {
     pub sources: Vec<super::PersistentId>,
+    pub preserved: Vec<super::PersistentId>,
     pub surface: Surface3,
     pub orientation: FaceOrientation,
     pub loops: Vec<BrepPatchLoop>,
+}
+
+impl BrepPatch {
+    /// Test coverage of construction tokens, not geometric similarity. Each
+    /// directed source coedge must survive in full, with no added boundary.
+    pub(crate) fn retains_boundary(&self, topology: &Topology, face: FaceId) -> KernelResult<bool> {
+        let mut expected = BTreeMap::new();
+        for loop_id in topology.face(face)?.loops() {
+            for id in topology.loop_coedges(*loop_id)? {
+                let coedge = topology.coedge(id)?;
+                expected.insert(coedge.name(), coedge.range());
+            }
+        }
+        let mut intervals = BTreeMap::<super::PersistentId, Vec<(f64, f64)>>::new();
+        for segment in self.loops.iter().flat_map(|loop_| &loop_.segments) {
+            let mut covered = false;
+            for (name, original, range) in &segment.provenance.boundaries {
+                if expected.get(name) != Some(original) {
+                    continue;
+                }
+                let start = (range.start - original.start) / original.span();
+                let end = (range.end - original.start) / original.span();
+                if end <= start {
+                    continue;
+                }
+                intervals.entry(*name).or_default().push((start, end));
+                covered = true;
+            }
+            if !covered {
+                return Ok(false);
+            }
+        }
+        for name in expected.keys() {
+            let Some(spans) = intervals.get_mut(name) else {
+                return Ok(false);
+            };
+            spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut end: f64 = 0.0;
+            for &(a, b) in spans.iter() {
+                if a > end {
+                    return Ok(false);
+                }
+                end = end.max(b);
+            }
+            if end != 1.0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
 }
 
 /// A fully prepared join; discarded candidates leave topology untouched.
@@ -406,6 +589,9 @@ fn conform_brep_boundaries_impl(
             for pair in parameters.windows(2) {
                 conformed.push(BrepPatchSegment {
                     range: ParameterRange::new(pair[0], pair[1])?,
+                    provenance: segment
+                        .provenance
+                        .trimmed(segment.range, ParameterRange::new(pair[0], pair[1])?),
                     ..segment.clone()
                 });
             }
@@ -455,6 +641,17 @@ impl<'kernel> EulerTransaction<'kernel> {
     }
     pub fn history(&self) -> &OperationHistory {
         &self.history
+    }
+
+    fn record_loop_edit(&mut self, id: LoopId) -> KernelResult<()> {
+        let loop_ = self.working.loop_(id)?;
+        let face = self.working.face(loop_.face)?;
+        let shell = self.working.shell(face.shell)?;
+        let body = self.working.body(shell.body)?;
+        for name in [loop_.name, face.name, shell.name, body.name] {
+            self.history.modified(name);
+        }
+        Ok(())
     }
 
     /// Make vertex, face, shell: the classical seed Euler operator.
@@ -749,6 +946,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         self.history
             .changed(source_name, ChangeKind::Modified, [source_name]);
 
+        self.record_loop_edit(loop_id)?;
         Ok(MevResult {
             edge,
             vertex,
@@ -949,6 +1147,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         self.history
             .changed(old_face_name, ChangeKind::Split, [old_face_name, face_name]);
 
+        self.record_loop_edit(old_loop)?;
         Ok(MefResult {
             edge,
             face: new_face,
@@ -1074,6 +1273,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         let survivor_name = self.working.vertex(surviving_vertex)?.name;
         self.history
             .changed(survivor_name, ChangeKind::Modified, [survivor_name]);
+        self.record_loop_edit(loop_id)?;
         Ok(KevResult {
             surviving_vertex,
             loop_id,
@@ -1230,6 +1430,8 @@ impl<'kernel> EulerTransaction<'kernel> {
         }
         self.history
             .changed(keep_face_name, ChangeKind::Merged, [keep_face_name]);
+        self.history
+            .merge_construction(remove_face_name, keep_face_name);
         // A merge within a primitive's construction keeps its authored role,
         // such as the extrusion side formed by joining two half cylinders.
         if !matches!(
@@ -1242,6 +1444,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 .collect::<BTreeSet<_>>();
             self.history.derived(keep_face_name, sources, "kef.face");
         }
+        self.record_loop_edit(keep_loop)?;
         Ok(KefResult {
             surviving_face: keep_face,
             loop_id: keep_loop,
@@ -1510,12 +1713,15 @@ impl<'kernel> EulerTransaction<'kernel> {
             self.working.coedges.remove(remove_id)?;
             self.history
                 .changed(removed_use.name, ChangeKind::Merged, [name]);
+            self.history.modified(name);
+            self.record_loop_edit(removed_use.loop_id)?;
         }
         let edge = self.working.edges.get_mut(survivor)?;
         edge.vertices[if prepend { 0 } else { 1 }] = other_vertex;
         edge.range = range;
         let name = edge.name;
         self.working.edges.remove(removed)?;
+        self.history.merge_construction(removed_edge.name, name);
         self.history
             .changed(removed_edge.name, ChangeKind::Merged, [name]);
         self.history.changed(name, ChangeKind::Modified, [name]);
@@ -1713,6 +1919,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         let face_name = self.working.face(face)?.name;
         self.history
             .changed(face_name, ChangeKind::Modified, [face_name]);
+        self.record_loop_edit(outer_loop)?;
         Ok(KemrResult {
             face,
             outer_loop,
@@ -1873,6 +2080,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             .changed(inner_loop_name, ChangeKind::Deleted, std::iter::empty());
         self.history
             .changed(face_name, ChangeKind::Modified, [face_name]);
+        self.record_loop_edit(outer_loop)?;
         Ok(MekrResult {
             edge,
             loop_id: outer_loop,
@@ -1978,6 +2186,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         let loop_name = self.working.loop_(inner_loop)?.name;
         self.history
             .changed(loop_name, ChangeKind::Modified, [loop_name]);
+        self.record_loop_edit(inner_loop)?;
         Ok(KfmrhResult {
             face: face_to_keep,
             inner_loop,
@@ -2058,6 +2267,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             .changed(loop_name, ChangeKind::Modified, [loop_name]);
         self.history
             .changed(old_face_name, ChangeKind::Modified, [old_face_name]);
+        self.record_loop_edit(inner_loop)?;
         Ok(MfkrhResult {
             face,
             outer_loop: inner_loop,
@@ -2639,6 +2849,16 @@ impl<'kernel> EulerTransaction<'kernel> {
             if !patch.sources.is_empty() {
                 self.history
                     .derived(face_name, patch.sources.iter().copied(), "brep.face");
+                self.history.record_construction(
+                    face_name,
+                    patch
+                        .sources
+                        .iter()
+                        .map(|name| super::history::EntitySource {
+                            name: *name,
+                            unchanged: patch.preserved.contains(name),
+                        }),
+                );
             }
             let outer_index = patch
                 .loops
@@ -2673,6 +2893,14 @@ impl<'kernel> EulerTransaction<'kernel> {
                         .point;
                     let start_vertex = weld_vertex(self, &mut vertices, start)?;
                     let end_vertex = weld_vertex(self, &mut vertices, end)?;
+                    self.history.record_construction(
+                        self.working.vertex(start_vertex)?.name(),
+                        segment.provenance.vertices[0].iter().copied(),
+                    );
+                    self.history.record_construction(
+                        self.working.vertex(end_vertex)?.name(),
+                        segment.provenance.vertices[1].iter().copied(),
+                    );
                     let matched = edges.iter().cloned().find(|candidate| {
                         let closed_circles_match = match (&candidate.curve, &segment.curve) {
                             (Curve3::Circle(first), Curve3::Circle(second)) => {
@@ -2839,6 +3067,10 @@ impl<'kernel> EulerTransaction<'kernel> {
                         (edge, true, segment.pcurve.clone())
                     };
                     let edge_range = self.working.edge(edge)?.range;
+                    self.history.record_construction(
+                        self.working.edge(edge)?.name(),
+                        segment.provenance.edges.iter().copied(),
+                    );
                     let coedge_name = self.names.next_for("coedge")?;
                     let coedge = self.make_coedge(
                         coedge_name,
@@ -4892,6 +5124,9 @@ impl<'kernel> EulerTransaction<'kernel> {
         let edge = self.working.coedge(coedge)?.edge;
         let range = self.working.edge(edge)?.range;
         let value = self.working.coedges.get_mut(coedge)?;
+        if value.forward != forward {
+            self.history.modified(value.name);
+        }
         value.forward = forward;
         value.range = if forward { range } else { range.reversed() };
         Ok(())
@@ -4902,7 +5137,11 @@ impl<'kernel> EulerTransaction<'kernel> {
         face: FaceId,
         orientation: FaceOrientation,
     ) -> KernelResult<()> {
-        self.working.faces.get_mut(face)?.orientation = orientation;
+        let face = self.working.faces.get_mut(face)?;
+        if face.orientation != orientation {
+            self.history.modified(face.name);
+        }
+        face.orientation = orientation;
         Ok(())
     }
 
@@ -5055,6 +5294,8 @@ impl<'kernel> EulerTransaction<'kernel> {
                     "edge use lost the endpoint being retargeted",
                 ));
             }
+            self.history.modified(value.name);
+            self.record_loop_edit(coedge.loop_id)?;
         }
         let value = self.working.edges.get_mut(edge_id)?;
         value.vertices[endpoint] = new_vertex;
@@ -5075,6 +5316,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         replacement: CoedgeId,
     ) -> KernelResult<()> {
         let old_value = self.working.coedge(old)?.clone();
+        self.record_loop_edit(old_value.loop_id)?;
         {
             let value = self.working.coedges.get_mut(replacement)?;
             value.loop_id = old_value.loop_id;
@@ -5105,6 +5347,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             ));
         }
         let loop_id = self.working.coedge(previous)?.loop_id;
+        self.record_loop_edit(loop_id)?;
         if self.working.coedge(next)?.loop_id != loop_id {
             return Err(KernelError::new(
                 DiagnosticKind::TopologyInvariant,
@@ -5126,6 +5369,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         loop_id: LoopId,
         uses: &[CoedgeId],
     ) -> KernelResult<()> {
+        self.record_loop_edit(loop_id)?;
         if uses.len() < 3 {
             return Err(KernelError::new(
                 DiagnosticKind::TopologyInvariant,
@@ -5290,7 +5534,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             ));
         }
         self.history
-            .complete_retained(&self.kernel.topology, &self.working)?;
+            .complete_retained(&self.kernel.topology, &self.working);
         self.kernel.topology = self.working;
         Ok(CommittedOperation {
             operation: self.namespace,

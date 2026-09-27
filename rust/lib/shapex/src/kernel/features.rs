@@ -4,7 +4,7 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3};
 
-use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment};
+use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::{
     Axis3, CoedgeId, Compound, Curve2, Curve3, DiagnosticKind, EdgeId, FaceHandle, FaceId,
     FaceOrientation, IntersectionSet, Kernel, KernelError, KernelResult, Line3, ParameterRange,
@@ -1348,7 +1348,7 @@ fn offset_body(
     openings: &BTreeSet<FaceId>,
     distance: f64,
     adjust_blends: bool,
-) -> KernelResult<(Compound, Vec<PersistentId>)> {
+) -> KernelResult<Compound> {
     let topology = source.topology();
     let tolerance = source.tolerance();
     let source_faces = source
@@ -1381,18 +1381,28 @@ fn offset_body(
         bounds.insert(*face_id, expanded);
     }
 
+    let mut changed_supports = source_faces
+        .difference(openings)
+        .copied()
+        .collect::<BTreeSet<_>>();
     if adjust_blends {
-        adjust_offset_blends(source, openings, distance, &mut supports)?;
+        changed_supports.extend(adjust_offset_blends(
+            source,
+            openings,
+            distance,
+            &mut supports,
+        )?);
     }
-    rebuild_supports(source, supports, bounds, false)
+    rebuild_supports(source, supports, bounds, changed_supports, false)
 }
 
 fn rebuild_supports(
     source: &Compound,
     supports: BTreeMap<FaceId, Surface3>,
     bounds: BTreeMap<FaceId, [ParameterRange; 2]>,
+    changed_supports: BTreeSet<FaceId>,
     preserve_orientation: bool,
-) -> KernelResult<(Compound, Vec<PersistentId>)> {
+) -> KernelResult<Compound> {
     let topology = source.topology();
     let tolerance = source.tolerance();
     let source_faces = source
@@ -1579,10 +1589,17 @@ fn rebuild_supports(
         edge.range = trim_offset_edge(topology, *edge_id, edge, &endpoints, tolerance)?;
     }
 
-    let mut patches_by_shell = BTreeMap::<super::ShellId, Vec<(BrepPatch, PersistentId)>>::new();
+    let mut patches_by_shell = BTreeMap::<super::ShellId, Vec<BrepPatch>>::new();
+    let mut changed_vertices = BTreeSet::new();
+    for id in &changed_supports {
+        for edge in topology.face_edges(*id)? {
+            changed_vertices.extend(topology.edge(edge)?.vertices());
+        }
+    }
     for face_id in source_faces {
         let face = topology.face(face_id)?;
         let surface = &supports[&face_id];
+        let mut face_retained = !changed_supports.contains(&face_id);
         let mut loops = Vec::new();
         for loop_id in face.loops() {
             let loop_value = topology.loop_(*loop_id)?;
@@ -1602,7 +1619,28 @@ fn rebuild_supports(
                     range,
                     tolerance,
                 )?;
+                let endpoints = topology.coedge_vertices(coedge_id)?;
+                let affected = endpoints
+                    .iter()
+                    .any(|vertex| changed_vertices.contains(vertex))
+                    || topology
+                        .edge_faces(coedge.edge())?
+                        .iter()
+                        .any(|face| changed_supports.contains(face));
+                face_retained &= !affected;
+                let original = SegmentProvenance::from_coedge(topology, coedge_id)?;
+                let mut provenance = if affected {
+                    original.modified()
+                } else {
+                    original.clone()
+                };
+                for end in 0..2 {
+                    if !changed_vertices.contains(&endpoints[end]) {
+                        provenance.vertices[end] = original.vertices[end].clone();
+                    }
+                }
                 segments.push(BrepPatchSegment {
+                    provenance,
                     curve: edge.curve.clone(),
                     pcurve,
                     range,
@@ -1627,6 +1665,7 @@ fn rebuild_supports(
                         exact[1].clone()
                     };
                     segments.push(BrepPatchSegment {
+                        provenance: Default::default(),
                         curve: curve.clone(),
                         pcurve,
                         range,
@@ -1638,9 +1677,16 @@ fn rebuild_supports(
                 segments,
             });
         }
-        patches_by_shell.entry(face.shell()).or_default().push((
-            BrepPatch {
-                sources: Vec::new(),
+        patches_by_shell
+            .entry(face.shell())
+            .or_default()
+            .push(BrepPatch {
+                preserved: if face_retained {
+                    vec![face.name()]
+                } else {
+                    Vec::new()
+                },
+                sources: vec![face.name()],
                 surface: surface.clone(),
                 orientation: if preserve_orientation {
                     face.orientation()
@@ -1667,29 +1713,25 @@ fn rebuild_supports(
                     }
                 },
                 loops,
-            },
-            face.name(),
-        ));
+            });
     }
 
     let mut kernel = Kernel::new(tolerance)?;
     let mut transaction = kernel.begin_operation();
     let mut bodies = Vec::new();
-    let mut patch_sources = Vec::new();
-        for patches_and_sources in patches_by_shell.into_values() {
-        let (patches, sources): (Vec<_>, Vec<_>) = patches_and_sources.into_iter().unzip();
+    for patches in patches_by_shell.into_values() {
         bodies.push(transaction.brep_shell(&patches)?);
-        patch_sources.extend(sources);
     }
     transaction.nest_brep_shells(&bodies, TessellationOptions::default())?;
     let committed = transaction.finish()?;
-    Ok((
-        Compound::from_operation(kernel, committed, [])?,
-        patch_sources,
-    ))
+    Compound::from_operation(kernel, committed, [])
 }
 
-pub(crate) fn face_patch(topology: &Topology, face_id: FaceId, reverse: bool) -> KernelResult<BrepPatch> {
+pub(crate) fn face_patch(
+    topology: &Topology,
+    face_id: FaceId,
+    reverse: bool,
+) -> KernelResult<BrepPatch> {
     let face = topology.face(face_id)?;
     let mut loops = Vec::new();
     for loop_id in face.loops() {
@@ -1700,6 +1742,7 @@ pub(crate) fn face_patch(topology: &Topology, face_id: FaceId, reverse: bool) ->
             .map(|coedge_id| {
                 let coedge = topology.coedge(coedge_id)?;
                 Ok(BrepPatchSegment {
+                    provenance: SegmentProvenance::from_coedge(topology, coedge_id)?,
                     curve: topology.edge(coedge.edge())?.curve().clone(),
                     pcurve: coedge.pcurve().clone(),
                     range: coedge.range(),
@@ -1710,6 +1753,7 @@ pub(crate) fn face_patch(topology: &Topology, face_id: FaceId, reverse: bool) ->
             segments.reverse();
             for segment in &mut segments {
                 segment.range = segment.range.reversed();
+                segment.provenance = segment.provenance.reversed();
             }
         }
         loops.push(BrepPatchLoop {
@@ -1718,6 +1762,11 @@ pub(crate) fn face_patch(topology: &Topology, face_id: FaceId, reverse: bool) ->
         });
     }
     Ok(BrepPatch {
+        preserved: if reverse {
+            Vec::new()
+        } else {
+            vec![face.name()]
+        },
         sources: vec![face.name()],
         surface: face.surface().clone(),
         orientation: if reverse {
@@ -1741,6 +1790,7 @@ fn loop_patch(
         .map(|coedge_id| {
             let coedge = topology.coedge(coedge_id)?;
             Ok(BrepPatchSegment {
+                provenance: SegmentProvenance::from_coedge(topology, coedge_id)?,
                 curve: topology.edge(coedge.edge())?.curve().clone(),
                 pcurve: coedge.pcurve().clone(),
                 range: coedge.range(),
@@ -1751,6 +1801,7 @@ fn loop_patch(
         segments.reverse();
         for segment in &mut segments {
             segment.range = segment.range.reversed();
+            segment.provenance = segment.provenance.reversed();
         }
     }
     Ok(BrepPatchLoop {
@@ -1817,6 +1868,9 @@ fn split_rim_segments(
                 continue;
             }
             result.push(BrepPatchSegment {
+                provenance: segment
+                    .provenance
+                    .trimmed(segment.range, ParameterRange::new(bounds[0], bounds[1])?),
                 curve: segment.curve.clone(),
                 pcurve: segment.pcurve.clone(),
                 range: ParameterRange::new(bounds[0], bounds[1])?,
@@ -1873,6 +1927,7 @@ fn rim_face_patch(
     }
     if !removed {
         return Ok(Some(BrepPatch {
+            preserved: Vec::new(),
             sources: Vec::new(),
             surface: surface.clone(),
             orientation,
@@ -1915,6 +1970,7 @@ fn rim_face_patch(
             let mut next = unused.swap_remove(index);
             if reverse {
                 next.range = next.range.reversed();
+                next.provenance = next.provenance.reversed();
             }
             end = rim_segment_points(&next)?[2];
             segments.push(next);
@@ -1950,6 +2006,7 @@ fn rim_face_patch(
         ));
     }
     Ok(Some(BrepPatch {
+        preserved: Vec::new(),
         sources: Vec::new(),
         surface: surface.clone(),
         orientation,
@@ -1964,41 +2021,23 @@ fn rim_face_patch(
 fn assemble_shell_boundary(
     source: &Compound,
     raw_offset: &Compound,
-    patch_sources: &[PersistentId],
     openings: &BTreeSet<FaceId>,
     distance: f64,
-) -> KernelResult<(Compound, Vec<PersistentId>)> {
+) -> KernelResult<Compound> {
     let source_topology = source.topology();
     let offset_topology = raw_offset.topology();
     let source_by_name = source
         .faces()
         .map(|face| (face.persistent_id(), face.topology_id()))
         .collect::<BTreeMap<_, _>>();
-    if raw_offset.faces().count() != patch_sources.len() {
-        return Err(KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "offset face count does not match its source-face correspondence",
-        ));
-    }
-
-    let mut offset_by_source = BTreeMap::new();
-    for (offset_face, source_name) in raw_offset.faces().zip(patch_sources.iter().copied()) {
-        let source_face = source_by_name.get(&source_name).copied().ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "an offset face lost its source-face correspondence",
-            )
-        })?;
-        if offset_by_source
-            .insert(source_face, offset_face.topology_id())
-            .is_some()
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "multiple offset faces claim the same source face",
-            ));
-        }
-    }
+    let offset_by_source = raw_offset
+        .faces()
+        .map(|face| {
+            let source_name =
+                raw_offset.topology_history().construction[&face.persistent_id()][0].name;
+            (source_by_name[&source_name], face.topology_id())
+        })
+        .collect::<BTreeMap<_, _>>();
 
     let source_shells = source
         .faces()
@@ -2009,7 +2048,7 @@ fn assemble_shell_boundary(
         })
         .collect::<KernelResult<BTreeSet<_>>>()?;
     let direct_closed_pair = source_shells.len() == 1 && openings.is_empty();
-    let mut groups = Vec::<Vec<(BrepPatch, PersistentId)>>::new();
+    let mut groups = Vec::<Vec<BrepPatch>>::new();
     for shell_id in source_shells {
         let shell_faces = source_topology.shell(shell_id)?.faces();
         let shell_openings = shell_faces
@@ -2022,23 +2061,13 @@ fn assemble_shell_boundary(
             .iter()
             .copied()
             .filter(|face| !openings.contains(face))
-            .map(|face| {
-                Ok((
-                    face_patch(source_topology, face, distance > 0.0)?,
-                    source_topology.face(face)?.name(),
-                ))
-            })
+            .map(|face| face_patch(source_topology, face, distance > 0.0))
             .collect::<KernelResult<Vec<_>>>()?;
         let offset_skin = shell_faces
             .iter()
             .copied()
             .filter(|face| !openings.contains(face))
-            .map(|face| {
-                Ok((
-                    face_patch(offset_topology, offset_by_source[&face], distance < 0.0)?,
-                    source_topology.face(face)?.name(),
-                ))
-            })
+            .map(|face| face_patch(offset_topology, offset_by_source[&face], distance < 0.0))
             .collect::<KernelResult<Vec<_>>>()?;
 
         if shell_openings.is_empty() {
@@ -2077,14 +2106,15 @@ fn assemble_shell_boundary(
                         loop_patch(source_topology, source_loop, super::LoopKind::Inner)?,
                     )
                 };
-                if let Some(rim) = rim_face_patch(
+                if let Some(mut rim) = rim_face_patch(
                     source_face.surface(),
                     source_face.orientation(),
                     outer_loop,
                     inner_loop,
                     source.tolerance(),
                 )? {
-                    connected.push((rim, source_face.name()));
+                    rim.sources.push(source_face.name());
+                    connected.push(rim);
                 }
             }
         }
@@ -2094,19 +2124,38 @@ fn assemble_shell_boundary(
     let mut kernel = Kernel::new(source.tolerance())?;
     let mut transaction = kernel.begin_operation();
     let mut bodies = Vec::new();
-    let mut output_sources = Vec::new();
+    for patch in groups.iter_mut().flatten() {
+        let mut preserved = Vec::new();
+        let mut sources = Vec::new();
+        for name in &patch.sources {
+            if let Some(records) = raw_offset.topology_history().construction.get(name) {
+                for record in records {
+                    sources.push(record.name);
+                    if patch.preserved.contains(name) && record.unchanged {
+                        preserved.push(record.name);
+                    }
+                }
+            } else {
+                sources.push(*name);
+                if patch.preserved.contains(name) {
+                    preserved.push(*name);
+                }
+            }
+        }
+        patch.sources = sources;
+        patch.preserved = preserved;
+        for segment in patch.loops.iter_mut().flat_map(|l| &mut l.segments) {
+            segment.provenance.through(raw_offset.topology_history());
+        }
+    }
     if direct_closed_pair {
         let mut groups = groups.into_iter();
-        let (source_patches, source_names): (Vec<_>, Vec<_>) = groups
+        let source_patches = groups
             .next()
-            .expect("a closed source shell has a source skin")
-            .into_iter()
-            .unzip();
-        let (offset_patches, offset_names): (Vec<_>, Vec<_>) = groups
+            .expect("a closed source shell has a source skin");
+        let offset_patches = groups
             .next()
-            .expect("a closed source shell has an offset skin")
-            .into_iter()
-            .unzip();
+            .expect("a closed source shell has an offset skin");
         debug_assert!(groups.next().is_none());
         let source_body = transaction.brep_shell(&source_patches)?;
         let offset_body = transaction.brep_shell(&offset_patches)?;
@@ -2117,21 +2166,14 @@ fn assemble_shell_boundary(
         };
         transaction.merge_shell_into_body(outer_body, cavity_body)?;
         bodies.push(outer_body);
-        output_sources.extend(source_names);
-        output_sources.extend(offset_names);
     } else {
-        for group in groups {
-            let (patches, sources): (Vec<_>, Vec<_>) = group.into_iter().unzip();
+        for patches in groups {
             bodies.push(transaction.brep_shell(&patches)?);
-            output_sources.extend(sources);
         }
         transaction.nest_brep_shells(&bodies, TessellationOptions::default())?;
     }
     let committed = transaction.finish()?;
-    Ok((
-        Compound::from_operation(kernel, committed, [])?,
-        output_sources,
-    ))
+    Compound::from_operation(kernel, committed, [])
 }
 
 // Solve contact-normal constraints with a minimum-length solution in the
@@ -2185,7 +2227,7 @@ fn adjust_offset_blends(
     retained: &BTreeSet<FaceId>,
     distance: f64,
     supports: &mut BTreeMap<FaceId, Surface3>,
-) -> KernelResult<()> {
+) -> KernelResult<BTreeSet<FaceId>> {
     let topology = source.topology();
     let tolerance = source.tolerance();
     let mut replacements = Vec::new();
@@ -2278,8 +2320,9 @@ fn adjust_offset_blends(
         }
         replacements.push((*face_id, surface));
     }
+    let changed = replacements.iter().map(|(id, _)| *id).collect();
     supports.extend(replacements);
-    Ok(())
+    Ok(changed)
 }
 
 pub(crate) fn offset_faces(
@@ -2298,22 +2341,11 @@ pub(crate) fn offset_faces(
         .collect();
     // Rebuild only the offset skin; shelling additionally adds the source skin
     // and opening rims to create a wall.
-    let (result, sources) = offset_body(source, &retained, distance, true)?;
+    let result = offset_body(source, &retained, distance, true)?;
     if result.solids().len() != 1 || result.volume() <= source.tolerance().linear.powi(3) {
         return Err(invalid("face offset must preserve a nonempty solid"));
     }
-    if result.faces().count() != sources.len() {
-        return Err(KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "offset face count does not match its source-face correspondence",
-        ));
-    }
-    let origins = result
-        .faces()
-        .zip(sources)
-        .map(|(face, origin)| (face.persistent_id(), vec![origin]))
-        .collect();
-    result.with_feature_parent(source, "offset-faces", &origins)
+    result.with_feature_parent(source, "offset-faces")
 }
 
 pub(crate) fn shell(
@@ -2331,20 +2363,9 @@ pub(crate) fn shell(
         .iter()
         .map(FaceHandle::topology_id)
         .collect::<BTreeSet<_>>();
-    let (raw_offset, patch_sources) = offset_body(source, &opening_ids, distance, false)?;
-    let (raw_shell, shell_sources) =
-        assemble_shell_boundary(source, &raw_offset, &patch_sources, &opening_ids, distance)?;
-    if raw_shell.faces().count() != shell_sources.len() {
-        return Err(KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "shell face count does not match its source-face correspondence",
-        ));
-    }
-    let mut origins = BTreeMap::new();
-    for (face, source_name) in raw_shell.faces().zip(shell_sources) {
-        origins.insert(face.persistent_id(), vec![source_name]);
-    }
-    let shell = raw_shell.with_feature_parent(source, "shell", &origins)?;
+    let raw_offset = offset_body(source, &opening_ids, distance, false)?;
+    let raw_shell = assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?;
+    let shell = raw_shell.with_feature_parent(source, "shell")?;
     if join_type == "sharp" {
         return Ok(shell);
     }
@@ -2359,9 +2380,12 @@ pub(crate) fn shell(
         .collect::<BTreeSet<_>>();
     let offset_surfaces = raw_offset
         .faces()
-        .zip(patch_sources.iter())
-        .filter(|(_, name)| !opening_names.contains(name))
-        .map(|(face, _)| face.surface().clone())
+        .filter(|face| {
+            !opening_names.contains(
+                &raw_offset.topology_history().construction[&face.persistent_id()][0].name,
+            )
+        })
+        .map(|face| face.surface().clone())
         .collect::<Vec<_>>();
     // Classify the original edge, not an offset intersection: numerical
     // support reconstruction must not turn a tangent seam into a new join.
@@ -2429,7 +2453,10 @@ pub(crate) fn shell(
         {
             continue;
         }
-        let mut pair = [origins[&faces[0].name()][0], origins[&faces[1].name()][0]];
+        let mut pair = [
+            shell.topology_history().construction[&faces[0].name()][0].name,
+            shell.topology_history().construction[&faces[1].name()][0].name,
+        ];
         pair.sort();
         if divergent.contains(&pair) {
             joins.push(handle.clone());
@@ -2452,12 +2479,13 @@ pub(crate) fn split(source: &Compound, plane: Plane3, keep: &str) -> KernelResul
         return source.unchanged();
     }
     let cutter = half_space_cutter(source, plane)?;
+    let cut = |kind| super::boolean::boolean_brep_with_face_boundaries(source, &cutter, kind, true);
     match keep {
-        "left" => source.difference(&cutter),
-        "right" => source.intersection(&cutter),
+        "left" => cut(super::BooleanKind::Difference),
+        "right" => cut(super::BooleanKind::Intersection),
         _ => {
-            let left = source.difference(&cutter)?;
-            let right = source.intersection(&cutter)?;
+            let left = cut(super::BooleanKind::Difference)?;
+            let right = cut(super::BooleanKind::Intersection)?;
             left.combined(&[right])
         }
     }
@@ -2510,15 +2538,20 @@ pub(crate) fn move_faces(
         supports.insert(id, surface);
     }
     let contacts = move_blend_contacts(source)?;
-    adjust_move_blends(source, &selected, transform, &contacts, &mut supports)?;
-    let (result, sources) = rebuild_supports(source, supports, bounds, true)?;
+    let mut changed_supports = faces
+        .iter()
+        .map(FaceHandle::topology_id)
+        .collect::<BTreeSet<_>>();
+    changed_supports.extend(adjust_move_blends(
+        source,
+        &selected,
+        transform,
+        &contacts,
+        &mut supports,
+    )?);
+    let result = rebuild_supports(source, supports, bounds, changed_supports, true)?;
     // A valid closed shell alone does not certify that a former fillet is still
     // tangent. Check the reconstructed contact rails before publishing it.
-    let origins = result
-        .faces()
-        .zip(sources)
-        .map(|(face, name)| (face.persistent_id(), name))
-        .collect::<BTreeMap<_, _>>();
     let mut tangent_pairs = BTreeSet::new();
     for (id, rails) in &contacts {
         let name = topology.face(*id)?.name();
@@ -2533,8 +2566,8 @@ pub(crate) fn move_faces(
             continue;
         };
         let pair = (
-            origins[&result_topology.face(*first)?.name()],
-            origins[&result_topology.face(*second)?.name()],
+            result.topology_history().construction[&result_topology.face(*first)?.name()][0].name,
+            result.topology_history().construction[&result_topology.face(*second)?.name()][0].name,
         );
         if !tangent_pairs.contains(&pair) {
             continue;
@@ -2553,64 +2586,7 @@ pub(crate) fn move_faces(
             ));
         }
     }
-    // Match moved edges and vertices by face incidence, since their old spatial
-    // supports no longer identify them. Ambiguous incidence is left unresolved.
-    let face_origins = origins;
-    let mut origins = face_origins
-        .iter()
-        .map(|(face, source)| (*face, vec![*source]))
-        .collect::<BTreeMap<_, _>>();
-    let mut source_edges = BTreeMap::<BTreeSet<PersistentId>, Vec<PersistentId>>::new();
-    for edge in source.edges() {
-        let faces = edge
-            .connected_faces()?
-            .iter()
-            .map(FaceHandle::persistent_id)
-            .collect();
-        source_edges
-            .entry(faces)
-            .or_default()
-            .push(edge.persistent_id());
-    }
-    for edge in result.edges() {
-        let faces = edge
-            .connected_faces()?
-            .iter()
-            .map(|face| face_origins[&face.persistent_id()])
-            .collect::<BTreeSet<_>>();
-        if let Some(names) = source_edges.get(&faces).filter(|names| names.len() == 1) {
-            origins.insert(edge.persistent_id(), names.clone());
-        }
-    }
-    let mut source_vertices = BTreeMap::<BTreeSet<PersistentId>, Vec<PersistentId>>::new();
-    for (id, vertex) in topology.vertices() {
-        let faces = topology
-            .vertex_faces(id)?
-            .iter()
-            .map(|face| topology.face(*face).map(|face| face.name()))
-            .collect::<KernelResult<BTreeSet<_>>>()?;
-        source_vertices
-            .entry(faces)
-            .or_default()
-            .push(vertex.name());
-    }
-    for (id, vertex) in result.topology().vertices() {
-        let faces = result
-            .topology()
-            .vertex_faces(id)?
-            .iter()
-            .map(|face| {
-                result
-                    .topology()
-                    .face(*face)
-                    .map(|face| face_origins[&face.name()])
-            })
-            .collect::<KernelResult<BTreeSet<_>>>()?;
-        if let Some(names) = source_vertices.get(&faces).filter(|names| names.len() == 1) {
-            origins.insert(vertex.name(), names.clone());
-        }
-    }
-    result.with_feature_parent(source, "move-faces", &origins)
+    result.with_feature_parent(source, "move-faces")
 }
 
 type BlendContacts = BTreeMap<FaceId, Vec<(FaceId, Point3, crate::Vec3)>>;
@@ -2681,7 +2657,7 @@ fn adjust_move_blends(
     transform: RigidTransform3,
     contacts: &BlendContacts,
     supports: &mut BTreeMap<FaceId, Surface3>,
-) -> KernelResult<()> {
+) -> KernelResult<BTreeSet<FaceId>> {
     let topology = source.topology();
     let tolerance = source.tolerance();
     let selected_faces = source
@@ -2689,6 +2665,7 @@ fn adjust_move_blends(
         .filter(|face| selected.contains(&face.persistent_id()))
         .map(FaceHandle::topology_id)
         .collect::<BTreeSet<_>>();
+    let mut changed = BTreeSet::new();
     let mut blends = BTreeSet::new();
     for face in source.faces() {
         let id = face.topology_id();
@@ -2911,8 +2888,9 @@ fn adjust_move_blends(
         };
         pending.remove(&id);
         supports.insert(id, surface);
+        changed.insert(id);
     }
-    Ok(())
+    Ok(changed)
 }
 
 pub(crate) fn replace_face(
@@ -3105,11 +3083,7 @@ pub(crate) fn draft(
         );
         supports.insert(handle.topology_id(), surface);
     }
-    let (result, origins) = rebuild_supports(source, supports, bounds, false)?;
-    let origins = result
-        .faces()
-        .zip(origins)
-        .map(|(face, origin)| (face.persistent_id(), vec![origin]))
-        .collect();
-    result.with_feature_parent(source, "draft", &origins)
+    let changed_supports = faces.iter().map(FaceHandle::topology_id).collect();
+    let result = rebuild_supports(source, supports, bounds, changed_supports, false)?;
+    result.with_feature_parent(source, "draft")
 }

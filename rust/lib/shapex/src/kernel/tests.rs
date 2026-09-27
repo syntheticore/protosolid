@@ -3042,6 +3042,57 @@ fn section_of_chamfered_and_filleted_slot_frame() {
     assert_eq!(retained.solids().len(), 1);
     assert!((retained.volume() - rounded.volume()).abs() < rounded.volume() * 1e-8);
     assert_eq!(rounded.split(section, "right").unwrap().solids().len(), 0);
+    let top = rounded
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().y.abs() > 0.99 && (p.origin().y - 14.0).abs() < 1e-7)
+        })
+        .unwrap();
+    assert!(matches!(retained.resolve(top), Resolution::Preserved(_)));
+
+    let boss = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(50.0, 1.8), 3.0).unwrap()],
+            tolerance,
+        )
+        .unwrap(),
+        [],
+        tolerance,
+    )
+    .unwrap()
+    .extrude(
+        Plane3::new(
+            Point3::new(0.0, 17.0, 0.0),
+            Vec3::unit_x(),
+            -Vec3::unit_z(),
+            tolerance,
+        )
+        .unwrap(),
+        -Vec3::unit_y() * 5.0,
+    )
+    .unwrap();
+    let with_boss = rounded.union(&boss).unwrap();
+    let top = with_boss
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().y.abs() > 0.99 && (p.origin().y - 14.0).abs() < 1e-7)
+        })
+        .unwrap();
+    let retained = with_boss.split(section, "left").unwrap();
+    assert!(matches!(retained.resolve(top), Resolution::Preserved(_)));
+    let section_faces = retained
+        .faces()
+        .filter(|face| {
+            matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().y.abs() > 0.99 && (p.origin().y - 14.0).abs() < 1e-7)
+        })
+        .count();
+    assert_eq!(
+        section_faces, 2,
+        "the existing top and the new boss cap must remain separate"
+    );
 }
 
 #[test]
@@ -4324,11 +4375,8 @@ fn unchanged_history_distinguishes_section_caps_from_existing_faces() {
     let section = Plane3::from_origin_normal(Point3::new(0.0, 0.0, 5.0), Vec3::unit_z()).unwrap();
     let cut = pocketed.split(section, "left").unwrap();
     assert!(
-        matches!(
-            cut.resolve(floor),
-            Resolution::Modified(_) | Resolution::Merged(_)
-        ),
-        "expanded floor is a cut cap"
+        matches!(cut.resolve(floor), Resolution::Preserved(_)),
+        "coincident floor remains separate from the cut cap"
     );
     assert!(
         matches!(cut.resolve(bottom), Resolution::Preserved(_)),
@@ -4348,16 +4396,132 @@ fn unchanged_history_distinguishes_section_caps_from_existing_faces() {
         );
     }
     assert!(
-        matches!(
-            untouched.resolve(floor),
-            Resolution::Modified(_) | Resolution::Merged(_)
-        ),
-        "older floor stays modified"
+        matches!(untouched.resolve(floor), Resolution::Preserved(_)),
+        "older floor stays preserved"
     );
     assert!(
         matches!(untouched.resolve(bottom), Resolution::Preserved(_)),
         "unchanged ancestry is transitive"
     );
+}
+
+#[test]
+fn construction_history_does_not_invent_ancestry_for_coincident_geometry() {
+    let source = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let independently_built = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let result = independently_built
+        .with_feature_parent(&source, "independent-construction")
+        .unwrap();
+    for face in source.faces() {
+        assert!(matches!(result.resolve(face), Resolution::Deleted));
+    }
+    for edge in source.edges() {
+        assert!(matches!(result.resolve(edge), Resolution::Deleted));
+    }
+    for vertex in source.vertices() {
+        assert!(matches!(result.resolve(vertex), Resolution::Deleted));
+    }
+}
+
+#[test]
+fn construction_history_preserves_reparameterized_boundaries() {
+    let source = owned_cuboid(Point3::origin(), Point3::new(10.0, 12.0, 14.0));
+    let mut patches = source
+        .faces()
+        .map(|face| {
+            super::features::face_patch(source.topology(), face.topology_id(), false).unwrap()
+        })
+        .collect::<Vec<_>>();
+    for segment in patches
+        .iter_mut()
+        .flat_map(|p| &mut p.loops)
+        .flat_map(|l| &mut l.segments)
+    {
+        let Curve3::Line(line) = &segment.curve else {
+            unreachable!()
+        };
+        segment.curve = Line3::new(line.origin(), line.direction() / 3.0)
+            .unwrap()
+            .into();
+        let Curve2::Line(line) = &segment.pcurve else {
+            unreachable!()
+        };
+        segment.pcurve = super::Line2::new(line.origin(), line.direction() / 3.0)
+            .unwrap()
+            .into();
+        segment.range =
+            ParameterRange::new(segment.range.start * 3.0, segment.range.end * 3.0).unwrap();
+    }
+    let mut kernel = Kernel::new(source.tolerance()).unwrap();
+    let mut operation = kernel.begin_operation();
+    operation.brep_shell(&patches).unwrap();
+    let committed = operation.finish().unwrap();
+    let result = super::Compound::from_operation(kernel, committed, [])
+        .unwrap()
+        .with_feature_parent(&source, "reparameterized-copy")
+        .unwrap();
+    for face in source.faces() {
+        assert!(matches!(result.resolve(face), Resolution::Preserved(_)));
+    }
+    for edge in source.edges() {
+        assert!(matches!(result.resolve(edge), Resolution::Preserved(_)));
+    }
+    for vertex in source.vertices() {
+        assert!(matches!(result.resolve(vertex), Resolution::Preserved(_)));
+    }
+}
+
+#[test]
+fn boolean_construction_reports_split_edges_and_retained_vertices() {
+    let source = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let cutter = owned_cuboid(Point3::new(4.0, -1.0, -1.0), Point3::new(6.0, 11.0, 11.0));
+    let result = source.difference(&cutter).unwrap();
+    for vertex in source.vertices() {
+        assert!(
+            matches!(result.resolve(vertex), Resolution::Preserved(_)),
+            "retained corner"
+        );
+    }
+    for edge in source.edges() {
+        let points = edge.endpoints().unwrap();
+        if (points[0].x - points[1].x).abs() > 9.0 {
+            assert!(
+                matches!(result.resolve(edge), Resolution::Split(parts) if parts.len() == 2),
+                "split source edge"
+            );
+        } else {
+            assert!(
+                matches!(result.resolve(edge), Resolution::Preserved(_)),
+                "untouched source edge"
+            );
+        }
+    }
+}
+
+#[test]
+fn moved_support_reports_edge_and_vertex_changes_at_construction() {
+    let tolerance = ModelTolerance::default();
+    let source = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let top = source.faces().find(|face| {
+        matches!(face.surface(), Surface3::Plane(plane) if plane.origin().z == 10.0 && plane.normal().z.abs() > 0.9)
+    }).unwrap();
+    let movement =
+        RigidTransform3::new(Matrix3::identity(), Vec3::new(0.0, 0.0, 0.125), tolerance).unwrap();
+    let result = source.move_faces(&[top.clone()], movement).unwrap();
+    for vertex in source.vertices() {
+        if vertex.point().z == 0.0 {
+            assert!(matches!(result.resolve(vertex), Resolution::Preserved(_)));
+        } else {
+            assert!(matches!(result.resolve(vertex), Resolution::Modified(_)));
+        }
+    }
+    for edge in source.edges() {
+        if edge.endpoints().unwrap().iter().all(|point| point.z == 0.0) {
+            assert!(matches!(result.resolve(edge), Resolution::Preserved(_)));
+        } else {
+            assert!(matches!(result.resolve(edge), Resolution::Modified(_)));
+        }
+    }
 }
 
 #[test]
@@ -5544,6 +5708,7 @@ fn unifies_subdivided_straight_edges_but_preserves_box_corners() {
                                 let direction = (b - a) / range.span();
                                 let uv_direction = (uv_b - uv_a) / range.span();
                                 super::euler::BrepPatchSegment {
+                                    provenance: Default::default(),
                                     curve: Line3::new(a - direction * range.start, direction)
                                         .unwrap()
                                         .into(),
@@ -5608,6 +5773,7 @@ fn unifies_periodic_edges_with_bounded_projection_pcurves() {
                     )
                     .unwrap();
                     segments.push(super::euler::BrepPatchSegment {
+                        provenance: Default::default(),
                         curve: segment.curve.clone(),
                         pcurve: super::SurfaceProjectionPcurve2::new(
                             segment.curve.clone(),

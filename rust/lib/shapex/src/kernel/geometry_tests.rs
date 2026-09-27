@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn periodic_spatial_projection_preserves_uv_winding() {
+    let tolerance = ModelTolerance::default();
+    let surface: Surface3 = Cylinder3::new(Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_z(), Vec3::unit_x() * 3.0, Vec3::unit_y() * 3.0, tolerance).unwrap().into();
+    let tau = std::f64::consts::TAU;
+    for direction in [-1.0, 1.0] {
+        let guide: Curve2 = Line2::new(Point2::new(0.3, 2.0), Vec2::new(direction, 0.0)).unwrap().into();
+        for range in [ParameterRange::new(0.0, tau).unwrap(), ParameterRange::new(tau, 0.0).unwrap()] {
+            let curve = surface.boundary_curve(guide.clone(), range, tolerance).unwrap();
+            let projection: Curve2 = SurfaceProjectionPcurve2::new(curve.clone(), surface.clone(),
+                guide.clone(), range, tolerance).unwrap().into();
+            assert_eq!(projection.domain().period, None);
+            for parameter in [-2.0 * tau - 0.1, -0.1, 0.0, tau, tau + 0.1, 3.0 * tau + 0.1] {
+                let uv = projection.evaluate(parameter).unwrap();
+                assert!((uv.point.x - (0.3 + direction * parameter)).abs() < tolerance.parameter);
+                assert!(surface.evaluate(uv.point.x, uv.point.y).unwrap().point
+                    .distance(curve.evaluate(parameter).unwrap().point) < tolerance.linear);
+                assert!((uv.first_derivative.x - direction).abs() < tolerance.parameter);
+            }
+        }
+    }
+}
+
+#[test]
 fn analytic_boundary_construction_preserves_pcurve_parameters() {
     let tolerance = ModelTolerance::default();
     let origin = Point3::new(3.0, -2.0, 5.0);

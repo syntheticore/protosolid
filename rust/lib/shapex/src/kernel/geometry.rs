@@ -497,6 +497,13 @@ impl Curve2 {
         if self.domain().contains_range(range, 0.0) {
             return Ok(self.clone());
         }
+        let range = match self.domain().bounds {
+            DomainBounds::Bounded(previous) => ParameterRange::new(
+                range.start.min(range.end).min(previous.start.min(previous.end)),
+                range.start.max(range.end).max(previous.start.max(previous.end)),
+            )?,
+            _ => range,
+        };
         match self {
             Self::Nurbs(curve) => Ok(curve.extended(range)?.into()),
             Self::SurfaceIntersection(pcurve) => {
@@ -1867,26 +1874,42 @@ impl SurfaceProjectionPcurve2 {
         self.range
     }
 
+    fn continuation_period(&self) -> Option<f64> {
+        self.curve.domain().period
+            .filter(|period| self.range.span().abs() + self.tolerance.parameter >= *period)
+    }
+
     fn domain(&self) -> ParameterDomain {
-        let period = self
-            .curve
-            .domain()
-            .period
-            .filter(|period| self.range.span().abs() + self.tolerance.parameter >= *period);
+        // A closed spatial curve need not close in the surface's UV chart:
+        // a circle on a cylinder advances u by one full turn. Its projection
+        // continues by a UV translation rather than periodic evaluation.
         ParameterDomain {
-            bounds: DomainBounds::Bounded(self.range),
-            period,
+            bounds: if self.continuation_period().is_some() {
+                DomainBounds::Unbounded
+            } else {
+                DomainBounds::Bounded(self.range)
+            },
+            period: None,
         }
     }
 
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<(f64, f64)> {
         let mut parameter = parameter;
-        // Preserve both ends of a full-turn UV chart. Recentring an already
-        // valid endpoint can exchange 0 and 2π and create a seam jump.
+        let mut lift = Vec2::new(0.0, 0.0);
         if !self.range.contains(parameter, self.tolerance) {
-            if let Some(period) = self.domain().period {
+            if let Some(period) = self.continuation_period() {
                 let center = (self.range.start + self.range.end) * 0.5;
-                parameter += ((center - parameter) / period).round() * period;
+                let turns = ((parameter - center) / period).round();
+                parameter -= turns * period;
+                let start = self.range.start.min(self.range.end);
+                let first = self.guide.first_order(start)?.0;
+                let last = self.guide.first_order(start + period)?.0;
+                for (axis, domain) in self.surface.domains().iter().enumerate() {
+                    if let Some(surface_period) = domain.period {
+                        lift[axis] = ((last[axis] - first[axis]) / surface_period).round()
+                            * surface_period * turns;
+                    }
+                }
             }
         }
         if !self.range.contains(parameter, self.tolerance) {
@@ -1921,7 +1944,7 @@ impl SurfaceProjectionPcurve2 {
             // for the tangential position: adjacent uses can acquire different
             // endpoints when their guides stop at different residuals.
             if residual.magnitude() <= f64::EPSILON * scale * 2048.0 {
-                return Ok(uv);
+                return Ok((uv.0 + lift.x, uv.1 + lift.y));
             }
             let a00 = du.magnitude2();
             let a01 = du.dot(dv);
@@ -1966,7 +1989,7 @@ impl SurfaceProjectionPcurve2 {
         // Once refinement stops improving, retain the existing certification
         // allowance for a curve that lies only within tolerance of its support.
         if point.distance(target) <= self.tolerance.linear_at_scale(scale) {
-            return Ok(uv);
+            return Ok((uv.0 + lift.x, uv.1 + lift.y));
         }
         Err(KernelError::new(
             DiagnosticKind::NumericalFailure,

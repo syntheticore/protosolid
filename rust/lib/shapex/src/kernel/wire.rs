@@ -794,7 +794,11 @@ fn general_parametric_pair(
             // from it at that arithmetic precision.
             let scale = first_value.point.to_vec().magnitude()
                 .max(second_value.point.to_vec().magnitude()).max(1.0);
-            let uncertainty = f64::EPSILON * scale * 64.0 / sine;
+            // Include the implicit evaluator's roundoff budget and the final
+            // Newton residual. At a quadratic tangency the remaining root
+            // distance is twice the residual divided by the intersection angle.
+            let uncertainty = (f64::EPSILON * scale * 2048.0
+                + first_value.point.distance(second_value.point) * 2.0) / sine;
             if let Some((a, b, _)) = shared_endpoints.iter().find(|(_, _, point)| {
                 point.distance(first_value.point) <= uncertainty
                     && point.distance(second_value.point) <= uncertainty

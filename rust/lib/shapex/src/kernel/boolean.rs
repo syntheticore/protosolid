@@ -1269,6 +1269,9 @@ fn trim_to_faces(
         if let super::DomainBounds::Bounded(range) = curve.domain().bounds {
             return Ok(range);
         }
+        if let Curve2::SurfaceProjection(projection) = curve {
+            return Ok(projection.range());
+        }
         let Curve2::Line(line) = curve else {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
@@ -1384,6 +1387,14 @@ fn trim_to_faces(
         // same side of a periodic seam instead of relying on a wrapped
         // point-in-polygon test that cannot preserve edge connectivity.
         for shift in shifts {
+            // Spatial periodicity does not make a bounded UV chart periodic.
+            // Other surface sheets are supplied by intersection_chart_copies;
+            // only shift parameters when both p-curves support that branch.
+            if !first.domain().contains(middle + shift, tolerance.parameter)
+                || !second.domain().contains(middle + shift, tolerance.parameter)
+            {
+                continue;
+            }
             if inside(middle + shift)? {
                 ranges.push(ParameterRange::new(pair[0] + shift, pair[1] + shift)?);
                 break;

@@ -3143,6 +3143,144 @@ fn move_faces_extends_cylinder_and_its_rounded_cap() {
 }
 
 #[test]
+fn compound_tilt_chamfer_document_30() {
+    let body = compound_tilt_boss_document_30(-41.051);
+    let cap = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.normal().x > 0.5)).unwrap();
+    let tolerance = ModelTolerance::default();
+    for distance in [2.0, 2.5, 2.99, 3.0, 3.01, 3.5, 4.0] {
+        let result = body.chamfer(&cap.boundary_edges().unwrap(), distance)
+            .unwrap_or_else(|error| panic!("chamfer {distance}: {error:?}"));
+        result.tessellate(TessellationOptions::default()).unwrap();
+        assert_eq!(result.faces().count(), body.faces().count() + 1);
+        let chamfer = result.faces().find(|face| matches!(face.surface(), Surface3::Ruled(_))).unwrap();
+        let rails = chamfer.boundary_edges().unwrap().into_iter()
+            .filter(|edge| edge.connected_faces().unwrap().len() == 2).collect::<Vec<_>>();
+        assert_eq!(rails.len(), 2);
+        for rail in rails {
+            let endpoints = rail.endpoints().unwrap();
+            assert!(endpoints[0].distance(endpoints[1]) < tolerance.linear);
+        }
+        assert!(result.volume() > 0.0 && result.volume() < body.volume());
+    }
+}
+
+fn compound_tilt_boss_document_30(z_angle: f64) -> super::modeling::Compound {
+    let tolerance = ModelTolerance::default();
+    let plane = |height| Plane3::new(Point3::new(0.0, height, 0.0),
+        Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
+    let cylinder = |x, y, radius, base, height| Profile::new(Wire2::new([
+        TrimmedCurve2::circle(Point2::new(x, y), radius).unwrap()
+    ], tolerance).unwrap(), [], tolerance).unwrap()
+        .extrude(plane(base), Vec3::unit_y() * height).unwrap();
+    let body = cylinder(0.0, 0.0, 34.48516397016436, 0.0, 19.0)
+        .union(&cylinder(-17.48305641426953, -3.255357738829639, 8.840646636818086, 19.0, 15.0)).unwrap()
+        .difference(&cylinder(18.923801555564232, 2.1259479110724135, 8.639117031005743, 19.0, -4.0)).unwrap();
+    let cap = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if (p.origin().y - 34.0).abs() < 1e-7)).unwrap().clone();
+    let center = Vec3::new(-17.48305641426953, 34.0, 3.255357738829639);
+    let rotation = Matrix3::from_angle_x(cgmath::Deg(-6.605))
+        * Matrix3::from_angle_y(cgmath::Deg(-4.955))
+        * Matrix3::from_angle_z(cgmath::Deg(z_angle));
+    body.move_faces(&[cap], RigidTransform3::new(rotation, center - rotation * center, tolerance).unwrap()).unwrap()
+}
+
+#[test]
+fn blend_tilted_chamfer_lower_rim_document_30() {
+    let body = compound_tilt_boss_document_30(-34.051);
+    let cap = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.normal().x > 0.5)).unwrap();
+    let body = body.chamfer(&cap.boundary_edges().unwrap(), 3.0).unwrap();
+    let rim = body.edges().find(|edge| {
+        let faces = edge.connected_faces().unwrap();
+        faces.iter().any(|f| matches!(f.surface(), Surface3::Ruled(_)))
+            && faces.iter().any(|f| matches!(f.surface(), Surface3::Cylinder(_)))
+    }).unwrap().clone();
+    for fillet in [true, false] {
+        let result = if fillet { body.fillet(&[rim.clone()], 1.0) }
+            else { body.chamfer(&[rim.clone()], 1.0) };
+        let result = result.unwrap_or_else(|error| panic!("fillet={fillet}: {error:?}"));
+        result.tessellate(TessellationOptions::default()).unwrap();
+        assert_eq!(result.faces().count(), body.faces().count() + 1);
+        assert!(result.volume() > 0.0 && result.volume() < body.volume());
+    }
+}
+
+#[test]
+fn move_boss_rejects_crossing_its_base_document_30() {
+    let tolerance = ModelTolerance::default();
+    let plane = |height| Plane3::new(Point3::new(0.0, height, 0.0),
+        Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
+    let cylinder = |x, y, radius, base, height| Profile::new(Wire2::new([
+        TrimmedCurve2::circle(Point2::new(x, y), radius).unwrap()
+    ], tolerance).unwrap(), [], tolerance).unwrap()
+        .extrude(plane(base), Vec3::unit_y() * height).unwrap();
+    let radius = 8.840646636818086;
+    let body = cylinder(0.0, 0.0, 34.48516397016436, 0.0, 19.0)
+        .union(&cylinder(-17.48305641426953, -3.255357738829639, radius, 19.0, 15.0)).unwrap()
+        .difference(&cylinder(18.923801555564232, 2.1259479110724135, 8.639117031005743, 19.0, -4.0)).unwrap();
+    let cap = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if (p.origin().y - 34.0).abs() < 1e-7)).unwrap().clone();
+    let center = Vec3::new(-17.48305641426953, 34.0, 3.255357738829639);
+    let contact = (15.0_f64 / radius).atan().to_degrees();
+    for angle in [-80.0, -contact, -contact + 0.1, 0.0, contact - 0.1, contact, 80.0] {
+        let rotation = Matrix3::from_angle_z(cgmath::Deg(angle));
+        let result = body.move_faces(&[cap.clone()], RigidTransform3::new(
+            rotation, center - rotation * center, tolerance,
+        ).unwrap());
+        if angle.abs() >= contact {
+            assert!(result.is_err(), "accepted touching/crossing cap at {angle} degrees");
+        } else {
+            result.unwrap().tessellate(TessellationOptions::default()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn closed_blends_document_29() {
+    // Replay untitled(29).cad: a round base, a boss and a shallow pocket,
+    // followed by the pocket fillet and a chamfer on the tilted boss cap.
+    let tolerance = ModelTolerance::default();
+    let plane = |height| Plane3::new(Point3::new(0.0, height, 0.0),
+        Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
+    let cylinder = |x, y, radius, base, height| Profile::new(Wire2::new([
+        TrimmedCurve2::circle(Point2::new(x, y), radius).unwrap()
+    ], tolerance).unwrap(), [], tolerance).unwrap()
+        .extrude(plane(base), Vec3::unit_y() * height).unwrap();
+    let body = cylinder(0.0, 0.0, 34.48516397016436, 0.0, 19.0)
+        .union(&cylinder(-17.48305641426953, -3.255357738829639, 8.840646636818086, 19.0, 15.0)).unwrap()
+        .difference(&cylinder(18.923801555564232, 2.1259479110724135, 8.639117031005743, 19.0, -4.0)).unwrap();
+    let rim = body.edges().find(|edge| matches!(edge.curve(), Curve3::Circle(c)
+        if (c.radius() - 8.639117031005743).abs() < 1e-7 && (c.center().y - 19.0).abs() < 1e-7)).unwrap().clone();
+    let body = body.fillet(&[rim], 1.0).unwrap();
+    let check_pocket_rims = |shape: &super::modeling::Compound| {
+        for (radius, height) in [(8.639117031005743, 18.0), (9.639117031005743, 19.0)] {
+            let edges = shape.edges().filter(|edge| matches!(edge.curve(), Curve3::Circle(c)
+                if (c.radius() - radius).abs() < 1e-7 && (c.center().y - height).abs() < 1e-7))
+                .collect::<Vec<_>>();
+            assert_eq!(edges.len(), 1, "one edge per circular contact rail");
+            let endpoints = edges[0].endpoints().unwrap();
+            assert!(endpoints[0].distance(endpoints[1]) < tolerance.linear);
+        }
+    };
+    check_pocket_rims(&body);
+    let cap = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if (p.origin().y - 34.0).abs() < 1e-7)).unwrap().clone();
+    let center = Vec3::new(-17.48305641426953, 34.0, 3.255357738829639);
+    let rotation = Matrix3::from_angle_z(cgmath::Deg(-20.0));
+    let body = body.move_faces(&[cap], RigidTransform3::new(rotation, center - rotation * center, tolerance).unwrap()).unwrap();
+    let cap = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.normal().dot(rotation * Vec3::unit_y()) > 0.999)).unwrap();
+    let result = body.chamfer(&cap.boundary_edges().unwrap(), 2.0).unwrap();
+    for face in result.faces() { face.tessellate(TessellationOptions::default()).unwrap(); }
+    assert_eq!(result.faces().count(), body.faces().count() + 1);
+    check_pocket_rims(&result);
+    let chamfer = result.faces().find(|face| matches!(face.surface(), Surface3::Ruled(_))).unwrap();
+    let physical_edges = chamfer.boundary_edges().unwrap().into_iter()
+        .filter(|edge| edge.connected_faces().unwrap().len() == 2).collect::<Vec<_>>();
+    assert_eq!(physical_edges.len(), 2, "one closed edge per chamfer contact rail");
+    for edge in physical_edges {
+        let endpoints = edge.endpoints().unwrap();
+        assert!(endpoints[0].distance(endpoints[1]) < tolerance.linear);
+    }
+    assert!(result.volume() > 0.0 && result.volume() < body.volume());
+}
+
+#[test]
 fn move_boss_on_document_28_frame() {
     // Replay the third component's construction from untitled(28).cad.cad.cad.
     // Keep its segment and selection order: they determine the periodic trim
@@ -3233,6 +3371,43 @@ fn move_boss_on_document_28_frame() {
         let expected = std::f64::consts::PI * radius * radius * distance;
         assert!((moved.volume() - body.volume() - expected).abs() < body.volume() * 1e-7,
             "volume change {} expected {}", moved.volume() - body.volume(), expected);
+    }
+    let center = Vec3::new(-53.8427277335454, 26.0, 0.0);
+    for angle in [-60.0, -40.0, -5.0, 5.0, 40.0, 60.0] {
+        for rotation in [
+            Matrix3::from_angle_x(cgmath::Deg(angle)),
+            Matrix3::from_angle_z(cgmath::Deg(angle)),
+        ] {
+            let rotated = body.move_faces(&[cap.clone()], RigidTransform3::new(
+                rotation, center - rotation * center, tolerance,
+            ).unwrap()).unwrap();
+            assert_eq!(rotated.faces().count(), body.faces().count());
+            let normal = rotation * Vec3::unit_y();
+            assert!(rotated.faces().any(|face| matches!(face.surface(), Surface3::Plane(plane)
+                if plane.normal().dot(normal) > 1.0 - tolerance.angular
+                    && plane.project(Point3::from_vec(center)).unwrap().distance < tolerance.linear)));
+            for face in rotated.faces() {
+                face.tessellate(options).unwrap();
+            }
+            // Tilting about the circular cap's center preserves its mean height
+            // and volume; allow the body-scale boundary quadrature error.
+            assert!((rotated.volume() - body.volume()).abs() < body.volume() * 1e-6,
+                "rotation {angle}: volume change {}", rotated.volume() - body.volume());
+            let tilted_cap = rotated.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+                if plane.normal().dot(normal) > 1.0 - tolerance.angular
+                    && plane.project(Point3::from_vec(center)).unwrap().distance < tolerance.linear)).unwrap();
+            let rim = tilted_cap.boundary_edges().unwrap();
+            for blended in [
+                rotated.fillet(&rim, 0.3).unwrap(),
+                rotated.chamfer(&rim, 0.3).unwrap(),
+            ] {
+                assert_eq!(blended.faces().count(), rotated.faces().count() + 1);
+                assert!(blended.volume() > 0.0 && blended.volume() < rotated.volume());
+                for face in blended.faces() {
+                    assert!(!face.tessellate(options).unwrap().is_empty());
+                }
+            }
+        }
     }
 }
 
@@ -5398,7 +5573,9 @@ fn join_after_shell_opening_blends() {
     .extrude(plane(33.0), Vec3::new(-44.0, 0.0, 0.0))
     .unwrap();
     let cut = shell.difference(&cutter).unwrap();
-    let rim = cut.edges().find(|edge| edge.connected_faces().unwrap().iter().any(|face| matches!(face.surface(), Surface3::Torus(t) if (t.minor_radius()-12.0).abs()<tolerance.linear)) && edge.connected_faces().unwrap().iter().any(|face| matches!(face.surface(), Surface3::Cylinder(_)))).unwrap().clone();
+    // Select the cut boundary, not the tangent contact with the base cylinder;
+    // topology normalization can change which of those edges is listed first.
+    let rim = cut.edges().find(|edge| edge.connected_faces().unwrap().iter().any(|face| matches!(face.surface(), Surface3::Torus(t) if (t.minor_radius()-12.0).abs()<tolerance.linear)) && edge.connected_faces().unwrap().iter().any(|face| matches!(face.surface(), Surface3::Cylinder(c) if (c.radius() - 26.954243397522823).abs() < tolerance.linear))).unwrap().clone();
     let body = cut
         .chamfer_with_tangent_propagation(&[rim], 0.5, true)
         .unwrap();

@@ -3021,12 +3021,21 @@ impl<'kernel> EulerTransaction<'kernel> {
                                 let parameter =
                                     guide_range.start + guide_range.span() * index as f64 / 32.0;
                                 let point = candidate.curve.evaluate(parameter)?.point;
-                                let projected =
-                                    patch.surface.project(point, self.kernel.tolerance)?;
-                                guide_points.push(Point2::new(
-                                    projected.parameters.0,
-                                    projected.parameters.1,
-                                ));
+                                // Reparameterize the retained trim in its own
+                                // chart. Projecting onto the surface afresh can
+                                // choose another turn of a closed blend support.
+                                let fraction = (parameter - coedge_range.start)
+                                    / coedge_range.span();
+                                let reference = segment.range.start + segment.range.span() * fraction;
+                                let mut source_parameter = segment.curve.project_on_trim(
+                                    point, segment.range, self.kernel.tolerance,
+                                )?.parameter;
+                                if let Some(period) = segment.curve.domain().period {
+                                    source_parameter += ((reference - source_parameter) / period).round() * period;
+                                } else if index == 0 || index == 32 {
+                                    source_parameter = reference;
+                                }
+                                guide_points.push(segment.pcurve.evaluate(source_parameter)?.point);
                             }
                             super::intersection::unwrap_periodic_points(
                                 &mut guide_points,

@@ -1871,8 +1871,14 @@ mod tests {
         let result = cylinder.chamfer(&rims, 1.0).unwrap();
         assert!(result.volume() < cylinder.volume());
         mesh(&result);
+        // Contact with the end rims requires a topology change; the retained
+        // cylinder trim must not publish an unrepresented pinch point.
+        let touching = Plane3::from_origin_normal(
+            Point3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 1.0, 1.0),
+        ).unwrap();
+        assert!(cylinder.split(touching, "both").is_err());
         let slanted =
-            Plane3::from_origin_normal(Point3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 1.0, 1.0))
+            Plane3::from_origin_normal(Point3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.8, 1.0))
                 .unwrap();
         let both = cylinder.split(slanted, "both").unwrap();
         assert_eq!(both.solids().len(), 2);

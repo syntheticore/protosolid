@@ -221,10 +221,14 @@ impl EulerTransaction<'_> {
         for edge in &selected {
             let value = self.working.edge(*edge)?;
             if value.vertices[0] == value.vertices[1] {
-                if let Ok(spine) =
+                if let Ok(mut spine) =
                     self.prepare_blend_spine(*edge, radius, kind, None, None, chamfer)
                 {
                     if matches!(spine.center.curve, Curve3::SurfaceIntersection(_)) {
+                        if !spine.local_guide {
+                            spine.center = closed_blend_chart(&spine.center, value, self.kernel.tolerance)?;
+                            spine.local_guide = true;
+                        }
                         closed_spines.push(spine);
                     }
                 }
@@ -234,6 +238,11 @@ impl EulerTransaction<'_> {
             .iter()
             .map(|edge| self.working.edge(*edge).cloned())
             .collect::<KernelResult<Vec<_>>>()?;
+        let closed_seams = sources
+            .iter()
+            .filter(|edge| edge.vertices[0] == edge.vertices[1])
+            .map(|edge| edge.vertices[0])
+            .collect::<BTreeSet<_>>();
         selected = self.subdivide_closed_blend_edges(&selected, kind)?;
         let mut chamfer = chamfer.cloned();
         if let Some(settings) = &mut chamfer {
@@ -641,7 +650,9 @@ impl EulerTransaction<'_> {
                     }
                 }
                 self.certify_blend_contact_trims(&patches)?;
-                return self.rewrite_blend_network(&patches, &junctions, &junction_surfaces, kind);
+                return self.rewrite_blend_network(
+                    &patches, &junctions, &junction_surfaces, &closed_seams, kind,
+                );
             }
             if selected.len() > 256 {
                 return Err(KernelError::new(
@@ -883,7 +894,14 @@ impl EulerTransaction<'_> {
         // Equal setbacks on planar supports correspond to r = d cot(theta/2),
         // where theta is the angle between outward normals. Perpendicular rims
         // retain r = d, including plane/cylinder tangent chains.
-        let offsets = if let Some((source, tangent_faces)) = propagated {
+        let offsets = if let Some(source) = shared {
+            // Subdivision changes the trim, not the generating offset surfaces.
+            // In particular, a chamfer's varying dihedral angle must not cause
+            // each temporary arc to redefine an already shared spine.
+            faces.map(|face| {
+                source.offsets[source.faces.iter().position(|id| *id == face).unwrap()]
+            })
+        } else if let Some((source, tangent_faces)) = propagated {
             // A propagated rolling chamfer must retain its source offset across
             // smooth support seams. Recomputing it at each edge midpoint makes
             // the contact rails disagree at their shared endpoint.
@@ -1022,7 +1040,7 @@ impl EulerTransaction<'_> {
                 }
             }
         };
-        let center = candidates
+        let mut center = candidates
             .into_iter()
             .filter_map(|candidate| {
                 candidate
@@ -1100,6 +1118,10 @@ impl EulerTransaction<'_> {
                 endpoint_seeds[0].max(endpoint_seeds[1]) + seed_span,
             )?,
         };
+        // A periodic 3D spine may cross the cut of either bounded UV guide.
+        // Continue the guides on their unwrapped charts over the support range.
+        center.first_pcurve = center.first_pcurve.extended(provisional_range)?;
+        center.second_pcurve = center.second_pcurve.extended(provisional_range)?;
         Ok(BlendSpine {
             edge_id,
             edge,
@@ -2376,7 +2398,7 @@ impl EulerTransaction<'_> {
         let old_vertex = spine.edge.vertices[endpoint_index];
         let old_point = self.working.vertex(old_vertex)?.point;
         let projected = spine.center.curve.project(old_point, tolerance)?.parameter;
-        let mut parameter = if let Some(period) = spine.shared_seam.map(|_| 1.0).or(spine
+        let parameter = if let Some(period) = spine.shared_seam.map(|_| 1.0).or(spine
             .center
             .curve
             .domain()
@@ -2387,8 +2409,10 @@ impl EulerTransaction<'_> {
         } else {
             projected
         };
-        // A periodic support seam must meet the exact contact curve. The
-        // nearest center to the old vertex need not lie on that seam.
+        // Each support seam meets its own contact rail. On general surfaces
+        // those intersections need not share a center-curve parameter; the
+        // new blend seam connects the two distinct contact stations.
+        let mut contact_parameters = [parameter; 2];
         for seam_id in self.working.vertex_edges(old_vertex)? {
             let faces = self.working.edge_faces(seam_id)?;
             if faces.len() != 1 {
@@ -2414,7 +2438,7 @@ impl EulerTransaction<'_> {
             } else {
                 seam.range.end
             };
-            parameter = contact
+            contact_parameters[parent] = contact
                 .intersect_curve_near(&seam.curve, parameter, seam_parameter, tolerance)?
                 .first_parameter;
         }
@@ -2422,9 +2446,9 @@ impl EulerTransaction<'_> {
         let mut contact_points = BTreeMap::new();
         for parent_index in 0..2 {
             let uv = if parent_index == 0 {
-                spine.center.first_pcurve.evaluate(parameter)?.point
+                spine.center.first_pcurve.evaluate(contact_parameters[parent_index])?.point
             } else {
-                spine.center.second_pcurve.evaluate(parameter)?.point
+                spine.center.second_pcurve.evaluate(contact_parameters[parent_index])?.point
             };
             let point = spine.parent_surfaces[parent_index]
                 .evaluate(uv.x, uv.y)?
@@ -3125,6 +3149,7 @@ impl EulerTransaction<'_> {
                 if (kind == EdgeBlendKind::Chamfer
                     && matches!(junction.kind, BlendJunctionKind::Trihedral))
                     || matches!(junction.kind, BlendJunctionKind::Miter { .. })
+                    || matches!(junction.kind, BlendJunctionKind::TangentChain { .. })
                 {
                     for parent in 0..2 {
                         let point = junction.contact_points[&spine.faces[parent]];
@@ -3139,8 +3164,32 @@ impl EulerTransaction<'_> {
                             spine.provisional_range,
                             tolerance,
                         )?);
-                        let projection = rail.project(point, tolerance)?;
-                        if projection.distance
+                        let tangent_chain =
+                            matches!(junction.kind, BlendJunctionKind::TangentChain { .. });
+                        // Retain the incident branch before correcting each
+                        // contact. A global rail projection can select another
+                        // turn of the same closed support.
+                        let mut parameter = if tangent_chain {
+                            if spine.local_guide {
+                                project_local_blend_endpoint(
+                                    &spine.center.curve, junction.center, endpoint_index, tolerance,
+                                )?
+                            } else {
+                                spine.center.curve.project(junction.center, tolerance)?.parameter
+                            }
+                        } else {
+                            rail.project(point, tolerance)?.parameter
+                        };
+                        if let Some(period) = spine.shared_seam.map(|_| 1.0)
+                            .or(spine.center.curve.domain().period)
+                        {
+                            parameter += ((spine.endpoint_seeds[endpoint_index] - parameter) / period)
+                                .round() * period;
+                        }
+                        if tangent_chain || spine.shared_seam.is_some() {
+                            parameter = correct_blend_contact_parameter(&rail, point, parameter)?;
+                        }
+                        if rail.evaluate(parameter)?.point.distance(point)
                             > tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0
                         {
                             return Err(KernelError::new(
@@ -3148,7 +3197,7 @@ impl EulerTransaction<'_> {
                                 "blend corner misses its incident contact rail",
                             ));
                         }
-                        contact_parameters[endpoint_index][parent] = projection.parameter;
+                        contact_parameters[endpoint_index][parent] = parameter;
                         contact_points[endpoint_index][parent] = point;
                     }
                     ends.push(BlendPatchEnd::Junction(vertex));
@@ -3181,15 +3230,12 @@ impl EulerTransaction<'_> {
                 if spine.shared_seam.is_some() {
                     // Repeated guide turns need not have identical parameter
                     // speeds, so an integer shift alone is only a seed.
-                    for _ in 0..16 {
-                        let value = spine.center.curve.evaluate(parameter)?;
-                        let residual = value.point - junction.center;
-                        if residual.magnitude() <= tolerance.linear {
-                            break;
-                        }
-                        parameter -= residual.dot(value.first_derivative)
-                            / value.first_derivative.magnitude2();
-                    }
+                    // Resolve the shared parameter to numerical accuracy: a
+                    // model-tolerance error on the center curve can grow on
+                    // its contact rails and separate them from their vertex.
+                    parameter = correct_blend_contact_parameter(
+                        &spine.center.curve, junction.center, parameter,
+                    )?;
                 }
                 let achieved = spine
                     .center
@@ -3298,9 +3344,16 @@ impl EulerTransaction<'_> {
                     spine.center.second_pcurve.clone()
                 };
                 let blend_pcurve = blend_parameterization.contact_pcurve(parent_index)?;
+                // Temporary arcs trim one shared rail. Do not bake each arc's
+                // trim into a different bounded SurfaceCurve support.
+                let support_range = if spine.shared_seam.is_some() {
+                    blend_support_range
+                } else {
+                    range
+                };
                 let blend_curve = blend_surface.boundary_curve(
                     blend_pcurve.clone(),
-                    range,
+                    support_range,
                     tolerance,
                 )?;
                 let curve = if matches!(blend_curve, Curve3::Line(_) | Curve3::Circle(_)) {
@@ -3308,7 +3361,7 @@ impl EulerTransaction<'_> {
                 } else {
                     spine.parent_surfaces[parent_index].boundary_curve(
                         parent_pcurve.clone(),
-                        range,
+                        support_range,
                         tolerance,
                     )?
                 };
@@ -3668,6 +3721,7 @@ impl EulerTransaction<'_> {
         patches: &[BlendPatch],
         junctions: &BTreeMap<VertexId, BlendJunction>,
         junction_surfaces: &BTreeMap<VertexId, Surface3>,
+        closed_seams: &BTreeSet<VertexId>,
         kind: EdgeBlendKind,
     ) -> KernelResult<()> {
         let tolerance = self.kernel.tolerance;
@@ -4619,15 +4673,12 @@ impl EulerTransaction<'_> {
         // boundaries.  Collapse every join whose two patches use the exact
         // same support; the final join then remains as the single
         // same-face parameter seam required by the periodic surface.
-        // A general shared chart is bounded, so retain its original cut.
-        // Merging across that cut would join different turns in UV space.
+        // Retain the source seam, including on analytical surfaces. Choosing
+        // an arbitrary construction join would put the blend's seam at a
+        // different vertex from the adjoining wall and split their shared rim.
         let transition_edges = smooth_edges
             .iter()
-            .filter(|(vertex, _)| {
-                !patches
-                    .iter()
-                    .any(|patch| patch.spine.shared_seam == Some(**vertex))
-            })
+            .filter(|(vertex, _)| !closed_seams.contains(vertex))
             .map(|(_, (edge, _))| *edge)
             .collect::<Vec<_>>();
         for edge in transition_edges {
@@ -4666,6 +4717,9 @@ impl EulerTransaction<'_> {
                 }
             }
         }
+        // Removing construction face joins exposes their degree-two rail
+        // vertices. Consume those subdivisions in the same transaction.
+        self.unify_same_domain_edges()?;
         for face in modified_faces {
             let name = self.working.face(face)?.name;
             self.history.changed(name, ChangeKind::Modified, [name]);
@@ -4801,21 +4855,17 @@ impl EulerTransaction<'_> {
             2
         };
         let closed = source.vertices[0] == source.vertices[1];
-        let extrapolated = |side: usize, index: i32| -> KernelResult<Point2> {
+        let extrapolated = |side: usize, index: i32| -> Point2 {
             if closed {
-                let coedge = self.working.coedge(uses[side])?;
-                let fraction = index as f64 / 16.0;
-                let fraction = if coedge.forward {
-                    fraction
-                } else {
-                    1.0 - fraction
-                };
-                return Ok(coedge
-                    .pcurve
-                    .evaluate(coedge.range.start + coedge.range.span() * fraction)?
-                    .point);
+                // A closed spatial edge can have a bounded, nonperiodic UV
+                // curve. Continue its lifted chart from one certified turn,
+                // rather than evaluating that curve outside its domain.
+                let turn = index.div_euclid(16);
+                let sample = index.rem_euclid(16) as usize;
+                let winding = boundary_parameters[side][16] - boundary_parameters[side][0];
+                return boundary_parameters[side][sample] + winding * turn as f64;
             }
-            Ok(if index < 0 {
+            if index < 0 {
                 boundary_parameters[side][0]
                     + (boundary_parameters[side][1] - boundary_parameters[side][0]) * index as f64
             } else if index > 16 {
@@ -4824,35 +4874,35 @@ impl EulerTransaction<'_> {
                         * (index - 16) as f64
             } else {
                 boundary_parameters[side][index as usize]
-            })
+            }
         };
         // Do not extend a guide past a bounded support. The local corrector
         // clamps those seeds to its natural domain, producing repeated points
         // and a stationary (or folded) spine outside the original edge.
-        let in_domains = |index| -> KernelResult<bool> {
+        let in_domains = |index| -> bool {
             for side in 0..2 {
-                let uv = extrapolated(side, index)?;
+                let uv = extrapolated(side, index);
                 for axis in 0..2 {
                     if !offsets[side].domains()[axis].contains(uv[axis], tolerance.parameter) {
-                        return Ok(false);
+                        return false;
                     }
                 }
             }
-            Ok(true)
+            true
         };
         let mut first_index = 0;
         let mut last_index = 16;
-        while first_index > -extension && in_domains(first_index - 1)? {
+        while first_index > -extension && in_domains(first_index - 1) {
             first_index -= 1;
         }
-        while last_index < 16 + extension && in_domains(last_index + 1)? {
+        while last_index < 16 + extension && in_domains(last_index + 1) {
             last_index += 1;
         }
         let support_range = ParameterRange::new(first_index as f64 / 16.0, last_index as f64 / 16.0)?;
         let mut parameters: [Vec<Point2>; 2] = [Vec::with_capacity(49), Vec::with_capacity(49)];
         for index in first_index..=last_index {
-            let first = extrapolated(0, index)?;
-            let second = extrapolated(1, index)?;
+            let first = extrapolated(0, index);
+            let second = extrapolated(1, index);
             let corrected = if let Some((side, axis)) = angular_coordinate {
                 let guide = [first.x, first.y, second.x, second.y];
                 let mut gauge = [0.0; 4];
@@ -4944,6 +4994,72 @@ impl EulerTransaction<'_> {
             achieved_error: tolerance.linear,
         })
     }
+}
+
+// Shared closed blends use one source traversal per unit parameter, with a
+// continuation on either side of the seam. Analytical intersection charts
+// (such as a tilted plane/cylinder ellipse) need the same chart as local guides
+// before the edge is divided into temporary arcs.
+fn closed_blend_chart(
+    center: &SurfaceSurfaceCurve,
+    edge: &Edge,
+    tolerance: ModelTolerance,
+) -> KernelResult<SurfaceSurfaceCurve> {
+    let Curve3::SurfaceIntersection(curve) = &center.curve else { unreachable!() };
+    let range = curve.range();
+    let source = edge.curve.evaluate(edge.range.start)?;
+    let seam = center.curve.project(source.point, tolerance)?.parameter;
+    let tangent = center.curve.evaluate(seam)?.first_derivative;
+    let direction = if tangent.dot(source.first_derivative) * edge.range.span() >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let exact = curve.exact_pcurves();
+    let mut points = [Vec::new(), Vec::new()];
+    for index in -32..=64 {
+        let fraction = (seam - range.start) / range.span()
+            + direction * index as f64 / 32.0;
+        let parameter = range.start + range.span() * fraction.rem_euclid(1.0);
+        for side in 0..2 {
+            points[side].push(exact[side].evaluate(parameter)?.point);
+        }
+    }
+    let support_range = ParameterRange::new(-1.0, 2.0)?;
+    let surfaces = [curve.first_surface(), curve.second_surface()];
+    for side in 0..2 {
+        super::intersection::unwrap_periodic_points(&mut points[side], surfaces[side].domains());
+    }
+    let rebuilt = SurfaceIntersectionCurve::new(
+        surfaces[0].clone(), surfaces[1].clone(),
+        super::intersection::smooth_nurbs_guide(&points[0], support_range)?.into(),
+        super::intersection::smooth_nurbs_guide(&points[1], support_range)?.into(),
+        support_range, tolerance, center.achieved_error,
+    )?;
+    let [first_pcurve, second_pcurve] = rebuilt.exact_pcurves();
+    Ok(SurfaceSurfaceCurve {
+        curve: rebuilt.into(), first_pcurve, second_pcurve,
+        achieved_error: center.achieved_error,
+    })
+}
+
+// Refine within the already selected branch. Callers certify the remaining
+// geometric residual against their junction or contact tolerance.
+fn correct_blend_contact_parameter(
+    curve: &Curve3,
+    point: Point3,
+    mut parameter: f64,
+) -> KernelResult<f64> {
+    let target = f64::EPSILON * point.to_vec().magnitude().max(1.0) * 2048.0;
+    for _ in 0..16 {
+        let value = curve.evaluate(parameter)?;
+        let residual = value.point - point;
+        if residual.magnitude() <= target {
+            break;
+        }
+        parameter -= residual.dot(value.first_derivative) / value.first_derivative.magnitude2();
+    }
+    Ok(parameter)
 }
 
 fn project_local_blend_endpoint(

@@ -89,8 +89,87 @@ pub(crate) fn validate_structure(
     validate_geometry(topology, tolerance, mode, &mut report);
     if mode.is_published() {
         validate_planar_face_regions(topology, tolerance, &mut report);
+        validate_curved_face_boundaries(topology, tolerance, &mut report);
     }
     report
+}
+
+/// Winding and edge incidence alone admit a curved face whose trim folds over
+/// itself, for example a tilted cylinder cap crossing its bottom rim. Validate
+/// the trim in the surface chart before publishing any operation's result.
+fn validate_curved_face_boundaries(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    report: &mut ValidationReport,
+) {
+    for (_, face) in topology.faces() {
+        if matches!(face.surface(), super::Surface3::Plane(_)) {
+            continue;
+        }
+        for loop_id in face.loops() {
+            let result = (|| -> KernelResult<()> {
+                let mut segments = Vec::new();
+                let mut previous: Option<Point2> = None;
+                let uses = topology.loop_coedges(*loop_id)?;
+                for id in &uses {
+                    let coedge = topology.coedge(*id)?;
+                    let mut pcurve = coedge.pcurve().clone();
+                    if let Some(end) = previous {
+                        let start = pcurve.evaluate(coedge.range().start)?.point;
+                        let mut shift = crate::Vec2::new(0.0, 0.0);
+                        for (axis, domain) in face.surface().domains().iter().enumerate() {
+                            if let Some(period) = domain.period {
+                                shift[axis] = ((end[axis] - start[axis]) / period).round() * period;
+                            }
+                        }
+                        if shift.magnitude2() > 0.0 {
+                            pcurve = super::boolean::translate_pcurve(&pcurve, shift, tolerance)?;
+                        }
+                    }
+                    previous = Some(pcurve.evaluate(coedge.range().end)?.point);
+                    segments.push(super::TrimmedCurve2::new(pcurve, coedge.range())?);
+                }
+                for first in 0..segments.len() {
+                    for second in first + 1..segments.len() {
+                        let a = topology.coedge(uses[first])?;
+                        let b = topology.coedge(uses[second])?;
+                        // Two uses of one seam are the chart cut, not two
+                        // independently intersecting material boundaries.
+                        if a.edge() == b.edge() {
+                            continue;
+                        }
+                        let intersection = super::wire::curve_pair_intersection(
+                            &segments[first], &segments[second], tolerance,
+                        )?;
+                        let vertices_a = topology.coedge_vertices(uses[first])?;
+                        let vertices_b = topology.coedge_vertices(uses[second])?;
+                        let endpoints_a = [segments[first].start()?, segments[first].end()?];
+                        let endpoints_b = [segments[second].start()?, segments[second].end()?];
+                        let represented = |point: Point2| {
+                            (0..2).any(|i| (0..2).any(|j| {
+                                vertices_a[i] == vertices_b[j]
+                                    && endpoints_a[i].distance(point) <= tolerance.linear * 8.0
+                                    && endpoints_b[j].distance(point) <= tolerance.linear * 8.0
+                            }))
+                        };
+                        if intersection.coincident || intersection.hits.iter().any(|hit| !represented(hit.point)) {
+                            return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
+                                "face boundary crosses or touches itself away from a shared vertex"));
+                        }
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                for diagnostic in error.diagnostics() {
+                    report.error(Diagnostic::new(
+                        DiagnosticKind::GeometryInvariant,
+                        format!("invalid curved face boundary: {}", diagnostic.message),
+                    ).with_entity(face.name));
+                }
+            }
+        }
+    }
 }
 
 /// A closed edge graph and correctly wound loops do not guarantee a valid

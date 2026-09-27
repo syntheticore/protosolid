@@ -976,12 +976,32 @@ fn retarget_offset_intersection_endpoints(
     let closed = source.vertices()[0] == source.vertices()[1];
     let curve_range = intersection.range();
     let exact = intersection.exact_pcurves();
+    let seam = if closed {
+        Some(edge.curve.project(vertices[&source.vertices()[0]], tolerance)?.parameter)
+    } else {
+        None
+    };
     let mut first_points = Vec::new();
     let mut second_points = Vec::new();
     for index in 0..=32 {
-        let parameter = curve_range.start + curve_range.span() * index as f64 / 32.0;
+        let fraction = index as f64 / 32.0;
+        // A closed intersection may start at a different seam from the source
+        // edge. Rotate its entire guide to that seam; moving only the two end
+        // samples folds the guide back over the rest of the intersection.
+        let fraction = seam.map_or(fraction, |seam| {
+            ((seam - curve_range.start) / curve_range.span() + fraction).rem_euclid(1.0)
+        });
+        let parameter = curve_range.start + curve_range.span() * fraction;
         first_points.push(exact[0].evaluate(parameter)?.point);
         second_points.push(exact[1].evaluate(parameter)?.point);
+    }
+    if closed {
+        super::intersection::unwrap_periodic_points(
+            &mut first_points, intersection.first_surface().domains(),
+        );
+        super::intersection::unwrap_periodic_points(
+            &mut second_points, intersection.second_surface().domains(),
+        );
     }
     let endpoint_window = curve_range.span().abs() * 0.05 + tolerance.parameter * 64.0;
     for (side, vertex) in source.vertices().into_iter().enumerate() {
@@ -1115,7 +1135,9 @@ fn trim_offset_edge(
                 start,
                 start + direction * period,
             )
-        } else if direction > 0.0 {
+        // Bounded surface curves can carry a descending domain. Match the
+        // traversal direction, rather than assuming every domain increases.
+        } else if bounds.span().signum() == direction {
             Ok(bounds)
         } else {
             Ok(bounds.reversed())

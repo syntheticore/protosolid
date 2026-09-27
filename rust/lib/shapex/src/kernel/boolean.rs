@@ -1986,24 +1986,19 @@ fn arrange_face(
         // Enclosing loops must be classified before their holes, regardless
         // of which source face supplied the first arrangement edge.
         loops.sort_by(|first, second| second.1.abs().total_cmp(&first.1.abs()));
-        let mut classified = Vec::<(Vec<DirectedPiece>, Vec<Point2>, f64, bool)>::new();
+        let mut classified = Vec::<(Vec<DirectedPiece>, Vec<Point2>, f64, bool, Point2)>::new();
         for (mut loop_, area) in loops {
             if area.abs() <= tolerance.parameter.powi(2) {
                 continue;
             }
             let polygon = loop_polyline(&loop_)?;
-            // A concave loop's centroid may lie outside it, even inside a
-            // disjoint larger loop. Test nesting from the boundary itself:
-            // arrangement loops cannot cross, so an interior point of any
-            // boundary segment lies inside every enclosing loop.
-            let segment = &loop_[0];
-            let sample = segment
-                .pcurve
-                .evaluate(segment.range.start + segment.range.span() * 0.5)?
-                .point;
+            // Sample inside the loop: a concave loop's centroid can lie
+            // outside it, while a boundary sample can lie on a shared chart
+            // seam and mistake an adjacent region for an enclosing one.
+            let sample = polygon_interior_point(&polygon)?;
             let depth = classified
                 .iter()
-                .filter(|(_, enclosing, enclosing_area, _)| {
+                .filter(|(_, enclosing, enclosing_area, _, _)| {
                     enclosing_area.abs() > area.abs() && point_in_polygon(sample, enclosing)
                 })
                 .count();
@@ -2013,7 +2008,7 @@ fn arrange_face(
                 loop_.reverse();
                 loop_ = loop_.into_iter().map(|piece| piece.reversed()).collect();
             }
-            classified.push((loop_, polygon, area, outer));
+            classified.push((loop_, polygon, area, outer, sample));
         }
         for outer_index in classified
             .iter()
@@ -2027,12 +2022,13 @@ fn arrange_face(
                 kind: LoopKind::Outer,
                 segments: patch_segments(outer, surface),
             }];
-            for (hole, _, _, is_outer) in &classified {
+            for (hole, _, hole_area, is_outer, sample) in &classified {
                 if *is_outer {
                     continue;
                 }
-                let sample = hole[0].pcurve.evaluate(hole[0].range.start)?.point;
-                if point_in_polygon(sample, outer_polygon) {
+                if classified[outer_index].2.abs() > hole_area.abs()
+                    && point_in_polygon(*sample, outer_polygon)
+                {
                     patch_loops.push(BrepPatchLoop {
                         kind: LoopKind::Inner,
                         segments: patch_segments(hole, surface),
@@ -2444,6 +2440,46 @@ fn point_in_polygon(point: Point2, polygon: &[Point2]) -> bool {
         }
     }
     inside
+}
+
+fn polygon_interior_point(polygon: &[Point2]) -> KernelResult<Point2> {
+    // Place a scanline between vertex heights, avoiding horizontal edges and
+    // vertex hits. Paired crossings bound intervals inside a simple polygon,
+    // including concave ones whose centroid lies outside the boundary.
+    let mut heights = polygon.iter().map(|point| point.y).collect::<Vec<_>>();
+    heights.sort_by(f64::total_cmp);
+    heights.dedup();
+    let band = heights
+        .windows(2)
+        .max_by(|a, b| (a[1] - a[0]).total_cmp(&(b[1] - b[0])))
+        .ok_or_else(|| {
+            KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "Boolean face loop has no interior",
+            )
+        })?;
+    let y = band[0] + (band[1] - band[0]) * 0.5;
+    let mut crossings = Vec::new();
+    for index in 0..polygon.len() {
+        let first = polygon[index];
+        let second = polygon[(index + 1) % polygon.len()];
+        if (first.y > y) != (second.y > y) {
+            crossings.push(
+                first.x + (second.x - first.x) * (y - first.y) / (second.y - first.y),
+            );
+        }
+    }
+    crossings.sort_by(f64::total_cmp);
+    let interval = crossings
+        .chunks_exact(2)
+        .max_by(|a, b| (a[1] - a[0]).total_cmp(&(b[1] - b[0])))
+        .ok_or_else(|| {
+            KernelError::new(
+                DiagnosticKind::GeometryInvariant,
+                "Boolean face loop has no interior",
+            )
+        })?;
+    Ok(Point2::new(interval[0] + (interval[1] - interval[0]) * 0.5, y))
 }
 
 pub(crate) fn patch_edge_samples(patch: &BrepPatch) -> KernelResult<Vec<[Point3; 3]>> {

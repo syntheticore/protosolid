@@ -3298,14 +3298,22 @@ impl EulerTransaction<'_> {
                     spine.center.second_pcurve.clone()
                 };
                 let blend_pcurve = blend_parameterization.contact_pcurve(parent_index)?;
-                Ok(BlendBoundary {
-                    curve: SurfaceCurve3::new(
-                        spine.parent_surfaces[parent_index].clone(),
+                let blend_curve = blend_surface.boundary_curve(
+                    blend_pcurve.clone(),
+                    range,
+                    tolerance,
+                )?;
+                let curve = if matches!(blend_curve, Curve3::Line(_) | Curve3::Circle(_)) {
+                    blend_curve
+                } else {
+                    spine.parent_surfaces[parent_index].boundary_curve(
                         parent_pcurve.clone(),
                         range,
                         tolerance,
                     )?
-                    .into(),
+                };
+                Ok(BlendBoundary {
+                    curve,
                     parent_pcurve,
                     blend_pcurve,
                     range,
@@ -3397,13 +3405,11 @@ impl EulerTransaction<'_> {
                                 Point2::new(uv.0, uv.1),
                             );
                         }
-                        let curve: Curve3 = SurfaceCurve3::new(
-                            blend_surface.clone(),
+                        let curve = blend_surface.boundary_curve(
                             blend_pcurve.clone(),
                             unit,
                             tolerance,
-                        )?
-                        .into();
+                        )?;
                         let Some(junction_surface) = junction_surfaces.get(vertex) else {
                             return Ok(BlendBoundary {
                                 curve,

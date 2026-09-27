@@ -423,6 +423,8 @@ fn rolling_ball_fillet_chain_certifies_at_application_scale() {
     let first = cuboid
         .check_edge_blends(&[edge], 2.0)
         .expect("first fillet");
+    assert!(first.edges().all(|edge| matches!(edge.curve(), Curve3::Line(_) | Curve3::Circle(_))),
+        "the cylindrical fillet must construct analytic contact and end edges");
     let end_edge = first
         .edges()
         .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
@@ -438,7 +440,9 @@ fn rolling_ball_fillet_chain_certifies_at_application_scale() {
         .filter(|edge| matches!(edge.curve(), Curve3::Line(_)))
         .filter(|edge| {
             let endpoints = edge.endpoints().expect("line endpoints");
-            endpoints
+            // Contact rails are now lines too, but run vertically; only the
+            // horizontal rim edges continue the end arc tangentially.
+            (endpoints[1].z - endpoints[0].z).abs() < 1.0e-7 && endpoints
                 .iter()
                 .any(|point| end_points.iter().any(|end| point.distance(*end) < 1.0e-7))
         })

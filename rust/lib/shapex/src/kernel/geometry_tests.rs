@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn analytic_boundary_construction_preserves_pcurve_parameters() {
+    let tolerance = ModelTolerance::default();
+    let origin = Point3::new(3.0, -2.0, 5.0);
+    let plane: Surface3 = Plane3::new(origin, Vec3::unit_x() * 2.0, Vec3::unit_y() * 3.0, tolerance).unwrap().into();
+    let cylinder: Surface3 = Cylinder3::new(origin, Vec3::unit_z() * 2.0, Vec3::unit_x() * 3.0, Vec3::unit_y() * 3.0, tolerance).unwrap().into();
+    let cone: Surface3 = Cone3::new(origin, Vec3::unit_z() * 2.0, Vec3::unit_x(), Vec3::unit_y(), tolerance).unwrap().into();
+    let torus: Surface3 = Torus3::new(origin, Vec3::unit_x() * 5.0, Vec3::unit_y() * 5.0, 2.0, tolerance).unwrap().into();
+    let range = ParameterRange::new(-2.0, 7.0).unwrap();
+    for (surface, uv, direction, circular) in [
+        (&plane, Point2::new(0.3, 0.7), Vec2::new(2.0, -3.0), false),
+        (&cylinder, Point2::new(0.3, 0.7), Vec2::new(0.0, -2.0), false),
+        (&cone, Point2::new(0.3, 0.7), Vec2::new(0.0, 2.0), false),
+        (&cylinder, Point2::new(0.3, 0.7), Vec2::new(1.0, 0.0), true),
+        (&cone, Point2::new(0.3, -0.7), Vec2::new(-1.0, 0.0), true),
+        (&torus, Point2::new(0.3, 0.7), Vec2::new(-1.0, 0.0), true),
+        (&torus, Point2::new(0.3, 0.7), Vec2::new(0.0, 1.0), true),
+    ] {
+        let pcurve: Curve2 = Line2::new(uv, direction).unwrap().into();
+        let curve = surface.boundary_curve(pcurve, range, tolerance).unwrap();
+        assert!(if circular { matches!(curve, Curve3::Circle(_)) } else { matches!(curve, Curve3::Line(_)) });
+        for t in [-2.0, 0.1, 4.5, 7.0] {
+            let uv = uv + direction * t;
+            let expected = surface.evaluate(uv.x, uv.y).unwrap();
+            let actual = curve.evaluate(t).unwrap();
+            assert!(actual.point.distance(expected.point) < 1.0e-12);
+            assert!((actual.first_derivative - expected.du * direction.x - expected.dv * direction.y).magnitude() < 1.0e-12);
+        }
+    }
+    // Even a nearly circular helix must remain generic: no tolerance-based
+    // recognition is allowed to erase its axial motion.
+    for direction in [Vec2::new(1.0, 1.0e-10), Vec2::new(2.0, 0.0)] {
+        let pcurve: Curve2 = Line2::new(Point2::new(0.0, 0.0), direction).unwrap().into();
+        assert!(matches!(cylinder.boundary_curve(pcurve, range, tolerance).unwrap(), Curve3::SurfaceCurve(_)));
+    }
+}
+
+#[test]
 fn parameter_cache_is_bounded_exact_and_shared_with_local_eviction() {
     let cache = ParameterEvaluationCache::<usize>::default();
     assert!(cache.0.lock().unwrap().sets.is_empty());

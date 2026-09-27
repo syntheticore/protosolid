@@ -1793,6 +1793,14 @@ fn trace_surface_intersections_in_domains(
         if let Some(value) = parameters.last_mut() {
             snap(value)?;
         }
+        // Snapping both ends of a short tangency trace to the same trim
+        // corner can leave only A-B-A. This retraces one segment, rather than
+        // defining a closed intersection, and has a zero tangent at its turn.
+        if parameters.len() == 3
+            && parameter_distance(parameters[0], parameters[2]) <= tolerance.parameter * 16.0
+        {
+            continue;
+        }
         if parameters.len() >= 2 {
             // A tangential contact at a trim corner can converge to several
             // parameter samples of the same spatial point. It has no curve

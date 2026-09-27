@@ -1104,8 +1104,13 @@ export class Projection {
 
     let curve
     if(item instanceof Edge) {
-      const shape = transformGeometry(item.geom(), relative).Shape()
-      curve = new window.oc.oc.BRepAdaptor_Curve_2(window.oc.oc.TopoDS.Edge_1(shape))
+      if(item.solid.compound.isShapex) {
+        curve = window.kernel.modeling.edgeProjectionCurve(item.geom(), relative)
+        if(!curve) return this.invalidate('This edge cannot be projected yet')
+      } else {
+        const shape = transformGeometry(item.geom(), relative).Shape()
+        curve = new window.oc.oc.BRepAdaptor_Curve_2(window.oc.oc.TopoDS.Edge_1(shape))
+      }
 
     } else if(item instanceof AxisHelper) {
       const axis = relative.clone().multiply(item.transform)

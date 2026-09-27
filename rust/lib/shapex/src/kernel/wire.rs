@@ -714,6 +714,15 @@ fn general_parametric_pair(
     second: &TrimmedCurve2,
     tolerance: ModelTolerance,
 ) -> KernelResult<CurvePairIntersection> {
+    let mut shared_endpoints = Vec::new();
+    for a in [first.range().start, first.range().end] {
+        for b in [second.range().start, second.range().end] {
+            let point = first.curve().evaluate(a)?.point;
+            if point.distance(second.curve().evaluate(b)?.point) <= tolerance.linear {
+                shared_endpoints.push((a, b, point));
+            }
+        }
+    }
     let mut seeds = Vec::new();
     let divisions = 32;
     for first_index in 0..=divisions {
@@ -771,6 +780,27 @@ fn general_parametric_pair(
             );
             if first_delta.abs().max(second_delta.abs()) <= tolerance.parameter {
                 break;
+            }
+        }
+        let first_value = first.curve().evaluate(first_parameter)?;
+        let second_value = second.curve().evaluate(second_parameter)?;
+        let a = first_value.first_derivative;
+        let b = second_value.first_derivative;
+        let sine = (a.x * b.y - a.y * b.x).abs() / (a.magnitude() * b.magnitude());
+        if sine > 0.0 {
+            // Near a tangential endpoint, roundoff in curve evaluation is
+            // amplified by the inverse intersection angle. Reuse a known
+            // endpoint root when the computed root cannot be distinguished
+            // from it at that arithmetic precision.
+            let scale = first_value.point.to_vec().magnitude()
+                .max(second_value.point.to_vec().magnitude()).max(1.0);
+            let uncertainty = f64::EPSILON * scale * 64.0 / sine;
+            if let Some((a, b, _)) = shared_endpoints.iter().find(|(_, _, point)| {
+                point.distance(first_value.point) <= uncertainty
+                    && point.distance(second_value.point) <= uncertainty
+            }) {
+                first_parameter = *a;
+                second_parameter = *b;
             }
         }
         let first_point = first.curve().evaluate(first_parameter)?.point;

@@ -4806,6 +4806,126 @@ pub enum Surface3 {
 }
 
 impl Surface3 {
+    /// Construct a spatial boundary in the p-curve's parameterization. Use
+    /// analytic geometry only when it follows from the defining surface and
+    /// p-curve; no sampled recognition or geometric fitting is performed.
+    pub(crate) fn boundary_curve(
+        &self,
+        pcurve: Curve2,
+        range: ParameterRange,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Curve3> {
+        if let Curve2::SurfaceProjection(projected) = &pcurve {
+            if projected.surface() == self {
+                return Ok(projected.curve().clone());
+            }
+            // Parallel offset planes retain their UV basis. Their boundary is
+            // the source analytic curve translated between the two origins.
+            if let (Self::Plane(from), Self::Plane(to)) = (projected.surface(), self) {
+                if from.u() == to.u() && from.v() == to.v() {
+                    let translation = to.origin() - from.origin();
+                    match projected.curve() {
+                        Curve3::Line(line) => {
+                            return Line3::new(line.origin() + translation, line.direction())
+                                .map(Curve3::from);
+                        }
+                        Curve3::Circle(circle) => {
+                            return Circle3::new(
+                                circle.center() + translation,
+                                circle.x_radius(),
+                                circle.y_radius(),
+                                tolerance,
+                            )
+                            .map(Curve3::from);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if let Curve2::Line(line) = &pcurve {
+            let origin = line.origin();
+            let direction = line.direction();
+            match self {
+                Self::Plane(plane) => {
+                    return Line3::new(
+                        plane.origin() + plane.u() * origin.x + plane.v() * origin.y,
+                        plane.u() * direction.x + plane.v() * direction.y,
+                    )
+                    .map(Curve3::from);
+                }
+                Self::Cylinder(_) | Self::Cone(_) if direction.x == 0.0 => {
+                    let value = self.evaluate(origin.x, origin.y)?;
+                    return Line3::new(value.point, value.dv * direction.y).map(Curve3::from);
+                }
+                _ => {}
+            }
+            // Circle3 uses radians. Unit angular rates preserve the edge and
+            // coedge parameters, including reversed traversal and seam crossings.
+            let circular_frame = if direction.y == 0.0 && direction.x.abs() == 1.0 {
+                match self {
+                    Self::Cylinder(cylinder) => Some((
+                        cylinder.origin() + cylinder.axis() * origin.y,
+                        cylinder.x_radius(),
+                        cylinder.y_radius(),
+                    )),
+                    Self::Cone(cone) if origin.y != 0.0 => Some((
+                        cone.apex() + cone.axis() * origin.y,
+                        cone.x_radius() * origin.y,
+                        cone.y_radius() * origin.y,
+                    )),
+                    Self::Sphere(sphere) => Some((
+                        sphere.center() + sphere.z_radius() * origin.y.sin(),
+                        sphere.x_radius() * origin.y.cos(),
+                        sphere.y_radius() * origin.y.cos(),
+                    )),
+                    Self::Torus(torus) => {
+                        let scale =
+                            1.0 + torus.minor_radius() * origin.y.cos() / torus.major_radius();
+                        Some((
+                            torus.center() + torus.normal() * (torus.minor_radius() * origin.y.sin()),
+                            torus.x_major() * scale,
+                            torus.y_major() * scale,
+                        ))
+                    }
+                    _ => None,
+                }
+                .map(|(center, x, y)| (center, x, y, origin.x, direction.x))
+            } else if direction.x == 0.0 && direction.y.abs() == 1.0 {
+                match self {
+                    Self::Sphere(sphere) => Some((
+                        sphere.center(),
+                        sphere.x_radius() * origin.x.cos() + sphere.y_radius() * origin.x.sin(),
+                        sphere.z_radius(),
+                    )),
+                    Self::Torus(torus) => {
+                        let radial =
+                            torus.x_major() * origin.x.cos() + torus.y_major() * origin.x.sin();
+                        Some((
+                            torus.center() + radial,
+                            radial * (torus.minor_radius() / torus.major_radius()),
+                            torus.normal() * torus.minor_radius(),
+                        ))
+                    }
+                    _ => None,
+                }
+                .map(|(center, x, y)| (center, x, y, origin.y, direction.y))
+            } else {
+                None
+            };
+            if let Some((center, x, y, angle, sense)) = circular_frame {
+                return Circle3::new(
+                    center,
+                    x * angle.cos() + y * angle.sin(),
+                    (-x * angle.sin() + y * angle.cos()) * sense,
+                    tolerance,
+                )
+                .map(Curve3::from);
+            }
+        }
+        SurfaceCurve3::new(self.clone(), pcurve, range, tolerance).map(Curve3::from)
+    }
+
     pub(crate) fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
         match self {
             Self::Swept(surface) => surface.first_order(u, v),

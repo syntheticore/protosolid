@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { markRaw, toRaw } from 'vue'
 
 import initShapex from '../shapexJS/index.js'
-import { rotationFromNormal } from '../core/utils.js'
+import { ocDirFromVec, ocPntFromVec, rotationFromNormal } from '../core/utils.js'
 
 const LINEAR_TOLERANCE = 0.1
 const ANGULAR_TOLERANCE = 0.1
@@ -520,6 +520,32 @@ export class ShapexBackend {
 
   edgeEndpoints(raw) {
     return shapexValue(raw).endpoints().map(point => new THREE.Vector3(...point.toArray()))
+  }
+
+  edgeProjectionCurve(raw, transform) {
+    const edge = shapexValue(raw)
+    const curve = edge.curve()
+    const oc = window.oc.oc
+    const point = value => new THREE.Vector3(...value.toArray()).applyMatrix4(transform)
+    if(curve instanceof this.api.Line3) {
+      const [start, end] = edge.endpoints().map(point)
+      const segment = new oc.GC_MakeSegment_1(ocPntFromVec(start), ocPntFromVec(end)).Value().get()
+      return new oc.GeomAdaptor_Curve_2(new oc.Handle_Geom_Curve_2(segment))
+    }
+    if(curve instanceof this.api.Circle3) {
+      const normal = new THREE.Vector3(...curve.normal().toArray()).transformDirection(transform)
+      const x = new THREE.Vector3(...curve.xRadius().toArray()).transformDirection(transform)
+      const axis = new oc.gp_Ax2_2(ocPntFromVec(point(curve.center())), ocDirFromVec(normal), ocDirFromVec(x))
+      const circle = new oc.Geom_Circle_2(axis, curve.radius())
+      // Tessellation retains the exact trim parameters, including full circles
+      // and arcs crossing the parameter seam; only its bounds are used here.
+      const { parameters } = edge.tessellate(this.tessellationOptions)
+      const start = parameters[0]
+      const end = parameters.at(-1)
+      return new oc.GeomAdaptor_Curve_3(
+        new oc.Handle_Geom_Curve_2(circle), Math.min(start, end), Math.max(start, end),
+      )
+    }
   }
 
   isSemanticEdge(compound, edge) {

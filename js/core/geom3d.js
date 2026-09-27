@@ -1546,14 +1546,19 @@ export class Compound extends Volumetric {
     if(this.isShapex) return this
 
     const originallyValid = this.validate()
+    // Unification can mutate shared topology even when its result is invalid.
+    // Preserve the input for the fallback and for earlier timeline states.
+    const copy = new window.oc.oc.BRepBuilderAPI_Copy_2(this.geom(), true, false)
     let out
     try {
-      out = this.unifyFaces().fixShape()
+      out = this.track(copy, 'copy').unifyFaces().fixShape()
     } catch(_) {
       // Some valid periodic solids cannot be tracked through face unification.
       // Keep those solids as-is, but do not mask failures to repair invalid input.
       if(originallyValid) return this
       throw { type: 'error', msg: "Geometry could not be repaired" }
+    } finally {
+      copy.delete()
     }
     if(!out.validate()) {
       if(originallyValid) return this

@@ -13,16 +13,7 @@
 
   const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value )
 
-  // A display failure must not abort Vue's component setup and break the
-  // timeline needed to edit or undo the feature that produced this face.
-  let tessellation
-  try {
-    tessellation = props.face.tesselate()
-  } catch(error) {
-    console.error('Could not display face', props.face.id, error)
-    tessellation = { positions: [], normals: [] }
-    queueMicrotask(() => props.document.bus.emit('toast', 'A face could not be displayed. You can edit or undo the last feature.'))
-  }
+  const tessellation = props.face.tesselate()
   const faceMesh = window.alcRenderer.convertMesh(tessellation, getMaterial())
   const basePositions = faceMesh.geometry.getAttribute('position').array.slice()
   const baseNormals = faceMesh.geometry.getAttribute('normal').array.slice()

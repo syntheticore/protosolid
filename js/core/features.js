@@ -94,7 +94,16 @@ export class Feature {
     try {
       const comp = tree.findChild(this.componentId)
       comp.compound = comp.compound.repair()
-    } catch(err) { this.error = (this.error && this.error.type == 'error') ? this.error : err }
+      // Prepare every face before the timeline publishes the feature result.
+      // A display failure rejects the feature just like a modeling failure.
+      for(const id of this.modifiedComponents()) {
+        for(const face of tree.findChild(id).compound.faces()) face.tesselate()
+      }
+    } catch(err) {
+      if(this.error?.type != 'error') {
+        this.error = { type: 'error', msg: err.msg || err.message || String(err) }
+      }
+    }
   }
 
   updateReferences(tree) {

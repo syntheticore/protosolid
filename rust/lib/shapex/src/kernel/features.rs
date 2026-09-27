@@ -1106,9 +1106,14 @@ fn trim_offset_edge(
             -1.0
         };
         return if let Some(period) = domain.period {
+            // Projection identifies a point modulo a full turn. Keep the
+            // source chart's turn so its p-curves remain continuous at the
+            // seam; an equivalent 3D range can cross their UV branch cut.
+            let start = projection.parameter
+                + ((source.range().start - projection.parameter) / period).round() * period;
             ParameterRange::new(
-                projection.parameter,
-                projection.parameter + direction * period,
+                start,
+                start + direction * period,
             )
         } else if direction > 0.0 {
             Ok(bounds)

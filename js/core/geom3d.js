@@ -1226,8 +1226,7 @@ export class Solid extends Volumetric {
   shapexFaceTessellation(face) {
     this.cachedShapexFaceTessellations ??= new Map()
     if(!this.cachedShapexFaceTessellations.has(face.kernelId)) {
-      // Mesh only the requested face, retaining its exact surface normals.
-      // Failure must not prevent other faces from being displayed or cached.
+      // Cache the mesh prepared during feature evaluation for the viewport.
       const mesh = window.kernel.modeling.mesh(face.geom())
       this.cachedShapexFaceTessellations.set(face.kernelId, mesh)
     }
@@ -1237,6 +1236,7 @@ export class Solid extends Volumetric {
   cloneCached(newCompound) {
     const clone = new Solid(newCompound, this.geom())
     clone.id = this.id
+    clone.cachedShapexFaceTessellations = this.cachedShapexFaceTessellations
     clone.cachedFaces = this.faces().map(face => new Face(clone, face.geom(), face.id, face.tessId) )
     clone.cachedEdges = this.edges().map(edge => new Edge(clone, edge.geom(), edge.id, edge.tessId) )
     return clone

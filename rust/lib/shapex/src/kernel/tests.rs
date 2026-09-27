@@ -3143,6 +3143,100 @@ fn move_faces_extends_cylinder_and_its_rounded_cap() {
 }
 
 #[test]
+fn move_boss_on_document_28_frame() {
+    // Replay the third component's construction from untitled(28).cad.cad.cad.
+    // Keep its segment and selection order: they determine the periodic trim
+    // charts that exposed the failure on the planar face around the boss.
+    let tolerance = ModelTolerance::default();
+    let p = |x, y| Point2::new(x, y);
+    let outer = Wire2::new(
+        [
+            TrimmedCurve2::arc_through(
+                p(-41.08804749448451, 24.49828364036358),
+                p(-63.757392263221234, 1.8289388716268609),
+                p(-41.08804749448452, -20.840405897109868),
+            ).unwrap(),
+            TrimmedCurve2::line(
+                p(-41.08804749448451, -20.840405897109868),
+                p(39.243454695349335, -20.840405897109868),
+            ).unwrap(),
+            TrimmedCurve2::arc_through(
+                p(39.24345469534932, -20.840405897109868),
+                p(61.91279946408605, 1.8289388716268524),
+                p(39.243454695349335, 24.49828364036358),
+            ).unwrap(),
+            TrimmedCurve2::line(
+                p(39.24345469534932, 24.49828364036358),
+                p(-41.08804749448452, 24.49828364036358),
+            ).unwrap(),
+        ], tolerance,
+    ).unwrap();
+    let inner = Wire2::new(
+        [
+            TrimmedCurve2::arc_through(
+                p(-35.09044151977286, 10.270564794554685),
+                p(-44.66890053586293, 0.6921057784646129),
+                p(-35.09044151977286, -8.886353237625462),
+            ).unwrap(),
+            TrimmedCurve2::line(
+                p(-35.09044151977286, -8.886353237625462),
+                p(32.38023301545568, -8.886353237625462),
+            ).unwrap(),
+            TrimmedCurve2::arc_through(
+                p(32.38023301545568, -8.886353237625462),
+                p(41.95869203154575, 0.6921057784646093),
+                p(32.38023301545568, 10.270564794554685),
+            ).unwrap(),
+            TrimmedCurve2::line(
+                p(32.38023301545568, 10.270564794554685),
+                p(-35.09044151977286, 10.270564794554685),
+            ).unwrap(),
+        ], tolerance,
+    ).unwrap();
+    let plane = |height| Plane3::new(
+        Point3::new(0.0, height, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tolerance,
+    ).unwrap();
+    let body = Profile::new(outer, [inner], tolerance).unwrap()
+        .extrude(plane(0.0), Vec3::unit_y() * 14.0).unwrap();
+    let faces = [8, 6].map(|index| body.faces().nth(index).unwrap().clone());
+    let body = body.move_faces(&faces, RigidTransform3::new(
+        Matrix3::from_angle_y(cgmath::Deg(-5.0)),
+        Vec3::new(0.2895224260213478, 0.0, -2.1925285538421133), tolerance,
+    ).unwrap()).unwrap();
+    let edges = [6, 15, 3, 9].map(|index| body.edges().nth(index).unwrap().clone());
+    let body = body.chamfer_with_tangent_propagation(&edges, 1.0, true).unwrap();
+    let edges = [12, 16, 30, 28].map(|index| body.edges().nth(index).unwrap().clone());
+    let body = body.fillet(&edges, 0.75).unwrap();
+    let cylinder = |x, radius, height| Profile::new(Wire2::new([
+        TrimmedCurve2::circle(p(x, 0.0), radius).unwrap()
+    ], tolerance).unwrap(), [], tolerance).unwrap()
+        .extrude(plane(14.0), Vec3::unit_y() * height).unwrap();
+    let body = body.difference(&cylinder(52.273464211369564, 5.769615333998077, -2.0)).unwrap();
+    let edges = [52, 57].map(|index| body.edges().nth(index).unwrap().clone());
+    let body = body.fillet(&edges, 0.5).unwrap();
+    let radius = 5.744170132035949;
+    let body = body.union(&cylinder(-53.8427277335454, radius, 12.0)).unwrap();
+    let options = TessellationOptions::new(0.1, 0.1, 24).unwrap();
+    for face in body.faces() {
+        face.tessellate(options).unwrap();
+    }
+    let cap = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().y.abs() > 0.99 && (p.origin().y - 26.0).abs() < 1e-7)).unwrap().clone();
+    for distance in [-1.0, 1.0] {
+        let moved = body.move_faces(&[cap.clone()], RigidTransform3::new(
+            Matrix3::identity(), Vec3::unit_y() * distance, tolerance,
+        ).unwrap()).unwrap();
+        for face in moved.faces() {
+            face.tessellate(options).unwrap();
+        }
+        // Curved BREP mass properties use adaptive quadrature at body scale.
+        let expected = std::f64::consts::PI * radius * radius * distance;
+        assert!((moved.volume() - body.volume() - expected).abs() < body.volume() * 1e-7,
+            "volume change {} expected {}", moved.volume() - body.volume(), expected);
+    }
+}
+
+#[test]
 fn move_faces_updates_connected_corner_fillets() {
     let tolerance = ModelTolerance::default();
     let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));

@@ -4594,6 +4594,46 @@ fn multi_solid_booleans_use_set_semantics() {
 }
 
 #[test]
+fn boolean_union_keeps_edge_touching_solids_separate() {
+    let left = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 1.0));
+    let right = owned_cuboid(Point3::new(4.0, 0.0, 0.0), Point3::new(6.0, 2.0, 1.0));
+    let pair = left.union(&right).unwrap();
+    let extrude = |points: Vec<Point2>| {
+        let tolerance = ModelTolerance::default();
+        Profile::new(Wire2::polygon(points, tolerance).unwrap(), [], tolerance)
+            .unwrap()
+            .extrude(Plane3::xy(), Vec3::unit_z())
+            .unwrap()
+    };
+    let lower = extrude(vec![
+        Point2::new(2.0, 0.0),
+        Point2::new(3.0, -2.0),
+        Point2::new(4.0, 0.0),
+        Point2::new(3.0, -0.5),
+    ]);
+    let diagonal = extrude(vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(-2.0, -1.0),
+        Point2::new(-1.0, -2.0),
+    ]);
+
+    for extra in [&lower, &diagonal] {
+        for result in [pair.union(extra).unwrap(), extra.union(&pair).unwrap()] {
+            assert_eq!(result.solids().len(), 3);
+            assert!((result.volume() - pair.volume() - extra.volume()).abs() < 1e-7);
+            result.tessellate(TessellationOptions::default()).unwrap();
+            assert_eq!(
+                result.edges().count(),
+                pair.edges().count() + extra.edges().count(),
+            );
+        }
+    }
+    let all = pair.union(&lower).unwrap().union(&diagonal).unwrap();
+    assert_eq!(all.solids().len(), 4);
+    assert!((all.volume() - pair.volume() - lower.volume() - diagonal.volume()).abs() < 1e-7);
+}
+
+#[test]
 fn owned_operations_resolve_entities_transitively_and_tessellate_them() {
     let cube = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(4.0, 4.0, 1.0));
     let top = cube

@@ -2310,7 +2310,8 @@ fn connect_loops(
                 .iter()
                 .copied()
                 .filter(|index| {
-                    pieces[*index].start_node == end_node || pieces[*index].end_node == end_node
+                    pieces[*index].start_node == end_node
+                        || (pieces[*index].parameter_seam && pieces[*index].end_node == end_node)
                 })
                 .collect::<Vec<_>>();
             if candidates.is_empty() {
@@ -2358,11 +2359,19 @@ fn connect_loops(
                             .first_order(candidate.range.start + candidate.range.span() * 1.0e-7)
                             .map(|value| (value.1 * candidate.range.span().signum()).normalize())
                             .unwrap_or(Vec2::unit_x());
-                        previous_tangent
+                        let angle = previous_tangent
                             .x
                             .mul_add(tangent.y, -previous_tangent.y * tangent.x)
-                            .atan2(previous_tangent.dot(tangent))
-                            .rem_euclid(std::f64::consts::TAU)
+                            .atan2(previous_tangent.dot(tangent));
+                        // Follow the material side at a point contact. Reversed
+                        // faces wind clockwise in the surface chart, so choosing
+                        // a counterclockwise turn would splice separate caps.
+                        let angle = if orientation == FaceOrientation::Reversed {
+                            -angle
+                        } else {
+                            angle
+                        };
+                        angle.rem_euclid(std::f64::consts::TAU)
                     };
                     turn(*first).total_cmp(&turn(*second))
                 })
@@ -2376,12 +2385,6 @@ fn connect_loops(
             end_node = next.end_node;
             end_uv = next.end_uv;
             loop_.push(next);
-            if loop_.len() > pieces.len() {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "imprinted Boolean face boundary did not close",
-                ));
-            }
         }
         loops.push(loop_);
     }
@@ -2752,6 +2755,47 @@ fn patch_components(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
+    let mut edge_uses = Vec::<Vec<(usize, usize)>>::new();
+    for (face, edges) in samples.iter().enumerate() {
+        for (index, sample) in edges.iter().enumerate() {
+            let matching = edge_uses.iter().position(|uses| {
+                let (other_face, other_index) = uses[0];
+                let other = samples[other_face][other_index];
+                same_unoriented_edge(*sample, other, linear)
+                    || (((sample[0].distance(other[0]) <= linear
+                        && sample[2].distance(other[2]) <= linear)
+                        || (sample[0].distance(other[2]) <= linear
+                            && sample[2].distance(other[0]) <= linear))
+                        && segments[face][index]
+                            .curve
+                            .project_on_trim(other[1], segments[face][index].range, tolerance)
+                            .is_ok_and(|p| p.distance <= linear)
+                        && segments[other_face][other_index]
+                            .curve
+                            .project_on_trim(
+                                sample[1],
+                                segments[other_face][other_index].range,
+                                tolerance,
+                            )
+                            .is_ok_and(|p| p.distance <= linear))
+            });
+            if let Some(group) = matching {
+                edge_uses[group].push((face, index));
+            } else {
+                edge_uses.push(vec![(face, index)]);
+            }
+        }
+    }
+    // An edge with four uses is a contact between shells, not an adjacency
+    // within a manifold shell. Reach each shell through its two-use edges;
+    // the Euler builder then gives coincident contact edges separate topology.
+    let mut neighbors = vec![BTreeSet::new(); patches.len()];
+    for uses in &edge_uses {
+        if let [(first, _), (second, _)] = uses.as_slice() {
+            neighbors[*first].insert(*second);
+            neighbors[*second].insert(*first);
+        }
+    }
     let mut remaining = (0..patches.len()).collect::<BTreeSet<_>>();
     let mut components = Vec::new();
     while let Some(seed) = remaining.iter().next().copied() {
@@ -2759,36 +2803,9 @@ fn patch_components(
         let mut stack = vec![seed];
         let mut component = vec![seed];
         while let Some(current) = stack.pop() {
-            let connected = remaining
-                .iter()
+            let connected = neighbors[current]
+                .intersection(&remaining)
                 .copied()
-                .filter(|candidate| {
-                    samples[current].iter().enumerate().any(|(i, first)| {
-                        samples[*candidate].iter().enumerate().any(|(j, second)| {
-                            same_unoriented_edge(*first, *second, linear)
-                                || (((first[0].distance(second[0]) <= linear
-                                    && first[2].distance(second[2]) <= linear)
-                                    || (first[0].distance(second[2]) <= linear
-                                        && first[2].distance(second[0]) <= linear))
-                                    && segments[current][i]
-                                        .curve
-                                        .project_on_trim(
-                                            second[1],
-                                            segments[current][i].range,
-                                            tolerance,
-                                        )
-                                        .is_ok_and(|p| p.distance <= linear)
-                                    && segments[*candidate][j]
-                                        .curve
-                                        .project_on_trim(
-                                            first[1],
-                                            segments[*candidate][j].range,
-                                            tolerance,
-                                        )
-                                        .is_ok_and(|p| p.distance <= linear))
-                        })
-                    })
-                })
                 .collect::<Vec<_>>();
             for candidate in connected {
                 remaining.remove(&candidate);

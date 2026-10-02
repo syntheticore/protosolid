@@ -1,0 +1,234 @@
+{
+  "lastId": "52n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 3,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-2",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-3",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    -15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    -15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-4",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    -15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-5",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-6",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    -15,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-16",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-15",
+              "sketchId": "id-2",
+              "rings": [
+                [
+                  "id-6",
+                  "id-3",
+                  "id-4",
+                  "id-5"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 20,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "ChamferFeature",
+        "id": "id-52",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "edges": [
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-16/top|/extrude-id-16/swept/id-6)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-16/top|/extrude-id-16/swept/id-3)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-16/top|/extrude-id-16/swept/id-4)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-16/top|/extrude-id-16/swept/id-5)/1"
+            }
+          ],
+          "chamferType": "equal",
+          "distance": 2,
+          "distance2": 1,
+          "angle": 45,
+          "flipSides": false,
+          "propagation": "tangent"
+        },
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "Box perimeter chamfer",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-2": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          70,
+          70,
+          70
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          0,
+          0,
+          10
+        ]
+      }
+    }
+  ]
+}

@@ -801,12 +801,12 @@ impl Surface3 {
             (Self::Torus(torus), Self::Plane(plane)) => {
                 Ok(swap_surface_curves(plane_torus(*plane, *torus, tolerance)?))
             }
-            (Self::Plane(plane), Self::RollingBall(blend)) => {
-                plane_blend_contact(*plane, blend, tolerance)
+            (Self::Plane(plane), Self::RollingBall(_) | Self::Offset(_)) => {
+                plane_blend_contact(*plane, other, tolerance)
             }
-            (Self::RollingBall(blend), Self::Plane(plane)) => {
+            (Self::RollingBall(_) | Self::Offset(_), Self::Plane(plane)) => {
                 Ok(swap_surface_curves(plane_blend_contact(
-                    *plane, blend, tolerance,
+                    *plane, self, tolerance,
                 )?))
             }
             (Self::Nurbs(_) | Self::Offset(_), Self::Nurbs(_) | Self::Offset(_)) => {
@@ -853,9 +853,17 @@ impl Surface3 {
 
 fn plane_blend_contact(
     plane: Plane3,
-    blend: &super::RollingBallSurface3,
+    surface: &Surface3,
     tolerance: ModelTolerance,
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let mut base = surface;
+    while let Surface3::Offset(offset) = base {
+        base = offset.base();
+    }
+    let Surface3::RollingBall(blend) = base else {
+        return Err(unsupported("plane is not a rolling-ball contact support"));
+    };
+    let range = blend.center_range();
     for (support, guide, side) in [
         (blend.first_surface(), blend.first_pcurve(), 0.0),
         (blend.second_surface(), blend.second_pcurve(), 1.0),
@@ -863,17 +871,33 @@ fn plane_blend_contact(
         let Surface3::Plane(contact_plane) = support else {
             continue;
         };
+        // A normal offset retains the contact rail's parameters and tangency,
+        // but shifts its supporting plane along the blend's oriented normal.
+        let contact_plane = if surface == base {
+            *contact_plane
+        } else {
+            Plane3::new(
+                surface.evaluate((range.start + range.end) * 0.5, side)?.point,
+                contact_plane.u(),
+                contact_plane.v(),
+                tolerance,
+            )?
+        };
         if !matches!(
-            plane_plane(plane, *contact_plane, tolerance)?,
+            plane_plane(plane, contact_plane, tolerance)?,
             IntersectionSet::Coincident
         ) {
             continue;
         }
         // This plane is tangent to every rolling sphere. Its only intersection
         // is the retained contact rail; tracing near it creates spurious curves.
-        let range = blend.center_range();
-        let curve: Curve3 =
-            super::SurfaceCurve3::new(support.clone(), guide.clone(), range, tolerance)?.into();
+        let second_pcurve: Curve2 =
+            Line2::new(Point2::new(0.0, side), crate::Vec2::unit_x())?.into();
+        let curve: Curve3 = if surface == base {
+            super::SurfaceCurve3::new(support.clone(), guide.clone(), range, tolerance)?.into()
+        } else {
+            super::SurfaceCurve3::new(surface.clone(), second_pcurve.clone(), range, tolerance)?.into()
+        };
         let first_pcurve = SurfaceProjectionPcurve2::new(
             curve.clone(),
             plane.into(),
@@ -885,7 +909,7 @@ fn plane_blend_contact(
         return Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
             curve,
             first_pcurve,
-            second_pcurve: Line2::new(Point2::new(0.0, side), crate::Vec2::unit_x())?.into(),
+            second_pcurve,
             achieved_error: 0.0,
         }]));
     }

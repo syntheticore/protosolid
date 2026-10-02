@@ -2956,6 +2956,71 @@ fn move_faces_resizes_round_slot_ends_between_parallel_walls() {
 }
 
 #[test]
+fn section_of_shelled_chamfered_cylinder() {
+    // untitled(32).cad: sectioning at the outer cap must preserve both seam
+    // uses; the inner cap also needs the offset fillet's exact contact rail.
+    let tolerance = ModelTolerance::default();
+    let plane = Plane3::new(Point3::origin(), Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
+    let body = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 34.810472096424256).unwrap()],
+            tolerance,
+        )
+        .unwrap(),
+        [],
+        tolerance,
+    )
+    .unwrap()
+    .extrude(plane, Vec3::unit_y() * 32.0)
+    .unwrap();
+    let rim = body
+        .edges()
+        .find(|edge| edge.endpoints().unwrap().iter().all(|p| (p.y - 32.0).abs() < 1e-7))
+        .unwrap()
+        .clone();
+    let body = body.chamfer_with_tangent_propagation(&[rim], 13.0, true).unwrap();
+    let rims = body
+        .edges()
+        .filter(|edge| {
+            let faces = edge.connected_faces().unwrap();
+            faces.len() == 2 && faces.iter().any(|face| matches!(face.surface(), Surface3::Cone(_)))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(rims.len(), 2);
+    let body = body
+        .fillet_with_options(&rims, FilletOptions::new(5.0).with_tangent_propagation(true))
+        .unwrap();
+    let opening = body
+        .faces()
+        .find(|face| matches!(face.surface(), Surface3::Plane(p) if p.origin().y.abs() < 1e-7))
+        .unwrap()
+        .clone();
+    let body = body.shell(&[opening], -4.0).unwrap();
+    let volume = body.volume();
+    for height in [0.0, 28.0, 32.0] {
+        let section = Plane3::new(
+            Point3::new(0.0, height, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tolerance,
+        ).unwrap();
+        let below = body.split(section, "left").unwrap();
+        let above = body.split(section, "right").unwrap();
+        assert!((below.volume() + above.volume() - volume).abs() < volume * 1e-8);
+        if height == 28.0 {
+            assert_eq!(below.solids().len(), 1);
+            assert_eq!(above.solids().len(), 1);
+            assert!(below.volume() > 0.0 && above.volume() > 0.0);
+        } else {
+            let (retained, empty) = if height == 0.0 { (&above, &below) } else { (&below, &above) };
+            assert_eq!(retained.solids().len(), 1);
+            assert_eq!(empty.solids().len(), 0);
+        }
+        for result in [below, above] {
+            result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+        }
+    }
+}
+
+#[test]
 fn section_of_chamfered_and_filleted_slot_frame() {
     // Reduced from untitled(28).cad.cad: the face move is not needed to expose
     // the missing offset-cone bounds or the tangent contact at the last sketch.

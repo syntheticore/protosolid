@@ -2020,7 +2020,7 @@ fn arrange_face(
             let outer_polygon = &classified[outer_index].1;
             let mut patch_loops = vec![BrepPatchLoop {
                 kind: LoopKind::Outer,
-                segments: patch_segments(outer, surface),
+                segments: patch_segments(outer),
             }];
             for (hole, _, hole_area, is_outer, sample) in &classified {
                 if *is_outer {
@@ -2031,7 +2031,7 @@ fn arrange_face(
                 {
                     patch_loops.push(BrepPatchLoop {
                         kind: LoopKind::Inner,
-                        segments: patch_segments(hole, surface),
+                        segments: patch_segments(hole),
                     });
                 }
             }
@@ -2388,33 +2388,18 @@ fn connect_loops(
     Ok(loops)
 }
 
-fn patch_segments(loop_: &[DirectedPiece], surface: &Surface3) -> Vec<BrepPatchSegment> {
+fn patch_segments(loop_: &[DirectedPiece]) -> Vec<BrepPatchSegment> {
     loop_
         .iter()
         .map(|piece| BrepPatchSegment {
             curve: piece.curve.clone(),
             provenance: piece.provenance.clone(),
-            pcurve: exact_pcurve_on_surface(&piece.curve, surface, &piece.pcurve),
+            // Arrangement p-curves are exact and retain the selected face chart.
+            // The spatial edge can carry the opposite use of a parameter seam.
+            pcurve: piece.pcurve.clone(),
             range: piece.range,
         })
         .collect()
-}
-
-fn exact_pcurve_on_surface(curve: &Curve3, surface: &Surface3, fallback: &Curve2) -> Curve2 {
-    match curve {
-        Curve3::SurfaceIntersection(intersection) => {
-            let exact = intersection.exact_pcurves();
-            if intersection.first_surface() == surface {
-                exact[0].clone()
-            } else if intersection.second_surface() == surface {
-                exact[1].clone()
-            } else {
-                fallback.clone()
-            }
-        }
-        Curve3::SurfaceCurve(curve) if curve.surface() == surface => curve.pcurve().clone(),
-        _ => fallback.clone(),
-    }
 }
 
 fn loop_polyline(loop_: &[DirectedPiece]) -> KernelResult<Vec<Point2>> {

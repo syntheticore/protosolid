@@ -1,0 +1,283 @@
+{
+  "lastId": "48n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 7,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-2",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-3",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-1",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "radius": 8
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "PlaneFeature",
+        "id": "id-7",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "base": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          },
+          "offset": 10
+        },
+        "expressions": {},
+        "planeId": "id-8"
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-9",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-8"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-10",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-6",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  3,
+                  0,
+                  0
+                ]
+              },
+              "radius": 11
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "PlaneFeature",
+        "id": "id-14",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "base": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          },
+          "offset": 20
+        },
+        "expressions": {},
+        "planeId": "id-15"
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-16",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-15"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-17",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-13",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "radius": 6
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "LoftFeature",
+        "id": "id-20",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-5",
+              "sketchId": "id-3",
+              "rings": [
+                [
+                  "id-1"
+                ]
+              ]
+            },
+            {
+              "$class": "ProfileReference",
+              "id": "id-12",
+              "sketchId": "id-10",
+              "rings": [
+                [
+                  "id-6"
+                ]
+              ]
+            },
+            {
+              "$class": "ProfileReference",
+              "id": "id-19",
+              "sketchId": "id-17",
+              "rings": [
+                [
+                  "id-13"
+                ]
+              ]
+            }
+          ],
+          "untwist": true,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "FilletFeature",
+        "id": "id-48",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "edges": [
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/id-20/loft/generated/1|/id-20/loft/generated/2)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/id-20/loft/generated/1|/id-20/loft/generated/3)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/id-20/loft/generated/1|/id-20/loft/generated/4)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/id-20/loft/generated/1|/id-20/loft/generated/5)/1"
+            }
+          ],
+          "radius": 1,
+          "propagation": "tangent"
+        },
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "three section loft fillet",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-3": true,
+        "id-10": true,
+        "id-17": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          90,
+          90,
+          70
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          0,
+          0,
+          10
+        ]
+      }
+    }
+  ]
+}

@@ -30,6 +30,12 @@ for(const file of files) {
     // A saved topology/profile reference failure is not a kernel test case.
     features.at(-1).updateReferences(document.timeline.tree(features.length - 1))
     assert.notEqual(features.at(-1).error?.type, 'error', `${file}: unresolved final references`)
+    if(file.includes('multiple-solids')) {
+      const final = features.at(-1)
+      assert.equal(final.constructor.name, 'ShellFeature', `${file}: expected one shell operation`)
+      const selectedSolids = new Set(final.faces().map(ref => ref.getItem().solid.id))
+      assert.ok(selectedSolids.size >= 2, `${file}: shell openings must resolve on multiple solids`)
+    }
   }
   failures += errors.length
 }

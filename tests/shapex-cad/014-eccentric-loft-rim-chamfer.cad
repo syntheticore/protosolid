@@ -1,0 +1,219 @@
+{
+  "lastId": "38n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 5,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-2",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-3",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-1",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "radius": 10
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "PlaneFeature",
+        "id": "id-7",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "base": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          },
+          "offset": 20
+        },
+        "expressions": {},
+        "planeId": "id-8"
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-9",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-8"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-10",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-6",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  4,
+                  0,
+                  0
+                ]
+              },
+              "radius": 6
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "LoftFeature",
+        "id": "id-13",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-5",
+              "sketchId": "id-3",
+              "rings": [
+                [
+                  "id-1"
+                ]
+              ]
+            },
+            {
+              "$class": "ProfileReference",
+              "id": "id-12",
+              "sketchId": "id-10",
+              "rings": [
+                [
+                  "id-6"
+                ]
+              ]
+            }
+          ],
+          "untwist": true,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "ChamferFeature",
+        "id": "id-38",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "edges": [
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/id-13/loft/generated/1|/id-13/loft/generated/2)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/id-13/loft/generated/1|/id-13/loft/generated/3)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/id-13/loft/generated/1|/id-13/loft/generated/4)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/id-13/loft/generated/1|/id-13/loft/generated/5)/1"
+            }
+          ],
+          "chamferType": "equal",
+          "distance": 1,
+          "distance2": 2,
+          "angle": 30,
+          "flipSides": false,
+          "propagation": "tangent"
+        },
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "eccentric loft rim chamfer",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-3": true,
+        "id-10": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          90,
+          90,
+          70
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          0,
+          0,
+          10
+        ]
+      }
+    }
+  ]
+}

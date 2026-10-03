@@ -1085,8 +1085,8 @@ export class LineTool extends SketchTool {
     const snap = this.startSnap
     return {
       start: this.curve.endpoints()[0],
-      perpendicularLines: [this.previousSegment, snap?.curve, snap?.elem, ...(snap?.intersection || [])]
-        .filter(elem => elem instanceof Line),
+      perpendicularCurves: [this.previousSegment, snap?.curve, snap?.elem, ...(snap?.intersection || [])]
+        .filter(elem => elem instanceof Line || elem instanceof Circle || elem instanceof Arc),
     }
   }
 
@@ -1799,9 +1799,13 @@ export class FixConstraintTool extends ConstraintTool {
 export class PerpendicularConstraintTool extends ConstraintTool {
   static constraintType = PerpendicularConstraint
   static icon = 'angle-up'
-  static selectors = ['axis']
+  static selectors = ['curve']
 
-  isComplete(counts) { return counts.axis == 2 }
+  isComplete(counts) { return counts.curve == 2 }
+
+  acceptsItem(item) { return item instanceof Line || item instanceof Circle || item instanceof Arc }
+
+  canConstrain(items) { return items.some(item => item instanceof Line) }
 }
 
 export class ParallelConstraintTool extends ConstraintTool {

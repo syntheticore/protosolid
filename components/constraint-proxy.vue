@@ -138,10 +138,10 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint, ConcentricConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, EqualConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, ConcentricConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, PerpendicularConstraint, EqualConstraint } from '../js/core/sketch.js'
   import { Line, Circle, Arc } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
-  import { tangentPoint } from '../js/three/constraint-icons.js'
+  import { tangentPoint, perpendicularPoint } from '../js/three/constraint-icons.js'
   import { SketchTool } from '../js/tools.js'
 
   const props = defineProps({
@@ -221,6 +221,11 @@
     if(props.constraint instanceof TangentConstraint) return [{
       pos: transformPosition(tangentPoint(props.constraint), sketch),
       offset: { x: 11, y: -11 },
+    }]
+
+    if(props.constraint instanceof PerpendicularConstraint &&
+      props.constraint.items.some(item => item.curve() instanceof Circle || item.curve() instanceof Arc)) return [{
+      pos: transformPosition(perpendicularPoint(props.constraint), sketch),
     }]
 
     if(props.constraint instanceof EqualConstraint) return props.constraint.items.map(item => {

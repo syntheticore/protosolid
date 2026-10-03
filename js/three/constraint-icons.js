@@ -1,4 +1,17 @@
-import { Line, Spline } from '../core/geom2d.js'
+import { Line, Arc, Spline } from '../core/geom2d.js'
+
+export function perpendicularPoint(constraint) {
+  const curves = constraint.items.map(item => item.curve())
+  const line = curves.find(curve => curve instanceof Line)
+  const round = curves.find(curve => curve !== line)
+  const center = round.center()
+  const direction = line.direction().normalize()
+  const intersections = [-1, 1].map(sign => center.clone().addScaledVector(direction, sign * round.radius))
+  const onArc = round instanceof Arc ? intersections.filter(point => round.distanceTo(point).almost(0.0)) : intersections
+  const candidates = onArc.length ? onArc : intersections
+  const distance = point => Math.min(...line.endpoints().map(endpoint => endpoint.distanceToSquared(point)))
+  return candidates.reduce((nearest, point) => distance(point) < distance(nearest) ? point : nearest)
+}
 
 export function tangentPoint(constraint) {
   const splineItem = constraint.items.find(item => item.curve() instanceof Spline)

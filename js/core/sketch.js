@@ -794,6 +794,13 @@ export class Sketch {
         })
 
       } else if(c instanceof PerpendicularConstraint) {
+        const round = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc)
+        if(round) {
+          const line = c.items.find(item => item.curve() instanceof Line)
+          const roundPrim = idMap[round.curve().id].at(-1)
+          const linePrim = idMap[line.curve().id].at(-1)
+          return { id: `${id++}`, type: 'point_on_line_pl', p_id: roundPrim.c_id, l_id: linePrim.id, temporary: c.temporary }
+        }
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 

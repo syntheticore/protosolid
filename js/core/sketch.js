@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { nextTick } from 'vue'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
@@ -97,10 +98,8 @@ export class Sketch {
     if(direction < 0 ? !this.canUndo : !this.canRedo) return false
     this.history.index += direction
     const state = Serialize.parse(this.history.states[this.history.index])
-    this.elements.forEach(elem => elem.clear())
-    this.projections.forEach(projection => {
-      if(projection.output instanceof SketchElement) projection.output.clear()
-    })
+    const previousElements = [...this.elements, ...this.projections
+      .map(projection => projection.output).filter(elem => elem instanceof SketchElement)]
     Object.assign(this, state)
     this.elements.forEach(elem => elem.sketch = this)
     this.constraints.forEach(constraint => constraint.sketch = this)
@@ -113,6 +112,8 @@ export class Sketch {
     this.solveNeeded = false
     this.restoringHistory = true
     this.profileUpdateNeeded = true
+    // Constraint proxies still reference the previous geometry until Vue updates.
+    nextTick(() => previousElements.forEach(elem => elem.clear()))
     return true
   }
 

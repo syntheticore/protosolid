@@ -6,6 +6,20 @@
   "description": "Parametric CAD",
   "author": "Björn Breitgoff <syntheticore@gmail.com>",
   "main": "main.js",
+  "build": {
+    "directories": {
+      "buildResources": "build"
+    },
+    "mac": {
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "icon": "build/icons"
+    }
+  },
   "devDependencies": {
     "electron": "31.3.0"
   }

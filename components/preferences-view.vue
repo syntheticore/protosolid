@@ -18,7 +18,7 @@
           Icon(:icon="section.icon" fixed-width)
           span {{ section.title }}
 
-    main.settings-content
+    main.settings-content(:class="{ 'has-restart': restartRequired }")
       section(v-if="activeSection === 'units'")
         header
           h1 Units
@@ -145,6 +145,7 @@
     position: relative
     display: grid
     grid-template-columns: 190px minmax(0, 1fr)
+    grid-template-rows: minmax(0, 1fr)
     width: 100%
     height: 100%
     color: $bright1
@@ -223,8 +224,11 @@
   .settings-content
     position: relative
     min-width: 0
-    padding: contentInset contentInset 88px
+    padding: contentInset
     overflow: auto
+
+    &.has-restart
+      padding-bottom: 88px
 
     .input:focus
       border-color: $bright2 * 0.7

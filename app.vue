@@ -179,6 +179,13 @@
       const editingText = e.target.closest?.('input, textarea, [contenteditable="true"]')
       if(!editingText && !switchingDocument.value && !documentBusy.value &&
         activeDocument.value?.activeSketch && !e.altKey && (e.ctrlKey || e.metaKey) &&
+        (key == 'c' || key == 'v')) {
+        e.preventDefault()
+        bus.emit('sketch-clipboard', key == 'c' ? 'copy' : 'paste')
+        return
+      }
+      if(!editingText && !switchingDocument.value && !documentBusy.value &&
+        activeDocument.value?.activeSketch && !e.altKey && (e.ctrlKey || e.metaKey) &&
         (key == 'z' || key == 'y')) {
         e.preventDefault()
         bus.emit('sketch-history', key == 'y' || e.shiftKey ? 1 : -1)

@@ -16,14 +16,6 @@
 
     .main
 
-      .sketch-history(v-if="document.activeSketch")
-
-        button.button(title="Undo (Ctrl/Cmd+Z)" :disabled="!document.activeSketch.canUndo" @click="bus.emit('sketch-history', -1)")
-          Icon(icon="undo" fixed-width)
-
-        button.button(title="Redo (Ctrl/Cmd+Shift+Z / Ctrl+Y)" :disabled="!document.activeSketch.canRedo" @click="bus.emit('sketch-history', 1)")
-          Icon(icon="redo" fixed-width)
-
       label.reference(v-if="document.activeSketch" title="Reference geometry")
 
         Icon(icon="asterisk")
@@ -101,15 +93,6 @@
     .hot-key
       top: 6px
       right: 2px
-
-  .sketch-history
-    display: flex
-    flex-direction: column
-    justify-content: center
-    border-right: 1px solid $dark1
-
-    button
-      padding: 6px 8px
 
   .tabs
     display: flex

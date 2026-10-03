@@ -50,6 +50,7 @@ import {
 } from './core/assembly.js'
 import { EPSILON } from './core/utils.js'
 import { lineFillet } from './core/sketch-fillet.js'
+import { pasteSketchSelection } from './sketch-clipboard.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
 import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffsetFrame, buildOffsetCurves } from './core/sketch-offset.js'
 
@@ -1160,6 +1161,48 @@ export class SketchTool extends Tool {
   }
 }
 
+
+export class PasteSketchTool extends SketchTool {
+  static icon = 'paste'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
+    Object.assign(this, pasteSketchSelection(sketch))
+    this.handles = this.elements.map(elem => elem.setHandles ? elem.handles().map(point => point.clone()) : null)
+    this.positions = this.constraints.map(constraint => constraint.position?.clone())
+    this.snapToGuides = false
+    this.snapToPoints = false
+    this.viewport.elementChanged()
+  }
+
+  mouseMove(vec) {
+    const delta = vec.clone().sub(this.anchor)
+    this.elements.forEach((elem, index) => {
+      if(this.handles[index]) elem.setHandles(this.handles[index].map(point => point.clone().add(delta)))
+    })
+    this.constraints.forEach((constraint, index) => {
+      if(this.positions[index]) constraint.position = this.positions[index].clone().add(delta)
+      if(constraint instanceof ProfileOffsetConstraint) constraint.rebuild()
+    })
+    this.viewport.elementChanged()
+  }
+
+  click(vec) {
+    this.mouseMove(vec)
+    this.constraints.forEach(constraint => this.sketch.addConstraint(constraint))
+    this.viewport.document.selection.clear()
+    this.elements.forEach(elem => this.viewport.document.selection.add(elem))
+    this.elements = []
+    this.viewport.activateTool(ManipulationTool)
+    this.viewport.updateRegions(true)
+  }
+
+  dispose() {
+    this.elements.forEach(elem => elem.remove())
+    this.elements = []
+    this.viewport.elementChanged()
+  }
+}
 
 export class LineTool extends SketchTool {
   static icon = 'pen'

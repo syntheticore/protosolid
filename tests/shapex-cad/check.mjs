@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { initialize, loadDocument } from './runtime.mjs'
 import { ShellFeature } from '../../js/core/features.js'
 
+const verifyFailures = process.argv.includes('--verify-failures')
 // Rebuild from the current Rust source before loading the WASM package.
 execSync('npm run build-shapex', {
   cwd: fileURLToPath(new URL('../..', import.meta.url)),
@@ -13,11 +14,16 @@ execSync('npm run build-shapex', {
   env: { ...process.env, PATH: dirname(process.execPath) + delimiter + process.env.PATH },
 })
 await initialize()
-const files = (await readdir(new URL('.', import.meta.url)))
-  .filter(file => file.endsWith('.cad')).sort()
+const files = [
+  ...(await readdir(new URL('.', import.meta.url))).filter(file => file.endsWith('.cad')),
+  ...(await readdir(new URL('failing/', import.meta.url)))
+    .filter(file => file.endsWith('.cad')).map(file => 'failing/' + file),
+].sort()
 assert.ok(files.length, 'No CAD cases found')
 let failures = 0
+let regressions = 0
 for(const file of files) {
+  const awaitingReview = file.startsWith('failing/')
   const source = await readFile(new URL(file, import.meta.url), 'utf8')
   const document = loadDocument(source)
   const { features, marker } = document.timeline
@@ -28,7 +34,7 @@ for(const file of files) {
     assert.ok(feature.isComplete(), `${file}: incomplete ${feature.title} ${feature.id}`)
     console.log(`  ${feature.error ? 'FAIL' : 'OK'} ${feature.title} ${feature.id}`)
     if(feature.error) console.log(`    ${feature.error.msg}`)
-    if(feature.constructor.name == 'LoftFeature' && !feature.error) {
+    if(!awaitingReview && feature.constructor.name == 'LoftFeature' && !feature.error) {
       const faces = feature.previewBody.faces()
       assert.equal(faces.length, 3, `${file}: circular loft must have one side and two caps`)
       assert.equal(faces.filter(face => face.getPlane()).length, 2,
@@ -36,6 +42,27 @@ for(const file of files) {
     }
   }
   const final = features.at(-1)
+  if(awaitingReview) {
+    assert.ok(features.slice(0, -1).every(feature => !feature.error), `${file}: setup must build without warnings`)
+    if(verifyFailures) {
+      assert.deepEqual(errors.map(feature => feature.id), [final.id],
+        `${file}: expected only the final feature to fail; review newly passing cases`)
+      assert.equal(final.error.type, 'error', `${file}: expected a failed feature`)
+      assert.match(final.error.msg, /^Shapex /, `${file}: failure must originate in modeling`)
+    }
+    final.updateReferences(document.timeline.tree(features.length - 1))
+    assert.equal(final.error, undefined, `${file}: every saved reference must resolve without partial loss`)
+    if(final.constructor.name == 'ShellFeature') {
+      for(const reference of final.faces() || []) {
+        assert.ok(!reference.getItem().connectedFaces().some(face => face.id.includes('/fillet/')),
+          `${file}: shell openings bordering fillets are excluded`)
+      }
+      if(file.includes('multiple-solids')) {
+        assert.ok(new Set(final.faces().map(reference => reference.getItem().solid.id)).size >= 2,
+          `${file}: one shell must select openings on multiple solids`)
+      }
+    }
+  } else regressions += errors.length
   if(file.startsWith('021-')) {
     for(const feature of features.slice(1)) {
       const body = document.top(feature).compound
@@ -114,4 +141,4 @@ for(const file of files) {
   failures += errors.length
 }
 console.log(`\n${files.length} documents, ${failures} failing features.`)
-if(failures) process.exitCode = 1
+if(regressions || (failures && !verifyFailures)) process.exitCode = 1

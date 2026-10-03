@@ -1,0 +1,519 @@
+{
+  "lastId": "30000n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 9,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-5",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-6",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-1",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    -15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    -15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-2",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    -15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-3",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-4",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    -15,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-16",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-15",
+              "sketchId": "id-6",
+              "rings": [
+                [
+                  "id-4",
+                  "id-1",
+                  "id-2",
+                  "id-3"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 20,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-53",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-54",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-52",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "radius": 5
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-57",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-56",
+              "sketchId": "id-54",
+              "rings": [
+                [
+                  "id-52"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 20,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "cut"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1005",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-1006",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-1001",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    30,
+                    -15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    60,
+                    -15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1002",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    60,
+                    -15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    60,
+                    15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1003",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    60,
+                    15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    30,
+                    15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1004",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    30,
+                    15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    30,
+                    -15,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-1016",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-1015",
+              "sketchId": "id-1006",
+              "rings": [
+                [
+                  "id-1004",
+                  "id-1001",
+                  "id-1002",
+                  "id-1003"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 20,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1053",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-1054",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-1052",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  45,
+                  0,
+                  0
+                ]
+              },
+              "radius": 5
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-1057",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-1056",
+              "sketchId": "id-1054",
+              "rings": [
+                [
+                  "id-1052"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 8,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "cut"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "ShellFeature",
+        "values": {
+          "faces": [
+            {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "/extrude-id-16/top"
+            },
+            {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/1",
+              "topoId": "/extrude-id-1057/top"
+            }
+          ],
+          "thickness": 1,
+          "side": false,
+          "joinType": "rounded"
+        },
+        "id": "id-20001",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "multiple solids pocket opening shell",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-6": true,
+        "id-54": true,
+        "id-1006": true,
+        "id-1054": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          108.12737263602233,
+          84.9225465881454,
+          75.11153291307065
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          23.127372636022333,
+          -0.07745341185460408,
+          10.11153291307064
+        ]
+      }
+    },
+    {
+      "id": "id-pocket-view",
+      "title": "Pocket floor",
+      "system": false,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          108.12737263602233,
+          84.9225465881454,
+          -65
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          23.127372636022333,
+          -0.07745341185460408,
+          10.11153291307064
+        ]
+      }
+    }
+  ]
+}

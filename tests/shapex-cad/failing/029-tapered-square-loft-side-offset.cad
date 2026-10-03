@@ -1,0 +1,353 @@
+{
+  "lastId": "30000n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 5,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-2",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-500",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -12,
+                    -12,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    12,
+                    -12,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-501",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    12,
+                    -12,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    12,
+                    12,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-502",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    12,
+                    12,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -12,
+                    12,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-503",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -12,
+                    12,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -12,
+                    -12,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "PlaneFeature",
+        "id": "id-6",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "base": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          },
+          "offset": 20
+        },
+        "expressions": {},
+        "planeId": "id-7"
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-8",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-7"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-9",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-510",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -6,
+                    -8,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    10,
+                    -8,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-511",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    10,
+                    -8,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    10,
+                    8,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-512",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    10,
+                    8,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -6,
+                    8,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-513",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -6,
+                    8,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -6,
+                    -8,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "LoftFeature",
+        "id": "id-13",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-5",
+              "sketchId": "id-2",
+              "rings": [
+                [
+                  "id-500",
+                  "id-501",
+                  "id-502",
+                  "id-503"
+                ]
+              ]
+            },
+            {
+              "$class": "ProfileReference",
+              "id": "id-12",
+              "sketchId": "id-9",
+              "rings": [
+                [
+                  "id-510",
+                  "id-511",
+                  "id-512",
+                  "id-513"
+                ]
+              ]
+            }
+          ],
+          "untwist": true,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "OffsetFeature",
+        "values": {
+          "faces": [
+            {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "/id-13/loft/generated/2"
+            }
+          ],
+          "distance": 0.5,
+          "side": true
+        },
+        "id": "id-20001",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "rectangular loft side offset",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-2": true,
+        "id-9": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          85.86842105263158,
+          85,
+          73.6842105263158
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          0.8684210526315789,
+          0,
+          8.68421052631579
+        ]
+      }
+    }
+  ]
+}

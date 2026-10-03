@@ -1,7 +1,10 @@
 # Shapex saved-document regressions
 
-These seventeen `.cad` files exercise real modeling workflows and saved references.
-Every feature must complete without an error or partial reference loss. Circular
+The seventeen `.cad` files in this directory are passing regressions. Ten new
+cases awaiting review are in [failing/](failing/README.md), numbered 022–031.
+All files exercise real modeling workflows and saved references.
+Every feature in a passing regression must complete without an error or partial
+reference loss. Circular
 lofts must publish one curved side surface and two planar caps.
 
 | File | Operation |
@@ -30,8 +33,9 @@ From the repository root:
 node tests/shapex-cad/check.mjs
 ```
 
-The checker rebuilds Shapex WASM from the current Rust source, loads the saved
-documents, and exits **1** if any feature fails or loses a reference. It verifies
+The checker rebuilds Shapex WASM from the current Rust source, loads both the
+passing regressions and the failing catalogue, and exits **1** if any feature
+fails or loses a reference. It verifies
 that blend selections are semantic edges joining two faces and checks the
 circular loft face counts. It does not build or launch the application.
 Case 019 checks that all chamfer boundary edges are visible. Case 020 applies
@@ -49,3 +53,16 @@ The loft selections in cases 013, 014, 015, and 017 refer to the single continuo
 side surface and its rim, replacing the former four patch selections. Operation
 dimensions and selected geometric regions are unchanged. Case numbering is
 preserved from the original failure catalogue.
+
+To verify the failure catalogue while also requiring the existing regressions
+to pass:
+
+```sh
+node tests/shapex-cad/check.mjs --verify-failures
+```
+
+This exits **0** only when each document in `failing/` has exactly one final
+Shapex modeling failure, a successful setup, and intact saved references. A newly
+passing case fails this verification so it can be reviewed and moved into the
+passing regressions. Shell openings bordering fillets and blend seam selections
+are excluded. The current result is 17 passing regressions and 10 final failures.

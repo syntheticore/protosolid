@@ -1,0 +1,360 @@
+{
+  "lastId": "30000n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 3,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-7",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-8",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-1",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    -15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    -15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-2",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    -15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    0,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-3",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    15,
+                    0,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-4",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    0,
+                    0,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    0,
+                    15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-5",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    0,
+                    15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    15,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-6",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    15,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    -15,
+                    -15,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-22",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-21",
+              "sketchId": "id-8",
+              "rings": [
+                [
+                  "id-6",
+                  "id-1",
+                  "id-2",
+                  "id-3",
+                  "id-4",
+                  "id-5"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 20,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "FilletFeature",
+        "values": {
+          "edges": [
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/bottom|/extrude-id-22/swept/id-6)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/bottom|/extrude-id-22/swept/id-1)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/bottom|/extrude-id-22/swept/id-2)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/bottom|/extrude-id-22/swept/id-3)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/bottom|/extrude-id-22/swept/id-4)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/bottom|/extrude-id-22/swept/id-5)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/swept/id-6|/extrude-id-22/swept/id-5)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/swept/id-6|/extrude-id-22/swept/id-1)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/swept/id-1|/extrude-id-22/swept/id-2)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/swept/id-2|/extrude-id-22/swept/id-3)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/swept/id-3|/extrude-id-22/swept/id-4)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/swept/id-4|/extrude-id-22/swept/id-5)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/top|/extrude-id-22/swept/id-6)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/top|/extrude-id-22/swept/id-1)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/top|/extrude-id-22/swept/id-2)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/top|/extrude-id-22/swept/id-3)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/top|/extrude-id-22/swept/id-4)/1"
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "(/extrude-id-22/top|/extrude-id-22/swept/id-5)/1"
+            }
+          ],
+          "radius": 1,
+          "propagation": "tangent"
+        },
+        "id": "id-20001",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "l block all edge fillet",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-8": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          82.5,
+          82.5,
+          75
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          -2.5,
+          -2.5,
+          10
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,205 @@
+{
+  "lastId": "30000n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 5,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-2",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-3",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-1",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "radius": 10
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-6",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-5",
+              "sketchId": "id-3",
+              "rings": [
+                [
+                  "id-1"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 20,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-17",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XZ"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-18",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-16",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  -10,
+                  0
+                ]
+              },
+              "radius": 3
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-21",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "both",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-20",
+              "sketchId": "id-18",
+              "rings": [
+                [
+                  "id-16"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 15,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "cut"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "MoveFeature",
+        "values": {
+          "faces": [
+            {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "/extrude-id-21/swept/id-16"
+            }
+          ],
+          "x": 1,
+          "y": 0,
+          "z": 0,
+          "rx": 0,
+          "ry": 0,
+          "rz": 0
+        },
+        "id": "id-20001",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "cross bore move",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-3": true,
+        "id-18": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          84.99999999043311,
+          84.99999997581303,
+          74.99999953035747
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          -9.566894669708934e-9,
+          -2.4186974606125582e-8,
+          9.999999530357472
+        ]
+      }
+    }
+  ]
+}

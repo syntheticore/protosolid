@@ -624,7 +624,7 @@ export class ManipulationTool extends HighlightTool {
     // A curve body has no single snap handle under the pointer. Snapping it
     // as though its first handle were being dragged would create surprising
     // endpoint/center constraints on release.
-    this.snapToPoints = !this.curveDrag
+    this.snapToPoints = !this.curveDrag && !this.viewport.activeDimension
     this.cursor = 'grabbing'
   }
 

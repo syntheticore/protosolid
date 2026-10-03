@@ -302,6 +302,7 @@
         this.cancelCameraUnpreview()
         this.cameraPreview = null
         this.registerDocument(this.document, oldDocument)
+        this.activateTool(ManipulationTool)
       },
 
       'document.activeSketch': function(sketch) {

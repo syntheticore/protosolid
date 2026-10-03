@@ -682,6 +682,7 @@
       },
 
       deactivateFeature() {
+        this.cancelPick()
         // Always consider sketches as modified
         if(this.isSketchFeature) this.document.timeline.invalidateFeature(this.activeFeature)
         // Restore feature state on cancel

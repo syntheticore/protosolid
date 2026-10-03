@@ -92,6 +92,8 @@
   export default {
     name: 'NumericInput',
 
+    inject: ['documentBusy'],
+
     props: {
       value: [String, Number],
       autoFocus: Boolean,
@@ -148,6 +150,10 @@
         if(!input) return
         clearTimeout(this.timeout)
         this.timeout = setTimeout(() => {
+          if(this.documentBusy) {
+            this.$watch('documentBusy', () => this.focusInput(cb), { once: true })
+            return
+          }
           input.setSelectionRange(0, input.value.length)
           input.focus()
           if(cb) setTimeout(cb)

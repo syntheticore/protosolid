@@ -504,7 +504,7 @@
         // Don't activate features twice
         if(this.feature && this.feature.constructor === tool.feature) return
         this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))
-        setTimeout(() => {
+        this.activationTimer = setTimeout(() => {
           if(tool.feature) {
             this.feature = new tool.feature(this.document)
             this.document.creatingFeature = this.feature
@@ -530,7 +530,9 @@
           this.activeTool.constructor.hasOptions
       },
 
-      closeFeature: function() {
+      closeFeature: function(document = this.document) {
+        if(document !== this.document) return
+        clearTimeout(this.activationTimer)
         this.document.creatingFeature = null
         this.feature = null
       },

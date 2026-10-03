@@ -10,7 +10,9 @@
 
     TabBar(
       :documents="documents"
-      v-model:active-document="activeDocument"
+      :active-document="activeDocument"
+      :inert="documentBusy"
+      @update:active-document="activateDocument"
       :maximized="maximized"
       @create-document="createDocument"
       @open-document="loadDocument"
@@ -19,7 +21,7 @@
       @delete-document="closeDocument"
     )
 
-    DocumentView(:document="activeDocument")
+    DocumentView(:document="activeDocument" :inert="documentBusy")
 
 </template>
 
@@ -71,6 +73,7 @@
   } from './js/preferences.js'
   import Document from './js/core/document.js'
   import Emitter from './js/emitter.js'
+  import { ManipulationTool } from './js/tools.js'
   // const wasmP = import('../../rust/pkg/wasm-index.js')
 
   loadPreferences()
@@ -107,6 +110,10 @@
   const maximized = ref(false)
   const activeDocument = ref(null)
   const documents = ref([])
+  const switchingDocument = ref(false)
+  const documentBusy = computed(() => switchingDocument.value || activeDocument.value?.isRegenerating)
+  provide('documentBusy', documentBusy)
+  let documentSwitchQueue = Promise.resolve()
 
   window.addEventListener('resize', () => {
     bus.emit('resize')
@@ -171,6 +178,8 @@
       const isModifierKey = ['Shift', 'Control', 'Meta', 'Alt'].includes(e.key)
       if(!isModifierKey && (e.ctrlKey || e.metaKey || e.altKey)) return
 
+      if(switchingDocument.value || (documentBusy.value && e.key !== 'Enter')) return
+
       if(e.key === 'Escape') {
         bus.emit('escape')
 
@@ -196,49 +205,67 @@
   })
 
 
-  function createDocument() {
-    activeDocument.value = new Document(bus)
-    documents.value.push(activeDocument.value)
+  function activateDocument(doc) {
+    switchingDocument.value = true
+    return documentSwitchQueue = documentSwitchQueue.catch(() => {}).then(async () => {
+      if(activeDocument.value === doc || !documents.value.includes(doc)) return
+      if(activeDocument.value) {
+        activeDocument.value.activateSimulation(null)
+        bus.emit('activate-tool', ManipulationTool)
+        await activeDocument.value.cancelFeature()
+      }
+      activeDocument.value = doc
+      await nextTick()
+    }).finally(() => switchingDocument.value = false)
+  }
+
+  async function createDocument() {
+    if(documentBusy.value) return
+    const doc = new Document(bus)
+    documents.value.push(doc)
+    await activateDocument(doc)
   }
 
   function loadDocument() {
+    if(documentBusy.value) return
     const doc = new Document(bus)
-    doc.load().then(() => {
+    doc.load().then(async () => {
       // Close untouched documents on load
-      if(activeDocument.value.isFresh) deleteDocument(activeDocument.value)
-      activeDocument.value = doc
+      const previousDocument = activeDocument.value
       documents.value.push(doc)
-      nextTick().then(() => {
-        doc.treeletsExpandedByDefault = true
-        bus.emit('zoom-all')
-      })
+      await activateDocument(doc)
+      if(previousDocument.isFresh) deleteDocument(previousDocument)
+      doc.treeletsExpandedByDefault = true
+      bus.emit('zoom-all')
     })
   }
 
-  async function saveDocument() {
-    activeDocument.value.save()
+  function saveDocument() {
+    return activeDocument.value.save()
   }
 
-  async function saveDocumentAs() {
-    activeDocument.value.save(true)
+  function saveDocumentAs() {
+    return activeDocument.value.save(true)
   }
 
-  function closeDocument(doc) {
+  async function closeDocument(doc) {
+    if(documentBusy.value) return
     const name = doc.filePath || 'Untitled Document'
     if(doc.hasChanges &&
       !window.confirm(name + ' has unsaved changes. Close anyway?')
     ) return
     const index = documents.value.indexOf(doc)
-    deleteDocument(doc)
-    if(!documents.value.length) {
-      createDocument()
-    } else if(activeDocument.value === doc) {
-      activeDocument.value = documents.value[Math.min(index, documents.value.length - 1)]
+    if(activeDocument.value === doc) {
+      if(documents.value.length === 1) {
+        await createDocument()
+      } else {
+        await activateDocument(documents.value[index + 1] || documents.value[index - 1])
+      }
     }
+    deleteDocument(doc)
   }
 
   function deleteDocument(doc) {
-    const index = documents.value.indexOf(doc)
     documents.value = documents.value.filter(d => d !== doc)
   }
 

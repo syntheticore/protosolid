@@ -9,7 +9,7 @@ import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, ocCatch, rad } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
-import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame } from '../three/gizmos.js'
+import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame, faceGizmoFrame } from '../three/gizmos.js'
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
 import {
@@ -168,11 +168,8 @@ export class Feature {
   getGizmo() {}
 
   updateGizmos() {
-    if(this.isComplete()) {
-      let gizmo = this.getGizmo()
-      if(!gizmo) return
-      gizmo = gizmo.distance
-      if(!gizmo) return
+    const gizmo = this.isComplete() && this.getGizmo()?.distance
+    if(gizmo) {
       const component = this.document.top().findChild(this.componentOccurrenceId) ||
         this.document.top().findChild(this.componentId)
       const transform = component && worldTransform(component)
@@ -1694,12 +1691,14 @@ export class RevolveFeature extends Feature {
         title: 'Angle',
         type: 'angle',
         when: feature => feature.extent == 'angle',
+        gizmo: true,
       },
       offset: {
         title: 'Offset',
         type: 'angle',
         allowNegative: true,
         when: feature => feature.extent == 'angle',
+        gizmo: true,
       },
       fromFace: {
         title: 'From face',
@@ -1749,6 +1748,52 @@ export class RevolveFeature extends Feature {
     } catch(err) {
       this.error = err?.msg ? err : { type: 'error', msg: 'Revolution could not be created' }
     }
+  }
+
+  getGizmo() {
+    const axis = this.axis().getItem()
+    const profileCenter = this.profiles().at(-1).getItem().center()
+    const direction = normalFromMatrix(axis)
+    const origin = new THREE.Vector3().setFromMatrixPosition(axis)
+    const center = origin.clone().addScaledVector(direction, profileCenter.clone().sub(origin).dot(direction))
+    const radial = profileCenter.clone().sub(center)
+    if(radial.lengthSq() < 1e-12) radial.setFromMatrixColumn(axis, 0)
+    radial.normalize()
+    const rotation = new THREE.Matrix4().makeBasis(radial, direction.clone().cross(radial), direction)
+    const sign = this.side ? 1 : -1
+    return {
+      angle: {
+        type: 'angle', center,
+        rotation: rotation.clone().multiply(new THREE.Matrix4().makeRotationZ(rad(this.offset * sign))),
+        value: this.angle * sign,
+        cb: angle => {
+          this.setExpression('angle', null)
+          this.angle = Math.min(360, Math.abs(angle))
+          if(angle) this.side = angle > 0
+        },
+      },
+      offset: {
+        type: 'angle', center, rotation, size: 0.65,
+        value: this.offset * sign,
+        cb: angle => {
+          this.setExpression('offset', null)
+          this.offset = angle * (this.side ? 1 : -1)
+        },
+      },
+    }
+  }
+
+  updateGizmos() {
+    this.revolveGizmos ||= markRaw(new FeatureGizmos())
+    const component = this.document.top().findChild(this.componentOccurrenceId) ||
+      this.document.top().findChild(this.componentId)
+    this.revolveGizmos.update(this.isComplete() && this.extent == 'angle' ? this.getGizmo() : {}, worldTransform(component))
+  }
+
+  dispose() {
+    super.dispose()
+    this.revolveGizmos?.dispose()
+    this.revolveGizmos = null
   }
 
   preview() {
@@ -2143,6 +2188,7 @@ export class ShellFeature extends Feature {
       thickness: {
         title: 'Thickness',
         type: 'length',
+        gizmo: true,
       },
       side: {
         title: 'Side',
@@ -2172,6 +2218,28 @@ export class ShellFeature extends Feature {
     try {
       comp.compound = comp.compound.shell(references.faces, thickness, this.joinType)
     } catch(err) { this.error = err || this.error }
+  }
+
+  getGizmo() {
+    const tree = this.document.top(this.document.timeline.features.indexOf(this))
+    const compound = tree.findChild(this.componentId).compound
+    const openings = this.faces ? this.faces().map(ref => ref.getItem()) : []
+    const retained = face => !openings.some(opening => opening.isSame(face))
+    const face = openings.at(-1)?.connectedFaces().find(retained) ||
+      compound.solids().flatMap(solid => solid.faces()).find(retained)
+    if(!face) return
+    const { center, direction } = faceGizmoFrame(face.tesselate(), face.center())
+    if(face.geom().Orientation_1() == window.oc.oc.TopAbs_Orientation.TopAbs_REVERSED) direction.negate()
+    return {
+      distance: {
+        center, direction, distance: this.thickness, side: this.side,
+        cb: (thickness, side) => {
+          this.setExpression('thickness', null)
+          this.thickness = thickness
+          this.side = side
+        },
+      },
+    }
   }
 }
 

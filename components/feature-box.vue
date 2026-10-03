@@ -381,6 +381,7 @@
       this.bus.on('resize', this.updatePaths)
       this.bus.on('keydown', this.onKeydown)
       this.pickerSession = new PickerSession(this.bus, {
+        canReactivate: () => !this.isSketchFeature,
         available: key => !this.destroyed && this.activeFeature.needsPicker(key, true),
         defaultKey: () => Object.keys(this.orderedSettings).find(key =>
           this.activeFeature.needsPicker(key, true)

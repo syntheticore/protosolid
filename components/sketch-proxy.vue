@@ -138,7 +138,7 @@
     const activeHandle = props.activeHandle
     const releasedHandle = !activeHandle && props.sketch.solveHandle
     props.sketch.solve(props.document.top(), activeHandle, {
-      applyResults: !releasedHandle,
+      applyResults: !releasedHandle && !props.sketch.restoringHistory,
     })
   }
 
@@ -157,6 +157,10 @@
     profiles.value = props.sketch.profiles(props.component)
     props.sketch.profileUpdateNeeded = false
     props.sketch.solveHandle = null
+    if(active.value && !props.activeHandle) {
+      props.sketch.recordHistory(props.activeTool?.historyState?.())
+    }
+    props.sketch.restoringHistory = false
     fresh = false
   }, { immediate: true })
 

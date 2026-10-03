@@ -108,6 +108,19 @@ class Tool {
 
   snapExclusions() { return this.curve ? [this.curve] : [] }
 
+  historyState() {
+    if(!this.sketch) return
+    const previews = new Set([
+      this.curve, this.arc, ...(this.lines || []),
+      ...(this.elements || []), ...(this.curves || []),
+    ])
+    const state = this.sketch.dump()
+    state.elements = state.elements.filter(elem => !previews.has(elem))
+    state.constraints = state.constraints.filter(constraint =>
+      !constraint.items.some(item => previews.has(item.curve())))
+    return state
+  }
+
   acceptsSnapElement(_elem) { return true }
 
   dispose() {}
@@ -1501,6 +1514,7 @@ export class CircleTool extends SketchTool {
       this.constrainPoint(this.curve, 0)
       // this.curve.sketch = this.sketch
     }
+    this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
@@ -1508,6 +1522,12 @@ export class CircleTool extends SketchTool {
     // this.curve.setHandles([this.center.toArray(), vec.toArray()], false)
     this.curve.setHandles([this.center, vec], false)
     this.viewport.elementChanged()
+  }
+
+  dispose() {
+    if(this.curve) this.curve.remove()
+    this.curve = null
+    this.center = null
   }
 }
 
@@ -1850,6 +1870,7 @@ export class ArcTool extends SketchTool {
       this.start = vec
       this.startSnap = snap
     }
+    this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
@@ -1862,6 +1883,13 @@ export class ArcTool extends SketchTool {
       return
     }
     this.viewport.elementChanged()
+  }
+
+  dispose() {
+    if(this.curve) this.curve.remove()
+    this.curve = null
+    this.start = null
+    this.end = null
   }
 }
 

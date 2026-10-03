@@ -366,6 +366,7 @@ export default class Document extends Emitter {
       // Activate sketch for sketch features
       if(feature.constructor === CreateSketchFeature) {
         this.activeSketch = feature.sketch
+        this.activeSketch.startHistory()
 
         // Store camera view
         this.previousActiveView = this.activeView

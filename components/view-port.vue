@@ -484,6 +484,7 @@
       this.bus.on('thermal-result', this.updateFluxArrows)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
+      this.bus.on('sketch-history', this.changeSketchHistory)
       this.bus.on('keyup', this.keyUp)
 
       this.bus.on('alt-pressed', this.setOrbiting)
@@ -499,6 +500,7 @@
     },
 
     beforeUnmount: function() {
+      this.bus.off('sketch-history', this.changeSketchHistory)
       clearTimeout(this.zoomEndTimer)
       this.cancelCameraUnpreview()
       this.document.off('regenerated', this.updateExportPreview)
@@ -513,6 +515,20 @@
     },
 
     methods: {
+      changeSketchHistory: function(direction) {
+        const sketch = this.document.activeSketch
+        if(!sketch || this.document.isRegenerating) return
+        this.activateTool(this.activeTool.constructor)
+        const tree = this.document.top()
+        if(this.regionsDirty || sketch.solveNeeded || sketch.profileUpdateNeeded) sketch.solve(tree)
+        sketch.recordHistory()
+        if(!sketch.restoreHistory(direction, tree)) return
+        this.document.selection.clear()
+        this.document.hasChanges = true
+        this.regionsDirty = false
+        this.$nextTick(() => this.renderer.render())
+      },
+
       updateSketchSectionSide: function() {
         if(!this.renderer || !this.sketchSectionPlane) return
         const normal = new THREE.Vector3().setFromMatrixColumn(this.sketchSectionPlane, 2).normalize()

@@ -66,10 +66,55 @@ export class Sketch {
     this.constraints = []
     this.projections = []
     this.workplane = new THREE.Matrix4()
+    this.history = null
     // this.componentId = componentId
   }
 
   typename() { return 'Sketch' }
+
+  startHistory() {
+    this.history = { states: [this.historySnapshot()], index: 0 }
+  }
+
+  historySnapshot(state = this.dump()) {
+    return JSON.stringify(Serialize.serialize(state), (key, value) =>
+      key == 'isReference' ? !!value : value)
+  }
+
+  recordHistory(state) {
+    if(!this.history || this.restoringHistory) return
+    const snapshot = this.historySnapshot(state)
+    const { states, index } = this.history
+    if(snapshot == states[index]) return
+    states.splice(index + 1, states.length, snapshot)
+    this.history.index++
+  }
+
+  get canUndo() { return !!this.history && this.history.index > 0 }
+  get canRedo() { return !!this.history && this.history.index < this.history.states.length - 1 }
+
+  restoreHistory(direction, tree) {
+    if(direction < 0 ? !this.canUndo : !this.canRedo) return false
+    this.history.index += direction
+    const state = Serialize.parse(this.history.states[this.history.index])
+    this.elements.forEach(elem => elem.clear())
+    this.projections.forEach(projection => {
+      if(projection.output instanceof SketchElement) projection.output.clear()
+    })
+    Object.assign(this, state)
+    this.elements.forEach(elem => elem.sketch = this)
+    this.constraints.forEach(constraint => constraint.sketch = this)
+    this.projections.forEach(projection => projection.sketch = this)
+    this.projections.forEach(projection => projection.update(tree))
+    this.constraints.forEach(constraint => constraint.update(tree))
+    this.constraints.filter(constraint => constraint instanceof ProfileOffsetConstraint)
+      .forEach(constraint => constraint.rebuild())
+    this.solveHandle = null
+    this.solveNeeded = false
+    this.restoringHistory = true
+    this.profileUpdateNeeded = true
+    return true
+  }
 
   add(elem) {
     if(!this.elements.includes(elem)) this.elements.push(elem)

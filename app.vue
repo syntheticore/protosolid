@@ -175,6 +175,15 @@
     window.addEventListener('keydown', (e) => {
       // console.log(e.keyCode, e.key)
       syncModifiers(e)
+      const key = e.key.toLowerCase()
+      const editingText = e.target.closest?.('input, textarea, [contenteditable="true"]')
+      if(!editingText && !switchingDocument.value && !documentBusy.value &&
+        activeDocument.value?.activeSketch && !e.altKey && (e.ctrlKey || e.metaKey) &&
+        (key == 'z' || key == 'y')) {
+        e.preventDefault()
+        bus.emit('sketch-history', key == 'y' || e.shiftKey ? 1 : -1)
+        return
+      }
       const isModifierKey = ['Shift', 'Control', 'Meta', 'Alt'].includes(e.key)
       if(!isModifierKey && (e.ctrlKey || e.metaKey || e.altKey)) return
 

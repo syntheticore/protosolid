@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict'
+import { execSync } from 'node:child_process'
 import { readFile, readdir } from 'node:fs/promises'
+import { delimiter, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { initialize, loadDocument } from './runtime.mjs'
 
 // Explicitly invoked only; these known failures do not enter npm test.
 // Default: report modeling failures and exit 1, as a normal test run would.
 // --verify-failures: confirm each document has exactly one final failing feature.
 const verifyFailures = process.argv.includes('--verify-failures')
+// Rebuild from the current Rust source before loading the WASM package.
+execSync('npm run build-shapex', {
+  cwd: fileURLToPath(new URL('../..', import.meta.url)),
+  stdio: 'inherit',
+  env: { ...process.env, PATH: dirname(process.execPath) + delimiter + process.env.PATH },
+})
 await initialize()
 const files = (await readdir(new URL('.', import.meta.url)))
   .filter(file => file.endsWith('.cad')).sort()
@@ -29,7 +38,21 @@ for(const file of files) {
     assert.match(errors[0].error.msg, /^Shapex /, `${file}: failure must originate in modeling`)
     // A saved topology/profile reference failure is not a kernel test case.
     features.at(-1).updateReferences(document.timeline.tree(features.length - 1))
-    assert.notEqual(features.at(-1).error?.type, 'error', `${file}: unresolved final references`)
+    const final = features.at(-1)
+    assert.equal(final.error, undefined, `${file}: every saved reference must resolve, without partial loss`)
+    if(final.constructor.name == 'ShellFeature') {
+      for(const ref of final.faces() || []) {
+        assert.ok(!ref.getItem().connectedFaces().some(face => face.id.includes('/fillet/')),
+          `${file}: shell openings bordering fillets are excluded from this library`)
+      }
+    }
+    if(['FilletFeature', 'ChamferFeature'].includes(final.constructor.name)) {
+      for(const ref of final.edges()) {
+        const edge = ref.getItem()
+        assert.ok(edge.isSemantic(), `${file}: blend selection must not be a seam`)
+        assert.equal(edge.connectedFaces().length, 2, `${file}: blend edge must join two faces`)
+      }
+    }
     if(file.includes('multiple-solids')) {
       const final = features.at(-1)
       assert.equal(final.constructor.name, 'ShellFeature', `${file}: expected one shell operation`)

@@ -794,14 +794,20 @@ export class Sketch {
         })
 
       } else if(c instanceof PerpendicularConstraint) {
+        const linePrimitive = item => {
+          const curve = item.curve()
+          return curve instanceof Spline ? idMap[curve.id].find(primitive =>
+            primitive.type == 'line' && primitive.splineTangent == (item.index == 0 ? 0 : 1)
+          ) : idMap[curve.id].at(-1)
+        }
         const round = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc)
         if(round) {
-          const line = c.items.find(item => item.curve() instanceof Line)
+          const line = c.items.find(item => item !== round)
           const roundPrim = idMap[round.curve().id].at(-1)
-          const linePrim = idMap[line.curve().id].at(-1)
+          const linePrim = linePrimitive(line)
           return { id: `${id++}`, type: 'point_on_line_pl', p_id: roundPrim.c_id, l_id: linePrim.id, temporary: c.temporary }
         }
-        const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
+        const constraintPrims = c.items.map(linePrimitive)
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof ParallelConstraint) {

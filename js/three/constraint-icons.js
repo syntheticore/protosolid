@@ -1,6 +1,8 @@
 import { Line, Arc, Spline } from '../core/geom2d.js'
 
 export function perpendicularPoint(constraint) {
+  const spline = constraint.items.find(item => item.curve() instanceof Spline)
+  if(spline) return spline.curve().handles()[spline.index]
   const curves = constraint.items.map(item => item.curve())
   const line = curves.find(curve => curve instanceof Line)
   const round = curves.find(curve => curve !== line)

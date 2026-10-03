@@ -139,7 +139,7 @@
 <script setup>
 
   import { Dimension, CoincidentConstraint, ConcentricConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, PerpendicularConstraint, EqualConstraint } from '../js/core/sketch.js'
-  import { Line, Circle, Arc } from '../js/core/geom2d.js'
+  import { Line, Circle, Arc, Spline } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
   import { tangentPoint, perpendicularPoint } from '../js/three/constraint-icons.js'
   import { SketchTool } from '../js/tools.js'
@@ -224,7 +224,7 @@
     }]
 
     if(props.constraint instanceof PerpendicularConstraint &&
-      props.constraint.items.some(item => item.curve() instanceof Circle || item.curve() instanceof Arc)) return [{
+      props.constraint.items.some(item => item.curve() instanceof Circle || item.curve() instanceof Arc || item.curve() instanceof Spline)) return [{
       pos: transformPosition(perpendicularPoint(props.constraint), sketch),
     }]
 

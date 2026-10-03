@@ -1173,6 +1173,27 @@ export class SplineTool extends SketchTool {
     return this.mode == 'draw' && this.curve ? this.curve.handles().at(-2) : null
   }
 
+  lineSnapContext() {
+    if(this.mode != 'draw' || !this.curve) return null
+    return {
+      start: this.curve.handles().at(-2),
+      perpendicularCurves: [],
+    }
+  }
+
+  constrainPoint(elem, index, snap) {
+    if(arguments.length < 3) snap = captureSnap(this.viewport.snapper)
+    const constraint = super.constrainPoint(elem, index, snap)
+    if(snap?.lineRelation?.perpendicular) {
+      const target = snap.lineRelation
+      this.sketch.addConstraint(new PerpendicularConstraint(
+        new ElemRef(elem, index),
+        target.elem,
+      ))
+    }
+    return constraint
+  }
+
   shiftConstraintIndices(spline, fromIndex, offset) {
     this.sketch.constraints.forEach(constraint => constraint.items.forEach(item => {
       if(item.curve() == spline && item.index !== undefined && item.index >= fromIndex) {

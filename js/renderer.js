@@ -12,6 +12,7 @@ import materials from './materials.js'
 import DualCamera from './three/dual-camera.js'
 import PathTracingViewport from './three/path-tracing-viewport.js'
 import SketchPlane from './three/sketch-plane.js'
+import DimensionControls from './three/dimension-controls.js'
 import ShadowCatcher from './three/shadow-catcher.js'
 // import ArrowControls from './arrow-controls.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
@@ -407,6 +408,12 @@ export default class Renderer {
   }
 
   render() {
+    // Camera-dependent dimension geometry must be ready before Three.js
+    // culls objects and uploads their buffers for this frame.
+    this.activeCamera.updateMatrixWorld()
+    this.scene.traverse(object => {
+      if(object instanceof DimensionControls) object.updateLayout()
+    })
     this.sketchPlane.update(this.activeCamera)
     this.updateSplineDashScale()
     const pathTraced = this.displayMode == 'pathTraced' &&

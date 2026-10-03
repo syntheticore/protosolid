@@ -80,6 +80,10 @@ export class Sketch {
   addConstraint(constraint) {
     const existing = this.constraints.find(other => sameConstraint(other, constraint))
     if(existing) return existing
+    if(constraint instanceof ConcentricConstraint) {
+      const [left, right] = constraint.items.map(item => item.curve())
+      if(this.coincidentPointsConnected(left, 0, right, 0)) return constraint
+    }
     if(constraint instanceof CoincidentConstraint && constraint.items.length == 2) {
       const [left, right] = constraint.items
       const leftCurve = left.curve()
@@ -190,10 +194,13 @@ export class Sketch {
       if(point.elem == targetElem && point.index == targetIndex) return true
       visited.push(point)
       this.constraints.forEach(constraint => {
-        if(!(constraint instanceof CoincidentConstraint) || !constraint.items.some(item =>
+        if(!(constraint instanceof CoincidentConstraint || constraint instanceof ConcentricConstraint)) return
+        const items = constraint instanceof ConcentricConstraint ?
+          constraint.items.map(item => new ElemRef(item.curveRef, 0)) : constraint.items
+        if(!items.some(item =>
           item.curve() == point.elem && item.index == point.index
         )) return
-        constraint.items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
+        items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
       })
     }
     return false
@@ -794,6 +801,10 @@ export class Sketch {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'parallel', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
+      } else if(c instanceof ConcentricConstraint) {
+        const centers = c.items.map(item => idMap[item.curve().id].at(-1).c_id)
+        return { id: `${id++}`, type: 'p2p_coincident', p1_id: centers[0], p2_id: centers[1], temporary: c.temporary }
+
       } else if(c instanceof EqualConstraint) {
         const items = c.items.map(item => ({
           curve: item.curve(),
@@ -1312,6 +1323,12 @@ export class EqualConstraint extends Constraint {
   typename() { return 'Equal Constraint' }
 }
 Serialize.register(EqualConstraint, 'EqualConstraint')
+
+export class ConcentricConstraint extends Constraint {
+  static icon = 'bullseye'
+  typename() { return 'Concentric Constraint' }
+}
+Serialize.register(ConcentricConstraint, 'ConcentricConstraint')
 
 export class TangentConstraint extends Constraint {
   static icon = 'bezier-curve'

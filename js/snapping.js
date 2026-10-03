@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { Line, Circle, Arc, Spline, OffsetCurve, supportsPointOnCurveConstraint } from './core/geom2d.js'
 import { cross2d, vecFromOc } from './core/utils.js'
-import { CoincidentConstraint, FixConstraint, HorVertConstraint, ProfileOffsetConstraint } from './core/sketch.js'
+import { CoincidentConstraint, ConcentricConstraint, FixConstraint, HorVertConstraint, ProfileOffsetConstraint } from './core/sketch.js'
 
 const snapDistance = 14 // px
 const maxSnapReferences = 5
@@ -164,10 +164,15 @@ export default class Snapper {
       if(points.some(other => other.elem == point.elem && other.index == point.index)) continue
       points.push(point)
       sketch.constraints.forEach(constraint => {
-        if(!(constraint instanceof CoincidentConstraint) || !constraint.items.some(item =>
-          item.curve() == point.elem && item.index == point.index
+        if(!(constraint instanceof CoincidentConstraint || constraint instanceof ConcentricConstraint)) return
+        const constraintPoints = constraint.items.map(item => ({
+          elem: item.curve(),
+          index: constraint instanceof ConcentricConstraint ? 0 : item.index,
+        }))
+        if(!constraintPoints.some(other =>
+          other.elem == point.elem && other.index == point.index
         )) return
-        constraint.items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
+        constraintPoints.forEach(other => pending.push(other))
       })
     }
     return points

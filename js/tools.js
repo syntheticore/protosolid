@@ -33,6 +33,7 @@ import {
   HorVertConstraint,
   ParallelConstraint,
   EqualConstraint,
+  ConcentricConstraint,
   TangentConstraint,
   FixConstraint,
   Dimension,
@@ -1824,6 +1825,16 @@ export class EqualConstraintTool extends ConstraintTool {
     return items.every(item => item instanceof Line) ||
       items.every(item => item instanceof Circle || item instanceof Arc)
   }
+}
+
+export class ConcentricConstraintTool extends ConstraintTool {
+  static constraintType = ConcentricConstraint
+  static icon = 'bullseye'
+  static selectors = ['curve']
+
+  isComplete(counts) { return counts.curve == 2 }
+
+  acceptsItem(item) { return item instanceof Circle || item instanceof Arc }
 }
 
 export class TangentConstraintTool extends ConstraintTool {

@@ -138,7 +138,7 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, EqualConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, ConcentricConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, EqualConstraint } from '../js/core/sketch.js'
   import { Line, Circle, Arc } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
   import { tangentPoint } from '../js/three/constraint-icons.js'
@@ -212,6 +212,11 @@
         offset: { x: 11, y: -11 },
       }]
     }
+
+    if(props.constraint instanceof ConcentricConstraint) return [{
+      pos: transformPosition(point(props.constraint.items[0]), sketch),
+      offset: { x: 11, y: -11 },
+    }]
 
     if(props.constraint instanceof TangentConstraint) return [{
       pos: transformPosition(tangentPoint(props.constraint), sketch),

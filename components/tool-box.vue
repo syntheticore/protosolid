@@ -278,6 +278,7 @@
     HorVertConstraintTool,
     ParallelConstraintTool,
     EqualConstraintTool,
+    ConcentricConstraintTool,
     TangentConstraintTool,
     FixConstraintTool,
     DimensionTool,
@@ -393,6 +394,7 @@
               { title: 'Hor/Vert', tool: HorVertConstraintTool },
               { title: 'Tangent', tool: TangentConstraintTool },
               { title: 'Equal', tool: EqualConstraintTool },
+              { title: 'Concentric', tool: ConcentricConstraintTool },
               { title: 'Fix', tool: FixConstraintTool }, //XXX also ground for assemblies
             ],
           },

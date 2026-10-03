@@ -1436,10 +1436,9 @@ export class RectangleTool extends SketchTool {
       this.sketch.addConstraint(new CoincidentConstraint(
         new ElemRef(first, firstIndex), new ElemRef(second, secondIndex)
       ))
+      this.sketch.addConstraint(new PerpendicularConstraint(first, second))
     })
-    ;[bottom, right, top, left].forEach(line => {
-      this.sketch.addConstraint(new HorVertConstraint(line))
-    })
+    this.sketch.addConstraint(new HorVertConstraint(bottom))
 
     this.constrainPoint(bottom, 0, this.startSnap)
     this.constrainPoint(top, 0, endSnap)

@@ -1,4 +1,5 @@
 import { Line, Arc, Spline } from '../core/geom2d.js'
+import { cross2d } from '../core/utils.js'
 
 export function perpendicularPoint(constraint) {
   const spline = constraint.items.find(item => item.curve() instanceof Spline)
@@ -6,6 +7,13 @@ export function perpendicularPoint(constraint) {
   const curves = constraint.items.map(item => item.curve())
   const line = curves.find(curve => curve instanceof Line)
   const round = curves.find(curve => curve !== line)
+  if(round instanceof Line) {
+    const start = line.points[0]
+    const direction = line.direction()
+    const otherDirection = round.direction()
+    const parameter = cross2d(round.points[0].clone().sub(start), otherDirection) / cross2d(direction, otherDirection)
+    return start.clone().addScaledVector(direction, parameter)
+  }
   const center = round.center()
   const direction = line.direction().normalize()
   const intersections = [-1, 1].map(sign => center.clone().addScaledVector(direction, sign * round.radius))

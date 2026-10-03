@@ -273,6 +273,7 @@
     PolygonTool,
     ArcTool,
     TrimTool,
+    SketchFilletTool,
     TouchConstraintTool,
     PerpendicularConstraintTool,
     HorVertConstraintTool,
@@ -376,6 +377,7 @@
             sketchOnly: true,
             tools: [
               { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
+              { title: 'Fillet', tool: SketchFilletTool, hotKey: 'F', keyCode: 70 },
               { title: 'Break', icon: 'layer-group' },
               { title: 'Extend', icon: 'layer-group' },
               { title: 'Offset', tool: OffsetTool },

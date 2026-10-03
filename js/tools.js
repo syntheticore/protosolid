@@ -49,6 +49,7 @@ import {
   worldTransform,
 } from './core/assembly.js'
 import { EPSILON } from './core/utils.js'
+import { lineFillet } from './core/sketch-fillet.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
 import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffsetFrame, buildOffsetCurves } from './core/sketch-offset.js'
 
@@ -808,6 +809,142 @@ export class ProjectTool extends HighlightTool {
     }
     this.sketch.addProjection(projection)
     this.viewport.updateRegions(true)
+  }
+}
+
+
+export class SketchFilletTool extends HighlightTool {
+  static icon = 'bezier-curve'
+  static hasOptions = true
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, ['curve', 'point'])
+    this.sketch = sketch
+    this.localSpace = true
+    this.cursor = 'crosshair'
+    this.radius = 1
+    this.items = []
+    this.fillets = []
+    this.settings = {
+      radius: { title: 'Radius', type: 'number', min: EPSILON * 2, step: 1 },
+    }
+  }
+
+  showsHandles(elem) { return elem != this.arc }
+
+  shouldPickImmediately() { return true }
+
+  acceptsInput(item) {
+    const curve = item instanceof ElemRef ? item.curve() : item
+    return curve instanceof Line && curve.sketch == this.sketch && !curve.projection
+  }
+
+  cornerLines(item) {
+    if(!(item instanceof ElemRef)) return this.items.length ? [this.items[0], item] : null
+    const line = item.curve()
+    const point = line.points[item.index]
+    const neighbors = this.sketch.elements.filter(other => other instanceof Line && other != line &&
+      !other.projection && other.isReference == line.isReference && other.points.some(end => end.almost(point)))
+    return neighbors.length == 1 ? [line, neighbors[0]] : null
+  }
+
+  setOption(key, value) {
+    if(key != 'radius') return
+    this.radius = value
+    if(this.previewLines) this.updatePreview(this.previewLines)
+  }
+
+  async mouseMove(vec, coords) {
+    const item = await this.getObject(coords, true)
+    if(this.disposed) return
+    this.viewport.$emit('update:highlight', item)
+    const lines = item && this.cornerLines(item)
+    if(lines) this.updatePreview(lines)
+    else this.clearPreview()
+  }
+
+  async click(vec, coords) {
+    const item = await this.getObject(coords)
+    if(!item || this.disposed) return
+    const lines = this.cornerLines(item)
+    if(!lines) {
+      this.clearPreview()
+      this.items = [item instanceof ElemRef ? item.curve() : item]
+      this.viewport.renderer.render()
+      return
+    }
+    if(!this.updatePreview(lines)) {
+      this.viewport.bus.emit('toast', this.previewError)
+      return
+    }
+    const arc = this.arc
+    const { indices, points } = this.fillet
+    this.fillets.push({ arc, position: this.dimensionPosition() })
+    this.arc = null
+    lines.forEach((line, i) => {
+      const handles = line.points.map(point => point.clone())
+      handles[indices[i]] = points[i]
+      const replacement = new Line(...handles)
+      replacement.isReference = line.isReference
+      this.sketch.replaceElement(line, [replacement])
+      this.sketch.addConstraint(new CoincidentConstraint(new ElemRef(replacement, indices[i]), new ElemRef(arc, i + 1)))
+      this.sketch.addConstraint(new TangentConstraint(replacement, arc))
+      this.viewport.document.selection.delete(line)
+    })
+    this.items = []
+    this.previewLines = null
+    this.viewport.$emit('update:highlight', null)
+    this.viewport.updateRegions(true)
+    this.viewport.renderer.render()
+  }
+
+  updatePreview(lines) {
+    if(this.arc && this.previewRadius == this.radius &&
+      this.previewLines.every((line, i) => line == lines[i])) return true
+    this.clearPreview()
+    this.previewLines = lines
+    try {
+      if(lines[0] == lines[1]) throw new Error('Select a different line for the fillet')
+      if(lines[0].isReference != lines[1].isReference) throw new Error('Both lines must have the same construction status')
+      this.fillet = lineFillet(...lines, this.radius)
+      this.arc = Arc.fromPoints([this.fillet.points[0], this.fillet.middle, this.fillet.points[1]])
+      if(!this.arc) throw new Error('This corner could not be filleted')
+      this.arc.isReference = lines[0].isReference
+      this.sketch.add(this.arc)
+      this.previewRadius = this.radius
+      this.previewError = null
+      this.viewport.renderer.render()
+      return true
+    } catch(error) {
+      this.previewError = error.message
+      return false
+    }
+  }
+
+  dimensionPosition() {
+    const direction = this.fillet.middle.clone().sub(this.fillet.center).normalize()
+    return this.fillet.middle.clone().addScaledVector(direction, 10)
+  }
+
+  clearPreview() {
+    if(this.arc) this.arc.remove()
+    this.arc = null
+    this.previewLines = null
+    this.viewport.renderer.render()
+  }
+
+  dispose() {
+    this.disposed = true
+    this.clearPreview()
+    this.items = []
+    const fillets = this.fillets.filter(({ arc }) => this.sketch.elements.includes(arc))
+    if(fillets.length) {
+      const first = fillets[0]
+      fillets.slice(1).forEach(({ arc }) => this.sketch.addConstraint(new EqualConstraint(first.arc, arc)))
+      this.sketch.addConstraint(new Dimension([first.arc], first.position, this.radius))
+      this.viewport.updateRegions(true)
+    }
+    this.fillets = []
   }
 }
 

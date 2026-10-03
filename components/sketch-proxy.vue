@@ -105,7 +105,9 @@
       .map(projection => projection.geometry())
       .filter(elem => elem instanceof Circle || elem instanceof ProjectedPoint)
     const origin = props.sketch.origin()
-    const handles = [...props.sketch.elements, ...projectedElements, origin].flatMap(elem => {
+    const elements = [...props.sketch.elements, ...projectedElements, origin]
+      .filter(elem => props.activeTool?.showsHandles?.(elem) !== false)
+    const handles = elements.flatMap(elem => {
       const elemHandles = elem.projection ? elem.handles().slice(0, 1) : elem.handles()
       return elemHandles.map((p, i) => {
         p = p.clone().applyMatrix4(elem.sketch.workplane)

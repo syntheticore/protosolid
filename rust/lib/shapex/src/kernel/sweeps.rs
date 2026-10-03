@@ -787,6 +787,32 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             curves[i] = best.unwrap().1;
         }
     }
+    // Bezier spans are an interpolation detail, not face boundaries. A
+    // single section curve keeps one chart through all of its knot spans.
+    if sections
+        .iter()
+        .all(|(_, profile)| profile.outer().segments().len() == 1)
+    {
+        for section in &mut curves {
+            let degree = section[0].degree;
+            let count = section.len();
+            let mut joined = SectionCurve {
+                degree,
+                points: section[0].points.clone(),
+                weights: section[0].weights.clone(),
+                knots: vec![0.0; degree + 1],
+            };
+            for (index, curve) in section.iter().enumerate().skip(1) {
+                joined.points.extend_from_slice(&curve.points[1..]);
+                joined.weights.extend_from_slice(&curve.weights[1..]);
+                joined
+                    .knots
+                    .extend(std::iter::repeat(index as f64 / count as f64).take(degree));
+            }
+            joined.knots.extend(vec![1.0; degree + 1]);
+            *section = vec![joined];
+        }
+    }
     let (v_degree, v_knots, inverse) = interpolation(sections.len())?;
     let forward =
         (sections[1].0.origin() - sections[0].0.origin()).dot(sections[0].0.normal()) > 0.0;
@@ -811,7 +837,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
         };
     }
     patches.push(end_cap);
-    for index in 0..count {
+    for index in 0..curves[0].len() {
         let first = &curves[0][index];
         if curves.iter().any(|section| {
             section[index].degree != first.degree
@@ -910,6 +936,103 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn revolved_sector_blend_followups() {
+        let body = rectangle(12.0, -4.0, 8.0, 8.0)
+            .revolve(
+                Plane3::xz(),
+                Axis3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_z()).unwrap(),
+                std::f64::consts::PI * 1.5,
+            )
+            .unwrap();
+        let cap = body
+            .faces()
+            .find(|face| {
+                matches!(face.surface(), Surface3::Plane(p)
+            if p.normal().x.abs() > 0.99)
+            })
+            .unwrap();
+        let edges = cap.boundary_edges().unwrap();
+        let chamfered = body.chamfer(&edges, 1.0).unwrap();
+        for edge in chamfered.edges() {
+            assert!(
+                chamfered.is_semantic_edge(edge),
+                "hidden edge {:?}",
+                edge.persistent_id()
+            );
+        }
+        let filleted = body.fillet(&edges, 2.0).unwrap();
+        for face in body.faces() {
+            let resolved = match filleted.resolve(face) {
+                super::super::Resolution::Preserved(face)
+                | super::super::Resolution::Modified(face) => face,
+                other => panic!("sector support lost during fillet: {other:?}"),
+            };
+            assert_eq!(
+                std::mem::discriminant(face.surface()),
+                std::mem::discriminant(resolved.surface())
+            );
+        }
+        for distance in [-1.0, 1.0] {
+            filleted.shell_with_join(&[], distance, "sharp").unwrap();
+        }
+        let shell = filleted.shell(&[], -1.0).unwrap();
+        assert!(shell.mass_properties().volume > 0.0);
+        assert!(shell.mass_properties().volume < filleted.mass_properties().volume);
+        shell
+            .tessellate(TessellationOptions::new(0.02, 0.1, 24).unwrap())
+            .unwrap();
+        let opening = body
+            .faces()
+            .find(|face| {
+                matches!(face.surface(), Surface3::Plane(p)
+            if p.normal().y.abs() > 0.99)
+            })
+            .unwrap();
+        let opening = match filleted.resolve(opening) {
+            super::super::Resolution::Preserved(face)
+            | super::super::Resolution::Modified(face) => face,
+            other => panic!("opening lost: {other:?}"),
+        };
+        for openings in [vec![], vec![opening]] {
+            let shell = filleted.shell(&openings, -2.0).unwrap();
+            assert!(shell.volume() > 0.0 && shell.volume() < filleted.volume());
+            shell
+                .tessellate(TessellationOptions::new(0.02, 0.1, 24).unwrap())
+                .unwrap();
+        }
+        let mut expanded = edges;
+        expanded.extend(
+            body.edges()
+                .filter(|edge| matches!(edge.curve(), Curve3::Circle(_)))
+                .cloned(),
+        );
+        assert_eq!(expanded.len(), 8);
+        let fully_rounded = body.fillet(&expanded, 2.0).unwrap();
+        let opening = fully_rounded
+            .faces()
+            .find(|face| {
+                matches!(face.surface(), Surface3::Plane(p)
+            if p.normal().y.abs() > 0.99)
+            })
+            .unwrap()
+            .clone();
+        for thickness in [1.0, 2.0] {
+            fully_rounded.shell(&[opening.clone()], -thickness).unwrap();
+        }
+        let shell = fully_rounded.shell(&[opening], -1.0).unwrap();
+        let rim_edges = [shell.edges().find(|edge| {
+            edge.endpoints().unwrap().iter().all(|p| p.y.abs() < 1e-7 && (p.z + 4.0).abs() < 1e-7)
+        }).unwrap().clone()];
+        let rounded = shell.fillet_with_options(&rim_edges,
+            FilletOptions::new(0.3).with_tangent_propagation(true)).unwrap();
+        let rim_edges = [rounded.edges().find(|edge| {
+            edge.endpoints().unwrap().iter().all(|p| p.y.abs() < 1e-7 && (p.x - 13.0).abs() < 1e-7)
+        }).unwrap().clone()];
+        let chamfered = rounded.chamfer_with_tangent_propagation(&rim_edges, 0.2, true).unwrap();
+        let section = Plane3::from_origin_normal(Point3::new(0.0, 0.0, -3.0), Vec3::unit_z()).unwrap();
+        chamfered.split(section, "right").unwrap();
+    }
     fn rectangle(x: f64, y: f64, w: f64, h: f64) -> Profile {
         let t = ModelTolerance::default();
         Profile::new(

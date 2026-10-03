@@ -1056,6 +1056,62 @@ fn cylinder_cylinder(
     let first_unit = first_axis.normalize();
     let second_unit = second_axis.normalize();
     if first_unit.dot(second_unit).abs() < 1.0 - tolerance.angular {
+        let cosine = first_unit.dot(second_unit);
+        let delta = second.origin() - first.origin();
+        let along =
+            (delta.dot(first_unit) - cosine * delta.dot(second_unit)) / (1.0 - cosine * cosine);
+        let center = first.origin() + first_unit * along;
+        let other = second.origin() + second_unit * (center - second.origin()).dot(second_unit);
+        let roundoff =
+            f64::EPSILON * 512.0 * center.to_vec().magnitude().max(first.radius()).max(1.0);
+        if center.distance(other) <= roundoff
+            && (first.radius() - second.radius()).abs() <= roundoff
+        {
+            // Equal-radius cylinders with intersecting axes factor into two
+            // planar sections. Preserve those regular conics through the
+            // tangencies where a four-parameter intersection loses rank.
+            let range = super::ParameterRange::new(0.0, std::f64::consts::TAU)?;
+            let mut curves = Vec::new();
+            for normal in [first_unit + second_unit, first_unit - second_unit] {
+                let frame = super::Frame3::from_z(center, normal)?;
+                let plane = Plane3::new(center, frame.x(), frame.y(), tolerance)?;
+                let IntersectionSet::Isolated(sections) = plane_cylinder(plane, first, tolerance)?
+                else {
+                    unreachable!()
+                };
+                for section in sections {
+                    let mut points = (0..=64)
+                        .map(|index| {
+                            let point = section
+                                .curve
+                                .evaluate(range.start + range.span() * index as f64 / 64.0)?
+                                .point;
+                            let uv = Surface3::Cylinder(second)
+                                .project(point, tolerance)?
+                                .parameters;
+                            Ok(Point2::new(uv.0, uv.1))
+                        })
+                        .collect::<KernelResult<Vec<_>>>()?;
+                    unwrap_periodic_points(&mut points, Surface3::Cylinder(second).domains());
+                    let guide = smooth_nurbs_guide(&points, range)?.into();
+                    let second_pcurve = SurfaceProjectionPcurve2::new(
+                        section.curve.clone(),
+                        second.into(),
+                        guide,
+                        range,
+                        tolerance,
+                    )?
+                    .into();
+                    curves.push(SurfaceSurfaceCurve {
+                        curve: section.curve,
+                        first_pcurve: section.second_pcurve,
+                        second_pcurve,
+                        achieved_error: section.achieved_error,
+                    });
+                }
+            }
+            return Ok(IntersectionSet::Isolated(curves));
+        }
         return Err(unsupported(
             "nonparallel cylinder intersection requires bounded general surface tracing",
         ));
@@ -2458,6 +2514,20 @@ pub(crate) fn smooth_nurbs_guide(
     );
     knots.extend(vec![range.end; degree + 1]);
     NurbsCurve2::new(degree, points.to_vec(), vec![1.0; points.len()], knots)
+}
+
+/// A repeated cubic control net includes one control beyond each end, so
+/// uniform unclamped knots preserve its exact period and UV winding. Clamping
+/// that net changes the interior spacing and compresses the traversal.
+pub(crate) fn periodic_nurbs_guide(
+    points: &[Point2],
+    range: super::ParameterRange,
+) -> KernelResult<NurbsCurve2> {
+    let step = range.span() / (points.len() - 3) as f64;
+    let knots = (0..points.len() + 4)
+        .map(|i| range.start + (i as f64 - 3.0) * step)
+        .collect();
+    NurbsCurve2::new(3, points.to_vec(), vec![1.0; points.len()], knots)
 }
 
 /// Lift sampled UV values into one continuous copy of every periodic chart.

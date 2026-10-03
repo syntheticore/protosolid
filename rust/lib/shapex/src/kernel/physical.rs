@@ -529,7 +529,20 @@ fn brep_shell_properties(
                             return Ok([0.0; TERMS]);
                         }
                         let point = raw_point + chart_shift;
-                        let inner = adaptive_simpson(
+                        let mut breaks = if let Surface3::Nurbs(spline) = support {
+                            let (u, v) = spline.knots();
+                            if primitive_axis == 0 { u.to_vec() } else { v.to_vec() }
+                        } else { Vec::new() };
+                        if let Some(period) = primitive_domain.period {
+                            let lower = primitive_origin.min(point[primitive_axis]);
+                            let upper = primitive_origin.max(point[primitive_axis]);
+                            breaks = breaks.iter().flat_map(|knot| {
+                                let first = ((lower - knot) / period).floor() as i64;
+                                let last = ((upper - knot) / period).ceil() as i64;
+                                (first..=last).map(move |turn| knot + turn as f64 * period)
+                            }).collect();
+                        }
+                        let inner = adaptive_gauss_kronrod_partitioned(
                             primitive_origin,
                             point[primitive_axis],
                             |parameter| {
@@ -542,6 +555,7 @@ fn brep_shell_properties(
                             targets,
                             14,
                             "exact BREP surface primitive did not converge",
+                            &breaks,
                         )?;
                         Ok(inner.map(|value| value * weight * orientation))
                     },

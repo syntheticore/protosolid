@@ -144,24 +144,6 @@
               "componentId": "id-0",
               "solidId": "id-0/solid/0",
               "topoId": "/id-13/loft/generated/2"
-            },
-            {
-              "$class": "FaceReference",
-              "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "/id-13/loft/generated/3"
-            },
-            {
-              "$class": "FaceReference",
-              "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "/id-13/loft/generated/4"
-            },
-            {
-              "$class": "FaceReference",
-              "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "/id-13/loft/generated/5"
             }
           ],
           "distance": 1,

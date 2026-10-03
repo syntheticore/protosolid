@@ -211,24 +211,6 @@
               "componentId": "id-0",
               "solidId": "id-0/solid/0",
               "topoId": "(/id-20/loft/generated/1|/id-20/loft/generated/2)/1"
-            },
-            {
-              "$class": "EdgeReference",
-              "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "(/id-20/loft/generated/1|/id-20/loft/generated/3)/1"
-            },
-            {
-              "$class": "EdgeReference",
-              "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "(/id-20/loft/generated/1|/id-20/loft/generated/4)/1"
-            },
-            {
-              "$class": "EdgeReference",
-              "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "(/id-20/loft/generated/1|/id-20/loft/generated/5)/1"
             }
           ],
           "radius": 1,

@@ -141,14 +141,7 @@ fn curve3(curve: &Curve3, range: ParameterRange) -> KernelResult<Bounds> {
             Bounds(c.center() - extent, c.center() + extent)
         }
         Curve3::Nurbs(c) => Bounds::points(c.control_points().iter().copied()),
-        Curve3::SurfaceCurve(c) => match c.pcurve() {
-            Curve2::SurfaceIntersection(p) if p.lies_on(c.surface()) => {
-                curve3(&p.spatial_curve(), range)?
-            }
-            Curve2::SurfaceProjection(p) if p.surface() == c.surface() => curve3(p.curve(), range)?,
-            _ => surface(c.surface(), None)
-                .or_else(|_| surface_patch(c.surface(), curve2(c.pcurve(), range)?))?,
-        },
+        Curve3::SurfaceCurve(c) => surface_curve(c.surface(), c.pcurve(), range)?,
         Curve3::SurfaceIntersection(c) => {
             // A curve lies on both supports. A finite enclosure of either is
             // sufficient, independent of the Newton-corrected parameter guides.
@@ -157,6 +150,21 @@ fn curve3(curve: &Curve3, range: ParameterRange) -> KernelResult<Bounds> {
                 .or_else(|_| intersection(c.first_surface(), c.second_surface(), curve, range))?
         }
     })
+}
+
+fn surface_curve(
+    support: &Surface3,
+    pcurve: &Curve2,
+    range: ParameterRange,
+) -> KernelResult<Bounds> {
+    match pcurve {
+        Curve2::SurfaceIntersection(p) if p.lies_on(support) => {
+            curve3(&p.spatial_curve(), range)
+        }
+        Curve2::SurfaceProjection(p) if p.surface() == support => curve3(p.curve(), range),
+        _ => surface(support, None)
+            .or_else(|_| surface_patch(support, curve2(pcurve, range)?)),
+    }
 }
 
 fn intersection(
@@ -341,13 +349,13 @@ fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bounds> {
         }
         Surface3::Ruled(b) => {
             // Ruled blends interpolate their contacts, not a circular section.
-            let first = surface_patch(
+            let first = surface_curve(
                 b.first_surface(),
-                curve2(b.first_pcurve(), b.center_range())?,
+                b.first_pcurve(), b.center_range(),
             )?;
-            let second = surface_patch(
+            let second = surface_curve(
                 b.second_surface(),
-                curve2(b.second_pcurve(), b.center_range())?,
+                b.second_pcurve(), b.center_range(),
             )?;
             first.union(second)
         }

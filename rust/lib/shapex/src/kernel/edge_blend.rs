@@ -263,6 +263,7 @@ impl EulerTransaction<'_> {
         let mut junction_sources = BTreeMap::<VertexId, EdgeId>::new();
         let mut spines = BTreeMap::<EdgeId, BlendSpine>::new();
         let mut propagated_offsets = BTreeMap::<EdgeId, (BlendSpine, [FaceId; 2])>::new();
+        let mut offset_components = BTreeSet::new();
         let mut regular_endpoints = BTreeMap::<(EdgeId, usize), Option<BlendEndpoint>>::new();
         loop {
             let missing = selected
@@ -277,17 +278,43 @@ impl EulerTransaction<'_> {
                     spine.edge.curve == value.curve
                         && spine.faces.iter().all(|face| faces.contains(face))
                 });
-                spines.insert(
+                let spine = self.prepare_blend_spine(
                     edge,
-                    self.prepare_blend_spine(
-                        edge,
-                        radius,
-                        kind,
-                        shared,
-                        propagated_offsets.get(&edge),
-                        chamfer.as_ref(),
-                    )?,
-                );
+                    radius,
+                    kind,
+                    shared,
+                    propagated_offsets.get(&edge),
+                    chamfer.as_ref(),
+                )?;
+                // Splitting a rim between the same supports must not change
+                // its generating offsets at each fragment's midpoint.
+                let mut pending = if offset_components.contains(&edge) {
+                    Vec::new()
+                } else {
+                    vec![edge]
+                };
+                while let Some(current) = pending.pop() {
+                    if !offset_components.insert(current) {
+                        continue;
+                    }
+                    for vertex in self.working.edge(current)?.vertices {
+                        for adjacent in self.working.vertex_edges(vertex)? {
+                            if selected.contains(&adjacent)
+                                && self
+                                    .working
+                                    .edge_faces(adjacent)?
+                                    .iter()
+                                    .all(|face| spine.faces.contains(face))
+                            {
+                                propagated_offsets
+                                    .entry(adjacent)
+                                    .or_insert_with(|| (spine.clone(), spine.faces));
+                                pending.push(adjacent);
+                            }
+                        }
+                    }
+                }
+                spines.insert(edge, spine);
             }
             let mut additions = BTreeSet::new();
             for spine in spines.values() {
@@ -390,8 +417,7 @@ impl EulerTransaction<'_> {
                         }
                     }
                     let incident_degree = self.working.vertex_edges(vertex)?.len();
-                    if kind == EdgeBlendKind::Fillet && selected_degree == 2 && incident_degree == 3
-                    {
+                    if selected_degree == 2 && incident_degree == 3 {
                         let seam_edge = self
                             .working
                             .vertex_edges(vertex)?
@@ -650,9 +676,54 @@ impl EulerTransaction<'_> {
                     }
                 }
                 self.certify_blend_contact_trims(&patches)?;
-                return self.rewrite_blend_network(
-                    &patches, &junctions, &junction_surfaces, &closed_seams, kind,
-                );
+                self.rewrite_blend_network(
+                    &patches,
+                    &junctions,
+                    &junction_surfaces,
+                    &closed_seams,
+                    kind,
+                )?;
+                if junctions.values().any(|junction| {
+                    matches!(junction.kind, BlendJunctionKind::Miter { wall_faces, .. }
+                        if junction.contact_points[&wall_faces[0]].distance(junction.contact_points[&wall_faces[1]]) > self.kernel.tolerance.linear)
+                }) {
+                    // Distinct wall contacts form a four-face corner. Reuse
+                    // support reconstruction to split it into two vertices
+                    // and their exact intersection edge.
+                    let tolerance = self.kernel.tolerance;
+                    let mut supports = BTreeMap::new();
+                    let mut bounds = BTreeMap::new();
+                    for (face, value) in self.working.faces() {
+                        supports.insert(face, value.surface.clone());
+                        let trim = super::features::face_parameter_bounds(
+                            &self.working, face, tolerance,
+                        )?;
+                        bounds.insert(face, super::features::expanded_offset_bounds(
+                            &value.surface, trim, radius, tolerance,
+                        )?);
+                    }
+                    let patches = super::features::support_patches(
+                        &self.working, tolerance, supports, bounds, BTreeSet::new(), true, true, &BTreeMap::new(),
+                    )?;
+                    self.working = super::Topology::new();
+                    self.touched_bodies.clear();
+                    let bodies = patches.into_values()
+                        .map(|patches| self.brep_shell(&patches))
+                        .collect::<KernelResult<Vec<_>>>()?;
+                    self.nest_brep_shells(&bodies, super::TessellationOptions::default())?;
+                    // Reconstruction changes the boundary graph, not the
+                    // identity of its supports. Retain each authored face and
+                    // its blend history instead of replacing it with a BREP
+                    // face whose sequential name can change on regeneration.
+                    let identities = self.working.faces().map(|(id, face)| {
+                        (id, face.name(), self.history.construction[&face.name()][0].name)
+                    }).collect::<Vec<_>>();
+                    for (id, generated, authored) in identities {
+                        self.working.faces.get_mut(id)?.name = authored;
+                        self.history.forget_output(generated);
+                    }
+                }
+                return Ok(());
             }
             if selected.len() > 256 {
                 return Err(KernelError::new(
@@ -997,7 +1068,7 @@ impl EulerTransaction<'_> {
             parent_surfaces[0].offset(offset_distance(0)?, tolerance)?,
             parent_surfaces[1].offset(offset_distance(1)?, tolerance)?,
         ];
-        let mut local_guide = false;
+        let mut local_guide = shared.is_some_and(|spine| spine.local_guide);
         let candidates = if let Some(shared) = shared {
             vec![shared.center.clone()]
         } else {
@@ -2740,6 +2811,12 @@ impl EulerTransaction<'_> {
                 tolerance,
                 true,
             )?
+            .with_center_period(
+                spine
+                    .shared_seam
+                    .map(|_| 1.0)
+                    .or(spine.center.curve.domain().period),
+            )
             .into(),
             BlendSurfaceParameterization::CONTACT_RAILS,
         ))
@@ -2901,6 +2978,12 @@ impl EulerTransaction<'_> {
                 radius,
                 tolerance,
             )?
+            .with_center_period(
+                spine
+                    .shared_seam
+                    .map(|_| 1.0)
+                    .or(spine.center.curve.domain().period),
+            )
             .into(),
             BlendSurfaceParameterization::CONTACT_RAILS,
         ))
@@ -4157,7 +4240,11 @@ impl EulerTransaction<'_> {
                         let contact_vertices_on_use =
                             self.working.coedge_vertices(blend_uses[0])?;
                         let desired_current_forward = contact_vertices_on_use[0] != vertices[0];
-                        let unit = boundary.range;
+                        let unit = if let Some((edge, _)) = smooth_edges.get(vertex) {
+                            self.working.edge(*edge)?.range
+                        } else {
+                            boundary.range
+                        };
                         let (edge, curve, same_direction, pcurve) = if let Some((edge, curve)) =
                             smooth_edges.get(vertex).cloned()
                         {
@@ -4179,7 +4266,11 @@ impl EulerTransaction<'_> {
                                 second,
                                 same_direction,
                             )?;
-                            let pcurve: Curve2 = SurfaceProjectionPcurve2::new(
+                            let start = guide.evaluate(0.0)?.point;
+                            let direction = (guide.evaluate(1.0)?.point - start) / unit.span();
+                            let guide =
+                                Line2::new(start - direction * unit.start, direction)?.into();
+                            let projected: Curve2 = SurfaceProjectionPcurve2::new(
                                 curve.clone(),
                                 patch.blend_surface.clone(),
                                 guide,
@@ -4187,6 +4278,12 @@ impl EulerTransaction<'_> {
                                 tolerance,
                             )?
                             .into();
+                            let pcurve = super::features::exact_pcurve(
+                                &curve,
+                                &patch.blend_surface,
+                                &projected,
+                                tolerance,
+                            )?;
                             (edge, curve, same_direction, pcurve)
                         } else {
                             let edge_name = self.names.next_for(&kind.role("transition.edge"))?;
@@ -4898,9 +4995,10 @@ impl EulerTransaction<'_> {
         while last_index < 16 + extension && in_domains(last_index + 1) {
             last_index += 1;
         }
-        let support_range = ParameterRange::new(first_index as f64 / 16.0, last_index as f64 / 16.0)?;
+        let support_range =
+            ParameterRange::new(first_index as f64 / 16.0, last_index as f64 / 16.0)?;
         let mut parameters: [Vec<Point2>; 2] = [Vec::with_capacity(49), Vec::with_capacity(49)];
-        for index in first_index..=last_index {
+        for index in first_index - i32::from(closed)..=last_index + i32::from(closed) {
             let first = extrapolated(0, index);
             let second = extrapolated(1, index);
             let corrected = if let Some((side, axis)) = angular_coordinate {
@@ -4967,10 +5065,13 @@ impl EulerTransaction<'_> {
                 parameters[side].push(uv);
             }
         }
-        let first_pcurve: Curve2 =
-            super::intersection::smooth_nurbs_guide(&parameters[0], support_range)?.into();
-        let second_pcurve: Curve2 =
-            super::intersection::smooth_nurbs_guide(&parameters[1], support_range)?.into();
+        let guide = if closed {
+            super::intersection::periodic_nurbs_guide
+        } else {
+            super::intersection::smooth_nurbs_guide
+        };
+        let first_pcurve: Curve2 = guide(&parameters[0], support_range)?.into();
+        let second_pcurve: Curve2 = guide(&parameters[1], support_range)?.into();
         let implicit = SurfaceIntersectionCurve::new(
             offsets[0].clone(),
             offsets[1].clone(),
@@ -5017,9 +5118,8 @@ fn closed_blend_chart(
     };
     let exact = curve.exact_pcurves();
     let mut points = [Vec::new(), Vec::new()];
-    for index in -32..=64 {
-        let fraction = (seam - range.start) / range.span()
-            + direction * index as f64 / 32.0;
+    for index in -33..=65 {
+        let fraction = (seam - range.start) / range.span() + direction * index as f64 / 32.0;
         let parameter = range.start + range.span() * fraction.rem_euclid(1.0);
         for side in 0..2 {
             points[side].push(exact[side].evaluate(parameter)?.point);
@@ -5031,14 +5131,19 @@ fn closed_blend_chart(
         super::intersection::unwrap_periodic_points(&mut points[side], surfaces[side].domains());
     }
     let rebuilt = SurfaceIntersectionCurve::new(
-        surfaces[0].clone(), surfaces[1].clone(),
-        super::intersection::smooth_nurbs_guide(&points[0], support_range)?.into(),
-        super::intersection::smooth_nurbs_guide(&points[1], support_range)?.into(),
-        support_range, tolerance, center.achieved_error,
+        surfaces[0].clone(),
+        surfaces[1].clone(),
+        super::intersection::periodic_nurbs_guide(&points[0], support_range)?.into(),
+        super::intersection::periodic_nurbs_guide(&points[1], support_range)?.into(),
+        support_range,
+        tolerance,
+        center.achieved_error,
     )?;
     let [first_pcurve, second_pcurve] = rebuilt.exact_pcurves();
     Ok(SurfaceSurfaceCurve {
-        curve: rebuilt.into(), first_pcurve, second_pcurve,
+        curve: rebuilt.into(),
+        first_pcurve,
+        second_pcurve,
         achieved_error: center.achieved_error,
     })
 }

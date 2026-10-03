@@ -371,9 +371,7 @@ fn validate_segment_is_simple(
     let Curve2::Nurbs(curve) = segment.curve() else {
         return Ok(());
     };
-    if segment.start()?.distance(segment.end()?) <= tolerance.linear {
-        return Err(invalid("a NURBS wire segment needs distinct endpoints"));
-    }
+    let closed = segment.is_closed(tolerance)?;
 
     // Exact rational Bézier subdivision turns an arbitrary regular spline into
     // projection-monotone pieces. Each such piece is simple; testing every
@@ -431,8 +429,13 @@ fn validate_segment_is_simple(
             let first_curve = TrimmedCurve2::new(curve.clone(), pieces[first].0)?;
             let second_curve = TrimmedCurve2::new(curve.clone(), pieces[second].0)?;
             let intersection = nurbs_nurbs_intersection(&first_curve, &second_curve, tolerance)?;
-            let adjacent = second == first + 1;
-            let shared = first_curve.end()?;
+            let seam = closed && first == 0 && second == pieces.len() - 1;
+            let adjacent = second == first + 1 || seam;
+            let shared = if seam {
+                first_curve.start()?
+            } else {
+                first_curve.end()?
+            };
             if intersection.coincident
                 || intersection
                     .hits
@@ -792,12 +795,14 @@ fn general_parametric_pair(
             // amplified by the inverse intersection angle. Reuse a known
             // endpoint root when the computed root cannot be distinguished
             // from it at that arithmetic precision.
-            let scale = first_value.point.to_vec().magnitude()
-                .max(second_value.point.to_vec().magnitude()).max(1.0);
+            // Subtracting two evaluated points combines both error budgets.
+            let evaluation_error = f64::EPSILON * 2048.0
+                * (first_value.point.to_vec().magnitude().max(1.0)
+                    + second_value.point.to_vec().magnitude().max(1.0));
             // Include the implicit evaluator's roundoff budget and the final
             // Newton residual. At a quadratic tangency the remaining root
             // distance is twice the residual divided by the intersection angle.
-            let uncertainty = (f64::EPSILON * scale * 2048.0
+            let uncertainty = (evaluation_error
                 + first_value.point.distance(second_value.point) * 2.0) / sine;
             if let Some((a, b, _)) = shared_endpoints.iter().find(|(_, _, point)| {
                 point.distance(first_value.point) <= uncertainty

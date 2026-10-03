@@ -8,10 +8,9 @@ use crate::{Point3, Vec3};
 use super::euler::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
-    BodyId, BooleanKind, ChangeKind, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel,
-    KernelError, KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin,
-    PersistentId, Plane3, Profile, RigidTransform3, Surface3, Tessellate, TessellationOptions,
-    Topology, TriangleMesh,
+    BodyId, BooleanKind, ChangeKind, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel, KernelError,
+    KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin, PersistentId, Plane3,
+    Profile, RigidTransform3, Tessellate, TessellationOptions, Topology, TriangleMesh,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -110,73 +109,18 @@ fn generated_index(history: &OperationHistory) -> BTreeMap<PersistentId, BTreeSe
     generated
 }
 
-fn semantic_edge(history: &OperationHistory, edge: &EdgeHandle) -> bool {
+fn semantic_edge(edge: &EdgeHandle) -> bool {
     let Ok(faces) = edge.connected_faces() else {
         return true;
     };
-    // A two-use edge whose uses lie on one periodic face is a parameterization
-    // seam, not a physical or user-selectable model edge.
-    if faces.len() == 1 {
-        return false;
-    }
-    if faces.len() != 2 {
-        return true;
-    }
-    // A subdivision of one support is not a model edge, regardless of which
-    // operation last touched the body. Operation history contains only the
-    // current operation and can lose the common ancestry of untouched faces.
-    if same_surface_support(
-        faces[0].surface(),
-        faces[1].surface(),
-        edge.state.tolerance(),
-    ) {
-        return false;
-    }
-    let first_roots = history.source_roots(faces[0].persistent_id());
-    let second_roots = history.source_roots(faces[1].persistent_id());
-    if first_roots.is_disjoint(&second_roots) {
-        return true;
-    }
-    // An exact Boolean deliberately gives all of its output faces the same
-    // operation ancestry. Preserve creases between unlike analytical supports,
-    // including perpendicular planes, without exposing the many edges of a
-    // faceted feature reconstruction.
-    if std::mem::discriminant(faces[0].surface()) != std::mem::discriminant(faces[1].surface()) {
-        return true;
-    }
-    let exact_boolean_face = |face: &FaceHandle| {
-        matches!(
-            history.origin(face.persistent_id()),
-            Some(Origin::Derived { role, .. })
-                if matches!(
-                    role.as_str(),
-                    "boolean.union" | "boolean.difference" | "boolean.intersection"
-                )
-        )
-    };
-    // Chamfer faces deliberately inherit from their adjacent parent faces.
-    // That shared ancestry is not a faceted reconstruction: the crease against
-    // either parent (or a corner/cap patch) is a real model edge immediately.
-    let chamfer_face = |face: &FaceHandle| {
-        matches!(history.origin(face.persistent_id()),
-            Some(Origin::Derived { role, .. }) if matches!(role.as_str(),
-                "chamfer.blend.face" | "chamfer.vertex.face" | "chamfer.cap.face"))
-    };
-    match (faces[0].surface(), faces[1].surface()) {
-        (Surface3::Plane(first), Surface3::Plane(second))
-            if (exact_boolean_face(&faces[0]) && exact_boolean_face(&faces[1]))
-                || chamfer_face(&faces[0])
-                || chamfer_face(&faces[1]) =>
-        {
-            first.normal().cross(second.normal()).magnitude() > edge.state.tolerance().angular
+    // Visibility follows geometry, independent of the operation ancestry.
+    // One-face periodic seams and subdivisions of the same support stay hidden.
+    match faces.as_slice() {
+        [_] => false,
+        [first, second] => {
+            !same_surface_support(first.surface(), second.surface(), edge.state.tolerance())
         }
-        // Faceted feature reconstructions deliberately share planar ancestry,
-        // so their internal triangle edges remain hidden. Curved analytical
-        // patches, however, can have the same surface representation while
-        // lying on different supports (for example two adjacent NURBS patches
-        // in a rolling blend). Their shared boundary is a semantic BREP edge.
-        (Surface3::Plane(_), Surface3::Plane(_)) => false,
-        (first, second) => !same_surface_support(first, second, edge.state.tolerance()),
+        _ => true,
     }
 }
 
@@ -535,12 +479,11 @@ impl Solid {
         self.history.origin(entity.persistent_name())
     }
 
-    /// Whether an edge separates semantic faces rather than merely subdividing
-    /// a faceted construction surface.
+    /// Whether an edge separates distinct supporting surfaces.
     pub fn is_semantic_edge(&self, edge: &EdgeHandle) -> bool {
         self.edges()
             .any(|candidate| candidate.persistent_id() == edge.persistent_id())
-            && semantic_edge(&self.history, edge)
+            && semantic_edge(edge)
     }
     pub fn faces_generated_from<T: ResolvableEntity>(&self, source: &T) -> Vec<FaceHandle> {
         generated_names(&self.history, source.persistent_name())
@@ -716,12 +659,11 @@ impl Compound {
         self.history.origin(entity.persistent_name())
     }
 
-    /// Whether an edge separates semantic faces rather than merely subdividing
-    /// a faceted construction surface.
+    /// Whether an edge separates distinct supporting surfaces.
     pub fn is_semantic_edge(&self, edge: &EdgeHandle) -> bool {
         self.edges()
             .any(|candidate| candidate.persistent_id() == edge.persistent_id())
-            && semantic_edge(&self.history, edge)
+            && semantic_edge(edge)
     }
 
     pub fn faces_generated_from<T: ResolvableEntity>(&self, source: &T) -> Vec<FaceHandle> {

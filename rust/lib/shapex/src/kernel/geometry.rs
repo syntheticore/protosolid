@@ -1917,6 +1917,10 @@ impl SurfaceProjectionPcurve2 {
                 "surface-projection parameter lies outside its certified range",
             ));
         }
+        parameter = parameter.clamp(
+            self.range.start.min(self.range.end),
+            self.range.start.max(self.range.end),
+        );
         let target = self.curve.first_order(parameter)?.0;
         let guide = self.guide.first_order(parameter)?.0;
         let domains = self.surface.domains();
@@ -2159,6 +2163,10 @@ impl SurfaceIntersectionCurve {
     // Reuse the converged parameters for both spatial and parameter-space
     // tangents, without cloning the intersection or running Newton again.
     fn parameter_derivative(&self, parameter: f64, parameters: [f64; 4]) -> KernelResult<[f64; 4]> {
+        let parameter = parameter.clamp(
+            self.range.start.min(self.range.end),
+            self.range.start.max(self.range.end),
+        );
         if let Some((_, Some(derivative))) = self.evaluations.get(parameter) {
             return Ok(derivative);
         }
@@ -2238,6 +2246,10 @@ impl SurfaceIntersectionCurve {
                 "surface-intersection parameter lies outside its certified range",
             ));
         }
+        let parameter = parameter.clamp(
+            self.range.start.min(self.range.end),
+            self.range.start.max(self.range.end),
+        );
         if let Some((parameters, _)) = self.evaluations.get(parameter) {
             return Ok(parameters);
         }
@@ -2767,7 +2779,23 @@ impl Curve3 {
             },
             Self::SurfaceCurve(curve) => ParameterDomain {
                 bounds: DomainBounds::Bounded(curve.range()),
-                period: None,
+                period: match curve.pcurve() {
+                    Curve2::Line(line) => curve
+                        .surface()
+                        .parameter_periods((line.origin().x, line.origin().y))
+                        .ok()
+                        .and_then(|periods| {
+                            (0..2).find_map(|axis| {
+                                (line.direction()[1 - axis] == 0.0 && line.direction()[axis] != 0.0)
+                                    .then(|| {
+                                        periods[axis]
+                                            .map(|period| period / line.direction()[axis].abs())
+                                    })
+                                    .flatten()
+                            })
+                        }),
+                    _ => None,
+                },
             },
         }
     }
@@ -3117,7 +3145,7 @@ impl NurbsSurface3 {
     }
 
     pub fn domains(&self) -> [ParameterDomain; 2] {
-        [
+        let mut domains = [
             ParameterDomain {
                 bounds: DomainBounds::Bounded(ParameterRange {
                     start: self.knots.0[self.degrees.0],
@@ -3132,7 +3160,34 @@ impl NurbsSurface3 {
                 }),
                 period: None,
             },
-        ]
+        ];
+        let same = |a: Point3, b: Point3| {
+            a.distance(b)
+                <= f64::EPSILON
+                    * 256.0
+                    * a.to_vec().magnitude().max(b.to_vec().magnitude()).max(1.0)
+        };
+        let closed = [
+            self.control_points
+                .iter()
+                .zip(&self.weights)
+                .all(|(row, weights)| {
+                    same(row[0], *row.last().unwrap()) && weights[0] == *weights.last().unwrap()
+                }),
+            self.control_points[0]
+                .iter()
+                .zip(self.control_points.last().unwrap())
+                .all(|(a, b)| same(*a, *b))
+                && self.weights[0] == *self.weights.last().unwrap(),
+        ];
+        for axis in 0..2 {
+            if closed[axis] {
+                if let DomainBounds::Bounded(range) = domains[axis].bounds {
+                    domains[axis].period = Some(range.span());
+                }
+            }
+        }
+        domains
     }
 
     fn homogeneous_rows(&self) -> Vec<Vec<Vec4>> {
@@ -3161,23 +3216,27 @@ impl NurbsSurface3 {
     /// an intersection just beyond a spline's original endpoint.
     pub(crate) fn extended_bezier(&self, padding: [f64; 2]) -> KernelResult<Self> {
         let (p, q) = self.degrees;
-        if self.control_points[0].len() != p + 1 || self.control_points.len() != q + 1 {
-            return Ok(self.clone());
-        }
         let ranges = [
-            ParameterRange::new(self.knots.0[p], self.knots.0[p + 1])?,
-            ParameterRange::new(self.knots.1[q], self.knots.1[q + 1])?,
+            ParameterRange::new(self.knots.0[p], self.knots.0[self.control_points[0].len()])?,
+            ParameterRange::new(self.knots.1[q], self.knots.1[self.control_points.len()])?,
         ];
-        for (axis, knots, degree) in [(0, &self.knots.0, p), (1, &self.knots.1, q)] {
-            if knots[..=degree].iter().any(|k| *k != ranges[axis].start)
-                || knots[degree + 1..].iter().any(|k| *k != ranges[axis].end)
-            {
-                return Ok(self.clone());
+        let extend_axis = [
+            self.control_points[0].len() == p + 1,
+            self.control_points.len() == q + 1,
+        ];
+        let padding = std::array::from_fn::<_, 2, _>(|axis| {
+            if extend_axis[axis] && self.domains()[axis].period.is_none() {
+                padding[axis]
+            } else {
+                0.0
             }
-        }
+        });
         // Blossom evaluation gives the controls on any affine subinterval,
         // including an interval extending beyond [0, 1], in homogeneous space.
         let extend = |controls: &[Vec4], axis: usize| -> Vec<Vec4> {
+            if padding[axis] == 0.0 {
+                return controls.to_vec();
+            }
             let degree = controls.len() - 1;
             let a = -padding[axis] / ranges[axis].span();
             let b = 1.0 - a;
@@ -3199,13 +3258,20 @@ impl NurbsSurface3 {
             .iter()
             .map(|row| extend(row, 0))
             .collect::<Vec<_>>();
-        for column in 0..=p {
+        for column in 0..net[0].len() {
             let controls = net.iter().map(|row| row[column]).collect::<Vec<_>>();
             for (row, value) in extend(&controls, 1).into_iter().enumerate() {
                 net[row][column] = value;
             }
         }
         let knots = |axis: usize, degree: usize| {
+            if padding[axis] == 0.0 {
+                return if axis == 0 {
+                    self.knots.0.clone()
+                } else {
+                    self.knots.1.clone()
+                };
+            }
             let mut knots = vec![ranges[axis].start - padding[axis]; degree + 1];
             knots.extend(vec![ranges[axis].end + padding[axis]; degree + 1]);
             knots
@@ -3356,6 +3422,9 @@ impl NurbsSurface3 {
         let domains = self.domains();
         let in_domain = |domain: ParameterDomain, value: f64| match domain.bounds {
             super::DomainBounds::Bounded(range) => {
+                if domain.period.is_some() {
+                    return Some(domain.normalize(value));
+                }
                 let minimum = range.start.min(range.end);
                 let maximum = range.start.max(range.end);
                 let slack = f64::EPSILON
@@ -3464,15 +3533,47 @@ impl NurbsSurface3 {
                 )
             })?
             .0;
+        let constrain = |axis: usize, value: f64| {
+            if domains[axis].period.is_some() {
+                value
+            } else if let DomainBounds::Bounded(range) = domains[axis].bounds {
+                value.clamp(range.start, range.end)
+            } else {
+                value
+            }
+        };
 
         let mut converged = false;
         for _ in 0..80 {
             let evaluation = self.evaluate(u, v)?;
             let residual = evaluation.point - point;
-            let gradient = [residual.dot(evaluation.du), residual.dot(evaluation.dv)];
-            let h00 = evaluation.du.magnitude2() + residual.dot(evaluation.duu);
-            let h01 = evaluation.du.dot(evaluation.dv) + residual.dot(evaluation.duv);
-            let h11 = evaluation.dv.magnitude2() + residual.dot(evaluation.dvv);
+            let mut gradient = [residual.dot(evaluation.du), residual.dot(evaluation.dv)];
+            let mut h00 = evaluation.du.magnitude2() + residual.dot(evaluation.duu);
+            let mut h01 = evaluation.du.dot(evaluation.dv) + residual.dot(evaluation.duv);
+            let mut h11 = evaluation.dv.magnitude2() + residual.dot(evaluation.dvv);
+            if h00 <= 0.0 || h11 <= 0.0 || h00 * h11 <= h01 * h01 {
+                h00 = evaluation.du.magnitude2();
+                h01 = evaluation.du.dot(evaluation.dv);
+                h11 = evaluation.dv.magnitude2();
+            }
+            for (axis, parameter) in [u, v].into_iter().enumerate() {
+                if domains[axis].period.is_none() {
+                    let DomainBounds::Bounded(range) = domains[axis].bounds else {
+                        continue;
+                    };
+                    if (parameter <= range.start && gradient[axis] >= 0.0)
+                        || (parameter >= range.end && gradient[axis] <= 0.0)
+                    {
+                        gradient[axis] = 0.0;
+                        h01 = 0.0;
+                        if axis == 0 {
+                            h00 = 1.0
+                        } else {
+                            h11 = 1.0
+                        }
+                    }
+                }
+            }
             let determinant = h00 * h11 - h01 * h01;
             if determinant.abs() <= f64::EPSILON {
                 break;
@@ -3480,8 +3581,8 @@ impl NurbsSurface3 {
             let mut du = (-gradient[0] * h11 + gradient[1] * h01) / determinant;
             let mut dv = (-gradient[1] * h00 + gradient[0] * h01) / determinant;
             let previous_distance = residual.magnitude2();
-            let mut next_u = (u + du).clamp(u_range.start, u_range.end);
-            let mut next_v = (v + dv).clamp(v_range.start, v_range.end);
+            let mut next_u = constrain(0, u + du);
+            let mut next_v = constrain(1, v + dv);
             for _ in 0..12 {
                 let next_distance = self.evaluate(next_u, next_v)?.point.distance2(point);
                 if next_distance <= previous_distance {
@@ -3489,8 +3590,8 @@ impl NurbsSurface3 {
                 }
                 du *= 0.5;
                 dv *= 0.5;
-                next_u = (u + du).clamp(u_range.start, u_range.end);
-                next_v = (v + dv).clamp(v_range.start, v_range.end);
+                next_u = constrain(0, u + du);
+                next_v = constrain(1, v + dv);
             }
             if (next_u - u).abs() <= tolerance.parameter
                 && (next_v - v).abs() <= tolerance.parameter
@@ -4173,7 +4274,7 @@ impl OffsetSurface3 {
         let domain = self.base.domains()[direction];
         let shifted = parameter + delta;
         if domain.period.is_some() {
-            domain.normalize(shifted)
+            shifted
         } else if let DomainBounds::Bounded(range) = domain.bounds {
             shifted.clamp(range.start.min(range.end), range.start.max(range.end))
         } else {
@@ -4239,6 +4340,7 @@ impl OffsetSurface3 {
             None
         };
         let constrain = |axis: usize, value: f64| match domains[axis].bounds {
+            _ if domains[axis].period.is_some() => value,
             DomainBounds::Bounded(range) => {
                 value.clamp(range.start.min(range.end), range.start.max(range.end))
             }
@@ -4331,6 +4433,7 @@ pub struct EdgeBlendSurface3 {
     first_pcurve: Curve2,
     second_pcurve: Curve2,
     center_range: ParameterRange,
+    center_period: Option<f64>,
     radius: f64,
     tolerance: ModelTolerance,
     sections: ParameterEvaluationCache<BlendSection>,
@@ -4430,6 +4533,7 @@ impl EdgeBlendSurface3 {
         );
         let surface = Self {
             ruled,
+            center_period: center_curve.domain().period,
             shared_intersection,
             center_curve: Box::new(center_curve),
             first_surface: Box::new(first_surface),
@@ -4459,6 +4563,10 @@ impl EdgeBlendSurface3 {
 
     pub fn center_curve(&self) -> &Curve3 {
         &self.center_curve
+    }
+    pub(crate) fn with_center_period(mut self, period: Option<f64>) -> Self {
+        self.center_period = period;
+        self
     }
 
     pub fn first_surface(&self) -> &Surface3 {
@@ -4613,7 +4721,27 @@ impl EdgeBlendSurface3 {
         })
     }
 
+    fn center_parameter(&self, parameter: f64) -> f64 {
+        self.center_period.map_or(parameter, |period| {
+            self.center_range.start.min(self.center_range.end)
+                + (parameter - self.center_range.start.min(self.center_range.end))
+                    .rem_euclid(period)
+        })
+    }
+
+    fn blend_period(&self, parameter: f64) -> KernelResult<Option<f64>> {
+        if self.ruled {
+            return Ok(None);
+        }
+        let section = self
+            .section(self.center_parameter(parameter))?
+            .circular
+            .unwrap();
+        Ok(Some(std::f64::consts::TAU / section.angle))
+    }
+
     fn first_order(&self, parameter: f64, blend: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
+        let parameter = self.center_parameter(parameter);
         if !self.center_range.contains(parameter, self.tolerance) || !blend.is_finite() {
             return Err(invalid("rolling-ball parameter lies outside its domain"));
         }
@@ -4677,6 +4805,7 @@ impl EdgeBlendSurface3 {
     }
 
     fn evaluate(&self, parameter: f64, blend: f64) -> KernelResult<SurfaceEvaluation> {
+        let parameter = self.center_parameter(parameter);
         let (point, du, dv) = self.first_order(parameter, blend)?;
         let parameter_step = (self.center_range.span().abs()
             * self.tolerance.parameter.sqrt().max(f64::EPSILON.sqrt()))
@@ -4804,6 +4933,9 @@ impl EdgeBlendSurface3 {
             }
             parameters = next;
         }
+        if let Some(period) = self.blend_period(parameters.0)? {
+            parameters.1 += ((0.5 - parameters.1) / period).round() * period;
+        }
         let projected = self.point(parameters.0, parameters.1)?;
         Ok(Projection2 {
             parameters,
@@ -4829,6 +4961,16 @@ pub enum Surface3 {
 }
 
 impl Surface3 {
+    fn parameter_periods(&self, uv: (f64, f64)) -> KernelResult<[Option<f64>; 2]> {
+        let mut periods = self.domains().map(|domain| domain.period);
+        match self {
+            Self::RollingBall(surface) => periods[1] = surface.blend_period(uv.0)?,
+            Self::Offset(surface) => return surface.base.parameter_periods(uv),
+            _ => {}
+        }
+        Ok(periods)
+    }
+
     /// Construct a spatial boundary in the p-curve's parameterization. Use
     /// analytic geometry only when it follows from the defining surface and
     /// p-curve; no sampled recognition or geometric fitting is performed.
@@ -5031,7 +5173,7 @@ impl Surface3 {
             Self::RollingBall(surface) | Self::Ruled(surface) => [
                 ParameterDomain {
                     bounds: DomainBounds::Bounded(surface.center_range()),
-                    period: None,
+                    period: surface.center_period,
                 },
                 ParameterDomain::unbounded(),
             ],

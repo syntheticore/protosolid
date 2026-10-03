@@ -221,6 +221,11 @@ impl OperationHistory {
         self.construction.extend(other.construction);
     }
 
+    pub(crate) fn forget_output(&mut self, name: PersistentId) {
+        self.origins.remove(&name);
+        self.construction.remove(&name);
+    }
+
     pub(crate) fn record_construction(
         &mut self,
         output: PersistentId,

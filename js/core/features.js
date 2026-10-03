@@ -277,8 +277,8 @@ export class PatternFeature extends Feature {
         title: 'Type',
         type: 'enum',
         options: {
-          grid: 'Grid',
-          radial: 'Radial',
+          grid: { title: 'Grid', icon: 'th' },
+          radial: { title: 'Radial', icon: 'sun' },
         },
       },
       center: {
@@ -601,10 +601,10 @@ export class JointFeature extends Feature {
         title: 'Type',
         type: 'enum',
         options: {
-          axis: 'Axis',
-          coplanar: 'Coplanar',
-          ball: 'Ball',
-          fix: 'Fix',
+          axis: { title: 'Axis', icon: 'arrows-alt-v' },
+          coplanar: { title: 'Coplanar', icon: 'layer-group' },
+          ball: { title: 'Ball', icon: 'globe' },
+          fix: { title: 'Fix', icon: 'lock' },
         },
       },
       axisA: { title: '1', type: 'face', when: is('axis') },
@@ -769,7 +769,13 @@ export class MotionLinkFeature extends Feature {
     const joint = reference?.getItem() || this.document.top()?.assemblyJoints?.find(joint =>
       joint.id == reference?.jointId
     )
-    return jointMotionOptions(joint)
+    const icons = {
+      rotateX: 'undo', rotateY: 'redo', rotateZ: 'sync-alt',
+      slideX: 'arrows-alt-h', slideY: 'arrows-alt-v', slideZ: 'expand-alt',
+    }
+    return Object.fromEntries(Object.entries(jointMotionOptions(joint)).map(([value, title]) =>
+      [value, { title, icon: icons[value] }]
+    ))
   }
 
   pickedInput(key, _reference, item) {
@@ -1294,7 +1300,10 @@ export class PlaceFeature extends Feature {
   settingOptions(key) {
     if(key != 'variantOption') return this.settings[key].options
     return Object.fromEntries(
-      (this.sourceVariant()?.options || []).map((option, index) => [index, option.title])
+      (this.sourceVariant()?.options || []).map((option, index) => [index, {
+        title: option.title,
+        icon: ['dice-one', 'dice-two', 'dice-three', 'dice-four', 'dice-five', 'dice-six'][index % 6],
+      }])
     )
   }
 
@@ -1868,9 +1877,9 @@ export class SplitFeature extends Feature {
         title: 'Keep',
         type: 'enum',
         options: {
-          both: 'Both',
-          left: 'Left',
-          right: 'Right',
+          both: { title: 'Both', icon: 'arrows-alt-h' },
+          left: { title: 'Left', icon: 'arrow-left' },
+          right: { title: 'Right', icon: 'arrow-right' },
         },
       },
     })

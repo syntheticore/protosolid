@@ -335,9 +335,9 @@ export class DiagnosticShadingTool extends Tool {
         title: 'Direction',
         type: 'enum',
         options: {
-          top: 'Top',
-          front: 'Front',
-          side: 'Side',
+          top: { title: 'Top', icon: 'arrow-down' },
+          front: { title: 'Front', icon: 'arrow-up' },
+          side: { title: 'Side', icon: 'arrow-left' },
         },
         visible: tool => tool.diagnosticMode == 'draft',
       },

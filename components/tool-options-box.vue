@@ -21,8 +21,9 @@
               span.empty(v-if="!activeTool[key].length") —
 
             RadioBar(
-              v-if="setting.type == 'select'"
+              v-if="setting.type == 'select' || setting.type == 'enum'"
               :items="setting.options"
+              :label="setting.title"
               :chosen="activeTool[key]"
               @update:chosen="setSetting(key, $event)"
             )
@@ -33,13 +34,6 @@
               :active="activeTool[key]"
               @update:active="setSetting(key, $event)"
             )
-
-            select.input.enum-input(
-              v-if="setting.type == 'enum'"
-              :value="activeTool[key]"
-              @change="setSetting(key, $event.target.value)"
-            )
-              option(v-for="(name, option) in setting.options" :key="option" :value="option") {{ name }}
 
             IntegerInput(
               v-if="setting.type == 'integer'"

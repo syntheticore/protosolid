@@ -27,8 +27,7 @@
 
           label
 
-            select.input(v-model="component.creator.material")
-              option(v-for="material in document.materials" :value="material") {{ material.title }}
+            ComboBox(v-model="component.creator.material" label="Material" :options="document.materials.map(material => ({ value: material, label: material.title }))")
 
             IconButton.clone(icon="plus" @click="cloneMaterial")
 

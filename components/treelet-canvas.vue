@@ -39,10 +39,7 @@
             span(:title="path") {{ path || 'Image Source'}}
 
           label
-            select.input.canvas-fields(v-model="canvas.plane")
-              option(value="top") Top
-              option(value="front") Front
-              option(value="side") Side
+            ComboBox.canvas-fields(v-model="canvas.plane" label="Plane" :options="[{ value: 'top', label: 'Top' }, { value: 'front', label: 'Front' }, { value: 'side', label: 'Side' }]")
             span Plane
 
           label

@@ -292,6 +292,7 @@
   import { Aluminum } from './../js/material.js'
   import { ThermalSimulation } from './../js/core/thermal.js'
   import { StaticSimulation } from './../js/core/static.js'
+  import { FluidSimulation } from './../js/core/fluid.js'
 
   export default {
     name: 'ToolBox',
@@ -445,6 +446,7 @@
               { title: 'Animation', icon: 'feather' }, //icon: 'clapperboard'
               { title: 'Static Load', action: this.addStaticLoad, icon: 'weight' },
               { title: 'Heat Flow', action: this.addHeatFlow, icon: 'thermometer' },
+              { title: 'Fluid Flow', action: this.addFluidFlow, icon: 'wind' },
               // { title: 'Modal Frequencies', icon: 'wave-square' },
             ],
           },
@@ -608,6 +610,14 @@
 
       addStaticLoad: function() {
         const simulation = new StaticSimulation()
+        simulation.activateFirstPicker = true
+        this.document.activeComponent.creator.simulations.push(simulation)
+        this.document.activateSimulation(simulation)
+        this.document.hasChanges = true
+      },
+
+      addFluidFlow: function() {
+        const simulation = new FluidSimulation()
         simulation.activateFirstPicker = true
         this.document.activeComponent.creator.simulations.push(simulation)
         this.document.activateSimulation(simulation)

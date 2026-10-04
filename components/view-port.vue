@@ -484,6 +484,7 @@
       this.bus.on('preview-feature', this.previewFeature)
       this.bus.on('unpreview-feature', this.unpreviewFeature)
       this.bus.on('thermal-result', this.updateFluxArrows)
+      this.bus.on('fluid-result', this.updateFluxArrows)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
       this.bus.on('sketch-history', this.changeSketchHistory)
@@ -510,6 +511,7 @@
       this.document.off('regenerated', this.updateExportPreview)
       this.bus.off('resize', this.onWindowResize)
       this.bus.off('thermal-result', this.updateFluxArrows)
+      this.bus.off('fluid-result', this.updateFluxArrows)
       this.bus.off('joint-picked', this.jointPicked)
       this.bus.off('alt-pressed', this.setOrbiting)
       this.clearFluxArrows()
@@ -1049,10 +1051,12 @@
         if(!this.renderer) return
         this.clearFluxArrows()
         const simulation = this.document.activeSimulation
-        if(simulation?.mode != 'thermal' || !simulation.result) return this.renderer.render()
+        if(!['thermal', 'fluid'].includes(simulation?.mode) || !simulation.result) return this.renderer.render()
         const component = this.document.top().findChild(simulation.result.componentId)
-        const samples = simulation.fluxSamples()
-        const maximum = Math.max(...samples.map(sample => sample.flux.length()))
+        const samples = simulation.mode == 'fluid' ? simulation.flowSamples() : simulation.fluxSamples()
+        const maximum = simulation.mode == 'fluid'
+          ? simulation.result.maxSpeed
+          : Math.max(...samples.map(sample => sample.flux.length()))
         const group = new THREE.Group()
         samples.forEach(sample => {
           const strength = sample.flux.length() / maximum
@@ -1061,7 +1065,7 @@
             sample.flux.clone().normalize(),
             sample.position,
             length,
-            0xffffff,
+            simulation.mode == 'fluid' ? new THREE.Color(0x003cff).lerp(new THREE.Color(0xff0000), strength) : 0xffffff,
             length * 0.22,
             length * 0.1,
           )

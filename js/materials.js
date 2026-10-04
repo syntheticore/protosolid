@@ -206,6 +206,14 @@ class Materials {
       vertexColors: true,
     })
 
+    this.fluidSurface = new THREE.MeshBasicMaterial({
+      side: THREE.DoubleSide,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.2,
+      depthWrite: false,
+    })
+
     this.highlightSurface = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,
       color: '#0070ff',

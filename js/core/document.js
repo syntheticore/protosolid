@@ -600,9 +600,11 @@ export default class Document extends Emitter {
       this.filePath = file.path
       this.isFresh = false
       this.treeletsExpandedByDefault = false
-      const dump = Serialize.parse(file.data, { document: this, sketches: {} })
+      const materials = []
+      const dump = Serialize.parse(file.data, { document: this, sketches: {}, materials })
       setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
       this.timeline = dump.timeline
+      this.materials = materials
       await this.timeline.evaluateAsync((feature, index, total) => {
         this.bus.emit('calculation', {
           id: calculationId,

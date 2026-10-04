@@ -81,6 +81,8 @@ export default class PathTracingViewport {
       material.clearcoat,
       material.clearcoatRoughness,
       material.transmission,
+      material.ior,
+      material.thickness,
       material.opacity,
     ].join(':')
   }

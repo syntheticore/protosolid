@@ -231,6 +231,7 @@
   import { Solid, Face } from './../js/core/geom3d.js'
   import { setWorldTransform, solveAssembly, worldTransform } from './../js/core/assembly.js'
   import { TransformGizmo } from './../js/three/gizmos.js'
+  import SimulationFlow from '../js/three/simulation-flow.js'
   import { componentTriangles } from './../js/core/export.js'
   import {
     DummyTool,
@@ -341,7 +342,7 @@
 
       'document.activeSimulation': function() {
         this.thermalProbe = null
-        this.$nextTick(this.updateFluxArrows)
+        this.$nextTick(this.updateSimulationFlow)
       },
 
       exportPreview: function() {
@@ -483,7 +484,8 @@
       this.bus.on('render-needed', () => this.renderer.render() )
       this.bus.on('preview-feature', this.previewFeature)
       this.bus.on('unpreview-feature', this.unpreviewFeature)
-      this.bus.on('thermal-result', this.updateFluxArrows)
+      this.bus.on('thermal-result', this.updateSimulationFlow)
+      this.bus.on('fluid-result', this.updateSimulationFlow)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
       this.bus.on('sketch-history', this.changeSketchHistory)
@@ -509,10 +511,11 @@
       this.cancelCameraUnpreview()
       this.document.off('regenerated', this.updateExportPreview)
       this.bus.off('resize', this.onWindowResize)
-      this.bus.off('thermal-result', this.updateFluxArrows)
+      this.bus.off('thermal-result', this.updateSimulationFlow)
+      this.bus.off('fluid-result', this.updateSimulationFlow)
       this.bus.off('joint-picked', this.jointPicked)
       this.bus.off('alt-pressed', this.setOrbiting)
-      this.clearFluxArrows()
+      this.clearSimulationFlow()
       this.clearExportPreview()
       this.clearSelectionTransformGizmo()
       this.renderer.dispose()
@@ -970,6 +973,9 @@
         const [vec, coords] = this.snap(e)
         if(this.pickingPath && vec) this.pickingPath.target = vec
         if(vec || this.activeTool.probesSurface) this.activeTool.mouseMove(vec, coords)
+        // At close zoom, background rays can miss the projection plane.
+        // Clear hover even when there is no world position for the tool.
+        else this.$emit('update:highlight', null)
       },
 
       mouseLeave: function() {
@@ -1035,44 +1041,22 @@
         this.paths = []
       },
 
-      clearFluxArrows: function() {
-        if(!this.fluxArrows) return
-        this.renderer.scene.remove(this.fluxArrows)
-        this.fluxArrows.traverse(object => {
-          object.geometry?.dispose()
-          object.material?.dispose()
-        })
-        this.fluxArrows = null
+      clearSimulationFlow: function() {
+        if(!this.simulationFlow) return
+        this.renderer.scene.remove(this.simulationFlow)
+        this.simulationFlow.dispose()
+        this.simulationFlow = null
       },
 
-      updateFluxArrows: function() {
+      updateSimulationFlow: function() {
         if(!this.renderer) return
-        this.clearFluxArrows()
+        this.clearSimulationFlow()
         const simulation = this.document.activeSimulation
-        if(simulation?.mode != 'thermal' || !simulation.result) return this.renderer.render()
+        if(!['thermal', 'fluid'].includes(simulation?.mode) || !simulation.result) return this.renderer.render()
         const component = this.document.top().findChild(simulation.result.componentId)
-        const samples = simulation.fluxSamples()
-        const maximum = Math.max(...samples.map(sample => sample.flux.length()))
-        const group = new THREE.Group()
-        samples.forEach(sample => {
-          const strength = sample.flux.length() / maximum
-          const length = simulation.result.step * (1 + strength * 1.5)
-          const arrow = new THREE.ArrowHelper(
-            sample.flux.clone().normalize(),
-            sample.position,
-            length,
-            0xffffff,
-            length * 0.22,
-            length * 0.1,
-          )
-          arrow.line.material.depthTest = false
-          arrow.cone.material.depthTest = false
-          arrow.line.renderOrder = 10
-          arrow.cone.renderOrder = 10
-          group.add(arrow)
-        })
+        const group = markRaw(new SimulationFlow(simulation))
         group.applyMatrix4(worldTransform(component))
-        this.fluxArrows = group
+        this.simulationFlow = group
         this.renderer.scene.add(group)
         this.renderer.render()
       },

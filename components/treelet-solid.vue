@@ -51,10 +51,11 @@
   const bus = inject('bus')
   const highlight = inject('highlight')
 
-  const isHidden = computed(() => props.component.creator.itemsHidden[props.solid.id] )
+  const isHidden = computed(() => props.component.isItemHidden(props.solid.id) )
 
   function toggleVisibility() {
-    props.component.creator.itemsHidden[props.solid.id] = !isHidden.value
+    props.component.creator.itemsHidden[props.component.sourceItemId(props.solid.id)] = !isHidden.value
+    props.document.updateFeatureVisibility()
   }
 
   async function removeSolid() {

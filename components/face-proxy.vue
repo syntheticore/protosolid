@@ -56,6 +56,7 @@
 
   function getSurfaceMaterial() {
     if(props.face.sectionSurface) return props.component.creator.compSectionMaterial
+    if(props.colorMode == 'fluid') return materials.fluidSurface
     if(props.colorMode == 'thermal' || props.colorMode == 'static') return materials.thermalSurface
     if(props.colorMode == 'interference') return materials.interferenceSurface
     if(props.colorMode.startsWith('diagnostic:')) {
@@ -126,6 +127,9 @@
     if(props.displayMode == 'exportPreview') return materials.invisibleSurface
     if(props.face.sectionSurface) return props.component.creator.compSectionMaterial
     if(props.displayMode == 'pathTraced') return getSurfaceMaterial()
+    if(props.colorMode == 'fluid' && !props.document.activeSimulationPicker) {
+      return props.parentActive ? materials.fluidSurface : materials.ghostSurface
+    }
     if((props.colorMode == 'thermal' || props.colorMode == 'static') && !props.document.activeSimulationPicker) {
       return props.parentActive ? materials.thermalSurface : materials.ghostSurface
     }

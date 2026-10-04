@@ -1,6 +1,6 @@
 <template lang="pug">
 
-  li.treelet-simulation(:class="{ expanded, invalid: warning }")
+  li.treelet-simulation(:class="{ expanded, invalid: warning, fluid: simulation.mode == 'fluid' }")
 
     .box
 
@@ -12,21 +12,29 @@
           :title="warning || null"
           fixed-width
         )
+
         h2 {{ simulation.title }}
+
         Icon.expand(icon="angle-right")
 
         .controls
+
           Icon.delete(icon="trash-alt" fixed-width title="Delete" @click.stop="remove")
 
       .content.form(v-if="expanded")
 
         fieldset
 
+          label(v-if="simulation.mode == 'fluid'")
+            span Fluid
+            select.input(:value="simulation.fluid" @change="fluidChanged($event)")
+              option(v-for="(material, key) in fluidMaterials" :key="key" :value="key") {{ material.label }}
+
           label.picker-row(v-for="picker in configuration.pickers" :key="picker.key")
             span {{ picker.label }} ({{ simulation[picker.key].length }})
             .picker(
               :ref="element => setPickerElement(picker.key, element)"
-              :class="{ active: activePicker == picker.key, filled: simulation[picker.key].length }"
+              :class="{ active: activePicker == picker.key, filled: simulation[picker.key].length, first: picker.key == configuration.pickers[0].key }"
               @click="pick(picker.key)"
             )
 
@@ -34,9 +42,22 @@
             span {{ input.label }}
             input.input(
               type="number"
+              :step="input.step || 'any'"
+              :min="input.min"
+              :max="input.max"
               :value="simulation[input.key]"
               @change="changed(input.key, $event)"
             )
+
+          template(v-if="simulation.mode == 'fluid'")
+
+            label.display-option
+              span Flow vectors
+              input(type="checkbox" :checked="simulation.showFlowVectors" @change="displayChanged('showFlowVectors', $event)")
+
+            label.display-option
+              span Flow lines
+              input(type="checkbox" :checked="simulation.showFlowLines" @change="displayChanged('showFlowLines', $event)")
 
 </template>
 
@@ -80,16 +101,23 @@
       border-width: 2px
       animation: 2s infinite linear rotate
 
-  .picker-row:nth-of-type(1) .picker
+  .picker.first
     background: $blue
     border-color: lighten($blue, 75%)
 
-  .picker-row:nth-of-type(2) .picker
+  .picker:not(.first)
     background: $purple
     border-color: lighten($purple, 75%)
 
   .input
     width: 64px
+    justify-self: end
+
+  select.input
+    width: 120px
+
+  .fluid fieldset .display-option input[type="checkbox"]
+    margin-left: 0
     justify-self: end
 
   fieldset label
@@ -111,11 +139,28 @@
 
 
 <script>
-  import { ManipulationTool, StaticProbeTool, ThermalProbeTool } from '../js/tools.js'
+  import { FluidProbeTool, ManipulationTool, StaticProbeTool, ThermalProbeTool } from '../js/tools.js'
+  import { fluidMaterials } from '../js/core/fluid.js'
   import { worldTransform } from '../js/core/assembly.js'
   import PickerSession from '../js/picker-session.js'
 
   const configurations = {
+    fluid: {
+      icon: 'wind',
+      probeTool: FluidProbeTool,
+      resultEvent: 'fluid-result',
+      pickers: [
+        { key: 'inletFaces', label: 'Inlet faces' },
+        { key: 'outletFaces', label: 'Outlet faces' },
+      ],
+      inputs: [
+        { key: 'inletSpeed', label: 'Inlet m/s', min: 0 },
+        { key: 'outletPressure', label: 'Outlet Pa gauge' },
+        { key: 'density', label: 'Density kg/m³', min: 0 },
+        { key: 'viscosity', label: 'Viscosity Pa·s', min: 0 },
+        { key: 'resolution', label: 'Grid cells', step: 1, min: 8, max: 24 },
+      ],
+    },
     thermal: {
       icon: 'thermometer-half',
       probeTool: ThermalProbeTool,
@@ -159,6 +204,8 @@
       return {
         activePicker: null,
         pickerElements: {},
+        fluidMaterials,
+        solveRevision: 0,
       }
     },
 
@@ -185,6 +232,8 @@
           this.bus.emit('activate-tool', this.configuration.probeTool)
           this.$nextTick(this.updatePaths)
         } else {
+          this.solveRevision++
+          this.simulation.cancelSolve?.()
           this.cancelPick()
           this.bus.emit('clear-pickers')
           this.bus.emit('activate-tool', ManipulationTool)
@@ -217,6 +266,8 @@
     },
 
     beforeUnmount() {
+      this.solveRevision++
+      this.simulation.cancelSolve?.()
       this.pickerSession.dispose()
       this.bus.off('resize', this.updatePaths)
       this.bus.off('tree-layout', this.updatePaths)
@@ -243,8 +294,12 @@
         this.$nextTick(this.updatePaths)
       },
 
-      solve() {
-        this.simulation.solve(this.document.top())
+      async solve() {
+        const revision = ++this.solveRevision
+        const pending = this.simulation.solve(this.document.top())
+        if(this.simulation.mode == 'fluid') this.bus.emit(this.configuration.resultEvent)
+        await pending
+        if(revision != this.solveRevision) return
         if(this.configuration.resultEvent) this.bus.emit(this.configuration.resultEvent)
         this.bus.emit('render-needed')
         this.$nextTick(this.updatePaths)
@@ -252,8 +307,21 @@
 
       changed(key, event) {
         this.simulation[key] = Number(event.target.value)
+        if(this.simulation.mode == 'fluid' && (key == 'density' || key == 'viscosity')) this.simulation.fluid = 'custom'
         this.document.hasChanges = true
         this.solve()
+      },
+
+      fluidChanged(event) {
+        this.simulation.setFluid(event.target.value)
+        this.document.hasChanges = true
+        this.solve()
+      },
+
+      displayChanged(key, event) {
+        this.simulation[key] = event.target.checked
+        this.document.hasChanges = true
+        this.bus.emit('fluid-result')
       },
 
       async pick(key) {

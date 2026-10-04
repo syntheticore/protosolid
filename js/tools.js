@@ -328,6 +328,14 @@ export class StaticProbeTool extends SimulationProbeTool {
 }
 
 
+export class FluidProbeTool extends SimulationProbeTool {
+  label(simulation, position) {
+    const sample = simulation.sampleAt(position)
+    if(sample) return `${sample.speed.toFixed(3)} m/s · ${sample.pressure.toFixed(2)} Pa gauge`
+  }
+}
+
+
 export class DiagnosticShadingTool extends Tool {
   static icon = 'palette'
   static hasOptions = true

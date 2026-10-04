@@ -238,7 +238,7 @@ export class FeatureGizmos {
       }
     }
     for(const [key, descriptor] of Object.entries(descriptors)) {
-      const { type, value, cb } = descriptor
+      const { type, value, cb, side = true } = descriptor
       const center = descriptor.center.clone().applyMatrix4(transform)
       const orientation = type == 'angle' ?
         new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().extractRotation(transform)
@@ -246,7 +246,7 @@ export class FeatureGizmos {
       let control = this.controls.get(key)
       if(!control) {
         control = type == 'angle' ? new AngleGizmo(center, orientation, value, cb) :
-          new LengthGizmo(center, orientation, value, true, cb)
+          new LengthGizmo(center, orientation, value, side, cb)
         this.controls.set(key, control)
         control.addEventListener('dragging-changed', event => {
           for(const other of this.controls.values()) {
@@ -256,7 +256,7 @@ export class FeatureGizmos {
         renderer.addGizmo(control)
       }
       control.setFrame(center, orientation)
-      control.set(value, true)
+      control.set(value, side)
       if(descriptor.size) control.setSize(descriptor.size * 1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight))
     }
   }

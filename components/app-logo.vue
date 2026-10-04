@@ -1,5 +1,5 @@
 <template lang="pug">
-  img.app-logo(:src="logoUrl" alt="ProtoSolid" draggable="false")
+  img.app-logo(:src="logoUrl" alt="" draggable="false")
 </template>
 
 <style lang="stylus" scoped>

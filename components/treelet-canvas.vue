@@ -126,6 +126,7 @@
       bus.emit('render-needed')
     })
     props.canvas.texture.colorSpace = THREE.SRGBColorSpace
+    props.canvas.texture.anisotropy = window.alcRenderer.renderer.capabilities.getMaxAnisotropy()
 
     // Render again, as image takes one frame to load
     setTimeout(() => bus.emit('render-needed') )

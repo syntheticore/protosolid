@@ -184,7 +184,7 @@
       top: 34px
       right: 12px
       bottom: 0.25rem
-      width: 110px
+      width: 140px
       display: flex
       flex-direction: column
 
@@ -210,7 +210,7 @@
         align-self: flex-end
         display: grid
         column-gap: 0.5rem
-        grid-template-columns: 72px 110px
+        grid-template-columns: 72px 140px
 
       .view-row
         display: contents
@@ -242,6 +242,9 @@
         .radio-bar
           margin-bottom: 0
           min-width: 0
+
+          :deep(.button)
+            padding: 4px
 
         .display-toggle
           display: flex
@@ -329,6 +332,10 @@
           wireframe: {
             title: 'Wireframe',
             icon: 'atlas',
+          },
+          hiddenLines: {
+            title: 'Shaded + Hidden Lines',
+            icon: 'vector-square',
           },
           shaded: {
             title: 'Shaded',
@@ -451,7 +458,7 @@
 
         if(keyCode.toLowerCase() == 'w') {
           this.previewDisplayMode = null
-          const modes = Object.keys(this.displayModes)
+          const modes = Object.keys(this.displayModes).filter(mode => mode != 'pathTraced')
           const index = modes.indexOf(this.displayMode)
           this.displayMode = modes[(index + 1) % modes.length]
           return

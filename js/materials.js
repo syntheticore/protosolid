@@ -32,6 +32,9 @@ class Materials {
     this.highlightLine.color.set('#2590e1')
     this.highlightLine.depthTest = false
 
+    this.visibleHighlightLine = this.highlightLine.clone()
+    this.visibleHighlightLine.depthTest = true
+
     this.constrainedLine = this.line.clone()
     this.constrainedLine.color.set('#d7e4ed')
 
@@ -71,6 +74,15 @@ class Materials {
     this.ghostWire = this.wire.clone()
     this.ghostWire.color.set('rgb(45, 49, 53)')
     this.ghostWire.linewidth = 1.5
+
+    this.hiddenLine = this.wire.clone()
+    this.hiddenLine.linewidth = 1.5
+    this.hiddenLine.dashed = true
+    this.hiddenLine.dashSize = 6
+    this.hiddenLine.gapSize = 4
+    this.hiddenLine.opacity = 0.55
+    this.hiddenLine.depthFunc = THREE.GreaterDepth
+    this.hiddenLine.depthWrite = false
 
     this.uiWire = this.wire.clone()
     this.uiWire.linewidth = 3

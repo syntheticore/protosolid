@@ -34,9 +34,9 @@
           label
 
             .flex.gap.section-fields
-              input.input(type="number" v-model.number="section.position.x" step="1")
-              input.input(type="number" v-model.number="section.position.y" step="1")
-              input.input(type="number" v-model.number="section.position.z" step="1")
+              input.input(type="number" v-model.number="section.position.x" step="0.1")
+              input.input(type="number" v-model.number="section.position.y" step="0.1")
+              input.input(type="number" v-model.number="section.position.z" step="0.1")
 
             span Position
 
@@ -91,13 +91,14 @@
 
 <script setup>
 
-  import * as THREE from 'three'
-
   const props = defineProps(['document', 'component', 'section', 'index'])
 
   const expanded = computed({
-    get: () => props.document.isTreeletExpanded(`section:${props.section.id}`),
-    set: value => props.document.setTreeletExpanded(`section:${props.section.id}`, value),
+    get: () => props.document.activeInteractivePanel === `section:${props.component.id}:${props.section.id}`,
+    set: value => {
+      if(value) props.document.activateComponent(props.component)
+      props.document.activateInteractivePanel(value ? `section:${props.component.id}:${props.section.id}` : null)
+    },
   })
 
   function toggleVisibility() {
@@ -105,6 +106,7 @@
   }
 
   function deleteSection() {
+    if(expanded.value) props.document.activateInteractivePanel(null)
     const creator = props.component.creator
     creator.sectionViews = creator.sectionViews.filter(section => section != props.section )
   }

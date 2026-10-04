@@ -5,8 +5,7 @@
   import * as THREE from 'three'
   import { CanvasPositionGizmo } from '../js/three/gizmos.js'
 
-  const props = defineProps(['document', 'canvas', 'parentHighlighted', 'parentSelected', 'parentTransform'])
-  const emit = defineEmits([])
+  const props = defineProps(['document', 'component', 'canvas', 'parentHighlighted', 'parentSelected', 'parentTransform'])
 
   const highlight = inject('highlight')
   const renderNeeded = inject('render-needed')
@@ -22,9 +21,8 @@
   window.alcRenderer.add(mesh)
 
   watch(() => !!props.canvas.texture &&
-    props.document.isTreeletExpanded(`canvas:${props.canvas.id}`) &&
-    !props.document.activeSketch && !props.document.activeFeature &&
-    !props.document.activeSimulation && !props.document.activeExportConfig,
+    props.document.activeInteractivePanel === `canvas:${props.component.id}:${props.canvas.id}` &&
+    !props.document.activeSketch && !props.document.activeFeature && !props.document.creatingFeature,
   visible => {
     if(visible) {
       positionGizmo = new CanvasPositionGizmo(getPlaneTransform(), props.canvas.x, props.canvas.y, (x, y) => {
@@ -39,7 +37,7 @@
       window.alcRenderer.removeGizmo(positionGizmo)
       positionGizmo = null
     }
-  }, { immediate: true })
+  }, { immediate: true, flush: 'sync' })
 
   watch(() => [
     props.canvas.texture,

@@ -36,7 +36,7 @@
           label
             button.button.canvas-fields(title="Choose file location" @click="chooseFile")
               Icon(icon="folder")
-            span.source-path(:title="path || canvas.src") {{ path || canvas.src || 'Image Source' }}
+            span.source-path(:title="canvas.src") {{ canvas.src || 'Image Source' }}
 
           label
             ComboBox.canvas-fields(v-model="canvas.plane" label="Plane" :options="[{ value: 'top', label: 'Top' }, { value: 'front', label: 'Front' }, { value: 'side', label: 'Side' }]")
@@ -61,7 +61,7 @@
 
 <style lang="stylus" scoped>
 
-  .box
+  .expanded .box
     width: 264px
 
   .icon
@@ -104,17 +104,19 @@
 <script setup>
 
   import * as THREE from 'three'
-  import { loadFile } from '../../js/utils.js'
+  import { loadFile } from '../js/utils.js'
 
   const props = defineProps(['document', 'component', 'canvas'])
 
   const bus = inject('bus')
 
   const expanded = computed({
-    get: () => props.document.isTreeletExpanded(`canvas:${props.canvas.id}`),
-    set: value => props.document.setTreeletExpanded(`canvas:${props.canvas.id}`, value),
+    get: () => props.document.activeInteractivePanel === `canvas:${props.component.id}:${props.canvas.id}`,
+    set: value => {
+      if(value) props.document.activateComponent(props.component)
+      props.document.activateInteractivePanel(value ? `canvas:${props.component.id}:${props.canvas.id}` : null)
+    },
   })
-  const path = ref(null)
   const sourceName = computed(() =>
     props.canvas.src?.split(/[\\/]/).pop() || 'Canvas'
   )
@@ -126,26 +128,18 @@
   async function chooseFile() {
     const { path: filePath, data, width, height } = await loadFile('image/*', 'dataUrl')
 
-    path.value = filePath
     props.canvas.src = filePath
     props.canvas.data = data
     props.canvas.width = width
     props.canvas.height = height
 
-    const textureLoader = new THREE.TextureLoader()
-    props.canvas.texture = textureLoader.load(data, texture => {
-      texture.colorSpace = THREE.SRGBColorSpace
-      texture.needsUpdate = true
-      bus.emit('render-needed')
-    })
+    props.canvas.texture = new THREE.TextureLoader().load(data, () => bus.emit('render-needed'))
     props.canvas.texture.colorSpace = THREE.SRGBColorSpace
     props.canvas.texture.anisotropy = window.alcRenderer.renderer.capabilities.getMaxAnisotropy()
-
-    // Render again, as image takes one frame to load
-    setTimeout(() => bus.emit('render-needed') )
   }
 
   function remove() {
+    if(expanded.value) props.document.activateInteractivePanel(null)
     props.component.creator.canvases = props.component.creator.canvases.filter(conf => conf !== props.canvas )
   }
 

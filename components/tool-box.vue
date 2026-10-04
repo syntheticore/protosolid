@@ -575,11 +575,15 @@
       },
 
       addSectionView: function() {
-        this.document.activeComponent.creator.sectionViews.push(new SectionView())
+        const section = new SectionView()
+        this.document.activeComponent.creator.sectionViews.push(section)
+        this.document.activateInteractivePanel(`section:${this.document.activeComponent.id}:${section.id}`)
       },
 
       addCanvas: function() {
-        this.document.activeComponent.creator.canvases.push(new Canvas())
+        const canvas = new Canvas()
+        this.document.activeComponent.creator.canvases.push(canvas)
+        this.document.activateInteractivePanel(`canvas:${this.document.activeComponent.id}:${canvas.id}`)
       },
 
       addExportConfig: function() {

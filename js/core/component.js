@@ -118,6 +118,22 @@ export class SectionView {
       .setPosition(this.position.x, this.position.y, this.position.z)
   }
 
+  setTransform(transform, rotate) {
+    const position = new THREE.Vector3().setFromMatrixPosition(transform)
+    this.position.x = Number(position.x.toFixed(1))
+    this.position.y = Number(position.y.toFixed(1))
+    this.position.z = Number(position.z.toFixed(1))
+
+    if(rotate) {
+      // A section stores its plane normal with two angles, without roll.
+      const normal = new THREE.Vector3().setFromMatrixColumn(transform, 2).normalize()
+      const x = Math.atan2(-normal.y, normal.z)
+      const y = Math.atan2(normal.x, Math.hypot(normal.y, normal.z))
+      this.orientation.x = THREE.MathUtils.euclideanModulo(THREE.MathUtils.radToDeg(x), 360)
+      this.orientation.y = THREE.MathUtils.euclideanModulo(THREE.MathUtils.radToDeg(y), 360)
+    }
+  }
+
   static undump(dump) {
     return new this(dump.id, dump.orientation, dump.position, dump.side, dump.hidden)
   }

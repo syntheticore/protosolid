@@ -67,6 +67,7 @@
     CanvasProxy(
       v-if="!canvas.hidden"
       :key="canvas.id"
+      :document="document"
       :canvas="canvas"
       :parent-transform="transform"
       :parent-highlighted="highlighted"

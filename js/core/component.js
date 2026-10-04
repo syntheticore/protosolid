@@ -126,7 +126,7 @@ Serialize.register(SectionView, 'SectionView')
 
 
 export class Canvas {
-  constructor(id, src, scale, hidden, x, y, plane) {
+  constructor(id, src, scale, hidden, x, y, plane, transparency) {
     this.id = id || makeID()
     this.src = src
     this.scale = scale ?? 1.0
@@ -134,6 +134,7 @@ export class Canvas {
     this.x = x ?? 0
     this.y = y ?? 0
     this.plane = plane || 'side'
+    this.transparency = transparency ?? 0
   }
 
   getTransform() {
@@ -145,7 +146,7 @@ export class Canvas {
     return rotations[this.plane] || rotations.top
   }
 
-  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden, dump.x, dump.y, dump.plane) }
+  static undump(dump) { return new this(dump.id, dump.src, dump.scale, dump.hidden, dump.x, dump.y, dump.plane, dump.transparency) }
 }
 Serialize.register(Canvas, 'Canvas')
 

@@ -29,14 +29,14 @@
 
       .content.form(v-if="expanded")
 
-        fieldset
+        img(v-if="canvas.data" :src="canvas.data")
 
-          img(v-if="canvas.data" :src="canvas.data")
+        fieldset
 
           label
             button.button.canvas-fields(title="Choose file location" @click="chooseFile")
               Icon(icon="folder")
-            span(:title="path") {{ path || 'Image Source'}}
+            span.source-path(:title="path || canvas.src") {{ path || canvas.src || 'Image Source' }}
 
           label
             ComboBox.canvas-fields(v-model="canvas.plane" label="Plane" :options="[{ value: 'top', label: 'Top' }, { value: 'front', label: 'Front' }, { value: 'side', label: 'Side' }]")
@@ -47,15 +47,22 @@
             span Scale
 
           label
+            input.canvas-fields(type="range" v-model.number="canvas.transparency" min="0" step="0.01" max="1" @input="document.markChanged()")
+            span Transparency
+
+          label
             .flex.gap.canvas-fields
-              input.input(type="number" v-model.number="canvas.x" step="1")
-              input.input(type="number" v-model.number="canvas.y" step="1")
+              input.input(type="number" v-model.number="canvas.x" step="0.1")
+              input.input(type="number" v-model.number="canvas.y" step="0.1")
             span Position
 
 </template>
 
 
 <style lang="stylus" scoped>
+
+  .box
+    width: 264px
 
   .icon
     padding-left: 3px
@@ -67,6 +74,12 @@
     overflow: hidden
     max-width: 110px
 
+  .source-path
+    max-width: 90px
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
   .expand
     padding: 3px !important
     margin: 0 2px
@@ -76,14 +89,14 @@
       transform: rotate(90deg)
 
   img
-    max-width: 240px
-    margin-inline: -12px
+    display: block
+    width: 100%
 
   .flex > *
     min-width: 0
 
   .form label > :first-child
-    width: 122px
+    width: 146px
 
 </style>
 

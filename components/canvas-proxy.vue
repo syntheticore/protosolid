@@ -3,9 +3,9 @@
 <script setup>
 
   import * as THREE from 'three'
-  import materials from '../js/materials.js'
+  import { CanvasPositionGizmo } from '../js/three/gizmos.js'
 
-  const props = defineProps(['canvas', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'canvas', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -14,17 +14,39 @@
   const highlighted = computed(() => props.parentHighlighted || props.canvas == highlight.value )
 
   let mesh = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), getMaterial())
+  let positionGizmo = null
 
   // Keep the mesh alive while the image and its dimensions are populated. The
   // renderer disposes textures when an object is removed, so rebuilding this
   // mesh for every canvas change makes subsequent updates use a dead texture.
   window.alcRenderer.add(mesh)
 
+  watch(() => !!props.canvas.texture &&
+    props.document.isTreeletExpanded(`canvas:${props.canvas.id}`) &&
+    !props.document.activeSketch && !props.document.activeFeature &&
+    !props.document.activeSimulation && !props.document.activeExportConfig,
+  visible => {
+    if(visible) {
+      positionGizmo = new CanvasPositionGizmo(getPlaneTransform(), props.canvas.x, props.canvas.y, (x, y) => {
+        props.canvas.x = x
+        props.canvas.y = y
+        updateTransform()
+        props.document.markChanged()
+        renderNeeded.value = true
+      })
+      window.alcRenderer.addGizmo(positionGizmo)
+    } else {
+      window.alcRenderer.removeGizmo(positionGizmo)
+      positionGizmo = null
+    }
+  }, { immediate: true })
+
   watch(() => [
     props.canvas.texture,
     props.canvas.width,
     props.canvas.height,
     props.canvas.scale,
+    props.canvas.transparency,
     props.canvas.x,
     props.canvas.y,
     props.canvas.plane,
@@ -54,8 +76,8 @@
       Number(props.canvas.y) || 0,
       0,
     )
-    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4())
-      .multiply(props.canvas.getTransform())
+    const planeTransform = getPlaneTransform()
+    mesh.matrix.copy(planeTransform)
       .multiply(localTransform)
     mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
 
@@ -64,6 +86,16 @@
     const scale = Number(props.canvas.scale) || 1
     const aspect = width > 0 && height > 0 ? height / width : 1
     mesh.scale.set(scale, aspect * scale, 1)
+
+    if(positionGizmo && !positionGizmo.dragging) {
+      positionGizmo.setFrame(planeTransform)
+      positionGizmo.setPosition(props.canvas.x, props.canvas.y)
+    }
+  }
+
+  function getPlaneTransform() {
+    return (props.parentTransform || new THREE.Matrix4()).clone()
+      .multiply(props.canvas.getTransform())
   }
 
   function getMaterial() {
@@ -71,6 +103,9 @@
       ...props.canvas.texture && { map: props.canvas.texture },
       side: THREE.DoubleSide,
       toneMapped: false,
+      transparent: props.canvas.transparency > 0,
+      opacity: 1 - props.canvas.transparency,
+      depthWrite: props.canvas.transparency === 0,
       ...(highlighted.value || props.parentSelected) && {
         color: new THREE.Color('#0070ff') ,
         combine: THREE.MultiplyOperation,
@@ -85,6 +120,7 @@
   }
 
   onUnmounted(() => {
+    window.alcRenderer.removeGizmo(positionGizmo)
     const material = mesh?.material
     const texture = material?.map
     window.alcRenderer.remove(mesh)

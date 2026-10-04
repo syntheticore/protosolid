@@ -12,5 +12,5 @@ self.onmessage = ({ data }) => {
     data.settings,
   )
   if(typeof result == 'string') self.postMessage(result)
-  else self.postMessage(result, [result.grid.buffer, result.velocities.buffer, result.pressures.buffer])
+  else self.postMessage(result, [result.grid.buffer, result.velocities.buffer, result.pressures.buffer, result.inletPositions.buffer])
 }

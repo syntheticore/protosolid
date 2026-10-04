@@ -4,6 +4,7 @@ import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { resolveSimulationFaces } from './simulation.js'
 import { findVoxelNode } from './voxel.js'
+import { traceFlowLines } from './fluid-lines.js'
 
 
 export const fluidMaterials = {
@@ -25,6 +26,8 @@ export class FluidSimulation {
     this.resolution = 16
     this.inletFaces = []
     this.outletFaces = []
+    this.showFlowVectors = true
+    this.showFlowLines = true
     this.result = null
     this.revision = 0
   }
@@ -128,10 +131,14 @@ export class FluidSimulation {
     return samples
   }
 
+  flowLines() {
+    return this.result ? traceFlowLines(this.result) : []
+  }
+
   dump() {
     return Object.fromEntries([
       'id', 'title', 'fluid', 'density', 'viscosity', 'inletSpeed', 'outletPressure',
-      'resolution', 'inletFaces', 'outletFaces',
+      'resolution', 'inletFaces', 'outletFaces', 'showFlowVectors', 'showFlowLines',
     ].map(key => [key, this[key]]))
   }
 

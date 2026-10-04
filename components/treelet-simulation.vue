@@ -12,10 +12,13 @@
           :title="warning || null"
           fixed-width
         )
+
         h2 {{ simulation.title }}
+
         Icon.expand(icon="angle-right")
 
         .controls
+
           Icon.delete(icon="trash-alt" fixed-width title="Delete" @click.stop="remove")
 
       .content.form(v-if="expanded")
@@ -45,6 +48,16 @@
               :value="simulation[input.key]"
               @change="changed(input.key, $event)"
             )
+
+          template(v-if="simulation.mode == 'fluid'")
+
+            label.display-option
+              span Flow vectors
+              input(type="checkbox" :checked="simulation.showFlowVectors" @change="displayChanged('showFlowVectors', $event)")
+
+            label.display-option
+              span Flow lines
+              input(type="checkbox" :checked="simulation.showFlowLines" @change="displayChanged('showFlowLines', $event)")
 
 </template>
 
@@ -102,6 +115,10 @@
 
   select.input
     width: 120px
+
+  .fluid fieldset .display-option input[type="checkbox"]
+    margin-left: 0
+    justify-self: end
 
   fieldset label
     display: grid
@@ -299,6 +316,12 @@
         this.simulation.setFluid(event.target.value)
         this.document.hasChanges = true
         this.solve()
+      },
+
+      displayChanged(key, event) {
+        this.simulation[key] = event.target.checked
+        this.document.hasChanges = true
+        this.bus.emit('fluid-result')
       },
 
       async pick(key) {

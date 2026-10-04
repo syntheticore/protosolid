@@ -79,6 +79,7 @@ class Materials {
       linewidth: 3,
       transparent: true,
       opacity: 0,
+      depthWrite: false,
     })
 
     this.table = {
@@ -208,9 +209,9 @@ class Materials {
 
     this.fluidSurface = new THREE.MeshBasicMaterial({
       side: THREE.DoubleSide,
-      vertexColors: true,
+      color: 'white',
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.1,
       depthWrite: false,
     })
 

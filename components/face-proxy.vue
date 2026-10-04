@@ -88,7 +88,7 @@
     normal.array.set(baseNormals)
     position.needsUpdate = true
     normal.needsUpdate = true
-    if(!['thermal', 'static', 'fluid'].includes(props.colorMode)) return
+    if(props.colorMode != 'thermal' && props.colorMode != 'static') return
 
     const simulation = props.document.activeSimulation
     const values = new Float32Array(position.count * 3)
@@ -102,16 +102,15 @@
     for(let i = 0; i < position.count; i++) {
       const point = new THREE.Vector3(basePositions[i * 3], basePositions[i * 3 + 1], basePositions[i * 3 + 2])
       const staticSample = props.colorMode == 'static' && simulatedFace && simulation.sampleAt(point)
-      const fluidSample = props.colorMode == 'fluid' && simulatedFace && simulation.sampleAt(point)
       const value = props.colorMode == 'thermal'
         ? simulatedFace && simulation.temperatureAt(point)
-        : props.colorMode == 'fluid' ? fluidSample?.speed : staticSample?.stress
+        : staticSample?.stress
       if(value === undefined || value === false) {
         color.setRGB(0.18, 0.18, 0.18)
       } else {
         const ratio = props.colorMode == 'thermal'
           ? (value - simulation.coldTemperature) / (simulation.hotTemperature - simulation.coldTemperature)
-          : props.colorMode == 'fluid' ? value / simulation.result.maxSpeed : Math.sqrt(Math.min(1, value))
+          : Math.sqrt(Math.min(1, value))
         color.copy(coldColor).lerp(hotColor, ratio)
         if(props.colorMode == 'static') {
           const displacement = staticSample.displacement

@@ -248,8 +248,11 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings) {
     if(face.type == 'inlet') inletFlow -= outward * h * h
     if(face.type == 'outlet') outletFlow += outward * h * h
   })
+  const inletNodes = new Set(faces.filter(face => face.type == 'inlet').map(face => Math.max(face.a, face.b)))
+  const inletPositions = Float64Array.from([...inletNodes].flatMap(node => points[node].toArray()))
   return {
     min: bounds.min.toArray(), step, nx, ny, nz, grid, velocities, pressures,
+    inletPositions,
     maxSpeed, inletFlow, outletFlow, time, iterations, converged, relativeChange, continuityError,
   }
 }

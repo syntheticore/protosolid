@@ -973,6 +973,9 @@
         const [vec, coords] = this.snap(e)
         if(this.pickingPath && vec) this.pickingPath.target = vec
         if(vec || this.activeTool.probesSurface) this.activeTool.mouseMove(vec, coords)
+        // At close zoom, background rays can miss the projection plane.
+        // Clear hover even when there is no world position for the tool.
+        else this.$emit('update:highlight', null)
       },
 
       mouseLeave: function() {

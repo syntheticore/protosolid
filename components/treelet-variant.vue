@@ -14,15 +14,14 @@
 
           Icon.expand(icon="angle-right")
 
-        .variant-picker(@click.stop="openOptionPicker")
+        .variant-picker(@click.stop)
 
-          select.variant-option(
-            ref="optionSelect"
-            :value="variant.activeOption"
-            @click.stop
-            @change="changeOption"
+          ComboBox.variant-option(
+            :model-value="variant.activeOption"
+            label="Variant"
+            :options="variant.options.map((option, i) => ({ value: i, label: option.title }))"
+            @update:model-value="changeOption"
           )
-            option(v-for="(option, i) in variant.options" :value="i") {{ option.title }}
 
         .controls(:class="{ wide: variant.options.length == 1, 'ultra-wide': variant.options.length > 1 }")
 
@@ -85,13 +84,18 @@
     padding: 12px
 
   .variant-option
-    height: auto
+    height: 24px
     color: $bright1
     background: transparent
     border: 0
     font-size: 10px
     font-weight: bold
     min-width: 0
+
+    :deep(.trigger)
+      color: inherit
+      background: transparent
+      border: 0
 
     &:hover
       color: white
@@ -153,15 +157,9 @@
         this.document.regenerateParameters()
       },
 
-      changeOption(event) {
-        this.component.creator.selectVariantOption(Number(event.target.value))
+      changeOption(value) {
+        this.component.creator.selectVariantOption(value)
         this.document.regenerateParameters()
-      },
-
-      openOptionPicker() {
-        const select = this.$refs.optionSelect
-        if(select?.showPicker) select.showPicker()
-        else select?.click()
       },
 
       removeOption() {

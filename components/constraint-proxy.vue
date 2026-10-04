@@ -9,6 +9,9 @@
     :style="{ top: proxy.coords.y + 'px', left: proxy.coords.x + 'px' }"
     @mouseup="$emit('dimensionMouseUp', $event, constraint)"
     @click.stop="select"
+    @mouseenter="highlight = constraint"
+    @mouseleave="clearHighlight"
+    @mousemove.stop
   )
 
   //- Sketch dimension
@@ -138,10 +141,10 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, EqualConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, ConcentricConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, PerpendicularConstraint, EqualConstraint } from '../js/core/sketch.js'
   import { Line, Circle, Arc } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
-  import { tangentPoint } from '../js/three/constraint-icons.js'
+  import { tangentPoint, perpendicularPoint } from '../js/three/constraint-icons.js'
   import { SketchTool } from '../js/tools.js'
 
   const props = defineProps({
@@ -156,6 +159,7 @@
   const bus = inject('bus')
   const frame = inject('frame')
   const renderNeeded = inject('render-needed')
+  const highlight = inject('highlight')
   const constraintIcons = inject('constraint-icons', null)
   const constraintIconLayout = inject('constraint-icon-layout', null)
 
@@ -209,13 +213,23 @@
       if(props.constraint.items.every(item => item.curve() instanceof Line)) return []
       return [{
         pos: transformPosition(point(props.constraint.items[0], true), sketch),
-        offset: { x: 11, y: -11 },
+        offset: { x: 14, y: -14 },
       }]
     }
 
+    if(props.constraint instanceof ConcentricConstraint) return [{
+      pos: transformPosition(point(props.constraint.items[0]), sketch),
+      offset: { x: 14, y: -14 },
+    }]
+
     if(props.constraint instanceof TangentConstraint) return [{
       pos: transformPosition(tangentPoint(props.constraint), sketch),
-      offset: { x: 11, y: -11 },
+      offset: { x: 14, y: -14 },
+    }]
+
+    if(props.constraint instanceof PerpendicularConstraint) return [{
+      pos: transformPosition(perpendicularPoint(props.constraint), sketch),
+      offset: { x: 14, y: -14 },
     }]
 
     if(props.constraint instanceof EqualConstraint) return props.constraint.items.map(item => {
@@ -231,7 +245,7 @@
       const item = props.constraint.items.find(item => item.index !== undefined)
       return [{
         pos: transformPosition(point(item, true), sketch),
-        offset: { x: 11, y: -11 },
+        offset: { x: 14, y: -14 },
       }]
     }
 
@@ -241,7 +255,7 @@
       const otherCurve = other && other.curve()
       const common = otherCurve && otherCurve.handles && curve.commonHandle && curve.commonHandle(otherCurve)
       return {
-        offset: item.index !== undefined ? { x: 11, y: -11 } : undefined,
+        offset: item.index !== undefined ? { x: 14, y: -14 } : undefined,
         pos: transformPosition((props.constraint.position && props.constraint.position.clone()) || (item.index !== undefined ?
           point(item, true)
           :
@@ -285,7 +299,12 @@
     props.document.selection.handle(props.constraint, bus.isCtrlPressed)
   }
 
+  function clearHighlight() {
+    if(highlight.value == props.constraint) highlight.value = null
+  }
+
   onUnmounted(() => {
+    clearHighlight()
     constraintIcons?.delete(props.constraint.id)
     window.alcRenderer.remove(_dimension)
     renderNeeded.value = true

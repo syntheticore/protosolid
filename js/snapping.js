@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { Line, Circle, Arc, Spline, OffsetCurve, supportsPointOnCurveConstraint } from './core/geom2d.js'
 import { cross2d, vecFromOc } from './core/utils.js'
-import { CoincidentConstraint, FixConstraint, HorVertConstraint, ProfileOffsetConstraint } from './core/sketch.js'
+import { CoincidentConstraint, ConcentricConstraint, FixConstraint, HorVertConstraint, ProfileOffsetConstraint } from './core/sketch.js'
 
 const snapDistance = 14 // px
 const maxSnapReferences = 5
@@ -16,9 +16,9 @@ function projectToGuide(point, guide) {
   return guide.start.clone().addScaledVector(guide.direction, point.clone().sub(guide.start).dot(guide.direction))
 }
 
-function snapTargetLines(target) {
+function snapTargetCurves(target) {
   return [target?.elem, target?.pointTarget?.elem, ...(target?.curves || [])]
-    .filter(elem => elem instanceof Line)
+    .filter(elem => elem instanceof Line || elem instanceof Circle || elem instanceof Arc)
 }
 
 function closestPointOnCurve(elem, point) {
@@ -164,10 +164,15 @@ export default class Snapper {
       if(points.some(other => other.elem == point.elem && other.index == point.index)) continue
       points.push(point)
       sketch.constraints.forEach(constraint => {
-        if(!(constraint instanceof CoincidentConstraint) || !constraint.items.some(item =>
-          item.curve() == point.elem && item.index == point.index
+        if(!(constraint instanceof CoincidentConstraint || constraint instanceof ConcentricConstraint)) return
+        const constraintPoints = constraint.items.map(item => ({
+          elem: item.curve(),
+          index: constraint instanceof ConcentricConstraint ? 0 : item.index,
+        }))
+        if(!constraintPoints.some(other =>
+          other.elem == point.elem && other.index == point.index
         )) return
-        constraint.items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
+        constraintPoints.forEach(other => pending.push(other))
       })
     }
     return points
@@ -412,20 +417,21 @@ export default class Snapper {
     const guides = []
     const context = this.viewport.activeTool.lineSnapContext()
     if(context) {
-      const { start, perpendicularLines } = context
+      const { start, perpendicularCurves } = context
       const delta = localVec.clone().sub(start)
       const elements = this.getSnapElements(this.getActiveHandleConnections())
       const candidates = [
-        ...new Set([...perpendicularLines, ...snapTargetLines(snapTarget)]),
+        ...new Set([...perpendicularCurves, ...snapTargetCurves(snapTarget)]),
       ].map(elem => ({ elem, perpendicular: true })).concat(
         this.lastLines.map(elem => ({ elem, perpendicular: false }))
       )
       if(!delta.lengthSq().almost(0.0)) candidates.forEach(({ elem, perpendicular }) => {
         if(!elements.includes(elem)) return
-        const direction = elem.direction()
+        const round = elem instanceof Circle || elem instanceof Arc
+        const direction = round ? elem.center().sub(start) : elem.direction()
         if(direction.lengthSq().almost(0.0)) return
         direction.normalize()
-        if(perpendicular) direction.set(-direction.y, direction.x, 0)
+        if(perpendicular && !round) direction.set(-direction.y, direction.x, 0)
         if(Math.abs(delta.clone().normalize().dot(direction)) < Math.cos(lineSnapAngle)) return
         guides.push({ start, direction, elem, perpendicular })
       })
@@ -483,7 +489,7 @@ export default class Snapper {
     guides.forEach(guide => {
       const start = this.guideScreenPoint(guide.start)
       if(guide.elem) {
-        const [first, second] = guide.elem.endpoints()
+        const [first, second] = guide.elem instanceof Line ? guide.elem.endpoints() : [guide.elem.center(), point]
         this.guides.push({ id: 'line-reference-' + guide.elem.id, start: this.guideScreenPoint(first), end: this.guideScreenPoint(second) })
         this.snapped.lineRelation = { elem: guide.elem, perpendicular: guide.perpendicular }
       } else {
@@ -509,7 +515,7 @@ export default class Snapper {
       this.catchSnapTargets(localVec, this.viewport.renderer.toScreen(vec), snapToGuides)
 
     if(snapToGuides && snapTarget) {
-      snapTargetLines(snapTarget).forEach(line => {
+      snapTargetCurves(snapTarget).filter(elem => elem instanceof Line).forEach(line => {
         this.lastLines = [line, ...this.lastLines.filter(other => other != line)].slice(0, maxSnapReferences)
       })
     }

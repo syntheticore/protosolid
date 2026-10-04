@@ -33,6 +33,7 @@ import {
   HorVertConstraint,
   ParallelConstraint,
   EqualConstraint,
+  ConcentricConstraint,
   TangentConstraint,
   FixConstraint,
   Dimension,
@@ -48,6 +49,8 @@ import {
   worldTransform,
 } from './core/assembly.js'
 import { EPSILON } from './core/utils.js'
+import { lineFillet } from './core/sketch-fillet.js'
+import { pasteSketchSelection } from './sketch-clipboard.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
 import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffsetFrame, buildOffsetCurves } from './core/sketch-offset.js'
 
@@ -105,6 +108,19 @@ class Tool {
   tangentSnapStart() { return null }
 
   snapExclusions() { return this.curve ? [this.curve] : [] }
+
+  historyState() {
+    if(!this.sketch) return
+    const previews = new Set([
+      this.curve, this.arc, ...(this.lines || []),
+      ...(this.elements || []), ...(this.curves || []),
+    ])
+    const state = this.sketch.dump()
+    state.elements = state.elements.filter(elem => !previews.has(elem))
+    state.constraints = state.constraints.filter(constraint =>
+      !constraint.items.some(item => previews.has(item.curve())))
+    return state
+  }
 
   acceptsSnapElement(_elem) { return true }
 
@@ -335,9 +351,9 @@ export class DiagnosticShadingTool extends Tool {
         title: 'Direction',
         type: 'enum',
         options: {
-          top: 'Top',
-          front: 'Front',
-          side: 'Side',
+          top: { title: 'Top', icon: 'arrow-down' },
+          front: { title: 'Front', icon: 'arrow-up' },
+          side: { title: 'Side', icon: 'arrow-left' },
         },
         visible: tool => tool.diagnosticMode == 'draft',
       },
@@ -622,7 +638,7 @@ export class ManipulationTool extends HighlightTool {
     // A curve body has no single snap handle under the pointer. Snapping it
     // as though its first handle were being dragged would create surprising
     // endpoint/center constraints on release.
-    this.snapToPoints = !this.curveDrag
+    this.snapToPoints = !this.curveDrag && !this.viewport.activeDimension
     this.cursor = 'grabbing'
   }
 
@@ -807,6 +823,142 @@ export class ProjectTool extends HighlightTool {
     }
     this.sketch.addProjection(projection)
     this.viewport.updateRegions(true)
+  }
+}
+
+
+export class SketchFilletTool extends HighlightTool {
+  static icon = 'bezier-curve'
+  static hasOptions = true
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, ['curve', 'point'])
+    this.sketch = sketch
+    this.localSpace = true
+    this.cursor = 'crosshair'
+    this.radius = 1
+    this.items = []
+    this.fillets = []
+    this.settings = {
+      radius: { title: 'Radius', type: 'number', min: EPSILON * 2, step: 1 },
+    }
+  }
+
+  showsHandles(elem) { return elem != this.arc }
+
+  shouldPickImmediately() { return true }
+
+  acceptsInput(item) {
+    const curve = item instanceof ElemRef ? item.curve() : item
+    return curve instanceof Line && curve.sketch == this.sketch && !curve.projection
+  }
+
+  cornerLines(item) {
+    if(!(item instanceof ElemRef)) return this.items.length ? [this.items[0], item] : null
+    const line = item.curve()
+    const point = line.points[item.index]
+    const neighbors = this.sketch.elements.filter(other => other instanceof Line && other != line &&
+      !other.projection && other.isReference == line.isReference && other.points.some(end => end.almost(point)))
+    return neighbors.length == 1 ? [line, neighbors[0]] : null
+  }
+
+  setOption(key, value) {
+    if(key != 'radius') return
+    this.radius = value
+    if(this.previewLines) this.updatePreview(this.previewLines)
+  }
+
+  async mouseMove(vec, coords) {
+    const item = await this.getObject(coords, true)
+    if(this.disposed) return
+    this.viewport.$emit('update:highlight', item)
+    const lines = item && this.cornerLines(item)
+    if(lines) this.updatePreview(lines)
+    else this.clearPreview()
+  }
+
+  async click(vec, coords) {
+    const item = await this.getObject(coords)
+    if(!item || this.disposed) return
+    const lines = this.cornerLines(item)
+    if(!lines) {
+      this.clearPreview()
+      this.items = [item instanceof ElemRef ? item.curve() : item]
+      this.viewport.renderer.render()
+      return
+    }
+    if(!this.updatePreview(lines)) {
+      this.viewport.bus.emit('toast', this.previewError)
+      return
+    }
+    const arc = this.arc
+    const { indices, points } = this.fillet
+    this.fillets.push({ arc, position: this.dimensionPosition() })
+    this.arc = null
+    lines.forEach((line, i) => {
+      const handles = line.points.map(point => point.clone())
+      handles[indices[i]] = points[i]
+      const replacement = new Line(...handles)
+      replacement.isReference = line.isReference
+      this.sketch.replaceElement(line, [replacement])
+      this.sketch.addConstraint(new CoincidentConstraint(new ElemRef(replacement, indices[i]), new ElemRef(arc, i + 1)))
+      this.sketch.addConstraint(new TangentConstraint(replacement, arc))
+      this.viewport.document.selection.delete(line)
+    })
+    this.items = []
+    this.previewLines = null
+    this.viewport.$emit('update:highlight', null)
+    this.viewport.updateRegions(true)
+    this.viewport.renderer.render()
+  }
+
+  updatePreview(lines) {
+    if(this.arc && this.previewRadius == this.radius &&
+      this.previewLines.every((line, i) => line == lines[i])) return true
+    this.clearPreview()
+    this.previewLines = lines
+    try {
+      if(lines[0] == lines[1]) throw new Error('Select a different line for the fillet')
+      if(lines[0].isReference != lines[1].isReference) throw new Error('Both lines must have the same construction status')
+      this.fillet = lineFillet(...lines, this.radius)
+      this.arc = Arc.fromPoints([this.fillet.points[0], this.fillet.middle, this.fillet.points[1]])
+      if(!this.arc) throw new Error('This corner could not be filleted')
+      this.arc.isReference = lines[0].isReference
+      this.sketch.add(this.arc)
+      this.previewRadius = this.radius
+      this.previewError = null
+      this.viewport.renderer.render()
+      return true
+    } catch(error) {
+      this.previewError = error.message
+      return false
+    }
+  }
+
+  dimensionPosition() {
+    const direction = this.fillet.middle.clone().sub(this.fillet.center).normalize()
+    return this.fillet.middle.clone().addScaledVector(direction, 10)
+  }
+
+  clearPreview() {
+    if(this.arc) this.arc.remove()
+    this.arc = null
+    this.previewLines = null
+    this.viewport.renderer.render()
+  }
+
+  dispose() {
+    this.disposed = true
+    this.clearPreview()
+    this.items = []
+    const fillets = this.fillets.filter(({ arc }) => this.sketch.elements.includes(arc))
+    if(fillets.length) {
+      const first = fillets[0]
+      fillets.slice(1).forEach(({ arc }) => this.sketch.addConstraint(new EqualConstraint(first.arc, arc)))
+      this.sketch.addConstraint(new Dimension([first.arc], first.position, this.radius))
+      this.viewport.updateRegions(true)
+    }
+    this.fillets = []
   }
 }
 
@@ -1010,6 +1162,48 @@ export class SketchTool extends Tool {
 }
 
 
+export class PasteSketchTool extends SketchTool {
+  static icon = 'paste'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch)
+    Object.assign(this, pasteSketchSelection(sketch))
+    this.handles = this.elements.map(elem => elem.setHandles ? elem.handles().map(point => point.clone()) : null)
+    this.positions = this.constraints.map(constraint => constraint.position?.clone())
+    this.snapToGuides = false
+    this.snapToPoints = false
+    this.viewport.elementChanged()
+  }
+
+  mouseMove(vec) {
+    const delta = vec.clone().sub(this.anchor)
+    this.elements.forEach((elem, index) => {
+      if(this.handles[index]) elem.setHandles(this.handles[index].map(point => point.clone().add(delta)))
+    })
+    this.constraints.forEach((constraint, index) => {
+      if(this.positions[index]) constraint.position = this.positions[index].clone().add(delta)
+      if(constraint instanceof ProfileOffsetConstraint) constraint.rebuild()
+    })
+    this.viewport.elementChanged()
+  }
+
+  click(vec) {
+    this.mouseMove(vec)
+    this.constraints.forEach(constraint => this.sketch.addConstraint(constraint))
+    this.viewport.document.selection.clear()
+    this.elements.forEach(elem => this.viewport.document.selection.add(elem))
+    this.elements = []
+    this.viewport.activateTool(ManipulationTool)
+    this.viewport.updateRegions(true)
+  }
+
+  dispose() {
+    this.elements.forEach(elem => elem.remove())
+    this.elements = []
+    this.viewport.elementChanged()
+  }
+}
+
 export class LineTool extends SketchTool {
   static icon = 'pen'
 
@@ -1084,8 +1278,8 @@ export class LineTool extends SketchTool {
     const snap = this.startSnap
     return {
       start: this.curve.endpoints()[0],
-      perpendicularLines: [this.previousSegment, snap?.curve, snap?.elem, ...(snap?.intersection || [])]
-        .filter(elem => elem instanceof Line),
+      perpendicularCurves: [this.previousSegment, snap?.curve, snap?.elem, ...(snap?.intersection || [])]
+        .filter(elem => elem instanceof Line || elem instanceof Circle || elem instanceof Arc),
     }
   }
 
@@ -1170,6 +1364,27 @@ export class SplineTool extends SketchTool {
 
   tangentSnapStart() {
     return this.mode == 'draw' && this.curve ? this.curve.handles().at(-2) : null
+  }
+
+  lineSnapContext() {
+    if(this.mode != 'draw' || !this.curve) return null
+    return {
+      start: this.curve.handles().at(-2),
+      perpendicularCurves: [],
+    }
+  }
+
+  constrainPoint(elem, index, snap) {
+    if(arguments.length < 3) snap = captureSnap(this.viewport.snapper)
+    const constraint = super.constrainPoint(elem, index, snap)
+    if(snap?.lineRelation?.perpendicular) {
+      const target = snap.lineRelation
+      this.sketch.addConstraint(new PerpendicularConstraint(
+        new ElemRef(elem, index),
+        target.elem,
+      ))
+    }
+    return constraint
   }
 
   shiftConstraintIndices(spline, fromIndex, offset) {
@@ -1342,6 +1557,7 @@ export class CircleTool extends SketchTool {
       this.constrainPoint(this.curve, 0)
       // this.curve.sketch = this.sketch
     }
+    this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
@@ -1349,6 +1565,12 @@ export class CircleTool extends SketchTool {
     // this.curve.setHandles([this.center.toArray(), vec.toArray()], false)
     this.curve.setHandles([this.center, vec], false)
     this.viewport.elementChanged()
+  }
+
+  dispose() {
+    if(this.curve) this.curve.remove()
+    this.curve = null
+    this.center = null
   }
 }
 
@@ -1414,10 +1636,9 @@ export class RectangleTool extends SketchTool {
       this.sketch.addConstraint(new CoincidentConstraint(
         new ElemRef(first, firstIndex), new ElemRef(second, secondIndex)
       ))
+      this.sketch.addConstraint(new PerpendicularConstraint(first, second))
     })
-    ;[bottom, right, top, left].forEach(line => {
-      this.sketch.addConstraint(new HorVertConstraint(line))
-    })
+    this.sketch.addConstraint(new HorVertConstraint(bottom))
 
     this.constrainPoint(bottom, 0, this.startSnap)
     this.constrainPoint(top, 0, endSnap)
@@ -1692,6 +1913,7 @@ export class ArcTool extends SketchTool {
       this.start = vec
       this.startSnap = snap
     }
+    this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
@@ -1704,6 +1926,13 @@ export class ArcTool extends SketchTool {
       return
     }
     this.viewport.elementChanged()
+  }
+
+  dispose() {
+    if(this.curve) this.curve.remove()
+    this.curve = null
+    this.start = null
+    this.end = null
   }
 }
 
@@ -1798,9 +2027,13 @@ export class FixConstraintTool extends ConstraintTool {
 export class PerpendicularConstraintTool extends ConstraintTool {
   static constraintType = PerpendicularConstraint
   static icon = 'angle-up'
-  static selectors = ['axis']
+  static selectors = ['curve']
 
-  isComplete(counts) { return counts.axis == 2 }
+  isComplete(counts) { return counts.curve == 2 }
+
+  acceptsItem(item) { return item instanceof Line || item instanceof Circle || item instanceof Arc }
+
+  canConstrain(items) { return items.some(item => item instanceof Line) }
 }
 
 export class ParallelConstraintTool extends ConstraintTool {
@@ -1824,6 +2057,16 @@ export class EqualConstraintTool extends ConstraintTool {
     return items.every(item => item instanceof Line) ||
       items.every(item => item instanceof Circle || item instanceof Arc)
   }
+}
+
+export class ConcentricConstraintTool extends ConstraintTool {
+  static constraintType = ConcentricConstraint
+  static icon = 'bullseye'
+  static selectors = ['curve']
+
+  isComplete(counts) { return counts.curve == 2 }
+
+  acceptsItem(item) { return item instanceof Circle || item instanceof Arc }
 }
 
 export class TangentConstraintTool extends ConstraintTool {

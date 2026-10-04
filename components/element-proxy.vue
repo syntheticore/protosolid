@@ -5,6 +5,7 @@
   import * as THREE from 'three'
   import materials from '../js/materials.js'
   import { SketchPoint, Spline } from '../js/core/geom2d.js'
+  import { Constraint } from '../js/core/sketch.js'
   import { ScreenPointObject } from '../js/three/helper-objects.js'
 
   const props = defineProps(['document', 'component', 'element', 'activeTool', 'showSplineControls', 'parentHighlighted', 'parentSelected', 'parentTransform'])
@@ -13,7 +14,9 @@
   const highlight = inject('highlight')
   const renderNeeded = inject('render-needed')
 
-  const highlighted = computed(() => props.parentHighlighted || props.element == highlight.value )
+  const highlighted = computed(() => props.parentHighlighted || props.element == highlight.value ||
+    (highlight.value instanceof Constraint && highlight.value.items.some(item => item.curve() == props.element))
+  )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.element) )
   const toolSelected = computed(() => props.activeTool && props.activeTool.items && props.activeTool.items.some(item =>
     (item.curve ? item.curve() : item) == props.element

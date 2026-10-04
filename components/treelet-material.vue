@@ -27,8 +27,7 @@
 
           label
 
-            select.input(v-model="component.creator.material")
-              option(v-for="material in document.materials" :value="material") {{ material.title }}
+            ComboBox(v-model="component.creator.material" label="Material" :options="document.materials.map(material => ({ value: material, label: material.title }))")
 
             IconButton.clone(icon="plus" @click="cloneMaterial")
 
@@ -63,12 +62,16 @@
             span Roughness
 
           label
-            input(type="range" v-model="material.transparency" min="0.0" step="0.001" max="1.0")
-            span Transparency
+            input(type="range" v-model="material.emission" min="0.0" step="0.001" max="1.0")
+            span Emission
 
           label
-            input(type="range" v-model="material.translucency" min="0.0" step="0.001" max="1.0")
-            span Translucency
+            input(type="range" v-model="material.transparency" min="0.0" step="0.001" max="1.0" @input="bus.emit('render-needed')")
+            span Transparency
+
+          label(v-if="material.transparency > 0" title="Controls how strongly transmitted light bends; glass is typically 1.5.")
+            input.input(type="number" v-model.number="material.refractiveIndex" min="1.0" step="0.01" max="2.333" @input="bus.emit('render-needed')")
+            span Refractive Index
 
           label
             input(type="checkbox" v-model="material.clearcoat")

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { nextTick } from 'vue'
 
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
@@ -163,8 +164,19 @@ export default class Document extends Emitter {
   }
 
   async moveMarker(i) {
-    await this.activateFeature(null, true, false)
+    const creatingIndex = this.timeline.features.indexOf(this.creatingFeature)
+    if(creatingIndex >= 0 && creatingIndex < i) i--
+    await this.cancelFeature(false)
     return this.regenerate(i)
+  }
+
+  async cancelFeature(resetMarker = true) {
+    this.bus.emit('close-feature', this)
+    // Closing the creation box removes its temporary feature during unmount.
+    await nextTick()
+    await this.regenerationQueue
+    await this.activateFeature(null, true, resetMarker)
+    return this.regenerationQueue
   }
 
   reorder(feature, other, after) {
@@ -335,8 +347,7 @@ export default class Document extends Emitter {
     if(feature) {
       this.activateSimulation(null)
 
-      // Deactivate old active feature
-      if(this.activeFeature) await this.activateFeature(null, true, false)
+      await this.cancelFeature(false)
 
       // Store marker, visibility and active component
       this.previousMarker = this.timeline.marker
@@ -355,6 +366,7 @@ export default class Document extends Emitter {
       // Activate sketch for sketch features
       if(feature.constructor === CreateSketchFeature) {
         this.activeSketch = feature.sketch
+        this.activeSketch.startHistory()
 
         // Store camera view
         this.previousActiveView = this.activeView
@@ -549,6 +561,7 @@ export default class Document extends Emitter {
   }
 
   async save(as) {
+    await this.cancelFeature()
     const dump = {
       lastId,
       timeline: this.timeline,
@@ -587,9 +600,11 @@ export default class Document extends Emitter {
       this.filePath = file.path
       this.isFresh = false
       this.treeletsExpandedByDefault = false
-      const dump = Serialize.parse(file.data, { document: this, sketches: {} })
+      const materials = []
+      const dump = Serialize.parse(file.data, { document: this, sketches: {}, materials })
       setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
       this.timeline = dump.timeline
+      this.materials = materials
       await this.timeline.evaluateAsync((feature, index, total) => {
         this.bus.emit('calculation', {
           id: calculationId,

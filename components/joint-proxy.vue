@@ -94,8 +94,7 @@
     if(bus.jointPickerActive || props.document.activeFeature) return
     const feature = props.document.timeline.features.find(feature => feature.id == props.joint.id)
     if(!feature || feature.constructor.editable === false) return
-    bus.emit('close-feature')
-    setTimeout(() => props.document.activateFeature(feature))
+    return props.document.activateFeature(feature)
   }
 
 </script>

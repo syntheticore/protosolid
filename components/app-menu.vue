@@ -9,7 +9,7 @@
 
       .about
 
-        Icon(icon="atom")
+        AppLogo.logo
         h1 ProtoSolid
         .version Version 0.11
 
@@ -78,10 +78,9 @@
     padding: 12px
     text-align: center
     background: linear-gradient(0deg, $dark2 * 0.83, transparent)
-    svg
-      font-size: 35px
-      // color: #ff9f90
-      color: $highlight * 1.2
+    .logo
+      width: 48px
+      height: 48px
     h1
       font-size: 16px
       font-weight: bold

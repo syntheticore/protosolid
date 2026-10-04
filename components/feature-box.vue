@@ -73,16 +73,10 @@
             @update:active="update"
           )
 
-          EnumInput(
-            v-if="setting.type == 'enum'"
-            v-model:value="activeFeature[key]"
-            :options="settingOptions(key, setting)"
-            @update:value="updateSetting"
-          )
-
           RadioBar(
-            v-if="setting.type == 'select'"
-            :items="setting.options"
+            v-if="setting.type == 'select' || setting.type == 'enum'"
+            :items="settingOptions(key, setting)"
+            :label="setting.title"
             v-model:chosen="activeFeature[key]"
             @update:chosen="updateSetting(key, $event)"
           )
@@ -387,6 +381,7 @@
       this.bus.on('resize', this.updatePaths)
       this.bus.on('keydown', this.onKeydown)
       this.pickerSession = new PickerSession(this.bus, {
+        canReactivate: () => !this.isSketchFeature,
         available: key => !this.destroyed && this.activeFeature.needsPicker(key, true),
         defaultKey: () => Object.keys(this.orderedSettings).find(key =>
           this.activeFeature.needsPicker(key, true)
@@ -683,6 +678,7 @@
       },
 
       deactivateFeature() {
+        this.cancelPick()
         // Always consider sketches as modified
         if(this.isSketchFeature) this.document.timeline.invalidateFeature(this.activeFeature)
         // Restore feature state on cancel

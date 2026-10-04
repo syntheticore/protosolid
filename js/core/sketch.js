@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { nextTick } from 'vue'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
@@ -66,10 +67,55 @@ export class Sketch {
     this.constraints = []
     this.projections = []
     this.workplane = new THREE.Matrix4()
+    this.history = null
     // this.componentId = componentId
   }
 
   typename() { return 'Sketch' }
+
+  startHistory() {
+    this.history = { states: [this.historySnapshot()], index: 0 }
+  }
+
+  historySnapshot(state = this.dump()) {
+    return JSON.stringify(Serialize.serialize(state), (key, value) =>
+      key == 'isReference' ? !!value : value)
+  }
+
+  recordHistory(state) {
+    if(!this.history || this.restoringHistory) return
+    const snapshot = this.historySnapshot(state)
+    const { states, index } = this.history
+    if(snapshot == states[index]) return
+    states.splice(index + 1, states.length, snapshot)
+    this.history.index++
+  }
+
+  get canUndo() { return !!this.history && this.history.index > 0 }
+  get canRedo() { return !!this.history && this.history.index < this.history.states.length - 1 }
+
+  restoreHistory(direction, tree) {
+    if(direction < 0 ? !this.canUndo : !this.canRedo) return false
+    this.history.index += direction
+    const state = Serialize.parse(this.history.states[this.history.index])
+    const previousElements = [...this.elements, ...this.projections
+      .map(projection => projection.output).filter(elem => elem instanceof SketchElement)]
+    Object.assign(this, state)
+    this.elements.forEach(elem => elem.sketch = this)
+    this.constraints.forEach(constraint => constraint.sketch = this)
+    this.projections.forEach(projection => projection.sketch = this)
+    this.projections.forEach(projection => projection.update(tree))
+    this.constraints.forEach(constraint => constraint.update(tree))
+    this.constraints.filter(constraint => constraint instanceof ProfileOffsetConstraint)
+      .forEach(constraint => constraint.rebuild())
+    this.solveHandle = null
+    this.solveNeeded = false
+    this.restoringHistory = true
+    this.profileUpdateNeeded = true
+    // Constraint proxies still reference the previous geometry until Vue updates.
+    nextTick(() => previousElements.forEach(elem => elem.clear()))
+    return true
+  }
 
   add(elem) {
     if(!this.elements.includes(elem)) this.elements.push(elem)
@@ -80,6 +126,10 @@ export class Sketch {
   addConstraint(constraint) {
     const existing = this.constraints.find(other => sameConstraint(other, constraint))
     if(existing) return existing
+    if(constraint instanceof ConcentricConstraint) {
+      const [left, right] = constraint.items.map(item => item.curve())
+      if(this.coincidentPointsConnected(left, 0, right, 0)) return constraint
+    }
     if(constraint instanceof CoincidentConstraint && constraint.items.length == 2) {
       const [left, right] = constraint.items
       const leftCurve = left.curve()
@@ -190,10 +240,13 @@ export class Sketch {
       if(point.elem == targetElem && point.index == targetIndex) return true
       visited.push(point)
       this.constraints.forEach(constraint => {
-        if(!(constraint instanceof CoincidentConstraint) || !constraint.items.some(item =>
+        if(!(constraint instanceof CoincidentConstraint || constraint instanceof ConcentricConstraint)) return
+        const items = constraint instanceof ConcentricConstraint ?
+          constraint.items.map(item => new ElemRef(item.curveRef, 0)) : constraint.items
+        if(!items.some(item =>
           item.curve() == point.elem && item.index == point.index
         )) return
-        constraint.items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
+        items.forEach(item => pending.push({ elem: item.curve(), index: item.index }))
       })
     }
     return false
@@ -787,12 +840,29 @@ export class Sketch {
         })
 
       } else if(c instanceof PerpendicularConstraint) {
-        const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
+        const linePrimitive = item => {
+          const curve = item.curve()
+          return curve instanceof Spline ? idMap[curve.id].find(primitive =>
+            primitive.type == 'line' && primitive.splineTangent == (item.index == 0 ? 0 : 1)
+          ) : idMap[curve.id].at(-1)
+        }
+        const round = c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc)
+        if(round) {
+          const line = c.items.find(item => item !== round)
+          const roundPrim = idMap[round.curve().id].at(-1)
+          const linePrim = linePrimitive(line)
+          return { id: `${id++}`, type: 'point_on_line_pl', p_id: roundPrim.c_id, l_id: linePrim.id, temporary: c.temporary }
+        }
+        const constraintPrims = c.items.map(linePrimitive)
         return { id: `${id++}`, type: 'perpendicular_ll', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
 
       } else if(c instanceof ParallelConstraint) {
         const constraintPrims = c.items.map(item => idMap[item.curve().id].slice(-1)[0] )
         return { id: `${id++}`, type: 'parallel', l1_id: constraintPrims[0].id, l2_id: constraintPrims[1].id, temporary: c.temporary }
+
+      } else if(c instanceof ConcentricConstraint) {
+        const centers = c.items.map(item => idMap[item.curve().id].at(-1).c_id)
+        return { id: `${id++}`, type: 'p2p_coincident', p1_id: centers[0], p2_id: centers[1], temporary: c.temporary }
 
       } else if(c instanceof EqualConstraint) {
         const items = c.items.map(item => ({
@@ -1317,6 +1387,12 @@ export class EqualConstraint extends Constraint {
   typename() { return 'Equal Constraint' }
 }
 Serialize.register(EqualConstraint, 'EqualConstraint')
+
+export class ConcentricConstraint extends Constraint {
+  static icon = 'bullseye'
+  typename() { return 'Concentric Constraint' }
+}
+Serialize.register(ConcentricConstraint, 'ConcentricConstraint')
 
 export class TangentConstraint extends Constraint {
   static icon = 'bezier-curve'

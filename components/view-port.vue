@@ -254,6 +254,8 @@
     DimensionTool,
   } from './../js/tools.js'
   import materials from '../js/materials.js'
+  import { copySketchSelection, hasSketchClipboard } from '../js/sketch-clipboard.js'
+  import { PasteSketchTool } from '../js/tools.js'
 
   export default {
     name: 'ViewPort',
@@ -302,6 +304,7 @@
         this.cancelCameraUnpreview()
         this.cameraPreview = null
         this.registerDocument(this.document, oldDocument)
+        this.activateTool(ManipulationTool)
       },
 
       'document.activeSketch': function(sketch) {
@@ -483,6 +486,8 @@
       this.bus.on('thermal-result', this.updateFluxArrows)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
+      this.bus.on('sketch-history', this.changeSketchHistory)
+      this.bus.on('sketch-clipboard', this.sketchClipboard)
       this.bus.on('keyup', this.keyUp)
 
       this.bus.on('alt-pressed', this.setOrbiting)
@@ -498,6 +503,8 @@
     },
 
     beforeUnmount: function() {
+      this.bus.off('sketch-history', this.changeSketchHistory)
+      this.bus.off('sketch-clipboard', this.sketchClipboard)
       clearTimeout(this.zoomEndTimer)
       this.cancelCameraUnpreview()
       this.document.off('regenerated', this.updateExportPreview)
@@ -512,6 +519,34 @@
     },
 
     methods: {
+      sketchClipboard: function(action) {
+        const sketch = this.document.activeSketch
+        if(!sketch || this.document.isRegenerating) return
+        if(action == 'copy') {
+          copySketchSelection(sketch, this.document.selection.items, this.activeTool.historyState?.())
+        } else if(hasSketchClipboard()) {
+          this.activateTool(ManipulationTool)
+          if(this.regionsDirty || sketch.solveNeeded || sketch.profileUpdateNeeded) sketch.solve(this.document.top())
+          sketch.recordHistory()
+          this.document.selection.clear()
+          this.activateTool(PasteSketchTool)
+        }
+      },
+
+      changeSketchHistory: function(direction) {
+        const sketch = this.document.activeSketch
+        if(!sketch || this.document.isRegenerating) return
+        this.activateTool(this.activeTool instanceof PasteSketchTool ? ManipulationTool : this.activeTool.constructor)
+        const tree = this.document.top()
+        if(this.regionsDirty || sketch.solveNeeded || sketch.profileUpdateNeeded) sketch.solve(tree)
+        sketch.recordHistory()
+        if(!sketch.restoreHistory(direction, tree)) return
+        this.document.selection.clear()
+        this.document.hasChanges = true
+        this.regionsDirty = false
+        this.$nextTick(() => this.renderer.render())
+      },
+
       updateSketchSectionSide: function() {
         if(!this.renderer || !this.sketchSectionPlane) return
         const normal = new THREE.Vector3().setFromMatrixColumn(this.sketchSectionPlane, 2).normalize()

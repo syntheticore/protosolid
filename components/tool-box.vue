@@ -273,11 +273,13 @@
     PolygonTool,
     ArcTool,
     TrimTool,
+    SketchFilletTool,
     TouchConstraintTool,
     PerpendicularConstraintTool,
     HorVertConstraintTool,
     ParallelConstraintTool,
     EqualConstraintTool,
+    ConcentricConstraintTool,
     TangentConstraintTool,
     FixConstraintTool,
     DimensionTool,
@@ -375,6 +377,7 @@
             sketchOnly: true,
             tools: [
               { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
+              { title: 'Fillet', tool: SketchFilletTool, hotKey: 'F', keyCode: 70 },
               { title: 'Break', icon: 'layer-group' },
               { title: 'Extend', icon: 'layer-group' },
               { title: 'Offset', tool: OffsetTool },
@@ -393,6 +396,7 @@
               { title: 'Hor/Vert', tool: HorVertConstraintTool },
               { title: 'Tangent', tool: TangentConstraintTool },
               { title: 'Equal', tool: EqualConstraintTool },
+              { title: 'Concentric', tool: ConcentricConstraintTool },
               { title: 'Fix', tool: FixConstraintTool }, //XXX also ground for assemblies
             ],
           },
@@ -506,7 +510,7 @@
         // Don't activate features twice
         if(this.feature && this.feature.constructor === tool.feature) return
         this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))
-        setTimeout(() => {
+        this.activationTimer = setTimeout(() => {
           if(tool.feature) {
             this.feature = new tool.feature(this.document)
             this.document.creatingFeature = this.feature
@@ -532,7 +536,9 @@
           this.activeTool.constructor.hasOptions
       },
 
-      closeFeature: function() {
+      closeFeature: function(document = this.document) {
+        if(document !== this.document) return
+        clearTimeout(this.activationTimer)
         this.document.creatingFeature = null
         this.feature = null
       },

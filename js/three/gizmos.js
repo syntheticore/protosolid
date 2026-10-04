@@ -142,8 +142,12 @@ export class AngleGizmo extends ArrowControls {
 
     this.set(startValue)
 
+    this.addEventListener('mouseDown', () => {
+      this.dragStartValue = Math.round(THREE.MathUtils.degToRad(this.value) / this.rotationSnap) * this.rotationSnap
+    })
     this.addEventListener('objectChange', () => {
-      cb(THREE.MathUtils.radToDeg(this.dummy.rotation.z))
+      // Euler angles wrap at 180 degrees; the drag delta preserves full turns.
+      cb(THREE.MathUtils.radToDeg(this.dragStartValue + this.rotationAngle))
     })
   }
 
@@ -154,6 +158,7 @@ export class AngleGizmo extends ArrowControls {
   }
 
   set(value) {
+    this.value = value
     this.dummy.rotation.set(0.0, 0.0, THREE.MathUtils.degToRad(value))
   }
 
@@ -161,6 +166,29 @@ export class AngleGizmo extends ArrowControls {
     super.dispose()
     window.alcRenderer.scene.remove(this.frame)
   }
+}
+
+
+export function faceGizmoFrame({ positions, normals }, target) {
+  const triangle = new THREE.Triangle()
+  const point = new THREE.Vector3()
+  const center = new THREE.Vector3()
+  const direction = new THREE.Vector3()
+  let closest = Infinity
+  for(let i = 0; i < positions.length; i += 9) {
+    triangle.a.fromArray(positions, i)
+    triangle.b.fromArray(positions, i + 3)
+    triangle.c.fromArray(positions, i + 6)
+    const distance = triangle.closestPointToPoint(target, point).distanceToSquared(target)
+    if(distance < closest) {
+      closest = distance
+      center.copy(point)
+      direction.fromArray(normals, i)
+        .add(new THREE.Vector3().fromArray(normals, i + 3))
+        .add(new THREE.Vector3().fromArray(normals, i + 6)).normalize()
+    }
+  }
+  return { center, direction }
 }
 
 
@@ -229,6 +257,7 @@ export class FeatureGizmos {
       }
       control.setFrame(center, orientation)
       control.set(value, true)
+      if(descriptor.size) control.setSize(descriptor.size * 1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight))
     }
   }
 

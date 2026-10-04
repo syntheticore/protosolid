@@ -32,10 +32,7 @@
         h3 Export Settings
 
         label
-          select.input(v-model="config.format")
-            option STL
-            option 3MF
-            option STEP
+          ComboBox(v-model="config.format" label="Format" :options="['STL', '3MF', 'STEP'].map(format => ({ value: format, label: format }))")
           span Format
 
         label(v-if="config.format != 'STEP'")

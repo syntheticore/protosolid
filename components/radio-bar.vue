@@ -1,12 +1,19 @@
 <template lang="pug">
 
-  .radio-bar(@mouseleave="$emit('unhover', chosen)")
+  .radio-bar(role="radiogroup" :aria-label="label" @mouseleave="$emit('unhover', chosen)")
 
     button.button(
       v-for="(item, key) in items"
+      :key="key"
+      type="button"
+      role="radio"
+      :aria-checked="key === chosen"
+      :aria-label="item.title"
       :title="item.title"
       :class="{pressed: key === chosen}"
+      :tabindex="key === chosen || (!Object.hasOwn(items, chosen) && key === Object.keys(items)[0]) ? 0 : -1"
       @click.prevent="$emit('update:chosen', key)"
+      @keydown.stop="onKeydown($event, key)"
       @mouseenter="$emit('hover', key)"
     )
 
@@ -78,6 +85,21 @@
       items: Object,
       chosen: String,
       hotKey: String,
+      label: String,
+    },
+    methods: {
+      onKeydown(event, key) {
+        if(!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        event.stopPropagation()
+        const keys = Object.keys(this.items)
+        let index = keys.indexOf(key)
+        if(event.key === 'Home') index = 0
+        else if(event.key === 'End') index = keys.length - 1
+        else index = (index + (['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : -1) + keys.length) % keys.length
+        this.$emit('update:chosen', keys[index])
+        this.$el.querySelectorAll('button')[index].focus()
+      },
     },
   }
 

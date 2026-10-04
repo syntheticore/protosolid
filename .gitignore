@@ -35,4 +35,10 @@ assets/oc/*.ts
 assets/oc/*.wasm
 
 electron/app
+
+# Generated Electron icon assets; retain the master artwork and instructions
+/electron/build/*
+!/electron/build/icon-source.png
+!/electron/build/README.md
+
 docs

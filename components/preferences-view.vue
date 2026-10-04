@@ -18,7 +18,7 @@
           Icon(:icon="section.icon" fixed-width)
           span {{ section.title }}
 
-    main.settings-content
+    main.settings-content(:class="{ 'has-restart': restartRequired }")
       section(v-if="activeSection === 'modeling'")
         header
           h1 Modeling
@@ -29,9 +29,7 @@
             span.setting-label
               strong Geometry kernel
               small A restart is required after changing the modeling kernel
-            select.input(v-model="preferences.modelingKernel" @change="restartRequired = true")
-              option(value="occ") OpenCascade
-              option(value="shapex") Shapex
+            ComboBox(v-model="preferences.modelingKernel" label="Geometry kernel" :options="[{ value: 'occ', label: 'OpenCascade' }, { value: 'shapex', label: 'Shapex' }]" @update:model-value="restartRequired = true")
 
       section(v-else-if="activeSection === 'units'")
         header
@@ -43,27 +41,19 @@
             span.setting-label
               strong Length
               small Default unit for distances and dimensions
-            select.input(v-model="preferences.preferredUnit")
-              option(value="mm") Millimeters
-              option(value="cm") Centimeters
-              option(value="m") Meters
-              option(value="inch") Inches
+            ComboBox(v-model="preferences.preferredUnit" label="Length unit" :options="[{ value: 'mm', label: 'Millimeters' }, { value: 'cm', label: 'Centimeters' }, { value: 'm', label: 'Meters' }, { value: 'inch', label: 'Inches' }]")
 
           label
             span.setting-label
               strong Angle
               small Default unit for angular measurements
-            select.input(v-model="preferences.angleUnit")
-              option(value="degrees") Degrees
-              option(value="radians") Radians
+            ComboBox(v-model="preferences.angleUnit" label="Angle unit" :options="[{ value: 'degrees', label: 'Degrees' }, { value: 'radians', label: 'Radians' }]")
 
           label
             span.setting-label
               strong Density
               small Default unit for material density
-            select.input(v-model="preferences.densityUnit")
-              option(value="g/cm3") g/cm³
-              option(value="kg/m3") kg/m³
+            ComboBox(v-model="preferences.densityUnit" label="Density unit" :options="[{ value: 'g/cm3', label: 'g/cm³' }, { value: 'kg/m3', label: 'kg/m³' }]")
 
       section(v-else-if="activeSection === 'appearance'")
         header
@@ -75,10 +65,7 @@
             span.setting-label
               strong Theme
               small Match the system or choose a fixed appearance
-            select.input(v-model="preferences.theme")
-              option(value="system") System default
-              option(value="light") Light
-              option(value="dark") Dark
+            ComboBox(v-model="preferences.theme" label="Theme" :options="[{ value: 'system', label: 'System default' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]")
 
           label
             span.setting-label
@@ -108,9 +95,7 @@
             span.setting-label
               strong Timeline features
               small Choose which features remain visible in the timeline
-            select.input.wide(v-model="preferences.timelineFeatureVisibility")
-              option(value="active-component") Active component and children only
-              option(value="all") All features (dim unrelated)
+            ComboBox.wide(v-model="preferences.timelineFeatureVisibility" label="Timeline features" :options="[{ value: 'active-component', label: 'Active component and children only' }, { value: 'all', label: 'All features (dim unrelated)' }]")
 
       section(v-else)
         header
@@ -146,7 +131,7 @@
 
       transition(name="fade")
         .restart(v-if="restartRequired")
-          span Some rendering changes require a restart.
+          span Some settings changes require a restart.
           button.button(@click="restart") Restart ProtoSolid
 </template>
 
@@ -159,6 +144,7 @@
     position: relative
     display: grid
     grid-template-columns: 190px minmax(0, 1fr)
+    grid-template-rows: minmax(0, 1fr)
     width: 100%
     height: 100%
     color: $bright1
@@ -237,8 +223,11 @@
   .settings-content
     position: relative
     min-width: 0
-    padding: contentInset contentInset 88px
+    padding: contentInset
     overflow: auto
+
+    &.has-restart
+      padding-bottom: 88px
 
     .input:focus
       border-color: $bright2 * 0.7
@@ -274,7 +263,7 @@
         width: auto
         margin: 0
 
-    select
+    .combo-box
       width: 168px
 
       &.wide

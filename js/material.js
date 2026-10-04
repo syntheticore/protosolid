@@ -13,6 +13,8 @@ export class Material {
       clearcoatRoughness: 0.05,
       iridescence: 0.25,
       sheen: 0.25,
+      // Nonzero thickness makes the path tracer refract at each solid boundary.
+      thickness: 1,
     }))
   }
 
@@ -33,16 +35,20 @@ export class Material {
   }
 
   get transparency() {
-    return 1.0 - this.displayMaterial.opacity
+    return this.displayMaterial.transmission
   }
 
-  get translucency() {
+  get emission() {
     return this.glow || 0.0
+  }
+
+  get refractiveIndex() {
+    return this.displayMaterial.ior
   }
 
   set color(color) {
     this.displayMaterial.color = new THREE.Color(color)
-    this.translucency = this.glow || 0.0
+    this.emission = this.glow || 0.0
   }
 
   set roughness(roughness) {
@@ -59,20 +65,18 @@ export class Material {
   }
 
   set transparency(transparency) {
-    const transparent = transparency > 0.000001
-    this.displayMaterial.opacity = 1.0 - transparency
-    if(this.displayMaterial.transparent !== transparent) {
-      this.displayMaterial.transparent = transparent
-      // `transparent` affects renderer state and shader selection. Make sure
-      // switching back to opaque does not retain the previous shader variant.
-      this.displayMaterial.needsUpdate = true
-    }
-    this.metal = this.isMetal
+    // Alpha transparency skips surfaces, including their reflections. Physical
+    // transmission preserves the surface and lets IOR control the bending.
+    this.displayMaterial.transmission = Number(transparency)
   }
 
-  set translucency(translucency) {
-    this.glow = translucency
-    this.displayMaterial.emissive = this.displayMaterial.color.clone().multiplyScalar(translucency)
+  set emission(emission) {
+    this.glow = emission
+    this.displayMaterial.emissive = this.displayMaterial.color.clone().multiplyScalar(emission)
+  }
+
+  set refractiveIndex(refractiveIndex) {
+    this.displayMaterial.ior = Number(refractiveIndex)
   }
 
   clone() {
@@ -83,7 +87,8 @@ export class Material {
     out.metal = this.metal
     out.clearcoat = this.clearcoat
     out.transparency = this.transparency
-    out.translucency = this.translucency
+    out.emission = this.emission
+    out.refractiveIndex = this.refractiveIndex
     return out
   }
 
@@ -96,11 +101,12 @@ export class Material {
       metal: this.metal,
       clearcoat: this.clearcoat,
       transparency: this.transparency,
-      translucency: this.translucency,
+      emission: this.emission,
+      refractiveIndex: this.refractiveIndex,
     }
   }
 
-  static undump(dump) {
+  static undump(dump, context) {
     const material = new this(dump.title)
     material.title = dump.title
     material.density = dump.density
@@ -109,7 +115,9 @@ export class Material {
     material.metal = dump.metal
     material.clearcoat = dump.clearcoat
     material.transparency = dump.transparency
-    material.translucency = dump.translucency
+    material.emission = dump.emission ?? dump.translucency ?? 0
+    material.refractiveIndex = dump.refractiveIndex ?? 1.5
+    if(context?.materials) context.materials.push(material)
     return material
   }
 
@@ -139,7 +147,7 @@ export class DarkViolet extends Material {
     this.metal = true
     this.color = '#1a1835'
     this.roughness = 0.5
-    this.translucency = 0.13
+    this.emission = 0.13
   }
 }
 
@@ -151,7 +159,7 @@ export class Polystyrene extends Material {
 
     this.color = '#ff57a3'
     this.roughness = 0.3
-    this.translucency = 0.12
+    this.emission = 0.12
   }
 }
 

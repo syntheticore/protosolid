@@ -2,7 +2,10 @@
 
   header.tab-bar
 
-    MenuButton.left.app-menu-btn(icon="atom")
+    MenuButton.left.app-menu-btn
+
+      template(v-slot:icon="")
+        AppLogo
 
       AppMenu(
         v-bind="$attrs"

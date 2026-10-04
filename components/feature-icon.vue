@@ -195,12 +195,7 @@
 
       openFeature() {
         if(!this.canEdit) return
-        this.bus.emit('close-feature')
-        setTimeout(async () => {
-          // Closing a temporary feature can itself enqueue regeneration.
-          await this.document.regenerationQueue
-          this.document.activateFeature(this.feature)
-        })
+        return this.document.activateFeature(this.feature)
       },
 
       deleteFeature() {

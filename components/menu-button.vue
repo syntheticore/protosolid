@@ -4,7 +4,8 @@
 
     button.button(:class="{ pressed: isOpen }" @mousedown="toggle()")
 
-      Icon(:icon="icon" fixed-width)
+      slot(name="icon")
+        Icon(:icon="icon" fixed-width)
 
       Icon.expander(icon="angle-down")
 

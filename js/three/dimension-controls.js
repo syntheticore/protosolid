@@ -3,6 +3,9 @@ import * as THREE from 'three'
 import { Circle, Arc } from '../core/geom2d.js'
 import materials from '../materials.js'
 
+const LEADER_LENGTH_PX = 50
+const ARC_EXTENSION_STEPS = 32
+
 
 export default class DimensionControls extends THREE.Object3D {
   constructor(constraint, renderer, parentTransform) {
@@ -43,67 +46,7 @@ export default class DimensionControls extends THREE.Object3D {
 
     // Circle/Arc diameter/radius
     } else if(isCircle || isArc) {
-      const circle = itemL.curve()
-
-      const left = constraint.position.clone().sub(circle.center()).x > 0
-      const constraintPos = constraint.position.clone().add(new THREE.Vector3(left ? -10 : 10, 0, 0))
-
-      const cdir = constraint.position.clone().sub(circle.center())
-      const isOutside = (cdir.length() > circle.radius)
-      cdir.normalize()
-      const dir = constraintPos.clone().sub(circle.center()).normalize()
-      const pOffset = dir.clone().multiplyScalar(circle.radius)
-      const p1 = circle.center().clone().add(pOffset)
-      const p2 = circle.center().clone().add(pOffset.negate())
-
-      if(isCircle) {
-
-        if(isOutside) {
-          const line = renderer.convertLine([constraintPos.toArray(), p2.toArray()], materials.wire)
-
-          const p3 = constraintPos.clone().add(new THREE.Vector3(left ? 10 : -10, 0, 0))
-          const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], materials.wire)
-
-          this.add(line)
-          this.add(dimLine)
-
-          this.add(makeArrow(p1, dir))
-          this.add(makeArrow(p2, dir.negate()))
-
-        } else {
-          const offset = cdir.clone().multiplyScalar(circle.radius)
-          const p1 = circle.center().clone().add(offset)
-          const p2 = circle.center().clone().add(offset.negate())
-
-          const line = renderer.convertLine([p1.toArray(), p2.toArray()], materials.wire)
-          this.add(line)
-
-          this.add(makeArrow(p1, cdir))
-          this.add(makeArrow(p2, cdir.clone().negate()))
-        }
-
-      } else {
-
-        if(isOutside) {
-          const line = renderer.convertLine([constraintPos.toArray(), p1.toArray()], materials.wire)
-          const p3 = constraintPos.clone().add(new THREE.Vector3(left ? 10 : -10, 0, 0))
-          const dimLine = renderer.convertLine([constraintPos.toArray(), p3.toArray()], materials.wire)
-
-          this.add(line)
-          this.add(dimLine)
-          this.add(makeArrow(p1, dir.negate()))
-          makeArc(this, renderer, circle, constraintPos)
-
-        } else {
-
-          const p = circle.center().clone().add(cdir.clone().multiplyScalar(circle.radius))
-          const line = renderer.convertLine([circle.center().toArray(), p.toArray()], materials.wire)
-
-          this.add(line)
-          this.add(makeArrow(p, cdir))
-          makeArc(this, renderer, circle, constraint.position)
-        }
-      }
+      makeCircularDimension(this, renderer, itemL.curve(), constraint, isCircle, parentTransform)
 
     // Point to point distance
     } else if(isPointDistance) {
@@ -170,10 +113,109 @@ export default class DimensionControls extends THREE.Object3D {
       (parentTransform || new THREE.Matrix4()).clone().multiply(constraint.sketch.workplane)
     )
   }
+
+  updateLayout() {}
 }
 
 function makeArrow(pos, dir) {
   return new THREE.ArrowHelper(dir, pos, 0.0, 'darkgray', 1.5, 0.75)
+}
+
+function makeCircularDimension(controls, renderer, circle, constraint, isDiameter, parentTransform) {
+  const center = circle.center()
+  const position = constraint.position
+  const transform = (parentTransform || new THREE.Matrix4()).clone().multiply(constraint.sketch.workplane)
+  const inverse = transform.clone().invert()
+  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0).applyMatrix4(transform)
+  // Keep segment counts fixed so position and color buffers stay aligned.
+  const line = renderer.convertLine([center.toArray(), position.toArray(), position.toArray()], materials.wire)
+  const arrow = makeArrow(center, new THREE.Vector3(1, 0, 0))
+  const oppositeArrow = isDiameter ? makeArrow(center, new THREE.Vector3(-1, 0, 0)) : null
+  const extension = !isDiameter ? renderer.convertLine(Array.from({ length: ARC_EXTENSION_STEPS + 1 }, () => center.toArray()), materials.wire) : null
+  controls.add(line, arrow)
+  if(oppositeArrow) controls.add(oppositeArrow)
+  if(extension) controls.add(extension)
+
+  const lastView = new THREE.Matrix4()
+  const view = new THREE.Matrix4()
+  const raycaster = new THREE.Raycaster()
+  let lastWidth = 0
+  const update = () => {
+    const camera = renderer.activeCamera
+    const width = renderer.renderer.domElement.width / renderer.getPixelRatio()
+    view.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+    if(view.equals(lastView) && width === lastWidth) return
+    lastView.copy(view)
+    lastWidth = width
+    const label = position.clone().applyMatrix4(transform).project(camera)
+    const projectedCenter = center.clone().applyMatrix4(transform).project(camera)
+    const labelOutside = position.distanceTo(center) > circle.radius
+    const elbowAt = direction => {
+      raycaster.setFromCamera(new THREE.Vector2(label.x + direction * 2 * LEADER_LENGTH_PX / width, label.y), camera)
+      return raycaster.ray.intersectPlane(plane, new THREE.Vector3()).applyMatrix4(inverse)
+    }
+    const outwardSide = label.x > projectedCenter.x ? 1 : -1
+    const stepLength = elbowAt(outwardSide).distanceTo(position)
+    const towardCenter = labelOutside || position.distanceTo(center) + stepLength > circle.radius
+    const side = outwardSide * (towardCenter ? -1 : 1)
+    let elbow = elbowAt(side)
+    // Keep an outside leader's elbow outside the circle as well.
+    if(labelOutside && elbow.distanceTo(center) <= circle.radius) {
+      elbow = elbowAt(-side)
+    }
+    const insideDiameter = isDiameter && !labelOutside
+    const direction = (insideDiameter ? position : elbow).clone().sub(center).normalize()
+    const near = center.clone().addScaledVector(direction, circle.radius)
+    const far = center.clone().addScaledVector(direction, -circle.radius)
+    let outside = elbow.distanceTo(center) > circle.radius
+    let end = isDiameter ? far : near
+    let arcPoints = []
+    if(!isDiameter) {
+      const radiusLayout = bend => {
+        const radial = bend.clone().sub(center).normalize()
+        const nearPoint = center.clone().addScaledVector(radial, circle.radius)
+        const isOutside = bend.distanceTo(center) > circle.radius
+        const extensionPoints = arcExtensionPoints(circle, nearPoint)
+        return { end: nearPoint, points: extensionPoints, outside: isOutside }
+      }
+      let layout = radiusLayout(elbow)
+      const exit = elbow.clone().applyMatrix4(transform).project(camera).x - label.x
+      const target = layout.end.clone().applyMatrix4(transform).project(camera).x - label.x - exit
+      if(exit * target < 0) {
+        const alternateElbow = elbowAt(exit > 0 ? -1 : 1)
+        const alternate = radiusLayout(alternateElbow)
+        const alternateExit = alternateElbow.clone().applyMatrix4(transform).project(camera).x - label.x
+        const alternateTarget = alternate.end.clone().applyMatrix4(transform).project(camera).x - label.x - alternateExit
+        if(alternateExit * alternateTarget > 0) {
+          elbow = alternateElbow
+          layout = alternate
+        }
+      }
+      end = layout.end
+      arcPoints = layout.points
+      outside = layout.outside
+    }
+    const points = insideDiameter
+      ? [near.toArray(), position.toArray(), far.toArray()]
+      : [position.toArray(), elbow.toArray(), end.toArray()]
+    line.geometry.setPositions(points.flat())
+    line.computeLineDistances()
+    arrow.position.copy(isDiameter ? near : end)
+    const arrowDirection = (isDiameter ? near : end).clone().sub(center).normalize()
+    arrow.setDirection(arrowDirection.multiplyScalar(outside && !isDiameter ? -1 : 1))
+    arrow.updateMatrixWorld(true)
+    if(oppositeArrow) {
+      oppositeArrow.position.copy(far)
+      oppositeArrow.setDirection(direction.clone().negate())
+      oppositeArrow.updateMatrixWorld(true)
+    }
+    if(extension) {
+      extension.geometry.setPositions((arcPoints.length ? arcPoints : Array.from({ length: ARC_EXTENSION_STEPS + 1 }, () => end.toArray())).flat())
+      extension.computeLineDistances()
+    }
+  }
+  controls.updateLayout = update
+  update()
 }
 
 function makeOffsetDimension(controls, renderer, start, end, position) {
@@ -288,17 +330,24 @@ function lineIntersection(left, right) {
   return originL.clone().add(dirL.multiplyScalar(t))
 }
 
-function makeArc(controls, renderer, circle, constraintPos) {
-  const start = circle.geom().get().FirstParameter()
-  const end = circle.geom().get().LastParameter()
-  const u = new Circle(circle.center(), circle.radius, circle.geom().get().BasisCurve()).unsample(constraintPos)
+function arcExtensionPoints(circle, constraintPos) {
+  const geom = circle.geom().get()
+  const start = geom.FirstParameter()
+  const end = geom.LastParameter()
+  const basis = geom.BasisCurve()
+  const u = new Circle(circle.center(), circle.radius, basis).unsample(constraintPos)
+  const period = Math.PI * 2
+  const progress = THREE.MathUtils.euclideanModulo(u - start, period)
+  const span = end - start
+  if(progress <= span) return []
 
-  if(u < start || u > end) {
-    const closer = [start, end].minMaxBy(Math.min, param => Math.abs(u - param) )
-
-    const arc = new Arc(circle.center().clone(), circle.radius, [closer, u].sort())
-    arc.update()
-
-    controls.add(renderer.convertLine(arc.tesselate(), materials.wire))
-  }
+  // Compare gaps around the circle, including across the parameter seam.
+  const fromEnd = progress - span
+  const fromStart = period - progress
+  const extensionStart = fromStart < fromEnd ? start - fromStart : end
+  const extensionEnd = fromStart < fromEnd ? start : end + fromEnd
+  return Array.from({ length: ARC_EXTENSION_STEPS + 1 }, (_value, index) => {
+    const point = basis.get().Value(extensionStart + (extensionEnd - extensionStart) * index / ARC_EXTENSION_STEPS)
+    return [point.X(), point.Y(), circle.center().z]
+  })
 }

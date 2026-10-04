@@ -302,12 +302,16 @@ export class PatternFeature extends Feature {
         title: 'U Step',
         type: 'length',
         autoFocus: false,
+        allowNegative: true,
+        gizmo: true,
         when: feature => feature.patternType == 'grid',
       },
       vOffset: {
         title: 'V Step',
         type: 'length',
         autoFocus: false,
+        allowNegative: true,
+        gizmo: true,
         when: feature => feature.patternType == 'grid',
       },
       radialCount: {
@@ -320,6 +324,8 @@ export class PatternFeature extends Feature {
         title: 'Angle Step',
         type: 'angle',
         step: 1,
+        allowNegative: true,
+        gizmo: true,
         when: feature => feature.patternType == 'radial',
       },
     })
@@ -433,6 +439,55 @@ export class PatternFeature extends Feature {
       )
     }
     return transforms
+  }
+
+  getGizmo() {
+    if(this.patternType == 'radial') {
+      const item = this.center().getItem()
+      const center = item instanceof THREE.Matrix4 ?
+        new THREE.Vector3().setFromMatrixPosition(item) : item.clone()
+      return {
+        radialStep: {
+          type: 'angle', center, rotation: new THREE.Matrix4(), value: this.radialStep,
+          cb: angle => {
+            this.setExpression('radialStep', null)
+            this.radialStep = angle
+          },
+        },
+      }
+    }
+
+    const source = this.inputs().at(-1).getItem()
+    const center = source.center()
+    if(source instanceof Component) {
+      const owner = this.document.top().findChild(this.componentId)
+      center.applyMatrix4(baselineWorldTransform(owner).invert().multiply(baselineWorldTransform(source)))
+    }
+    const step = (key, direction) => ({
+      type: 'length', center, direction,
+      value: Math.abs(this[key]), side: this[key] >= 0,
+      cb: (value, side) => {
+        this.setExpression(key, null)
+        this[key] = value * (side ? 1 : -1)
+      },
+    })
+    return {
+      uOffset: step('uOffset', new THREE.Vector3(1, 0, 0)),
+      vOffset: step('vOffset', new THREE.Vector3(0, 1, 0)),
+    }
+  }
+
+  updateGizmos() {
+    this.patternGizmos ||= markRaw(new FeatureGizmos())
+    const component = this.document.top().findChild(this.componentOccurrenceId) ||
+      this.document.top().findChild(this.componentId)
+    this.patternGizmos.update(this.isComplete() && this.error?.type != 'error' ? this.getGizmo() : {}, worldTransform(component))
+  }
+
+  dispose() {
+    super.dispose()
+    this.patternGizmos?.dispose()
+    this.patternGizmos = null
   }
 
   identifyCopy(compound, transformIndex, sourceIndex) {

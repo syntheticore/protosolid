@@ -24,7 +24,7 @@
           Icon.eye(
             v-if="!isTop"
             icon="eye" fixed-width
-            @click.stop="component.creator.hidden = !component.creator.hidden"
+            @click.stop="toggleVisibility"
           )
 
           Icon.component(
@@ -445,6 +445,11 @@
     },
 
     methods: {
+      toggleVisibility: function() {
+        this.component.creator.hidden = !this.component.creator.hidden
+        this.document.updateFeatureVisibility()
+      },
+
       activateComponent: function() {
         if(this.component.readOnly) return
         const source = this.document.getComponent(this.component.sourceId())

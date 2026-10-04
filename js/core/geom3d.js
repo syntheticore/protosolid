@@ -1148,10 +1148,58 @@ export class Compound extends Volumetric {
   cloneForComponent(componentId) {
     const clone = this.cloneCached()
     clone.componentId = componentId
-    clone.cachedSolids.forEach((solid, index) => {
-      solid.id = componentId + '/solid/' + index
+    clone.cachedSolids.forEach(solid => {
+      solid.id = componentId + solid.id.slice(this.componentId.length)
     })
     return clone
+  }
+
+  subset(solids) {
+    const out = new Compound(this.componentId)
+    if(solids.length) {
+      const geom = new window.oc.oc.TopoDS_Compound()
+      const builder = new window.oc.oc.BRep_Builder()
+      builder.MakeCompound(geom)
+      solids.forEach(solid => builder.Add(geom, solid.geom()))
+      builder.delete()
+      out.geom = () => geom
+    }
+    // Keep the input face objects so selected shell openings still match.
+    out.cachedSolids = solids
+    return out
+  }
+
+  restoreSolids(originals, hidden) {
+    const results = this.solids().map(solid => solid.cloneCached(this))
+    const usedIds = new Set(hidden.map(solid => solid.id))
+    const visible = originals.filter(solid => !usedIds.has(solid.id))
+    const faceIds = visible.map(solid => new Set(solid.faces().map(face => face.id)))
+
+    // Keep body identities when operations merge, remove, or split solids.
+    // Hidden bodies retain both their geometry and their tree visibility IDs.
+    results.forEach(solid => {
+      const faces = solid.faces()
+      const matches = visible.map((original, index) => ({
+        original,
+        count: faces.filter(face => faceIds[index].has(face.id)).length,
+      })).filter(match => match.count && !usedIds.has(match.original.id))
+        .sort((a, b) => b.count - a.count)
+      solid.id = matches[0]?.original.id
+      if(solid.id) usedIds.add(solid.id)
+    })
+    results.filter(solid => !solid.id).forEach(solid => {
+      const original = visible.find(solid => !usedIds.has(solid.id))
+      let index = 0
+      let id = original?.id
+      while(!id || usedIds.has(id)) id = `${this.componentId}/solid/${index++}`
+      solid.id = id
+      usedIds.add(id)
+    })
+
+    const combined = [...results, ...hidden].sort((a, b) =>
+      Number(a.id.split('/').at(-1)) - Number(b.id.split('/').at(-1))
+    )
+    return this.subset(combined).cloneCached()
   }
 
   track(algorithm, algoName, other, featureId) {

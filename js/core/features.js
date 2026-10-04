@@ -4,7 +4,7 @@ import { markRaw } from 'vue'
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
 import { Compound } from './geom3d.js'
-import { Reference, PatternInputReference } from './references.js'
+import { PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, ocCatch, rad } from './utils.js'
 import { loadFile } from '../utils.js'
@@ -89,6 +89,10 @@ export class Feature {
       return
     }
 
+    this.updateGeometry(tree, references)
+  }
+
+  updateGeometry(tree, references) {
     this.updateFeature(tree, references)
 
     try {
@@ -156,7 +160,7 @@ export class Feature {
 
   confirm() {
     const comp = this.document.top().findChild(this.componentId)
-    const sketches = Object.entries(this.settings)
+    Object.entries(this.settings)
       .filter(([key, setting]) => this[key] && ['profile', 'curve'].some(type => type == setting.type ) )
       .forEach(([key, _]) =>
         [this[key]()].flat().forEach(elem => comp.creator.itemsHidden[elem.getItem().sketch.id] = true )
@@ -164,6 +168,8 @@ export class Feature {
   }
 
   updateFeature(tree, references) {}
+
+  captureVisibility() {}
 
   getGizmo() {}
 
@@ -246,6 +252,7 @@ export class Feature {
       componentOccurrenceId: this.componentOccurrenceId,
       values: this.getValues(),
       expressions: this.expressions,
+      visibilities: this.visibilities,
     }
   }
 
@@ -254,6 +261,7 @@ export class Feature {
     feature.id = dump.id
     feature.componentId = dump.componentId
     feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
+    feature.visibilities = dump.visibilities
     feature.setValues(dump.values)
     feature.expressions = Object.fromEntries(
       Object.entries(dump.expressions || {}).filter(([key]) => feature.settings[key])
@@ -263,7 +271,54 @@ export class Feature {
 }
 
 
-export class PatternFeature extends Feature {
+export class SolidFeature extends Feature {
+  captureVisibility() {
+    this.visibilities = this.document.captureVisualViewState().visibilities
+  }
+
+  isSolidVisible(tree, solid) {
+    if(!this.visibilities) return true // Preserve the scope of older documents.
+    let component = tree.findChild(solid.compound.componentId)
+    if(component.id == this.componentId) {
+      component = tree.findChild(this.componentOccurrenceId) || component
+    }
+    if(this.visibilities[component.id]?.itemsHidden[component.sourceItemId(solid.id)]) return false
+    for(; component; component = component.parent) {
+      if(this.visibilities[component.id]?.compHidden) return false
+    }
+    return true
+  }
+
+  updateGeometry(tree, references) {
+    if(!this.visibilities) return super.updateGeometry(tree, references)
+
+    const component = tree.findChild(this.componentId)
+    const original = component.compound
+    const solids = original.solids()
+    const visible = solids.filter(solid => this.isSolidVisible(tree, solid))
+    const hidden = solids.filter(solid => !visible.includes(solid))
+
+    this.previewBody = null
+    if(!visible.length && !this.operation) return
+
+    // Inputs such as limit faces can remain references to hidden geometry;
+    // selected faces and edges to modify must belong to visible solids.
+    const scopedReferences = { ...references }
+    for(const key of ['faces', 'edges', 'face', 'tools']) {
+      if(!references[key]) continue
+      const items = [references[key]].flat().filter(item => this.isSolidVisible(tree, item.solid || item))
+      scopedReferences[key] = this.settings[key].multi ? items : items[0]
+      if(!this.settings[key].optional && !items.length) return
+    }
+
+    component.compound = original.subset(visible)
+    super.updateGeometry(tree, scopedReferences)
+    component.compound = component.compound.restoreSolids(solids, hidden)
+  }
+}
+
+
+export class PatternFeature extends SolidFeature {
   static icon = 'th'
 
   constructor(doc) {
@@ -1587,7 +1642,7 @@ Serialize.register(PlaceFeature, 'PlaceFeature')
 Serialize.register(PlaceFeature, 'ImportFeature')
 
 
-export class ExtrudeFeature extends Feature {
+export class ExtrudeFeature extends SolidFeature {
   static icon = 'layer-group'
   constructor(doc) {
     super(doc, true, 'Extrusion', {
@@ -1729,7 +1784,7 @@ export class ExtrudeFeature extends Feature {
 Serialize.register(ExtrudeFeature, 'ExtrudeFeature')
 
 
-export class RevolveFeature extends Feature {
+export class RevolveFeature extends SolidFeature {
   static icon = 'wave-square'
   constructor(document) {
     super(document, true, 'Revolution', {
@@ -1868,7 +1923,7 @@ export class RevolveFeature extends Feature {
 Serialize.register(RevolveFeature, 'RevolveFeature')
 
 
-export class LoftFeature extends Feature {
+export class LoftFeature extends SolidFeature {
   static icon = 'layer-group'
   constructor(doc) {
     super(doc, true, 'Loft', {
@@ -1915,7 +1970,7 @@ export class LoftFeature extends Feature {
 Serialize.register(LoftFeature, 'LoftFeature')
 
 
-export class SplitFeature extends Feature {
+export class SplitFeature extends SolidFeature {
   static icon = 'divide'
   constructor(document) {
     super(document, false, 'Split', {
@@ -1954,7 +2009,7 @@ export class SplitFeature extends Feature {
 Serialize.register(SplitFeature, 'SplitFeature')
 
 
-export class DraftFeature extends Feature {
+export class DraftFeature extends SolidFeature {
   static icon = 'clone'
   constructor(document) {
     super(document, true, 'Draft', {
@@ -2029,7 +2084,7 @@ export class DraftFeature extends Feature {
 Serialize.register(DraftFeature, 'DraftFeature')
 
 
-export class SweepFeature extends Feature {
+export class SweepFeature extends SolidFeature {
   static icon = 'route'
   constructor(document) {
     super(document, true, 'Sweep', {
@@ -2065,7 +2120,7 @@ export class SweepFeature extends Feature {
 Serialize.register(SweepFeature, 'SweepFeature')
 
 
-export class FilletFeature extends Feature {
+export class FilletFeature extends SolidFeature {
   static icon = 'scroll'
   constructor(doc) {
     super(doc, false, 'Fillet', {
@@ -2118,7 +2173,7 @@ export class FilletFeature extends Feature {
 Serialize.register(FilletFeature, 'FilletFeature')
 
 
-export class ChamferFeature extends Feature {
+export class ChamferFeature extends SolidFeature {
   static icon = 'screwdriver'
   constructor(doc) {
     super(doc, false, 'Chamfer', {
@@ -2239,7 +2294,7 @@ export class ChamferFeature extends Feature {
 Serialize.register(ChamferFeature, 'ChamferFeature')
 
 
-export class ShellFeature extends Feature {
+export class ShellFeature extends SolidFeature {
   static icon = 'dot-circle'
   constructor(doc) {
     super(doc, false, 'Shell', {
@@ -2289,8 +2344,9 @@ export class ShellFeature extends Feature {
     const compound = tree.findChild(this.componentId).compound
     const openings = this.faces ? this.faces().map(ref => ref.getItem()) : []
     const retained = face => !openings.some(opening => opening.isSame(face))
-    const face = openings.at(-1)?.connectedFaces().find(retained) ||
-      compound.solids().flatMap(solid => solid.faces()).find(retained)
+    const visible = compound.solids().filter(solid => this.isSolidVisible(tree, solid))
+    const face = openings.filter(face => visible.some(solid => solid.id == face.solid.id)).at(-1)?.connectedFaces().find(retained) ||
+      visible.flatMap(solid => solid.faces()).find(retained)
     if(!face) return
     const { center, direction } = faceGizmoFrame(face.tesselate(), face.center())
     if(face.geom().Orientation_1() == window.oc.oc.TopAbs_Orientation.TopAbs_REVERSED) direction.negate()
@@ -2310,7 +2366,7 @@ export class ShellFeature extends Feature {
 Serialize.register(ShellFeature, 'ShellFeature')
 
 
-export class OffsetFeature extends Feature {
+export class OffsetFeature extends SolidFeature {
   static icon = 'arrows-alt'
   constructor(doc) {
     super(doc, false, 'Offset', {
@@ -2354,7 +2410,7 @@ export class OffsetFeature extends Feature {
 Serialize.register(OffsetFeature, 'OffsetFeature')
 
 
-export class DissolveFeature extends Feature {
+export class DissolveFeature extends SolidFeature {
   static icon = 'virus-slash'
   constructor(doc) {
     super(doc, false, 'Dissolve', {
@@ -2379,7 +2435,7 @@ export class DissolveFeature extends Feature {
 Serialize.register(DissolveFeature, 'DissolveFeature')
 
 
-export class BooleanFeature extends Feature {
+export class BooleanFeature extends SolidFeature {
   static icon = 'boxes'
   constructor(doc) {
     super(doc, true, 'Boolean', {
@@ -2419,9 +2475,8 @@ export class BooleanFeature extends Feature {
       const tools = inputs.map(input => input.compound)
       const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join') )
       const localTools = inputs.filter(input => !input.external)
-      comp.compound = comp.compound
-        .removeShapes(localTools.map(input => input.tool))
-        .boolean(tool, this.operation)
+      if(localTools.length) comp.compound = comp.compound.removeShapes(localTools.map(input => input.tool))
+      comp.compound = comp.compound.boolean(tool, this.operation)
       if(this.keepTools && localTools.length) {
         comp.compound = comp.compound.merge(localTools.map(input => input.compound))
       }
@@ -2459,7 +2514,7 @@ export class RemoveSolidsFeature extends Feature {
 Serialize.register(RemoveSolidsFeature, 'RemoveSolidsFeature')
 
 
-export class MoveFeature extends Feature {
+export class MoveFeature extends SolidFeature {
   static icon = 'arrows-alt'
   constructor(doc) {
     super(doc, false, 'Move', {
@@ -2489,7 +2544,7 @@ export class MoveFeature extends Feature {
 Serialize.register(MoveFeature, 'MoveFeature')
 
 
-export class ReplaceFeature extends Feature {
+export class ReplaceFeature extends SolidFeature {
   static icon = 'exchange-alt'
   constructor(doc) {
     super(doc, false, 'Move', {

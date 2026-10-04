@@ -3,7 +3,7 @@ import { nextTick } from 'vue'
 
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
-import { Feature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature } from './features.js'
+import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature } from './features.js'
 import { Selection } from '../selection.js'
 import { Component, SectionView } from './component.js'
 import Emitter from '../emitter.js'
@@ -158,9 +158,9 @@ export default class Document extends Emitter {
     this.activateSimulation(null)
     await this.activateFeature(null, true, false)
     if(!(feature instanceof PoseFeature)) this.top().resetPose()
+    feature.captureVisibility()
     this.timeline.insertFeature(feature, false)
     await this.regenerate()
-    this.reactivateActiveComponent()
   }
 
   async moveMarker(i) {
@@ -332,7 +332,9 @@ export default class Document extends Emitter {
   reactivateActiveComponent(comp = this.activeComponent) {
     const updated = this.getComponent(comp.id)
     if(updated) {
+      const hidden = updated.creator.hidden
       this.activateComponent(updated, false)
+      updated.creator.hidden = hidden
     } else {
       this.reactivateActiveComponent(comp.parent)
     }
@@ -353,12 +355,19 @@ export default class Document extends Emitter {
       this.previousMarker = this.timeline.marker
       this.previousComponent = this.activeComponent
       const compIds = feature.modifiedComponents()
-      const comps = compIds.map(id => this.getComponent(id) ).filter(Boolean)
-      this.oldVisibility = {}
-      comps.forEach(comp => this.oldVisibility[comp.id] = comp.creator.hidden )
+      this.oldVisibility = this.top().getChildren().map(comp => ({
+        id: comp.id,
+        definition: comp.creator,
+        hidden: comp.creator.hidden,
+        itemsHidden: { ...comp.creator.itemsHidden },
+        ownsItemsHidden: Object.hasOwn(comp.creator, 'itemsHidden'),
+      }))
+
+      this.applyPartVisibilities(feature.visibilities)
 
       // Regenerate at feature position
       if(!this.timeline.isCurrentFeature(feature)) await this.regenerate(feature)
+      this.applyPartVisibilities(feature.visibilities)
 
       // Activate matching component
       this.activeComponent = this.getComponent(feature.componentId)
@@ -374,14 +383,13 @@ export default class Document extends Emitter {
         this.emit('look-at', this.activeSketch.workplane)
       }
 
-      // Show involved sketches & store previous visibility
+      // Show involved sketches while editing.
       feature.involvedSketches().forEach(sketch => {
-        this.oldVisibility[sketch.id] = this.activeComponent.creator.itemsHidden[sketch.id]
         this.activeComponent.creator.itemsHidden[sketch.id] = false
       })
 
-      // Make affected components visible
-      compIds.forEach(id => this.getComponent(id).creator.hidden = false )
+      // Legacy and non-solid features do not have a saved visibility state.
+      if(!feature.visibilities) compIds.forEach(id => this.getComponent(id).creator.hidden = false )
       this.activeFeature = feature
 
     } else if(this.activeFeature) {
@@ -392,23 +400,29 @@ export default class Document extends Emitter {
       // Restore previous state
       if(doReset && this.previousComponent) {
 
-        // Restore sketch visiblities
+        // Restore the camera after sketch editing.
         if(this.activeSketch) {
-          this.activeComponent.creator.itemsHidden[this.activeSketch.id] = this.oldVisibility[this.activeSketch.id]
           this.activeView = this.previousActiveView
           this.dirtyView = this.previousDirtyView
           const view = this.dirtyView || this.previewView || this.activeView
           this.emit('force-view', view)
-        } else {
-          this.activeFeature.involvedSketches().forEach(sketch => {
-            this.activeComponent.creator.itemsHidden[sketch.id] = this.oldVisibility[sketch.id]
-          })
         }
 
-        // Restore component visiblities
-        this.activeFeature.modifiedComponents().forEach(id =>
-          this.getComponent(id).creator.hidden = this.oldVisibility[id]
-        )
+        // Definitions are shared by cached trees, including future components.
+        const restoreVisibility = () => this.oldVisibility.forEach(({ id, definition, hidden, itemsHidden, ownsItemsHidden }) => {
+          const restoreDefinition = definition => {
+            definition.hidden = hidden
+            // Instances must resume inheriting their source's visibility map.
+            if(ownsItemsHidden) definition.itemsHidden = { ...itemsHidden }
+            else delete definition.itemsHidden
+          }
+          restoreDefinition(definition)
+          const current = this.getComponent(id)
+          if(current && current.creator !== definition) {
+            restoreDefinition(current.creator)
+          }
+        })
+        restoreVisibility()
 
         // Regeneration yields to rendering. Leave sketch mode before exposing
         // the restored timeline, so it cannot section the finished model using
@@ -421,12 +435,23 @@ export default class Document extends Emitter {
 
         // Restore active component
         if(this.previousComponent) this.activateComponent(this.getComponent(this.previousComponent.id))
+        restoreVisibility()
         this.previousComponent = null
       }
       this.activeFeature = null
       this.activeSketch = null
     }
     this.selection.clear()
+  }
+
+  async updateFeatureVisibility() {
+    this.markChanged()
+    const feature = this.activeFeature || this.creatingFeature
+    if(!(feature instanceof SolidFeature)) return
+    feature.captureVisibility()
+    this.timeline.invalidateFeature(feature)
+    await this.regenerate()
+    this.emit('feature-visibility-changed', feature)
   }
 
   activateSketch(sketch) {

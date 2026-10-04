@@ -397,8 +397,10 @@
       })
       this.document.on('deactivate-feature', this.deactivateFeature)
       this.document.on('regenerated', this.refreshError)
+      this.document.on('feature-visibility-changed', this.refreshVisibility)
       this.startValues = this.activeFeature.getValues()
       this.startExpressions = { ...this.activeFeature.expressions }
+      this.startVisibilities = this.activeFeature.visibilities
       this.activateBaseTool()
       setTimeout(async () => {
         const activation = this.activeFeature.activate?.()
@@ -427,6 +429,7 @@
       this.bus.off('keydown', this.onKeydown)
       this.document.off('deactivate-feature', this.deactivateFeature)
       this.document.off('regenerated', this.refreshError)
+      this.document.off('feature-visibility-changed', this.refreshVisibility)
       this.bus.emit('unpreview-feature')
       this.bus.emit('clear-pickers')
       this.bus.emit('activate-tool', ManipulationTool)
@@ -469,6 +472,13 @@
       refreshError: function() {
         const errors = [this.activeFeature.error, this.activeFeature.activationError].filter(Boolean)
         this.error = errors.find(error => error.type == 'error') || errors[0] || null
+      },
+
+      refreshVisibility: function(feature) {
+        if(feature !== this.activeFeature) return
+        this.activeFeature.updateGizmos()
+        this.previewFeature()
+        this.updatePaths()
       },
 
       pick: function(key, restart) {
@@ -686,10 +696,12 @@
           this.showHeader && // Only for existing features
           !this.isSketchFeature && // Never reset sketches
           (!shallowEqual(this.activeFeature.getValues(), this.startValues) ||
-            !shallowEqual(this.activeFeature.expressions, this.startExpressions)) // Only if feature actually changed
+            !shallowEqual(this.activeFeature.expressions, this.startExpressions) ||
+            this.activeFeature.visibilities !== this.startVisibilities) // Only if feature actually changed
         ) {
           this.activeFeature.setValues(this.startValues)
           this.activeFeature.expressions = { ...this.startExpressions }
+          this.activeFeature.visibilities = this.startVisibilities
           this.update()
         }
       },

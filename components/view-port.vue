@@ -378,14 +378,14 @@
 
       transformSelectionKey: function() {
         const feature = this.document.activeFeature
+        const creatingFeature = this.document.creatingFeature
         const sketch = this.document.activeSketch
-        const simulation = this.document.activeSimulation
-        const exportConfig = this.document.activeExportConfig
+        const panel = this.document.activeInteractivePanel
         const items = this.document.selection.items.map(item => {
           const component = item?.typename?.() == 'Component' ? item : item?.component
           return `${item?.id || ''}:${component?.id || ''}`
         })
-        return `${feature?.id || ''}|${sketch?.id || ''}|${simulation?.id || ''}|${exportConfig?.id || ''}|${items.join(',')}`
+        return `${feature?.id || ''}|${creatingFeature?.id || ''}|${sketch?.id || ''}|${panel || ''}|${items.join(',')}`
       },
 
       allPaths: function() {
@@ -599,9 +599,9 @@
         this.clearSelectionTransformGizmo()
         if(
           this.document.activeFeature ||
+          this.document.creatingFeature ||
           this.document.activeSketch ||
-          this.document.activeSimulation ||
-          this.document.activeExportConfig
+          this.document.activeInteractivePanel
         ) return
 
         const selectedComponents = this.document.selection.items

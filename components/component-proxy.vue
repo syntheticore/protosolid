@@ -67,10 +67,25 @@
     CanvasProxy(
       v-if="!canvas.hidden"
       :key="canvas.id"
+      :document="document"
+      :component="component"
       :canvas="canvas"
       :parent-transform="transform"
       :parent-highlighted="highlighted"
       :parent-selected="selected"
+    )
+
+  //- Section Views
+
+  template(v-for="section in component.creator.sectionViews")
+
+    SectionProxy(
+      v-if="!section.hidden"
+      :key="section.id"
+      :document="document"
+      :component="component"
+      :section="section"
+      :parent-transform="transform"
     )
 
   //- Child Components

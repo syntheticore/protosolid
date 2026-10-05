@@ -87,6 +87,46 @@ export class TransformGizmo extends THREE.Object3D {
   }
 }
 
+export class CanvasPositionGizmo extends TransformControls {
+  constructor(frame, x, y, onChange) {
+    const renderer = window.alcRenderer
+    super(renderer.camera, renderer.canvas)
+
+    // Keep the position in canvas-plane coordinates, including when its
+    // component is transformed in an assembly.
+    this.frame = new THREE.Object3D()
+    this.dummy = new THREE.Object3D()
+    this.frame.add(this.dummy)
+    renderer.scene.add(this.frame)
+    this.setFrame(frame)
+    this.setPosition(x, y)
+    this.setSpace('local')
+    this.showZ = false
+    this.setTranslationSnap(0.1)
+    this.setSize(1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight))
+    this.attach(this.dummy)
+
+    this.addEventListener('objectChange', () => {
+      onChange(Number(this.dummy.position.x.toFixed(1)), Number(this.dummy.position.y.toFixed(1)))
+    })
+  }
+
+  setFrame(transform) {
+    transform.decompose(this.frame.position, this.frame.quaternion, this.frame.scale)
+    this.frame.updateMatrixWorld(true)
+  }
+
+  setPosition(x, y) {
+    this.dummy.position.set(Number(x) || 0, Number(y) || 0, 0)
+    this.frame.updateMatrixWorld(true)
+  }
+
+  dispose() {
+    super.dispose()
+    window.alcRenderer.scene.remove(this.frame)
+  }
+}
+
 export class LengthGizmo extends ArrowControls {
   constructor(startPosition, direction, startValue, startSide, cb) {
     super(startPosition, new THREE.Euler().setFromRotationMatrix(rotationFromNormal(direction)))

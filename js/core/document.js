@@ -36,6 +36,7 @@ export default class Document extends Emitter {
     this.activeSketch = null
     this.activeFeature = null
     this.creatingFeature = null
+    this.activeInteractivePanel = null
     this.activeSimulation = null
     this.activeSimulationPicker = false
     this.activeExportConfig = null
@@ -141,9 +142,9 @@ export default class Document extends Emitter {
     this.addFeature(feature)
   }
 
-  activateComponent(comp, closeSimulation = true) {
+  activateComponent(comp, closeInteractivePanel = true) {
     if(comp?.readOnly) return
-    if(closeSimulation) this.activateSimulation(null)
+    if(closeInteractivePanel) this.activateInteractivePanel(null)
     if(comp) comp.creator.hidden = false
     this.activeComponent = comp
     this.selection.clear()
@@ -155,7 +156,7 @@ export default class Document extends Emitter {
   }
 
   async addFeature(feature) {
-    this.activateSimulation(null)
+    this.activateInteractivePanel(null)
     await this.activateFeature(null, true, false)
     if(!(feature instanceof PoseFeature)) this.top().resetPose()
     feature.captureVisibility()
@@ -227,17 +228,25 @@ export default class Document extends Emitter {
     return this.regenerationQueue
   }
 
-  activateSimulation(simulation) {
-    this.activateExport(null)
-    this.activeSimulation = simulation
+  activateInteractivePanel(key) {
+    // Remove the previous panel's viewport controls before opening the next.
+    this.activeInteractivePanel = null
+    this.activeSimulation = null
     this.activeSimulationPicker = false
-    if(simulation) this.selection.clear()
+    this.activeExportConfig = null
+    this.activeExportComponentId = null
+    if(key) this.selection.clear()
+    this.activeInteractivePanel = key
+  }
+
+  activateSimulation(simulation) {
+    this.activateInteractivePanel(simulation ? 'simulation' : null)
+    this.activeSimulation = simulation
   }
 
   activateExport(config, component) {
-    if(config) {
-      this.activeSimulation = null
-      this.activeSimulationPicker = false
+    if(config || this.activeExportConfig) {
+      this.activateInteractivePanel(config ? 'export' : null)
     }
     this.activeExportConfig = config
     this.activeExportComponentId = config && component ? component.id : null
@@ -347,7 +356,7 @@ export default class Document extends Emitter {
 
   async activateFeature(feature, doReset, resetMarker) {
     if(feature) {
-      this.activateSimulation(null)
+      this.activateInteractivePanel(null)
 
       await this.cancelFeature(false)
 

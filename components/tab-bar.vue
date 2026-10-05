@@ -61,7 +61,7 @@
     box-shadow: 0 1px 0 #323840
     max-width: 100vw
     align-items: center
-    z-index: 2
+    z-index: 3
 
     .blurry &
       // backdrop-filter: blur(32px)

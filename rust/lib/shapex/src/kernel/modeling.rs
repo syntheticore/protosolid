@@ -72,12 +72,16 @@ impl Lineage {
         for parent in parents {
             for ((kind, ancestor, revision), previous) in &parent.entries {
                 let entry = entries.entry((*kind, *ancestor, *revision)).or_default();
-                entry.changed |= previous.changed;
-                entry.merged |= previous.merged;
                 for source in &previous.descendants {
                     let direct = direct_descendants(*kind, *source, history, current, &generated);
-                    entry.changed |= direct.changed;
-                    entry.merged |= direct.merged;
+                    // Per-solid operations share the compound's ancestry. A
+                    // branch without this entity must not mark a surviving
+                    // sibling branch modified when the results are combined.
+                    if direct.descendants.is_empty() {
+                        continue;
+                    }
+                    entry.changed |= previous.changed || direct.changed;
+                    entry.merged |= previous.merged || direct.merged;
                     entry.descendants.extend(direct.descendants);
                 }
             }

@@ -4578,6 +4578,57 @@ fn disconnected_profiles_cut_two_blind_pockets_in_one_operation() {
 }
 
 #[test]
+fn multi_solid_sections_preserve_uncut_face_history() {
+    let first = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 13.0));
+    let second = owned_cuboid(Point3::new(20.0, 0.0, 0.0), Point3::new(30.0, 10.0, 13.0));
+    let pair = first.combined(&[second]).unwrap();
+    let plane = |z| {
+        Plane3::new(
+            Point3::new(0.0, 0.0, z),
+            Vec3::unit_x(),
+            Vec3::unit_y(),
+            ModelTolerance::default(),
+        )
+        .unwrap()
+    };
+    let unchanged = pair.split(plane(13.0), "left").unwrap();
+    assert!((unchanged.volume() - pair.volume()).abs() < 1e-6);
+    for face in pair.faces() {
+        assert!(
+            matches!(unchanged.resolve(face), Resolution::Preserved(_)),
+            "a tangent section must preserve face {:?}",
+            face.persistent_id()
+        );
+    }
+    // A second section also traverses the recombined result's lineage.
+    let repeated = unchanged.split(plane(13.0), "left").unwrap();
+    for face in pair.faces().chain(first.faces()) {
+        assert!(matches!(repeated.resolve(face), Resolution::Preserved(_)));
+    }
+
+    let cut = pair.split(plane(6.0), "left").unwrap();
+    assert!((cut.volume() - pair.volume() * 6.0 / 13.0).abs() < 1e-6);
+    for face in pair.faces() {
+        if let Surface3::Plane(p) = face.surface() {
+            if p.normal().z.abs() > 0.9 {
+                if p.origin().z == 0.0 {
+                    assert!(matches!(cut.resolve(face), Resolution::Preserved(_)));
+                } else {
+                    assert!(matches!(cut.resolve(face), Resolution::Deleted));
+                }
+            } else {
+                assert!(matches!(cut.resolve(face), Resolution::Modified(_)));
+            }
+        }
+    }
+    assert_eq!(
+        cut.faces().filter(|face| matches!(face.surface(), Surface3::Plane(p)
+            if p.normal().z.abs() > 0.9 && (p.origin().z - 6.0).abs() < 1e-7)).count(),
+        2
+    );
+}
+
+#[test]
 fn multi_solid_booleans_use_set_semantics() {
     let left = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
     let right = owned_cuboid(Point3::new(4.0, 0.0, 0.0), Point3::new(6.0, 2.0, 2.0));

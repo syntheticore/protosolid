@@ -1,4 +1,33 @@
 use super::*;
+use super::super::{IntersectionKind, IntersectionSet};
+
+#[test]
+fn distant_line_origin_preserves_circle_tangency() {
+    let tolerance = ModelTolerance::default();
+    // Coordinates from the extrusion that split one tangent into two nearby hits.
+    let center = Point3::new(15.318275486591771, 12.199999999999998, 19.485467329507593);
+    let circle: Curve3 = Circle3::new(
+        center,
+        Vec3::new(0.0, 0.0, -0.3),
+        Vec3::new(0.0, 0.3, 0.0),
+        tolerance,
+    ).unwrap().into();
+    let line: Curve3 = Line3::new(
+        Point3::new(15.318275486591771, 12.499999999999998, -30.303258588388346),
+        Vec3::new(0.0, 0.0, 57.777220306116355),
+    ).unwrap().into();
+
+    let IntersectionSet::Isolated(hits) = line.intersect_curve(&circle, tolerance).unwrap() else {
+        panic!("expected one tangent hit");
+    };
+    assert_eq!(hits.len(), 1);
+    let hit = hits[0];
+    assert_eq!(hit.kind, IntersectionKind::Tangent);
+    assert_eq!(hit.multiplicity, 2);
+    assert!(hit.point.distance(Point3::new(center.x, center.y + 0.3, center.z)) < tolerance.linear);
+    assert!(line.evaluate(hit.first_parameter).unwrap().point
+        .distance(circle.evaluate(hit.second_parameter).unwrap().point) < tolerance.linear);
+}
 
 #[test]
 fn periodic_spatial_projection_preserves_uv_winding() {

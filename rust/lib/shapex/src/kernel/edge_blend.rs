@@ -342,7 +342,7 @@ impl EulerTransaction<'_> {
                                 .or_insert_with(|| (spine.clone(), tangent_faces));
                             continue;
                         } else if let Some((seam_edge, continuation, tangent_faces)) =
-                            self.smooth_blend_continuation(vertex, spine, &selected)?
+                            self.smooth_blend_continuation(vertex, spine, &selected, kind)?
                         {
                             junction_kinds.insert(
                                 vertex,
@@ -386,7 +386,7 @@ impl EulerTransaction<'_> {
                         }
                     }
                     if let Some((seam_edge, continuation, tangent_faces)) =
-                        self.smooth_blend_continuation(vertex, spine, &selected)?
+                        self.smooth_blend_continuation(vertex, spine, &selected, kind)?
                     {
                         if selected.contains(&continuation) {
                             junction_kinds.insert(
@@ -2628,10 +2628,11 @@ impl EulerTransaction<'_> {
     }
 
     fn smooth_blend_continuation(
-        &self,
+        &mut self,
         vertex: VertexId,
         spine: &BlendSpine,
         selected: &BTreeSet<EdgeId>,
+        kind: EdgeBlendKind,
     ) -> KernelResult<Option<(EdgeId, EdgeId, [FaceId; 2])>> {
         let current_edge = spine.edge_id;
         let current = self.working.edge(current_edge)?;
@@ -2719,6 +2720,38 @@ impl EulerTransaction<'_> {
                 .is_ok_and(|concave| continues_direction || concave == spine.concave)
             });
             if let Some(continuation) = continuation {
+                if kind == EdgeBlendKind::Chamfer && !selected.contains(&continuation) {
+                    let candidate = self.prepare_blend_spine(
+                        continuation,
+                        spine.offset,
+                        kind,
+                        None,
+                        Some(&(spine.clone(), [faces[0], faces[1]])),
+                        None,
+                    );
+                    if let Ok(candidate) = candidate {
+                        let far_end = usize::from(candidate.edge.vertices[0] == vertex);
+                        let snapshot = self.working.clone();
+                        let endpoint = self.prepare_blend_endpoint(&candidate, far_end);
+                        self.working = snapshot;
+                        if let Ok(endpoint) = endpoint {
+                            // A chamfer cannot terminate after extending both open
+                            // neighboring rails past their shared end. Periodic
+                            // rails may only need a chart turn, so keep those.
+                            if endpoint.allow_adjacent_extension == [true; 2]
+                                && self.tangent_chain_continuation(&candidate, far_end)?.is_none()
+                                && endpoint.adjacent_uses.iter().all(|use_id| {
+                                    self.working
+                                        .coedge(*use_id)
+                                        .and_then(|use_| self.working.edge(use_.edge))
+                                        .is_ok_and(|edge| edge.curve.domain().period.is_none())
+                                })
+                            {
+                                continue;
+                            }
+                        }
+                    }
+                }
                 return Ok(Some((seam, continuation, [faces[0], faces[1]])));
             }
         }

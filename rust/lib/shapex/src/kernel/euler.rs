@@ -5332,7 +5332,20 @@ impl<'kernel> EulerTransaction<'kernel> {
                 1.0 - edge_fraction
             };
             let parameter = coedge.range.start + coedge.range.span() * traversal_fraction;
+            let extended_pcurve = if allow_extension {
+                let range = if traversal_vertices[0] == old_vertex {
+                    ParameterRange::new(parameter, coedge.range.end)?
+                } else {
+                    ParameterRange::new(coedge.range.start, parameter)?
+                };
+                Some(coedge.pcurve.extended(range)?)
+            } else {
+                None
+            };
             let value = self.working.coedges.get_mut(coedge_id)?;
+            if let Some(pcurve) = extended_pcurve {
+                value.pcurve = pcurve;
+            }
             if traversal_vertices[0] == old_vertex {
                 value.range.start = parameter;
             } else if traversal_vertices[1] == old_vertex {

@@ -2787,19 +2787,21 @@ fn line_circle(
     let offset = line.origin() - circle.center();
     let direction = line.direction();
     let a = direction.magnitude2();
-    let b = 2.0 * offset.dot(direction);
-    let c = offset.magnitude2() - circle.radius().powi(2);
-    let discriminant = b * b - 4.0 * a * c;
-    let discriminant_tolerance = linear * linear * a;
-    if discriminant < -discriminant_tolerance {
+    let closest_parameter = -offset.dot(direction) / a;
+    let closest = line.evaluate(closest_parameter)?.point;
+    // The expanded quadratic loses precision when the line's origin is far
+    // from a tangency. Measure the radial gap at the closest point instead.
+    let radial_gap = circle.radius().powi(2) - (closest - circle.center()).magnitude2();
+    let gap_tolerance = linear * linear * 0.25;
+    if radial_gap < -gap_tolerance {
         return Ok(IntersectionSet::Empty);
     }
-    let tangent = discriminant.abs() <= discriminant_tolerance;
-    let root = discriminant.max(0.0).sqrt();
+    let tangent = radial_gap.abs() <= gap_tolerance;
+    let step = (radial_gap.max(0.0) / a).sqrt();
     let parameters = if tangent {
-        vec![-b / (2.0 * a)]
+        vec![closest_parameter]
     } else {
-        vec![(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)]
+        vec![closest_parameter - step, closest_parameter + step]
     };
     let mut hits = Vec::with_capacity(parameters.len());
     for parameter in parameters {

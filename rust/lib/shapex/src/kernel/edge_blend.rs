@@ -1478,33 +1478,66 @@ impl EulerTransaction<'_> {
                 adjacent_seed,
                 tolerance,
             );
-            // At a tangent endpoint, correction on a circular support can
-            // select the other side of the circle. Search the retained arc and
-            // contact rail before extending either past the selected edge.
+            // Local correction can select a different intersection branch on
+            // an extended adjacent rail. Prefer a hit on the retained edge
+            // and contact span before allowing either rail to extend.
             let retained_contact = ParameterRange {
                 start: spine.endpoint_seeds[0],
                 end: spine.endpoint_seeds[1],
             };
-            let local_hit = match local_hit {
-                original @ Err(_) if matches!(adjacent_edge.curve, Curve3::Circle(_)) => {
-                    contact_curve
-                        .intersect_curve_near(
-                            &adjacent_edge.curve,
-                            spine.endpoint_seeds[endpoint_index],
-                            (adjacent_edge.range.start + adjacent_edge.range.end) * 0.5,
-                            tolerance,
-                        )
-                        .ok()
-                        .filter(|hit| {
-                            retained_contact.contains(hit.first_parameter, tolerance)
-                                && adjacent_edge
-                                    .range
-                                    .contains(hit.second_parameter, tolerance)
-                        })
-                        .map(Ok)
-                        .unwrap_or(original)
+            let on_retained_edges = |hit: &super::CurveCurveHit| {
+                retained_contact.contains(hit.first_parameter, tolerance)
+                    && adjacent_edge.range.contains(hit.second_parameter, tolerance)
+            };
+            let search_retained = match &local_hit {
+                Ok(hit) => {
+                    matches!(adjacent_edge.curve, Curve3::SurfaceIntersection(_))
+                        && !retained_contact.contains(hit.first_parameter, tolerance)
+                        && !adjacent_edge.range.contains(hit.second_parameter, tolerance)
                 }
-                original => original,
+                Err(_) => matches!(adjacent_edge.curve, Curve3::Circle(_)),
+            };
+            let local_hit = if !search_retained {
+                local_hit
+            } else {
+                let first_seeds = [
+                    seed,
+                    spine.endpoint_seeds[endpoint_index],
+                    (retained_contact.start + retained_contact.end) * 0.5,
+                ];
+                let second_seeds = [
+                    rail_seed.parameter,
+                    adjacent_edge.range.start,
+                    (adjacent_edge.range.start + adjacent_edge.range.end) * 0.5,
+                    adjacent_edge.range.end,
+                ];
+                let mut retained_hits = Vec::new();
+                for first in first_seeds {
+                    for second in second_seeds {
+                        if let Ok(hit) = contact_curve.intersect_curve_near(
+                            &adjacent_edge.curve,
+                            first,
+                            second,
+                            tolerance,
+                        ) {
+                            if on_retained_edges(&hit) {
+                                retained_hits.push(hit);
+                            }
+                        }
+                    }
+                }
+                retained_hits
+                    .into_iter()
+                    .min_by(|first, second| {
+                        (first.first_parameter - spine.endpoint_seeds[endpoint_index])
+                            .abs()
+                            .total_cmp(
+                                &(second.first_parameter - spine.endpoint_seeds[endpoint_index])
+                                    .abs(),
+                            )
+                    })
+                    .map(Ok)
+                    .unwrap_or(local_hit)
             };
             let (contact_parameter, rail_parameter, contact_point) = if let Ok(hit) = local_hit {
                 (hit.first_parameter, hit.second_parameter, hit.point)

@@ -14,8 +14,8 @@ export class StaticSimulation {
     this.fixedFaces = []
     this.loadFaces = []
     this.forceX = 0
-    this.forceY = 0
-    this.forceZ = -100
+    this.forceY = -100
+    this.forceZ = 0
     this.result = null
     this.revision = 0
     this.deformationFactor = 1
@@ -76,7 +76,7 @@ export class StaticSimulation {
     const fractions = []
     for(let axis = 0; axis < 3; axis++) {
       const coordinate = Math.max(0, Math.min(dimensions[axis] - 1,
-        (coordinates[axis] - result.min[axis]) / result.step - 0.5))
+        (coordinates[axis] - result.min[axis]) / result.steps[axis] - 0.5))
       lower[axis] = Math.floor(coordinate)
       fractions[axis] = coordinate - lower[axis]
     }
@@ -140,18 +140,62 @@ export class StaticSimulation {
 Serialize.register(StaticSimulation, 'StaticSimulation')
 
 
+function solidGridSteps(solid) {
+  const faces = solid.faces().filter(face => face.getPlane()).map(face => {
+    const triangles = makeTriangles([face])
+    const normal = triangles[0].getNormal(new THREE.Vector3())
+    const axis = [0, 1, 2].reduce((best, current) =>
+      Math.abs(normal.getComponent(current)) > Math.abs(normal.getComponent(best)) ? current : best, 0)
+    if(Math.abs(normal.getComponent(axis)) < 0.95) return null
+    const bounds = new THREE.Box3()
+    triangles.forEach(triangle => {
+      bounds.expandByPoint(triangle.a)
+      bounds.expandByPoint(triangle.b)
+      bounds.expandByPoint(triangle.c)
+    })
+    return { axis, normal: normal.getComponent(axis), bounds }
+  }).filter(Boolean)
+  const steps = [Infinity, Infinity, Infinity]
+  for(let i = 0; i < faces.length; i++) {
+    for(let j = i + 1; j < faces.length; j++) {
+      const a = faces[i]
+      const b = faces[j]
+      if(a.axis != b.axis || a.normal * b.normal >= 0) continue
+      const axis = a.axis
+      const otherAxes = [0, 1, 2].filter(other => other != axis)
+      if(otherAxes.some(other => Math.min(a.bounds.max.getComponent(other), b.bounds.max.getComponent(other)) -
+        Math.max(a.bounds.min.getComponent(other), b.bounds.min.getComponent(other)) <= 1e-4)) continue
+      const thickness = Math.abs(a.bounds.min.getComponent(axis) - b.bounds.min.getComponent(axis))
+      if(thickness > 1e-4) steps[axis] = Math.min(steps[axis], thickness / 4)
+    }
+  }
+  return steps
+}
+
+
 function solveSpringSolid(solid, fixedFaces, loadFaces, force) {
   const fixedTriangles = makeTriangles(fixedFaces)
   const loadTriangles = makeTriangles(loadFaces)
-  const { bounds, size, step, nx, ny, nz, grid, points } = voxelizeSolid(solid, 28, 4000)
+  if(!fixedTriangles.length || !loadTriangles.length) return
+  const targetSteps = solidGridSteps(solid)
+  const refined = targetSteps.some(Number.isFinite)
+  const { bounds, size, step, steps, nx, ny, nz, grid, points } = voxelizeSolid(
+    solid, 28, refined ? 16000 : 4000, refined ? targetSteps : null,
+  )
 
   const fixed = new Set()
   const loaded = []
   const closest = new THREE.Vector3()
-  const limit = step * step * 1.1
+  const boundaryTriangles = triangles => triangles.map(triangle => {
+    const normal = triangle.getNormal(new THREE.Vector3())
+    const distance = 1.05 * Math.hypot(normal.x * steps[0], normal.y * steps[1], normal.z * steps[2])
+    return { triangle, limit: distance * distance }
+  })
+  const fixedBoundary = boundaryTriangles(fixedTriangles)
+  const loadBoundary = boundaryTriangles(loadTriangles)
   points.forEach((point, node) => {
-    if(fixedTriangles.some(triangle => triangle.closestPointToPoint(point, closest).distanceToSquared(point) < limit)) fixed.add(node)
-    if(loadTriangles.some(triangle => triangle.closestPointToPoint(point, closest).distanceToSquared(point) < limit)) loaded.push(node)
+    if(fixedBoundary.some(({ triangle, limit }) => triangle.closestPointToPoint(point, closest).distanceToSquared(point) < limit)) fixed.add(node)
+    if(loadBoundary.some(({ triangle, limit }) => triangle.closestPointToPoint(point, closest).distanceToSquared(point) < limit)) loaded.push(node)
   })
   if(!points.length || !fixed.size || !loaded.length) return
 
@@ -232,10 +276,10 @@ function solveSpringSolid(solid, fixedFaces, loadFaces, force) {
     const minus = coordinates[axis] > 0 ? grid[index - stride] : -1
     const plus = coordinates[axis] + 1 < dimensions[axis] ? grid[index + stride] : -1
     if(minus >= 0 && plus >= 0) {
-      return (displacements[plus * 3 + component] - displacements[minus * 3 + component]) / (2 * step)
+      return (displacements[plus * 3 + component] - displacements[minus * 3 + component]) / (2 * steps[axis])
     }
-    if(plus >= 0) return (displacements[plus * 3 + component] - displacements[node * 3 + component]) / step
-    if(minus >= 0) return (displacements[node * 3 + component] - displacements[minus * 3 + component]) / step
+    if(plus >= 0) return (displacements[plus * 3 + component] - displacements[node * 3 + component]) / steps[axis]
+    if(minus >= 0) return (displacements[node * 3 + component] - displacements[minus * 3 + component]) / steps[axis]
     return 0
   }
   for(let k = 0; k < nz; k++) {
@@ -270,6 +314,7 @@ function solveSpringSolid(solid, fixedFaces, loadFaces, force) {
   return {
     min: bounds.min.toArray(),
     step,
+    steps,
     nx,
     ny,
     nz,

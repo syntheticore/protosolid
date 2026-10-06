@@ -66,16 +66,56 @@ export class StaticSimulation {
   }
 
   sampleAt(position) {
-    const node = this.nodeAt(position)
-    if(node === undefined) return
     const result = this.result
+    if(!result) return
+    const coordinates = [position.x, position.y, position.z]
+    const dimensions = [result.nx, result.ny, result.nz]
+    const lower = []
+    const fractions = []
+    for(let axis = 0; axis < 3; axis++) {
+      const coordinate = Math.max(0, Math.min(dimensions[axis] - 1,
+        (coordinates[axis] - result.min[axis]) / result.step - 0.5))
+      lower[axis] = Math.floor(coordinate)
+      fractions[axis] = coordinate - lower[axis]
+    }
+    const displacement = new THREE.Vector3()
+    let stress = 0
+    let totalWeight = 0
+    for(let z = 0; z <= 1; z++) {
+      for(let y = 0; y <= 1; y++) {
+        for(let x = 0; x <= 1; x++) {
+          const i = lower[0] + x
+          const j = lower[1] + y
+          const k = lower[2] + z
+          if(i >= result.nx || j >= result.ny || k >= result.nz) continue
+          const node = result.grid[i + result.nx * (j + result.ny * k)]
+          if(node < 0) continue
+          const weight = (x ? fractions[0] : 1 - fractions[0]) *
+            (y ? fractions[1] : 1 - fractions[1]) *
+            (z ? fractions[2] : 1 - fractions[2])
+          displacement.x += weight * result.displacements[node * 3]
+          displacement.y += weight * result.displacements[node * 3 + 1]
+          displacement.z += weight * result.displacements[node * 3 + 2]
+          stress += weight * result.stresses[node]
+          totalWeight += weight
+        }
+      }
+    }
+    if(!totalWeight) {
+      const node = this.nodeAt(position)
+      if(node === undefined) return
+      return {
+        displacement: new THREE.Vector3(
+          result.displacements[node * 3],
+          result.displacements[node * 3 + 1],
+          result.displacements[node * 3 + 2],
+        ),
+        stress: result.stresses[node] / result.maxStress,
+      }
+    }
     return {
-      displacement: new THREE.Vector3(
-        result.displacements[node * 3],
-        result.displacements[node * 3 + 1],
-        result.displacements[node * 3 + 2],
-      ),
-      stress: result.stresses[node] / result.maxStress,
+      displacement: displacement.divideScalar(totalWeight),
+      stress: stress / totalWeight / result.maxStress,
     }
   }
 
@@ -101,7 +141,7 @@ Serialize.register(StaticSimulation, 'StaticSimulation')
 function solveSpringSolid(solid, fixedFaces, loadFaces, force) {
   const fixedTriangles = makeTriangles(fixedFaces)
   const loadTriangles = makeTriangles(loadFaces)
-  const { bounds, size, step, nx, ny, nz, grid, points } = voxelizeSolid(solid)
+  const { bounds, size, step, nx, ny, nz, grid, points } = voxelizeSolid(solid, 28, 4000)
 
   const fixed = new Set()
   const loaded = []
@@ -183,21 +223,40 @@ function solveSpringSolid(solid, fixedFaces, loadFaces, force) {
 
   const displacements = conjugateGradient(apply, right)
   const stresses = new Float64Array(points.length)
-  const springCounts = new Uint16Array(points.length)
-  springs.forEach(spring => {
-    const ai = spring.a * 3
-    const bi = spring.b * 3
-    const strain = Math.abs(
-      (displacements[bi] - displacements[ai]) * spring.direction.x +
-      (displacements[bi + 1] - displacements[ai + 1]) * spring.direction.y +
-      (displacements[bi + 2] - displacements[ai + 2]) * spring.direction.z
-    ) / step
-    stresses[spring.a] += strain
-    stresses[spring.b] += strain
-    springCounts[spring.a]++
-    springCounts[spring.b]++
-  })
-  stresses.forEach((stress, node) => stresses[node] = stress / springCounts[node])
+  const dimensions = [nx, ny, nz]
+  const strides = [1, nx, nx * ny]
+  const gradient = (index, node, coordinates, axis, component) => {
+    const stride = strides[axis]
+    const minus = coordinates[axis] > 0 ? grid[index - stride] : -1
+    const plus = coordinates[axis] + 1 < dimensions[axis] ? grid[index + stride] : -1
+    if(minus >= 0 && plus >= 0) {
+      return (displacements[plus * 3 + component] - displacements[minus * 3 + component]) / (2 * step)
+    }
+    if(plus >= 0) return (displacements[plus * 3 + component] - displacements[node * 3 + component]) / step
+    if(minus >= 0) return (displacements[node * 3 + component] - displacements[minus * 3 + component]) / step
+    return 0
+  }
+  for(let k = 0; k < nz; k++) {
+    for(let j = 0; j < ny; j++) {
+      for(let i = 0; i < nx; i++) {
+        const index = i + nx * (j + ny * k)
+        const node = grid[index]
+        if(node < 0) continue
+        const coordinates = [i, j, k]
+        const exx = gradient(index, node, coordinates, 0, 0)
+        const eyy = gradient(index, node, coordinates, 1, 1)
+        const ezz = gradient(index, node, coordinates, 2, 2)
+        const exy = (gradient(index, node, coordinates, 0, 1) + gradient(index, node, coordinates, 1, 0)) / 2
+        const eyz = (gradient(index, node, coordinates, 1, 2) + gradient(index, node, coordinates, 2, 1)) / 2
+        const ezx = (gradient(index, node, coordinates, 2, 0) + gradient(index, node, coordinates, 0, 2)) / 2
+        // For a uniform isotropic material, von Mises stress is proportional to this strain measure.
+        stresses[node] = Math.sqrt(
+          ((exx - eyy) ** 2 + (eyy - ezz) ** 2 + (ezz - exx) ** 2) / 2 +
+          3 * (exy ** 2 + eyz ** 2 + ezx ** 2)
+        )
+      }
+    }
+  }
   const maxStress = Math.max(...stresses) || 1
   let maxDisplacement = 0
   points.forEach((_, node) => {

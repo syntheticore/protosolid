@@ -3,6 +3,7 @@
 <script setup>
 
   import * as THREE from 'three'
+  import { TessellateModifier } from 'three/examples/jsm/modifiers/TessellateModifier.js'
   import materials from '../js/materials.js'
 
   const props = defineProps(['document', 'component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
@@ -24,8 +25,12 @@
     queueMicrotask(() => props.document.bus.emit('toast', 'A face could not be displayed. You can edit or undo the last feature.'))
   }
   const faceMesh = window.alcRenderer.convertMesh(tessellation, getMaterial())
-  const basePositions = faceMesh.geometry.getAttribute('position').array.slice()
-  const baseNormals = faceMesh.geometry.getAttribute('normal').array.slice()
+  const originalGeometry = faceMesh.geometry
+  const originalPositions = originalGeometry.getAttribute('position').array.slice()
+  const originalNormals = originalGeometry.getAttribute('normal').array.slice()
+  let analysisGeometry = null
+  let analysisPositions = null
+  let analysisNormals = null
   faceMesh.alcTypes = [
     'face',
     props.face.getPlane() && 'plane',
@@ -82,6 +87,22 @@
   }
 
   function updateAnalysisGeometry() {
+    const simulation = props.document.activeSimulation
+    const simulatedFace = simulation?.result &&
+      simulation.result.componentId == props.component.id &&
+      simulation.result.solidId == props.face.solid.id
+    if(props.colorMode == 'static' && simulatedFace) {
+      if(!analysisGeometry) {
+        analysisGeometry = new TessellateModifier(simulation.result.step, 10).modify(originalGeometry)
+        analysisPositions = analysisGeometry.getAttribute('position').array.slice()
+        analysisNormals = analysisGeometry.getAttribute('normal').array.slice()
+      }
+      faceMesh.geometry = analysisGeometry
+    } else {
+      faceMesh.geometry = originalGeometry
+    }
+    const basePositions = faceMesh.geometry == analysisGeometry ? analysisPositions : originalPositions
+    const baseNormals = faceMesh.geometry == analysisGeometry ? analysisNormals : originalNormals
     const position = faceMesh.geometry.getAttribute('position')
     const normal = faceMesh.geometry.getAttribute('normal')
     position.array.set(basePositions)
@@ -90,15 +111,10 @@
     normal.needsUpdate = true
     if(props.colorMode != 'thermal' && props.colorMode != 'static') return
 
-    const simulation = props.document.activeSimulation
     const values = new Float32Array(position.count * 3)
     const color = new THREE.Color()
     const coldColor = new THREE.Color(0x003cff)
     const hotColor = new THREE.Color(0xff0000)
-    const simulatedFace = simulation?.result &&
-      simulation.result.componentId == props.component.id &&
-      simulation.result.solidId == props.face.solid.id
-
     for(let i = 0; i < position.count; i++) {
       const point = new THREE.Vector3(basePositions[i * 3], basePositions[i * 3 + 1], basePositions[i * 3 + 2])
       const staticSample = props.colorMode == 'static' && simulatedFace && simulation.sampleAt(point)
@@ -157,6 +173,7 @@
 
   onUnmounted(() => {
     window.alcRenderer.remove(faceMesh)
+    analysisGeometry?.dispose()
     props.face.mesh = null
     renderNeeded.value = true
   })

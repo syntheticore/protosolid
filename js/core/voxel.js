@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 
-export function voxelizeSolid(solid, resolution=14) {
+export function voxelizeSolid(solid, resolution=14, maxCells=Infinity) {
   const triangles = makeTriangles(solid.faces())
   const bounds = new THREE.Box3()
   triangles.forEach(triangle => {
@@ -11,7 +11,8 @@ export function voxelizeSolid(solid, resolution=14) {
   })
 
   const size = bounds.getSize(new THREE.Vector3())
-  const step = Math.max(size.x, size.y, size.z) / resolution
+  let step = Math.max(size.x, size.y, size.z) / resolution
+  while(Math.ceil(size.x / step) * Math.ceil(size.y / step) * Math.ceil(size.z / step) > maxCells) step *= 1.05
   const nx = Math.max(1, Math.ceil(size.x / step))
   const ny = Math.max(1, Math.ceil(size.y / step))
   const nz = Math.max(1, Math.ceil(size.z / step))

@@ -17,7 +17,15 @@
 
         Icon.expand(icon="angle-right")
 
-        .controls
+        .controls(:class="{ wide: simulation.mode == 'static' }")
+
+          Icon.playback(
+            v-if="simulation.mode == 'static'"
+            :icon="playing ? 'pause' : 'play'"
+            fixed-width
+            :title="playing ? 'Pause deformation' : 'Play deformation'"
+            @click.stop="togglePlayback"
+          )
 
           Icon.delete(icon="trash-alt" fixed-width title="Delete" @click.stop="remove")
 
@@ -206,6 +214,10 @@
         pickerElements: {},
         fluidMaterials,
         solveRevision: 0,
+        playing: false,
+        playbackFrame: null,
+        playbackTime: 0,
+        previousFrameTime: null,
       }
     },
 
@@ -232,6 +244,7 @@
           this.bus.emit('activate-tool', this.configuration.probeTool)
           this.$nextTick(this.updatePaths)
         } else {
+          this.stopPlayback(true)
           this.solveRevision++
           this.simulation.cancelSolve?.()
           this.cancelPick()
@@ -266,6 +279,7 @@
     },
 
     beforeUnmount() {
+      this.stopPlayback(true)
       this.solveRevision++
       this.simulation.cancelSolve?.()
       this.pickerSession.dispose()
@@ -289,6 +303,48 @@
         }
       },
 
+      togglePlayback() {
+        if(this.playing) {
+          this.stopPlayback(false)
+          return
+        }
+        if(!this.expanded) {
+          this.document.activateComponent(this.component)
+          this.document.activateSimulation(this.simulation)
+          this.$nextTick(this.startPlayback)
+        } else {
+          this.startPlayback()
+        }
+      },
+
+      startPlayback() {
+        if(!this.expanded || !this.simulation.result) return
+        this.playing = true
+        this.previousFrameTime = null
+        this.playbackFrame = requestAnimationFrame(this.advancePlayback)
+      },
+
+      advancePlayback(time) {
+        if(!this.playing) return
+        if(this.previousFrameTime !== null) this.playbackTime += Math.min(time - this.previousFrameTime, 50)
+        this.previousFrameTime = time
+        this.simulation.deformationFactor = (1 + Math.cos(2 * Math.PI * this.playbackTime / 2400)) / 2
+        this.simulation.animationRevision++
+        this.playbackFrame = requestAnimationFrame(this.advancePlayback)
+      },
+
+      stopPlayback(reset) {
+        if(this.playbackFrame !== null) cancelAnimationFrame(this.playbackFrame)
+        this.playbackFrame = null
+        this.previousFrameTime = null
+        this.playing = false
+        if(reset && this.simulation.mode == 'static') {
+          this.playbackTime = 0
+          this.simulation.deformationFactor = 1
+          this.simulation.animationRevision++
+        }
+      },
+
       regenerated() {
         if(this.expanded) this.solve()
         this.$nextTick(this.updatePaths)
@@ -300,6 +356,7 @@
         if(this.simulation.mode == 'fluid') this.bus.emit(this.configuration.resultEvent)
         await pending
         if(revision != this.solveRevision) return
+        if(this.simulation.mode == 'static' && !this.simulation.result && this.playing) this.stopPlayback(true)
         if(this.configuration.resultEvent) this.bus.emit(this.configuration.resultEvent)
         this.bus.emit('render-needed')
         this.$nextTick(this.updatePaths)

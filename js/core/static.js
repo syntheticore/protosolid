@@ -18,6 +18,8 @@ export class StaticSimulation {
     this.forceZ = -100
     this.result = null
     this.revision = 0
+    this.deformationFactor = 1
+    this.animationRevision = 0
   }
 
   resolve(tree) {

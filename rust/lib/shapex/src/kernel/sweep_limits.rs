@@ -100,7 +100,7 @@ fn join_cells(
     let mut removed = BTreeSet::new();
     for i in 0..first.faces().count() {
         for j in first.faces().count()..patches.len() {
-            if !super::boolean::coincident_supports(
+            if !super::trim::coincident_supports(
                 &patches[i].surface,
                 &patches[j].surface,
                 first.tolerance(),
@@ -149,8 +149,7 @@ fn join_cells(
     super::euler::conform_brep_boundaries(&mut patches, first.tolerance())?;
     let mut kernel = super::Kernel::new(first.tolerance())?;
     let mut transaction = kernel.begin_operation();
-    let body = transaction.brep_shell(&patches)?;
-    transaction.nest_brep_shells(&[body], TessellationOptions::default())?;
+    transaction.brep_shell(&patches)?;
     transaction.unify_same_domain()?;
     let committed = transaction.finish()?;
     Ok(Some(

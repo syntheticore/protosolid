@@ -123,7 +123,7 @@ fn validate_curved_face_boundaries(
                             }
                         }
                         if shift.magnitude2() > 0.0 {
-                            pcurve = super::boolean::translate_pcurve(&pcurve, shift, tolerance)?;
+                            pcurve = super::trim::translate_pcurve(&pcurve, shift, tolerance)?;
                         }
                     }
                     previous = Some(pcurve.evaluate(coedge.range().end)?.point);

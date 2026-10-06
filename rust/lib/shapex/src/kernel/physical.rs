@@ -4,6 +4,7 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec2, Vec3};
 
+use super::brep_classification::{BrepClassifier, PointClassification};
 use super::integration::{adaptive_gauss_kronrod_partitioned, adaptive_simpson};
 use super::{
     BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, DomainBounds, FaceId, Kernel, KernelError,
@@ -304,12 +305,10 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
             ));
         }
         validate_polyhedral_shells_disjoint(topology, outer_shell, *shell_id, physical_tolerance)?;
-        if !point_inside_polyhedral_shell(
-            topology,
-            outer_shell,
-            properties.centroid,
-            physical_tolerance,
-        )? {
+        if BrepClassifier::new(topology, outer_shell, physical_tolerance)?
+            .classify(properties.centroid)?
+            != PointClassification::Inside
+        {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
                 "cavity shell is not contained by the outer shell",
@@ -330,17 +329,19 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
             )?;
             let first_center = shell_properties[first].1.centroid;
             let second_center = shell_properties[second].1.centroid;
-            if point_inside_polyhedral_shell(
+            let second_classifier = BrepClassifier::new(
                 topology,
                 shell_properties[second].0,
-                first_center,
                 physical_tolerance,
-            )? || point_inside_polyhedral_shell(
+            )?;
+            let first_classifier = BrepClassifier::new(
                 topology,
                 shell_properties[first].0,
-                second_center,
                 physical_tolerance,
-            )? {
+            )?;
+            if second_classifier.classify(first_center)? == PointClassification::Inside
+                || first_classifier.classify(second_center)? == PointClassification::Inside
+            {
                 return Err(KernelError::new(
                     DiagnosticKind::GeometryInvariant,
                     "cavity shells may not contain or overlap one another",
@@ -364,13 +365,230 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
     Ok(PhysicalCertificate { properties })
 }
 
-/// Direct divergence-theorem integration over exact trimmed parametric faces.
+/// Integrate surface quantities over one exact trimmed parametric face.
 ///
 /// For each surface quantity `h(u,v)`, Green's theorem converts the UV-domain
 /// integral to `integral Q dv` or `-integral P du` around the exact p-curves,
 /// where Q integrates h along u and P integrates it along v. Both are adaptive and
 /// evaluate the retained analytical/implicit supports; rendering meshes never
 /// participate in physical certification.
+pub(super) fn integrate_face<const TERMS: usize>(
+    topology: &Topology,
+    face_id: FaceId,
+    tolerance: ModelTolerance,
+    targets: [f64; TERMS],
+    surface_terms: impl Fn(f64, f64) -> KernelResult<[f64; TERMS]>,
+) -> KernelResult<[f64; TERMS]> {
+    let mut totals = [0.0; TERMS];
+    let face = topology.face(face_id)?;
+    let orientation = match face.orientation() {
+        super::FaceOrientation::Forward => 1.0,
+        super::FaceOrientation::Reversed => -1.0,
+    };
+    // Blend normals need the contact-rail derivatives even without an
+    // offset. Integrating across v first keeps the rail parameter fixed
+    // and reuses its section throughout the inner quadrature, avoiding
+    // repeated support-intersection solves along the rail.
+    // Green's theorem permits either Q dv or -P du with the same targets.
+    let mut support = face.surface();
+    while let Surface3::Offset(offset) = support {
+        support = offset.base();
+    }
+    let primitive_axis = usize::from(matches!(
+        support,
+        Surface3::RollingBall(_) | Surface3::Ruled(_)
+    ));
+    let primitive_domain = face.surface().domains()[primitive_axis];
+    let domain_origin = match primitive_domain.bounds {
+        DomainBounds::Bounded(range) => range.start,
+        DomainBounds::LowerBounded(start) => start,
+        DomainBounds::UpperBounded(end) => end,
+        DomainBounds::Unbounded => 0.0,
+    };
+    let primitive_origin = if primitive_domain.contains(0.0, tolerance.parameter) {
+        0.0
+    } else {
+        face.loops()
+            .first()
+            .and_then(|loop_id| topology.loop_coedges(*loop_id).ok())
+            .and_then(|coedges| coedges.first().copied())
+            .and_then(|coedge_id| topology.coedge(coedge_id).ok())
+            .and_then(|coedge| {
+                coedge
+                    .pcurve()
+                    .evaluate(coedge.range().start)
+                    .ok()
+                    .map(|value| value.point[primitive_axis])
+            })
+            .unwrap_or(domain_origin)
+    };
+    for loop_id in face.loops() {
+        // Lift every periodic p-curve loop into one continuous UV chart.
+        // Topology may legitimately store both uses of a seam in the same
+        // principal period because they are the same spatial edge. Green's
+        // theorem, however, needs the two chart copies separated by one
+        // period or their contributions cancel and the curved face appears
+        // to have zero area and volume.
+        let domains = face.surface().domains();
+        let mut previous_end = None;
+        for coedge_id in topology.loop_coedges(*loop_id)? {
+            let coedge = topology.coedge(coedge_id)?;
+            let range = coedge.range();
+            let raw_start = coedge.pcurve().evaluate(range.start)?.point;
+            let chart_shift = if let Some(previous) = previous_end {
+                let delta: Vec2 = previous - raw_start;
+                let (point, du, dv) = face.surface().first_order(raw_start.x, raw_start.y)?;
+                let linear = tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0));
+                let shift = |value: f64, period: Option<f64>, tangent: Vec3| {
+                    period
+                        .map(|period| {
+                            let candidate = (value / period).round() * period;
+                            // Sewn implicit trims agree in model space, not
+                            // necessarily to the much smaller parameter epsilon.
+                            // Scale that existing tolerance by the local chart
+                            // metric before recognizing a complete seam turn.
+                            // At a collapsed pole retain the explicit UV span.
+                            let speed = tangent.magnitude();
+                            let epsilon = if speed > linear {
+                                (linear / speed).max(tolerance.parameter * 64.0)
+                            } else {
+                                tolerance.parameter * 64.0
+                            };
+                            if (value - candidate).abs() <= epsilon {
+                                candidate
+                            } else {
+                                0.0
+                            }
+                        })
+                        .unwrap_or(0.0)
+                };
+                Vec2::new(
+                    shift(delta.x, domains[0].period, du),
+                    shift(delta.y, domains[1].period, dv),
+                )
+            } else {
+                Vec2::new(0.0, 0.0)
+            };
+            let raw_end = coedge.pcurve().evaluate(range.end)?.point;
+            previous_end = Some(raw_end + chart_shift);
+            let breakpoints = coedge.pcurve().integration_breakpoints(range);
+            let outer = adaptive_gauss_kronrod_partitioned(
+                range.start,
+                range.end,
+                |parameter| {
+                    let (raw_point, derivative) = coedge.pcurve().first_order(parameter)?;
+                    let weight = if primitive_axis == 0 {
+                        derivative.y
+                    } else {
+                        -derivative.x
+                    };
+                    if weight == 0.0 {
+                        return Ok([0.0; TERMS]);
+                    }
+                    let point = raw_point + chart_shift;
+                    let mut breaks = if let Surface3::Nurbs(spline) = support {
+                        let (u, v) = spline.knots();
+                        if primitive_axis == 0 { u.to_vec() } else { v.to_vec() }
+                    } else { Vec::new() };
+                    if let Some(period) = primitive_domain.period {
+                        let lower = primitive_origin.min(point[primitive_axis]);
+                        let upper = primitive_origin.max(point[primitive_axis]);
+                        breaks = breaks.iter().flat_map(|knot| {
+                            let first = ((lower - knot) / period).floor() as i64;
+                            let last = ((upper - knot) / period).ceil() as i64;
+                            (first..=last).map(move |turn| knot + turn as f64 * period)
+                        }).collect();
+                    }
+                    let inner = adaptive_gauss_kronrod_partitioned(
+                        primitive_origin,
+                        point[primitive_axis],
+                        |parameter| {
+                            if primitive_axis == 0 {
+                                surface_terms(parameter, point.y)
+                            } else {
+                                surface_terms(point.x, parameter)
+                            }
+                        },
+                        targets,
+                        14,
+                        "exact BREP surface primitive did not converge",
+                        &breaks,
+                    )?;
+                    Ok(inner.map(|value| value * weight * orientation))
+                },
+                targets,
+                14,
+                "exact BREP boundary integration did not converge",
+                &breakpoints,
+            )
+            .map_err(|error| {
+                KernelError::new(
+                    DiagnosticKind::NumericalFailure,
+                    format!(
+                        "{error} (face support {}, boundary p-curve {}, parameter range [{}, {}])",
+                        surface_kind(face.surface()),
+                        curve2_kind(coedge.pcurve()),
+                        range.start,
+                        range.end,
+                    ),
+                )
+            })?;
+            for index in 0..TERMS {
+                totals[index] += outer[index];
+            }
+        }
+    }
+    Ok(totals)
+}
+
+pub(crate) fn face_surface_properties(
+    topology: &Topology,
+    face_id: FaceId,
+    tolerance: ModelTolerance,
+) -> KernelResult<super::SurfaceProperties> {
+    let face = topology.face(face_id)?;
+    let scale = topology.face_vertices(face_id)?.iter()
+        .map(|id| topology.vertex(*id).map(|vertex| vertex.point().to_vec().magnitude()))
+        .collect::<KernelResult<Vec<_>>>()?.into_iter().fold(1.0_f64, f64::max);
+    let area_target = tolerance.linear_at_scale(scale) * scale;
+    let totals = integrate_face(topology, face_id, tolerance,
+        [area_target, area_target * scale, area_target * scale, area_target * scale],
+        |u, v| {
+            let (point, du, dv) = face.surface().first_order(u, v)?;
+            let area = du.cross(dv).magnitude();
+            Ok([area, area * point.x, area * point.y, area * point.z])
+        })?;
+    if totals[0] <= tolerance.linear.powi(2) {
+        return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
+            "BREP face has zero surface area"));
+    }
+    Ok(super::SurfaceProperties {
+        area: totals[0],
+        centroid: Point3::new(totals[1], totals[2], totals[3]) / totals[0],
+    })
+}
+
+pub(super) fn shell_signed_volume(
+    topology: &Topology,
+    shell_id: ShellId,
+    tolerance: ModelTolerance,
+) -> KernelResult<f64> {
+    let mut volume = 0.0;
+    for face_id in topology.shell(shell_id)?.faces() {
+        let face = topology.face(*face_id)?;
+        let orientation = if face.orientation() == super::FaceOrientation::Forward { 1.0 } else { -1.0 };
+        let scale = topology.face_vertices(*face_id)?.iter()
+            .map(|id| topology.vertex(*id).map(|vertex| vertex.point().to_vec().magnitude()))
+            .collect::<KernelResult<Vec<_>>>()?.into_iter().fold(1.0_f64, f64::max);
+        let target = (tolerance.linear_at_scale(scale) * scale.powi(2)).max(scale.powi(3) * 1.0e-8);
+        volume += integrate_face(topology, *face_id, tolerance, [target], |u, v| {
+            let (point, du, dv) = face.surface().first_order(u, v)?;
+            Ok([point.to_vec().dot(du.cross(dv)) * orientation / 3.0])
+        })?[0];
+    }
+    Ok(volume)
+}
+
 fn brep_shell_properties(
     topology: &Topology,
     shell_id: ShellId,
@@ -396,8 +614,7 @@ fn brep_shell_properties(
         dimensional_target(5),
     ];
     let mut totals = [0.0; TERMS];
-    let shell = topology.shell(shell_id)?;
-    for face_id in shell.faces() {
+    for face_id in topology.shell(shell_id)?.faces() {
         let face = topology.face(*face_id)?;
         let orientation = match face.orientation() {
             super::FaceOrientation::Forward => 1.0,
@@ -428,158 +645,9 @@ fn brep_shell_properties(
                 point.y.powi(2) * point.z * normal.y / 2.0,
             ])
         };
-        // Blend normals need the contact-rail derivatives even without an
-        // offset. Integrating across v first keeps the rail parameter fixed
-        // and reuses its section throughout the inner quadrature, avoiding
-        // repeated support-intersection solves along the rail.
-        // Green's theorem permits either Q dv or -P du with the same targets.
-        let mut support = face.surface();
-        while let Surface3::Offset(offset) = support {
-            support = offset.base();
-        }
-        let primitive_axis = usize::from(matches!(
-            support,
-            Surface3::RollingBall(_) | Surface3::Ruled(_)
-        ));
-        let primitive_domain = face.surface().domains()[primitive_axis];
-        let domain_origin = match primitive_domain.bounds {
-            DomainBounds::Bounded(range) => range.start,
-            DomainBounds::LowerBounded(start) => start,
-            DomainBounds::UpperBounded(end) => end,
-            DomainBounds::Unbounded => 0.0,
-        };
-        let primitive_origin = if primitive_domain.contains(0.0, tolerance.parameter) {
-            0.0
-        } else {
-            face.loops()
-                .first()
-                .and_then(|loop_id| topology.loop_coedges(*loop_id).ok())
-                .and_then(|coedges| coedges.first().copied())
-                .and_then(|coedge_id| topology.coedge(coedge_id).ok())
-                .and_then(|coedge| {
-                    coedge
-                        .pcurve()
-                        .evaluate(coedge.range().start)
-                        .ok()
-                        .map(|value| value.point[primitive_axis])
-                })
-                .unwrap_or(domain_origin)
-        };
-        for loop_id in face.loops() {
-            // Lift every periodic p-curve loop into one continuous UV chart.
-            // Topology may legitimately store both uses of a seam in the same
-            // principal period because they are the same spatial edge. Green's
-            // theorem, however, needs the two chart copies separated by one
-            // period or their contributions cancel and the curved face appears
-            // to have zero area and volume.
-            let domains = face.surface().domains();
-            let mut previous_end = None;
-            for coedge_id in topology.loop_coedges(*loop_id)? {
-                let coedge = topology.coedge(coedge_id)?;
-                let range = coedge.range();
-                let raw_start = coedge.pcurve().evaluate(range.start)?.point;
-                let chart_shift = if let Some(previous) = previous_end {
-                    let delta: Vec2 = previous - raw_start;
-                    let (point, du, dv) = face.surface().first_order(raw_start.x, raw_start.y)?;
-                    let linear = tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0));
-                    let shift = |value: f64, period: Option<f64>, tangent: Vec3| {
-                        period
-                            .map(|period| {
-                                let candidate = (value / period).round() * period;
-                                // Sewn implicit trims agree in model space, not
-                                // necessarily to the much smaller parameter epsilon.
-                                // Scale that existing tolerance by the local chart
-                                // metric before recognizing a complete seam turn.
-                                // At a collapsed pole retain the explicit UV span.
-                                let speed = tangent.magnitude();
-                                let epsilon = if speed > linear {
-                                    (linear / speed).max(tolerance.parameter * 64.0)
-                                } else {
-                                    tolerance.parameter * 64.0
-                                };
-                                if (value - candidate).abs() <= epsilon {
-                                    candidate
-                                } else {
-                                    0.0
-                                }
-                            })
-                            .unwrap_or(0.0)
-                    };
-                    Vec2::new(
-                        shift(delta.x, domains[0].period, du),
-                        shift(delta.y, domains[1].period, dv),
-                    )
-                } else {
-                    Vec2::new(0.0, 0.0)
-                };
-                let raw_end = coedge.pcurve().evaluate(range.end)?.point;
-                previous_end = Some(raw_end + chart_shift);
-                let breakpoints = coedge.pcurve().integration_breakpoints(range);
-                let outer = adaptive_gauss_kronrod_partitioned(
-                    range.start,
-                    range.end,
-                    |parameter| {
-                        let (raw_point, derivative) = coedge.pcurve().first_order(parameter)?;
-                        let weight = if primitive_axis == 0 {
-                            derivative.y
-                        } else {
-                            -derivative.x
-                        };
-                        if weight == 0.0 {
-                            return Ok([0.0; TERMS]);
-                        }
-                        let point = raw_point + chart_shift;
-                        let mut breaks = if let Surface3::Nurbs(spline) = support {
-                            let (u, v) = spline.knots();
-                            if primitive_axis == 0 { u.to_vec() } else { v.to_vec() }
-                        } else { Vec::new() };
-                        if let Some(period) = primitive_domain.period {
-                            let lower = primitive_origin.min(point[primitive_axis]);
-                            let upper = primitive_origin.max(point[primitive_axis]);
-                            breaks = breaks.iter().flat_map(|knot| {
-                                let first = ((lower - knot) / period).floor() as i64;
-                                let last = ((upper - knot) / period).ceil() as i64;
-                                (first..=last).map(move |turn| knot + turn as f64 * period)
-                            }).collect();
-                        }
-                        let inner = adaptive_gauss_kronrod_partitioned(
-                            primitive_origin,
-                            point[primitive_axis],
-                            |parameter| {
-                                if primitive_axis == 0 {
-                                    surface_terms(parameter, point.y)
-                                } else {
-                                    surface_terms(point.x, parameter)
-                                }
-                            },
-                            targets,
-                            14,
-                            "exact BREP surface primitive did not converge",
-                            &breaks,
-                        )?;
-                        Ok(inner.map(|value| value * weight * orientation))
-                    },
-                    targets,
-                    14,
-                    "exact BREP boundary integration did not converge",
-                    &breakpoints,
-                )
-                .map_err(|error| {
-                    KernelError::new(
-                        DiagnosticKind::NumericalFailure,
-                        format!(
-                            "{error} (face support {}, boundary p-curve {}, parameter range [{}, {}])",
-                            surface_kind(face.surface()),
-                            curve2_kind(coedge.pcurve()),
-                            range.start,
-                            range.end,
-                        ),
-                    )
-                })?;
-                for index in 0..TERMS {
-                    totals[index] += outer[index];
-                }
-            }
+        let values = integrate_face(topology, *face_id, tolerance, targets, surface_terms)?;
+        for index in 0..TERMS {
+            totals[index] += values[index];
         }
     }
     let signed_volume = totals[1];
@@ -2220,58 +2288,6 @@ fn face_trim_location(
     } else {
         TrimLocation::Outside
     })
-}
-
-fn point_inside_polyhedral_shell(
-    topology: &Topology,
-    shell_id: ShellId,
-    point: Point3,
-    tolerance: ModelTolerance,
-) -> KernelResult<bool> {
-    let directions = [
-        Vec3::new(1.0, std::f64::consts::SQRT_2, std::f64::consts::PI).normalize(),
-        Vec3::new(std::f64::consts::E, 1.0, std::f64::consts::SQRT_2).normalize(),
-        Vec3::new(std::f64::consts::PI, std::f64::consts::E, 1.0).normalize(),
-    ];
-    for direction in directions {
-        let mut parameters = Vec::new();
-        let mut ambiguous = false;
-        for face_id in topology.shell(shell_id)?.faces() {
-            let face = topology.face(*face_id)?;
-            let Surface3::Plane(plane) = face.surface() else {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "polyhedral containment requires planar faces",
-                ));
-            };
-            let denominator = direction.dot(plane.normal());
-            if denominator.abs() <= tolerance.angular {
-                continue;
-            }
-            let parameter = (plane.origin() - point).dot(plane.normal()) / denominator;
-            if parameter <= tolerance.linear {
-                continue;
-            }
-            let hit = point + direction * parameter;
-            match face_trim_location(topology, *face_id, hit, tolerance)? {
-                TrimLocation::Inside => parameters.push(parameter),
-                TrimLocation::Boundary => {
-                    ambiguous = true;
-                    break;
-                }
-                TrimLocation::Outside => {}
-            }
-        }
-        if !ambiguous {
-            parameters.sort_by(f64::total_cmp);
-            parameters.dedup_by(|first, second| (*first - *second).abs() <= tolerance.linear);
-            return Ok(parameters.len() % 2 == 1);
-        }
-    }
-    Err(KernelError::new(
-        DiagnosticKind::NumericalFailure,
-        "analytical shell containment ray repeatedly hit boundary topology",
-    ))
 }
 
 fn validate_polyhedral_shell_intersections(

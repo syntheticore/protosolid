@@ -31,11 +31,11 @@ impl Bounds {
         result
     }
 
-    fn union(self, other: Self) -> Self {
+    pub(crate) fn union(self, other: Self) -> Self {
         Self::points([self.0, self.1, other.0, other.1])
     }
 
-    fn expanded(self, radius: f64) -> Self {
+    pub(crate) fn expanded(self, radius: f64) -> Self {
         let padding = Vec3::new(radius, radius, radius);
         Self(self.0 - padding, self.1 + padding)
     }
@@ -388,13 +388,11 @@ fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bounds> {
     })
 }
 
-pub(crate) fn compound(source: &Compound) -> KernelResult<Bounds> {
-    let topology = source.topology();
-    let mut result: Option<Bounds> = None;
-    for face in source.faces() {
-        let b = surface(face.surface(), None).or_else(|_| {
+pub(crate) fn face(topology: &super::Topology, id: super::FaceId) -> KernelResult<Bounds> {
+    let face = topology.face(id)?;
+    surface(face.surface(), None).or_else(|_| {
             let mut boundary: Option<Bounds> = None;
-            for id in topology.face_edges(face.topology_id())? {
+            for id in topology.face_edges(id)? {
                 let edge = topology.edge(id)?;
                 let b = curve3(edge.curve(), edge.range()).map_err(|error| {
                     KernelError::new(
@@ -405,7 +403,14 @@ pub(crate) fn compound(source: &Compound) -> KernelResult<Bounds> {
                 boundary = Some(boundary.map_or(b, |old| old.union(b)));
             }
             surface(face.surface(), boundary)
-        })?;
+        })
+}
+
+pub(crate) fn compound(source: &Compound) -> KernelResult<Bounds> {
+    let topology = source.topology();
+    let mut result: Option<Bounds> = None;
+    for value in source.faces() {
+        let b = face(topology, value.topology_id())?;
         result = Some(result.map_or(b, |old| old.union(b)));
     }
     let result = result.ok_or_else(unavailable)?;

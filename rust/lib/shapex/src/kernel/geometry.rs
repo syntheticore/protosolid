@@ -2137,6 +2137,19 @@ impl SurfaceIntersectionCurve {
         self.achieved_error
     }
 
+    /// Convert support residual to transverse positional uncertainty. Near
+    /// tangency, a small surface residual does not establish a small distance
+    /// between intersection branches or between an intersection and a trim.
+    pub(crate) fn positional_uncertainty(&self, parameter: f64) -> KernelResult<f64> {
+        let parameters = self.corrected_parameters(parameter)?;
+        let (point, first_u, first_v) = self.first_surface.first_order(parameters[0], parameters[1])?;
+        let (_, second_u, second_v) = self.second_surface.first_order(parameters[2], parameters[3])?;
+        let sine = first_u.cross(first_v).normalize()
+            .cross(second_u.cross(second_v).normalize()).magnitude();
+        if sine <= self.tolerance.angular { return Ok(f64::INFINITY); }
+        Ok(self.achieved_error.max(self.tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0))) / sine)
+    }
+
     pub fn pcurve_for_surface(&self, surface: &Surface3) -> Option<&Curve2> {
         if self.first_surface.as_ref() == surface {
             Some(&self.first_pcurve)
@@ -2833,7 +2846,13 @@ impl Curve3 {
         let high = range.start.max(range.end);
         let mut seeds = vec![low, high];
         if matches!(self, Self::Line(_) | Self::Circle(_)) {
-            let mut parameter = self.project(point, tolerance)?.parameter;
+            // On a circle's axis every retained parameter minimizes distance.
+            // A trim still has a well-defined closest point at either endpoint.
+            let on_axis = matches!(self, Self::Circle(circle) if {
+                let delta = point - circle.center();
+                delta.dot(circle.x_radius()) == 0.0 && delta.dot(circle.y_radius()) == 0.0
+            });
+            let mut parameter = if on_axis { low } else { self.project(point, tolerance)?.parameter };
             if let Some(period) = self.domain().period {
                 parameter += (((low + high) * 0.5 - parameter) / period).round() * period;
             }

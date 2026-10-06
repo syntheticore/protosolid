@@ -460,6 +460,13 @@ impl NativeFace {
         id_string(self.inner.persistent_id())
     }
 
+    #[wasm_bindgen(js_name = surfaceProperties)]
+    pub fn surface_properties(&self) -> Result<Float64Array, JsValue> {
+        let properties = self.inner.surface_properties().map_err(js_error)?;
+        Ok(f64_array(&[properties.area, properties.centroid.x,
+            properties.centroid.y, properties.centroid.z]))
+    }
+
     pub fn tessellate(
         &self,
         linear: f64,

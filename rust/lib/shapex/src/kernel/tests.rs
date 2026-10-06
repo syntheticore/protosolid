@@ -2866,6 +2866,161 @@ fn move_faces_retrims_planar_neighbors_and_preserves_history() {
 }
 
 #[test]
+fn move_cap_of_rounded_closed_shell() {
+    let tolerance = ModelTolerance::default();
+    let width = 30.266420840254132;
+    let length = 88.4682421048154;
+    let diagonal = 8.0 / 2.0_f64.sqrt();
+    let wire = Wire2::new([
+        TrimmedCurve2::line(Point2::new(0.0, 0.0), Point2::new(length, 0.0)).unwrap(),
+        TrimmedCurve2::arc_through(Point2::new(length, 0.0),
+            Point2::new(length + diagonal, 8.0 - diagonal), Point2::new(length + 8.0, 8.0)).unwrap(),
+        TrimmedCurve2::line(Point2::new(length + 8.0, 8.0), Point2::new(length + 8.0, width - 8.0)).unwrap(),
+        TrimmedCurve2::arc_through(Point2::new(length + 8.0, width - 8.0),
+            Point2::new(length + diagonal, width - 8.0 + diagonal), Point2::new(length, width)).unwrap(),
+        TrimmedCurve2::line(Point2::new(length, width), Point2::new(0.0, width)).unwrap(),
+        TrimmedCurve2::line(Point2::new(0.0, width), Point2::new(0.0, 0.0)).unwrap(),
+    ], tolerance).unwrap();
+    let body = Profile::new(wire, [], tolerance).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * 13.0).unwrap();
+    let rim = body.edges().filter(|edge| edge.endpoints().unwrap().iter()
+        .all(|point| point.z.abs() < 1e-7)).cloned().collect::<Vec<_>>();
+    let body = body.fillet(&rim, 5.0).unwrap().shell(&[], -3.0).unwrap();
+    let cap = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().z.abs() > 0.9 && (p.origin().z - 13.0).abs() < 1e-7)).unwrap().clone();
+    let cap_area = (length + 8.0) * width - 128.0 + 32.0 * std::f64::consts::PI;
+    for distance in [1.0, 5.0] {
+        let moved = body.move_faces(&[cap.clone()], RigidTransform3::new(
+            Matrix3::identity(), Vec3::unit_z() * distance, tolerance,
+        ).unwrap()).unwrap();
+        let delta = moved.volume() - body.volume();
+        assert!((delta - cap_area * distance).abs() < cap_area * distance * 1e-7,
+            "distance {distance}: volume change {delta}, expected {}", cap_area * distance);
+        assert_eq!(moved.faces().count(), body.faces().count());
+        moved.tessellate(TessellationOptions::default()).unwrap();
+    }
+    assert!(body.move_faces(&[cap], RigidTransform3::new(
+        Matrix3::identity(), -Vec3::unit_z() * 4.0, tolerance,
+    ).unwrap()).is_err());
+}
+
+#[test]
+fn brep_point_classification_and_surface_properties() {
+    let body = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0))
+        .shell(&[], -2.0).unwrap();
+    let topology = body.topology();
+    let shells = topology.bodies().next().unwrap().1.shells();
+    let outer = super::brep_classification::BrepClassifier::new(topology, shells[0], body.tolerance()).unwrap();
+    let cavity = super::brep_classification::BrepClassifier::new(topology, shells[1], body.tolerance()).unwrap();
+    for x in [-1.0, 1.0, 5.0, 9.0, 11.0] {
+        for y in [-1.0, 1.0, 5.0, 9.0, 11.0] {
+            for z in [-1.0, 1.0, 5.0, 9.0, 11.0] {
+                let point = Point3::new(x, y, z);
+                assert_eq!(outer.contains(point).unwrap(), [x,y,z].iter().all(|c| *c >= 0.0 && *c <= 10.0));
+                assert_eq!(cavity.contains(point).unwrap(), [x,y,z].iter().all(|c| *c >= 2.0 && *c <= 8.0));
+            }
+        }
+    }
+    assert!(outer.contains(Point3::new(0.0, 5.0, 5.0)).unwrap());
+    let mut area = 0.0;
+    for face in body.faces() {
+        let properties = face.surface_properties().unwrap();
+        let expected = if shells[0] == topology.face(face.topology_id()).unwrap().shell() {100.0} else {36.0};
+        assert!((properties.area - expected).abs() < 1e-7);
+        assert!(face.surface().project(properties.centroid, body.tolerance()).unwrap().distance < 1e-7);
+        area += properties.area;
+    }
+    assert!((area - body.surface_area()).abs() < 1e-7);
+}
+
+#[test]
+fn brep_compound_classification_respects_solids_and_cavities() {
+    use super::brep_classification::BrepClassifier;
+    let first = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let second = owned_cuboid(Point3::new(5.0, 0.0, 0.0), Point3::new(15.0, 10.0, 10.0));
+    let combined = first.combined(&[second.clone()]).unwrap();
+    let classifier = BrepClassifier::for_compound(&combined).unwrap();
+    for x in [1.0, 7.0, 13.0] {
+        assert!(classifier.contains(Point3::new(x, 5.0, 5.0)).unwrap());
+    }
+    assert!(!classifier.contains(Point3::new(16.0, 5.0, 5.0)).unwrap());
+    let subset = combined.solids().next().unwrap().to_compound();
+    assert!(!BrepClassifier::for_compound(&subset).unwrap()
+        .contains(Point3::new(13.0, 5.0, 5.0)).unwrap());
+    let hollow = first.shell(&[], -2.0).unwrap();
+    let classifier = BrepClassifier::for_compound(&hollow).unwrap();
+    assert!(classifier.contains(Point3::new(1.0, 5.0, 5.0)).unwrap());
+    assert!(!classifier.contains(Point3::new(3.0, 5.0, 5.0)).unwrap());
+    let filled = hollow.combined(&[second]).unwrap();
+    let classifier = BrepClassifier::for_compound(&filled).unwrap();
+    assert!(!classifier.contains(Point3::new(3.0, 5.0, 5.0)).unwrap());
+    assert!(classifier.contains(Point3::new(7.0, 5.0, 5.0)).unwrap());
+    let profile = Profile::new(Wire2::new([
+        TrimmedCurve2::circle(Point2::origin(), 10.0).unwrap()], first.tolerance()).unwrap(),
+        [], first.tolerance()).unwrap();
+    let cylinder = profile.extrude(Plane3::xy(), Vec3::unit_z() * 20.0).unwrap();
+    let classifier = BrepClassifier::for_compound(&cylinder).unwrap();
+    for (x, inside) in [(0.0, true), (9.95, true), (10.05, false), (20.0, false)] {
+        assert_eq!(classifier.contains(Point3::new(x, 0.0, 10.0)).unwrap(), inside);
+    }
+}
+
+#[test]
+fn brep_classifies_torus_without_a_mesh() {
+    let tolerance = ModelTolerance::default();
+    let mut kernel = Kernel::new(tolerance).unwrap();
+    let mut operation = kernel.begin_operation();
+    let body = operation.torus(Point3::new(1.0, 2.0, 3.0),
+        Vec3::unit_x() * 4.0, Vec3::unit_y() * 4.0, 1.25).unwrap();
+    operation.commit().unwrap();
+    let shell = kernel.topology().body(body).unwrap().shells()[0];
+    let classifier = super::brep_classification::BrepClassifier::new(kernel.topology(), shell, tolerance).unwrap();
+    for (point, expected) in [
+        (Point3::new(5.0, 2.0, 3.0), true),
+        (Point3::new(5.0, 2.0, 4.0), true),
+        (Point3::new(1.0, 2.0, 3.0), false),
+        (Point3::new(5.0, 2.0, 4.5), false),
+        (Point3::new(7.0, 2.0, 3.0), false),
+    ] {
+        assert_eq!(classifier.contains(point).unwrap(), expected, "{point:?}");
+    }
+    let mut area = 0.0;
+    let mut moment = Vec3::zero();
+    for face in kernel.topology().shell(shell).unwrap().faces() {
+        let properties = super::physical::face_surface_properties(kernel.topology(), *face, tolerance).unwrap();
+        area += properties.area;
+        moment += properties.centroid.to_vec() * properties.area;
+    }
+    assert!((area - 4.0 * std::f64::consts::PI.powi(2) * 4.0 * 1.25).abs() < 1e-6);
+    assert!((moment / area - Vec3::new(1.0, 2.0, 3.0)).magnitude() < 1e-7);
+}
+
+#[test]
+fn curved_face_properties_and_cavity_ownership() {
+    let tolerance = ModelTolerance::default();
+    let profile = Profile::new(Wire2::new([
+        TrimmedCurve2::circle(Point2::origin(), 5.0).unwrap()], tolerance).unwrap(),
+        [], tolerance).unwrap();
+    let body = profile.extrude(Plane3::xy(), Vec3::unit_z() * 10.0).unwrap();
+    for face in body.faces() {
+        let properties = face.surface_properties().unwrap();
+        let (area, z) = if matches!(face.surface(), Surface3::Cylinder(_)) {
+            (100.0 * std::f64::consts::PI, 5.0)
+        } else {
+            (25.0 * std::f64::consts::PI, if face.centroid().unwrap().z > 5.0 {10.0} else {0.0})
+        };
+        assert!((properties.area - area).abs() < 1e-6);
+        assert!(properties.centroid.distance(Point3::new(0.0, 0.0, z)) < 1e-7);
+    }
+    let hollow = body.shell(&[], -1.0).unwrap();
+    let inner = hollow.faces().filter(|face| hollow.topology().face(face.topology_id()).unwrap().shell()
+        == hollow.topology().bodies().next().unwrap().1.shells()[1]).cloned().collect::<Vec<_>>();
+    // A cavity must retain its parent even when a single operation translates
+    // it completely outside without crossing any boundary at the final position.
+    assert!(hollow.move_faces(&inner, RigidTransform3::new(Matrix3::identity(),
+        Vec3::unit_x() * 20.0, tolerance).unwrap()).is_err());
+}
+
+#[test]
 fn move_faces_preserves_fillet_radius_when_translating_and_rotating_a_support() {
     let tolerance = ModelTolerance::default();
     let block = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));

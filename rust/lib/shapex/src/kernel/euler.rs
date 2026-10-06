@@ -15,8 +15,8 @@ use super::{
     BodyId, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, DiagnosticKind, EdgeId,
     FaceId, FaceOrientation, Kernel, KernelError, KernelResult, Line2, Line3, LoopId, LoopKind,
     ModelTolerance, NurbsCurve3, NurbsSurface3, OperationHistory, ParameterRange, Plane3,
-    PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3, TessellationOptions, Topology,
-    Torus3, TriangleMesh, TrimmedCurve2, VertexId, Wire2,
+    PersistentId, PolyhedralMesh, Profile, ShellId, ShellKind, Sphere3, Surface3, Topology,
+    Torus3, TrimmedCurve2, VertexId, Wire2,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -1513,7 +1513,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             };
             if offset.magnitude2() > 0.0 {
                 for coedge in self.collect_loop(removed_loop)? {
-                    let translated = super::boolean::translate_pcurve(
+                    let translated = super::trim::translate_pcurve(
                         &self.working.coedge(coedge)?.pcurve,
                         offset,
                         self.kernel.tolerance,
@@ -2704,71 +2704,111 @@ impl<'kernel> EulerTransaction<'kernel> {
         result
     }
 
-    /// Attach every inward-oriented disconnected shell to the smallest
-    /// outward-oriented shell that geometrically contains it. Analytical face
-    /// construction produces one connected patch component per shell; this
-    /// operation restores the BREP body/shell nesting without knowing which
-    /// feature produced those patches.
-    pub(crate) fn nest_brep_shells(
-        &mut self,
-        bodies: &[BodyId],
-        options: TessellationOptions,
-    ) -> KernelResult<()> {
+    /// Assemble newly created components using signed BREP volume and trimmed
+    /// surface classification. A containment witness is sufficient only after
+    /// establishing that the two closed boundaries are disjoint.
+    pub(crate) fn nest_brep_shells(&mut self, bodies: &[BodyId]) -> KernelResult<()> {
         if bodies.len() < 2 {
             return Ok(());
         }
-        let scratch = Kernel {
-            tolerance: self.kernel.tolerance,
-            topology: self.working.clone(),
-        };
-        let mut shells = Vec::with_capacity(bodies.len());
-        for body in bodies {
-            let value = scratch.topology().body(*body)?;
+        let topology = self.working.clone();
+        let tolerance = self.kernel.tolerance;
+        let shells = bodies.iter().map(|body| {
+            let value = topology.body(*body)?;
             if value.shells().len() != 1 {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a newly assembled BREP component must contain exactly one shell",
-                ));
+                return Err(KernelError::new(DiagnosticKind::TopologyInvariant,
+                    "a newly assembled BREP component must contain exactly one shell"));
             }
             let shell = value.shells()[0];
-            let mesh = scratch.tessellate_shell(shell, options)?;
-            let signed_volume = mesh_signed_volume(&mesh);
-            if signed_volume.abs() <= self.kernel.tolerance.linear.powi(3) {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "an analytical BREP shell has zero volume at model tolerance",
-                ));
+            let volume = super::physical::shell_signed_volume(&topology, shell, tolerance)?;
+            if volume.abs() <= tolerance.linear.powi(3) {
+                return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
+                    "an analytical BREP shell has zero volume at model tolerance"));
             }
-            shells.push((*body, mesh, signed_volume));
+            Ok((*body, shell, volume))
+        }).collect::<KernelResult<Vec<_>>>()?;
+        let mut containers = Vec::new();
+        for (body, shell, volume) in &shells {
+            if *volume > 0.0 {
+                containers.push((*body, *shell, *volume,
+                    super::brep_classification::BrepClassifier::new(&topology, *shell, tolerance)?));
+            }
         }
-
-        let outward = shells
-            .iter()
-            .enumerate()
-            .filter_map(|(index, (_, _, volume))| (*volume > 0.0).then_some(index))
-            .collect::<Vec<_>>();
-        for (cavity_body, cavity_mesh, signed_volume) in &shells {
-            if *signed_volume > 0.0 {
-                continue;
+        containers.sort_by(|a, b| a.2.total_cmp(&b.2));
+        let mut attachments = Vec::new();
+        for (body, cavity, volume) in &shells {
+            if *volume > 0.0 { continue; }
+            let witness = shell_witness(&topology, *cavity)?;
+            let mut parent = None;
+            for (outer_body, outer, _, classifier) in &containers {
+                if !shells_intersect(&topology, *outer, *cavity, tolerance, None)?
+                    && classifier.contains(witness)? {
+                    parent = Some(*outer_body);
+                    break;
+                }
             }
-            let container = outward
-                .iter()
-                .copied()
-                .filter(|candidate| {
-                    let (_, outer_mesh, _) = &shells[*candidate];
-                    cavity_mesh
-                        .positions
-                        .iter()
-                        .all(|point| mesh_contains(outer_mesh, *point))
-                })
-                .min_by(|first, second| shells[*first].2.abs().total_cmp(&shells[*second].2.abs()))
-                .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "an inward-oriented analytical BREP shell is not contained by an outer shell",
-                    )
-                })?;
-            self.merge_shell_into_body_unchecked(shells[container].0, *cavity_body)?;
+            let parent = parent.ok_or_else(|| KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "an inward-oriented analytical BREP shell is not contained by an outer shell"))?;
+            attachments.push((parent, *body, *cavity));
+        }
+        for (index, (parent, _, shell)) in attachments.iter().enumerate() {
+            for (other_parent, _, other) in &attachments[..index] {
+                if parent == other_parent
+                    && shells_intersect(&topology, *shell, *other, tolerance, None)? {
+                    return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
+                        "cavity boundaries intersect"));
+                }
+            }
+        }
+        for (parent, body, _) in attachments {
+            self.merge_shell_into_body_unchecked(parent, body)?;
+        }
+        Ok(())
+    }
+
+    /// Support reconstruction retains the original body/shell relationship.
+    /// Only changed boundaries need collision checks; they cannot be reassigned
+    /// to another solid merely because the edited cavity now lies inside it.
+    pub(crate) fn restore_brep_shells(
+        &mut self,
+        source: &Topology,
+        rebuilt: &BTreeMap<ShellId, BodyId>,
+        affected: &BTreeSet<PersistentId>,
+    ) -> KernelResult<()> {
+        let topology = self.working.clone();
+        let tolerance = self.kernel.tolerance;
+        let changed_faces = topology.faces().filter_map(|(id, face)|
+            self.history.construction.get(&face.name()).is_some_and(|sources|
+                sources.iter().any(|source| affected.contains(&source.name))).then_some(id)
+        ).collect::<BTreeSet<_>>();
+        let source_bodies = rebuilt.keys().map(|shell| source.shell(*shell).map(|value| value.body()))
+            .collect::<KernelResult<BTreeSet<_>>>()?;
+        for body in source_bodies {
+            let body = source.body(body)?;
+            // Construction and shell merge keep the outward shell first.
+            let outer_body = rebuilt[&body.shells()[0]];
+            let outer = topology.body(outer_body)?.shells()[0];
+            let mut shells = vec![outer];
+            for source_shell in &body.shells()[1..] {
+                let cavity_body = rebuilt[source_shell];
+                let cavity = topology.body(cavity_body)?.shells()[0];
+                for other in &shells {
+                    if shells_intersect(&topology, cavity, *other, tolerance, Some(&changed_faces))? {
+                        return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
+                            "an edited cavity boundary intersects another shell"));
+                    }
+                }
+                let changed = [outer, cavity].iter().any(|shell|
+                    topology.shell(*shell).unwrap().faces().iter().any(|face| changed_faces.contains(face)));
+                if changed && !super::brep_classification::BrepClassifier::new(
+                    &topology, outer, tolerance)?.contains(shell_witness(&topology, cavity)?)? {
+                    return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
+                        "an edited cavity lies outside its original outer shell"));
+                }
+                shells.push(cavity);
+                self.merge_shell_into_body_unchecked(outer_body, cavity_body)?;
+            }
         }
         Ok(())
     }
@@ -5554,34 +5594,30 @@ impl<'kernel> EulerTransaction<'kernel> {
     }
 }
 
-fn mesh_signed_volume(mesh: &TriangleMesh) -> f64 {
-    mesh.triangles
-        .iter()
-        .map(|triangle| {
-            let [a, b, c] = triangle.map(|index| mesh.positions[index].to_vec());
-            a.dot(b.cross(c)) / 6.0
-        })
-        .sum()
+fn shell_witness(topology: &Topology, shell: ShellId) -> KernelResult<Point3> {
+    let face = topology.shell(shell)?.faces()[0];
+    let edge = topology.face_edges(face)?[0];
+    topology.edge(edge)?.curve().evaluate(topology.edge(edge)?.range().start).map(|value| value.point)
 }
 
-fn mesh_contains(mesh: &TriangleMesh, point: Point3) -> bool {
-    let mut solid_angle = 0.0;
-    for triangle in &mesh.triangles {
-        let a = mesh.positions[triangle[0]] - point;
-        let b = mesh.positions[triangle[1]] - point;
-        let c = mesh.positions[triangle[2]] - point;
-        let lengths = [a.magnitude(), b.magnitude(), c.magnitude()];
-        if lengths.iter().any(|length| *length <= f64::EPSILON) {
-            return true;
+fn shells_intersect(
+    topology: &Topology,
+    first: ShellId,
+    second: ShellId,
+    tolerance: ModelTolerance,
+    affected: Option<&BTreeSet<FaceId>>,
+) -> KernelResult<bool> {
+    for a in topology.shell(first)?.faces() {
+        for b in topology.shell(second)?.faces() {
+            if affected.is_some_and(|changed| !changed.contains(a) && !changed.contains(b)) {
+                continue;
+            }
+            if super::trim::trimmed_faces_intersect(topology, *a, *b, tolerance)? {
+                return Ok(true);
+            }
         }
-        let numerator = a.dot(b.cross(c));
-        let denominator = lengths[0] * lengths[1] * lengths[2]
-            + a.dot(b) * lengths[2]
-            + b.dot(c) * lengths[0]
-            + c.dot(a) * lengths[1];
-        solid_angle += 2.0 * numerator.atan2(denominator);
     }
-    solid_angle.abs() > std::f64::consts::TAU
+    Ok(false)
 }
 
 pub(super) fn prepared_wire_segments(wire: &Wire2) -> KernelResult<Vec<TrimmedCurve2>> {

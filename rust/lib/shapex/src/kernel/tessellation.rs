@@ -1798,7 +1798,7 @@ mod tests {
                 }
                 for id in kernel.topology.loop_coedges(*loop_id).unwrap() {
                     let coedge = shifted.topology.coedges.get_mut(id).unwrap();
-                    coedge.pcurve = super::super::boolean::translate_pcurve(
+                    coedge.pcurve = super::super::trim::translate_pcurve(
                         &coedge.pcurve,
                         crate::Vec2::new(turns * period, 0.0),
                         tolerance,

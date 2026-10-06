@@ -450,6 +450,15 @@ export class ShapexBackend {
     return new THREE.Vector3(...shapexValue(raw).centroid().toArray())
   }
 
+  surfaceArea(raw) {
+    const value = shapexValue(raw)
+    return value instanceof this.api.Face ? value.area() : value.surfaceArea()
+  }
+
+  surfaceCenter(raw) {
+    return this.center(raw)
+  }
+
   entityId(raw) {
     return shapexValue(raw).id()
   }

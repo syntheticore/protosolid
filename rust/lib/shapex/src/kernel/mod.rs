@@ -7,6 +7,7 @@
 
 mod arena;
 mod boolean;
+mod brep_classification;
 mod bounds;
 mod domain;
 mod edge_blend;
@@ -30,6 +31,7 @@ mod sweeps;
 mod tessellation;
 mod tolerance;
 mod topology;
+mod trim;
 mod transform;
 mod validation;
 mod wire;
@@ -58,7 +60,7 @@ pub use history::{ChangeKind, CreationRole, OperationHistory, Origin, ProfileBou
 pub use intersection::{
     CurveCurveHit, CurveSurfaceHit, IntersectionKind, IntersectionSet, SurfaceSurfaceCurve,
 };
-pub use mass_properties::MassProperties;
+pub use mass_properties::{MassProperties, SurfaceProperties};
 pub use modeling::{
     ChamferMode, Compound, EdgeHandle, FaceHandle, FilletOptions, Resolution, ResolvableEntity,
     Solid, VertexHandle,

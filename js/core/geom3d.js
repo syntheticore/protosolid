@@ -865,7 +865,7 @@ export class Shape {
   area() {
     if(!this.geom) return 0
     if(this.isShapex || this.solid?.compound?.isShapex || this.compound?.isShapex) {
-      return meshAreaAndCenter(this.tesselate()).area
+      return window.kernel.modeling.surfaceArea(this.geom())
     }
     const gprops = new window.oc.oc.GProp_GProps_1()
     window.oc.oc.BRepGProp.SurfaceProperties_1(this.geom(), gprops, false, false)
@@ -873,7 +873,7 @@ export class Shape {
   }
 
   center() {
-    if(this.solid?.compound?.isShapex) return meshAreaAndCenter(this.tesselate()).center
+    if(this.solid?.compound?.isShapex) return window.kernel.modeling.surfaceCenter(this.geom())
     const gprops = new window.oc.oc.GProp_GProps_1()
     window.oc.oc.BRepGProp.SurfaceProperties_1(this.geom(), gprops, false, false)
     return vecFromOc(gprops.CentreOfMass())
@@ -2045,22 +2045,6 @@ export class Compound extends Volumetric {
     }
   }
 }
-
-function meshAreaAndCenter(mesh) {
-  let area = 0
-  const center = new THREE.Vector3()
-  for(let index = 0; index < mesh.positions.length; index += 9) {
-    const a = new THREE.Vector3(...mesh.positions.slice(index, index + 3))
-    const b = new THREE.Vector3(...mesh.positions.slice(index + 3, index + 6))
-    const c = new THREE.Vector3(...mesh.positions.slice(index + 6, index + 9))
-    const triangleArea = b.clone().sub(a).cross(c.clone().sub(a)).length() * 0.5
-    area += triangleArea
-    center.add(a.add(b).add(c).multiplyScalar(triangleArea / 3.0))
-  }
-  if(area) center.divideScalar(area)
-  return { area, center }
-}
-
 
 function tesselateCurve(geom) {
   const deflection = new window.oc.oc.GCPnts_TangentialDeflection_2(geom,

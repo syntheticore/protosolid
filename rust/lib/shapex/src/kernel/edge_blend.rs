@@ -705,12 +705,13 @@ impl EulerTransaction<'_> {
                     let patches = super::features::support_patches(
                         &self.working, tolerance, supports, bounds, BTreeSet::new(), true, true, &BTreeMap::new(),
                     )?;
+                    let source = self.working.clone();
                     self.working = super::Topology::new();
                     self.touched_bodies.clear();
-                    let bodies = patches.into_values()
-                        .map(|patches| self.brep_shell(&patches))
-                        .collect::<KernelResult<Vec<_>>>()?;
-                    self.nest_brep_shells(&bodies, super::TessellationOptions::default())?;
+                    let bodies = patches.into_iter()
+                        .map(|(shell, patches)| Ok((shell, self.brep_shell(&patches)?)))
+                        .collect::<KernelResult<BTreeMap<_, _>>>()?;
+                    self.restore_brep_shells(&source, &bodies, &BTreeSet::new())?;
                     // Reconstruction changes the boundary graph, not the
                     // identity of its supports. Retain each authored face and
                     // its blend history instead of replacing it with a BREP

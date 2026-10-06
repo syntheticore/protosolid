@@ -1,6 +1,13 @@
 use crate::Point3;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurfaceProperties {
+    pub area: f64,
+    /// Area-weighted center of the trimmed surface.
+    pub centroid: Point3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MassProperties {
     pub volume: f64,
     pub signed_volume: f64,

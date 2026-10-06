@@ -9,7 +9,7 @@ use super::{
     Axis3, CoedgeId, Compound, Curve2, Curve3, DiagnosticKind, EdgeId, FaceHandle, FaceId,
     FaceOrientation, IntersectionSet, Kernel, KernelError, KernelResult, Line3, ParameterRange,
     PersistentId, Plane3, Profile, RigidTransform3, Surface3, SurfaceCurve3,
-    SurfaceIntersectionCurve, SurfaceProjectionPcurve2, TessellationOptions, Topology,
+    SurfaceIntersectionCurve, SurfaceProjectionPcurve2, Topology,
     TrimmedCurve2, VertexId, Wire2,
 };
 
@@ -1605,18 +1605,26 @@ fn rebuild_supports(
         tolerance,
         supports,
         bounds,
-        changed_supports,
+        changed_supports.clone(),
         preserve_orientation,
         false,
         collapsed,
     )?;
     let mut kernel = Kernel::new(tolerance)?;
     let mut transaction = kernel.begin_operation();
-    let mut bodies = Vec::new();
-    for patches in patches_by_shell.into_values() {
-        bodies.push(transaction.brep_shell(&patches)?);
+    let mut affected_faces = changed_supports.clone();
+    for face in changed_supports {
+        for edge in topology.face_edges(face)? {
+            affected_faces.extend(topology.edge_faces(edge)?);
+        }
     }
-    transaction.nest_brep_shells(&bodies, TessellationOptions::default())?;
+    let affected = affected_faces.into_iter().map(|face| topology.face(face).map(|value| value.name()))
+        .collect::<KernelResult<BTreeSet<_>>>()?;
+    let mut bodies = BTreeMap::new();
+    for (shell, patches) in patches_by_shell {
+        bodies.insert(shell, transaction.brep_shell(&patches)?);
+    }
+    transaction.restore_brep_shells(topology, &bodies, &affected)?;
     let committed = transaction.finish()?;
     Compound::from_operation(kernel, committed, [])
 }
@@ -2480,7 +2488,7 @@ fn assemble_shell_boundary(
         for patches in groups {
             bodies.push(transaction.brep_shell(&patches)?);
         }
-        transaction.nest_brep_shells(&bodies, TessellationOptions::default())?;
+        transaction.nest_brep_shells(&bodies)?;
     }
     let committed = transaction.finish()?;
     Compound::from_operation(kernel, committed, [])

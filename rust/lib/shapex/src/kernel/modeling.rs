@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use cgmath::prelude::*;
 
@@ -211,6 +211,7 @@ pub struct FaceHandle {
     name: PersistentId,
     revision: uuid::Uuid,
     surface: super::Surface3,
+    surface_properties: Arc<OnceLock<KernelResult<super::SurfaceProperties>>>,
 }
 
 impl FaceHandle {
@@ -219,6 +220,17 @@ impl FaceHandle {
     }
     pub fn surface(&self) -> &super::Surface3 {
         &self.surface
+    }
+    pub fn surface_properties(&self) -> KernelResult<super::SurfaceProperties> {
+        self.surface_properties.get_or_init(|| {
+            super::physical::face_surface_properties(self.state.topology(), self.face, self.state.tolerance())
+        }).clone()
+    }
+    pub fn area(&self) -> KernelResult<f64> {
+        self.surface_properties().map(|properties| properties.area)
+    }
+    pub fn centroid(&self) -> KernelResult<Point3> {
+        self.surface_properties().map(|properties| properties.centroid)
     }
     pub(crate) fn topology_id(&self) -> FaceId {
         self.face
@@ -452,6 +464,10 @@ impl FilletOptions {
 }
 
 impl Solid {
+    pub(crate) fn topology_id(&self) -> BodyId {
+        self.body
+    }
+
     pub fn volume(&self) -> f64 {
         self.properties.volume
     }
@@ -1672,6 +1688,7 @@ fn build_face_handle(
         name,
         revision,
         surface,
+        surface_properties: Arc::new(OnceLock::new()),
     })
 }
 

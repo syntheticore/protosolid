@@ -1783,10 +1783,16 @@ export class ExtrudeFeature extends SolidFeature {
         when: feature => feature.extent == 'face',
       },
       offset: {
-        title: 'Offset',
+        title: 'Start offset',
         type: 'length',
         allowNegative: true,
         when: feature => feature.extent != 'through',
+      },
+      endOffset: {
+        title: 'End offset',
+        type: 'length',
+        allowNegative: true,
+        when: feature => feature.extent == 'face',
       },
     })
 
@@ -1796,6 +1802,7 @@ export class ExtrudeFeature extends SolidFeature {
     this.axis = null
     this.distance = 1.0
     this.offset = 0
+    this.endOffset = 0
     this.side = 'forward'
   }
 
@@ -1822,7 +1829,7 @@ export class ExtrudeFeature extends SolidFeature {
     try {
       for(const profile of references.profiles) {
         const extrusion = this.extent == 'face' ?
-          profile.extrudeUpToFace(this.componentId, references.limitFace, this.id, this.offset) :
+          profile.extrudeUpToFace(this.componentId, references.limitFace, this.id, this.offset, this.endOffset) :
           this.extent == 'through' ?
             profile.extrudeThroughAll(this.componentId, comp.compound, this.id, this.side) :
             profile.extrude(this.componentId, distance, this.id, offset)

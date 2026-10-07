@@ -352,7 +352,7 @@ export class Profile {
     return result
   }
 
-  extrudeUpToFace(componentId, target, featureId, offset = 0) {
+  extrudeUpToFace(componentId, target, featureId, offset = 0, endOffset = 0) {
     const oc = window.oc.oc
     const fail = msg => { throw { type: 'error', msg } }
     if(!target) fail('Select a face to extrude up to')
@@ -375,9 +375,11 @@ export class Profile {
     // Work along local +Z with the offset start at the origin.
     const frame = rotationFromNormal(direction).setPosition(origin.clone().addScaledVector(direction, offset))
     const inverseFrame = frame.clone().invert()
-    const planeGeometry = plane && ocPlnFromMatrix(inverseFrame.clone().multiply(plane))
+    // Move the limit along the extrusion direction, independently of the start.
+    const limitFrame = new THREE.Matrix4().makeTranslation(0, 0, endOffset).multiply(inverseFrame)
+    const planeGeometry = plane && ocPlnFromMatrix(limitFrame.clone().multiply(plane))
     const planeBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(planeGeometry)
-    const targetTransform = !plane && transformGeometry(target.solid.geom(), inverseFrame)
+    const targetTransform = !plane && transformGeometry(target.solid.geom(), limitFrame)
     const targetShape = planeBuilder ? planeBuilder.Face() : targetTransform.ModifiedShape(target.geom())
     const baseTransform = transformGeometry(this.makeFace(), frame.clone().setPosition(origin).invert())
     const base = baseTransform.Shape()

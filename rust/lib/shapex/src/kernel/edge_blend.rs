@@ -3266,7 +3266,7 @@ impl EulerTransaction<'_> {
 
     fn prepare_blend_patch(
         &self,
-        spine: BlendSpine,
+        mut spine: BlendSpine,
         junctions: &BTreeMap<VertexId, BlendJunction>,
         junction_surfaces: &BTreeMap<VertexId, Surface3>,
         regular_endpoints: &BTreeMap<(EdgeId, usize), Option<BlendEndpoint>>,
@@ -3377,7 +3377,11 @@ impl EulerTransaction<'_> {
                         tolerance,
                     )?
                 };
-                if spine.shared_seam.is_some() {
+                if spine.local_guide {
+                    parameter = continue_local_blend_parameter(
+                        &mut spine, junction.center, parameter,
+                    )?;
+                } else if spine.shared_seam.is_some() {
                     // Repeated guide turns need not have identical parameter
                     // speeds, so an integer shift alone is only a seed.
                     // Resolve the shared parameter to numerical accuracy: a
@@ -5213,6 +5217,40 @@ fn closed_blend_chart(
         second_pcurve,
         achieved_error: center.achieved_error,
     })
+}
+
+// Continue a local intersection only as far as its solved junction requires.
+// A fixed fraction of the source edge can end before the corner on short arcs.
+// Extend both exact contact rails together with the implicit center curve.
+fn continue_local_blend_parameter(
+    spine: &mut BlendSpine,
+    point: Point3,
+    mut parameter: f64,
+) -> KernelResult<f64> {
+    let target = f64::EPSILON * point.to_vec().magnitude().max(1.0) * 2048.0;
+    for _ in 0..16 {
+        let value = spine.center.curve.evaluate(parameter)?;
+        let residual = value.point - point;
+        if residual.magnitude() <= target {
+            break;
+        }
+        let next = parameter
+            - residual.dot(value.first_derivative) / value.first_derivative.magnitude2();
+        if let Curve3::SurfaceIntersection(curve) = &spine.center.curve {
+            let range = curve.range();
+            if next < range.start || next > range.end {
+                let range = ParameterRange::new(range.start.min(next), range.end.max(next))?;
+                let extended = curve.extended(range)?;
+                let [first, second] = extended.exact_pcurves();
+                spine.center.curve = extended.into();
+                spine.center.first_pcurve = first;
+                spine.center.second_pcurve = second;
+                spine.provisional_range = range;
+            }
+        }
+        parameter = next;
+    }
+    Ok(parameter)
 }
 
 // Refine within the already selected branch. Callers certify the remaining

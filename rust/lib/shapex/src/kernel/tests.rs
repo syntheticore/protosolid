@@ -6086,7 +6086,8 @@ fn shell_rounded_chamfered_torus() {
 
 #[test]
 fn shell_filleted_curved_pocket_document_44() {
-    // The 1 mm pocket fillet collapses at the default 1 mm shell thickness.
+    // The 1 mm pocket fillet disappears; larger rounded offset joins also
+    // intersect the dome and remove portions of the cylindrical pocket wall.
     let tol = ModelTolerance::default();
     let circle = |center, radius| Profile::new(
         Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tol).unwrap(), [], tol,
@@ -6106,7 +6107,7 @@ fn shell_filleted_curved_pocket_document_44() {
     let rim = pocket.edges().find(|edge| {
         let faces = edge.connected_faces().unwrap();
         faces.iter().any(|face| !matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_)))
-            && faces.iter().any(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+            && faces.iter().any(|face| matches!(face.surface(), Surface3::Cylinder(cylinder) if cylinder.radius() < 10.0))
             && !matches!(edge.curve(), Curve3::Circle(_))
     }).unwrap().clone();
     let body = pocket.fillet(&[rim], 1.0).unwrap();
@@ -6116,11 +6117,46 @@ fn shell_filleted_curved_pocket_document_44() {
     let top = body.faces().find(|face| {
         matches!(face.surface(), Surface3::Plane(plane) if plane.origin().y > 67.0)
     }).unwrap().clone();
-    assert!(body.shell(&[top], -1.0).is_err());
-    for openings in [vec![], vec![bottom]] {
-        let shell = body.shell(&openings, -1.0).unwrap();
+    for thickness in [1.0, 2.0, 3.0] {
+        assert!(body.shell(&[top.clone()], -thickness).is_err());
+        for openings in [vec![], vec![bottom.clone()]] {
+            let shell = body.shell(&openings, -thickness)
+                .unwrap_or_else(|error| panic!("{thickness} mm, {} openings: {error}", openings.len()));
+            assert_eq!(shell.solids().len(), 1);
+            assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+            assert!(shell.faces().any(|face| {
+                matches!(face.surface(), Surface3::RollingBall(blend) if (blend.radius() - thickness).abs() < tol.linear)
+            }));
+            shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn shell_past_circular_fillet_document_45() {
+    let tol = ModelTolerance::default();
+    let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+    let cylinder = Profile::new(
+        Wire2::new([TrimmedCurve2::circle(Point2::new(0.0, 0.0), 33.22795844564359).unwrap()], tol).unwrap(),
+        [], tol,
+    ).unwrap().extrude(plane, Vec3::new(0.0, 39.0, 0.0)).unwrap();
+    let rim = cylinder.edges().find(|edge| {
+        matches!(edge.curve(), Curve3::Circle(circle) if circle.center().y > 38.0)
+    }).unwrap().clone();
+    let body = cylinder.fillet(&[rim], 9.0).unwrap();
+    let bottom = body.faces().find(|face| {
+        matches!(face.surface(), Surface3::Plane(plane) if plane.origin().y < 1.0)
+    }).unwrap().clone();
+    for thickness in [8.0, 9.0, 10.0, 11.0] {
+        let shell = body.shell(&[bottom.clone()], -thickness)
+            .unwrap_or_else(|error| panic!("{thickness} mm: {error}"));
         assert_eq!(shell.solids().len(), 1);
         assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+        if thickness >= 9.0 {
+            let cavity = std::f64::consts::PI * (33.22795844564359 - thickness).powi(2) * (39.0 - thickness);
+            assert!((shell.volume() - (body.volume() - cavity)).abs() < 1.0e-5);
+            assert_eq!(shell.faces().filter(|face| matches!(face.surface(), Surface3::Torus(_))).count(), 1);
+        }
         shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
     }
 }

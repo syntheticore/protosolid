@@ -876,6 +876,22 @@ fn arrange_face(
         };
     }
 
+    arrange_surface_regions(
+        surface, curves, classification_offset, uv_probe_limit, tolerance, orientation_at,
+    )
+}
+
+/// Split a support's candidate trims and retain the regions selected by the
+/// operation's material classifier. Offsets use the same arrangement as Booleans
+/// when a rolling join intersects a third support.
+pub(super) fn arrange_surface_regions(
+    surface: &Surface3,
+    curves: &[FaceCurve],
+    classification_offset: f64,
+    uv_probe_limit: f64,
+    tolerance: ModelTolerance,
+    orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
+) -> KernelResult<Vec<BrepPatch>> {
     let mut split_parameters = curves
         .iter()
         .map(|curve| vec![curve.range.start, curve.range.end])

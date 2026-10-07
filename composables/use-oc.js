@@ -1,17 +1,5 @@
-// import initOpenCascade from "opencascade.js"
-// import opencascade from 'opencascade.js/dist/opencascade.full.js'
-// import opencascadeWasm from "opencascade.js/dist/opencascade.full.wasm?url"
-
-// const oc = await initOpenCascade({
-//   mainJs: opencascade,
-//   mainWasm: opencascadeWasm,
-// })
-
 import opencascade from '~/assets/oc/oc.js'
 import opencascadeWasm from '~/assets/oc/oc.wasm?url'
-
-// import opencascade from '~/assets/oc/opencascade.full.js'
-// import opencascadeWasm from '~/assets/oc/opencascade.full.wasm?url'
 
 const ocp = opencascade({
   locateFile: () => opencascadeWasm,
@@ -64,13 +52,13 @@ export async function useOC() {
       const freeParams = primitives.filter(primitive => primitive.type == 'free_param')
       primitives = primitives.filter(primitive => primitive.type != 'free_param')
 
-      const makeSolver = () => {
+      const makeSolver = (systemPrimitives=primitives, systemFreeParams=freeParams) => {
         const system = new gcs.GcsSystem()
         const solver = new GcsWrapper(system, gcs)
-        solver.set_max_iterations(200) // 100
+        solver.set_max_iterations(200)
         solver.set_convergence_threshold(1e-10)
-        freeParams.forEach(param => solver.push_sketch_param(param.name, param.value, false))
-        solver.push_primitives_and_params(primitives)
+        systemFreeParams.forEach(param => solver.push_sketch_param(param.name, param.value, false))
+        solver.push_primitives_and_params(systemPrimitives)
         return solver
       }
 
@@ -87,38 +75,59 @@ export async function useOC() {
       solver.apply_solution()
 
       const results = solver.sketch_index.get_primitives()
-      const dof = solver.gcs.dof()
+      const solvedFreeParams = freeParams.map(param => ({
+        ...param, value: solver.get_sketch_param_value(param.name),
+      }))
+      let dof = solver.gcs.dof()
+      if(parameterGroups.length) {
+        // Diagnosis uses the initial geometry. Recompute at the solution
+        // before skipping movement probes for a fully constrained system.
+        const diagnosis = makeSolver(results, solvedFreeParams)
+        diagnosis.solve()
+        dof = diagnosis.gcs.dof()
+        diagnosis.destroy_gcs_module()
+      }
 
-      // PlaneGCS only exposes total DOF. Probe whether each element owns any
-      // of that freedom by fixing its parameters at the solved position. If
-      // doing so does not lower total DOF, that element cannot move.
+      // Fixing parameters changes PlaneGCS's redundancy reduction, so DOF
+      // differences can report freedom on immovable geometry. Instead, use
+      // temporary objectives, as dragging does, to measure whether each
+      // parameter can move while preserving the structural constraints.
       const parameterCounts = { point: 2, circle: 1, arc: 3 }
       const primitiveById = new Map(primitives.map(primitive => [primitive.id, primitive]))
-      const parameterIndices = (target, primitiveIds) => primitiveIds.flatMap(id => {
+      const parameterIndices = primitiveIds => primitiveIds.flatMap(id => {
         const primitive = primitiveById.get(id)
-        const start = target.p_param_index.get(id)
+        const start = solver.p_param_index.get(id)
         const count = parameterCounts[primitive?.type] || 0
         return start === undefined ? [] : Array.from({ length: count }, (_, offset) => start + offset)
       }).filter((index, position, indices) => indices.indexOf(index) == position)
 
-      const probeFullyConstrained = primitiveIds => {
-        const baseIndices = parameterIndices(solver, primitiveIds)
-        if(baseIndices.every(index => solver.gcs.get_is_fixed(index))) return true
+      const constrainedParameters = new Map()
+      const probeParameter = index => {
+        if(solver.gcs.get_is_fixed(index)) return true
+        if(constrainedParameters.has(index)) return constrainedParameters.get(index)
 
-        // PlaneGCS establishes its parameter structure during the first solve,
-        // so changing fixed flags on the solved system would leave stale DOF.
-        const probe = makeSolver()
-        const indices = parameterIndices(probe, primitiveIds)
-          .filter(index => !probe.gcs.get_is_fixed(index))
-        indices.forEach(index => probe.gcs.set_p_param(index, probe.gcs.get_p_param(index), true))
+        const probe = makeSolver(results, solvedFreeParams)
+        const value = probe.gcs.get_p_param(index)
+        const parameterScale = Math.max(1, Math.abs(value))
+        const probeStep = parameterScale * 1e-3
+        const movementTolerance = parameterScale * 1e-7
+        const target = probe.gcs.push_p_param(value + probeStep, true)
+        // A negative tag makes this an objective on the remaining freedom,
+        // rather than an additional equation in the structural diagnosis.
+        probe.gcs.add_constraint_equal(index, target, -1, true, 0, 1)
         const status = probe.solve()
-        const probeDof = probe.gcs.dof()
+        probe.gcs.apply_solution()
+        const constrained = status < 2 &&
+          Math.abs(probe.gcs.get_p_param(index) - value) <= movementTolerance
         probe.destroy_gcs_module()
 
-        return status < 2 && probeDof == dof
+        constrainedParameters.set(index, constrained)
+        return constrained
       }
       const fullyConstrained = dof == 0 ?
-        parameterGroups.map(() => true) : parameterGroups.map(probeFullyConstrained)
+        parameterGroups.map(() => true) : parameterGroups.map(primitiveIds =>
+          parameterIndices(primitiveIds).every(probeParameter)
+        )
 
       solver.destroy_gcs_module()
 

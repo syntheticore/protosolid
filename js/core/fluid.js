@@ -40,9 +40,9 @@ export class FluidSimulation {
     }
   }
 
-  resolve(tree) {
+  resolve(tree, bind=true) {
     if(!this.inletFaces.length || !this.outletFaces.length) return 'Pick inlet and outlet faces on the fluid volume'
-    const problem = resolveSimulationFaces(tree, [this.inletFaces, this.outletFaces])
+    const problem = resolveSimulationFaces(tree, [this.inletFaces, this.outletFaces], bind)
     if(problem) return problem
     if(this.inletFaces.some(inlet => this.outletFaces.some(outlet => inlet.topoId == outlet.topoId))) {
       return 'A face cannot be both an inlet and an outlet'

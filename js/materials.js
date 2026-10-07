@@ -219,6 +219,19 @@ class Materials {
       vertexColors: true,
     })
 
+    this.staticSurface = new THREE.MeshStandardMaterial({
+      side: THREE.DoubleSide,
+      vertexColors: true,
+      roughness: 0.75,
+      metalness: 0,
+    })
+    this.staticSurface.onBeforeCompile = shader => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        'outgoingLight = mix(diffuseColor.rgb, outgoingLight, 0.45);\n#include <opaque_fragment>',
+      )
+    }
+
     this.fluidSurface = new THREE.MeshBasicMaterial({
       side: THREE.DoubleSide,
       color: 'white',

@@ -1274,20 +1274,47 @@ export class PlaneFeature extends Feature {
         type: 'length',
         allowNegative: true,
       },
+      rotationX: {
+        title: 'Rotation X',
+        type: 'angle',
+        allowNegative: true,
+      },
+      rotationY: {
+        title: 'Rotation Y',
+        type: 'angle',
+        allowNegative: true,
+      },
     })
 
     this.base = null
     this.offset = 1.0
+    this.rotationX = 0
+    this.rotationY = 0
+    this.rotationTransform = new THREE.Matrix4()
+    this.rotationAppliedX = 0
+    this.rotationAppliedY = 0
 
     this.planeId = makeID()
   }
 
   updateFeature(tree, references) {
-    const vec = normalFromMatrix(references.base).multiplyScalar(this.offset)
-    const pos = new THREE.Vector3().setFromMatrixPosition(references.base)
-    const plane = references.base.clone().setPosition(pos.add(vec))
+    const plane = references.base.clone()
+      .multiply(new THREE.Matrix4().makeTranslation(0, 0, this.offset))
+      .multiply(this.getRotation())
     const helper = new PlaneHelper(this.componentId, plane, this.planeId)
     tree.findChild(this.componentId).helpers.push(helper)
+  }
+
+  getRotation() {
+    // Numeric edits apply a turn about the plane's current local axis.
+    if(this.rotationX != this.rotationAppliedX || this.rotationY != this.rotationAppliedY) {
+      this.rotationTransform = this.rotationTransform.clone()
+        .multiply(new THREE.Matrix4().makeRotationX(rad(this.rotationX - this.rotationAppliedX)))
+        .multiply(new THREE.Matrix4().makeRotationY(rad(this.rotationY - this.rotationAppliedY)))
+      this.rotationAppliedX = this.rotationX
+      this.rotationAppliedY = this.rotationY
+    }
+    return this.rotationTransform.clone()
   }
 
   getGizmo() {
@@ -1302,8 +1329,77 @@ export class PlaneFeature extends Feature {
           this.setExpression('offset', null)
           this.offset = distance * (side ? 1 : -1)
         },
-      }
+      },
     }
+  }
+
+  updateGizmos() {
+    super.updateGizmos()
+    if(!this.isComplete()) {
+      this.clearRotationGizmo()
+      return
+    }
+    const component = this.document.top().findChild(this.componentOccurrenceId) ||
+      this.document.top().findChild(this.componentId)
+    const transform = worldTransform(component).multiply(this.base().getItem())
+      .multiply(new THREE.Matrix4().makeTranslation(0, 0, this.offset))
+      .multiply(this.getRotation())
+    if(this.rotationGizmo) {
+      if(!this.rotationGizmo.dragging) this.rotationGizmo.setTransform(transform)
+      return
+    }
+    const gizmo = markRaw(new TransformGizmo(transform, desiredWorld => {
+      const key = `rotation${gizmo.rotationControl.axis}`
+      this.setExpression(key, null)
+      this[key] = this.rotationDragStartValue + THREE.MathUtils.radToDeg(gizmo.rotationControl.rotationAngle)
+      const current = this.document.top().findChild(this.componentOccurrenceId) ||
+        this.document.top().findChild(this.componentId)
+      const reference = worldTransform(current).multiply(this.base().getItem())
+      this.rotationTransform = new THREE.Matrix4().extractRotation(reference.invert().multiply(desiredWorld))
+      this.rotationAppliedX = this.rotationX
+      this.rotationAppliedY = this.rotationY
+      this.document.timeline.invalidateFeature(this)
+      this.document.regenerate()
+    }))
+    gizmo.translationControl.showX = false
+    gizmo.translationControl.showY = false
+    gizmo.translationControl.showZ = false
+    gizmo.rotationControl.showZ = false
+    gizmo.addEventListener('mouseDown', () => {
+      this.rotationDragStartValue = this[`rotation${gizmo.rotationControl.axis}`]
+    })
+    gizmo.addEventListener('dragging-changed', event => { this.distanceGizmo().enabled = !event.value })
+    this.distanceGizmo().addEventListener('dragging-changed', event => { gizmo.enabled = !event.value })
+    this.rotationGizmo = gizmo
+    window.alcRenderer.addGizmo(gizmo)
+  }
+
+  clearRotationGizmo() {
+    if(this.rotationGizmo) window.alcRenderer.removeGizmo(this.rotationGizmo)
+    this.rotationGizmo = null
+  }
+
+  dispose() {
+    super.dispose()
+    this.clearRotationGizmo()
+  }
+
+  getValues() {
+    return {
+      ...super.getValues(),
+      rotationTransform: this.rotationTransform,
+      rotationAppliedX: this.rotationAppliedX,
+      rotationAppliedY: this.rotationAppliedY,
+    }
+  }
+
+  setValues(values) {
+    super.setValues(values)
+    this.rotationTransform = values.rotationTransform || new THREE.Matrix4().makeRotationFromEuler(
+      new THREE.Euler(rad(this.rotationX), rad(this.rotationY))
+    )
+    this.rotationAppliedX = values.rotationAppliedX ?? this.rotationX
+    this.rotationAppliedY = values.rotationAppliedY ?? this.rotationY
   }
 
   dump() {
@@ -1500,6 +1596,7 @@ export class PlaceFeature extends Feature {
       const canonical = this.sourceTree.findChild(sourceDefinitionId) || source
       definition = new ComponentDefinition(canonical.creator.title, canonical.creator.color)
       definition.hidden = !!canonical.creator.hidden
+      definition.material = canonical.creator.material
       definitions.set(sourceDefinitionId, definition)
     }
     component.creator = source.instanceOf ? Object.assign(Object.create(definition), {
@@ -1710,10 +1807,16 @@ export class ExtrudeFeature extends SolidFeature {
         when: feature => feature.extent == 'face',
       },
       offset: {
-        title: 'Offset',
+        title: 'Start offset',
         type: 'length',
         allowNegative: true,
         when: feature => feature.extent != 'through',
+      },
+      endOffset: {
+        title: 'End offset',
+        type: 'length',
+        allowNegative: true,
+        when: feature => feature.extent == 'face',
       },
     })
 
@@ -1723,6 +1826,7 @@ export class ExtrudeFeature extends SolidFeature {
     this.axis = null
     this.distance = 1.0
     this.offset = 0
+    this.endOffset = 0
     this.side = 'forward'
   }
 
@@ -1749,7 +1853,7 @@ export class ExtrudeFeature extends SolidFeature {
     try {
       for(const profile of references.profiles) {
         const extrusion = this.extent == 'face' ?
-          profile.extrudeUpToFace(this.componentId, references.limitFace, this.id, this.offset) :
+          profile.extrudeUpToFace(this.componentId, references.limitFace, this.id, this.offset, this.endOffset) :
           this.extent == 'through' ?
             profile.extrudeThroughAll(this.componentId, comp.compound, this.id, this.side) :
             profile.extrude(this.componentId, distance, this.id, offset)

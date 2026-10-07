@@ -3,6 +3,7 @@
 <script setup>
 
   import * as THREE from 'three'
+  import { TessellateModifier } from 'three/examples/jsm/modifiers/TessellateModifier.js'
   import materials from '../js/materials.js'
 
   const props = defineProps(['document', 'component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
@@ -15,8 +16,17 @@
 
   const tessellation = props.face.tesselate()
   const faceMesh = window.alcRenderer.convertMesh(tessellation, getMaterial())
-  const basePositions = faceMesh.geometry.getAttribute('position').array.slice()
-  const baseNormals = faceMesh.geometry.getAttribute('normal').array.slice()
+  const originalGeometry = faceMesh.geometry
+  const originalPositions = originalGeometry.getAttribute('position').array.slice()
+  const originalNormals = originalGeometry.getAttribute('normal').array.slice()
+  let analysisGeometry = null
+  let analysisResult = null
+  let analysisPositions = null
+  let analysisNormals = null
+  let analysisDisplacements = null
+  let analysisStresses = null
+  const coldColor = new THREE.Color(0x003cff)
+  const hotColor = new THREE.Color(0xff0000)
   faceMesh.alcTypes = [
     'face',
     props.face.getPlane() && 'plane',
@@ -54,10 +64,17 @@
     renderNeeded.value = true
   }, { immediate: true })
 
+  watch(() => props.document.activeSimulation?.animationRevision, () => {
+    if(props.colorMode != 'static') return
+    updateDeformation()
+    renderNeeded.value = true
+  })
+
   function getSurfaceMaterial() {
     if(props.face.sectionSurface) return props.component.creator.compSectionMaterial
     if(props.colorMode == 'fluid') return materials.fluidSurface
-    if(props.colorMode == 'thermal' || props.colorMode == 'static') return materials.thermalSurface
+    if(props.colorMode == 'thermal') return materials.thermalSurface
+    if(props.colorMode == 'static') return materials.staticSurface
     if(props.colorMode == 'interference') return materials.interferenceSurface
     if(props.colorMode.startsWith('diagnostic:')) {
       const [mode, direction, frequency] = props.colorMode.slice('diagnostic:'.length).split(':')
@@ -73,6 +90,30 @@
   }
 
   function updateAnalysisGeometry() {
+    const simulation = props.document.activeSimulation
+    const simulatedFace = simulation?.result &&
+      simulation.result.componentId == props.component.id &&
+      simulation.result.solidId == props.face.solid.id
+    if(props.colorMode == 'static' && simulatedFace) {
+      if(analysisResult != simulation.result) {
+        analysisGeometry?.dispose()
+        const quality = simulation.quality - 1
+        const edgeLength = simulation.result.step * (3 - quality * 0.5)
+        const angularTolerance = 1.75 - quality * 0.175
+        const tessellation = props.face.tesselateAt(edgeLength * 0.25, angularTolerance)
+        const baseGeometry = window.alcRenderer.convertBufferGeometry(tessellation)
+        analysisGeometry = new TessellateModifier(edgeLength, 10).modify(baseGeometry)
+        baseGeometry.dispose()
+        analysisResult = simulation.result
+        analysisPositions = analysisGeometry.getAttribute('position').array.slice()
+        analysisNormals = analysisGeometry.getAttribute('normal').array.slice()
+      }
+      faceMesh.geometry = analysisGeometry
+    } else {
+      faceMesh.geometry = originalGeometry
+    }
+    const basePositions = faceMesh.geometry == analysisGeometry ? analysisPositions : originalPositions
+    const baseNormals = faceMesh.geometry == analysisGeometry ? analysisNormals : originalNormals
     const position = faceMesh.geometry.getAttribute('position')
     const normal = faceMesh.geometry.getAttribute('normal')
     position.array.set(basePositions)
@@ -81,21 +122,16 @@
     normal.needsUpdate = true
     if(props.colorMode != 'thermal' && props.colorMode != 'static') return
 
-    const simulation = props.document.activeSimulation
     const values = new Float32Array(position.count * 3)
     const color = new THREE.Color()
-    const coldColor = new THREE.Color(0x003cff)
-    const hotColor = new THREE.Color(0xff0000)
-    const simulatedFace = simulation?.result &&
-      simulation.result.componentId == props.component.id &&
-      simulation.result.solidId == props.face.solid.id
-
+    analysisDisplacements = props.colorMode == 'static' && simulatedFace ? new Float32Array(basePositions.length) : null
+    analysisStresses = analysisDisplacements ? new Float32Array(position.count).fill(-1) : null
     for(let i = 0; i < position.count; i++) {
       const point = new THREE.Vector3(basePositions[i * 3], basePositions[i * 3 + 1], basePositions[i * 3 + 2])
       const staticSample = props.colorMode == 'static' && simulatedFace && simulation.sampleAt(point)
       const value = props.colorMode == 'thermal'
         ? simulatedFace && simulation.temperatureAt(point)
-        : staticSample?.stress
+        : staticSample?.relativeStress
       if(value === undefined || value === false) {
         color.setRGB(0.18, 0.18, 0.18)
       } else {
@@ -104,23 +140,55 @@
           : Math.sqrt(Math.min(1, value))
         color.copy(coldColor).lerp(hotColor, ratio)
         if(props.colorMode == 'static') {
+          analysisStresses[i] = value
           const displacement = staticSample.displacement
-          position.setXYZ(
-            i,
-            point.x + displacement.x * simulation.result.displayScale,
-            point.y + displacement.y * simulation.result.displayScale,
-            point.z + displacement.z * simulation.result.displayScale,
-          )
+          analysisDisplacements[i * 3] = displacement.x * simulation.result.displayScale
+          analysisDisplacements[i * 3 + 1] = displacement.y * simulation.result.displayScale
+          analysisDisplacements[i * 3 + 2] = displacement.z * simulation.result.displayScale
         }
       }
       values.set(color.toArray(), i * 3)
     }
     faceMesh.geometry.setAttribute('color', new THREE.BufferAttribute(values, 3))
-    if(props.colorMode == 'static') {
-      position.needsUpdate = true
-      faceMesh.geometry.computeVertexNormals()
-      faceMesh.geometry.computeBoundingSphere()
+
+    if(analysisDisplacements) {
+      const bounds = new THREE.Box3()
+      const point = new THREE.Vector3()
+      for(let i = 0; i < analysisDisplacements.length; i += 3) {
+        const x = analysisPositions[i]
+        const y = analysisPositions[i + 1]
+        const z = analysisPositions[i + 2]
+        bounds.expandByPoint(point.set(x, y, z))
+        bounds.expandByPoint(point.set(
+          x + analysisDisplacements[i],
+          y + analysisDisplacements[i + 1],
+          z + analysisDisplacements[i + 2],
+        ))
+      }
+      analysisGeometry.boundingSphere = bounds.getBoundingSphere(new THREE.Sphere())
+      updateDeformation()
     }
+  }
+
+  function updateDeformation() {
+    if(!analysisDisplacements || faceMesh.geometry != analysisGeometry) return
+    const position = analysisGeometry.getAttribute('position')
+    const colors = analysisGeometry.getAttribute('color')
+    const factor = props.document.activeSimulation.deformationFactor
+    for(let i = 0; i < analysisDisplacements.length; i++) {
+      position.array[i] = analysisPositions[i] + analysisDisplacements[i] * factor
+    }
+    for(let i = 0; i < analysisStresses.length; i++) {
+      if(analysisStresses[i] < 0) continue
+      const ratio = Math.sqrt(Math.min(1, analysisStresses[i] * factor))
+      const offset = i * 3
+      colors.array[offset] = coldColor.r + (hotColor.r - coldColor.r) * ratio
+      colors.array[offset + 1] = coldColor.g + (hotColor.g - coldColor.g) * ratio
+      colors.array[offset + 2] = coldColor.b + (hotColor.b - coldColor.b) * ratio
+    }
+    position.needsUpdate = true
+    colors.needsUpdate = true
+    analysisGeometry.computeVertexNormals()
   }
 
   function getMaterial() {
@@ -131,7 +199,7 @@
       return props.parentActive ? materials.fluidSurface : materials.ghostSurface
     }
     if((props.colorMode == 'thermal' || props.colorMode == 'static') && !props.document.activeSimulationPicker) {
-      return props.parentActive ? materials.thermalSurface : materials.ghostSurface
+      return props.parentActive ? getSurfaceMaterial() : materials.ghostSurface
     }
     if(props.colorMode == 'interference') {
       return props.parentActive ? materials.interferenceSurface : materials.ghostSurface
@@ -148,6 +216,7 @@
 
   onUnmounted(() => {
     window.alcRenderer.remove(faceMesh)
+    analysisGeometry?.dispose()
     props.face.mesh = null
     renderNeeded.value = true
   })

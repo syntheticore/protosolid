@@ -322,8 +322,8 @@ export class ThermalProbeTool extends SimulationProbeTool {
 
 export class StaticProbeTool extends SimulationProbeTool {
   label(simulation, position) {
-    const stress = simulation.stressAt(position)
-    if(stress !== undefined) return `Relative stress ${(stress * 100).toFixed(0)}%`
+    const sample = simulation.sampleAt(position)
+    if(sample) return `${sample.stress.toPrecision(3)} MPa · ${sample.displacement.length().toPrecision(3)} mm displacement`
   }
 }
 

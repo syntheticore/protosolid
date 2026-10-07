@@ -1224,9 +1224,9 @@ class TransformControlsGizmo extends Object3D {
     this.gizmo[ 'rotate' ].visible = this.mode === 'rotate';
     this.gizmo[ 'scale' ].visible = this.mode === 'scale';
 
-    this.helper[ 'translate' ].visible = this.mode === 'translate';
-    this.helper[ 'rotate' ].visible = this.mode === 'rotate';
-    this.helper[ 'scale' ].visible = this.mode === 'scale';
+    this.helper[ 'translate' ].visible = this.enabled && this.mode === 'translate';
+    this.helper[ 'rotate' ].visible = this.enabled && this.mode === 'rotate';
+    this.helper[ 'scale' ].visible = this.enabled && this.mode === 'scale';
 
 
     let handles = [];
@@ -1266,7 +1266,7 @@ class TransformControlsGizmo extends Object3D {
 
         if ( handle.name === 'AXIS' ) {
 
-          handle.position.copy( this.worldPositionStart );
+          handle.position.copy( this.dragging ? this.worldPositionStart : this.worldPosition );
           handle.visible = !! this.axis;
 
           if ( this.axis === 'X' ) {

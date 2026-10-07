@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 
-export function voxelizeSolid(solid, resolution=14) {
+export function voxelizeSolid(solid, resolution=14, maxCells=Infinity, targetSteps=null) {
   const triangles = makeTriangles(solid.faces())
   const bounds = new THREE.Box3()
   triangles.forEach(triangle => {
@@ -11,10 +11,15 @@ export function voxelizeSolid(solid, resolution=14) {
   })
 
   const size = bounds.getSize(new THREE.Vector3())
-  const step = Math.max(size.x, size.y, size.z) / resolution
-  const nx = Math.max(1, Math.ceil(size.x / step))
-  const ny = Math.max(1, Math.ceil(size.y / step))
-  const nz = Math.max(1, Math.ceil(size.z / step))
+  const baseStep = Math.max(size.x, size.y, size.z) / resolution
+  const steps = [0, 1, 2].map(axis => Math.min(baseStep, targetSteps?.[axis] ?? Infinity))
+  while(Math.ceil(size.x / steps[0]) * Math.ceil(size.y / steps[1]) * Math.ceil(size.z / steps[2]) > maxCells) {
+    for(let axis = 0; axis < 3; axis++) steps[axis] *= 1.05
+  }
+  const step = Math.max(...steps)
+  const nx = Math.max(1, Math.ceil(size.x / steps[0]))
+  const ny = Math.max(1, Math.ceil(size.y / steps[1]))
+  const nz = Math.max(1, Math.ceil(size.z / steps[2]))
   const grid = new Int32Array(nx * ny * nz).fill(-1)
   const points = []
 
@@ -22,9 +27,9 @@ export function voxelizeSolid(solid, resolution=14) {
     for(let j = 0; j < ny; j++) {
       for(let i = 0; i < nx; i++) {
         const point = new THREE.Vector3(
-          bounds.min.x + (i + 0.5) * step,
-          bounds.min.y + (j + 0.5) * step,
-          bounds.min.z + (k + 0.5) * step,
+          bounds.min.x + (i + 0.5) * steps[0],
+          bounds.min.y + (j + 0.5) * steps[1],
+          bounds.min.z + (k + 0.5) * steps[2],
         )
         if(!isInside(point, triangles)) continue
         grid[i + nx * (j + ny * k)] = points.length
@@ -33,14 +38,15 @@ export function voxelizeSolid(solid, resolution=14) {
     }
   }
 
-  return { bounds, size, step, nx, ny, nz, grid, points }
+  return { bounds, size, step, steps, nx, ny, nz, grid, points }
 }
 
 
 export function findVoxelNode(result, position) {
-  const i = Math.floor((position.x - result.min[0]) / result.step)
-  const j = Math.floor((position.y - result.min[1]) / result.step)
-  const k = Math.floor((position.z - result.min[2]) / result.step)
+  const steps = result.steps || [result.step, result.step, result.step]
+  const i = Math.floor((position.x - result.min[0]) / steps[0])
+  const j = Math.floor((position.y - result.min[1]) / steps[1])
+  const k = Math.floor((position.z - result.min[2]) / steps[2])
 
   for(let radius = 0; radius < 3; radius++) {
     for(let z = k - radius; z <= k + radius; z++) {

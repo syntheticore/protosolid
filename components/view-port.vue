@@ -827,12 +827,15 @@
       },
 
       mouseDown: function(e) {
-        document.activeElement.blur() // Necessary since THREE R123
         // The pointer event is the authoritative modifier state for this drag.
         // This also updates controls recreated while Alt was already held.
         this.setOrbiting(e.altKey)
+        if(e.button == 0 && this.renderer.isGizmoHovered()) {
+          e.preventDefault()
+          return
+        }
+        document.activeElement.blur() // Necessary since THREE R123
         if(e.button != 0) return
-        if(this.renderer.isGizmoHovered()) return
         this.isPanning = e.shiftKey
         if(this.isPanning) {
           // Shift gives the complete pointer gesture to OrbitControls. This

@@ -19,9 +19,9 @@ export class ThermalSimulation {
     this.revision = 0
   }
 
-  resolve(tree) {
+  resolve(tree, bind=true) {
     if(!this.coldFaces.length || !this.hotFaces.length) return 'Pick hot and cold faces'
-    return resolveSimulationFaces(tree, [this.coldFaces, this.hotFaces])
+    return resolveSimulationFaces(tree, [this.coldFaces, this.hotFaces], bind)
   }
 
   solve(tree) {

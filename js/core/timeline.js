@@ -89,6 +89,9 @@ export class Timeline {
   }
 
   async evaluateAsync(onFeature) {
+    // Let pointer events settle for this frame before capturing the pass.
+    // Capturing first would let every drag event cancel it before execution.
+    await yieldToBrowser()
     const lastChange = this.last_change_index
     const marker = this.marker
     const completed = await this.regenerateAsync(Math.min(lastChange, marker), marker, onFeature)
@@ -133,7 +136,7 @@ export class Timeline {
     for(let i = from; i < to; i++) {
       const feature = this.features[i]
       onFeature(feature, i, to)
-      await yieldToBrowser()
+      if(i > from) await yieldToBrowser()
 
       // A newer edit or structural change supersedes this pass. In
       // particular, do not republish a feature that was canceled while this

@@ -186,17 +186,22 @@ export default class Document extends Emitter {
   }
 
   regenerate(at) {
-    this.pendingRegenerations++
     // Runtime poses never belong to cached timeline states. A pose only
     // crosses a marker after keepPose() has turned it into a PoseFeature.
     this.top().resetPose()
     if(at !== undefined) {
+      const previousMarker = this.timeline.marker
       if(at instanceof Feature) {
         this.timeline.moveMarkerToFeature(at)
       } else {
         this.timeline.marker = at
       }
+      if(this.timeline.marker !== previousMarker) this.timeline.change_version++
     }
+    // The running pass retries invalidated work and reads the latest values
+    // after yielding. Share it instead of queuing a pass for every drag event.
+    if(this.isRegenerating) return this.regenerationQueue
+    this.pendingRegenerations++
     const run = async () => {
       const calculationId = ++nextCalculationId
       try {

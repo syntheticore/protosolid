@@ -380,9 +380,10 @@ export class Profile {
     return result
   }
 
-  extrudeUpToFace(componentId, target, featureId, offset = 0) {
+  extrudeUpToFace(componentId, target, featureId, offset = 0, endOffset = 0) {
     if(window.kernel.modeling.id == 'shapex') {
       if(!target) throw { type: 'error', msg: 'Select a face to extrude up to' }
+      if(endOffset) window.kernel.modeling.unsupported('end offsets for extrusion up to face')
       return new Compound(componentId, window.kernel.modeling.extrudeUpToFace(this, target, offset))
         .inheritShapexTopology([], 'extrude', featureId).nameShapexExtrusion(this, featureId)
     }
@@ -408,9 +409,11 @@ export class Profile {
     // Work along local +Z with the offset start at the origin.
     const frame = rotationFromNormal(direction).setPosition(origin.clone().addScaledVector(direction, offset))
     const inverseFrame = frame.clone().invert()
-    const planeGeometry = plane && ocPlnFromMatrix(inverseFrame.clone().multiply(plane))
+    // Move the limit along the extrusion direction, independently of the start.
+    const limitFrame = new THREE.Matrix4().makeTranslation(0, 0, endOffset).multiply(inverseFrame)
+    const planeGeometry = plane && ocPlnFromMatrix(limitFrame.clone().multiply(plane))
     const planeBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(planeGeometry)
-    const targetTransform = !plane && transformGeometry(target.solid.geom(), inverseFrame)
+    const targetTransform = !plane && transformGeometry(target.solid.geom(), limitFrame)
     const targetShape = planeBuilder ? planeBuilder.Face() : targetTransform.ModifiedShape(target.geom())
     const baseTransform = transformGeometry(this.makeFace(), frame.clone().setPosition(origin).invert())
     const base = baseTransform.Shape()
@@ -1092,6 +1095,30 @@ export class Face extends Shape {
       chordTolerance: this.tessellationChordTolerance,
     }
     return this.cachedTesselation
+  }
+
+  tesselateAt(linearTolerance, angularTolerance) {
+    if(this.solid.compound.isShapex) {
+      return window.kernel.modeling.mesh(this.geom(), {
+        chordTolerance: linearTolerance,
+        angularTolerance,
+      })
+    }
+    const oc = window.oc.oc
+    const copy = new oc.BRepBuilderAPI_Copy_2(this.geom(), true, false)
+    const shape = copy.Shape()
+    const mesher = new oc.BRepMesh_IncrementalMesh_2(
+      shape, linearTolerance, false, angularTolerance, false,
+    )
+    let tessellation
+    exploreShape(shape, 'face', face => {
+      tessellation = new Face(this.solid, face).tesselate()
+      face.delete()
+    })
+    mesher.delete()
+    shape.delete()
+    copy.delete()
+    return tessellation
   }
 }
 

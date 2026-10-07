@@ -88,7 +88,7 @@
 
       //- Material
       TreeletMaterial(
-        v-if="component.creator.material"
+        v-if="component.creator.material && !component.readOnly"
         :document="document"
         :material="component.creator.material"
         :component="component"

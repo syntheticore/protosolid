@@ -383,8 +383,7 @@ export class Profile {
   extrudeUpToFace(componentId, target, featureId, offset = 0, endOffset = 0) {
     if(window.kernel.modeling.id == 'shapex') {
       if(!target) throw { type: 'error', msg: 'Select a face to extrude up to' }
-      if(endOffset) window.kernel.modeling.unsupported('end offsets for extrusion up to face')
-      return new Compound(componentId, window.kernel.modeling.extrudeUpToFace(this, target, offset))
+      return new Compound(componentId, window.kernel.modeling.extrudeUpToFace(this, target, offset, endOffset))
         .inheritShapexTopology([], 'extrude', featureId).nameShapexExtrusion(this, featureId)
     }
     const oc = window.oc.oc

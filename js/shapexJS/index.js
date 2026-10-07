@@ -656,10 +656,11 @@ export function createShapex(bindings) {
         profileDto(this), new Float64Array(plane._values()), new Float64Array(axis._values()), angle,
       )))
     }
-    extrudeUpToFace(plane, target, limit, offset = 0) {
+    extrudeUpToFace(plane, target, limit, offset = 0, endOffset = 0) {
       instance(plane, Plane3, 'plane'); instance(target, Compound, 'target'); instance(limit, Face, 'limit')
       return nativeCall(() => new Compound(bindings.extrudeUpToFace(
-        profileDto(this), new Float64Array(plane._values()), target._raw(), limit._raw(), finite(offset, 'offset'),
+        profileDto(this), new Float64Array(plane._values()), target._raw(), limit._raw(),
+        finite(offset, 'offset'), finite(endOffset, 'endOffset'),
       )))
     }
     revolveUpToFace(plane, axis, target, limit, forward = true) {

@@ -297,10 +297,11 @@ pub fn extrude_up_to_face(
     target: &NativeCompound,
     limit: &NativeFace,
     offset: f64,
+    end_offset: f64,
 ) -> Result<NativeCompound, JsValue> {
     let profile = profile(description)?;
     profile
-        .extrude_up_to_face(plane(plane_values, profile.tolerance())?, &target.inner, &limit.inner, offset)
+        .extrude_up_to_face(plane(plane_values, profile.tolerance())?, &target.inner, &limit.inner, offset, end_offset)
         .map(|inner| NativeCompound { inner })
         .map_err(js_error)
 }

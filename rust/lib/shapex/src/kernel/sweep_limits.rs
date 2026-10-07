@@ -2,7 +2,8 @@
 //! retain the exact surfaces, trim curves and certified Boolean topology.
 use super::{
     Axis3, Compound, DiagnosticKind, FaceHandle, KernelError, KernelResult, ModelTolerance,
-    PersistentId, Plane3, Profile, Resolution, ResolvableEntity, Surface3, TessellationOptions,
+    PersistentId, Plane3, Profile, Resolution, ResolvableEntity, RigidTransform3, Surface3,
+    TessellationOptions,
 };
 use crate::{Matrix3, Point3, Vec3};
 use cgmath::prelude::*;
@@ -400,7 +401,7 @@ mod tests {
         let limit_plane = shifted(plane, -Vec3::unit_x() * 38.0, tol).unwrap();
         let limit = cap(&body, limit_plane).unwrap();
         let result = profile
-            .extrude_up_to_face(plane, &body, &limit, 0.0)
+            .extrude_up_to_face(plane, &body, &limit, 0.0, 0.0)
             .unwrap();
         near(result.volume(), PI * 20.834734325948986_f64.powi(2) * 38.0);
     }
@@ -419,16 +420,16 @@ mod tests {
         .unwrap();
         near(
             profile
-                .extrude_up_to_face(plane, &target, &limit, 2.0)
+                .extrude_up_to_face(plane, &target, &limit, 2.0, 0.0)
                 .unwrap()
                 .volume(),
             32.0,
         );
         assert!(profile
-            .extrude_up_to_face(plane, &target, &limit, 11.0)
+            .extrude_up_to_face(plane, &target, &limit, 11.0, 0.0)
             .is_err());
         assert!(profile
-            .extrude_up_to_face(plane, &target, &limit, f64::NAN)
+            .extrude_up_to_face(plane, &target, &limit, f64::NAN, 0.0)
             .is_err());
     }
 
@@ -459,7 +460,7 @@ mod tests {
             .unwrap();
         let profile = rectangle(-1.0, -1.0, 1.0, 1.0);
         let result = profile
-            .extrude_up_to_face(Plane3::xy(), &target, limit, 0.0)
+            .extrude_up_to_face(Plane3::xy(), &target, limit, 0.0, 0.0)
             .unwrap();
         near(
             result.volume(),
@@ -467,7 +468,7 @@ mod tests {
         );
         assert_eq!(result.solids().len(), 1);
         assert!(rectangle(-6.0, -1.0, 6.0, 1.0)
-            .extrude_up_to_face(Plane3::xy(), &target, limit, 0.0)
+            .extrude_up_to_face(Plane3::xy(), &target, limit, 0.0, 0.0)
             .is_err());
     }
 
@@ -539,7 +540,7 @@ mod tests {
             .find(|f| matches!(f.surface(), Surface3::Cylinder(_)))
             .unwrap();
         let tool = profile
-            .extrude_up_to_face(profile_plane, &body, limit, 0.0)
+            .extrude_up_to_face(profile_plane, &body, limit, 0.0, 0.0)
             .unwrap();
         near(
             body.union(&tool).unwrap().volume(),
@@ -857,17 +858,22 @@ mod tests {
 impl Profile {
     /// Sweep to the selected surface. Planar limits use their infinite support;
     /// curved limits must cover the full profile with their trimmed face.
-    /// The offset is measured from the sketch toward the automatically chosen limit.
+    /// Both offsets follow the automatically chosen extrusion direction: the
+    /// start offset moves the sketch and the end offset moves the limiting surface.
     pub fn extrude_up_to_face(
         &self,
         plane: Plane3,
         target: &Compound,
         limit: &FaceHandle,
         offset: f64,
+        end_offset: f64,
     ) -> KernelResult<Compound> {
         check_limit(target, limit)?;
         if !offset.is_finite() {
             return Err(invalid("extrusion offset must be finite"));
+        }
+        if !end_offset.is_finite() {
+            return Err(invalid("extrusion end offset must be finite"));
         }
         let tol = self.tolerance();
         let origin = profile_center(self, plane)?;
@@ -892,7 +898,11 @@ impl Profile {
                 direction = -direction;
             }
         }
-        let start_plane = shifted(plane, direction * offset, tol)?;
+        // Trim against the original face from a shifted start, then translate
+        // the result. This moves even curved limits without changing the final
+        // start position or letting the end offset reverse the chosen direction.
+        let start_offset = offset - end_offset;
+        let start_plane = shifted(plane, direction * start_offset, tol)?;
         let probe = self.extrude(start_plane, direction)?;
         let base = cap(&probe, start_plane)?;
         let reach = if let Surface3::Plane(p) = limit.surface() {
@@ -904,7 +914,7 @@ impl Profile {
         } else {
             target_points
                 .iter()
-                .map(|point| (point - (origin + direction * offset)).dot(direction))
+                .map(|point| (point - (origin + direction * start_offset)).dot(direction))
                 .fold(f64::NEG_INFINITY, f64::max)
         };
         if reach <= tol.linear {
@@ -935,6 +945,13 @@ impl Profile {
                 }
             }
         }
+        let result = if end_offset != 0.0 {
+            result.transformed(RigidTransform3::new(
+                Matrix3::identity(), direction * end_offset, tol,
+            )?)?
+        } else {
+            result
+        };
         Ok(result.with_creation_roles(roles))
     }
 

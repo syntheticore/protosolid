@@ -308,11 +308,11 @@ export class ShapexBackend {
     ))
   }
 
-  extrudeUpToFace(profile, target, offset) {
+  extrudeUpToFace(profile, target, offset, endOffset = 0) {
     const body = shapexValue(target.solid.geom()).toCompound()
     try {
       return featureResult('extrusion up to face', () => this.profile(profile).extrudeUpToFace(
-        this.plane(profile.sketch.workplane), body, shapexValue(target.geom()), offset,
+        this.plane(profile.sketch.workplane), body, shapexValue(target.geom()), offset, endOffset,
       ))
     } finally { body.free() }
   }

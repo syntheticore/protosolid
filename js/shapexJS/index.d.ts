@@ -317,7 +317,7 @@ export interface Profile {
   tolerance(): ModelTolerance
   extrude(plane: Plane3, vector: Vec3): Compound
   revolve(plane: Plane3, axis: Axis3, angle: number): Compound
-  extrudeUpToFace(plane: Plane3, target: Compound, limit: Face, offset?: number): Compound
+  extrudeUpToFace(plane: Plane3, target: Compound, limit: Face, offset?: number, endOffset?: number): Compound
   revolveUpToFace(plane: Plane3, axis: Axis3, target: Compound, limit: Face, forward?: boolean): Compound
   revolveBetweenFaces(plane: Plane3, axis: Axis3, fromBody: Compound, from: Face, untilBody: Compound, until: Face, forward?: boolean): Compound
   sweep(plane: Plane3, railPlane: Plane3, rail: TrimmedCurve2): Compound

@@ -1573,6 +1573,7 @@ export class PlaceFeature extends Feature {
       const canonical = this.sourceTree.findChild(sourceDefinitionId) || source
       definition = new ComponentDefinition(canonical.creator.title, canonical.creator.color)
       definition.hidden = !!canonical.creator.hidden
+      definition.material = canonical.creator.material
       definitions.set(sourceDefinitionId, definition)
     }
     component.creator = source.instanceOf ? Object.assign(Object.create(definition), {

@@ -104,7 +104,7 @@
             :items="displayModes"
             hot-key="W"
             v-model:chosen="displayMode"
-            @hover="previewDisplayMode = $event"
+            @hover="previewDisplayMode = $event === 'pathTraced' ? null : $event"
             @unhover="previewDisplayMode = null"
           )
 

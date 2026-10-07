@@ -61,7 +61,7 @@
       value(value) {
         if(this.inner.getBase() == value) return
         this.inner.setBase(value)
-        this.update()
+        this.update(true)
       },
     },
 

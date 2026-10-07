@@ -991,6 +991,24 @@ export class Face extends Shape {
     }
     return this.cachedTesselation
   }
+
+  tesselateAt(linearTolerance, angularTolerance) {
+    const oc = window.oc.oc
+    const copy = new oc.BRepBuilderAPI_Copy_2(this.geom(), true, false)
+    const shape = copy.Shape()
+    const mesher = new oc.BRepMesh_IncrementalMesh_2(
+      shape, linearTolerance, false, angularTolerance, false,
+    )
+    let tessellation
+    exploreShape(shape, 'face', face => {
+      tessellation = new Face(this.solid, face).tesselate()
+      face.delete()
+    })
+    mesher.delete()
+    shape.delete()
+    copy.delete()
+    return tessellation
+  }
 }
 
 

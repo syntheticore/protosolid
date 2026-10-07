@@ -42,8 +42,16 @@
             span Title
 
           label
-            input.input(type="number" v-model="material.density" min="0.0" step="0.01" max="10.0")
-            span Density
+            input.input(type="number" v-model.number="material.density" min="0.0" step="0.01" max="10.0")
+            span Density (g/cm³)
+
+          label
+            input.input(type="number" v-model.number="material.elasticModulus" min="0" step="any")
+            span Elastic modulus (MPa)
+
+          label
+            input.input(type="number" v-model.number="material.poissonRatio" min="0" max="0.449" step="0.01")
+            span Poisson ratio
 
         fieldset.visual
 
@@ -112,6 +120,7 @@
       'component.creator.material': {
         handler() {
           this.bus.emit('render-needed')
+          this.bus.emit('material-changed')
         },
         deep: true
       },

@@ -6,6 +6,8 @@ export class Material {
   constructor(title) {
     this.title = title
     this.density = 1.0 // g/cm^3
+    this.elasticModulus = null // MPa = N/mm²
+    this.poissonRatio = null
     // Three.js materials contain mutable render state and should not be
     // deeply proxied when the owning document is made reactive by Vue.
     this.displayMaterial = markRaw(new THREE.MeshPhysicalMaterial({
@@ -82,6 +84,8 @@ export class Material {
   clone() {
     const out = new Material(this.title)
     out.density = this.density
+    out.elasticModulus = this.elasticModulus
+    out.poissonRatio = this.poissonRatio
     out.color = this.color
     out.roughness = this.roughness
     out.metal = this.metal
@@ -96,6 +100,8 @@ export class Material {
     return {
       title: this.title,
       density: this.density,
+      elasticModulus: this.elasticModulus,
+      poissonRatio: this.poissonRatio,
       color: this.color,
       roughness: this.roughness,
       metal: this.metal,
@@ -110,6 +116,8 @@ export class Material {
     const material = new this(dump.title)
     material.title = dump.title
     material.density = dump.density
+    material.elasticModulus = dump.elasticModulus ?? material.elasticModulus
+    material.poissonRatio = dump.poissonRatio ?? material.poissonRatio
     material.color = dump.color
     material.roughness = dump.roughness
     material.metal = dump.metal
@@ -131,6 +139,8 @@ export class Aluminum extends Material {
     super('Aluminum')
 
     this.density = 2.7
+    this.elasticModulus = 69000
+    this.poissonRatio = 0.33
 
     this.metal = true
     this.color = '#abc5d9'
@@ -143,6 +153,8 @@ export class DarkViolet extends Material {
     super('Aluminum Anodized')
 
     this.density = 2.7
+    this.elasticModulus = 69000
+    this.poissonRatio = 0.33
 
     this.metal = true
     this.color = '#1a1835'
@@ -156,6 +168,8 @@ export class Polystyrene extends Material {
     super('Polystyrene')
 
     this.density = 0.9
+    this.elasticModulus = 3000
+    this.poissonRatio = 0.35
 
     this.color = '#ff57a3'
     this.roughness = 0.3
@@ -181,6 +195,8 @@ export class Glass extends Material {
     super('Glass')
 
     this.density = 2.2
+    this.elasticModulus = 70000
+    this.poissonRatio = 0.22
 
     this.color = 'white'
     this.roughness = 0.0

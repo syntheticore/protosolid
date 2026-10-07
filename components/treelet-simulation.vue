@@ -35,8 +35,12 @@
 
           label(v-if="simulation.mode == 'fluid'")
             span Fluid
-            select.input(:value="simulation.fluid" @change="fluidChanged($event)")
-              option(v-for="(material, key) in fluidMaterials" :key="key" :value="key") {{ material.label }}
+            ComboBox.fluid-selector(
+              :model-value="simulation.fluid"
+              label="Fluid"
+              :options="Object.entries(fluidMaterials).map(([value, material]) => ({ value, label: material.label }))"
+              @update:model-value="fluidChanged"
+            )
 
           label.picker-row(v-for="picker in configuration.pickers" :key="picker.key")
             span {{ picker.label }} ({{ simulation[picker.key].length }})
@@ -57,6 +61,10 @@
               @change="changed(input.key, $event)"
             )
 
+          label.quality(v-if="simulation.mode == 'static'")
+            span Quality {{ simulation.quality }} / 5
+            input(type="range" min="1" max="5" step="1" title="Refines the solver grid and animated display mesh" :value="simulation.quality" @change="changed('quality', $event)")
+
           template(v-if="simulation.mode == 'fluid'")
 
             label.display-option
@@ -66,6 +74,23 @@
             label.display-option
               span Flow lines
               input(type="checkbox" :checked="simulation.showFlowLines" @change="displayChanged('showFlowLines', $event)")
+
+        fieldset.result-stats(v-if="simulation.mode == 'static' && simulation.result")
+
+          label.result-summary
+            span Max von Mises
+            span {{ simulation.result.maxStress.toPrecision(3) }} MPa
+
+          label.result-summary
+            span Max displacement
+            span {{ simulation.result.maxDisplacement.toPrecision(3) }} mm
+
+          label.result-summary(v-if="simulation.result.relativeResidual > 0.001")
+            span Solver residual
+            span {{ (simulation.result.relativeResidual * 100).toFixed(1) }}% — results may be inaccurate
+
+        transition(name="fade")
+          .error-msg(v-if="warning") {{ warning }}
 
 </template>
 
@@ -88,6 +113,22 @@
 
   .invalid .box
     border-color: $warn !important
+
+  .error-msg
+    font-size: 12px
+    font-weight: bold
+    padding: 6px 10px
+    transition: all 0.25s
+    text-align: center
+    color: lighten($warn, 65%)
+    background: darken($warn, 50%)
+
+  .fade-enter-from
+  .fade-leave-to
+    opacity: 0
+    padding-top: 0
+    padding-bottom: 0
+    margin-bottom: -12px
 
   .picker
     width: 24px !important
@@ -121,8 +162,25 @@
     width: 64px
     justify-self: end
 
-  select.input
+  .quality input
+    width: 62px
+    justify-self: end
+
+  .result-stats
+    background: $dark2 * 1.5
+    border-top: 1px solid $dark1 * 1.4
+    padding-bottom: 0
+
+  .result-summary span:first-child
+    font-weight: normal
+
+  .result-summary span:last-child
+    justify-self: end
+    text-align: right
+
+  .fluid-selector
     width: 120px
+    justify-self: end
 
   .fluid fieldset .display-option input[type="checkbox"]
     margin-left: 0
@@ -190,9 +248,9 @@
         { key: 'loadFaces', label: 'Loaded faces' },
       ],
       inputs: [
-        { key: 'forceX', label: 'Force X' },
-        { key: 'forceY', label: 'Force Y' },
-        { key: 'forceZ', label: 'Force Z' },
+        { key: 'forceX', label: 'Force X (N)' },
+        { key: 'forceY', label: 'Force Y (N)' },
+        { key: 'forceZ', label: 'Force Z (N)' },
       ],
     },
   }
@@ -232,9 +290,10 @@
 
       warning() {
         this.document.timeline.marker
-        const problem = this.simulation.resolve(this.document.top())
-        return problem?.warning ? problem.message : null
+        const problem = this.simulation.resolve(this.document.top(), false)
+        return typeof problem == 'string' ? problem : problem?.warning ? problem.message : null
       },
+
     },
 
     watch: {
@@ -266,6 +325,7 @@
       this.bus.on('resize', this.updatePaths)
       this.bus.on('tree-layout', this.updatePaths)
       this.bus.on('escape', this.onEscape)
+      this.bus.on('material-changed', this.materialChanged)
       this.document.on('regenerated', this.regenerated)
       if(this.expanded) {
         this.solve()
@@ -286,6 +346,7 @@
       this.bus.off('resize', this.updatePaths)
       this.bus.off('tree-layout', this.updatePaths)
       this.bus.off('escape', this.onEscape)
+      this.bus.off('material-changed', this.materialChanged)
       this.document.off('regenerated', this.regenerated)
     },
 
@@ -326,11 +387,12 @@
 
       advancePlayback(time) {
         if(!this.playing) return
+        this.playbackFrame = requestAnimationFrame(this.advancePlayback)
+        if(this.previousFrameTime !== null && time - this.previousFrameTime < 30) return
         if(this.previousFrameTime !== null) this.playbackTime += Math.min(time - this.previousFrameTime, 50)
         this.previousFrameTime = time
         this.simulation.deformationFactor = (1 + Math.cos(2 * Math.PI * this.playbackTime / 2400)) / 2
         this.simulation.animationRevision++
-        this.playbackFrame = requestAnimationFrame(this.advancePlayback)
       },
 
       stopPlayback(reset) {
@@ -348,6 +410,13 @@
       regenerated() {
         if(this.expanded) this.solve()
         this.$nextTick(this.updatePaths)
+      },
+
+      materialChanged() {
+        if(this.simulation.mode != 'static') return
+        this.$nextTick(() => {
+          if(this.expanded) this.solve()
+        })
       },
 
       async solve() {
@@ -369,8 +438,8 @@
         this.solve()
       },
 
-      fluidChanged(event) {
-        this.simulation.setFluid(event.target.value)
+      fluidChanged(fluid) {
+        this.simulation.setFluid(fluid)
         this.document.hasChanges = true
         this.solve()
       },

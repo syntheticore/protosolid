@@ -29,6 +29,7 @@
   const originalPositions = originalGeometry.getAttribute('position').array.slice()
   const originalNormals = originalGeometry.getAttribute('normal').array.slice()
   let analysisGeometry = null
+  let analysisResult = null
   let analysisPositions = null
   let analysisNormals = null
   let analysisDisplacements = null
@@ -103,8 +104,16 @@
       simulation.result.componentId == props.component.id &&
       simulation.result.solidId == props.face.solid.id
     if(props.colorMode == 'static' && simulatedFace) {
-      if(!analysisGeometry) {
-        analysisGeometry = new TessellateModifier(simulation.result.step, 10).modify(originalGeometry)
+      if(analysisResult != simulation.result) {
+        analysisGeometry?.dispose()
+        const quality = simulation.quality - 1
+        const edgeLength = simulation.result.step * (3 - quality * 0.5)
+        const angularTolerance = 1.75 - quality * 0.175
+        const tessellation = props.face.tesselateAt(edgeLength * 0.25, angularTolerance)
+        const baseGeometry = window.alcRenderer.convertBufferGeometry(tessellation)
+        analysisGeometry = new TessellateModifier(edgeLength, 10).modify(baseGeometry)
+        baseGeometry.dispose()
+        analysisResult = simulation.result
         analysisPositions = analysisGeometry.getAttribute('position').array.slice()
         analysisNormals = analysisGeometry.getAttribute('normal').array.slice()
       }
@@ -131,7 +140,7 @@
       const staticSample = props.colorMode == 'static' && simulatedFace && simulation.sampleAt(point)
       const value = props.colorMode == 'thermal'
         ? simulatedFace && simulation.temperatureAt(point)
-        : staticSample?.stress
+        : staticSample?.relativeStress
       if(value === undefined || value === false) {
         color.setRGB(0.18, 0.18, 0.18)
       } else {
@@ -150,7 +159,24 @@
       values.set(color.toArray(), i * 3)
     }
     faceMesh.geometry.setAttribute('color', new THREE.BufferAttribute(values, 3))
-    if(analysisDisplacements) updateDeformation()
+
+    if(analysisDisplacements) {
+      const bounds = new THREE.Box3()
+      const point = new THREE.Vector3()
+      for(let i = 0; i < analysisDisplacements.length; i += 3) {
+        const x = analysisPositions[i]
+        const y = analysisPositions[i + 1]
+        const z = analysisPositions[i + 2]
+        bounds.expandByPoint(point.set(x, y, z))
+        bounds.expandByPoint(point.set(
+          x + analysisDisplacements[i],
+          y + analysisDisplacements[i + 1],
+          z + analysisDisplacements[i + 2],
+        ))
+      }
+      analysisGeometry.boundingSphere = bounds.getBoundingSphere(new THREE.Sphere())
+      updateDeformation()
+    }
   }
 
   function updateDeformation() {
@@ -172,7 +198,6 @@
     position.needsUpdate = true
     colors.needsUpdate = true
     analysisGeometry.computeVertexNormals()
-    analysisGeometry.computeBoundingSphere()
   }
 
   function getMaterial() {

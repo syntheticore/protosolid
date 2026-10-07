@@ -602,6 +602,7 @@
       addMaterial: function() {
         this.document.materials[0] ||= new Aluminum()
         this.document.activeComponent.creator.material = this.document.materials[0]
+        this.bus.emit('material-changed')
       },
 
       addHeatFlow: function() {

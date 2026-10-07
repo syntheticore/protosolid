@@ -6085,6 +6085,47 @@ fn shell_rounded_chamfered_torus() {
 }
 
 #[test]
+fn shell_filleted_curved_pocket_document_44() {
+    // The 1 mm pocket fillet collapses at the default 1 mm shell thickness.
+    let tol = ModelTolerance::default();
+    let circle = |center, radius| Profile::new(
+        Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tol).unwrap(), [], tol,
+    ).unwrap();
+    let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+    let cylinder = circle(Point2::new(0.0, 0.0), 46.54400344616973)
+        .extrude(plane, Vec3::new(0.0, 68.0, 0.0)).unwrap();
+    let rim = cylinder.edges().find(|edge| {
+        matches!(edge.curve(), Curve3::Circle(circle) if circle.center().y > 67.0)
+    }).unwrap().clone();
+    let rounded = cylinder.fillet(&[rim], 30.0).unwrap();
+    let limit = rounded.faces().find(|face| !matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_))).unwrap().clone();
+    let top = Plane3::new(Point3::new(0.0, 68.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+    let cutter = circle(Point2::new(0.0, 30.413996263282527), 9.684232064779334)
+        .extrude_up_to_face(top, &rounded, &limit, -2.0, 4.0).unwrap();
+    let pocket = rounded.difference(&cutter).unwrap();
+    let rim = pocket.edges().find(|edge| {
+        let faces = edge.connected_faces().unwrap();
+        faces.iter().any(|face| !matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_)))
+            && faces.iter().any(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+            && !matches!(edge.curve(), Curve3::Circle(_))
+    }).unwrap().clone();
+    let body = pocket.fillet(&[rim], 1.0).unwrap();
+    let bottom = body.faces().find(|face| {
+        matches!(face.surface(), Surface3::Plane(plane) if plane.origin().y < 1.0)
+    }).unwrap().clone();
+    let top = body.faces().find(|face| {
+        matches!(face.surface(), Surface3::Plane(plane) if plane.origin().y > 67.0)
+    }).unwrap().clone();
+    assert!(body.shell(&[top], -1.0).is_err());
+    for openings in [vec![], vec![bottom]] {
+        let shell = body.shell(&openings, -1.0).unwrap();
+        assert_eq!(shell.solids().len(), 1);
+        assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+        shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn extrude_circle_on_open_torus_shell() {
     let tol = ModelTolerance::default();
     let body = rounded_chamfered_torus(true);

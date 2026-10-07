@@ -1023,6 +1023,12 @@ fn retarget_offset_intersection_endpoints(
     supports: &BTreeMap<FaceId, Surface3>,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<()> {
+    // Collapsed blend rails share the same exact center curve. Retargeting each
+    // rail independently would give the two surviving faces different seams.
+    // Their p-curves are constructed on the surviving supports after trimming.
+    if edge.pcurves.is_empty() {
+        return Ok(());
+    }
     let Curve3::SurfaceIntersection(intersection) = &edge.curve else {
         return Ok(());
     };
@@ -1202,6 +1208,18 @@ fn trim_offset_edge(
         } else {
             -1.0
         };
+        if edge.pcurves.is_empty() && domain.period.is_none() {
+            // The blend center support is extended beyond its rails. A closed
+            // rail still traverses only its source turn, starting at its seam.
+            let projection = edge.curve.project_on_trim(reference, source.range(), tolerance)?;
+            let period = source.range().span().abs();
+            let start = projection.parameter
+                + (((bounds.start + bounds.end) * 0.5 - projection.parameter) / period).round() * period;
+            return ParameterRange::new(
+                start,
+                start + direction * period,
+            );
+        }
         return if let Some(period) = domain.period {
             // Projection identifies a point modulo a full turn. Keep the
             // source chart's turn so its p-curves remain continuous at the
@@ -1965,12 +1983,37 @@ pub(super) fn support_patches(
                         provenance.vertices[end] = original.vertices[end].clone();
                     }
                 }
-                segments.push(BrepPatchSegment {
-                    provenance,
-                    curve: edge.curve.clone(),
-                    pcurve,
-                    range,
-                });
+                let mut parameters = vec![range.start, range.end];
+                for neighbor in topology.edge_faces(coedge.edge())? {
+                    if !collapsed.contains_key(&neighbor) {
+                        continue;
+                    }
+                    // Both rails of a collapsed blend become one boundary.
+                    // Retain the seams from both neighboring faces by splitting
+                    // that boundary at every surviving rail vertex.
+                    for rail in topology.face_edges(neighbor)? {
+                        for vertex in topology.edge(rail)?.vertices() {
+                            if let Some(point) = vertices.get(&vertex) {
+                                let projection = edge.curve.project_on_trim(*point, range, tolerance)?;
+                                if projection.distance <= tolerance.linear * 8.0 {
+                                    parameters.push(projection.parameter);
+                                }
+                            }
+                        }
+                    }
+                }
+                parameters.sort_by(|a, b| ((a - range.start) / range.span())
+                    .total_cmp(&((b - range.start) / range.span())));
+                parameters.dedup_by(|a, b| (*a - *b).abs() <= tolerance.parameter);
+                for pair in parameters.windows(2) {
+                    let retained = ParameterRange::new(pair[0], pair[1])?;
+                    segments.push(BrepPatchSegment {
+                        provenance: provenance.trimmed(range, retained),
+                        curve: edge.curve.clone(),
+                        pcurve: pcurve.clone(),
+                        range: retained,
+                    });
+                }
                 let source_edge = topology.edge(coedge.edge())?;
                 let vertex = source_edge.vertices()[if coedge.is_forward() { 1 } else { 0 }];
                 if let Some(curve) = corner_edges.get(&(vertex, face_id)) {

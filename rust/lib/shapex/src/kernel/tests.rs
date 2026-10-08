@@ -6162,6 +6162,44 @@ fn shell_past_circular_fillet_document_45() {
 }
 
 #[test]
+fn shell_through_top_chamfer_document_46() {
+    // The 0.5 mm chamfer vanishes before the 1 mm vertical fillet collapses.
+    let tol = ModelTolerance::default();
+    let arc = |start, middle, end| TrimmedCurve2::arc_through(start, middle, end).unwrap();
+    let wire = Wire2::new([
+        arc(Point2::new(9.444171418893058, -9.381765000711214), Point2::new(-9.381765000711212, -9.44417141889306), Point2::new(-9.44417141889306, 9.38176500071121)),
+        TrimmedCurve2::line(Point2::new(-9.44417141889306, 9.38176500071121), Point2::new(6.398874075080942, 25.33019660511283)).unwrap(),
+        TrimmedCurve2::line(Point2::new(6.398874075080936, 25.33019660511284), Point2::new(-18.465793285138364, 73.60545721113832)).unwrap(),
+        arc(Point2::new(-18.465793285138375, 73.60545721113832), Point2::new(-41.74986151465153, 81.0582106603938), Point2::new(-49.20261496390702, 57.774142430880666)),
+        TrimmedCurve2::line(Point2::new(-49.20261496390702, 57.774142430880666), Point2::new(-15.36841083938433, -7.915657390128813)).unwrap(),
+        arc(Point2::new(-15.368410839384332, -7.915657390128809), Point2::new(3.3107605450329225, -16.967160877986043), Point2::new(17.216860111955928, -1.557373279386644)),
+        TrimmedCurve2::line(Point2::new(17.216860111955896, -1.557373279386681), Point2::new(9.444171418893063, -9.381765000711212)).unwrap(),
+    ], tol).unwrap();
+    let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+    let mut body = Profile::new(wire, [], tol).unwrap().extrude(plane, Vec3::new(0.0, 8.0, 0.0)).unwrap();
+    for (point, radius) in [
+        (Point3::new(17.216860111955896, 4.0, 1.557373279386681), 1.0),
+        (Point3::new(6.398874075080936, 4.0, -25.33019660511284), 16.0),
+    ] {
+        let edge = body.edges().find(|edge| {
+            let [start, end] = edge.endpoints().unwrap();
+            (start + (end - start) * 0.5).distance(point) < tol.linear
+        }).unwrap().clone();
+        body = body.fillet(&[edge], radius).unwrap();
+    }
+    let top = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().y > 7.9)).unwrap();
+    body = body.chamfer(&top.boundary_edges().unwrap(), 0.5).unwrap();
+    let bottom = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane) if plane.origin().y < 0.1)).unwrap().clone();
+    for thickness in [0.5, 0.8, 0.9, 1.0] {
+        let shell = body.shell(&[bottom.clone()], -thickness)
+            .unwrap_or_else(|error| panic!("{thickness} mm: {error}"));
+        assert_eq!(shell.solids().len(), 1);
+        assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+        shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn extrude_circle_on_open_torus_shell() {
     let tol = ModelTolerance::default();
     let body = rounded_chamfered_torus(true);

@@ -1538,7 +1538,12 @@ fn offset_body(
                 break;
             }
         }
-        let curve = intersect_collapsed_blend(&supports[first], &supports[second], guide, period, tolerance)?;
+        let super::DomainBounds::Bounded(range) = guide.domain().bounds else {
+            return Err(unsupported("unbounded collapsed blend guide"));
+        };
+        let curve = intersect_collapsed_blend(
+            &supports[first], &supports[second], guide, range, period, tolerance,
+        )?;
         collapsed.insert(face_id, CollapsedSupport::Curve(curve));
     }
 
@@ -1554,15 +1559,154 @@ fn offset_body(
             &mut supports,
         )?);
     }
-    let offset = rebuild_supports(
-        source,
-        supports,
-        bounds,
-        changed_supports,
-        false,
-        &collapsed,
-    )?;
+    let patches = loop {
+        let patches = support_patches(
+            topology,
+            tolerance,
+            supports.clone(),
+            bounds.clone(),
+            changed_supports.clone(),
+            false,
+            false,
+            &collapsed,
+        )?;
+        let mut removed = BTreeSet::new();
+        for patch in patches.values().flatten() {
+            if offset_patch_collapsed(patch, tolerance)? {
+                for face_id in supports.keys() {
+                    if patch.sources.contains(&topology.face(*face_id)?.name()) {
+                        removed.insert(*face_id);
+                    }
+                }
+            }
+        }
+        if removed.is_empty() {
+            break patches;
+        }
+        // A thin offset face can reverse after its two boundary rails cross.
+        // Replace the entire strip by the intersection of the surviving supports.
+        for face_id in &removed {
+            supports.remove(face_id);
+            bounds.remove(face_id);
+        }
+        let previous_collapsed = collapsed.clone();
+        for face_id in removed {
+            let edges = topology.face_edges(face_id)?;
+            let neighbors = edges
+                .iter()
+                .map(|edge| topology.edge_faces(*edge))
+                .collect::<KernelResult<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect::<BTreeSet<_>>();
+            let surviving = neighbors
+                .iter()
+                .filter(|face| supports.contains_key(face))
+                .copied()
+                .collect::<Vec<_>>();
+            let support = match surviving.as_slice() {
+                [first, second] => {
+                    let edge_id = edges
+                        .iter()
+                        .find(|edge| {
+                            topology.edge_faces(**edge).is_ok_and(|faces| faces.contains(first))
+                        })
+                        .unwrap();
+                    let edge = topology.edge(*edge_id)?;
+                    CollapsedSupport::Curve(intersect_collapsed_blend(
+                        &supports[first],
+                        &supports[second],
+                        edge.curve(),
+                        edge.range(),
+                        None,
+                        tolerance,
+                    )?)
+                }
+                [face] => {
+                    let guide = neighbors
+                        .iter()
+                        .find_map(|neighbor| match previous_collapsed.get(neighbor) {
+                            Some(CollapsedSupport::Curve(curve)) => Some(curve),
+                            _ => None,
+                        })
+                        .ok_or_else(|| unsupported("collapsed offset face without a surviving rail"))?;
+                    let range = face_parameter_bounds(topology, face_id, tolerance)?;
+                    let source_point = topology.face(face_id)?
+                        .surface()
+                        .evaluate(
+                            (range[0].start + range[0].end) * 0.5,
+                            (range[1].start + range[1].end) * 0.5,
+                        )?
+                        .point;
+                    let parameter = guide.project(source_point, tolerance)?.parameter;
+                    let uv = supports[face]
+                        .project(guide.evaluate(parameter)?.point, tolerance)?
+                        .parameters;
+                    CollapsedSupport::Point(
+                        guide
+                            .intersect_surface_near(&supports[face], parameter, uv, tolerance)?
+                            .point,
+                    )
+                }
+                _ => {
+                    return Err(unsupported(
+                        "removal of an offset face without two surviving supports",
+                    ));
+                }
+            };
+            collapsed.insert(face_id, support);
+        }
+    };
+    let offset = commit_support_patches(source, patches, changed_supports)?;
     Ok((offset, has_vanished_blends))
+}
+
+fn offset_patch_collapsed(
+    patch: &BrepPatch,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<bool> {
+    let sign = if patch.orientation == FaceOrientation::Forward {
+        1.0
+    } else {
+        -1.0
+    };
+    let domains = patch.surface.domains();
+    for loop_ in &patch.loops {
+        if loop_.kind != super::LoopKind::Outer {
+            continue;
+        }
+        let mut area = 0.0;
+        let mut principal_area = 0.0;
+        let mut previous_end: Option<Point2> = None;
+        for segment in &loop_.segments {
+            let start = segment.pcurve.evaluate(segment.range.start)?.point;
+            let end = segment.pcurve.evaluate(segment.range.end)?.point;
+            let mut shift = crate::Vec2::new(0.0, 0.0);
+            if let Some(previous) = previous_end {
+                for axis in 0..2 {
+                    if let Some(period) = domains[axis].period {
+                        let delta = previous[axis] - start[axis];
+                        let candidate = (delta / period).round() * period;
+                        if (delta - candidate).abs() <= tolerance.parameter * 64.0 {
+                            shift[axis] = candidate;
+                        }
+                    }
+                }
+            }
+            let contribution = segment
+                .pcurve
+                .signed_area_contribution(segment.range, tolerance.parameter)?;
+            principal_area += contribution;
+            area += contribution + 0.5 * (shift.x * (end.y - start.y) - shift.y * (end.x - start.x));
+            previous_end = Some(end + shift);
+        }
+        if principal_area * sign <= tolerance.parameter.powi(2)
+            && area * sign <= tolerance.parameter.powi(2)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[derive(Clone)]
@@ -1618,12 +1762,10 @@ fn intersect_collapsed_blend(
     first: &Surface3,
     second: &Surface3,
     guide: &Curve3,
+    mut range: ParameterRange,
     period: Option<f64>,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Curve3> {
-    let super::DomainBounds::Bounded(mut range) = guide.domain().bounds else {
-        return Err(unsupported("unbounded collapsed blend guide"));
-    };
     let intersections = first.intersect_surface(second, tolerance).or_else(|error| {
         if !error.diagnostics().iter().all(|d| d.kind == DiagnosticKind::UnsupportedGeometry) {
             return Err(error);
@@ -1715,7 +1857,16 @@ fn collapsed_offset_vertex(
             constraints.push(CornerConstraint::Curve(&edges[&edge_id].curve));
         }
     }
-    refine_support_corner(topology.vertex(vertex)?.point(), &constraints, tolerance)
+    // At tangent supports, start on the replacement rail rather than correcting
+    // from the old corner through a singular surface intersection.
+    let mut seed = topology.vertex(vertex)?.point();
+    if let Some(support) = faces.iter().find_map(|face| collapsed.get(face)) {
+        seed = match support {
+            CollapsedSupport::Curve(curve) => curve.project(seed, tolerance)?.point,
+            CollapsedSupport::Point(point) => *point,
+        };
+    }
+    refine_support_corner(seed, &constraints, tolerance)
 }
 
 fn rebuild_supports(
@@ -1738,6 +1889,16 @@ fn rebuild_supports(
         false,
         collapsed,
     )?;
+    commit_support_patches(source, patches_by_shell, changed_supports)
+}
+
+fn commit_support_patches(
+    source: &Compound,
+    patches_by_shell: BTreeMap<super::ShellId, Vec<BrepPatch>>,
+    changed_supports: BTreeSet<FaceId>,
+) -> KernelResult<Compound> {
+    let topology = source.topology();
+    let tolerance = source.tolerance();
     let mut kernel = Kernel::new(tolerance)?;
     let mut transaction = kernel.begin_operation();
     let mut affected_faces = changed_supports.clone();

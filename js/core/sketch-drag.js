@@ -147,6 +147,8 @@ export function solveDrag(primitives, constraints, targets, solve) {
   }
   const initialDistance = targetDistance(accepted)
   if(!Number.isFinite(initialDistance)) return { results: accepted, failed: true }
+  const targetGroups = [...new Set(targets.map(target => target.property))]
+    .map(property => targets.filter(target => target.property == property))
   // Bounded work per pointer event. A new event resumes from the accepted
   // geometry, including after reversing away from a singularity.
   for(let attempt = 0; attempt < 48; attempt++) {
@@ -154,31 +156,53 @@ export function solveDrag(primitives, constraints, targets, solve) {
     if(remaining <= tolerance) break
     const distance = Math.min(step, remaining)
     const byId = index(accepted)
-    const objectives = targets.map((target, i) => {
-      const value = byId.get(target.id)[target.property]
-      const desired = value + (target.value - value) * distance / remaining
-      return target.property == 'radius' ? {
-        id: `drag-${i}`, type: target.type == 'arc' ? 'arc_radius' : 'circle_radius',
-        [target.type == 'arc' ? 'a_id' : 'c_id']: target.id, radius: desired, temporary: true,
-      } : {
-        id: `drag-${i}`, type: `coordinate_${target.property}`, p_id: target.id,
-        [target.property]: desired, temporary: true,
+    const objectivesFor = group => {
+      const remaining = Math.hypot(...group.map(target => target.value - byId.get(target.id)[target.property]))
+      const fraction = Math.min(1, step / remaining)
+      return group.map((target, i) => {
+        const value = byId.get(target.id)[target.property]
+        const desired = value + (target.value - value) * fraction
+        return target.property == 'radius' ? {
+          id: `drag-${i}`, type: target.type == 'arc' ? 'arc_radius' : 'circle_radius',
+          [target.type == 'arc' ? 'a_id' : 'c_id']: target.id, radius: desired, temporary: true,
+        } : {
+          id: `drag-${i}`, type: `coordinate_${target.property}`, p_id: target.id,
+          [target.property]: desired, temporary: true,
+        }
+      })
+    }
+    const solveCandidate = objectives => {
+      // The wrapper mutates its primitive objects when applying a solution.
+      const solution = solve([...accepted.map(p => ({ ...p })), ...constraints, ...objectives])
+      const candidateById = index(solution.results)
+      const candidate = accepted.map(p => candidateById.get(p.id))
+      if(solution.failed || solution.conflicting || candidate.some(p => !p) ||
+        !validGeometry(candidate) ||
+        !continuous(accepted, candidate, distance) ||
+        !continuous(primitives, candidate, initialDistance, false) ||
+        !satisfiesConstraints(candidate, constraints)) return null
+      return candidate
+    }
+    let candidate = solveCandidate(objectivesFor(targets))
+    if(targetGroups.length > 1 && (!candidate || targetDistance(candidate) > remaining - distance + tolerance)) {
+      // A locked coordinate can make the combined pointer objectives conflict.
+      // Minimize along each coordinate direction and keep the closest valid
+      // step, so an unreachable direction does not block the remaining freedom.
+      for(const group of targetGroups) {
+        const trial = solveCandidate(objectivesFor(group))
+        if(trial && (!candidate || targetDistance(trial) < targetDistance(candidate))) candidate = trial
       }
-    })
-    // The wrapper mutates its primitive objects when applying a solution.
-    const solution = solve([...accepted.map(p => ({ ...p })), ...constraints, ...objectives])
-    const candidateById = index(solution.results)
-    const candidate = accepted.map(p => candidateById.get(p.id))
-    if(solution.failed || solution.conflicting || candidate.some(p => !p) ||
-      !validGeometry(candidate) ||
-      !continuous(accepted, candidate, distance) ||
-      !continuous(primitives, candidate, initialDistance, false) ||
-      !satisfiesConstraints(candidate, constraints)) {
+    }
+    if(!candidate) {
       step /= 2
       if(step < minimumSize / 8) break
       continue
     }
-    if(targetDistance(candidate) >= remaining - tolerance) break
+    const candidateById = index(candidate)
+    const movement = Math.hypot(...targets.map(target =>
+      candidateById.get(target.id)[target.property] - byId.get(target.id)[target.property]
+    ))
+    if(movement <= tolerance || targetDistance(candidate) >= remaining) break
     accepted = candidate
     const localSizes = sizes(accepted).filter(size => size > minimumSize)
     const localScale = localSizes.length ? Math.min(...localSizes) : scale

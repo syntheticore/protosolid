@@ -2141,7 +2141,7 @@ fn rational_surface_cells(surface: &Surface3) -> KernelResult<Vec<RationalSurfac
         Surface3::Offset(offset) => {
             let mut cells = rational_surface_cells(offset.base())?;
             for cell in &mut cells {
-                cell.padding += offset.distance().abs();
+                cell.padding += offset.maximum_distance();
             }
             Ok(cells)
         }

@@ -122,7 +122,7 @@ fn parameter_bounds(s: &Surface3, bounds: Bounds) -> KernelResult<Bounds> {
             ))
         }
         Surface3::Offset(offset) => {
-            parameter_bounds(offset.base(), bounds.expanded(offset.distance().abs()))
+            parameter_bounds(offset.base(), bounds.expanded(offset.maximum_distance()))
         }
         _ => Err(unavailable()),
     }
@@ -222,7 +222,7 @@ fn intersection(
 fn offset_base(mut surface: &Surface3) -> (&Surface3, f64) {
     let mut distance = 0.0;
     while let Surface3::Offset(offset) = surface {
-        distance += offset.distance().abs();
+        distance += offset.maximum_distance();
         surface = offset.base();
     }
     (surface, distance)
@@ -297,7 +297,7 @@ fn surface_patch(support: &Surface3, uv: Bounds) -> KernelResult<Bounds> {
                     ),
             )
         }
-        Surface3::Offset(s) => Ok(surface_patch(s.base(), uv)?.expanded(s.distance().abs())),
+        Surface3::Offset(s) => Ok(surface_patch(s.base(), uv)?.expanded(s.maximum_distance())),
         _ => surface(support, None),
     }
 }
@@ -341,7 +341,7 @@ fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bounds> {
         Surface3::Offset(o) => {
             // The supplied boundary is on the offset, so first enclose the
             // corresponding base boundary as well.
-            let d = o.distance().abs();
+            let d = o.maximum_distance();
             surface(o.base(), boundary.map(|b| b.expanded(d)))?.expanded(d)
         }
         Surface3::RollingBall(b) => {

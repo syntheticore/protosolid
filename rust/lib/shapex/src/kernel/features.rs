@@ -8,7 +8,7 @@ use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance
 use super::{
     Axis3, CoedgeId, Compound, Curve2, Curve3, DiagnosticKind, EdgeId, FaceHandle, FaceId,
     FaceOrientation, IntersectionSet, Kernel, KernelError, KernelResult, Line3, ParameterRange,
-    PersistentId, Plane3, Profile, RigidTransform3, Surface3, SurfaceCurve3,
+    PersistentId, Plane3, Profile, RigidTransform3, Surface3,
     SurfaceIntersectionCurve, SurfaceProjectionPcurve2, Topology,
     TrimmedCurve2, VertexId, Wire2,
 };
@@ -187,46 +187,10 @@ pub(super) fn face_parameter_bounds(
     face: FaceId,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<[ParameterRange; 2]> {
-    let mut minimum = Point2::new(f64::INFINITY, f64::INFINITY);
-    let mut maximum = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
-    for loop_id in topology.face(face)?.loops() {
-        for coedge_id in topology.loop_coedges(*loop_id)? {
-            let coedge = topology.coedge(coedge_id)?;
-            let range = coedge.range();
-            for index in 0..=16 {
-                let parameter = range.start + range.span() * index as f64 / 16.0;
-                let point = coedge.pcurve().evaluate(parameter)?.point;
-                minimum.x = minimum.x.min(point.x);
-                minimum.y = minimum.y.min(point.y);
-                maximum.x = maximum.x.max(point.x);
-                maximum.y = maximum.y.max(point.y);
-            }
-        }
-    }
-    if !minimum.x.is_finite()
-        || !minimum.y.is_finite()
-        || !maximum.x.is_finite()
-        || !maximum.y.is_finite()
-    {
-        return Err(KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "a shell face has no finite parameter-space boundary",
-        ));
-    }
-    let padded = |minimum: f64, maximum: f64| {
-        let padding = tolerance.parameter * 64.0;
-        if maximum - minimum <= padding {
-            (minimum - padding, maximum + padding)
-        } else {
-            (minimum, maximum)
-        }
-    };
-    let u = padded(minimum.x, maximum.x);
-    let v = padded(minimum.y, maximum.y);
-    Ok([
-        ParameterRange::new(u.0, u.1)?,
-        ParameterRange::new(v.0, v.1)?,
-    ])
+    super::trim::face_parameter_bounds(
+        &super::trim::face_boundary_curves(topology, face, tolerance)?,
+        tolerance,
+    )
 }
 
 pub(super) fn exact_pcurve(
@@ -235,6 +199,14 @@ pub(super) fn exact_pcurve(
     fallback: &Curve2,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Curve2> {
+    if let (Curve3::Nurbs(curve), Surface3::Plane(plane)) = (curve, surface) {
+        let controls = curve.control_points().iter().map(|point| {
+            let uv = plane.project(*point)?.parameters;
+            Ok(Point2::new(uv.0, uv.1))
+        }).collect::<KernelResult<Vec<_>>>()?;
+        return super::NurbsCurve2::new(curve.degree(), controls,
+            curve.weights().to_vec(), curve.knots().to_vec()).map(Into::into);
+    }
     if let (Curve3::Line(line), Surface3::Plane(plane)) = (curve, surface) {
         let origin = plane.project(line.origin())?.parameters;
         let end = plane.project(line.origin() + line.direction())?.parameters;
@@ -280,84 +252,6 @@ pub(super) fn exact_pcurve(
         Curve3::SurfaceCurve(curve) if curve.surface() == surface => curve.pcurve().clone(),
         _ => fallback.clone(),
     })
-}
-
-fn exact_surface_curve(
-    surface: &Surface3,
-    pcurve: &Curve2,
-    range: ParameterRange,
-    tolerance: super::ModelTolerance,
-) -> KernelResult<Curve3> {
-    // A projected latitude circle is still an exact circle after a torus
-    // offset. Preserve its periodic support so a seam endpoint can move past
-    // its old trim when the neighboring face is offset.
-    if let (Surface3::Torus(torus), Curve2::SurfaceProjection(projection)) = (surface, pcurve) {
-        if let (Surface3::Torus(parent), Curve3::Circle(circle)) =
-            (projection.surface(), projection.curve())
-        {
-            let axis = parent.normal();
-            let delta = circle.center() - parent.center();
-            if torus.center() == parent.center()
-                && torus.x_major() == parent.x_major()
-                && torus.y_major() == parent.y_major()
-                && (delta - axis * delta.dot(axis)).magnitude() <= tolerance.linear
-                && circle.normal().cross(axis).magnitude() <= tolerance.angular
-            {
-                let v = pcurve.evaluate((range.start + range.end) * 0.5)?.point.y;
-                let radius = torus.major_radius() + torus.minor_radius() * v.cos();
-                return super::Circle3::new(
-                    torus.center() + axis * (torus.minor_radius() * v.sin()),
-                    circle.x_radius().normalize() * radius,
-                    circle.y_radius().normalize() * radius,
-                    tolerance,
-                )
-                .map(Into::into);
-            }
-        }
-    }
-    // A meridian seam on a cylinder is spatially a line even though it is
-    // represented as a one-face surface curve in topology. Preserve that
-    // simplest exact form so the seam can extend to newly offset end caps;
-    // retaining the old bounded SurfaceCurve range would artificially pin the
-    // seam to the source face's axial extent.
-    if let Curve2::Line(line) = pcurve {
-        let direction = line.direction();
-        if let Surface3::Torus(torus) = surface {
-            if direction.y.abs() <= tolerance.parameter
-                && (direction.x.abs() - 1.0).abs() <= tolerance.parameter
-            {
-                let uv = line.origin();
-                let radius = torus.major_radius() + torus.minor_radius() * uv.y.cos();
-                let x = torus.x_major().normalize();
-                let y = torus.y_major().normalize();
-                return super::Circle3::new(
-                    torus.center() + torus.normal() * (torus.minor_radius() * uv.y.sin()),
-                    (x * uv.x.cos() + y * uv.x.sin()) * radius,
-                    (-x * uv.x.sin() + y * uv.x.cos()) * (radius * direction.x),
-                    tolerance,
-                )
-                .map(Into::into);
-            }
-        }
-        if matches!(surface, Surface3::Plane(_))
-            || (matches!(surface, Surface3::Cylinder(_) | Surface3::Cone(_))
-                && direction.x.abs() <= tolerance.parameter * direction.y.abs().max(1.0))
-        {
-            let parameter = if range.contains(0.0, tolerance) {
-                0.0
-            } else {
-                range.start
-            };
-            let uv = pcurve.evaluate(parameter)?.point;
-            let (point, du, dv) = surface.first_order(uv.x, uv.y)?;
-            return Line3::new(
-                point - (du * direction.x + dv * direction.y) * parameter,
-                du * direction.x + dv * direction.y,
-            )
-            .map(Into::into);
-        }
-    }
-    SurfaceCurve3::new(surface.clone(), pcurve.clone(), range, tolerance).map(Into::into)
 }
 
 fn continued_range(
@@ -412,7 +306,7 @@ fn offset_edge(
         let range = coedge.range();
         let pcurve = coedge.pcurve().clone();
         let range = continued_range(&supports[&face], &pcurve, bounds[&face], range, tolerance)?;
-        let curve = exact_surface_curve(&supports[&face], &pcurve, range, tolerance)?;
+        let curve = supports[&face].boundary_curve(pcurve.clone(), range, tolerance)?;
         return Ok(OffsetEdge {
             curve,
             pcurves: topology
@@ -445,7 +339,7 @@ fn offset_edge(
     {
         return Ok(OffsetEdge {
             curve: if let Curve3::SurfaceCurve(curve) = source.curve() {
-                exact_surface_curve(curve.surface(), curve.pcurve(), source_range, tolerance)?
+                curve.surface().boundary_curve(curve.pcurve().clone(), source_range, tolerance)?
             } else {
                 source.curve().clone()
             },
@@ -465,7 +359,7 @@ fn offset_edge(
             source_range,
             tolerance,
         )?;
-        exact_surface_curve(&supports[&face], pcurve, range, tolerance)
+        supports[&face].boundary_curve(pcurve.clone(), range, tolerance)
     };
     let mut shared_pcurves = BTreeMap::new();
     let mut shared_curve = None;
@@ -774,7 +668,7 @@ fn offset_vertex(
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Point3> {
     let source_point = topology.vertex(vertex)?.point();
-    let incident = topology
+    let mut incident = topology
         .vertex_edges(vertex)?
         .into_iter()
         .filter(|edge| edges.contains_key(edge))
@@ -786,100 +680,39 @@ fn offset_vertex(
         .into_iter()
         .flatten()
         .collect::<BTreeSet<_>>();
-    if incident.iter().any(|edge| {
-        matches!(
-            edges[edge].curve,
-            Curve3::SurfaceCurve(_) | Curve3::SurfaceIntersection(_)
-        )
-    }) {
-        if let Ok(point) =
-            refine_offset_corner(source_point, &faces, &incident, edges, supports, tolerance)
-        {
-            return Ok(point);
-        }
+    // Parameter seams do not constrain the shape. When seams from two
+    // supports meet, retain one chart anchor and let the other seam move.
+    let seams = incident.iter().copied().filter(|edge| {
+        topology.edge_faces(*edge).is_ok_and(|faces| faces.len() == 1)
+    }).collect::<Vec<_>>();
+    if faces.len() > 1 && seams.len() > 1 {
+        let anchor = seams.iter().copied().find(|edge| {
+            let face = topology.edge_faces(*edge).unwrap()[0];
+            topology.face(face).unwrap().surface() == &supports[&face]
+        }).unwrap_or(seams[0]);
+        incident.retain(|edge| !seams.contains(edge) || *edge == anchor);
     }
-    let mut candidates = Vec::new();
-    let complexity = |curve: &Curve3| match curve {
-        Curve3::Line(_) => 0_u8,
-        Curve3::Circle(_) => 1,
-        Curve3::Nurbs(_) => 2,
-        Curve3::SurfaceCurve(_) => 3,
-        Curve3::SurfaceIntersection(_) => 4,
-    };
-    let distance_to_support = |curve: &Curve3, point: Point3| -> KernelResult<f64> {
-        if let Curve3::SurfaceIntersection(intersection) = curve {
-            let first = intersection
-                .first_surface()
-                .project(point, tolerance)?
-                .distance;
-            let second = intersection
-                .second_surface()
-                .project(point, tolerance)?
-                .distance;
-            Ok(first.max(second))
-        } else {
-            curve
-                .project(point, tolerance)
-                .map(|projection| projection.distance)
-        }
-    };
-    for first in 0..incident.len() {
-        for second in first + 1..incident.len() {
-            let first_curve = &edges[&incident[first]].curve;
-            let second_curve = &edges[&incident[second]].curve;
-            let Ok(first_guess) = first_curve.project(source_point, tolerance) else {
+    // Analytic rails give an exact seed even when the old vertex is an
+    // antipode of a moved sphere. Refine the same support system from it.
+    for (index, first) in incident.iter().enumerate() {
+        for second in &incident[index + 1..] {
+            let (a, b) = (&edges[first].curve, &edges[second].curve);
+            if !matches!(a, Curve3::Line(_) | Curve3::Circle(_))
+                || !matches!(b, Curve3::Line(_) | Curve3::Circle(_)) {
                 continue;
-            };
-            let Ok(second_guess) = second_curve.project(source_point, tolerance) else {
-                continue;
-            };
-            let Ok(hit) = first_curve.intersect_curve_near(
-                second_curve,
-                first_guess.parameter,
-                second_guess.parameter,
-                tolerance,
-            ) else {
-                continue;
-            };
-            let scale = hit.point.to_vec().magnitude().max(1.0);
-            let allowed = tolerance.linear_at_scale(scale);
-            let distances = incident
-                .iter()
-                .map(|edge| distance_to_support(&edges[edge].curve, hit.point))
-                .collect::<KernelResult<Vec<_>>>()?;
-            if distances.iter().all(|distance| *distance <= allowed) {
-                candidates.push((
-                    complexity(first_curve) + complexity(second_curve),
-                    distances.into_iter().fold(0.0_f64, f64::max),
-                    hit.point,
-                ));
+            }
+            let pa = a.project(source_point, tolerance)?.parameter;
+            let pb = b.project(source_point, tolerance)?.parameter;
+            if let Ok(hit) = a.intersect_curve_near(b, pa, pb, tolerance) {
+                if let Ok(point) = refine_offset_corner(
+                    topology, hit.point, &faces, &incident, edges, supports, tolerance,
+                ) {
+                    return Ok(point);
+                }
             }
         }
     }
-    candidates
-        .into_iter()
-        .min_by(|first, second| {
-            first
-                .0
-                .cmp(&second.0)
-                .then_with(|| first.1.total_cmp(&second.1))
-                .then_with(|| {
-                    first
-                        .2
-                        .distance(source_point)
-                        .total_cmp(&second.2.distance(source_point))
-                })
-        })
-        .map(|(_, _, point)| point)
-        .ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                format!(
-                    "offset shell faces do not meet at a common vertex ({vertex:?}, {} incident edges)",
-                    incident.len()
-                ),
-            )
-        })
+    refine_offset_corner(topology, source_point, &faces, &incident, edges, supports, tolerance)
 }
 
 #[derive(Clone, Copy)]
@@ -932,6 +765,7 @@ impl CornerConstraint<'_> {
 // Solve supports of every dimension with one local projection corrector.
 // Tangent rails supply constraints that coincident surface normals cannot.
 fn refine_offset_corner(
+    topology: &Topology,
     point: Point3,
     faces: &BTreeSet<FaceId>,
     incident: &[EdgeId],
@@ -939,15 +773,21 @@ fn refine_offset_corner(
     supports: &BTreeMap<FaceId, Surface3>,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Point3> {
-    let constraints = faces
+    let mut constraints = faces
         .iter()
         .map(|face| CornerConstraint::Surface(&supports[face]))
-        .chain(incident.iter().filter_map(|edge| {
-            let curve = &edges[edge].curve;
-            (!matches!(curve, Curve3::SurfaceIntersection(_)))
-                .then_some(CornerConstraint::Curve(curve))
-        }))
         .collect::<Vec<_>>();
+    for edge in incident {
+        if matches!(edges[edge].curve, Curve3::SurfaceIntersection(_)) {
+            continue;
+        }
+        let adjacent = topology.edge_faces(*edge)?;
+        if adjacent.len() == 1
+            || !tangent_contact(topology, *edge, adjacent[0], adjacent[1], tolerance)?.is_empty()
+        {
+            constraints.push(CornerConstraint::Curve(&edges[edge].curve));
+        }
+    }
     refine_support_corner(point, &constraints, tolerance)
 }
 
@@ -1435,6 +1275,65 @@ fn offset_parameter_padding(
     }))
 }
 
+pub(super) fn extended_support(
+    surface: &Surface3,
+    bounds: [ParameterRange; 2],
+    distance: f64,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<Surface3> {
+    match surface {
+        Surface3::Nurbs(spline) => {
+            let padding = offset_parameter_padding(surface, bounds, distance, tolerance)?;
+            spline.extended_bezier(padding).map(Into::into)
+        }
+        Surface3::Revolved(revolved) if matches!(revolved.profile(), Curve2::Nurbs(_)) => {
+            let padding = offset_parameter_padding(surface, bounds, distance, tolerance)?;
+            let range = revolved.profile_range();
+            let range = ParameterRange::new(range.start - padding[1], range.end + padding[1])?;
+            super::RevolvedSurface3::new(
+                revolved.frame(), revolved.profile().extended(range)?, range, tolerance,
+            ).map(Into::into)
+        }
+        _ => Ok(surface.clone()),
+    }
+}
+
+// Contact rails delimit the material sector of a blend. Miter end curves can
+// continue beyond those rails and must not enlarge its half-space constraint.
+fn contact_sector(
+    topology: &Topology,
+    face: FaceId,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<[ParameterRange; 2]> {
+    let boundary = super::trim::face_boundary_curves(topology, face, tolerance)?;
+    let mut bounds = super::trim::face_parameter_bounds(&boundary, tolerance)?;
+    let mut rails = [Vec::new(), Vec::new()];
+    for curve in boundary {
+        let edge = topology.coedge(curve.provenance)?.edge();
+        let faces = topology.edge_faces(edge)?;
+        if faces.len() != 2 || tangent_contact(topology, edge, faces[0], faces[1], tolerance)?.is_empty() {
+            continue;
+        }
+        let points = [curve.range.start, (curve.range.start + curve.range.end) * 0.5, curve.range.end]
+            .map(|parameter| curve.pcurve.evaluate(parameter).map(|v| v.point));
+        let [a, b, c] = points;
+        let (a, b, c) = (a?, b?, c?);
+        for axis in 0..2 {
+            if (a[axis] - b[axis]).abs().max((a[axis] - c[axis]).abs()) <= tolerance.parameter {
+                rails[axis].push(a[axis]);
+            }
+        }
+    }
+    for axis in 0..2 {
+        let low = rails[axis].iter().copied().fold(f64::INFINITY, f64::min);
+        let high = rails[axis].iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if high - low > tolerance.parameter {
+            bounds[axis] = ParameterRange::new(low, high)?;
+        }
+    }
+    Ok(bounds)
+}
+
 pub(super) fn expanded_offset_bounds(
     surface: &Surface3,
     bounds: [ParameterRange; 2],
@@ -1488,13 +1387,7 @@ fn offset_body(
     for face_id in &source_faces {
         let face = topology.face(*face_id)?;
         let face_bounds = face_parameter_bounds(topology, *face_id, tolerance)?;
-        let mut base = face.surface().clone();
-        if let Surface3::Nurbs(surface) = &base {
-            // Continue the exact support before offsetting it: a retained
-            // opening may intersect beyond the source spline's natural ends.
-            let padding = offset_parameter_padding(&base, face_bounds, distance, tolerance)?;
-            base = surface.extended_bezier(padding)?.into();
-        }
+        let base = extended_support(face.surface(), face_bounds, distance, tolerance)?;
         let surface = if openings.contains(face_id) {
             base
         } else {
@@ -2036,6 +1929,7 @@ pub(super) fn support_patches(
                                 .copied()
                                 .collect::<Vec<_>>();
                             if let Ok(point) = refine_offset_corner(
+                                topology,
                                 source_point,
                                 &subset,
                                 &uses,
@@ -2055,7 +1949,7 @@ pub(super) fn support_patches(
                             let projection =
                                 supports[&excluded].project(ends[side].0, tolerance)?;
                             let uv = projection.parameters;
-                            let trim = face_parameter_bounds(topology, excluded, tolerance)?;
+                            let trim = contact_sector(topology, excluded, tolerance)?;
                             let domains = supports[&excluded].domains();
                             // Angular supports constrain only their retained
                             // sector. Their continuation is not a global
@@ -2156,7 +2050,7 @@ pub(super) fn support_patches(
         });
     }
     for (edge_id, edge) in &mut edges {
-        let endpoints = topology
+        let endpoints: BTreeMap<_, _> = topology
             .edge(*edge_id)?
             .vertices()
             .into_iter()
@@ -2167,6 +2061,32 @@ pub(super) fn support_patches(
                     .map(|point| (vertex, *point))
             })
             .collect();
+        let faces = topology.edge_faces(*edge_id)?;
+        if let [face] = faces.as_slice() {
+            let original = topology.edge(*edge_id)?;
+            if endpoints.len() == 2 && endpoints.values().any(|point| {
+                edge.curve.project(*point, tolerance).is_ok_and(|p| p.distance > tolerance.linear)
+            }) {
+                let range = original.range();
+                let mut uv = original.vertices().map(|vertex| {
+                    supports[face].project(endpoints[&vertex], tolerance).map(|p| Point2::new(p.parameters.0, p.parameters.1))
+                }).into_iter().collect::<KernelResult<Vec<_>>>()?;
+                super::intersection::unwrap_periodic_points(&mut uv, supports[face].domains());
+                let direction = (uv[1] - uv[0]) / range.span();
+                let pcurve: Curve2 = super::Line2::new(uv[0] - direction * range.start, direction)?.into();
+                edge.curve = supports[face].boundary_curve(pcurve.clone(), range, tolerance)?;
+                for id in original.coedges() {
+                    let old_uv = topology.coedge(*id)?.pcurve().evaluate(range.start)?.point;
+                    let mut shift = crate::Vec2::new(0.0, 0.0);
+                    for (axis, domain) in supports[face].domains().iter().enumerate() {
+                        if let Some(period) = domain.period {
+                            shift[axis] = ((old_uv[axis] - uv[0][axis]) / period).round() * period;
+                        }
+                    }
+                    edge.pcurves.insert(*id, super::Line2::new(uv[0] + shift - direction * range.start, direction)?.into());
+                }
+            }
+        }
         retarget_offset_intersection_endpoints(
             topology, *edge_id, edge, &endpoints, &supports, tolerance,
         )?;
@@ -2278,6 +2198,12 @@ pub(super) fn support_patches(
                 parameters.dedup_by(|a, b| (*a - *b).abs() <= tolerance.parameter);
                 for pair in parameters.windows(2) {
                     let retained = ParameterRange::new(pair[0], pair[1])?;
+                    let start = edge.curve.evaluate(retained.start)?.point;
+                    let end = edge.curve.evaluate(retained.end)?.point;
+                    let middle = edge.curve.evaluate((retained.start + retained.end) * 0.5)?.point;
+                    if start.distance(end).max(start.distance(middle)) <= tolerance.linear {
+                        continue;
+                    }
                     segments.push(BrepPatchSegment {
                         provenance: provenance.trimmed(range, retained),
                         curve: edge.curve.clone(),
@@ -3051,7 +2977,7 @@ fn rounded_offset_regions(
             (Point2::new(range.start, 0.0), Point2::new(range.start, 1.0), ParameterRange::new(1.0, 0.0)?, true),
         ] {
             let pcurve: Curve2 = super::Line2::new(start, end - start)?.into();
-            let curve = exact_surface_curve(&blend, &pcurve, trim, tolerance)?;
+            let curve = blend.boundary_curve(pcurve.clone(), trim, tolerance)?;
             boundary.push(candidate(curve, pcurve, trim, seam));
         }
         boundary.last_mut().unwrap().loop_end = true;
@@ -3907,6 +3833,30 @@ pub(crate) fn draft(
                         tolerance,
                     )?
                     .into()
+                }
+                Surface3::Nurbs(spline) if spline.degrees().1 == 1
+                    && spline.control_points().len() == 2
+                    && spline.weights()[0] == spline.weights()[1] => {
+                    let controls = spline.control_points();
+                    let heights = [0, 1].map(|row| (controls[row][0] - neutral.origin()).dot(direction));
+                    if (heights[1] - heights[0]).abs() <= tolerance.linear
+                        || controls.iter().enumerate().any(|(row, points)| points.iter().any(|p|
+                            ((p - neutral.origin()).dot(direction) - heights[row]).abs() > tolerance.linear)) {
+                        return Err(unsupported("draft requires sections parallel to the neutral plane"));
+                    }
+                    let fraction = -heights[0] / (heights[1] - heights[0]);
+                    let section = controls[0].iter().zip(&controls[1])
+                        .map(|(a, b)| *a + (*b - *a) * fraction).collect::<Vec<_>>();
+                    let base = super::NurbsSurface3::new(spline.degrees(),
+                        heights.iter().map(|h| section.iter().map(|p| *p + direction * *h).collect()).collect(),
+                        spline.weights().to_vec(), (spline.knots().0.to_vec(), spline.knots().1.to_vec()))?;
+                    let super::DomainBounds::Bounded(v) = base.domains()[1].bounds else { unreachable!() };
+                    let slope = -orientation * angle.tan() * (heights[1] - heights[0]) / v.span();
+                    let distance = -orientation * angle.tan() * heights[0] - slope * v.start;
+                    let bounds = face_parameter_bounds(source.topology(), handle.topology_id(), tolerance)?;
+                    let padding = offset_parameter_padding(&base.clone().into(), bounds,
+                        heights[0].abs().max(heights[1].abs()) * angle.tan(), tolerance)?;
+                    super::OffsetSurface3::with_linear_distance(base.extended_bezier(padding)?.into(), distance, slope, tolerance)?.into()
                 }
                 _ => return Err(unsupported("draft of this face support")),
             };

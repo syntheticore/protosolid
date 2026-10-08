@@ -442,6 +442,17 @@ struct SectionCurve {
 }
 impl SectionCurve {
     fn curve2(&self) -> KernelResult<Curve2> {
+        let start = self.points[0];
+        let direction = *self.points.last().unwrap() - start;
+        if self.points.len() == self.degree + 1
+            && self.weights.iter().all(|weight| *weight == self.weights[0])
+            && self.points.iter().enumerate().all(|(i, point)| {
+                point.distance(start + direction * (i as f64 / self.degree as f64))
+                    <= f64::EPSILON * direction.magnitude().max(1.0) * 32.0
+            })
+        {
+            return Line2::new(start, direction).map(Into::into);
+        }
         Ok(NurbsCurve2::new(
             self.degree,
             self.points.clone(),
@@ -893,13 +904,16 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             ));
         }
         for (order, u, start, end) in [(1, first.points.len() - 1, 0.0, 1.0), (3, 0, 1.0, 0.0)] {
-            let curve = NurbsCurve3::new(
-                v_degree,
-                points.iter().map(|r| r[u]).collect(),
-                weights.iter().map(|r| r[u]).collect(),
-                v_knots.clone(),
-            )?
-            .into();
+            let curve = if points.len() == 2 && weights[0][u] == weights[1][u] {
+                Line3::new(points[0][u], points[1][u] - points[0][u])?.into()
+            } else {
+                NurbsCurve3::new(
+                    v_degree,
+                    points.iter().map(|r| r[u]).collect(),
+                    weights.iter().map(|r| r[u]).collect(),
+                    v_knots.clone(),
+                )?.into()
+            };
             edges.push((
                 order,
                 BrepPatchSegment {
@@ -925,6 +939,16 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
                 segments: edges.into_iter().map(|(_, s)| s).collect(),
             }],
         };
+        if let Surface3::Nurbs(surface) = &patch.surface {
+            if let Some(plane) = surface.plane(tolerance)? {
+                patch.surface = plane.into();
+                for segment in &mut patch.loops[0].segments {
+                    segment.pcurve = super::features::exact_pcurve(
+                        &segment.curve, &patch.surface, &segment.pcurve, tolerance,
+                    )?;
+                }
+            }
+        }
         if !forward {
             reverse(&mut patch);
         }
@@ -1421,6 +1445,85 @@ mod tests {
             .unwrap();
         assert!((body.volume() - 32.0 / 3.0 * std::f64::consts::PI).abs() < 1.0e-5);
         mesh(&body);
+    }
+    #[test]
+    fn draft_preserves_neutral_section_and_sets_angle() {
+        let a = circle(10.0);
+        let b = circle(6.0);
+        let plane = Plane3::new(Point3::new(4.0, 0.0, 20.0), Vec3::unit_x(), Vec3::unit_y(), ModelTolerance::default()).unwrap();
+        let body = a.loft(Plane3::xy(), [(plane, &b)]).unwrap();
+        let side = body.faces().find(|face| matches!(face.surface(), Surface3::Nurbs(_))).unwrap().clone();
+        for angle in [-3.0_f64, 3.0].map(f64::to_radians) {
+            let drafted = body.draft(&[side.clone()], Plane3::xy(), angle).unwrap();
+            let side = drafted.faces().find(|face| matches!(face.surface(), Surface3::Offset(_))).unwrap();
+            for u in [0.0, 0.17, 0.4, 0.8, 1.0] {
+                let foot = side.surface().evaluate(u, 0.0).unwrap().point;
+                assert!((foot.to_vec().magnitude() - 10.0).abs() < 1e-7);
+                for v in [0.0, 0.3, 0.7, 1.0] {
+                    assert!((side.surface().normal(u, v).unwrap().z - angle.sin()).abs() < 1e-7);
+                }
+            }
+            let r = 10.0 - 20.0 * angle.tan();
+            let volume = std::f64::consts::PI * 20.0 / 3.0 * (100.0 + 10.0 * r + r * r);
+            assert!((drafted.volume() - volume).abs() < volume * 1e-8);
+            mesh(&drafted);
+        }
+    }
+    #[test]
+    fn spline_sector_end_fillet() {
+        let t = ModelTolerance::default();
+        let spline = NurbsCurve2::new(3, vec![Point2::new(20.0, -4.0), Point2::new(22.0, -1.0), Point2::new(22.0, 1.0), Point2::new(20.0, 4.0)], vec![1.0;4], vec![0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0]).unwrap();
+        let profile = Profile::new(Wire2::new([
+            TrimmedCurve2::line(Point2::new(12.0,-4.0), Point2::new(20.0,-4.0)).unwrap(),
+            TrimmedCurve2::new(spline, range(0.0,1.0).unwrap()).unwrap(),
+            TrimmedCurve2::line(Point2::new(20.0,4.0), Point2::new(12.0,4.0)).unwrap(),
+            TrimmedCurve2::line(Point2::new(12.0,4.0), Point2::new(12.0,-4.0)).unwrap(),
+        ],t).unwrap(),[],t).unwrap();
+        let body = profile.revolve(Plane3::xz(), Axis3::new(Point3::new(0.0,0.0,0.0),Vec3::unit_z()).unwrap(),std::f64::consts::PI*1.5).unwrap();
+        let cap = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p) if p.normal().y.abs()>0.99)).unwrap();
+        let result = body.fillet(&cap.boundary_edges().unwrap(),0.5).unwrap();
+        mesh(&result);
+    }
+    #[test]
+    fn intersecting_bores_rim_fillet() {
+        let t = ModelTolerance::default();
+        let body = rectangle(-15.0,-15.0,30.0,30.0).extrude(Plane3::xy(), Vec3::unit_z()*20.0).unwrap();
+        let first = circle(5.0).extrude(Plane3::xy(),Vec3::unit_z()*20.0).unwrap();
+        let second = first.transformed(RigidTransform3::new(crate::Matrix3::identity(),Vec3::unit_x()*6.0,t).unwrap()).unwrap();
+        let body = body.difference(&first).unwrap().difference(&second).unwrap();
+        let cap = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p) if p.origin().z>19.0)).unwrap();
+        let result = body.fillet(&cap.boundary_edges().unwrap(),0.5).unwrap();
+        mesh(&result);
+    }
+    #[test]
+    fn cross_bore_move() {
+        let t = ModelTolerance::default();
+        let body = circle(10.0).extrude(Plane3::xy(), Vec3::unit_z() * 20.0).unwrap();
+        let plane = Plane3::new(Point3::new(0.0, -15.0, 10.0), Vec3::unit_x(), -Vec3::unit_z(), t).unwrap();
+        let tool = circle(3.0).extrude(plane, Vec3::unit_y() * 30.0).unwrap();
+        let original = body.clone();
+        let body = body.difference(&tool).unwrap();
+        let bore = body.faces().find(|face| matches!(face.surface(), Surface3::Cylinder(c) if c.radius() < 4.0)).unwrap().clone();
+        let transform = RigidTransform3::new(crate::Matrix3::identity(), Vec3::unit_x(), t).unwrap();
+        let moved = body.move_faces(&[bore], transform).unwrap();
+        let expected = original.difference(&tool.transformed(transform).unwrap()).unwrap();
+        assert!((moved.volume() - expected.volume()).abs() < expected.volume() * 1e-7);
+        let bore = moved.faces().find(|face| matches!(face.surface(), Surface3::Cylinder(c) if c.radius() < 4.0)).unwrap();
+        let Surface3::Cylinder(cylinder) = bore.surface() else { unreachable!() };
+        assert!((cylinder.origin().x - 1.0).abs() < t.linear);
+        assert!((cylinder.radius() - 3.0).abs() < t.linear);
+        mesh(&moved);
+    }
+    #[test]
+    fn tapered_planar_loft_followups() {
+        let a = rectangle(-12.0, -12.0, 24.0, 24.0);
+        let b = rectangle(-6.0, -8.0, 16.0, 16.0);
+        let body = a.loft(Plane3::xy(), [(upper(20.0), &b)]).unwrap();
+        assert!(body.faces().all(|face| matches!(face.surface(), Surface3::Plane(_))));
+        for face in body.faces() {
+            body.offset_faces(&[face.clone()], 0.5).unwrap();
+        }
+        body.fillet(&body.edges().cloned().collect::<Vec<_>>(), 0.5).unwrap();
     }
     #[test]
     fn feature_loft_sections() {

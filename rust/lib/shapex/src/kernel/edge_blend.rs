@@ -444,8 +444,8 @@ impl EulerTransaction<'_> {
                             .iter()
                             .any(|edge| spines[edge].concave != first_concavity)
                         {
-                            let diagnostic = incident
-                                .iter()
+                            let diagnostic = spines
+                                .keys()
                                 .filter(|edge| spines[edge].concave)
                                 .fold(
                                     Diagnostic::new(
@@ -694,13 +694,16 @@ impl EulerTransaction<'_> {
                     let mut supports = BTreeMap::new();
                     let mut bounds = BTreeMap::new();
                     for (face, value) in self.working.faces() {
-                        supports.insert(face, value.surface.clone());
                         let trim = super::features::face_parameter_bounds(
                             &self.working, face, tolerance,
                         )?;
-                        bounds.insert(face, super::features::expanded_offset_bounds(
+                        let surface = super::features::extended_support(
                             &value.surface, trim, radius, tolerance,
+                        )?;
+                        bounds.insert(face, super::features::expanded_offset_bounds(
+                            &surface, trim, radius, tolerance,
                         )?);
+                        supports.insert(face, surface);
                     }
                     let patches = super::features::support_patches(
                         &self.working, tolerance, supports, bounds, BTreeSet::new(), true, true, &BTreeMap::new(),
@@ -778,6 +781,15 @@ impl EulerTransaction<'_> {
                     "an inner-rim corner has no wall seam edge",
                 )
             })?;
+        let seam = self.working.edge(seam_edge)?;
+        let walls = self.working.edge_faces(seam_edge)?;
+        if walls.len() == 2 {
+            let surfaces = [self.working.face(walls[0])?.surface.clone(), self.working.face(walls[1])?.surface.clone()];
+            let midpoint = seam.curve.evaluate((seam.range.start + seam.range.end) * 0.5)?.point;
+            if !self.blend_edge_is_concave(seam, [seam.coedges[0], seam.coedges[1]], [walls[0], walls[1]], &surfaces, midpoint)? {
+                return Ok(None);
+            }
+        }
         Ok(Some((continuation, carrier_loop.face, seam_edge)))
     }
 
@@ -954,10 +966,14 @@ impl EulerTransaction<'_> {
                 "blend requires two distinct incident faces",
             ));
         }
-        let parent_surfaces = [
+        let mut parent_surfaces = [
             self.working.face(faces[0])?.surface.clone(),
             self.working.face(faces[1])?.surface.clone(),
         ];
+        for (index, surface) in parent_surfaces.iter_mut().enumerate() {
+            let bounds = super::features::face_parameter_bounds(&self.working, faces[index], tolerance)?;
+            *surface = super::features::extended_support(surface, bounds, size, tolerance)?;
+        }
         let midpoint = edge
             .curve
             .evaluate((edge.range.start + edge.range.end) * 0.5)?

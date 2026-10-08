@@ -241,11 +241,20 @@ fn join_offset_cylinder_shell_from_open_end() {
         .unwrap();
     // Round the outer bottom rim, then chamfer the two inner rim edges.
     // Their junction creates a revolved corner with a collapsed boundary.
-    let rim = joined.edges().next().unwrap().clone();
+    let rim = joined.edges().find(|edge| matches!(edge.curve(), Curve3::Circle(circle)
+        if circle.center().y.abs() < tol.linear && (circle.radius() - 36.40489826969949).abs() < tol.linear))
+        .unwrap().clone();
     // A 4 mm fillet would cross the inner boundary of the 3 mm shell wall.
     assert!(joined.fillet(&[rim.clone()], 4.0).is_err());
     let filleted = joined.fillet(&[rim], 0.25).unwrap();
-    let edges: Vec<_> = filleted.edges().skip(1).take(2).cloned().collect();
+    let bottom = filleted.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+        if plane.origin().y.abs() < tol.linear && plane.normal().y.abs() > 0.99)).unwrap();
+    let topology = filleted.topology();
+    let inner = topology.face(bottom.topology_id()).unwrap().loops().iter().copied()
+        .find(|id| topology.loop_(*id).unwrap().kind() == super::LoopKind::Inner).unwrap();
+    let inner_edges = topology.loop_coedges(inner).unwrap().into_iter()
+        .map(|id| topology.edge(topology.coedge(id).unwrap().edge()).unwrap().name()).collect::<Vec<_>>();
+    let edges = filleted.edges().filter(|edge| inner_edges.contains(&edge.persistent_id())).cloned().collect::<Vec<_>>();
     for distance in [1.0, 2.5] {
         let chamfered = filleted
             .chamfer_with_tangent_propagation(&edges, distance, true)

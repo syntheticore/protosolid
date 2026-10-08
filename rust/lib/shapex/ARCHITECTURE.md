@@ -132,11 +132,14 @@ The current publisher certifies:
 - exact sweeps along line, circle, and regular planar NURBS rails, with a
   continuous tangent frame through inflections and closed rail seams;
 - smooth rational section lofts through line, circle, and NURBS profiles, with
-  exact subdivision and degree elevation for section correspondence;
+  exact subdivision and degree elevation for section correspondence, retaining
+  planar supports and straight boundaries when their control nets permit it;
 - local fillet/chamfer edge networks sharing propagation, contact trimming,
   endpoint handling, topology rewriting, history, and validation; chamfers use
   planes, cones, or exact ruled contact-rail surfaces instead of Boolean cutters;
-- neutral plane drafts of planar and pull-aligned cylindrical/conical faces;
+- neutral plane drafts of planar, pull-aligned cylindrical/conical faces, and
+  ruled spline faces with sections parallel to the neutral plane; spline drafts
+  use an affine normal-offset law on the neutral section's pull extrusion;
 - plane splits retaining either or both sides, including disconnected solids;
 - rigid transforms of those bodies.
 
@@ -156,6 +159,15 @@ supports and curves. Edge blends likewise retain exact supports when trimming
 across earlier fillets. Periodic
 seam continuity and display bands use a consistent parameter chart, with retained
 seams selecting the intended sweep interval at and beyond a half turn.
+
+Offset, move, and blend reconstruction share support continuation and a corner
+projection solver. Surface constraints locate regular intersections; tangent
+contact rails and one periodic seam anchor supply the missing constraints at
+singular intersections. Contact rails delimit a blend's material sector even
+when a miter boundary extends beyond it. Boundary construction preserves exact
+lines and circles through a single surface API. Mixed concave/convex fillet
+networks form concave setbacks first, then consume their smooth continuations
+with the convex network, without searching construction-order permutations.
 
 ## Parametric systems
 

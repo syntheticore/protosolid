@@ -1159,7 +1159,7 @@ impl Compound {
         if let Err(error) =
             transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind, chamfer)
         {
-            let mixed_trihedral = (edges.len() == 3 && chamfer.is_none())
+            let mixed_trihedral = chamfer.is_none()
                 .then(|| {
                     error.diagnostics().iter().find(|diagnostic| {
                         diagnostic.operation.as_deref() == Some("blend.mixed-trihedral-setback")
@@ -1167,7 +1167,7 @@ impl Compound {
                 })
                 .flatten();
             if let Some(diagnostic) = mixed_trihedral {
-                return self.blend_three_edge_setback(edges, size, &diagnostic.entities, kind);
+                return self.blend_setback_network(edges, size, &diagnostic.entities, kind);
             }
             return Err(error);
         }
@@ -1175,7 +1175,7 @@ impl Compound {
         Self::from_operation(kernel, committed, [self])
     }
 
-    fn blend_three_edge_setback(
+    fn blend_setback_network(
         &self,
         edges: &[EdgeHandle],
         size: f64,
@@ -1185,79 +1185,30 @@ impl Compound {
         // Each stage creates smooth continuation edges that the following stage must consume to
         // enter the already-rounded corner. This is internal continuation, not user-facing
         // selection propagation: the original sharp-edge selection remains exactly `edges`.
-        let fallback_orders = [
-            [[0, 1], [2, usize::MAX]],
-            [[0, 2], [1, usize::MAX]],
-            [[1, 2], [0, usize::MAX]],
-            [[0, usize::MAX], [1, 2]],
-            [[1, usize::MAX], [0, 2]],
-            [[2, usize::MAX], [0, 1]],
-        ];
         let concave = concave_edges.iter().copied().collect::<BTreeSet<_>>();
-        let concave_indices = edges
-            .iter()
-            .enumerate()
-            .filter_map(|(index, edge)| concave.contains(&edge.persistent_id()).then_some(index))
-            .collect::<Vec<_>>();
-        let minority = match concave_indices.as_slice() {
-            [only] => Some(*only),
-            [first, second] => (0..3).find(|index| index != first && index != second),
-            _ => None,
-        };
-        let mut grouped_orders = Vec::with_capacity(fallback_orders.len());
-        if let Some(singleton) = minority {
-            let pair = (0..3)
-                .filter(|index| *index != singleton)
-                .collect::<Vec<_>>();
-            grouped_orders.push([[singleton, usize::MAX], [pair[0], pair[1]]]);
-        }
-        for order in fallback_orders {
-            if !grouped_orders.contains(&order) {
-                grouped_orders.push(order);
-            }
-        }
-        let mut last_error = None;
-        for groups in grouped_orders {
-            let mut result = self.clone();
-            let mut failed = false;
-            for group in groups {
-                let resolved = group
-                    .into_iter()
-                    .filter(|index| *index != usize::MAX)
-                    .map(|index| match result.resolve(&edges[index]) {
-                        Resolution::Preserved(edge)
-                        | Resolution::Modified(edge)
-                        | Resolution::Merged(edge) => Ok(edge),
-                        Resolution::Split(mut descendants) if descendants.len() == 1 => {
-                            Ok(descendants.remove(0))
-                        }
-                        _ => Err(KernelError::new(
-                            DiagnosticKind::UnsupportedGeometry,
-                            "setback blend could not reidentify an incident edge after the preceding blend",
-                        )),
-                    })
-                    .collect::<KernelResult<Vec<_>>>();
-                match resolved
-                    .and_then(|resolved| result.blend_edges(&resolved, size, true, kind, None))
-                {
-                    Ok(next) => result = next,
-                    Err(error) => {
-                        last_error = Some(error);
-                        failed = true;
-                        break;
+        let mut result = self.clone();
+        // Concave rails create the setback; the convex network then consumes
+        // its smooth continuations. This ordering is independent of selection
+        // order and applies to any number of mixed corners.
+        for concavity in [true, false] {
+            let resolved = edges.iter()
+                .filter(|edge| concave.contains(&edge.persistent_id()) == concavity)
+                .map(|edge| match result.resolve(edge) {
+                    Resolution::Preserved(edge)
+                    | Resolution::Modified(edge)
+                    | Resolution::Merged(edge) => Ok(edge),
+                    Resolution::Split(mut descendants) if descendants.len() == 1 => {
+                        Ok(descendants.remove(0))
                     }
-                }
-            }
-            if !failed {
-                return Ok(result);
-            }
+                    _ => Err(KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "setback blend could not reidentify an incident edge after the preceding blend",
+                    )),
+                })
+                .collect::<KernelResult<Vec<_>>>()?;
+            result = result.blend_edges(&resolved, size, true, kind, None)?;
         }
-        Err(last_error.unwrap_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "mixed convex-concave setback blend has no valid construction order",
-            )
-        }))
+        Ok(result)
     }
 
     /// Publish an identity operation while sharing topology, certificates and lineage.

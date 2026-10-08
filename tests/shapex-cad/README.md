@@ -1,11 +1,11 @@
 # Shapex saved-document regressions
 
-The seventeen `.cad` files in this directory are passing regressions. Nine
-cases awaiting review are in [failing/](failing/README.md), numbered 022–030.
+The twenty-six `.cad` files in this directory are passing regressions.
 All files exercise real modeling workflows and saved references.
 Every feature in a passing regression must complete without an error or partial
 reference loss. Circular
-lofts must publish one curved side surface and two planar caps.
+lofts must publish one curved side surface and two planar caps; tapered square
+lofts must retain six planar faces.
 
 | File | Operation |
 | --- | --- |
@@ -26,6 +26,15 @@ lofts must publish one curved side surface and two planar caps.
 | `019-revolved-sector-chamfer.cad` | 270 degree rectangular sector, 1 mm radial end perimeter chamfer |
 | `020-revolved-sector-end-fillet.cad` | 270 degree rectangular sector, 2 mm radial end perimeter fillet |
 | `021-shelled-sector-rim-blends-section.cad` | Rounded sector, open shell, 0.3 mm rim fillet and 0.2 mm rim chamfer; sketch section views |
+| `022-cross-bore-move.cad` | Transverse cylindrical bore translated 1 mm along X |
+| `023-eccentric-loft-draft.cad` | Eccentric circular loft, 3 degree draft relative to the lower cap |
+| `024-tapered-square-loft-fillet.cad` | Tapered square loft, 0.5 mm fillet on all twelve edges |
+| `025-tapered-square-loft-chamfer.cad` | Tapered square loft, 1 mm upper perimeter chamfer |
+| `026-spline-prism-draft.cad` | Spline-sided prism, 3 degree draft on all four sides |
+| `027-spline-sector-end-fillet.cad` | 270 degree spline-sided sector, 0.5 mm radial end perimeter fillet |
+| `028-l-block-all-edge-fillet.cad` | L block, 1 mm fillet on all eighteen edges |
+| `029-tapered-square-loft-side-offset.cad` | Tapered square loft, one side offset outward by 0.5 mm |
+| `030-intersecting-bores-rim-fillet.cad` | Box with overlapping bores, 0.5 mm outer top perimeter and bore rim fillet |
 
 From the repository root:
 
@@ -33,11 +42,12 @@ From the repository root:
 node tests/shapex-cad/check.mjs
 ```
 
-The checker rebuilds Shapex WASM from the current Rust source, loads both the
-passing regressions and the failing catalogue, and exits **1** if any feature
+The checker rebuilds Shapex WASM from the current Rust source, loads every
+document, and exits **1** if any feature
 fails or loses a reference. It verifies
 that blend selections are semantic edges joining two faces and checks the
-circular loft face counts. It does not build or launch the application.
+loft face counts. It continues after a failed document to report the whole suite.
+It does not build or launch the application.
 Case 019 checks that all chamfer boundary edges are visible. Case 020 applies
 1 and 2 mm inward shells, with and without a planar opening, and verifies volume
 and face tessellation. It also adds four circular rims to the upstream fillet
@@ -54,17 +64,5 @@ side surface and its rim, replacing the former four patch selections. Operation
 dimensions and selected geometric regions are unchanged. Case numbering is
 preserved from the original failure catalogue.
 
-To verify the failure catalogue while also requiring the existing regressions
-to pass:
-
-```sh
-node tests/shapex-cad/check.mjs --verify-failures
-```
-
-This exits **0** only when each document in `failing/` has exactly one final
-Shapex modeling failure, a successful setup, and intact saved references. A newly
-passing case fails this verification so it can be reviewed and moved into the
-passing regressions. Shell openings bordering fillets and blend seam selections
-are excluded. The catalogue contains 17 regression documents and nine documents
-with final modeling failures. Case 020's additional follow-up shell check
-currently fails, although its saved feature sequence builds.
+Cases 022–030 were promoted from the failure catalogue without changing their
+saved geometry, dimensions, or selections.

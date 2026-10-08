@@ -3156,6 +3156,24 @@ impl NurbsSurface3 {
     pub fn control_points(&self) -> &[Vec<Point3>] {
         &self.control_points
     }
+
+    /// The positive rational basis lies in the affine hull of its controls.
+    /// Recognize planar supports from that hull, not from sampled positions.
+    pub(crate) fn plane(&self, tolerance: ModelTolerance) -> KernelResult<Option<Plane3>> {
+        let domains = self.domains();
+        let midpoint = |domain: ParameterDomain| match domain.bounds {
+            DomainBounds::Bounded(range) => (range.start + range.end) * 0.5,
+            _ => unreachable!(),
+        };
+        let jet = self.evaluate(midpoint(domains[0]), midpoint(domains[1]))?;
+        let plane = Plane3::from_origin_normal(jet.point, jet.du.cross(jet.dv))?;
+        for point in self.control_points.iter().flatten() {
+            if plane.project(*point)?.distance > tolerance.linear {
+                return Ok(None);
+            }
+        }
+        Ok(Some(plane))
+    }
     pub fn weights(&self) -> &[Vec<f64>] {
         &self.weights
     }
@@ -4159,6 +4177,10 @@ impl RevolvedSurface3 {
                 "revolved-surface parameter lies outside its domain",
             ));
         }
+        let parameter = parameter.clamp(
+            self.profile_range.start.min(self.profile_range.end),
+            self.profile_range.start.max(self.profile_range.end),
+        );
         let profile = self.profile.evaluate(parameter)?;
         let (sin, cos) = angle.sin_cos();
         let radial = self.frame.x() * cos + self.frame.y() * sin;
@@ -4236,6 +4258,7 @@ impl RevolvedSurface3 {
 pub struct OffsetSurface3 {
     base: Box<Surface3>,
     distance: f64,
+    v_slope: f64,
     tolerance: ModelTolerance,
 }
 
@@ -4250,6 +4273,7 @@ impl OffsetSurface3 {
         Ok(Self {
             base: Box::new(base),
             distance,
+            v_slope: 0.0,
             tolerance,
         })
     }
@@ -4260,6 +4284,38 @@ impl OffsetSurface3 {
 
     pub fn distance(&self) -> f64 {
         self.distance
+    }
+
+    pub fn v_slope(&self) -> f64 {
+        self.v_slope
+    }
+
+    /// An affine offset law in the parent's second parameter. A vertical
+    /// extrusion with this law is an exact constant-angle draft surface.
+    pub fn with_linear_distance(
+        base: Surface3,
+        distance: f64,
+        v_slope: f64,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Self> {
+        tolerance.validate()?;
+        if !distance.is_finite() || !v_slope.is_finite()
+            || !matches!(base.domains()[1].bounds, DomainBounds::Bounded(_))
+        {
+            return Err(invalid("a linear offset law needs finite coefficients and a bounded second parameter"));
+        }
+        Ok(Self { base: Box::new(base), distance, v_slope, tolerance })
+    }
+
+    pub(crate) fn maximum_distance(&self) -> f64 {
+        if self.v_slope == 0.0 {
+            return self.distance.abs();
+        }
+        let DomainBounds::Bounded(range) = self.base.domains()[1].bounds else {
+            unreachable!()
+        };
+        (self.distance + self.v_slope * range.start).abs()
+            .max((self.distance + self.v_slope * range.end).abs())
     }
 
     fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
@@ -4282,10 +4338,11 @@ impl OffsetSurface3 {
         let cross_v = value.duv.cross(value.dv) + value.du.cross(value.dvv);
         let normal_u = project_tangent(cross_u) / magnitude;
         let normal_v = project_tangent(cross_v) / magnitude;
+        let distance = self.distance + self.v_slope * v;
         Ok((
-            value.point + normal * self.distance,
-            value.du + normal_u * self.distance,
-            value.dv + normal_v * self.distance,
+            value.point + normal * distance,
+            value.du + normal_u * distance,
+            value.dv + normal_v * distance + normal * self.v_slope,
         ))
     }
 
@@ -4999,6 +5056,44 @@ impl Surface3 {
         range: ParameterRange,
         tolerance: ModelTolerance,
     ) -> KernelResult<Curve3> {
+        // A projected latitude circle is still an exact circle after a torus
+        // offset. Preserve its periodic support so a seam endpoint can move past
+        // its old trim when the neighboring face is offset.
+        if let (Surface3::Torus(torus), Curve2::SurfaceProjection(projection)) = (self, &pcurve) {
+            if let (Surface3::Torus(parent), Curve3::Circle(circle)) =
+                (projection.surface(), projection.curve())
+            {
+                let axis = parent.normal();
+                let delta = circle.center() - parent.center();
+                if torus.center() == parent.center()
+                    && torus.x_major() == parent.x_major()
+                    && torus.y_major() == parent.y_major()
+                    && (delta - axis * delta.dot(axis)).magnitude() <= tolerance.linear
+                    && circle.normal().cross(axis).magnitude() <= tolerance.angular
+                {
+                    let v = pcurve.evaluate((range.start + range.end) * 0.5)?.point.y;
+                    let radius = torus.major_radius() + torus.minor_radius() * v.cos();
+                    return super::Circle3::new(
+                        torus.center() + axis * (torus.minor_radius() * v.sin()),
+                        circle.x_radius().normalize() * radius,
+                        circle.y_radius().normalize() * radius,
+                        tolerance,
+                    )
+                    .map(Into::into);
+                }
+            }
+        }
+        if let (Self::Plane(plane), Curve2::Circle(circle)) = (self, &pcurve) {
+            let u = plane.u();
+            let v = plane.v();
+            if u.dot(v).abs() <= tolerance.angular * u.magnitude() * v.magnitude()
+                && (u.magnitude() - v.magnitude()).abs() <= tolerance.linear {
+                return Circle3::new(
+                    plane.origin() + u * circle.center().x + v * circle.center().y,
+                    u * circle.radius(), v * circle.radius(), tolerance,
+                ).map(Curve3::from);
+            }
+        }
         if let Curve2::SurfaceProjection(projected) = &pcurve {
             if projected.surface() == self {
                 return Ok(projected.curve().clone());
@@ -5063,6 +5158,15 @@ impl Surface3 {
                         sphere.x_radius() * origin.y.cos(),
                         sphere.y_radius() * origin.y.cos(),
                     )),
+                    Self::Revolved(surface) => {
+                        let profile = surface.profile().evaluate(origin.y)?.point;
+                        let frame = surface.frame();
+                        Some((
+                            frame.origin() + frame.z() * profile.y,
+                            frame.x() * profile.x,
+                            frame.y() * profile.x,
+                        ))
+                    }
                     Self::Torus(torus) => {
                         let scale =
                             1.0 + torus.minor_radius() * origin.y.cos() / torus.major_radius();

@@ -315,6 +315,10 @@ pub(crate) fn transform_surface(
             (surface.knots().0.to_vec(), surface.knots().1.to_vec()),
         )?
         .into(),
+        Surface3::Offset(surface) if surface.v_slope() != 0.0 => OffsetSurface3::with_linear_distance(
+            transform_surface(surface.base().clone(), transform, tolerance)?,
+            surface.distance(), surface.v_slope(), tolerance,
+        )?.into(),
         Surface3::Offset(surface) => OffsetSurface3::new(
             transform_surface(surface.base().clone(), transform, tolerance)?,
             surface.distance(),

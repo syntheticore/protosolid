@@ -1,0 +1,172 @@
+{
+  "lastId": "60000n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 2,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-5",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XZ"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-6",
+          "elements": [
+            {
+              "$class": "Arc",
+              "id": "id-900",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "radius": 10,
+              "bounds": [
+                0,
+                1.5707963267948966
+              ],
+              "forward": true
+            },
+            {
+              "$class": "Line",
+              "id": "id-901",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    0,
+                    -10,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-902",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    0,
+                    0,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    10,
+                    0,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "RevolveFeature",
+        "id": "id-50001",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "angle",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-15",
+              "sketchId": "id-6",
+              "rings": [
+                [
+                  "id-900",
+                  "id-901",
+                  "id-902"
+                ]
+              ]
+            }
+          ],
+          "axis": {
+            "$class": "AxialReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/Z"
+            }
+          },
+          "angle": 360,
+          "offset": 0,
+          "fromFace": null,
+          "limitFace": null,
+          "side": true,
+          "operation": "join"
+        },
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "hemisphere revolution",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {},
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          50,
+          50,
+          40
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          0,
+          0,
+          5
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,251 @@
+{
+  "lastId": "60000n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 3,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-5",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XZ"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-6",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-1",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    12,
+                    -4,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    20,
+                    -4,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Spline",
+              "id": "id-2",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    20,
+                    -4,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    22,
+                    -1,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    22,
+                    1,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    20,
+                    4,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-3",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    20,
+                    4,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    12,
+                    4,
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-4",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    12,
+                    4,
+                    0
+                  ]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [
+                    12,
+                    -4,
+                    0
+                  ]
+                }
+              ]
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "RevolveFeature",
+        "id": "id-16",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "angle",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-15",
+              "sketchId": "id-6",
+              "rings": [
+                [
+                  "id-4",
+                  "id-1",
+                  "id-2",
+                  "id-3"
+                ]
+              ]
+            }
+          ],
+          "axis": {
+            "$class": "AxialReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/Z"
+            }
+          },
+          "angle": 270,
+          "offset": 0,
+          "fromFace": null,
+          "limitFace": null,
+          "side": true,
+          "operation": "join"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "DraftFeature",
+        "id": "id-50001",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "faces": [
+            {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "/id-16/revolve/generated/3"
+            },
+            {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "/id-16/revolve/generated/5"
+            }
+          ],
+          "ref_plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "solidId": "id-0/solid/0",
+              "topoId": "/id-16/revolve/generated/2"
+            }
+          },
+          "angle": 3,
+          "operation": "join"
+        },
+        "expressions": {}
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "spline sector draft",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-6": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [
+          66.41116560323172,
+          73.58883439676828,
+          50
+        ]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [
+          -3.5888343967682776,
+          3.5888343967682776,
+          0
+        ]
+      }
+    }
+  ]
+}

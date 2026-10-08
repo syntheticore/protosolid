@@ -1,6 +1,8 @@
 # Shapex saved-document regressions
 
 The twenty-six `.cad` files in this directory are passing regressions.
+Ten new documents awaiting review are in [failing/](failing/README.md), numbered
+032–041. Removed case 031 is not reused.
 All files exercise real modeling workflows and saved references.
 Every feature in a passing regression must complete without an error or partial
 reference loss. Circular
@@ -66,3 +68,16 @@ preserved from the original failure catalogue.
 
 Cases 022–030 were promoted from the failure catalogue without changing their
 saved geometry, dimensions, or selections.
+
+Check the new failure catalogue separately:
+
+```sh
+node tests/shapex-cad/failing/check.mjs --verify-failures
+```
+
+This also rebuilds Shapex from the current Rust source. It succeeds only when
+every new document has a complete, successful setup, intact references, and
+exactly one final modeling failure. Without `--verify-failures`, it reports the
+modeling failures and exits 1. The only new shell case opens the sharp outer
+end of an unblended square sweep. Shell exclusions are handled when choosing
+and reviewing fixtures.

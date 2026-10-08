@@ -63,7 +63,9 @@ export async function useOC() {
       }
 
       const solver = makeSolver()
-      const status = solver.solve()
+      // BFGS is cheaper for unreachable pointer objectives. Structural
+      // solves keep the default DogLeg algorithm.
+      const status = solver.solve(primitives.some(primitive => primitive.temporary) ? 0 : undefined)
       const conflicting = solver.has_gcs_conflicting_constraints()
       const failed = status >= 2
       // Redundant equations can have a valid solution. They are not a
@@ -115,7 +117,7 @@ export async function useOC() {
         // A negative tag makes this an objective on the remaining freedom,
         // rather than an additional equation in the structural diagnosis.
         probe.gcs.add_constraint_equal(index, target, -1, true, 0, 1)
-        const status = probe.solve()
+        const status = probe.solve(0) // BFGS, as for temporary pointer objectives.
         probe.gcs.apply_solution()
         const constrained = status < 2 &&
           Math.abs(probe.gcs.get_p_param(index) - value) <= movementTolerance

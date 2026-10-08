@@ -1,7 +1,7 @@
 # Shapex saved-document regressions
 
-The seventeen `.cad` files in this directory are passing regressions. Ten new
-cases awaiting review are in [failing/](failing/README.md), numbered 022–031.
+The seventeen `.cad` files in this directory are passing regressions. Nine
+cases awaiting review are in [failing/](failing/README.md), numbered 022–030.
 All files exercise real modeling workflows and saved references.
 Every feature in a passing regression must complete without an error or partial
 reference loss. Circular
@@ -65,4 +65,6 @@ This exits **0** only when each document in `failing/` has exactly one final
 Shapex modeling failure, a successful setup, and intact saved references. A newly
 passing case fails this verification so it can be reviewed and moved into the
 passing regressions. Shell openings bordering fillets and blend seam selections
-are excluded. The current result is 17 passing regressions and 10 final failures.
+are excluded. The catalogue contains 17 regression documents and nine documents
+with final modeling failures. Case 020's additional follow-up shell check
+currently fails, although its saved feature sequence builds.

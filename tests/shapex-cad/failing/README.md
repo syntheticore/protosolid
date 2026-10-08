@@ -1,6 +1,6 @@
 # Modeling failures awaiting review
 
-These ten `.cad` documents were tested against WASM rebuilt from the current
+These nine `.cad` documents were tested against WASM rebuilt from the current
 Rust source. Open a file with Shapex selected: the marker is at the end, setup
 sketches are hidden, and the last feature fails while the preceding body remains
 visible. The documents store actual feature settings and topology references;
@@ -17,17 +17,10 @@ they contain no saved errors or artificial failure flags.
 | [028](028-l-block-all-edge-fillet.cad) | Extruded L profile, height 20 mm; radius 1 mm fillet on all eighteen edges, including the concave vertical corner | Mixed convex/concave three-edge blends require a setback corner patch |
 | [029](029-tapered-square-loft-side-offset.cad) | Same tapered square loft; offset one side outward by 0.5 mm | Offset faces do not meet at a common vertex |
 | [030](030-intersecting-bores-rim-fillet.cad) | 30 x 30 x 20 mm box with two overlapping radius 5 mm through bores, centers 6 mm apart; radius 0.5 mm fillet on the outer top perimeter and the merged bore rim | Generated planar wire self-intersects |
-| [031](031-multiple-solids-pocket-opening-shell.cad) | Two separate boxes: one with a through bore, the other with an 8 mm deep blind bore entered from below; one inward 1 mm shell selecting the first box's top and the second box's pocket floor | Generated profile holes do not lie strictly inside the outer wire |
 
 Cases 024, 025, and 029 reuse one shape to compare three distinct operations.
 Cases 023 and 026 exercise draft on a loft surface and an extruded spline
 surface respectively. These are review candidates, not approved requirements.
-
-Case 031 resolves its two openings on different solids. Neither opening borders
-a fillet; the pocket floor meets its bore wall at a sharp right angle. Use the
-saved **Pocket floor** view to inspect the underside. The pocket-floor opening
-also fails when that box is shelled on its own. Selecting both outer top faces
-instead passes, so this case does not isolate a defect in multi-solid dispatch.
 
 The earlier passing documents remain in the parent directory. From the
 repository root, run:

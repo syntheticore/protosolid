@@ -15,7 +15,7 @@ were made.
 | [035](035-spline-square-sweep-end-fillet.cad) | 4 x 4 mm square swept along the same spline; radius 0.3 mm fillet around all four upper rim edges | Surface intersection correction does not converge |
 | [036](036-spline-square-sweep-side-offset.cad) | Same square sweep; offset all four side faces outward by 0.3 mm | Surface intersection correction does not converge |
 | [037](037-spline-square-sweep-open-end-shell.cad) | Same unblended square sweep; inward 0.4 mm shell with only the outer upper cap removed | Surface intersection correction does not converge |
-| [038](038-spline-sector-draft.cad) | 270 degree sector with a spline-shaped outer wall; draft the cylindrical inner and curved outer walls by 3 degrees relative to the lower horizontal face | Draft of this support is not implemented |
+| [038](038-box-orthogonal-equal-bores.cad) | 30 x 30 x 20 mm block with a vertical radius 5 mm through bore; cut a perpendicular radius 5 mm through bore along Y at z=10 mm, with the axes intersecting | Imprinted Boolean face boundary is open on the existing cylindrical bore |
 | [039](039-bulging-square-loft-rim-fillet.cad) | Three square sections at z=0, 10, 20 mm, widths 20, 24, 16 mm and X offsets 0, 2, 1 mm; fillet the four upper rim edges at radius 0.5 mm | NURBS surface parameters lie outside the natural domain |
 | [040](040-bulging-square-loft-side-offset.cad) | Same three-section square loft; offset one curved side outward by 0.5 mm | Certified surface intersection exceeds its subdivision budget |
 | [041](041-l-block-asymmetric-all-edge-chamfer.cad) | Extruded L block, height 20 mm; chamfer all eighteen edges with 0.5 and 0.75 mm setbacks | Mixed convex/concave corner requires a setback patch |
@@ -29,6 +29,13 @@ Cases 034–037 share one rail: cubic control points (X,Z) = (0,0), (0,8),
 (10,12), (10,20) mm, in the XZ plane. The square cases compare blending, face
 offset, and shelling on that same geometry. Cases 039–040 compare blending and
 face offset on a three-section loft rather than a sweep.
+
+Case 038 tests equal-diameter intersecting bores. Their cylindrical walls have
+tangential intersection points inside the block; this is a Boolean cross-drilling
+case, with no shell operation, fillets, or shell openings. The first bore and all
+sketches build, and only the perpendicular cut fails. It replaces the removed
+spline-sector draft case. Independent OpenCascade cuts using the same saved
+profiles and extrusion extents produce a valid solid.
 
 Case 037 is the only shell test. Its opening is the outermost upper cap at
 z=20 mm, not a pocket floor. There are no fillets anywhere in its setup. The

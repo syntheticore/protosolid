@@ -2,7 +2,7 @@
   "lastId": "60000n",
   "timeline": {
     "$class": "Timeline",
-    "marker": 3,
+    "marker": 6,
     "features": [
       {
         "$class": "CreateSketchFeature",
@@ -15,7 +15,7 @@
             "item": {
               "$class": "HelperReference",
               "componentId": "id-0",
-              "helperId": "id-0/XZ"
+              "helperId": "id-0/XY"
             }
           }
         },
@@ -31,54 +31,38 @@
                 {
                   "$class": "Vector3",
                   "elements": [
-                    12,
-                    -4,
+                    -15,
+                    -15,
                     0
                   ]
                 },
                 {
                   "$class": "Vector3",
                   "elements": [
-                    20,
-                    -4,
+                    15,
+                    -15,
                     0
                   ]
                 }
               ]
             },
             {
-              "$class": "Spline",
+              "$class": "Line",
               "id": "id-2",
               "points": [
                 {
                   "$class": "Vector3",
                   "elements": [
-                    20,
-                    -4,
+                    15,
+                    -15,
                     0
                   ]
                 },
                 {
                   "$class": "Vector3",
                   "elements": [
-                    22,
-                    -1,
-                    0
-                  ]
-                },
-                {
-                  "$class": "Vector3",
-                  "elements": [
-                    22,
-                    1,
-                    0
-                  ]
-                },
-                {
-                  "$class": "Vector3",
-                  "elements": [
-                    20,
-                    4,
+                    15,
+                    15,
                     0
                   ]
                 }
@@ -91,16 +75,16 @@
                 {
                   "$class": "Vector3",
                   "elements": [
-                    20,
-                    4,
+                    15,
+                    15,
                     0
                   ]
                 },
                 {
                   "$class": "Vector3",
                   "elements": [
-                    12,
-                    4,
+                    -15,
+                    15,
                     0
                   ]
                 }
@@ -113,16 +97,16 @@
                 {
                   "$class": "Vector3",
                   "elements": [
-                    12,
-                    4,
+                    -15,
+                    15,
                     0
                   ]
                 },
                 {
                   "$class": "Vector3",
                   "elements": [
-                    12,
-                    -4,
+                    -15,
+                    -15,
                     0
                   ]
                 }
@@ -134,12 +118,13 @@
         }
       },
       {
-        "$class": "RevolveFeature",
+        "$class": "ExtrudeFeature",
         "id": "id-16",
         "componentId": "id-0",
         "componentOccurrenceId": "id-0",
         "values": {
-          "extent": "angle",
+          "extent": "distance",
+          "side": "forward",
           "profiles": [
             {
               "$class": "ProfileReference",
@@ -155,61 +140,150 @@
               ]
             }
           ],
-          "axis": {
-            "$class": "AxialReference",
-            "item": {
-              "$class": "HelperReference",
-              "componentId": "id-0",
-              "helperId": "id-0/Z"
-            }
-          },
-          "angle": 270,
-          "offset": 0,
-          "fromFace": null,
+          "axis": null,
+          "distance": 20,
           "limitFace": null,
-          "side": true,
+          "offset": 0,
           "operation": "join"
         },
         "expressions": {}
       },
       {
-        "$class": "DraftFeature",
-        "id": "id-50001",
+        "$class": "CreateSketchFeature",
+        "id": "id-53",
         "componentId": "id-0",
         "componentOccurrenceId": "id-0",
         "values": {
-          "faces": [
-            {
-              "$class": "FaceReference",
-              "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "/id-16/revolve/generated/3"
-            },
-            {
-              "$class": "FaceReference",
-              "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "/id-16/revolve/generated/5"
-            }
-          ],
-          "ref_plane": {
+          "plane": {
             "$class": "PlanarReference",
             "item": {
-              "$class": "FaceReference",
+              "$class": "HelperReference",
               "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "/id-16/revolve/generated/2"
+              "helperId": "id-0/XY"
             }
-          },
-          "angle": 3,
-          "operation": "join"
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-54",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-52",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "radius": 5
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-57",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-56",
+              "sketchId": "id-54",
+              "rings": [
+                [
+                  "id-52"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 20,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "cut"
+        },
+        "expressions": {}
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-851",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XZ"
+            }
+          }
+        },
+        "expressions": {},
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-852",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-850",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [
+                  0,
+                  -10,
+                  0
+                ]
+              },
+              "radius": 5
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-853",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "both",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-56",
+              "sketchId": "id-852",
+              "rings": [
+                [
+                  "id-850"
+                ]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 20,
+          "limitFace": null,
+          "offset": 0,
+          "operation": "cut"
         },
         "expressions": {}
       }
     ],
     "baseCompDef": {
       "$class": "ComponentDefinition",
-      "title": "spline sector draft",
+      "title": "box intersecting orthogonal bores",
       "hidden": false,
       "material": null,
       "cog": false,
@@ -220,7 +294,9 @@
       "simulations": [],
       "canvases": [],
       "itemsHidden": {
-        "id-6": true
+        "id-6": true,
+        "id-54": true,
+        "id-852": true
       },
       "color": "hsl(47.88, 100%, 59.22%)"
     }
@@ -233,17 +309,17 @@
       "position": {
         "$class": "Vector3",
         "elements": [
-          66.41116560323172,
-          73.58883439676828,
-          50
+          84.074103032636,
+          85,
+          75
         ]
       },
       "target": {
         "$class": "Vector3",
         "elements": [
-          -3.5888343967682776,
-          3.5888343967682776,
-          0
+          -0.9258969673640032,
+          -2.7412056842616604e-17,
+          10
         ]
       }
     }

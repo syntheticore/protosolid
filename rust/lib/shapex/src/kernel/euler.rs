@@ -3037,6 +3037,27 @@ impl<'kernel> EulerTransaction<'kernel> {
                                 pcurve.direction() * scale,
                             )?
                             .into()
+                        } else if let (
+                            Curve3::Circle(circle), Curve3::Circle(source), Curve2::Line(pcurve),
+                            Surface3::Sphere(_) | Surface3::Revolved(_),
+                        ) = (&candidate.curve, &segment.curve, &segment.pcurve, &patch.surface)
+                        {
+                            // Circle charts differ only by phase and orientation.
+                            // Retain the exact meridian through a revolution pole,
+                            // where surface projection has no unique derivative.
+                            let scale = circle.normal().dot(source.normal()).signum();
+                            let anchor = coedge_range.start.min(coedge_range.end);
+                            let parameter = segment.curve.project(
+                                candidate.curve.evaluate(anchor)?.point, self.kernel.tolerance,
+                            )?.parameter;
+                            let reference = segment.range.start + segment.range.span()
+                                * (anchor - coedge_range.start) / coedge_range.span();
+                            let parameter = parameter + ((reference - parameter) / std::f64::consts::TAU).round()
+                                * std::f64::consts::TAU;
+                            Line2::new(
+                                pcurve.origin() + pcurve.direction() * (parameter - scale * anchor),
+                                pcurve.direction() * scale,
+                            )?.into()
                         } else if let (Curve3::Line(line), Surface3::Plane(plane)) =
                             (&candidate.curve, &patch.surface)
                         {
@@ -3162,6 +3183,37 @@ impl<'kernel> EulerTransaction<'kernel> {
                     edge.start, edge.end, edge.middle
                 ),
             ));
+        }
+        // Spatial welding identifies edge mates, but a point contact can have
+        // several disconnected face fans. Each fan owns a topological vertex.
+        let mut corners = BTreeMap::<VertexId, BTreeSet<CoedgeId>>::new();
+        for edge in &edges {
+            for coedge in self.working.edge(edge.edge)?.coedges() {
+                let vertex = self.working.coedge_vertices(*coedge)?[0];
+                corners.entry(vertex).or_default().insert(*coedge);
+            }
+        }
+        for (vertex, mut remaining) in corners {
+            let mut first = true;
+            while let Some(start) = remaining.first().copied() {
+                let target = if first {
+                    first = false;
+                    vertex
+                } else {
+                    let name = self.names.next_for("vertex")?;
+                    self.make_vertex(name, self.working.vertex(vertex)?.point())
+                };
+                self.working.vertices.get_mut(target)?.outgoing = Some(start);
+                let mut current = start;
+                while remaining.remove(&current) {
+                    let coedge = self.working.coedge(current)?.clone();
+                    let previous = self.working.coedge(coedge.previous)?;
+                    let next = *self.working.edge(previous.edge)?.coedges().iter()
+                        .find(|id| **id != coedge.previous).expect("sewn edge has two uses");
+                    self.working.edges.get_mut(coedge.edge)?.vertices[usize::from(!coedge.forward)] = target;
+                    current = next;
+                }
+            }
         }
         self.seal_shell_unchecked(shell)?;
         if !self.touched_bodies.contains(&body) {

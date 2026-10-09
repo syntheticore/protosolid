@@ -31,9 +31,9 @@ function checkDocument(file, source) {
     if(feature.error) console.log(`    ${feature.error.msg}`)
     if(feature.constructor.name == 'LoftFeature' && !feature.error) {
       const faces = feature.previewBody.faces()
-      const square = file.includes('tapered-square')
+      const square = file.includes('square-loft')
       assert.equal(faces.length, square ? 6 : 3, `${file}: loft must retain its section topology`)
-      assert.equal(faces.filter(face => face.getPlane()).length, square ? 6 : 2,
+      assert.equal(faces.filter(face => face.getPlane()).length, file.includes('tapered-square') ? 6 : 2,
         `${file}: loft must retain exact planar supports`)
     }
   }

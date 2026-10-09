@@ -1098,10 +1098,10 @@ impl EulerTransaction<'_> {
                         super::intersection::parallel_plane_torus_section(*plane, *torus, tolerance)
                             .map(super::intersection::swap_surface_curves)
                     }
-                    _ => offsets[0].intersect_surface(&offsets[1], tolerance),
+                    _ => offsets[0].intersect_support(&offsets[1], tolerance),
                 }
             } else {
-                offsets[0].intersect_surface(&offsets[1], tolerance)
+                offsets[0].intersect_support(&offsets[1], tolerance)
             };
             match intersection {
                 Ok(IntersectionSet::Isolated(curves)) => curves,

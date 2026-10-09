@@ -1159,15 +1159,11 @@ impl Compound {
         if let Err(error) =
             transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind, chamfer)
         {
-            let mixed_trihedral = chamfer.is_none()
-                .then(|| {
-                    error.diagnostics().iter().find(|diagnostic| {
-                        diagnostic.operation.as_deref() == Some("blend.mixed-trihedral-setback")
-                    })
-                })
-                .flatten();
+            let mixed_trihedral = error.diagnostics().iter().find(|diagnostic| {
+                diagnostic.operation.as_deref() == Some("blend.mixed-trihedral-setback")
+            });
             if let Some(diagnostic) = mixed_trihedral {
-                return self.blend_setback_network(edges, size, &diagnostic.entities, kind);
+                return self.blend_setback_network(edges, size, &diagnostic.entities, kind, chamfer);
             }
             return Err(error);
         }
@@ -1181,6 +1177,7 @@ impl Compound {
         size: f64,
         concave_edges: &[PersistentId],
         kind: super::edge_blend::EdgeBlendKind,
+        chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<Self> {
         // Each stage creates smooth continuation edges that the following stage must consume to
         // enter the already-rounded corner. This is internal continuation, not user-facing
@@ -1191,9 +1188,11 @@ impl Compound {
         // its smooth continuations. This ordering is independent of selection
         // order and applies to any number of mixed corners.
         for concavity in [true, false] {
-            let resolved = edges.iter()
+            let stage_edges = edges.iter()
                 .filter(|edge| concave.contains(&edge.persistent_id()) == concavity)
-                .map(|edge| match result.resolve(edge) {
+                .collect::<Vec<_>>();
+            let resolved = stage_edges.iter()
+                .map(|edge| match result.resolve(*edge) {
                     Resolution::Preserved(edge)
                     | Resolution::Modified(edge)
                     | Resolution::Merged(edge) => Ok(edge),
@@ -1206,7 +1205,21 @@ impl Compound {
                     )),
                 })
                 .collect::<KernelResult<Vec<_>>>()?;
-            result = result.blend_edges(&resolved, size, true, kind, None)?;
+            let settings = chamfer.map(|settings| {
+                let reference_faces = stage_edges.iter().zip(&resolved).map(|(source, edge)| {
+                    let reference = self.faces().find(|face| face.persistent_id() == settings.reference_faces[&source.persistent_id()]).unwrap();
+                    let faces = match result.resolve(reference) {
+                        Resolution::Preserved(face) | Resolution::Modified(face) | Resolution::Merged(face) => vec![face],
+                        Resolution::Split(faces) => faces,
+                        _ => Vec::new(),
+                    };
+                    let reference = edge.connected_faces()?.into_iter().find(|face| faces.contains(face))
+                        .ok_or_else(|| KernelError::new(DiagnosticKind::TopologyInvariant, "setback chamfer lost its reference face"))?;
+                    Ok((edge.persistent_id(), reference.persistent_id()))
+                }).collect::<KernelResult<_>>()?;
+                Ok::<_, KernelError>(ChamferSettings { mode: settings.mode, reference_faces })
+            }).transpose()?;
+            result = result.blend_edges(&resolved, size, true, kind, settings.as_ref())?;
         }
         Ok(result)
     }

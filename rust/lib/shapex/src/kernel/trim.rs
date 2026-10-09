@@ -28,51 +28,19 @@ impl<P> FaceCurve<P> {
 
 /// Translate periodic UV copies of a bounded intersection while retaining its
 /// exact spatial curve and parameterization.
-pub(super) fn intersection_chart_copies<P>(
-    curve: &Curve3,
+pub(super) fn intersection_chart_copies(
+    domain: super::DomainBounds,
     pcurve: &Curve2,
     surface: &Surface3,
-    other: &Surface3,
-    boundary: &[FaceCurve<P>],
+    bounds: [ParameterRange; 2],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<Curve2>> {
-    // Closed sections can cross the chart seam independently of the face's
-    // edge range. This includes circles: their cylinder p-curve is unbounded
-    // even though the spatial curve and its mate have one bounded revolution.
-    let conical_section = matches!(
-        (surface, other),
-        (
-            Surface3::Cone(_),
-            Surface3::Plane(_) | Surface3::Cylinder(_)
-        ) | (
-            Surface3::Plane(_) | Surface3::Cylinder(_),
-            Surface3::Cone(_)
-        )
-    );
-    let oblique_section = matches!(curve, Curve3::SurfaceIntersection(_))
-        && matches!(
-            (surface, other),
-            (Surface3::Plane(_), Surface3::Cylinder(_))
-                | (Surface3::Cylinder(_), Surface3::Plane(_))
-        );
-    let circular_section = matches!(curve, Curve3::Circle(_));
-    if !(conical_section || oblique_section || circular_section)
-        || !surface.domains().iter().any(|d| d.period.is_some())
-    {
+    if !surface.domains().iter().any(|d| d.period.is_some()) {
         return Ok(vec![pcurve.clone()]);
     }
-    let super::DomainBounds::Bounded(range) = curve.domain().bounds else {
+    let super::DomainBounds::Bounded(range) = domain else {
         return Ok(vec![pcurve.clone()]);
     };
-    if curve
-        .evaluate(range.start)?
-        .point
-        .distance(curve.evaluate(range.end)?.point)
-        > tolerance.linear
-    {
-        return Ok(vec![pcurve.clone()]);
-    }
-    let bounds = face_parameter_bounds(boundary, tolerance)?;
     let mut minimum = Point2::new(f64::INFINITY, f64::INFINITY);
     let mut maximum = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     for i in 0..=32 {
@@ -85,10 +53,8 @@ pub(super) fn intersection_chart_copies<P>(
         maximum.y = maximum.y.max(p.y);
     }
     let offsets = |axis: usize| {
-        let candidates = surface.domains()[axis]
-            .period
-            .map_or(vec![0.0], |p| vec![-p, 0.0, p]);
-        candidates
+        let Some(period) = surface.domains()[axis].period else { return vec![0.0]; };
+        [-period, 0.0, period]
             .into_iter()
             .filter(|offset| {
                 minimum[axis] + offset < bounds[axis].end + tolerance.parameter
@@ -437,10 +403,10 @@ pub(super) fn trimmed_faces_intersect(
                     None, first_surface, &first_boundary, tolerance)?;
                 let second_pcurve = align_pcurve_to_face_chart(&intersection.second_pcurve,
                     None, second_surface, &second_boundary, tolerance)?;
-                let first_copies = intersection_chart_copies(&intersection.curve, &first_pcurve,
-                    first_surface, second_surface, &first_boundary, tolerance)?;
-                let second_copies = intersection_chart_copies(&intersection.curve, &second_pcurve,
-                    second_surface, first_surface, &second_boundary, tolerance)?;
+                let first_copies = intersection_chart_copies(intersection.curve.domain().bounds, &first_pcurve,
+                    first_surface, first_bounds, tolerance)?;
+                let second_copies = intersection_chart_copies(intersection.curve.domain().bounds, &second_pcurve,
+                    second_surface, second_bounds, tolerance)?;
                 for first in &first_copies {
                     for second in &second_copies {
                         if !trim_to_faces(&intersection.curve, first, &first_boundary,

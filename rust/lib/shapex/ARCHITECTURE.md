@@ -85,11 +85,16 @@ meshes compose the same face tessellations rather than using a second meshing pa
 ### Evaluation cost and reuse
 
 Rational 2D and 3D curves share a local homogeneous evaluator for positions and
-their first two derivatives. It locates the active knot span and reads only
+their derivatives through third order. It locates the active knot span and reads only
 `degree + 1` controls, giving `O(log(control_count) + degree²)` evaluation cost.
 Derivative control data is formed only for that span. Degrees up to 15 use stack
 scratch space; higher degrees use scratch space proportional to the degree.
 Endpoint selection and repeated-knot behavior match whole-curve differentiation.
+All derivative orders use the same domain clamping, including endpoint roundoff.
+
+Operations with an existing edge use analytic support intersections or continue
+that edge locally. Trimmed-face intersections search only the supplied parameter
+bounds. They do not first run an exhaustive search over an extended support.
 
 Edge blends prepare their contact rails, circular frame and differential data once
 per longitudinal parameter. Evaluations across a section reuse that preparation.
@@ -154,20 +159,26 @@ integration.
 Before sewing, unmatched face boundaries are split at existing vertices on their
 exact curves so adjacent faces can share an edge despite different subdivisions.
 Boolean side probes use distances to retained curve intervals; coincident supports
-use oriented trims to determine material sides. These operations retain exact
+use oriented trims to determine material sides within one periodic chart.
+Periodic intersection copies depend on domain coverage rather than surface types.
+Nearest-edge classification uses the normals of both incident faces. Sewing
+separates disconnected vertex fans at point contacts and reparameterizes conical
+generators and circular meridians algebraically through surface poles. These operations retain exact
 supports and curves. Edge blends likewise retain exact supports when trimming
 across earlier fillets. Periodic
 seam continuity and display bands use a consistent parameter chart, with retained
 seams selecting the intended sweep interval at and beyond a half turn.
 
 Offset, move, and blend reconstruction share support continuation and a corner
-projection solver. Surface constraints locate regular intersections; tangent
+projection solver. Sweep continuation extends the profile and rail while retaining
+the original frame. Surface constraints locate regular intersections; tangent
 contact rails and one periodic seam anchor supply the missing constraints at
 singular intersections. Contact rails delimit a blend's material sector even
 when a miter boundary extends beyond it. Boundary construction preserves exact
-lines and circles through a single surface API. Mixed concave/convex fillet
+lines and circles through a single surface API. Mixed concave/convex blend
 networks form concave setbacks first, then consume their smooth continuations
 with the convex network, without searching construction-order permutations.
+Asymmetric chamfers carry their reference faces through both stages using history.
 
 ## Parametric systems
 

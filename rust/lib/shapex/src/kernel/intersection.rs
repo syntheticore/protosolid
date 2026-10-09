@@ -742,6 +742,24 @@ impl Surface3 {
         other: &Self,
         tolerance: ModelTolerance,
     ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+        match self.intersect_support(other, tolerance) {
+            Err(error) if matches!((self, other),
+                (Self::Nurbs(_) | Self::Offset(_), Self::Nurbs(_) | Self::Offset(_)))
+                && error.diagnostics().iter().all(|d| d.kind == DiagnosticKind::UnsupportedGeometry) =>
+            {
+                trace_regular_surface_intersections(self, other, tolerance)
+            }
+            result => result,
+        }
+    }
+
+    /// Support intersections without global search. Reconstruction has a BREP
+    /// branch and must use it instead of searching entire surface domains.
+    pub(crate) fn intersect_support(
+        &self,
+        other: &Self,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
         // A trimmed feature cap can retain the very same spline or procedural
         // support as its target. This is an overlap, not an isolated curve;
         // tracing the identical equations is singular and loses the cap loop.
@@ -809,9 +827,6 @@ impl Surface3 {
                     *plane, self, tolerance,
                 )?))
             }
-            (Self::Nurbs(_) | Self::Offset(_), Self::Nurbs(_) | Self::Offset(_)) => {
-                trace_regular_surface_intersections(self, other, tolerance)
-            }
             _ => Err(unsupported(
                 "this surface/surface intersection pair is not yet certified",
             )),
@@ -830,7 +845,7 @@ impl Surface3 {
         second_domains: [super::ParameterRange; 2],
         tolerance: ModelTolerance,
     ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
-        match self.intersect_surface(other, tolerance) {
+        match self.intersect_support(other, tolerance) {
             Ok(result) => Ok(result),
             Err(error)
                 if error

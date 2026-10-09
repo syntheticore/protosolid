@@ -84,6 +84,22 @@ impl SweptSurface3 {
     pub fn rail(&self) -> &TrimmedCurve2 {
         &self.rail
     }
+    pub(crate) fn extended(&self, padding: [f64; 2]) -> KernelResult<Self> {
+        let mut result = self.clone();
+        let domains = self.domains();
+        for (axis, curve) in [&mut result.profile, &mut result.rail].into_iter().enumerate() {
+            if domains[axis].period.is_none() {
+                let bounds = curve.range();
+                let range = ParameterRange::new(
+                    bounds.start.min(bounds.end) - padding[axis],
+                    bounds.start.max(bounds.end) + padding[axis],
+                )?;
+                *curve = TrimmedCurve2::new(curve.curve().extended(range)?, range)?;
+            }
+        }
+        // Continuation retains the original section frame and rail anchor.
+        Ok(result)
+    }
     pub(crate) fn domains(&self) -> [ParameterDomain; 2] {
         let mut domains = [&self.profile, &self.rail].map(|curve| ParameterDomain {
             bounds: DomainBounds::Bounded(curve.range()),

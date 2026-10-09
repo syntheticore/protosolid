@@ -151,19 +151,17 @@ pub(crate) fn boolean_brep_with_face_boundaries(
                     tolerance,
                 )?;
                 let first_copies = intersection_chart_copies(
-                    &intersection.curve,
+                    intersection.curve.domain().bounds,
                     &first_pcurve,
                     first_face.surface(),
-                    second_face.surface(),
-                    first_boundary,
+                    first_bounds,
                     tolerance,
                 )?;
                 let second_copies = intersection_chart_copies(
-                    &intersection.curve,
+                    intersection.curve.domain().bounds,
                     &second_pcurve,
                     second_face.surface(),
-                    first_face.surface(),
-                    second_boundary,
+                    second_bounds,
                     tolerance,
                 )?;
                 for first_pcurve in &first_copies {
@@ -244,107 +242,49 @@ pub(crate) fn boolean_brep_with_face_boundaries(
             }
             let first_boundary = &original_curves[&(0, first_index)];
             let second_boundary = &original_curves[&(1, second_index)];
-            for (index, source) in imprinted_curves[&(1, second_index)].iter().enumerate() {
-                if index >= second_boundary.len()
-                    && (boundary_curve_for_intersection(
-                        &source.curve,
-                        source.range,
-                        first_boundary,
-                        tolerance,
-                    )?
-                    .is_some()
-                        || boundary_curve_for_intersection(
-                            &source.curve,
-                            source.range,
-                            second_boundary,
-                            tolerance,
-                        )?
-                        .is_some())
-                {
-                    continue;
+            for (target_key, source_key, target, target_boundary, source_boundary) in [
+                ((0, first_index), (1, second_index), first_face, first_boundary, second_boundary),
+                ((1, second_index), (0, first_index), second_face, second_boundary, first_boundary),
+            ] {
+                // A union can enlarge a partial source face. Overlay in one
+                // complete chart, rather than clipping to the source trim.
+                let mut chart = face_parameter_bounds(target_boundary, tolerance)?;
+                for (axis, domain) in target.surface().domains().iter().enumerate() {
+                    if let Some(period) = domain.period {
+                        chart[axis].end = chart[axis].start + period;
+                    }
                 }
-                let projected: Curve2 = if first_face.surface() == second_face.surface() {
-                    source.pcurve.clone()
-                } else {
-                    super::SurfaceProjectionPcurve2::new(
-                        source.curve.clone(),
-                        first_face.surface().clone(),
-                        source.pcurve.clone(),
-                        source.range,
-                        tolerance,
-                    )?
-                    .into()
-                };
-                let projected = align_pcurve_to_face_chart(
-                    &projected,
-                    Some(source.range),
-                    first_face.surface(),
-                    first_boundary,
-                    tolerance,
-                )?;
-                face_curves
-                    .get_mut(&(0, first_index))
-                    .expect("face curve map is complete")
-                    .push(FaceCurve {
-                        provenance: source.provenance.clone(),
-                        curve: source.curve.clone(),
-                        pcurve: projected,
-                        range: source.range,
-                        loop_end: false,
-                        loop_kind: source.loop_kind,
-                        parameter_seam: source.parameter_seam,
-                    });
-            }
-            for (index, source) in imprinted_curves[&(0, first_index)].iter().enumerate() {
-                if index >= first_boundary.len()
-                    && (boundary_curve_for_intersection(
-                        &source.curve,
-                        source.range,
-                        first_boundary,
-                        tolerance,
-                    )?
-                    .is_some()
-                        || boundary_curve_for_intersection(
-                            &source.curve,
-                            source.range,
-                            second_boundary,
-                            tolerance,
-                        )?
-                        .is_some())
-                {
-                    continue;
+                for (index, source) in imprinted_curves[&source_key].iter().enumerate() {
+                    if index >= source_boundary.len()
+                        && (boundary_curve_for_intersection(&source.curve, source.range, first_boundary, tolerance)?.is_some()
+                            || boundary_curve_for_intersection(&source.curve, source.range, second_boundary, tolerance)?.is_some())
+                    {
+                        continue;
+                    }
+                    let projected: Curve2 = if first_face.surface() == second_face.surface() {
+                        source.pcurve.clone()
+                    } else {
+                        super::SurfaceProjectionPcurve2::new(
+                            source.curve.clone(), target.surface().clone(), source.pcurve.clone(), source.range, tolerance,
+                        )?.into()
+                    };
+                    let projected = align_pcurve_to_face_chart(
+                        &projected, Some(source.range), target.surface(), target_boundary, tolerance,
+                    )?;
+                    for pcurve in intersection_chart_copies(
+                        super::DomainBounds::Bounded(source.range), &projected, target.surface(), chart, tolerance,
+                    )? {
+                        face_curves.get_mut(&target_key).expect("face curve map is complete").push(FaceCurve {
+                            provenance: source.provenance.clone(),
+                            curve: source.curve.clone(),
+                            pcurve,
+                            range: source.range,
+                            loop_end: false,
+                            loop_kind: source.loop_kind,
+                            parameter_seam: source.parameter_seam,
+                        });
+                    }
                 }
-                let projected: Curve2 = if first_face.surface() == second_face.surface() {
-                    source.pcurve.clone()
-                } else {
-                    super::SurfaceProjectionPcurve2::new(
-                        source.curve.clone(),
-                        second_face.surface().clone(),
-                        source.pcurve.clone(),
-                        source.range,
-                        tolerance,
-                    )?
-                    .into()
-                };
-                let projected = align_pcurve_to_face_chart(
-                    &projected,
-                    Some(source.range),
-                    second_face.surface(),
-                    second_boundary,
-                    tolerance,
-                )?;
-                face_curves
-                    .get_mut(&(1, second_index))
-                    .expect("face curve map is complete")
-                    .push(FaceCurve {
-                        provenance: source.provenance.clone(),
-                        curve: source.curve.clone(),
-                        pcurve: projected,
-                        range: source.range,
-                        loop_end: false,
-                        loop_kind: source.loop_kind,
-                        parameter_seam: source.parameter_seam,
-                    });
             }
         }
     }
@@ -360,7 +300,7 @@ pub(crate) fn boolean_brep_with_face_boundaries(
             first_faces.as_slice()
         };
         for (index, face) in faces.iter().enumerate() {
-            let original = boundary_curves(compound, face.topology_id())?;
+            let mut original = boundary_curves(compound, face.topology_id())?;
             let has_coincident_support = opposite_faces.iter().any(|opposite| {
                 face.surface()
                     .intersect_surface(opposite.surface(), tolerance)
@@ -388,7 +328,7 @@ pub(crate) fn boolean_brep_with_face_boundaries(
                 }
                 for (other_index, other) in faces.iter().enumerate() {
                     if same_support(other) {
-                        for curve in &face_curves[&(operand, other_index)] {
+                        for (curve_index, curve) in face_curves[&(operand, other_index)].iter().enumerate() {
                             let mut curve = curve.clone();
                             if other.surface() != face.surface() {
                                 curve.pcurve = super::SurfaceProjectionPcurve2::new(
@@ -399,8 +339,6 @@ pub(crate) fn boolean_brep_with_face_boundaries(
                                     tolerance,
                                 )?
                                 .into();
-                            }
-                            if other_index != index {
                                 curve.pcurve = align_pcurve_to_face_chart(
                                     &curve.pcurve,
                                     Some(curve.range),
@@ -408,6 +346,9 @@ pub(crate) fn boolean_brep_with_face_boundaries(
                                     &original,
                                     tolerance,
                                 )?;
+                            }
+                            if other_index != index && curve_index < original_curves[&(operand, other_index)].len() {
+                                original.push(curve.clone());
                             }
                             combined_curves.push(curve);
                         }
@@ -814,6 +755,15 @@ fn arrange_face(
         Ok(direct)
     };
     let orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
+        // Classify one complete periodic chart. The material is periodic,
+        // but its planar arrangement needs an exterior at the chart seams.
+        if has_coincident_support && surface.domains().iter().enumerate().any(|(axis, domain)| {
+            domain.period.is_some_and(|period| {
+                uv[axis] < uv_bounds[0][axis] || uv[axis] > uv_bounds[0][axis] + period
+            })
+        }) {
+            return Ok(None);
+        }
         if surface
             .domains()
             .iter()

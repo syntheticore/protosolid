@@ -590,23 +590,19 @@ impl Curve2 {
             Self::Circle(_) => Ok(-self.evaluate(parameter)?.first_derivative),
             Self::Nurbs(curve) => {
                 let value = curve.evaluate(parameter)?;
-                let mut degree = curve.degree;
-                let mut knots = curve.knots.clone();
-                let mut controls = curve.homogeneous_controls();
-                let weight = de_boor_vec3(degree, &knots, &controls, parameter)?.z;
-                let mut derivatives = [Vec3::new(0.0, 0.0, 0.0); 3];
-                for derivative in &mut derivatives {
-                    let Some(next) = derivative_controls3(degree, &knots, &controls) else {
-                        break;
-                    };
-                    (degree, knots, controls) = next;
-                    *derivative = de_boor_vec3(degree, &knots, &controls, parameter)?;
-                }
-                Ok((derivatives[2].truncate()
-                    - value.point.to_vec() * derivatives[2].z
-                    - value.first_derivative * (3.0 * derivatives[1].z)
-                    - value.second_derivative * (3.0 * derivatives[0].z))
-                    / weight)
+                let parameter = parameter.clamp(curve.knots[curve.degree], curve.knots[curve.control_points.len()]);
+                let [weight, first, second, third] = homogeneous_curve_jet(
+                    curve.degree, &curve.knots, curve.control_points.len(), parameter,
+                    |index| {
+                        let point = curve.control_points[index];
+                        let weight = curve.weights[index];
+                        Vec3::new(point.x * weight, point.y * weight, weight)
+                    },
+                );
+                Ok((third.truncate()
+                    - value.point.to_vec() * third.z
+                    - value.first_derivative * (3.0 * second.z)
+                    - value.second_derivative * (3.0 * first.z)) / weight.z)
             }
             _ => Err(invalid("sweep rails must be lines, circles, or NURBS")),
         }
@@ -1327,18 +1323,18 @@ fn find_span(degree: usize, knots: &[f64], control_count: usize, parameter: f64)
     middle
 }
 
-/// Evaluate a homogeneous curve and its first two derivatives on the active
+/// Evaluate a homogeneous curve and its derivatives on the active
 /// knot span. Only degree + 1 controls can contribute at a parameter; building
 /// whole derivative curves here makes every sample linear in model size.
 /// The same local evaluator serves rational 2D trims and 3D geometry. Common
 /// degrees use stack storage; arbitrary higher degrees remain supported.
-fn homogeneous_curve_jet<V: cgmath::VectorSpace<Scalar = f64>>(
+fn homogeneous_curve_jet<V: cgmath::VectorSpace<Scalar = f64>, const N: usize>(
     degree: usize,
     knots: &[f64],
     control_count: usize,
     parameter: f64,
     mut control: impl FnMut(usize) -> V,
-) -> [V; 3] {
+) -> [V; N] {
     let span = find_span(degree, knots, control_count, parameter);
     let first = span - degree;
     let mut knots = &knots[first..first + 2 * degree + 2];
@@ -1355,8 +1351,8 @@ fn homogeneous_curve_jet<V: cgmath::VectorSpace<Scalar = f64>>(
     for (index, value) in controls.iter_mut().enumerate() {
         *value = control(first + index);
     }
-    let mut jet = [V::zero(); 3];
-    for (order, result) in jet.iter_mut().enumerate().take(degree.min(2) + 1) {
+    let mut jet = [V::zero(); N];
+    for (order, result) in jet.iter_mut().enumerate().take(degree + 1) {
         let current_degree = degree - order;
         values[..=current_degree].copy_from_slice(&controls[..=current_degree]);
         for level in 1..=current_degree {
@@ -1371,7 +1367,7 @@ fn homogeneous_curve_jet<V: cgmath::VectorSpace<Scalar = f64>>(
             }
         }
         *result = values[current_degree];
-        if order < 2 && current_degree > 0 {
+        if order + 1 < N && current_degree > 0 {
             for j in 0..current_degree {
                 let denominator = knots[j + current_degree + 1] - knots[j + 1];
                 controls[j] = if denominator == 0.0 {
@@ -1384,61 +1380,6 @@ fn homogeneous_curve_jet<V: cgmath::VectorSpace<Scalar = f64>>(
         }
     }
     jet
-}
-
-fn de_boor_vec3(
-    degree: usize,
-    knots: &[f64],
-    controls: &[Vec3],
-    parameter: f64,
-) -> KernelResult<Vec3> {
-    if degree == 0 {
-        let span = find_span(0, knots, controls.len(), parameter);
-        return Ok(controls[span]);
-    }
-    let span = find_span(degree, knots, controls.len(), parameter);
-    let mut values: Vec<Vec3> = (0..=degree).map(|j| controls[span - degree + j]).collect();
-    for level in 1..=degree {
-        for j in (level..=degree).rev() {
-            let index = span - degree + j;
-            let denominator = knots[index + degree + 1 - level] - knots[index];
-            if denominator == 0.0 {
-                values[j] = values[j - 1];
-            } else {
-                let alpha = (parameter - knots[index]) / denominator;
-                values[j] = values[j - 1] * (1.0 - alpha) + values[j] * alpha;
-            }
-        }
-    }
-    let result = values[degree];
-    if !finite_vector(result) {
-        return Err(KernelError::new(
-            DiagnosticKind::NumericalFailure,
-            "2D NURBS evaluation produced a non-finite value",
-        ));
-    }
-    Ok(result)
-}
-
-fn derivative_controls3(
-    degree: usize,
-    knots: &[f64],
-    controls: &[Vec3],
-) -> Option<(usize, Vec<f64>, Vec<Vec3>)> {
-    if degree == 0 || controls.len() < 2 {
-        return None;
-    }
-    let derivative = (0..controls.len() - 1)
-        .map(|index| {
-            let denominator = knots[index + degree + 1] - knots[index + 1];
-            if denominator == 0.0 {
-                Vec3::new(0.0, 0.0, 0.0)
-            } else {
-                (controls[index + 1] - controls[index]) * (degree as f64 / denominator)
-            }
-        })
-        .collect();
-    Some((degree - 1, knots[1..knots.len() - 1].to_vec(), derivative))
 }
 
 impl Circle3 {
@@ -3440,7 +3381,7 @@ impl NurbsSurface3 {
                 self.control_points.len(),
                 v,
                 |row| {
-                    homogeneous_curve_jet(
+                    homogeneous_curve_jet::<_, 3>(
                         self.degrees.0,
                         &self.knots.0,
                         self.control_points[row].len(),

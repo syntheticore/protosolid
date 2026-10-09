@@ -187,10 +187,21 @@ pub(super) fn face_parameter_bounds(
     face: FaceId,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<[ParameterRange; 2]> {
-    super::trim::face_parameter_bounds(
+    let mut bounds = super::trim::face_parameter_bounds(
         &super::trim::face_boundary_curves(topology, face, tolerance)?,
         tolerance,
-    )
+    )?;
+    // Trims carry an achieved tolerance. Their bounding box is intersected
+    // with the support domain before it is used to evaluate that support.
+    for (bound, domain) in bounds.iter_mut().zip(topology.face(face)?.surface().domains()) {
+        if domain.period.is_none() {
+            if let super::DomainBounds::Bounded(range) = domain.bounds {
+                bound.start = bound.start.max(range.start.min(range.end));
+                bound.end = bound.end.min(range.start.max(range.end));
+            }
+        }
+    }
+    Ok(bounds)
 }
 
 pub(super) fn exact_pcurve(
@@ -472,7 +483,7 @@ fn offset_edge(
         }
     }
     let intersections = supports[&first]
-        .intersect_surface(&supports[&second], tolerance)
+        .intersect_support(&supports[&second], tolerance)
         .or_else(|error| {
             if !error
                 .diagnostics()
@@ -1282,6 +1293,10 @@ pub(super) fn extended_support(
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Surface3> {
     match surface {
+        Surface3::Swept(sweep) => {
+            let padding = offset_parameter_padding(surface, bounds, distance, tolerance)?;
+            sweep.extended(padding).map(Surface3::Swept)
+        }
         Surface3::Nurbs(spline) => {
             let padding = offset_parameter_padding(surface, bounds, distance, tolerance)?;
             spline.extended_bezier(padding).map(Into::into)
@@ -3275,12 +3290,7 @@ pub(crate) fn move_faces(
     for face in source.faces() {
         let id = face.topology_id();
         let original_bounds = face_parameter_bounds(topology, id, tolerance)?;
-        let mut surface = face.surface().clone();
-        if let Surface3::Nurbs(spline) = &surface {
-            let padding =
-                offset_parameter_padding(&surface, original_bounds, displacement, tolerance)?;
-            surface = spline.extended_bezier(padding)?.into();
-        }
+        let mut surface = extended_support(face.surface(), original_bounds, displacement, tolerance)?;
         if selected.contains(&face.persistent_id()) {
             surface = super::transform::transform_surface(surface, transform, tolerance)?;
         }

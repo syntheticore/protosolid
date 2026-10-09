@@ -1580,6 +1580,44 @@ mod tests {
         mesh(&body);
     }
     #[test]
+    fn bulging_square_loft_rim() {
+        let a = rectangle(-10.0, -10.0, 20.0, 20.0);
+        let b = rectangle(-10.0, -12.0, 24.0, 24.0);
+        let c = rectangle(-7.0, -8.0, 16.0, 16.0);
+        let body = a.loft(Plane3::xy(), [(upper(10.0), &b), (upper(20.0), &c)]).unwrap();
+        let edges = body.edges().filter(|edge| {
+            edge.endpoints().unwrap().into_iter().all(|p| (p.z - 20.0).abs() < 1e-6)
+        }).cloned().collect::<Vec<_>>();
+        assert_eq!(edges.len(), 4);
+        let result = body.fillet(&edges, 0.5).unwrap();
+        assert!(result.volume() < body.volume());
+        mesh(&result);
+    }
+    #[test]
+    fn equal_orthogonal_bores() {
+        let block = rectangle(-15.0, -15.0, 30.0, 30.0).extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0)).unwrap();
+        let bore = circle(5.0).extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0)).unwrap();
+        let plane = Plane3::new(Point3::new(0.0, -15.0, 10.0), Vec3::unit_x(), Vec3::unit_z(), block.tolerance()).unwrap();
+        let cross = circle(5.0).extrude(plane, Vec3::new(0.0, 30.0, 0.0)).unwrap();
+        let result = block.difference(&bore).unwrap().difference(&cross).unwrap();
+        let expected = 18000.0 - 50.0 * std::f64::consts::PI * 25.0 + 16.0 * 125.0 / 3.0;
+        assert!((result.volume() - expected).abs() < 1e-3);
+        mesh(&result);
+    }
+    #[test]
+    fn torus_face_limited_pocket() {
+        let t = ModelTolerance::default();
+        let section = Profile::new(Wire2::new([TrimmedCurve2::circle(Point2::new(12.0, 0.0), 3.0).unwrap()], t).unwrap(), [], t).unwrap();
+        let body = section.revolve(Plane3::xz(), Axis3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_z()).unwrap(), std::f64::consts::TAU).unwrap();
+        let pocket = Profile::new(Wire2::new([TrimmedCurve2::circle(Point2::new(12.0, 0.0), 1.0).unwrap()], t).unwrap(), [], t).unwrap();
+        let limit = body.faces().find(|face| matches!(face.surface(), Surface3::Torus(_))).unwrap();
+        let tool = pocket.extrude_up_to_face(Plane3::xy(), &body, limit, 0.0, 0.0).unwrap();
+        let result = body.difference(&tool).unwrap();
+        assert!((result.volume() + tool.volume() - body.volume()).abs() < body.volume() * 1e-6,
+            "volumes {} + {} != {}", result.volume(), tool.volume(), body.volume());
+        mesh(&result);
+    }
+    #[test]
     fn feature_split() {
         let body = rectangle(-2.0, -2.0, 4.0, 4.0)
             .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 4.0))

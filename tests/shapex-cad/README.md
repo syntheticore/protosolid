@@ -1,13 +1,13 @@
 # Shapex saved-document regressions
 
-The twenty-six `.cad` files in this directory are passing regressions.
-Ten new documents awaiting review are in [failing/](failing/README.md), numbered
-032–041. Removed case 031 is not reused.
+The thirty-six `.cad` files in this directory are passing regressions.
+Removed case 031 is not reused.
 All files exercise real modeling workflows and saved references.
 Every feature in a passing regression must complete without an error or partial
 reference loss. Circular
 lofts must publish one curved side surface and two planar caps; tapered square
-lofts must retain six planar faces.
+lofts must retain six planar faces; bulging square lofts retain four curved sides
+and two planar caps.
 
 | File | Operation |
 | --- | --- |
@@ -37,6 +37,16 @@ lofts must retain six planar faces.
 | `028-l-block-all-edge-fillet.cad` | L block, 1 mm fillet on all eighteen edges |
 | `029-tapered-square-loft-side-offset.cad` | Tapered square loft, one side offset outward by 0.5 mm |
 | `030-intersecting-bores-rim-fillet.cad` | Box with overlapping bores, 0.5 mm outer top perimeter and bore rim fillet |
+| `032-hemisphere-revolution.cad` | Hemisphere revolution through a singular pole |
+| `033-torus-up-to-face-pocket.cad` | Circular pocket terminated on a torus face |
+| `034-spline-pipe-end-tilt.cad` | Spline pipe with a tilted end face |
+| `035-spline-square-sweep-end-fillet.cad` | Square spline sweep with an end perimeter fillet |
+| `036-spline-square-sweep-side-offset.cad` | Square spline sweep with an offset side |
+| `037-spline-square-sweep-open-end-shell.cad` | Square spline sweep shelled with one end open |
+| `038-box-orthogonal-equal-bores.cad` | Box with equal perpendicular bores |
+| `039-bulging-square-loft-rim-fillet.cad` | Bulging square loft with an upper rim fillet |
+| `040-bulging-square-loft-side-offset.cad` | Bulging square loft with an offset side |
+| `041-l-block-asymmetric-all-edge-chamfer.cad` | L block with asymmetric chamfers on all edges |
 
 From the repository root:
 
@@ -66,18 +76,5 @@ side surface and its rim, replacing the former four patch selections. Operation
 dimensions and selected geometric regions are unchanged. Case numbering is
 preserved from the original failure catalogue.
 
-Cases 022–030 were promoted from the failure catalogue without changing their
+Cases 022–030 and 032–041 were promoted from the failure catalogue without changing their
 saved geometry, dimensions, or selections.
-
-Check the new failure catalogue separately:
-
-```sh
-node tests/shapex-cad/failing/check.mjs --verify-failures
-```
-
-This also rebuilds Shapex from the current Rust source. It succeeds only when
-every new document has a complete, successful setup, intact references, and
-exactly one final modeling failure. Without `--verify-failures`, it reports the
-modeling failures and exits 1. The only new shell case opens the sharp outer
-end of an unblended square sweep. Shell exclusions are handled when choosing
-and reviewing fixtures.

@@ -235,6 +235,7 @@ fn check_jet(degree: usize, knots: Vec<f64>) {
         .collect::<Vec<_>>();
     let first = derivative_controls(degree, &knots, &controls).unwrap();
     let second = derivative_controls(first.0, &first.1, &first.2);
+    let third = second.as_ref().and_then(|(d, k, c)| derivative_controls(*d, k, c));
     let start = knots[degree];
     let end = knots[count];
     let parameters = knots
@@ -244,7 +245,7 @@ fn check_jet(degree: usize, knots: Vec<f64>) {
         .chain((0..=100).map(|i| start + (end - start) * i as f64 / 100.0));
     for t in parameters {
         let mut accessed = 0;
-        let actual = homogeneous_curve_jet(degree, &knots, count, t, |i| {
+        let actual = homogeneous_curve_jet::<_, 4>(degree, &knots, count, t, |i| {
             accessed += 1;
             controls[i]
         });
@@ -260,6 +261,10 @@ fn check_jet(degree: usize, knots: Vec<f64>) {
                 .as_ref()
                 .map(|(d, k, c)| de_boor_vec4(*d, k, c, t).unwrap())
                 .unwrap_or(Vec4::zero()),
+            third
+                .as_ref()
+                .map(|(d, k, c)| de_boor_vec4(*d, k, c, t).unwrap())
+                .unwrap_or(Vec4::zero()),
         ];
         for (actual, expected) in actual.into_iter().zip(expected) {
             assert!(
@@ -267,7 +272,7 @@ fn check_jet(degree: usize, knots: Vec<f64>) {
                 "degree {degree}, parameter {t}: {actual:?} != {expected:?}"
             );
         }
-        let actual2 = homogeneous_curve_jet(degree, &knots, count, t, |i| {
+        let actual2 = homogeneous_curve_jet::<_, 4>(degree, &knots, count, t, |i| {
             Vec3::new(controls[i].x, controls[i].y, controls[i].w)
         });
         for (actual, expected) in actual2.into_iter().zip(expected) {

@@ -15,7 +15,7 @@ struct ClassificationFace {
     id: FaceId,
     bounds: Bounds,
     parameters: [ParameterRange; 2],
-    boundary: Vec<FaceCurve>,
+    boundary: Vec<FaceCurve<super::CoedgeId>>,
 }
 
 struct ClassificationRegion {
@@ -66,7 +66,7 @@ impl<'a> BrepClassifier<'a> {
                         id: *id,
                         bounds: super::bounds::face(topology, *id)?.expanded(tolerance.linear),
                         parameters: face_parameter_bounds(&boundary, tolerance)?,
-                        boundary: boundary.into_iter().map(|curve| curve.with_provenance(())).collect(),
+                        boundary,
                     });
                 }
             }
@@ -251,7 +251,18 @@ impl<'a> BrepClassifier<'a> {
                 let projection = boundary.curve.project_on_trim(point, boundary.range, self.tolerance)?;
                 if projection.distance <= linear { return Ok(PointClassification::Boundary); }
                 let uv = boundary.pcurve.evaluate(projection.parameter)?.point;
-                minimum.consider(projection.point, surface.normal(uv.x, uv.y)? * sign, point, linear);
+                // An edge minimum belongs to every incident face. Obtain its
+                // normal from topology, rather than hoping independent face
+                // projections converge to numerically identical minima.
+                let edge = self.topology.edge(self.topology.coedge(boundary.provenance)?.edge())?;
+                let normal = edge.coedges().iter().try_fold(Vec3::zero(), |sum, id| {
+                    let coedge = self.topology.coedge(*id)?;
+                    let face = self.topology.face(self.topology.loop_(coedge.loop_id())?.face())?;
+                    let uv = coedge.pcurve().evaluate(projection.parameter)?.point;
+                    let sign = if face.orientation() == FaceOrientation::Forward { orientation } else { -orientation };
+                    Ok::<_, super::KernelError>(sum + face.surface().normal(uv.x, uv.y)? * sign)
+                })?;
+                minimum.consider(projection.point, normal, point, linear);
                 let uv = refine_face_projection(surface, point, uv, face.parameters, self.tolerance)?;
                 if self.in_trim(face, (uv.x, uv.y))? {
                     let (position, _, _) = surface.first_order(uv.x, uv.y)?;

@@ -109,6 +109,18 @@ pub(super) fn publish(patches: &[BrepPatch], tolerance: ModelTolerance) -> Kerne
     Compound::from_operation(kernel, committed, [])
 }
 
+// Attach roles at construction, before welding/unification can merge patches.
+// The tokens identify generators, not positions in the published face array.
+pub(super) fn publish_with_roles(mut patches: Vec<BrepPatch>, roles: Vec<CreationRole>, tolerance: ModelTolerance) -> KernelResult<Compound> {
+    let namespace = super::identity::fresh_uuid();
+    let roots = roles.into_iter().enumerate().map(|(index, role)|
+        (PersistentId { namespace, local: index as u64 }, role)).collect::<std::collections::BTreeMap<_, _>>();
+    for (patch, (name, _)) in patches.iter_mut().zip(&roots) {
+        patch.sources.push(*name);
+    }
+    Ok(publish(&patches, tolerance)?.with_patch_roles(&roots))
+}
+
 fn radial_profile(
     profile: &Profile,
     plane: Plane3,
@@ -208,7 +220,7 @@ fn radial_profile(
         wires.push(Wire2::new(segments, tolerance)?);
     }
     let outer = wires.remove(0);
-    Ok((Profile::new(outer, wires, tolerance)?, frame))
+    Ok((Profile::new(outer, wires, tolerance)?.with_generators_from(profile), frame))
 }
 
 pub(super) fn revolve(
@@ -231,13 +243,16 @@ pub(super) fn revolve(
         )
     };
     let mut patches = Vec::new();
+    let mut roles = Vec::new();
     if !full {
         // Radial/axial profile normal points opposite the positive sweep.
         patches.push(cap(&profile, section_plane(low)?, false)?);
         patches.push(cap(&profile, section_plane(high)?, true)?);
+        roles.push(if angle > 0.0 { CreationRole::ProfileStart } else { CreationRole::ProfileEnd });
+        roles.push(if angle > 0.0 { CreationRole::ProfileEnd } else { CreationRole::ProfileStart });
     }
-    for wire in std::iter::once(profile.outer()).chain(profile.holes()) {
-        for segment in wire.segments() {
+    for (ring, wire) in std::iter::once(profile.outer()).chain(profile.holes()).enumerate() {
+        for (segment_index, segment) in wire.segments().iter().enumerate() {
             let first = segment.start()?;
             let last = segment.end()?;
             if matches!(segment.curve(), Curve2::Line(_))
@@ -310,10 +325,12 @@ pub(super) fn revolve(
                 }
                 promote_revolution(&mut patch, frame, segment, tolerance)?;
                 patches.push(patch);
+                roles.push(CreationRole::ProfileSide { generators: vec![[0, ring, profile.generator(ring, segment_index)]],
+                    chart: if full { Some(if (a == low) == (angle > 0.0) { SurfaceChart::TurnStart } else { SurfaceChart::TurnEnd }) } else { None } });
             }
         }
     }
-    publish(&patches, tolerance)
+    publish_with_roles(patches, roles, tolerance)
 }
 
 fn promote_revolution(
@@ -435,6 +452,7 @@ fn promote_revolution(
 
 #[derive(Clone)]
 struct SectionCurve {
+    source: usize,
     degree: usize,
     points: Vec<Point2>,
     weights: Vec<f64>,
@@ -466,6 +484,7 @@ impl SectionCurve {
     }
     fn reversed(&self) -> Self {
         Self {
+            source: self.source,
             degree: self.degree,
             points: self.points.iter().rev().copied().collect(),
             weights: self.weights.iter().rev().copied().collect(),
@@ -488,9 +507,10 @@ fn split_controls(controls: &[Vec3], t: f64) -> (Vec<Vec3>, Vec<Vec3>) {
     right.reverse();
     (left, right)
 }
-fn section_from_controls(controls: Vec<Vec3>) -> SectionCurve {
+fn section_from_controls(controls: Vec<Vec3>, source: usize) -> SectionCurve {
     let degree = controls.len() - 1;
     SectionCurve {
+        source,
         degree,
         points: controls
             .iter()
@@ -548,10 +568,10 @@ fn compatible_sections(sections: &mut [Vec<SectionCurve>]) -> KernelResult<()> {
             }
             for remaining in (1..=subdivisions).rev() {
                 if remaining == 1 {
-                    result.push(section_from_controls(controls.clone()));
+                    result.push(section_from_controls(controls.clone(), curve.source));
                 } else {
                     let (first, rest) = split_controls(&controls, 1.0 / remaining as f64);
-                    result.push(section_from_controls(first));
+                    result.push(section_from_controls(first, curve.source));
                     controls = rest;
                 }
             }
@@ -566,12 +586,14 @@ fn section_curves(profile: &Profile) -> KernelResult<Vec<SectionCurve>> {
         return Err(invalid("loft profiles with holes are not supported"));
     }
     let mut result = Vec::new();
-    for segment in profile.outer().segments() {
+    for (source, segment) in profile.outer().segments().iter().enumerate() {
+        let source = profile.generator(0, source);
         match segment.curve() {
             Curve2::Line(_) => {
                 let a = segment.start()?;
                 let b = segment.end()?;
                 result.push(SectionCurve {
+                    source,
                     degree: 2,
                     points: vec![a, a + (b - a) * 0.5, b],
                     weights: vec![1.0; 3],
@@ -593,6 +615,7 @@ fn section_curves(profile: &Profile) -> KernelResult<Vec<SectionCurve>> {
                             + Vec2::new(angle.cos(), angle.sin()) * (circle.radius() * scale)
                     };
                     result.push(SectionCurve {
+                        source,
                         degree: 2,
                         points: vec![point(a, 1.0), point(mid, 1.0 / weight), point(b, 1.0)],
                         weights: vec![1.0, weight, 1.0],
@@ -618,7 +641,7 @@ fn section_curves(profile: &Profile) -> KernelResult<Vec<SectionCurve>> {
                     if start_fraction > 0.0 {
                         controls = split_controls(&controls, start_fraction).1;
                     }
-                    spans.push(section_from_controls(controls));
+                    spans.push(section_from_controls(controls, source));
                 }
                 if segment.range().span() < 0.0 {
                     spans = spans.iter().rev().map(SectionCurve::reversed).collect();
@@ -808,6 +831,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             let degree = section[0].degree;
             let count = section.len();
             let mut joined = SectionCurve {
+                source: section[0].source,
                 degree,
                 points: section[0].points.clone(),
                 weights: section[0].weights.clone(),
@@ -828,6 +852,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
     let forward =
         (sections[1].0.origin() - sections[0].0.origin()).dot(sections[0].0.normal()) > 0.0;
     let mut patches = vec![section_cap(&curves[0], sections[0].0, forward, tolerance)?];
+    let mut roles = vec![CreationRole::ProfileStart, CreationRole::ProfileEnd];
     let last = sections.len() - 1;
     // Alignment can reverse a section's winding; cap orientation follows the
     // actual boundary, while the side patches determine the shell orientation.
@@ -953,8 +978,10 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             reverse(&mut patch);
         }
         patches.push(patch);
+        roles.push(CreationRole::ProfileSide { chart: None, generators: curves.iter().enumerate()
+            .map(|(section, curves)| [section, 0, curves[index].source]).collect() });
     }
-    publish(&patches, tolerance)
+    publish_with_roles(patches, roles, tolerance)
 }
 
 #[cfg(test)]

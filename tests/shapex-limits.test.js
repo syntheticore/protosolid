@@ -1,11 +1,19 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import nodeTest from 'node:test'
 import { readFile } from 'node:fs/promises'
 import * as THREE from 'three'
 import initShapex from '../js/shapexJS/index.js'
 import { ShapexBackend } from '../js/kernels/shapex.js'
 import { Profile } from '../js/core/geom3d.js'
 import { rotationFromNormal } from '../js/core/utils.js'
+import { withTopologyNaming } from '../js/core/topological-naming.js'
+
+let namingFeature
+const test = (name, evaluate) => nodeTest(name, () => {
+  namingFeature = { id: name }
+  return withTopologyNaming(namingFeature, evaluate)
+})
+const document9 = JSON.parse(await readFile(new URL('./fixtures/revolve-limits-document-9.json', import.meta.url)))
 
 const api = await initShapex({ wasm: await readFile(new URL('../js/shapexJS/pkg/shapex_js_wasm_bg.wasm', import.meta.url)) })
 // Saved fixture sketches contain control points without live OC geometry.
@@ -47,7 +55,8 @@ function rectangle(x0, y0, x1, y1, workplane = new THREE.Matrix4()) {
 }
 
 function cap(body, role) {
-  return body.faces().find(face => face.id.endsWith('/' + role))
+  return body.faces().find(face => window.kernel.modeling.creationRole(body.geom(), face.geom())?.kind ==
+    (role == 'top' ? 'extrusion-end' : 'extrusion-start'))
 }
 
 function circle(x, y, radius, workplane = new THREE.Matrix4()) {
@@ -66,7 +75,7 @@ function cylinderLimit(angle) {
 test('section hatching preserves the planar face around a circular boss', () => {
   const base = rectangle(0, 0, 10, 10).extrude('c', 5, 'base')
   const boss = circle(5, 5, 2).extrude('c', 8, 'boss')
-  const body = base.boolean(boss, 'join', 'join')
+  const body = base.boolean(boss, 'join')
   const plane = new THREE.Matrix4().makeTranslation(0, 0, 5)
   const cut = body.halfCut(plane, true)
   const originalTop = body.faces().find(face => {
@@ -104,7 +113,7 @@ test('extrusion limits use the infinite plane, support offsets and reverse direc
   near(result.volume(), 40)
   assert.ok(cap(result, 'bottom'))
   assert.ok(cap(result, 'top'))
-  assert.equal(result.faces().filter(face => face.id.includes('/swept/edge-')).length, 4)
+  assert.equal(result.faces().filter(face => construction(face, 'limit', 'profile-side')).length, 4)
   near(source.extrudeUpToFace('c', cap(target, 'top'), 'limit', 2).volume(), 32)
   const below = rectangle(20, 20, 21, 21).extrude('c', -10, 'below')
   near(source.extrudeUpToFace('c', cap(below, 'top'), 'limit', 2).volume(), 32)
@@ -162,8 +171,17 @@ test('revolve to and between curved faces', () => {
   near(result.volume(), expected)
   const from = cylinderLimit(Math.PI / 3)
   const until = cylinderLimit(5 * Math.PI / 9)
-  near(source.revolveBetweenFaces('c', axis, from, until, 'between').volume(), 5 * 2 * Math.PI / 9)
-  near(source.revolveBetweenFaces('c', axis, until, from, 'wrap').volume(), 5 * 16 * Math.PI / 9)
+  const between = source.revolveBetweenFaces('c', axis, from, until, 'between')
+  const wrapped = source.revolveBetweenFaces('c', axis, until, from, 'wrap')
+  near(between.volume(), 5 * 2 * Math.PI / 9)
+  near(wrapped.volume(), 5 * 16 * Math.PI / 9)
+  for(const [body, owner] of [[result, 'limit'], [between, 'between'], [wrapped, 'wrap']]) {
+    assert.equal(body.faces().filter(face => construction(face, owner, 'profile-start')).length, 1)
+    assert.equal(body.faces().filter(face => construction(face, owner, 'profile-end')).length, 1)
+    for(const item of [...body.faces(), ...body.edges().filter(edge => edge.isSemantic())]) {
+      assert.equal(body.resolveTopology(body.topologySelection(item)).status, 'resolved')
+    }
+  }
 })
 
 test('non-radial planes and late curved limits span quarter-turn boundaries', () => {
@@ -205,13 +223,31 @@ test('document 8: cutting with a circle ending on the cylinder leaves the cylind
     rotationFromNormal(new THREE.Vector3(0, 1, 0)).setPosition(0, -49, 0))
   const target = body.faces().find(face => !face.getPlane())
   const tool = source.extrudeUpToFace('c', target, 'limit')
-  near(body.boolean(tool, 'join', 'feature').volume(), body.volume() + tool.volume())
-  near(body.boolean(tool, 'cut', 'feature').volume(), body.volume())
-  near(body.boolean(tool, 'join', 'feature').volume(), body.volume() + tool.volume())
+  near(body.boolean(tool, 'join').volume(), body.volume() + tool.volume())
+  near(body.boolean(tool, 'cut').volume(), body.volume())
+  near(body.boolean(tool, 'join').volume(), body.volume() + tool.volume())
 })
 
-async function revolveLimitsFixture() {
-  const features = JSON.parse(await readFile(new URL('./fixtures/revolve-limits-document-9.json', import.meta.url)))
+
+// This raw legacy fixture is replayed from its sketch generators. Tests select
+// their authored construction roles, rather than the former display names.
+function construction(item, owner, role, source) {
+  return item.topology.anchors.some(anchor => {
+    const [kind, actualRole, sources, feature] = JSON.parse(namingFeature.topologyNames.bindings.find(binding => binding.id == anchor).description)
+    return kind == 'face' && feature == owner && (!role || actualRole == role) && (!source || sources.includes(source))
+  })
+}
+function fixtureFace(body, name) {
+  const [, owner, role, source] = name.match(/^\/extrude-(.*?)\/(swept|top|bottom)(?:\/(.*))?$/)
+  return body.faces().find(face => construction(face, owner,
+    role == 'swept' ? 'profile-side' : role == 'top' ? 'profile-end' : 'profile-start', source))
+}
+function revolutionEdge(edge) {
+  return edge.connectedFaces().some(face => construction(face, 'id-67306'))
+}
+
+function revolveLimitsFixture() {
+  const features = document9
   const sketches = new Map()
   let body
   const vector = value => new THREE.Vector3(...value.elements)
@@ -234,7 +270,7 @@ async function revolveLimitsFixture() {
     if(feature.type == 'CreateSketchFeature') {
       const ref = feature.values.plane.item
       const plane = ref.helperId ? rotationFromNormal(ref.helperId.endsWith('XZ') ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1)) :
-        body.faces().find(face => face.id == ref.topoId).getPlane()
+        fixtureFace(body, ref.topoId).getPlane()
       sketches.set(feature.sketchId, { elements: feature.elements, plane })
     } else {
       let tool
@@ -242,9 +278,9 @@ async function revolveLimitsFixture() {
         const p = profile(sketches.get(ref.sketchId), ref.rings[0])
         const both = feature.values.side == 'both'
         const extrusion = p.extrude('c', feature.values.distance * (both ? 2 : 1), feature.id, both ? -feature.values.distance : 0)
-        tool = tool ? tool.boolean(extrusion, 'join', feature.id) : extrusion
+        tool = tool ? tool.boolean(extrusion, 'join') : extrusion
       }
-      body = body ? body.boolean(tool, feature.values.operation, feature.id) : tool
+      body = body ? body.boolean(tool, feature.values.operation) : tool
     }
   }
   const sketch = sketches.get('id-6')
@@ -256,24 +292,25 @@ async function revolveLimitsFixture() {
   return { body, source, axis }
 }
 
-test('document 9: fillet joined revolution and bounded spline edges', async () => {
-  const { body, source, axis } = await revolveLimitsFixture()
-  const upper = body.faces().find(face => face.id == '/extrude-id-3826/swept/id-20296')
-  const lower = body.faces().find(face => face.id == '/extrude-id-42724/swept/id-42703')
+test('document 9: fillet joined revolution and bounded spline edges', () => {
+  const { body, source, axis } = revolveLimitsFixture()
+  const upper = fixtureFace(body, '/extrude-id-3826/swept/id-20296')
+  const lower = fixtureFace(body, '/extrude-id-42724/swept/id-42703')
   const tool = source.revolveBetweenFaces('c', axis, upper, lower, 'id-67306', true)
-  const joined = body.boolean(tool, 'join', 'id-67306')
+  const joined = body.boolean(tool, 'join')
   const edges = joined.solids().flatMap(solid => solid.edges()).filter(edge =>
     edge.connectedFaces().length == 2)
   // These two curved rims need continuation past the spline's natural end;
   // that endpoint-extension case is separate from the bounded-guide fix.
-  const unsupportedRims = new Set([
-    '(/extrude-id-42724/top|/extrude-id-42724/swept/id-42703)/1',
-    '(/extrude-id-42724/bottom|/extrude-id-42724/swept/id-42703)/1',
-  ])
+  const unsupportedRims = new Set(edges.filter(edge => {
+    const faces = edge.connectedFaces()
+    return faces.some(face => construction(face, 'id-42724', 'profile-side', 'id-42703')) &&
+      faces.some(face => construction(face, 'id-42724', 'profile-start') || construction(face, 'id-42724', 'profile-end'))
+  }).map(edge => edge.id))
   assert.equal(edges.filter(edge => unsupportedRims.has(edge.id)).length, 2)
   // The periodic lower rim is one closed edge; the upper rim has two arcs.
-  assert.equal(edges.filter(edge => edge.id.includes('revolve')).length, 3)
-  const lowerRim = edges.filter(edge => edge.id.includes('revolve')
+  assert.equal(edges.filter(edge => revolutionEdge(edge)).length, 3)
+  const lowerRim = edges.filter(edge => revolutionEdge(edge)
     && edge.connectedFaces().some(face => face.id == lower.id))
   assert.equal(lowerRim.length, 1)
   const endpoints = lowerRim[0].vertices()
@@ -291,15 +328,15 @@ test('document 9: fillet joined revolution and bounded spline edges', async () =
   assert.deepEqual(errors, [])
 })
 
-test('document 9: revolve circle to both spline surfaces in both directions', async () => {
-  const { body, source, axis } = await revolveLimitsFixture()
+test('document 9: revolve circle to both spline surfaces in both directions', () => {
+  const { body, source, axis } = revolveLimitsFixture()
   const full = source.revolve('c', axis, 2 * Math.PI, 'full')
   assert.ok(full.volume() > 0)
   const targets = body.faces().filter(face => !face.getPlane())
   assert.equal(targets.length, 3)
   const errors = []
-  const upper = targets.find(face => face.id == '/extrude-id-3826/swept/id-20296')
-  const lower = targets.find(face => face.id == '/extrude-id-42724/swept/id-42703')
+  const upper = fixtureFace(body, '/extrude-id-3826/swept/id-20296')
+  const lower = fixtureFace(body, '/extrude-id-42724/swept/id-42703')
   for(const [from, until] of [[upper, lower], [lower, upper]]) {
     for(const forward of [true, false]) {
       try {
@@ -309,7 +346,7 @@ test('document 9: revolve circle to both spline surfaces in both directions', as
         for(const face of result.faces()) window.kernel.modeling.mesh(face.geom())
         for(const operation of ['join', 'cut', 'intersect']) {
           try {
-            const output = body.boolean(result, operation, 'feature')
+            const output = body.boolean(result, operation)
             for(const face of output.faces()) window.kernel.modeling.mesh(face.geom())
           } catch(error) { errors.push({ from: from.id, until: until.id, forward, operation, error }) }
         }
@@ -320,7 +357,7 @@ test('document 9: revolve circle to both spline surfaces in both directions', as
     for(const forward of [true, false]) {
       // The opposite wall face ends inside the torus at the wall's base.
       // It intersects the torus, but cannot cap the entire swept circle.
-      if(target.id == '/extrude-id-3826/swept/id-3771') {
+      if(construction(target, 'id-3826', 'profile-side', 'id-3771')) {
         assert.throws(() => source.revolveUpToFace('c', axis, target, 'limit', forward),
           error => error.msg.includes('must cap the entire profile'))
         continue
@@ -332,7 +369,7 @@ test('document 9: revolve circle to both spline surfaces in both directions', as
         for(const face of result.faces()) window.kernel.modeling.mesh(face.geom())
         for(const operation of ['join', 'cut', 'intersect']) {
           try {
-            const output = body.boolean(result, operation, 'feature')
+            const output = body.boolean(result, operation)
             for(const face of output.faces()) window.kernel.modeling.mesh(face.geom())
           }
           catch(error) { errors.push({ face: target.id, forward, operation, error }) }

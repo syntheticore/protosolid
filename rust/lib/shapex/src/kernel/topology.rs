@@ -616,6 +616,28 @@ impl Topology {
         }
         Ok(names)
     }
+
+    /// An independently owned transformed body must be composable with its
+    /// source and other copies. Fresh opaque names retain exact correspondence.
+    pub(crate) fn reidentify_body(&mut self, body: BodyId, namespace: uuid::Uuid) -> KernelResult<super::OperationHistory> {
+        let names = self.body_entity_names(body)?;
+        let mut history = super::OperationHistory::default();
+        for (local, old) in names.into_iter().enumerate() {
+            let new = PersistentId { namespace, local: local as u64 };
+            match self.entity(old).unwrap() {
+                EntityId::Vertex(id) => self.vertices.get_mut(id)?.name = new,
+                EntityId::Edge(id) => self.edges.get_mut(id)?.name = new,
+                EntityId::Coedge(id) => self.coedges.get_mut(id)?.name = new,
+                EntityId::Loop(id) => self.loops.get_mut(id)?.name = new,
+                EntityId::Face(id) => self.faces.get_mut(id)?.name = new,
+                EntityId::Shell(id) => self.shells.get_mut(id)?.name = new,
+                EntityId::Body(id) => self.bodies.get_mut(id)?.name = new,
+            }
+            history.changed(old, super::ChangeKind::Modified, [new]);
+            history.derived(new, [old], super::DerivationRole::Transform);
+        }
+        Ok(history)
+    }
 }
 
 // Constructors are intentionally confined to Euler code.

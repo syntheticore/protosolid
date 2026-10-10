@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use uuid::Uuid;
 
-use super::{DiagnosticKind, KernelError, KernelResult};
+use super::{DerivationRole, DiagnosticKind, KernelError, KernelResult};
 
 /// Stable identity of a topological entity across modeling operations.
 ///
@@ -37,6 +37,12 @@ impl NameSource {
             allocated: BTreeSet::new(),
             scope: Vec::new(),
         }
+    }
+
+    /// Allocate from an operation's typed output category. Formatting here keeps
+    /// the identity stream independent of enum discriminants and Rust layout.
+    pub fn next_derived(&mut self, role: DerivationRole) -> KernelResult<PersistentId> {
+        self.next_for(&role.to_string())
     }
 
     /// Allocate from a deterministic role-specific stream.

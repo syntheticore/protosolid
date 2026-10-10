@@ -148,6 +148,29 @@ export class Feature {
     return results
   }
 
+  selectInput(key, reference, item) {
+    if(this.settings[key].multi) {
+      const tree = this.document.top(this.document.timeline.features.indexOf(this))
+      // An explicit pick repairs this input. Regeneration alone retains failed
+      // references so restoring their upstream topology can recover the feature.
+      const references = (this[key] ? this[key]() : []).filter(ref => {
+        // Cancel restores the original reference objects, including their cached
+        // editor bindings. Resolve a clone before discarding a failed reference.
+        if(ref.clone().update(tree)?.type == 'error') return false
+        ref.update(tree)
+        return true
+      })
+      const previous = references.find(ref => ref.matches ? ref.matches(item) :
+        ref.getItems().some(current => current.id == item.id))
+      if(previous) references.splice(references.indexOf(previous), 1)
+      else references.push(reference)
+      this[key] = () => references
+    } else {
+      this[key] = () => reference
+    }
+    this.pickedInput?.(key, reference, item)
+  }
+
   needsPicker(setting, includeOptionals) {
     setting = this.settings[setting]
     return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].some(type =>
@@ -497,10 +520,10 @@ export class PatternFeature extends SolidFeature {
         return
       }
       const tool = copies.slice(1).reduce(
-        (combined, copy) => combined.boolean(copy, 'join', this.id),
+        (combined, copy) => combined.boolean(copy, 'join'),
         copies[0],
       )
-      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
+      comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
   }
@@ -1860,9 +1883,9 @@ export class ExtrudeFeature extends SolidFeature {
           this.extent == 'through' ?
             profile.extrudeThroughAll(this.componentId, comp.compound, this.id, this.side) :
             profile.extrude(this.componentId, distance, this.id, offset)
-        tool = tool.boolean(extrusion, 'join', this.id)
+        tool = tool.boolean(extrusion, 'join')
       }
-      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
+      comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) {
       this.error = err?.msg ? err : { type: 'error', msg: 'Extrusion could not be created' }
@@ -1990,9 +2013,9 @@ export class RevolveFeature extends SolidFeature {
           this.extent == 'face' ?
           profile.revolveUpToFace(this.componentId, references.axis, references.limitFace, this.id, this.side) :
           profile.revolve(this.componentId, references.axis, rad(angle), this.id, rad(offset))
-        tool = tool.boolean(revolution, 'join', this.id)
+        tool = tool.boolean(revolution, 'join')
       }
-      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
+      comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) {
       this.error = err?.msg ? err : { type: 'error', msg: 'Revolution could not be created' }
@@ -2087,7 +2110,7 @@ export class LoftFeature extends SolidFeature {
         this.untwist,
         this.id,
       )
-      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
+      comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
   }
@@ -2136,7 +2159,7 @@ export class SplitFeature extends SolidFeature {
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      comp.compound = comp.compound.split(references.plane, this.keep, this.id)
+      comp.compound = comp.compound.split(references.plane, this.keep)
     } catch(err) { this.error = err || this.error }
   }
 }
@@ -2314,13 +2337,6 @@ export class FilletFeature extends SolidFeature {
       }
     }
   }
-
-  repair() {
-    const tree = this.document.top(this.document.timeline.previousFeature(this))
-    const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
-    this.edges = () => remainingEdges
-    this.error = null
-  }
 }
 
 Serialize.register(FilletFeature, 'FilletFeature')
@@ -2434,13 +2450,6 @@ export class ChamferFeature extends SolidFeature {
     return gizmos
   }
 
-  repair() {
-    const tree = this.document.top(this.document.timeline.previousFeature(this))
-    const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
-    this.edges = () => remainingEdges
-    this.error = null
-  }
-
   updateGizmos() {
     this.chamferGizmos ||= markRaw(new FeatureGizmos())
     const component = this.document.top().findChild(this.componentOccurrenceId) ||
@@ -2507,7 +2516,8 @@ export class ShellFeature extends SolidFeature {
     const tree = this.document.top(this.document.timeline.features.indexOf(this))
     const compound = tree.findChild(this.componentId).compound
     const openings = this.faces ? this.faces().map(ref => ref.getItem()) : []
-    const retained = face => !openings.some(opening => opening.geom().IsSame(face.geom()))
+    const retained = face => !openings.some(opening => compound.isShapex ?
+      opening.kernelId == face.kernelId : opening.geom().IsSame(face.geom()))
     const visible = compound.solids().filter(solid => this.isSolidVisible(tree, solid))
     const face = openings.filter(face => visible.some(solid => solid.id == face.solid.id)).at(-1)?.connectedFaces().find(retained) ||
       visible.flatMap(solid => solid.faces()).find(retained)
@@ -2561,7 +2571,7 @@ export class OffsetFeature extends SolidFeature {
     const comp = tree.findChild(this.componentId)
     const distance = this.distance * (this.side ? 1 : -1)
     try {
-      comp.compound = comp.compound.offsetFaces(references.faces, distance, this.id)
+      comp.compound = comp.compound.offsetFaces(references.faces, distance)
     } catch(err) { this.error = err || this.error }
   }
 
@@ -2638,10 +2648,10 @@ export class BooleanFeature extends SolidFeature {
         return { tool, compound, external }
       })
       const tools = inputs.map(input => input.compound)
-      const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join', this.id) )
+      const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join') )
       const localTools = inputs.filter(input => !input.external)
       if(localTools.length) comp.compound = comp.compound.removeShapes(localTools.map(input => input.tool))
-      comp.compound = comp.compound.boolean(tool, this.operation, this.id)
+      comp.compound = comp.compound.boolean(tool, this.operation)
       if(this.keepTools && localTools.length) {
         comp.compound = comp.compound.merge(localTools.map(input => input.compound))
       }
@@ -2718,7 +2728,7 @@ export class MoveFeature extends SolidFeature {
       const transform = this.moveFrame().multiply(new THREE.Matrix4().makeTranslation(
         -this.moveCenter.x, -this.moveCenter.y, -this.moveCenter.z,
       ))
-      comp.compound = comp.compound.moveFaces(references.faces, transform, this.id)
+      comp.compound = comp.compound.moveFaces(references.faces, transform)
     } catch(err) { this.error = err || this.error }
   }
 

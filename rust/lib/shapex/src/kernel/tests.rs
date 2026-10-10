@@ -4999,7 +4999,7 @@ fn construction_history_does_not_invent_ancestry_for_coincident_geometry() {
     let source = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
     let independently_built = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
     let result = independently_built
-        .with_feature_parent(&source, "independent-construction")
+        .with_feature_parent(&source, super::DerivationRole::BrepFace)
         .unwrap();
     for face in source.faces() {
         assert!(matches!(result.resolve(face), Resolution::Deleted));
@@ -5047,7 +5047,7 @@ fn construction_history_preserves_reparameterized_boundaries() {
     let committed = operation.finish().unwrap();
     let result = super::Compound::from_operation(kernel, committed, [])
         .unwrap()
-        .with_feature_parent(&source, "reparameterized-copy")
+        .with_feature_parent(&source, super::DerivationRole::BrepFace)
         .unwrap();
     for face in source.faces() {
         assert!(matches!(result.resolve(face), Resolution::Preserved(_)));
@@ -5284,6 +5284,23 @@ fn extrusion_exposes_semantic_creation_provenance() {
             .count(),
         4
     );
+
+    // Construction metadata must not rewrite ancestry or entity resolution.
+    let face = extrusion.faces().next().unwrap();
+    let tagged = extrusion.clone().with_creation_roles([
+        (face.persistent_id(), super::CreationRole::ProfileEnd),
+    ]);
+    assert_eq!(tagged.origin(face), extrusion.origin(face));
+    assert!(matches!(tagged.resolve(face), super::Resolution::Preserved(_)));
+    assert_eq!(tagged.creation_roles(face), vec![super::CreationRole::ProfileEnd]);
+    let moved = tagged.transformed(RigidTransform3::new(
+        Matrix3::identity(), Vec3::new(10.0, 0.0, 0.0), ModelTolerance::default(),
+    ).unwrap()).unwrap();
+    let output = match moved.resolve(face) {
+        super::Resolution::Modified(face) => face,
+        other => panic!("unexpected transformed face resolution: {other:?}"),
+    };
+    assert_eq!(moved.creation_roles(&output), vec![super::CreationRole::ProfileEnd]);
 }
 
 #[test]

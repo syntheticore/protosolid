@@ -1,8 +1,9 @@
 # Persistent topology references
 
 `js/core/topological-naming.js` owns document identities and selection recipes.
-`js/core/occ-topology.js` translates OCC history and incidence into that model.
-The shared layer has no OCC types or geometric matching.
+`js/core/topology.js` supplies shared incidence and reference resolution.
+`js/core/occ-topology.js` and `js/core/shapex-topology.js` translate their kernel's
+history into that model. The shared layer has no kernel types or geometric matching.
 
 ## Construction and history
 
@@ -89,6 +90,11 @@ made before a split can request all descendants; a single selection must resolve
 uniquely. A selection made on one branch remains scoped to that branch under
 either policy.
 
+An explicit pick repairs that input by discarding unresolved references while
+retaining valid selections. Regeneration alone preserves failed references so
+they can recover if their upstream topology returns. Cancel restores the original
+selection and its cached editor bindings.
+
 Construction and incidence cannot distinguish every possible symmetric result.
 Picking such a cell raises an explicit error; an existing selection that becomes
 ambiguous fails to resolve. There is no nearest-geometry or first-output choice.
@@ -116,11 +122,24 @@ correspondence, but the document manifest and selection binding remain shared.
 The application uses `Compound.topologySelection`, `resolveTopology`,
 `restoreTopologySelections`, and `namespaceTopology` to access the adapter.
 
+Shapex publishes input-profile correspondence with construction patches before welding,
+and exposes face, edge and body history through its WASM bindings. Native IDs are
+opaque correspondence tokens, never serialized document identities. Transformed
+copies receive fresh native IDs with exact lineage so combining copies cannot
+conflate their histories. Shell construction distinguishes the continuing source
+skin from the generated offset skin and opening rims.
+
+The kernel exposes typed construction roles independently of entity ancestry.
+Trimming can change a face's construction role without replacing its actual
+source history. The application maps input segment indices to sketch IDs and
+maps native shell roles to document naming roles. Feature IDs, selection recipes,
+timeline behavior and reference policies remain outside the kernel.
+
 The new format contains feature manifests and selection descriptors. It has no
 reader for legacy `solidId` / `topoId` references and no migration during
 regeneration. Existing files require a separate converter.
 
-Run `npm test` for the shared naming, OCC, timeline, reference, assembly, and
+Run `npm test` for the shared naming, OCC, Shapex, timeline, reference, assembly, and
 simulation checks. Transition coverage includes branch disappearance and return,
 initially empty split sides, conflicting unnamed branches, consumed and retained
 boolean tools, independent copies, merges, and save/reload with a missing branch.
@@ -128,3 +147,5 @@ The OCC fixture requires the generated `assets/oc/oc.js` and
 `assets/oc/oc.wasm`, which are ignored by Git. Build the kernel first with
 `npm run build-oc` (`npm run build-oc-win` on Windows). The tests load that kernel
 without building or launching the application.
+The same reference contract runs against both adapters. Shapex tests also require
+the generated WASM package from `npm run build-shapex`.

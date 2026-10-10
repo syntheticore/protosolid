@@ -6,10 +6,10 @@
 
 use js_sys::{Float64Array, Uint32Array, JSON};
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use shapex::kernel::{
     Axis3, BooleanKind, Circle2, Curve2, Curve3, Line2, NurbsCurve2, Origin, ParameterRange,
-    RigidTransform3, Surface3,
+    RigidTransform3, Surface3, SurfaceChart,
 };
 use shapex::{
     ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
@@ -684,6 +684,10 @@ pub struct NativeSolid {
 
 #[wasm_bindgen(js_class = NativeSolid)]
 impl NativeSolid {
+    #[wasm_bindgen(getter)]
+    pub fn id(&self) -> String {
+        id_string(self.inner.persistent_id())
+    }
     pub fn volume(&self) -> f64 {
         self.inner.volume()
     }
@@ -884,16 +888,26 @@ fn vertex_resolution(value: Resolution<VertexHandle>) -> NativeResolution {
 }
 
 #[wasm_bindgen(js_name = NativeCreationRole)]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NativeCreationRole {
     kind: String,
     boundary: Option<String>,
     hole_index: Option<usize>,
     segment: Option<usize>,
     part: Option<usize>,
+    generators: Vec<[usize; 3]>,
+    chart: Option<String>,
 }
 
 #[wasm_bindgen(js_class = NativeCreationRole)]
 impl NativeCreationRole {
+    #[wasm_bindgen(getter)]
+    pub fn chart(&self) -> Option<String> { self.chart.clone() }
+    #[wasm_bindgen(getter)]
+    pub fn generators(&self) -> String {
+        serde_json::to_string(&self.generators).unwrap()
+    }
     #[wasm_bindgen(getter)]
     pub fn kind(&self) -> String {
         self.kind.clone()
@@ -918,12 +932,36 @@ impl NativeCreationRole {
 
 fn creation_role(role: &CreationRole) -> NativeCreationRole {
     match role {
+        CreationRole::ProfileStart | CreationRole::ProfileEnd => NativeCreationRole {
+            kind: if matches!(role, CreationRole::ProfileStart) { "profile-start" } else { "profile-end" }.into(),
+            boundary: None, hole_index: None, segment: None, part: None, generators: Vec::new(), chart: None,
+        },
+        CreationRole::ProfileSide { generators, chart } => NativeCreationRole {
+            kind: "profile-side".into(), boundary: None, hole_index: None, segment: None,
+            part: None, generators: generators.clone(), chart: chart.map(|chart| match chart {
+                SurfaceChart::TurnStart => "turn-start",
+                SurfaceChart::TurnEnd => "turn-end",
+                SurfaceChart::SectionPositive => "section-positive",
+                SurfaceChart::SectionNegative => "section-negative",
+            }.to_owned()),
+        },
+        CreationRole::ShellSource | CreationRole::ShellOffset | CreationRole::ShellRim => NativeCreationRole {
+            kind: match role {
+                CreationRole::ShellSource => "shell-source",
+                CreationRole::ShellOffset => "shell-offset",
+                CreationRole::ShellRim => "shell-rim",
+                _ => unreachable!(),
+            }.into(),
+            boundary: None, hole_index: None, segment: None, part: None, generators: Vec::new(), chart: None,
+        },
         CreationRole::ExtrusionStart => NativeCreationRole {
             kind: "extrusion-start".into(),
             boundary: None,
             hole_index: None,
             segment: None,
             part: None,
+            generators: Vec::new(),
+            chart: None,
         },
         CreationRole::ExtrusionEnd => NativeCreationRole {
             kind: "extrusion-end".into(),
@@ -931,6 +969,8 @@ fn creation_role(role: &CreationRole) -> NativeCreationRole {
             hole_index: None,
             segment: None,
             part: None,
+            generators: Vec::new(),
+            chart: None,
         },
         CreationRole::ExtrusionSide {
             boundary,
@@ -947,6 +987,8 @@ fn creation_role(role: &CreationRole) -> NativeCreationRole {
                 hole_index,
                 segment: Some(*segment),
                 part: Some(*part),
+                generators: Vec::new(),
+                chart: None,
             }
         }
     }
@@ -959,6 +1001,28 @@ pub struct NativeCompound {
 
 #[wasm_bindgen(js_class = NativeCompound)]
 impl NativeCompound {
+    #[wasm_bindgen(js_name = topologyHistory)]
+    pub fn topology_history(&self) -> String {
+        let history = self.inner.topology_history();
+        let changes = history.changes().iter().map(|(source, (kind, outputs))| {
+            serde_json::json!({ "source": id_string(*source), "kind": format!("{kind:?}").to_lowercase(),
+                "outputs": outputs.iter().map(|id| id_string(*id)).collect::<Vec<_>>() })
+        }).collect::<Vec<_>>();
+        let origins = history.origins().iter().map(|(id, origin)| {
+            match origin {
+                Origin::Created { role } => serde_json::json!({ "id": id_string(*id),
+                    "role": role.as_ref().map(creation_role), "sources": [] }),
+                Origin::Derived { sources, role } => serde_json::json!({ "id": id_string(*id),
+                    "operation": role.to_string(), "sources": sources.iter().map(|id| id_string(*id)).collect::<Vec<_>>() }),
+            }
+        }).collect::<Vec<_>>();
+        let construction_roles = self.inner.faces().map(|face| {
+            (id_string(face.persistent_id()), self.inner.creation_roles(face).iter()
+                .map(creation_role).collect::<Vec<_>>())
+        }).collect::<std::collections::BTreeMap<_, _>>();
+        serde_json::json!({ "changes": changes, "origins": origins,
+            "constructionRoles": construction_roles }).to_string()
+    }
     pub fn volume(&self) -> f64 {
         self.inner.volume()
     }
@@ -1189,15 +1253,17 @@ impl NativeCompound {
     }
     #[wasm_bindgen(js_name = creationRoleFace)]
     pub fn creation_role_face(&self, value: &NativeFace) -> Option<NativeCreationRole> {
-        match self.inner.origin(&value.inner) {
-            Some(Origin::Created { role: Some(role) }) => Some(creation_role(role)),
+        let roles = self.inner.creation_roles(&value.inner);
+        match roles.as_slice() {
+            [role] => Some(creation_role(role)),
             _ => None,
         }
     }
     #[wasm_bindgen(js_name = creationRoleEdge)]
     pub fn creation_role_edge(&self, value: &NativeEdge) -> Option<NativeCreationRole> {
-        match self.inner.origin(&value.inner) {
-            Some(Origin::Created { role: Some(role) }) => Some(creation_role(role)),
+        let roles = self.inner.creation_roles(&value.inner);
+        match roles.as_slice() {
+            [role] => Some(creation_role(role)),
             _ => None,
         }
     }

@@ -8,7 +8,7 @@ use cgmath::prelude::*;
 use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::euler::EulerTransaction;
-use super::history::ChangeKind;
+use super::history::{BlendRole, ChangeKind, DerivationRole};
 use super::modeling::{ChamferMode, ChamferSettings};
 use super::topology::{Edge, Vertex};
 use super::validation::{validate, ValidationMode};
@@ -28,12 +28,11 @@ pub(crate) enum EdgeBlendKind {
 }
 
 impl EdgeBlendKind {
-    fn role(self, suffix: &str) -> String {
-        let name = match self {
-            Self::Fillet => "fillet",
-            Self::Chamfer => "chamfer",
-        };
-        format!("{name}.{suffix}")
+    fn role(self, role: BlendRole) -> DerivationRole {
+        match self {
+            Self::Fillet => DerivationRole::Fillet(role),
+            Self::Chamfer => DerivationRole::Chamfer(role),
+        }
     }
 }
 
@@ -822,14 +821,14 @@ impl EulerTransaction<'_> {
             for part in 1..4 {
                 let parameter = edge.range.start + edge.range.span() * part as f64 / 4.0;
                 let point = edge.curve.evaluate(parameter)?.point;
-                let name = self.names.next_for(&kind.role("periodic-split.vertex"))?;
+                let name = self.names.next_derived(kind.role(BlendRole::PeriodicSplitVertex))?;
                 let vertex = self.working.vertices.insert(Vertex::new(
                     name,
                     point,
                     self.kernel.tolerance.linear,
                 ));
                 self.history
-                    .derived(name, [source_name], &kind.role("periodic-split.vertex"));
+                    .derived(name, [source_name], kind.role(BlendRole::PeriodicSplitVertex));
                 vertices.push(vertex);
             }
             vertices.push(seam);
@@ -850,7 +849,7 @@ impl EulerTransaction<'_> {
             }
             let mut arcs = vec![*edge_id];
             for part in 1..4 {
-                let name = self.names.next_for(&kind.role("periodic-split.edge"))?;
+                let name = self.names.next_derived(kind.role(BlendRole::PeriodicSplitEdge))?;
                 let arc = self.make_edge(
                     name,
                     [vertices[part], vertices[part + 1]],
@@ -858,7 +857,7 @@ impl EulerTransaction<'_> {
                     ranges[part],
                 )?;
                 self.history
-                    .derived(name, [source_name], &kind.role("periodic-split.edge"));
+                    .derived(name, [source_name], kind.role(BlendRole::PeriodicSplitEdge));
                 arcs.push(arc);
             }
 
@@ -871,7 +870,7 @@ impl EulerTransaction<'_> {
                 };
                 let mut uses = Vec::with_capacity(4);
                 for (part, arc) in traversal_arcs.into_iter().enumerate() {
-                    let name = self.names.next_for(&kind.role("periodic-split.use"))?;
+                    let name = self.names.next_derived(kind.role(BlendRole::PeriodicSplitUse))?;
                     let range = ParameterRange::new(
                         old_use.range.start + old_use.range.span() * part as f64 / 4.0,
                         old_use.range.start + old_use.range.span() * (part + 1) as f64 / 4.0,
@@ -885,7 +884,7 @@ impl EulerTransaction<'_> {
                         range,
                     )?;
                     self.history
-                        .derived(name, [source_name], &kind.role("periodic-split.use"));
+                        .derived(name, [source_name], kind.role(BlendRole::PeriodicSplitUse));
                     uses.push(use_id);
                 }
                 for index in 0..uses.len() {
@@ -2160,12 +2159,12 @@ impl EulerTransaction<'_> {
             source.range.end
         };
         let point = self.working.vertex(vertex)?.point;
-        let name = self.names.next_for("fillet.transition.vertex")?;
+        let name = self.names.next_derived(DerivationRole::Fillet(BlendRole::TransitionVertex))?;
         let new_vertex = self.make_vertex(name, point);
         self.history.derived(
             name,
             [self.working.vertex(vertex)?.name],
-            "fillet.transition.vertex",
+            DerivationRole::Fillet(BlendRole::TransitionVertex),
         );
         // Move the source and the adjacent seam on the first support to the
         // second vertex, leaving a gap in each cross-support loop.
@@ -2192,12 +2191,12 @@ impl EulerTransaction<'_> {
             start: parameter,
             end: parameter,
         };
-        let name = self.names.next_for("fillet.transition.edge")?;
+        let name = self.names.next_derived(DerivationRole::Fillet(BlendRole::TransitionEdge))?;
         let edge = self.make_edge(name, [vertex, new_vertex], curve.into(), range)?;
         self.history.derived(
             name,
             [self.working.vertex(vertex)?.name],
-            "fillet.transition.edge",
+            DerivationRole::Fillet(BlendRole::TransitionEdge),
         );
         for side in 0..2 {
             let mut gap = None;
@@ -2217,13 +2216,13 @@ impl EulerTransaction<'_> {
                     "transition bridge has no loop gap",
                 )
             })?;
-            let name = self.names.next_for("fillet.transition.use")?;
+            let name = self.names.next_derived(DerivationRole::Fillet(BlendRole::TransitionUse))?;
             let coedge =
                 self.make_coedge(name, edge, loop_id, forward, pcurves[side].clone(), range)?;
             self.history.derived(
                 name,
                 [self.working.edge(edge)?.name],
-                "fillet.transition.use",
+                DerivationRole::Fillet(BlendRole::TransitionUse),
             );
             self.insert_loop_coedge(previous, next, coedge)?;
         }
@@ -4002,7 +4001,7 @@ impl EulerTransaction<'_> {
                             continue;
                         }
                     }
-                    let name = self.names.next_for(&kind.role("contact.vertex"))?;
+                    let name = self.names.next_derived(kind.role(BlendRole::ContactVertex))?;
                     let vertex = self.make_vertex(name, point);
                     self.history.derived(
                         name,
@@ -4010,7 +4009,7 @@ impl EulerTransaction<'_> {
                             self.working.vertex(old_vertex)?.name,
                             self.working.face(face)?.name,
                         ],
-                        &kind.role("contact.vertex"),
+                        kind.role(BlendRole::ContactVertex),
                     );
                     contact_vertices.insert(key, vertex);
                 }
@@ -4164,8 +4163,8 @@ impl EulerTransaction<'_> {
                 continue;
             }
             let surface = junction_surfaces[vertex].clone();
-            let face_name = self.names.next_for(&kind.role("vertex.face"))?;
-            let loop_name = self.names.next_for(&kind.role("vertex.loop"))?;
+            let face_name = self.names.next_derived(kind.role(BlendRole::VertexFace))?;
+            let loop_name = self.names.next_derived(kind.role(BlendRole::VertexLoop))?;
             let (face, loop_id) = self.make_face_loop(
                 shell,
                 face_name,
@@ -4180,10 +4179,10 @@ impl EulerTransaction<'_> {
                     .iter()
                     .map(|face| self.working.face(*face).map(|value| value.name))
                     .collect::<KernelResult<Vec<_>>>()?,
-                &kind.role("vertex.face"),
+                kind.role(BlendRole::VertexFace),
             );
             self.history
-                .derived(loop_name, [face_name], &kind.role("vertex.loop"));
+                .derived(loop_name, [face_name], kind.role(BlendRole::VertexLoop));
             junction_faces.insert(*vertex, face);
             junction_loops.insert(*vertex, loop_id);
             junction_uses.insert(*vertex, Vec::with_capacity(3));
@@ -4198,8 +4197,8 @@ impl EulerTransaction<'_> {
                     ..
                 }) = &patch.ends[index]
                 {
-                    let face_name = self.names.next_for(&kind.role("cap.face"))?;
-                    let loop_name = self.names.next_for(&kind.role("cap.loop"))?;
+                    let face_name = self.names.next_derived(kind.role(BlendRole::CapFace))?;
+                    let loop_name = self.names.next_derived(kind.role(BlendRole::CapLoop))?;
                     let (_, loop_id) = self.make_face_loop(
                         shell,
                         face_name,
@@ -4210,10 +4209,10 @@ impl EulerTransaction<'_> {
                     self.history.derived(
                         face_name,
                         [patch.spine.edge.name],
-                        &kind.role("cap.face"),
+                        kind.role(BlendRole::CapFace),
                     );
                     self.history
-                        .derived(loop_name, [face_name], &kind.role("cap.loop"));
+                        .derived(loop_name, [face_name], kind.role(BlendRole::CapLoop));
                     cap_loops.insert((patch.spine.edge_id, index), loop_id);
                     cap_uses.insert((patch.spine.edge_id, index), Vec::new());
                 }
@@ -4224,8 +4223,8 @@ impl EulerTransaction<'_> {
         let mut contact_parent_uses = BTreeMap::<(EdgeId, usize), CoedgeId>::new();
         for patch in patches {
             let selected_name = patch.spine.edge.name;
-            let blend_face_name = self.names.next_for(&kind.role("blend.face"))?;
-            let blend_loop_name = self.names.next_for(&kind.role("blend.loop"))?;
+            let blend_face_name = self.names.next_derived(kind.role(BlendRole::BlendFace))?;
+            let blend_loop_name = self.names.next_derived(kind.role(BlendRole::BlendLoop))?;
             let (_blend_face, blend_loop) = self.make_face_loop(
                 shell,
                 blend_face_name,
@@ -4240,10 +4239,10 @@ impl EulerTransaction<'_> {
                     self.working.face(patch.spine.faces[0])?.name,
                     self.working.face(patch.spine.faces[1])?.name,
                 ],
-                &kind.role("blend.face"),
+                kind.role(BlendRole::BlendFace),
             );
             self.history
-                .derived(blend_loop_name, [blend_face_name], &kind.role("blend.loop"));
+                .derived(blend_loop_name, [blend_face_name], kind.role(BlendRole::BlendLoop));
 
             let mut blend_uses = Vec::with_capacity(4);
             for parent_index in 0..2 {
@@ -4252,9 +4251,9 @@ impl EulerTransaction<'_> {
                     contact_vertices[&Self::contact_vertex_key(patch, 0, parent_index, junctions)];
                 let second_vertex =
                     contact_vertices[&Self::contact_vertex_key(patch, 1, parent_index, junctions)];
-                let edge_name = self.names.next_for(&kind.role("contact.edge"))?;
-                let parent_use_name = self.names.next_for(&kind.role("contact.parent-use"))?;
-                let blend_use_name = self.names.next_for(&kind.role("contact.blend-use"))?;
+                let edge_name = self.names.next_derived(kind.role(BlendRole::ContactEdge))?;
+                let parent_use_name = self.names.next_derived(kind.role(BlendRole::ContactParentUse))?;
+                let blend_use_name = self.names.next_derived(kind.role(BlendRole::ContactBlendUse))?;
                 let edge = self.make_edge(
                     edge_name,
                     [first_vertex, second_vertex],
@@ -4298,15 +4297,15 @@ impl EulerTransaction<'_> {
                         selected_name,
                         self.working.face(patch.spine.faces[parent_index])?.name,
                     ],
-                    &kind.role("contact.edge"),
+                    kind.role(BlendRole::ContactEdge),
                 );
                 self.history.derived(
                     parent_use_name,
                     [edge_name],
-                    &kind.role("contact.parent-use"),
+                    kind.role(BlendRole::ContactParentUse),
                 );
                 self.history
-                    .derived(blend_use_name, [edge_name], &kind.role("contact.blend-use"));
+                    .derived(blend_use_name, [edge_name], kind.role(BlendRole::ContactBlendUse));
             }
 
             for endpoint_index in 0..2 {
@@ -4373,13 +4372,13 @@ impl EulerTransaction<'_> {
                             )?;
                             (edge, curve, same_direction, pcurve)
                         } else {
-                            let edge_name = self.names.next_for(&kind.role("transition.edge"))?;
+                            let edge_name = self.names.next_derived(kind.role(BlendRole::TransitionEdge))?;
                             let edge =
                                 self.make_edge(edge_name, vertices, boundary.curve.clone(), unit)?;
                             self.history.derived(
                                 edge_name,
                                 [selected_name],
-                                &kind.role("transition.edge"),
+                                kind.role(BlendRole::TransitionEdge),
                             );
                             smooth_edges.insert(*vertex, (edge, boundary.curve.clone()));
                             (
@@ -4395,7 +4394,7 @@ impl EulerTransaction<'_> {
                         } else {
                             !desired_current_forward
                         };
-                        let use_name = self.names.next_for(&kind.role("transition.blend-use"))?;
+                        let use_name = self.names.next_derived(kind.role(BlendRole::TransitionBlendUse))?;
                         let blend_use = self.make_coedge(
                             use_name,
                             edge,
@@ -4408,7 +4407,7 @@ impl EulerTransaction<'_> {
                         self.history.derived(
                             use_name,
                             [self.working.edge(edge)?.name],
-                            &kind.role("transition.blend-use"),
+                            kind.role(BlendRole::TransitionBlendUse),
                         );
                         continue;
                     }
@@ -4419,9 +4418,9 @@ impl EulerTransaction<'_> {
                     contact_vertices
                         [&Self::contact_vertex_key(patch, endpoint_index, 1, junctions)],
                 ];
-                let edge_name = self.names.next_for(&kind.role("end.edge"))?;
-                let other_use_name = self.names.next_for(&kind.role("end.other-use"))?;
-                let blend_use_name = self.names.next_for(&kind.role("end.blend-use"))?;
+                let edge_name = self.names.next_derived(kind.role(BlendRole::EndEdge))?;
+                let other_use_name = self.names.next_derived(kind.role(BlendRole::EndOtherUse))?;
+                let blend_use_name = self.names.next_derived(kind.role(BlendRole::EndBlendUse))?;
                 let edge =
                     self.make_edge(edge_name, vertices, boundary.curve.clone(), boundary.range)?;
                 let (other_loop, other_forward) = match &patch.ends[endpoint_index] {
@@ -4502,7 +4501,7 @@ impl EulerTransaction<'_> {
                                     )
                                     .map(Curve2::from)
                                 };
-                                let name = self.names.next_for(&kind.role("cap.edge"))?;
+                                let name = self.names.next_derived(kind.role(BlendRole::CapEdge))?;
                                 let cap_edge = self.make_edge(
                                     name,
                                     [original_vertex, contact_vertex],
@@ -4522,7 +4521,7 @@ impl EulerTransaction<'_> {
                                 };
                                 let forward =
                                     self.working.coedge_vertices(previous)?[1] == original_vertex;
-                                let use_name = self.names.next_for(&kind.role("cap.parent-use"))?;
+                                let use_name = self.names.next_derived(kind.role(BlendRole::CapParentUse))?;
                                 let use_id = self.make_coedge(
                                     use_name,
                                     cap_edge,
@@ -4532,7 +4531,7 @@ impl EulerTransaction<'_> {
                                     if forward { range } else { range.reversed() },
                                 )?;
                                 self.insert_loop_coedge(previous, next, use_id)?;
-                                let cap_name = self.names.next_for(&kind.role("cap.use"))?;
+                                let cap_name = self.names.next_derived(kind.role(BlendRole::CapUse))?;
                                 let cap_use = self.make_coedge(
                                     cap_name,
                                     cap_edge,
@@ -4543,14 +4542,14 @@ impl EulerTransaction<'_> {
                                 )?;
                                 cap_uses.get_mut(&cap_key).unwrap().push(cap_use);
                                 self.history
-                                    .derived(name, [selected_name], &kind.role("cap.edge"));
+                                    .derived(name, [selected_name], kind.role(BlendRole::CapEdge));
                                 self.history.derived(
                                     use_name,
                                     [name],
-                                    &kind.role("cap.parent-use"),
+                                    kind.role(BlendRole::CapParentUse),
                                 );
                                 self.history
-                                    .derived(cap_name, [name], &kind.role("cap.use"));
+                                    .derived(cap_name, [name], kind.role(BlendRole::CapUse));
                             }
                         } else {
                             self.insert_loop_coedge(gap.0, gap.1, other_use)?;
@@ -4562,11 +4561,11 @@ impl EulerTransaction<'_> {
                 }
                 blend_uses.push(blend_use);
                 self.history
-                    .derived(edge_name, [selected_name], &kind.role("end.edge"));
+                    .derived(edge_name, [selected_name], kind.role(BlendRole::EndEdge));
                 self.history
-                    .derived(other_use_name, [edge_name], &kind.role("end.other-use"));
+                    .derived(other_use_name, [edge_name], kind.role(BlendRole::EndOtherUse));
                 self.history
-                    .derived(blend_use_name, [edge_name], &kind.role("end.blend-use"));
+                    .derived(blend_use_name, [edge_name], kind.role(BlendRole::EndBlendUse));
             }
             blend_cycles.push((blend_loop, blend_uses));
         }
@@ -4711,9 +4710,9 @@ impl EulerTransaction<'_> {
                 tolerance,
             )?
             .into();
-            let edge_name = self.names.next_for(&kind.role("rim-corner.contact.edge"))?;
-            let carrier_use_name = self.names.next_for(&kind.role("rim-corner.carrier-use"))?;
-            let junction_use_name = self.names.next_for(&kind.role("rim-corner.junction-use"))?;
+            let edge_name = self.names.next_derived(kind.role(BlendRole::RimCornerContactEdge))?;
+            let carrier_use_name = self.names.next_derived(kind.role(BlendRole::RimCornerCarrierUse))?;
+            let junction_use_name = self.names.next_derived(kind.role(BlendRole::RimCornerJunctionUse))?;
             let edge = self.make_edge(edge_name, [start_vertex, end_vertex], curve, range)?;
             let carrier_use = self.make_coedge(
                 carrier_use_name,
@@ -4737,17 +4736,17 @@ impl EulerTransaction<'_> {
             self.history.derived(
                 edge_name,
                 [self.working.face(carrier_face)?.name],
-                &kind.role("rim-corner.contact.edge"),
+                kind.role(BlendRole::RimCornerContactEdge),
             );
             self.history.derived(
                 carrier_use_name,
                 [edge_name],
-                &kind.role("rim-corner.carrier-use"),
+                kind.role(BlendRole::RimCornerCarrierUse),
             );
             self.history.derived(
                 junction_use_name,
                 [edge_name],
-                &kind.role("rim-corner.junction-use"),
+                kind.role(BlendRole::RimCornerJunctionUse),
             );
         }
         for (key, uses) in cap_uses {

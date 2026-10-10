@@ -167,12 +167,23 @@ fn exact_full_revolution(
         axis_direction.cross(radial_direction),
         tolerance,
     )?;
-    annulus
-        .extrude(
+    let result = annulus.extrude(
             section_plane,
             axis_direction * (axial_values[1] - axial_values[0]),
-        )
-        .map(Some)
+        )?;
+    let roles = result.faces().map(|face| {
+        let (values, value) = match result.origin(face) {
+            Some(super::Origin::Created { role: Some(super::CreationRole::ExtrusionStart) }) => (&axial, axial_values[0]),
+            Some(super::Origin::Created { role: Some(super::CreationRole::ExtrusionEnd) }) => (&axial, axial_values[1]),
+            Some(super::Origin::Created { role: Some(super::CreationRole::ExtrusionSide { boundary, .. }) }) =>
+                (&radial, if matches!(boundary, super::ProfileBoundary::Outer) { outer_radius } else { inner_radius }),
+            _ => unreachable!(),
+        };
+        let segment = (0..4).find(|i| (values[*i] - value).abs() <= tolerance.linear &&
+            (values[(*i + 1) % 4] - value).abs() <= tolerance.linear).unwrap();
+        (face.persistent_id(), super::CreationRole::ProfileSide { generators: vec![[0, 0, profile.generator(0, segment)]], chart: None })
+    }).collect::<Vec<_>>();
+    Ok(Some(result.with_creation_roles(roles)))
 }
 
 #[derive(Debug, Clone)]
@@ -2597,6 +2608,13 @@ fn assemble_shell_boundary(
     openings: &BTreeSet<FaceId>,
     distance: f64,
 ) -> KernelResult<Compound> {
+    let namespace = super::identity::fresh_uuid();
+    let mut tokens = BTreeMap::new();
+    let mut tag = |patch: &mut BrepPatch, role: super::CreationRole| {
+        let name = super::PersistentId { namespace, local: tokens.len() as u64 };
+        tokens.insert(name, role);
+        patch.sources.push(name);
+    };
     let source_topology = source.topology();
     let offset_topology = raw_offset.topology();
     let source_by_name = source
@@ -2634,7 +2652,11 @@ fn assemble_shell_boundary(
             .iter()
             .copied()
             .filter(|face| !openings.contains(face))
-            .map(|face| face_patch(source_topology, face, distance > 0.0))
+            .map(|face| {
+                let mut patch = face_patch(source_topology, face, distance > 0.0)?;
+                tag(&mut patch, super::CreationRole::ShellSource);
+                Ok(patch)
+            })
             .collect::<KernelResult<Vec<_>>>()?;
         let offset_skin = raw_offset.faces()
             .filter(|face| {
@@ -2642,7 +2664,11 @@ fn assemble_shell_boundary(
                 let source_face = source_by_name[&name];
                 shell_faces.contains(&source_face) && !openings.contains(&source_face)
             })
-            .map(|face| face_patch(offset_topology, face.topology_id(), distance < 0.0))
+            .map(|face| {
+                let mut patch = face_patch(offset_topology, face.topology_id(), distance < 0.0)?;
+                tag(&mut patch, super::CreationRole::ShellOffset);
+                Ok(patch)
+            })
             .collect::<KernelResult<Vec<_>>>()?;
 
         if shell_openings.is_empty() {
@@ -2689,6 +2715,7 @@ fn assemble_shell_boundary(
                     source.tolerance(),
                 )? {
                     rim.sources.push(source_face.name());
+                    tag(&mut rim, super::CreationRole::ShellRim);
                     connected.push(rim);
                 }
             }
@@ -2748,7 +2775,7 @@ fn assemble_shell_boundary(
         transaction.nest_brep_shells(&bodies)?;
     }
     let committed = transaction.finish()?;
-    Compound::from_operation(kernel, committed, [])
+    Ok(Compound::from_operation(kernel, committed, [])?.with_patch_roles(&tokens))
 }
 
 // Solve contact-normal constraints with a minimum-length solution in the
@@ -2922,7 +2949,7 @@ pub(crate) fn offset_faces(
     if result.solids().len() != 1 || result.volume() <= source.tolerance().linear.powi(3) {
         return Err(invalid("face offset must preserve a nonempty solid"));
     }
-    result.with_feature_parent(source, "offset-faces")
+    result.with_feature_parent(source, super::DerivationRole::OffsetFaces)
 }
 
 /// Construct closed rolling joins before changing the boundary graph. A contact
@@ -3120,7 +3147,7 @@ pub(crate) fn shell(
     let (raw_offset, has_vanished_blends) = offset_body(source, &opening_ids, distance, false)?;
     if join_type == "sharp" {
         return assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?
-            .with_feature_parent(source, "shell");
+            .with_feature_parent(source, super::DerivationRole::Shell);
     }
 
     // A rolling ball of radius |distance| between the diverging offset
@@ -3191,10 +3218,10 @@ pub(crate) fn shell(
     {
         let rounded = rounded_offset_regions(source, &raw_offset, &divergent_edges, &opening_ids, distance.abs())?;
         return assemble_shell_boundary(source, &rounded, &opening_ids, distance)?
-            .with_feature_parent(source, "shell");
+            .with_feature_parent(source, super::DerivationRole::Shell);
     }
     let shell = assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?
-        .with_feature_parent(source, "shell")?;
+        .with_feature_parent(source, super::DerivationRole::Shell)?;
     let offset_surfaces = raw_offset
         .faces()
         .filter(|face| {
@@ -3356,7 +3383,7 @@ pub(crate) fn move_faces(
             ));
         }
     }
-    result.with_feature_parent(source, "move-faces")
+    result.with_feature_parent(source, super::DerivationRole::MoveFaces)
 }
 
 type BlendContacts = BTreeMap<FaceId, Vec<(FaceId, Point3, crate::Vec3)>>;
@@ -3886,5 +3913,5 @@ pub(crate) fn draft(
         false,
         &BTreeMap::new(),
     )?;
-    result.with_feature_parent(source, "draft")
+    result.with_feature_parent(source, super::DerivationRole::Draft)
 }

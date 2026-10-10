@@ -567,8 +567,8 @@ export class ShapexBackend {
     return shapexValue(compound).creationRole(shapexValue(face))
   }
 
-  resolveFace(compound, face) {
-    const resolution = shapexValue(compound).resolve(shapexValue(face))
+  resolveEntity(compound, entity) {
+    const resolution = shapexValue(compound).resolve(shapexValue(entity))
     return {
       kind: resolution.kind,
       entityIds: resolution.entities.map(entity => {
@@ -576,6 +576,10 @@ export class ShapexBackend {
         finally { entity.free() }
       }),
     }
+  }
+
+  topologyHistory(compound) {
+    return shapexValue(compound).topologyHistory()
   }
 
   mesh(raw, options = {}) {

@@ -14,6 +14,7 @@ use super::{
 pub struct Profile {
     outer: Wire2,
     holes: Vec<Wire2>,
+    generators: Vec<Vec<usize>>,
     area: f64,
     tolerance: ModelTolerance,
 }
@@ -25,6 +26,12 @@ impl Profile {
         tolerance: ModelTolerance,
     ) -> KernelResult<Self> {
         tolerance.validate()?;
+        let holes = holes.into_iter().collect::<Vec<_>>();
+        let generators = std::iter::once(&outer).chain(&holes).enumerate().map(|(ring, wire)| {
+            let mut sources = (0..wire.segments().len()).collect::<Vec<_>>();
+            if wire.is_counter_clockwise() != (ring == 0) { sources.reverse(); }
+            sources
+        }).collect();
         let outer = if outer.is_counter_clockwise() {
             outer
         } else {
@@ -66,6 +73,7 @@ impl Profile {
         Ok(Self {
             outer,
             holes,
+            generators,
             area,
             tolerance,
         })
@@ -82,6 +90,18 @@ impl Profile {
     }
     pub fn tolerance(&self) -> ModelTolerance {
         self.tolerance
+    }
+
+    /// Correspondence to the supplied profile wire before winding normalization.
+    pub fn generator(&self, ring: usize, segment: usize) -> usize {
+        self.generators[ring][segment]
+    }
+
+    pub(crate) fn with_generators_from(mut self, source: &Self) -> Self {
+        for (ring, generators) in self.generators.iter_mut().enumerate() {
+            for segment in generators { *segment = source.generator(ring, *segment); }
+        }
+        self
     }
 
     pub fn boolean_planar(&self, other: &Self, kind: BooleanKind) -> KernelResult<Vec<Self>> {

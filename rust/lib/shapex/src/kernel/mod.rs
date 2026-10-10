@@ -56,7 +56,10 @@ pub use geometry::{
     SurfaceCurvature, SurfaceCurve3, SurfaceEvaluation, SurfaceIntersectionCurve,
     SurfaceProjectionPcurve2, Torus3,
 };
-pub use history::{ChangeKind, CreationRole, OperationHistory, Origin, ProfileBoundary};
+pub use history::{
+    BlendRole, ChangeKind, CreationRole, DerivationRole, OperationHistory, Origin,
+    ProfileBoundary, SurfaceChart,
+};
 pub use intersection::{
     CurveCurveHit, CurveSurfaceHit, IntersectionKind, IntersectionSet, SurfaceSurfaceCurve,
 };

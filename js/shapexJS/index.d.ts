@@ -253,6 +253,7 @@ export interface Vertex extends NativeValue {
 }
 
 export interface Solid extends NativeValue {
+  id(): string
   volume(): number
   surfaceArea(): number
   centroid(): Point3
@@ -272,11 +273,15 @@ export interface Resolution<T extends Face | Edge | Vertex = Face | Edge | Verte
 }
 
 export interface CreationRole {
-  readonly kind: string
+  readonly kind: 'profile-start' | 'profile-end' | 'profile-side' |
+    'extrusion-start' | 'extrusion-end' | 'extrusion-side' |
+    'shell-source' | 'shell-offset' | 'shell-rim'
   readonly boundary?: string
   readonly holeIndex?: number
   readonly segment?: number
   readonly part?: number
+  readonly generators: readonly [number, number, number][]
+  readonly chart?: 'turn-start' | 'turn-end' | 'section-positive' | 'section-negative'
 }
 
 export interface Compound extends NativeValue {
@@ -306,6 +311,11 @@ export interface Compound extends NativeValue {
   transformed(transform: RigidTransform3): Compound
   resolve<T extends Face | Edge | Vertex>(entity: T): Resolution<T>
   isSemanticEdge(edge: Edge): boolean
+  topologyHistory(): {
+    changes: { source: string, kind: string, outputs: string[] }[]
+    origins: { id: string, sources: string[], role?: CreationRole, operation?: string }[]
+    constructionRoles: Record<string, CreationRole[]>
+  }
   creationRole(entity: Face | Edge): CreationRole | undefined
   facesGeneratedFrom(entity: Face | Edge): Face[]
 }

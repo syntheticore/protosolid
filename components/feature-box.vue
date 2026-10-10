@@ -517,24 +517,7 @@
           itemRef = new JointReference(item)
         }
 
-        // Add item reference to feature
-        if(setting.multi) {
-          // Toggle items in multi select mode
-          const currentItems = (this.activeFeature[key] && [...this.activeFeature[key]()]) || []
-          this.activeFeature[key] = () => currentItems
-          const oldItem = currentItems.find(otherRef => {
-            return otherRef.matches ? otherRef.matches(item) : otherRef.item.id == item.id
-          })
-          if(oldItem) {
-            currentItems.splice(currentItems.indexOf(oldItem), 1)
-          } else {
-            currentItems.push(itemRef)
-          }
-        } else {
-          // Hide heavy data from Vue in a closure
-          this.activeFeature[key] = () => itemRef
-        }
-        this.activeFeature.pickedInput?.(key, itemRef, item)
+        this.activeFeature.selectInput(key, itemRef, item)
         this.updatePaths()
       },
 

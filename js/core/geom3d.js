@@ -6,7 +6,9 @@ import { Line } from './geom2d.js'
 import { ShapexGeometry } from '../kernels/shapex.js'
 import Expression from './expression.js'
 import preferences from '../preferences.js'
-import { trackOccTopology, trackOccOperations, seedOccTopology, resolveOccSelection, restoreOccSelections, identifyTopology, topologyItems, readShapeList } from './occ-topology.js'
+import { trackOccTopology, trackOccOperations, seedOccTopology, readShapeList } from './occ-topology.js'
+import { resolveCompoundSelection, restoreCompoundSelections, identifyTopology, topologyItems } from './topology.js'
+import { seedShapexTopology, trackShapexTopology, trackShapexOperations } from './shapex-topology.js'
 import { captureTopologySelection, namespaceTopology } from './topological-naming.js'
 import {
   arrayRange,
@@ -251,7 +253,7 @@ export class Profile {
     if(window.kernel.modeling.id == 'shapex') {
       const geometry = window.kernel.modeling.extrude(this, height)
       const compound = new Compound(componentId, geometry)
-      compound.nameShapexExtrusion(this, featureId)
+      compound.seedShapexTopology([this], featureId)
       if(!offset) return compound
       const translation = this.normal().normalize().multiplyScalar(offset)
       return compound.transform(new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z))
@@ -286,7 +288,7 @@ export class Profile {
       // Match OCC's removed-material tool, including separated bodies and
       // curved exit faces. A single prism avoids an internal seam for both sides.
       const tool = this.extrude(componentId, end - start, featureId, start)
-      const result = tool.boolean(support, 'intersect', featureId).repair()
+      const result = tool.boolean(support, 'intersect').repair()
       if(!result.solids().length || result.volume() <= EPSILON) {
         fail('Through all does not intersect an existing body in the selected direction')
       }
@@ -370,7 +372,7 @@ export class Profile {
     if(window.kernel.modeling.id == 'shapex') {
       if(!target) throw { type: 'error', msg: 'Select a face to extrude up to' }
       return new Compound(componentId, window.kernel.modeling.extrudeUpToFace(this, target, offset, endOffset))
-        .inheritShapexTopology([], 'extrude', featureId).nameShapexExtrusion(this, featureId)
+        .seedShapexTopology([this], featureId)
     }
     const oc = window.oc.oc
     const fail = msg => { throw { type: 'error', msg } }
@@ -457,7 +459,7 @@ export class Profile {
     if(!angle) throw { type: 'error', msg: 'Revolution has no volume' }
     if(window.kernel.modeling.id == 'shapex') {
       const geometry = window.kernel.modeling.revolve(this, axis, angle)
-      const compound = new Compound(componentId, geometry).inheritShapexTopology([], 'revolve', featureId)
+      const compound = new Compound(componentId, geometry).seedShapexTopology([this], featureId)
       if(!offset) return compound
       const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(offset)).multiply(axis.clone().invert())
       return compound.transform(turn)
@@ -480,7 +482,7 @@ export class Profile {
     if(window.kernel.modeling.id == 'shapex') {
       if(!target) throw { type: 'error', msg: 'Select a face to revolve up to' }
       return new Compound(componentId, window.kernel.modeling.revolveUpToFace(this, axis, target, forward))
-        .inheritShapexTopology([], 'revolve', featureId)
+        .seedShapexTopology([this], featureId)
     }
     const oc = window.oc.oc
     const fail = msg => { throw { type: 'error', msg } }
@@ -644,7 +646,7 @@ export class Profile {
     if(!from || !until) fail('Select both limiting faces')
     if(window.kernel.modeling.id == 'shapex') {
       return new Compound(componentId, window.kernel.modeling.revolveBetweenFaces(this, axis, from, until, forward))
-        .inheritShapexTopology([], 'revolve', featureId)
+        .seedShapexTopology([this], featureId)
     }
     if(from.geom().IsSame(until.geom())) fail('Choose different starting and ending faces')
     // Build curved limits together: subtracting independent periodic sweeps
@@ -702,7 +704,7 @@ export class Profile {
     }
     if(window.kernel.modeling.id == 'shapex') {
       const geometry = window.kernel.modeling.loft(profiles, untwist)
-      return new Compound(componentId, geometry).inheritShapexTopology([], 'loft', featureId)
+      return new Compound(componentId, geometry).seedShapexTopology(profiles, featureId)
     }
 
     const named = []
@@ -739,7 +741,7 @@ export class Profile {
 
       if(window.kernel.modeling.id == 'shapex') {
         const geometry = window.kernel.modeling.sweep(this, rail)
-        return new Compound(componentId, geometry).inheritShapexTopology([], 'sweep', featureId)
+        return new Compound(componentId, geometry).seedShapexTopology([this], featureId, [rail.id.split('/')[0]])
       }
 
       // A wire profile produces a shell. Use the filled face so MakePipe
@@ -1188,6 +1190,7 @@ export class Solid extends Volumetric {
     super()
     this.compound = compound
     this.geom = () => geom
+    if(compound.isShapex) this.kernelId = window.kernel.modeling.entityId(geom)
   }
 
   typename() { return 'Solid' }
@@ -1284,9 +1287,9 @@ export class Compound extends Volumetric {
 
   topologySelection(item, policy) { return captureTopologySelection(item, policy) }
 
-  resolveTopology(selection) { return resolveOccSelection(this, selection) }
+  resolveTopology(selection) { return resolveCompoundSelection(this, selection) }
 
-  restoreTopologySelections(feature) { restoreOccSelections(this, feature) }
+  restoreTopologySelections(feature) { restoreCompoundSelections(this, feature) }
 
   namespaceTopology(role) {
     namespaceTopology(topologyItems(this), role)
@@ -1300,7 +1303,6 @@ export class Compound extends Volumetric {
     if(this.isShapex) {
       this.cachedSolids = window.kernel.modeling.compoundSolids(this.geom())
         .map(solid => new Solid(this, solid))
-      this.cachedSolids.forEach((solid, i) => solid.id = this.componentId + '/solid/' + i)
       return this.cachedSolids
     }
     this.cachedSolids = this.collectShapes('solid')
@@ -1334,26 +1336,8 @@ export class Compound extends Volumetric {
     return clone
   }
 
-  nameShapexExtrusion(profile, featureId) {
-    if(!this.isShapex) return this
-    const faces = this.faces()
-    faces.forEach(face => {
-      const role = window.kernel.modeling.creationRole(this.geom(), face.geom())
-      if(role?.kind == 'extrusion-start') {
-        face.id = `/extrude-${featureId}/bottom`
-      } else if(role?.kind == 'extrusion-end') {
-        face.id = `/extrude-${featureId}/top`
-      } else if(role?.kind == 'extrusion-side') {
-        const ringIndex = role.boundary == 'outer' ? 0 : role.holeIndex + 1
-        const segmentIndex = role.segment
-        const segment = profile.rings[ringIndex]?.segments[segmentIndex]
-        const suffix = role.part ? `/part/${role.part}` : ''
-        const sourceId = segment ? profile.getBaseId(segment) : `${role.boundary}/${segmentIndex}`
-        face.id = `/extrude-${featureId}/swept/${sourceId}${suffix}`
-      }
-    })
-    this.nameShapexEdges()
-    return this
+  seedShapexTopology(profiles, owner, extraSources) {
+    return seedShapexTopology(this, profiles, owner, extraSources)
   }
 
   // Application IDs describe ancestry. Retention is a kernel-history query.
@@ -1365,41 +1349,14 @@ export class Compound extends Volumetric {
       ))
     }
     const preservedIds = new Set(originalFaces.flatMap(original => {
-      const resolution = window.kernel.modeling.resolveFace(this.geom(), original.geom())
+      const resolution = window.kernel.modeling.resolveEntity(this.geom(), original.geom())
       return resolution.kind == 'preserved' ? resolution.entityIds : []
     }))
     return new Set(faces.filter(face => preservedIds.has(face.kernelId)))
   }
 
-  inheritShapexTopology(parents, operation, featureId) {
-    if(!this.isShapex) return this
-    const outputFaces = this.faces()
-    const assigned = new Set()
-    parents.flatMap(parent => parent.faces()).forEach(oldFace => {
-      const resolution = window.kernel.modeling.resolveFace(this.geom(), oldFace.geom())
-      for(let index = 0; index < resolution.entityIds.length; index++) {
-        const resolvedId = resolution.entityIds[index]
-        const face = outputFaces.find(candidate => candidate.kernelId == resolvedId)
-        if(!face || assigned.has(face)) continue
-        face.id = resolution.kind == 'split' ? `${oldFace.id}/split/${index}` : oldFace.id
-        assigned.add(face)
-      }
-    })
-    outputFaces.filter(face => !assigned.has(face)).forEach((face, index) => {
-      face.id = `/${featureId || 'kernel'}/${operation}/generated/${index}`
-    })
-    this.nameShapexEdges()
-    return this
-  }
-
-  nameShapexEdges() {
-    const namesUsed = {}
-    this.edges().forEach(edge => {
-      const faces = edge.connectedFaces()
-      const base = `(${faces.map(face => face.id).join('|')})`
-      namesUsed[base] = (namesUsed[base] || 0) + 1
-      edge.id = `${base}/${namesUsed[base]}`
-    })
+  trackShapex(parents, operation, bodyParents) {
+    return trackShapexTopology(this, parents, operation, bodyParents)
   }
 
   faces() {
@@ -1418,22 +1375,7 @@ export class Compound extends Volumetric {
         compounds.slice(1).map(compound => compound.kernelGeometry),
       )
       const out = new Compound(this.componentId, geometry)
-      // Combining imports topology into a new kernel state. Use its handles
-      // while retaining application IDs and the prepared display geometry.
-      out.solids().forEach((solid, index) => {
-        const original = solids[index]
-        solid.id = original.id
-        solid.cachedShapexFaceTessellations = original.cachedShapexFaceTessellations
-        for(const key of ['faces', 'edges']) {
-          const originals = new Map(original[key]().map(item => [item.kernelId, item]))
-          solid[key]().forEach(item => {
-            const source = originals.get(item.kernelId)
-            item.id = source.id
-            item.tessId = source.tessId
-          })
-        }
-      })
-      return out
+      return trackShapexTopology(out, compounds, 'combine')
     }
 
     const out = new Compound(this.componentId)
@@ -1462,7 +1404,7 @@ export class Compound extends Volumetric {
     const input = this.isShapex ? this.kernelGeometry : this.geom()
     const algo = window.kernel.modeling.transform(input, plane)
     if(algo instanceof ShapexGeometry) {
-      return new Compound(this.componentId, algo).inheritShapexTopology([this], 'transform')
+      return new Compound(this.componentId, algo).trackShapex([this], 'transform')
     }
     return this.track(algo, 'transform')
   }
@@ -1477,7 +1419,7 @@ export class Compound extends Volumetric {
         others.map(other => other.kernelGeometry),
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this, ...others], 'combine')
+        .trackShapex([this, ...others], 'combine')
     }
     const compound = new window.oc.oc.TopoDS_Compound()
     const builder = new window.oc.oc.BRep_Builder()
@@ -1548,7 +1490,7 @@ export class Compound extends Volumetric {
     this.track(reshaper, 'reorient')
   }
 
-  boolean(other, op, featureId) {
+  boolean(other, op) {
     if(!other.geom) throw { type: 'error', msg: "Tool body has no volume" }
 
     if(op == 'create') {
@@ -1568,7 +1510,7 @@ export class Compound extends Volumetric {
       return new Compound(
         this.componentId,
         window.kernel.modeling.boolean(this.kernelGeometry, other.kernelGeometry, op),
-      ).inheritShapexTopology([this, other], op, featureId)
+      ).trackShapex([this, other], op, op == 'cut' ? [this] : [this, other])
     }
     const algo = window.kernel.modeling.boolean(this.geom(), other.geom(), op)
     // Subtraction consumes its tool body; union and intersection continue
@@ -1585,7 +1527,7 @@ export class Compound extends Volumetric {
         followTangentEdges,
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'fillet')
+        .trackShapex([this], 'fillet')
     }
     const fillet = new window.oc.oc.BRepFilletAPI_MakeFillet(this.geom(), window.oc.oc.ChFi3d_FilletShape.ChFi3d_Rational)
     edges.forEach(edge => {
@@ -1610,7 +1552,7 @@ export class Compound extends Volumetric {
         { type, referenceFaces, value: type == 'distance-angle' ? angle : distance2 },
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'chamfer')
+        .trackShapex([this], 'chamfer')
     }
     const chamfer = new window.oc.oc.BRepFilletAPI_MakeChamfer(this.geom())
     try {
@@ -1635,7 +1577,7 @@ export class Compound extends Volumetric {
     }
   }
 
-  offsetFaces(faces, distance, featureId) {
+  offsetFaces(faces, distance) {
     const fail = msg => { throw { type: 'error', msg } }
     if(!faces?.length) fail('Select one or more faces to offset')
     if(!Number.isFinite(distance)) fail('Offset distance must be finite')
@@ -1645,7 +1587,7 @@ export class Compound extends Volumetric {
         this.kernelGeometry, faces.map(face => face.geom()), distance,
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'offset-faces', featureId)
+        .trackShapex([this], 'offset-faces')
     }
     const oc = window.oc.oc
     if(!oc.OCJS_FaceOffset) fail('Face offset requires an updated geometry kernel')
@@ -1691,7 +1633,7 @@ export class Compound extends Volumetric {
         joinType,
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'shell')
+        .trackShapex([this], 'shell')
     }
     // Offset each affected solid individually
     try {
@@ -1732,7 +1674,7 @@ export class Compound extends Volumetric {
         this.kernelGeometry, faces.map(face => face.geom()), plane, angle,
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'draft')
+        .trackShapex([this], 'draft')
     }
     try {
       const draft = new window.oc.oc.BRepOffsetAPI_DraftAngle_1()
@@ -1784,7 +1726,7 @@ export class Compound extends Volumetric {
         shapes.map(shape => shape.geom()),
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'remove-solids')
+        .trackShapex([this], 'remove-solids')
     }
     return this.reshape('remove-shapes', reshaper => {
       shapes.forEach(shape => {
@@ -1805,7 +1747,7 @@ export class Compound extends Volumetric {
         replacements[0].geom(),
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], algoName || 'replace-face')
+        .trackShapex([this], algoName || 'replace-face')
     }
     return this.reshape(algoName || 'replace-shapes', reshaper => {
       shapes.forEach((shape, i) => {
@@ -1814,7 +1756,7 @@ export class Compound extends Volumetric {
     })
   }
 
-  moveFaces(faces, transform, featureId) {
+  moveFaces(faces, transform) {
     if(this.isShapex) {
       const geometry = window.kernel.modeling.moveFaces(
         this.kernelGeometry,
@@ -1822,17 +1764,24 @@ export class Compound extends Volumetric {
         transform,
       )
       return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'move-faces', featureId)
+        .trackShapex([this], 'move-faces')
     }
     throw { type: 'error', msg: 'Moving faces requires the ShapeX kernel' }
   }
 
-  split(plane, keep, featureId) {
+  split(plane, keep) {
     if(!this.geom) return this
     if(this.isShapex) {
-      const geometry = window.kernel.modeling.split(this.kernelGeometry, plane, keep)
-      return new Compound(this.componentId, geometry)
-        .inheritShapexTopology([this], 'split', featureId)
+      const operations = ['left', 'right'].map(branch => ({ branch, operation: 'split',
+        compound: new Compound(this.componentId, window.kernel.modeling.split(this.kernelGeometry, plane, branch)) }))
+      const nonempty = operations.map(operation => operation.compound).filter(compound => compound.solids().length)
+      if(!nonempty.length) return new Compound(this.componentId)
+      const out = new Compound(this.componentId, window.kernel.modeling.combine(
+        nonempty[0].kernelGeometry, nonempty.slice(1).map(compound => compound.kernelGeometry)))
+      trackShapexOperations(out, [this], operations)
+      if(keep == 'both') return out
+      const retained = new Set(operations[keep == 'left' ? 0 : 1].compound.solids().map(solid => solid.kernelId))
+      return out.subset(out.solids().filter(solid => retained.has(solid.kernelId))).cloneCached()
     }
     const operations = [true, false].map(side => {
       const algorithm = this.halfCutAlgorithm(plane, side)
@@ -1853,13 +1802,13 @@ export class Compound extends Volumetric {
     }
   }
 
-  halfCut(plane, side, featureId) {
+  halfCut(plane, side) {
     if(!this.geom) return this
     if(this.isShapex) {
       try {
         const geometry = window.kernel.modeling.halfCut(this.kernelGeometry, plane, side)
         return new Compound(this.componentId, geometry)
-          .inheritShapexTopology([this], side ? 'split-left' : 'split-right', featureId)
+          .trackShapex([this], 'section')
       } catch(error) {
         throw new Error(`Shapex section view failed: ${error?.message || error?.msg || error}`, { cause: error })
       }

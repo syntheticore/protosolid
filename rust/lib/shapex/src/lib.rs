@@ -19,7 +19,8 @@ mod math;
 
 #[cfg(not(feature = "legacy"))]
 pub use kernel::{
-    ChamferMode, Circle2, Compound, CreationRole, Curve2, EdgeHandle, FaceHandle, FilletOptions,
+    BlendRole, ChamferMode, Circle2, Compound, CreationRole, Curve2, DerivationRole,
+    EdgeHandle, FaceHandle, FilletOptions,
     Frame3, Line2, MassProperties, Plane3, Polyline, Profile, ProfileBoundary, Resolution,
     RevolvedSurface3, Solid, SweptSurface3, Tessellate, TessellationOptions, TriangleMesh,
     TrimmedCurve2, VertexHandle, Wire2,

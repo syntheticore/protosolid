@@ -157,7 +157,7 @@ fn join_cells(
         Compound::from_operation(kernel, committed, [first, second])?.with_boolean_parents(
             first,
             second,
-            "sweep.join_cells",
+            super::DerivationRole::SweepJoinCells,
         )?,
     ))
 }
@@ -929,8 +929,8 @@ impl Profile {
             .ok_or_else(|| {
                 invalid("selected face must cover the entire extrusion beyond its start")
             })?;
-        // Publish the high-level extrusion's roles after trimming, so cap and
-        // sketch-segment names remain stable when switching extent modes.
+        // Report the high-level extrusion's construction correspondence after
+        // trimming, independently of the Boolean's entity ancestry.
         let mut roles = result
             .faces()
             .map(|face| (face.persistent_id(), super::CreationRole::ExtrusionEnd))
@@ -945,6 +945,7 @@ impl Profile {
                 }
             }
         }
+        let result = result.with_creation_roles(roles);
         let result = if end_offset != 0.0 {
             result.transformed(RigidTransform3::new(
                 Matrix3::identity(), direction * end_offset, tol,
@@ -952,7 +953,7 @@ impl Profile {
         } else {
             result
         };
-        Ok(result.with_creation_roles(roles))
+        Ok(result)
     }
 
     /// Revolve to the first complete crossing in the requested direction.
@@ -984,7 +985,9 @@ impl Profile {
             let end = cap(&tool, end_plane)?;
             let trimmed = trim(&tool, target, limit, &start, &end)?;
             if let Some(result) = trimmed.result {
-                return Ok(result);
+                let limits = names(&result, limit).into_iter()
+                    .map(|id| (id, super::CreationRole::ProfileEnd)).collect::<Vec<_>>();
+                return Ok(result.with_construction_roles_from(&[&tool], &limits));
             }
             if !trimmed.can_extend {
                 return Err(invalid(
@@ -1054,14 +1057,21 @@ impl Profile {
                 .ok_or_else(|| invalid("starting sweep has no limiting cap"))?;
             self.revolve_up_to_face(plane, axis, start, limit, !forward)
         };
-        let result = match (start, end) {
+        let mut tools = start.iter().chain(end.iter()).collect::<Vec<_>>();
+        let rest;
+        let result = match (&start, &end) {
             (None, None) => return Err(invalid("limiting planes coincide")),
-            (None, Some(end)) => end,
-            (Some(start), None) => complement(&start)?,
+            (None, Some(end)) => end.clone(),
+            (Some(start), None) => {
+                rest = complement(start)?;
+                tools.push(&rest);
+                rest.clone()
+            },
             (Some(start), Some(end)) => {
                 let end_outside = end.difference(&start)?;
                 if end_outside.solids().len() == 0 {
-                    let rest = complement(&start)?;
+                    rest = complement(start)?;
+                    tools.push(&rest);
                     // Remove the common sketch cap and sew the exact patches;
                     // no new torus intersection is needed at this interface.
                     join_cells(&rest, &end, from)?.ok_or_else(|| {
@@ -1077,6 +1087,10 @@ impl Profile {
         if result.solids().len() != 1 || result.volume() <= self.tolerance().linear.powi(3) {
             return Err(invalid("limiting faces do not enclose a valid revolution"));
         }
-        Ok(result)
+        let limits = names(&result, from).into_iter()
+            .map(|id| (id, super::CreationRole::ProfileStart))
+            .chain(names(&result, until).into_iter().map(|id| (id, super::CreationRole::ProfileEnd)))
+            .collect::<Vec<_>>();
+        Ok(result.with_construction_roles_from(&tools, &limits))
     }
 }

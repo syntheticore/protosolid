@@ -777,6 +777,7 @@ export function createShapex(bindings) {
   }
 
   class Solid extends NativeValue {
+    id() { return this._raw().id }
     volume() { return this._raw().volume() }
     surfaceArea() { return this._raw().surfaceArea() }
     centroid() { return new Point3(...Array.from(this._raw().centroid())) }
@@ -919,6 +920,7 @@ export function createShapex(bindings) {
       } finally { free(raw) }
     }
     isSemanticEdge(edge) { return this._raw().isSemanticEdge(instance(edge, Edge, 'edge')._raw()) }
+    topologyHistory() { return JSON.parse(this._raw().topologyHistory()) }
     creationRole(entity) {
       let raw
       if(entity instanceof Face) raw = this._raw().creationRoleFace(entity._raw())
@@ -929,6 +931,8 @@ export function createShapex(bindings) {
         return Object.freeze({
           kind: raw.kind, boundary: raw.boundary, holeIndex: raw.holeIndex,
           segment: raw.segment, part: raw.part,
+          generators: JSON.parse(raw.generators),
+          chart: raw.chart,
         })
       } finally { free(raw) }
     }

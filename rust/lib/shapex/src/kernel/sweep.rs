@@ -315,6 +315,7 @@ impl Profile {
         let forward = alignment > 0.0;
         let closed = start.distance(end) <= tolerance.linear;
         let mut patches = Vec::new();
+        let mut roles = Vec::new();
         if !closed {
             patches.push(super::sweeps::cap(self, plane, forward)?);
             patches.push(super::sweeps::cap(
@@ -322,6 +323,7 @@ impl Profile {
                 frame.section_plane(rail.range().end)?,
                 !forward,
             )?);
+            roles.extend([super::CreationRole::ProfileStart, super::CreationRole::ProfileEnd]);
         }
         let mut parameters = rail.curve().integration_breakpoints(rail.range());
         parameters.extend([rail.range().start, rail.range().end]);
@@ -335,7 +337,7 @@ impl Profile {
         }
         // Keep each source section edge intact. Periodic charts and display
         // subdivision must not introduce artificial CAD edges into the solid.
-        for section in self.outer().segments() {
+        for (source, section) in self.outer().segments().iter().enumerate() {
             let surface = Surface3::Swept(SweptSurface3::new(
                 plane,
                 section.clone(),
@@ -404,9 +406,10 @@ impl Profile {
                     }
                 }
                 patches.push(patch);
+                roles.push(super::CreationRole::ProfileSide { generators: vec![[0, 0, self.generator(0, source)]], chart: None });
             }
         }
-        super::sweeps::publish(&patches, tolerance)
+        super::sweeps::publish_with_roles(patches, roles, tolerance)
     }
 }
 

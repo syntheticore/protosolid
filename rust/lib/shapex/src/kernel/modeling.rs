@@ -8,7 +8,7 @@ use crate::{Point3, Vec3};
 use super::euler::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
-    BodyId, BooleanKind, ChangeKind, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel, KernelError,
+    BodyId, BooleanKind, ChangeKind, DerivationRole, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel, KernelError,
     KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin, PersistentId, Plane3,
     Profile, RigidTransform3, Tessellate, TessellationOptions, Topology, TriangleMesh,
 };
@@ -464,6 +464,9 @@ impl FilletOptions {
 }
 
 impl Solid {
+    pub fn persistent_id(&self) -> PersistentId {
+        self.state.topology().body(self.body).unwrap().name()
+    }
     pub(crate) fn topology_id(&self) -> BodyId {
         self.body
     }
@@ -679,6 +682,58 @@ impl Compound {
         self.history.origin(entity.persistent_name())
     }
 
+    /// Generator roles follow authored provenance through patch welding.
+    pub fn creation_roles<T: ResolvableEntity>(&self, entity: &T) -> Vec<super::CreationRole> {
+        let mut pending = vec![entity.persistent_name()];
+        let mut visited = BTreeSet::new();
+        let mut roles = Vec::new();
+        while let Some(name) = pending.pop() {
+            if !visited.insert(name) { continue; }
+            if let Some(authored) = self.history.construction_roles.get(&name) {
+                for role in authored {
+                    if !roles.contains(role) { roles.push(role.clone()); }
+                }
+                continue;
+            }
+            match self.history.origin(name) {
+                Some(Origin::Created { role: Some(role) }) => {
+                    if !roles.contains(role) { roles.push(role.clone()); }
+                }
+                Some(Origin::Derived { sources, .. }) => pending.extend(sources),
+                _ => {},
+            }
+        }
+        roles
+    }
+
+    pub(crate) fn with_construction_roles_from(mut self, tools: &[&Self], limits: &[(PersistentId, super::CreationRole)]) -> Self {
+        let mut roles = BTreeMap::<PersistentId, Vec<super::CreationRole>>::new();
+        for tool in tools {
+            for face in tool.faces() {
+                let source_roles = tool.creation_roles(face);
+                let outputs = match self.resolve(face) {
+                    Resolution::Preserved(face) | Resolution::Modified(face) | Resolution::Merged(face) => vec![face],
+                    Resolution::Split(faces) => faces,
+                    _ => Vec::new(),
+                };
+                if source_roles.is_empty() { continue; }
+                for output in outputs {
+                    let target = roles.entry(output.persistent_id()).or_default();
+                    for role in &source_roles {
+                        if !target.contains(role) { target.push(role.clone()); }
+                    }
+                }
+            }
+        }
+        for (face, role) in limits { roles.insert(*face, vec![role.clone()]); }
+        let history = Arc::make_mut(&mut self.history);
+        history.construction_roles.extend(roles);
+        for solid in &mut self.solids {
+            solid.history = Arc::clone(&self.history);
+        }
+        self
+    }
+
     /// Whether an edge separates distinct supporting surfaces.
     pub fn is_semantic_edge(&self, edge: &EdgeHandle) -> bool {
         self.edges()
@@ -714,17 +769,19 @@ impl Compound {
         }
         let mut history = OperationHistory::default();
         for body in &bodies {
-            history.absorb(kernel.transform_body(*body, transform)?);
+            kernel.transform_body(*body, transform)?;
+            history.absorb(kernel.topology.reidentify_body(*body, super::identity::fresh_uuid())?);
         }
         let certificates = certify_bodies(&kernel, &bodies)?;
-        Self::from_parts(
+        let result = Self::from_parts(
             kernel,
             super::identity::fresh_uuid(),
             bodies,
             history,
             certificates,
             [self],
-        )
+        )?;
+        Ok(result.with_construction_roles_from(&[self], &[]))
     }
 
     pub fn boolean(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
@@ -810,18 +867,13 @@ impl Compound {
                 BooleanKind::Difference => self.clone(),
                 BooleanKind::Intersection => combine_compounds(Vec::new(), self.tolerance())?,
             };
-            let role = match kind {
-                BooleanKind::Union => "boolean.union",
-                BooleanKind::Difference => "boolean.difference",
-                BooleanKind::Intersection => "boolean.intersection",
-            };
-            return result.with_boolean_parents(self, other, role);
+            return result.with_boolean_parents(self, other, DerivationRole::Boolean(kind));
         }
         super::boolean::boolean_brep(self, other, kind)
     }
 
     /// Consume operator-authored correspondence; never match output geometry.
-    fn with_operation_parents(&self, parents: &[&Self], role: &str) -> KernelResult<Self> {
+    fn with_operation_parents(&self, parents: &[&Self], role: DerivationRole) -> KernelResult<Self> {
         let bodies = self
             .solids
             .iter()
@@ -836,6 +888,7 @@ impl Compound {
         }
         let mut descendants = BTreeMap::<PersistentId, BTreeMap<PersistentId, bool>>::new();
         let mut history = OperationHistory::default();
+        history.construction_roles = self.history.construction_roles.clone();
         for (output, kind) in &outputs {
             let mut records = self
                 .history
@@ -906,12 +959,12 @@ impl Compound {
         &self,
         first: &Self,
         second: &Self,
-        role: &str,
+        role: DerivationRole,
     ) -> KernelResult<Self> {
         self.with_operation_parents(&[first, second], role)
     }
 
-    pub(crate) fn with_feature_parent(&self, parent: &Self, role: &str) -> KernelResult<Self> {
+    pub(crate) fn with_feature_parent(&self, parent: &Self, role: DerivationRole) -> KernelResult<Self> {
         self.with_operation_parents(&[parent], role)
     }
 
@@ -921,7 +974,24 @@ impl Compound {
     ) -> Self {
         let history = Arc::make_mut(&mut self.history);
         for (name, role) in roles {
-            history.created_as(name, role);
+            history.construction_roles.insert(name, vec![role]);
+        }
+        for solid in &mut self.solids {
+            solid.history = Arc::clone(&self.history);
+        }
+        self
+    }
+
+    pub(crate) fn with_patch_roles(mut self, tokens: &BTreeMap<PersistentId, super::CreationRole>) -> Self {
+        let history = Arc::make_mut(&mut self.history);
+        for (output, records) in &history.construction {
+            let mut roles = Vec::new();
+            for role in records.iter().filter_map(|record| tokens.get(&record.name)) {
+                if !roles.contains(role) { roles.push(role.clone()); }
+            }
+            if !roles.is_empty() {
+                history.construction_roles.insert(*output, roles);
+            }
         }
         for solid in &mut self.solids {
             solid.history = Arc::clone(&self.history);

@@ -471,13 +471,8 @@ pub(crate) fn boolean_brep_with_face_boundaries(
     transaction.nest_brep_shells(&bodies)?;
     transaction.unify_same_domain()?;
     let committed = transaction.finish()?;
-    let role = match kind {
-        BooleanKind::Union => "boolean.union",
-        BooleanKind::Intersection => "boolean.intersection",
-        BooleanKind::Difference => "boolean.difference",
-    };
     Compound::from_operation(kernel, committed, [first, second])?
-        .with_boolean_parents(first, second, role)
+        .with_boolean_parents(first, second, super::DerivationRole::Boolean(kind))
 }
 
 fn curve_complexity(curve: &Curve3) -> u8 {

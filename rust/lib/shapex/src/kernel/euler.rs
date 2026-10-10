@@ -936,13 +936,13 @@ impl<'kernel> EulerTransaction<'kernel> {
         self.working.vertices.get_mut(vertex)?.outgoing = Some(reverse);
 
         self.history
-            .derived(vertex_name, [source_name], "mev.vertex");
+            .derived(vertex_name, [source_name], super::DerivationRole::MevVertex);
         self.history
-            .derived(edge_name, [source_name, vertex_name], "mev.edge");
+            .derived(edge_name, [source_name, vertex_name], super::DerivationRole::MevEdge);
         self.history
-            .derived(forward_name, [edge_name], "mev.forward-use");
+            .derived(forward_name, [edge_name], super::DerivationRole::MevForwardUse);
         self.history
-            .derived(reverse_name, [edge_name], "mev.reverse-use");
+            .derived(reverse_name, [edge_name], super::DerivationRole::MevReverseUse);
         self.history
             .changed(source_name, ChangeKind::Modified, [source_name]);
 
@@ -1136,14 +1136,14 @@ impl<'kernel> EulerTransaction<'kernel> {
         let start_name = self.working.vertex(start)?.name;
         let end_name = self.working.vertex(end)?.name;
         self.history
-            .derived(edge_name, [start_name, end_name], "mef.edge");
+            .derived(edge_name, [start_name, end_name], super::DerivationRole::MefEdge);
         self.history
-            .derived(forward_name, [edge_name], "mef.new-face-use");
+            .derived(forward_name, [edge_name], super::DerivationRole::MefNewFaceUse);
         self.history
-            .derived(reverse_name, [edge_name], "mef.old-face-use");
-        self.history.derived(face_name, [old_face_name], "mef.face");
+            .derived(reverse_name, [edge_name], super::DerivationRole::MefOldFaceUse);
+        self.history.derived(face_name, [old_face_name], super::DerivationRole::MefFace);
         self.history
-            .derived(loop_name, [face_name], "mef.outer-loop");
+            .derived(loop_name, [face_name], super::DerivationRole::MefOuterLoop);
         self.history
             .changed(old_face_name, ChangeKind::Split, [old_face_name, face_name]);
 
@@ -1442,7 +1442,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 .into_iter()
                 .flat_map(|name| self.history.source_roots(name))
                 .collect::<BTreeSet<_>>();
-            self.history.derived(keep_face_name, sources, "kef.face");
+            self.history.derived(keep_face_name, sources, super::DerivationRole::KefFace);
         }
         self.record_loop_edit(keep_loop)?;
         Ok(KefResult {
@@ -1910,7 +1910,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         self.history.derived(
             loop_name,
             [self.working.face(face)?.name],
-            "kemr.inner-loop",
+            super::DerivationRole::KemrInnerLoop,
         );
         for name in [edge_name, removed_use_names[0], removed_use_names[1]] {
             self.history
@@ -2071,11 +2071,11 @@ impl<'kernel> EulerTransaction<'kernel> {
 
         let face_name = self.working.face(face)?.name;
         self.history
-            .derived(edge_name, [face_name], "mekr.bridge-edge");
+            .derived(edge_name, [face_name], super::DerivationRole::MekrBridgeEdge);
         self.history
-            .derived(forward_name, [edge_name], "mekr.forward-use");
+            .derived(forward_name, [edge_name], super::DerivationRole::MekrForwardUse);
         self.history
-            .derived(reverse_name, [edge_name], "mekr.reverse-use");
+            .derived(reverse_name, [edge_name], super::DerivationRole::MekrReverseUse);
         self.history
             .changed(inner_loop_name, ChangeKind::Deleted, std::iter::empty());
         self.history
@@ -2262,7 +2262,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             loop_value.kind = LoopKind::Outer;
         }
         self.history
-            .derived(face_name, [old_face_name, loop_name], "mfkrh.face");
+            .derived(face_name, [old_face_name, loop_name], super::DerivationRole::MfkrhFace);
         self.history
             .changed(loop_name, ChangeKind::Modified, [loop_name]);
         self.history
@@ -2888,7 +2888,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             )?;
             if !patch.sources.is_empty() {
                 self.history
-                    .derived(face_name, patch.sources.iter().copied(), "brep.face");
+                    .derived(face_name, patch.sources.iter().copied(), super::DerivationRole::BrepFace);
                 self.history.record_construction(
                     face_name,
                     patch
@@ -4181,6 +4181,12 @@ impl<'kernel> EulerTransaction<'kernel> {
         self.working.faces.get_mut(seed.face)?.orientation = FaceOrientation::Forward;
         self.working.faces.get_mut(lamina.face)?.surface = torus.into();
         self.working.faces.get_mut(lamina.face)?.orientation = FaceOrientation::Forward;
+        self.history.construction_roles.insert(self.working.face(seed.face)?.name(), vec![super::CreationRole::ProfileSide {
+            generators: vec![[0, 0, 0]], chart: Some(super::SurfaceChart::SectionPositive),
+        }]);
+        self.history.construction_roles.insert(self.working.face(lamina.face)?.name(), vec![super::CreationRole::ProfileSide {
+            generators: vec![[0, 0, 0]], chart: Some(super::SurfaceChart::SectionNegative),
+        }]);
         let horizontal = |v: f64| -> KernelResult<Curve2> {
             Ok(Line2::new(Point2::new(0.0, v), Vec2::new(1.0, 0.0))?.into())
         };
@@ -4494,7 +4500,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                     name,
                     super::CreationRole::ExtrusionSide {
                         boundary,
-                        segment,
+                        segment: profile.generator(index, segment),
                         part,
                     },
                 );

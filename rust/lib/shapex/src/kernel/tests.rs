@@ -6159,6 +6159,48 @@ fn shell_filleted_curved_pocket_document_44() {
 }
 
 #[test]
+fn shell_filleted_slot_with_floor_chamfer() {
+    let tol = ModelTolerance::default();
+    let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+    let cylinder = Profile::new(Wire2::new([
+        TrimmedCurve2::circle(Point2::new(0.0, 0.0), 37.32788704942782).unwrap(),
+    ], tol).unwrap(), [], tol).unwrap().extrude(plane, Vec3::new(0.0, 63.0, 0.0)).unwrap();
+    let rim = cylinder.edges().find(|edge| matches!(edge.curve(), Curve3::Circle(c) if c.center().y > 62.0)).unwrap().clone();
+    let rounded = cylinder.fillet(&[rim], 13.0).unwrap();
+    let points = [
+        Point2::new(-8.976935751099653, 7.6854630100868855),
+        Point2::new(64.84272456939797, 7.6854630100868855),
+        Point2::new(64.84272456939797, -9.720435845300738),
+        Point2::new(-8.976935751099653, -9.720435845300738),
+    ];
+    let slot = Profile::new(Wire2::new((0..4).map(|i| TrimmedCurve2::line(points[i], points[(i + 1) % 4]).unwrap()), tol).unwrap(), [], tol).unwrap();
+    let top = Plane3::new(Point3::new(0.0, 63.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+    let mut body = rounded.difference(&slot.extrude(top, Vec3::new(0.0, -37.0, 0.0)).unwrap()).unwrap();
+    let corners = body.edges().filter(|edge| {
+        let [a, b] = edge.endpoints().unwrap();
+        (a.x + 8.976935751099653).abs() < tol.linear && (b.x - a.x).abs() < tol.linear && (b.y - a.y).abs() > 36.0
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(corners.len(), 2);
+    body = body.fillet(&corners, 4.0).unwrap();
+    let lip = body.edges().find(|edge| {
+        let [a, b] = edge.endpoints().unwrap();
+        (a.z + 7.685463010086885).abs() < tol.linear && (b.z + 7.685463010086885).abs() < tol.linear
+            && (a.y - b.y).abs() > 12.0 && matches!(edge.curve(), Curve3::SurfaceIntersection(_))
+    }).unwrap().clone();
+    body = body.fillet(&[lip], 5.0).unwrap();
+    let rim = body.edges().find(|edge| matches!(edge.curve(), Curve3::Circle(c) if (c.center().y - 26.0).abs() < tol.linear)).unwrap().clone();
+    body = body.chamfer_with_tangent_propagation(&[rim], 5.0, true).unwrap();
+    let bottom = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p) if p.origin().y.abs() < tol.linear)).unwrap().clone();
+    for thickness in [3.0, 4.0, 5.0, 6.0] {
+        let shell = body.shell(&[bottom.clone()], -thickness)
+            .unwrap_or_else(|error| panic!("{thickness} mm shell: {error}"));
+        assert_eq!(shell.solids().len(), 1);
+        assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+        shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn shell_past_circular_fillet_document_45() {
     let tol = ModelTolerance::default();
     let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();

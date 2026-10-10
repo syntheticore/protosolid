@@ -118,19 +118,52 @@ export function propagateTopology(items, correspondence, operation, neighbors) {
   }
 }
 
-function incidencePaths(item, neighbors, aliases = false, depth = 2, visited = new Set()) {
+function incidencePaths(item, neighbors, depth = 2, visited = new Set()) {
   const paths = []
   const nextVisited = new Set([...visited, item])
   for(const neighbor of neighbors(item).filter(neighbor => !nextVisited.has(neighbor))) {
-    const names = aliases ? neighbor.topology.names : neighbor.topology.anchors
+    const names = neighbor.topology.anchors
+    const descendants = depth > 1 && names.length ?
+      incidencePaths(neighbor, neighbors, depth - 1, nextVisited).map(path => JSON.parse(path)) : []
     for(const name of names) {
       paths.push([name])
-      if(depth > 1) {
-        for(const path of incidencePaths(neighbor, neighbors, aliases, depth - 1, nextVisited)) paths.push([name, ...JSON.parse(path)])
-      }
+      for(const path of descendants) paths.push([name, ...path])
     }
   }
   return unique(paths.map(path => JSON.stringify(path)))
+}
+
+// Resolution needs membership in named paths, not every combination of a
+// merged cell's aliases. Follow only the requested names through incidence.
+function incidenceContexts(neighbors) {
+  const contexts = new Map(), paths = new Map(), adjacent = new Map(), namesByCell = new Map()
+  const cells = cell => {
+    if(!adjacent.has(cell)) adjacent.set(cell, neighbors(cell))
+    return adjacent.get(cell)
+  }
+  const named = (cell, name) => {
+    if(!namesByCell.has(cell)) namesByCell.set(cell, new Set(cell.topology.names))
+    return namesByCell.get(cell).has(name)
+  }
+  const contains = (cell, names, visited = new Set()) => {
+    const nextVisited = new Set([...visited, cell])
+    return cells(cell).some(neighbor => !nextVisited.has(neighbor) &&
+      named(neighbor, names[0]) &&
+      (names.length == 1 || contains(neighbor, names.slice(1), nextVisited)))
+  }
+  return item => {
+    if(!contexts.has(item)) {
+      const results = new Map()
+      contexts.set(item, {
+        has(path) {
+          if(!paths.has(path)) paths.set(path, JSON.parse(path))
+          if(!results.has(path)) results.set(path, contains(item, paths.get(path)))
+          return results.get(path)
+        },
+      })
+    }
+    return contexts.get(item)
+  }
 }
 
 export function topologySelection(item, neighbors, policy = 'single') {
@@ -146,14 +179,17 @@ export function topologySelection(item, neighbors, policy = 'single') {
 }
 
 export function resolveTopology(items, selection, neighbors) {
+  return resolveTopologyWithContexts(items, selection, incidenceContexts(neighbors))
+}
+
+function resolveTopologyWithContexts(items, selection, contextFor) {
   let candidates = items.filter(item => matchesSelection(item, selection))
   if(selection.policy == 'all-descendants') return { status: candidates.length ? 'resolved' : 'deleted', items: candidates }
   if(candidates.length > 1) {
-    const contexts = new Map(candidates.map(item => [item, new Set(incidencePaths(item, neighbors, true))]))
     // An inserted feature can remove an old boundary. Only surviving named
     // constraints discriminate descendants; never pick the first or nearest.
-    const surviving = selection.context.filter(name => candidates.some(item => contexts.get(item).has(name)))
-    candidates = candidates.filter(item => surviving.every(name => contexts.get(item).has(name)))
+    const surviving = selection.context.filter(name => candidates.some(item => contextFor(item).has(name)))
+    candidates = candidates.filter(item => surviving.every(name => contextFor(item).has(name)))
   }
   return {
     status: candidates.length == 1 ? 'resolved' : candidates.length ? 'ambiguous' : 'deleted',
@@ -182,14 +218,18 @@ function addName(item, identity) {
 // dependency on an unrelated feature merely because it was selected later.
 export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
   const branches = []
+  // Names and incidence stay fixed until the branch annotation pass below.
+  // Share lookup tables across recipes only within this resolution phase.
+  const contextFor = incidenceContexts(neighbors)
   for(const item of items) {
     const origin = item.topology.origin
     if(origin.recipe) continue
     const recipe = topologySelection(item, neighbors)
     const siblings = items.filter(candidate => matchesSelection(candidate, recipe))
+    const contexts = siblings.length > 1 ? siblings.map(contextFor) : []
     recipe.branch = siblings.length > 1 ? recipe.context.filter(path =>
-      siblings.some(sibling => !incidencePaths(sibling, neighbors, true).includes(path))) : []
-    const resolution = resolveRecipe(items, recipe, neighbors)
+      contexts.some(context => !context.has(path))) : []
+    const resolution = resolveRecipe(items, recipe, neighbors, sides, contextFor)
     origin.recipe = recipe
     origin.selectable = !!origin.feature && resolution.status == 'resolved' && resolution.items[0] === item
     // Retain the producer's geometry, not a later modifier's preview. A pick
@@ -222,11 +262,12 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
   const features = new Set(branches.map(item => item.topology.origin.feature))
   if(activeFeature?.topologyNames.branches?.length) features.add(activeFeature)
   for(const feature of features) {
+    const branchContextFor = incidenceContexts(neighbors)
     const bindings = feature.topologyNames.branches ||= []
     const matches = new Map(items.filter(item => item.topology.kind == 'body')
       .map(item => [item, []]))
     for(const binding of bindings) {
-      const result = resolveRecipe(items, binding.recipe, neighbors)
+      const result = resolveRecipe(items, binding.recipe, neighbors, sides, branchContextFor)
       if(result.status == 'resolved' && matches.has(result.items[0])) {
         matches.get(result.items[0]).push(binding)
       }
@@ -279,12 +320,17 @@ export function captureTopologySelection(item, policy = 'single') {
   })
 }
 
-function resolveRecipe(items, recipe, neighbors, sides = () => []) {
-  const constrained = items.filter(item => matchesSelection(item, recipe) &&
-    recipe.branch.every(path => incidencePaths(item, neighbors, true).includes(path)) &&
-    (!recipe.sides || recipe.sides.every(constraint =>
-      sides(item).some(side => JSON.stringify(side) == JSON.stringify(constraint)))))
-  return resolveTopology(constrained, recipe, neighbors)
+function resolveRecipe(items, recipe, neighbors, sides = () => [], contextFor = incidenceContexts(neighbors)) {
+  const constrained = items.filter(item => {
+    if(!matchesSelection(item, recipe)) return false
+    if(recipe.branch.length) {
+      const context = contextFor(item)
+      if(!recipe.branch.every(path => context.has(path))) return false
+    }
+    return !recipe.sides || recipe.sides.every(constraint =>
+      sides(item).some(side => JSON.stringify(side) == JSON.stringify(constraint)))
+  })
+  return resolveTopologyWithContexts(constrained, recipe, contextFor)
 }
 
 export function restoreTopologySelections(feature, items, neighbors, sides) {

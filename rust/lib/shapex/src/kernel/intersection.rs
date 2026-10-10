@@ -1,6 +1,6 @@
 use cgmath::prelude::*;
 
-use crate::{Point2, Point3, Vec4};
+use crate::{Point2, Point3, Vec3, Vec4};
 
 use super::{
     Circle3, Curve2, Curve3, DiagnosticKind, DomainBounds, KernelError, KernelResult, Line2, Line3,
@@ -1647,7 +1647,18 @@ fn trace_surface_intersections_in_domains(
             }
         }
         for parameters in candidates {
-            let point = first.evaluate(parameters[0], parameters[1])?.point;
+            let (point, du, dv) = first.first_order(parameters[0], parameters[1])?;
+            let (_, eu, ev) = second.first_order(parameters[2], parameters[3])?;
+            // Both interior and boundary-constrained seeds must be regular.
+            // A collapsed chart direction can otherwise manufacture tiny
+            // intersection loops around an isolated contact point.
+            let regular_chart = |u: Vec3, v: Vec3, ranges: [super::ParameterRange; 2]| {
+                let u = u * ranges[0].span().abs();
+                let v = v * ranges[1].span().abs();
+                u.cross(v).magnitude() > tolerance.linear_at_scale(point.to_vec().magnitude()) * u.magnitude().max(v.magnitude())
+            };
+            if !regular_chart(du, dv, first_domains) || !regular_chart(eu, ev, second_domains) { continue; }
+            if du.cross(dv).normalize().cross(eu.cross(ev).normalize()).magnitude() <= tolerance.angular * 8.0 { continue; }
             if seeds.iter().any(|existing| {
                 first.evaluate(existing[0], existing[1]).is_ok_and(|value| {
                     value.point.distance(point)
@@ -1736,7 +1747,11 @@ fn trace_surface_intersections_in_domains(
         return Ok(IntersectionSet::Empty);
     }
 
-    let base_step = parameter_scale / 48.0;
+    let nested_intersection = [first, second].iter().any(|surface| {
+        surface.domains()[0].period.is_none()
+            && matches!(surface, Surface3::RollingBall(blend) if matches!(blend.center_curve(), Curve3::SurfaceIntersection(_)))
+    });
+    let base_step = parameter_scale / if nested_intersection { 192.0 } else { 48.0 };
     let mut traced = Vec::<Vec<[f64; 4]>>::new();
     for seed in seeds {
         if traced.iter().any(|curve| {
@@ -1782,6 +1797,7 @@ fn trace_surface_intersections_in_domains(
         // converged trace can still sit next to a trim corner. A nearby box
         // endpoint is usable only if it is a common point of both supports.
         let snap = |values: &mut [f64; 4]| -> KernelResult<()> {
+            let endpoint_step = base_step * if nested_intersection { 2.0 } else { 0.1 };
             // Retain any trim already reached while snapping toward a nearby
             // corner. Moving off it can collapse a short seam-to-cap branch.
             let preserves_bounds = |candidate: [f64; 4], original: [f64; 4]| {
@@ -1810,7 +1826,7 @@ fn trace_surface_intersections_in_domains(
             .enumerate()
             {
                 for bound in [range.start, range.end] {
-                    if (values[index] - bound).abs() > base_step * 0.1 {
+                    if (values[index] - bound).abs() > endpoint_step {
                         continue;
                     }
                     let mut guide = *values;
@@ -1826,7 +1842,7 @@ fn trace_surface_intersections_in_domains(
                         second_domains,
                         tolerance,
                     )? {
-                        if parameter_distance(endpoint, *values) <= base_step * 0.1
+                        if parameter_distance(endpoint, *values) <= endpoint_step
                             && preserves_bounds(endpoint, *values)
                         {
                             *values = endpoint;
@@ -1846,38 +1862,44 @@ fn trace_surface_intersections_in_domains(
             .enumerate()
             {
                 for bound in [range.start, range.end] {
-                    if (candidate[index] - bound).abs() <= base_step * 0.1 {
+                    if (candidate[index] - bound).abs() <= endpoint_step {
                         candidate[index] = bound;
                         changed[index / 2] = true;
                     }
                 }
             }
-            let projection = if changed[1] {
-                let point = second.evaluate(candidate[2], candidate[3])?.point;
-                let projected = first.project(point, tolerance)?;
-                candidate[0] = projected.parameters.0;
-                candidate[1] = projected.parameters.1;
-                Some((point, projected.distance))
-            } else if changed[0] {
-                let point = first.evaluate(candidate[0], candidate[1])?.point;
-                let projected = second.project(point, tolerance)?;
-                candidate[2] = projected.parameters.0;
-                candidate[3] = projected.parameters.1;
-                Some((point, projected.distance))
-            } else {
-                None
-            };
-            if let Some((point, distance)) = projection {
-                if distance <= f64::EPSILON * point.to_vec().magnitude().max(1.0) * 256.0
-                    && preserves_bounds(candidate, *values)
+            for side in 0..2 {
+                if !changed[side] { continue; }
+                let mut endpoint = candidate;
+                let (point, projection) = if side == 0 {
+                    let point = first.evaluate(candidate[0], candidate[1])?.point;
+                    let projection = second.project(point, tolerance)?;
+                    endpoint[2] = projection.parameters.0;
+                    endpoint[3] = projection.parameters.1;
+                    (point, projection)
+                } else {
+                    let point = second.evaluate(candidate[2], candidate[3])?.point;
+                    let projection = first.project(point, tolerance)?;
+                    endpoint[0] = projection.parameters.0;
+                    endpoint[1] = projection.parameters.1;
+                    (point, projection)
+                };
+                for (index, domain) in first.domains().into_iter().chain(second.domains()).enumerate() {
+                    if let Some(period) = domain.period {
+                        endpoint[index] += ((values[index] - endpoint[index]) / period).round() * period;
+                    }
+                }
+                if projection.distance <= f64::EPSILON * point.to_vec().magnitude().max(1.0) * 256.0
+                    && preserves_bounds(endpoint, *values)
                     && parameters_in_ranges(
-                        candidate,
+                        endpoint,
                         first_domains,
                         second_domains,
                         tolerance.parameter,
                     )
                 {
-                    *values = candidate;
+                    *values = endpoint;
+                    break;
                 }
             }
             Ok(())
@@ -1927,8 +1949,14 @@ fn trace_surface_intersections_in_domains(
             unwrap_periodic_points(&mut first_points, first.domains());
             unwrap_periodic_points(&mut second_points, second.domains());
             let range = super::ParameterRange::new(0.0, 1.0)?;
-            let first_pcurve = smooth_nurbs_guide(&first_points, range)?;
-            let second_pcurve = smooth_nurbs_guide(&second_points, range)?;
+            let guide = |points: &[Point2]| {
+                if nested_intersection {
+                    let parameters = (0..points.len()).map(|index| index as f64 / (points.len() - 1) as f64).collect::<Vec<_>>();
+                    interpolating_nurbs_guide(points, &parameters)
+                } else { smooth_nurbs_guide(points, range) }
+            };
+            let first_pcurve = guide(&first_points)?;
+            let second_pcurve = guide(&second_points)?;
             let achieved_error = parameters.iter().try_fold(0.0_f64, |error, value| {
                 let first = first.evaluate(value[0], value[1])?.point;
                 let second = second.evaluate(value[2], value[3])?.point;
@@ -2223,11 +2251,7 @@ fn correct_surface_pair(
         // A model-tolerance residual near tangency can manufacture a tiny
         // intersection branch. Match the accuracy of implicit evaluation.
         if residual.magnitude() <= f64::EPSILON * scale * 2048.0 {
-            let regularity = first
-                .normal(parameters[0], parameters[1])?
-                .cross(second.normal(parameters[2], parameters[3])?)
-                .magnitude();
-            return Ok((regularity > tolerance.angular * 8.0).then_some(parameters));
+            return Ok(Some(parameters));
         }
         let mut jacobian = [
             [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
@@ -2311,6 +2335,7 @@ fn trace_surface_intersection_direction(
     let mut result = Vec::new();
     let mut current = seed;
     let mut previous_tangent = None;
+    let domains = [first.domains(), second.domains()].concat();
     for _ in 0..512 {
         let (_, first_du, first_dv) = first.first_order(current[0], current[1])?;
         let (_, second_du, second_dv) = second.first_order(current[2], current[3])?;
@@ -2433,6 +2458,25 @@ fn trace_surface_intersection_direction(
             break;
         }
         result.push(next);
+        // Stop on the first trim reached, excluding full-period seams.
+        // Continuing along a trim can switch branches at a collapsing blend
+        // and corrupt the curve guide.
+        if first_domains.iter().chain(&second_domains).enumerate().any(|(index, range)| {
+            if domains[index].period.is_some_and(|period| range.span().abs() >= period - tolerance.parameter * 8.0) { return false; }
+            [range.start, range.end].into_iter().any(|bound| {
+                (next[index] - bound).abs() <= tolerance.parameter * 8.0
+                    && (current[index] - bound).abs() > tolerance.parameter * 8.0
+            })
+        }) {
+            break;
+        }
+        let (_, du, dv) = first.first_order(next[0], next[1])?;
+        let (_, eu, ev) = second.first_order(next[2], next[3])?;
+        if du.cross(dv).magnitude2() == 0.0 || eu.cross(ev).magnitude2() == 0.0
+            || du.cross(dv).normalize().cross(eu.cross(ev).normalize()).magnitude() <= tolerance.angular * 8.0
+        {
+            break;
+        }
         if result.len() > 12 && parameter_distance(next, seed) <= step * 0.75 {
             break;
         }
@@ -2529,6 +2573,39 @@ pub(crate) fn smooth_nurbs_guide(
     );
     knots.extend(vec![range.end; degree + 1]);
     NurbsCurve2::new(degree, points.to_vec(), vec![1.0; points.len()], knots)
+}
+
+/// Preserve each traced sample while making the guide tangent continuous.
+/// Monotone Hermite slopes keep a short endpoint span from overshooting its trim.
+pub(crate) fn smooth_interpolating_guide(curve: &NurbsCurve2) -> KernelResult<Curve2> {
+    if curve.degree() != 1 { return Ok(curve.clone().into()); }
+    let points = curve.control_points();
+    let parameters = &curve.knots()[1..curve.knots().len() - 1];
+    let slopes = points.windows(2).zip(parameters.windows(2)).map(|(points, parameters)| {
+        (points[1] - points[0]) / (parameters[1] - parameters[0])
+    }).collect::<Vec<_>>();
+    let tangents = (0..points.len()).map(|index| {
+        if index == 0 { return slopes[0]; }
+        if index == points.len() - 1 { return slopes[index - 1]; }
+        let mut tangent = crate::Vec2::new(0.0, 0.0);
+        for axis in 0..2 {
+            let a = slopes[index - 1][axis];
+            let b = slopes[index][axis];
+            tangent[axis] = if a * b > 0.0 { 2.0 * a * b / (a + b) } else { 0.0 };
+        }
+        tangent
+    }).collect::<Vec<_>>();
+    let mut controls = vec![points[0]];
+    for index in 0..points.len() - 1 {
+        let step = (parameters[index + 1] - parameters[index]) / 3.0;
+        controls.extend([points[index] + tangents[index] * step,
+            points[index + 1] - tangents[index + 1] * step, points[index + 1]]);
+    }
+    let mut knots = vec![parameters[0]; 4];
+    for parameter in &parameters[1..parameters.len() - 1] { knots.extend([*parameter; 3]); }
+    knots.extend([*parameters.last().unwrap(); 4]);
+    let weights = vec![1.0; controls.len()];
+    Ok(NurbsCurve2::new(3, controls, weights, knots)?.into())
 }
 
 /// A repeated cubic control net includes one control beyond each end, so

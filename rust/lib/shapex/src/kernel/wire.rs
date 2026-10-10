@@ -720,75 +720,82 @@ fn general_parametric_pair(
     let mut shared_endpoints = Vec::new();
     for a in [first.range().start, first.range().end] {
         for b in [second.range().start, second.range().end] {
-            let point = first.curve().evaluate(a)?.point;
-            if point.distance(second.curve().evaluate(b)?.point) <= tolerance.linear {
+            let point = first.curve().first_order(a)?.0;
+            if point.distance(second.curve().first_order(b)?.0) <= tolerance.linear {
                 shared_endpoints.push((a, b, point));
             }
         }
     }
     let mut seeds = Vec::new();
     let divisions = 32;
-    for first_index in 0..=divisions {
-        let first_parameter =
-            first.range().start + first.range().span() * first_index as f64 / divisions as f64;
-        let first_value = first.curve().evaluate(first_parameter)?;
-        for second_index in 0..=divisions {
-            let second_parameter = second.range().start
-                + second.range().span() * second_index as f64 / divisions as f64;
-            let second_value = second.curve().evaluate(second_parameter)?;
-            let local_scale = first_value
-                .point
+    // The grid compares every sample pair, but each exact curve evaluation
+    // depends on just one parameter. Evaluate the two axes once each.
+    let samples = |segment: &TrimmedCurve2| {
+        (0..=divisions).map(|index| {
+            let parameter = segment.range().start
+                + segment.range().span() * index as f64 / divisions as f64;
+            Ok((parameter, segment.curve().first_order(parameter)?))
+        }).collect::<KernelResult<Vec<_>>>()
+    };
+    let first_samples = samples(first)?;
+    let second_samples = samples(second)?;
+    for (first_parameter, (first_point, first_tangent)) in &first_samples {
+        for (second_parameter, (second_point, second_tangent)) in &second_samples {
+            let local_scale = first_point
                 .to_vec()
                 .magnitude()
-                .max(second_value.point.to_vec().magnitude())
+                .max(second_point.to_vec().magnitude())
                 .max(1.0);
             // Convert parameter-cell widths to geometric lengths. Comparing a
             // spatial distance with raw parameter spans misses intersections
             // whenever either curve has a non-unit parameterization.
-            let cell_size = first_value.first_derivative.magnitude() * first.range().span().abs()
+            let cell_size = first_tangent.magnitude() * first.range().span().abs()
                 / divisions as f64
-                + second_value.first_derivative.magnitude() * second.range().span().abs()
+                + second_tangent.magnitude() * second.range().span().abs()
                     / divisions as f64;
-            if first_value.point.distance(second_value.point)
+            if first_point.distance(*second_point)
                 <= cell_size.max(tolerance.linear_at_scale(local_scale) * 32.0)
             {
-                seeds.push((first_parameter, second_parameter));
+                seeds.push((*first_parameter, *second_parameter));
             }
         }
     }
     let mut hits = Vec::new();
     for (mut first_parameter, mut second_parameter) in seeds {
         for _ in 0..32 {
-            let first_value = first.curve().evaluate(first_parameter)?;
-            let second_value = second.curve().evaluate(second_parameter)?;
-            let residual = first_value.point - second_value.point;
-            let determinant = first_value.first_derivative.x * -second_value.first_derivative.y
-                - first_value.first_derivative.y * -second_value.first_derivative.x;
+            let (first_point, first_tangent) = first.curve().first_order(first_parameter)?;
+            let (second_point, second_tangent) = second.curve().first_order(second_parameter)?;
+            let residual = first_point - second_point;
+            let determinant = first_tangent.x * -second_tangent.y
+                - first_tangent.y * -second_tangent.x;
             if determinant.abs() <= f64::EPSILON * 256.0 {
                 break;
             }
-            let first_delta = (-residual.x * -second_value.first_derivative.y
-                + residual.y * -second_value.first_derivative.x)
+            let first_delta = (-residual.x * -second_tangent.y
+                + residual.y * -second_tangent.x)
                 / determinant;
-            let second_delta = (first_value.first_derivative.x * -residual.y
-                + first_value.first_derivative.y * residual.x)
+            let second_delta = (first_tangent.x * -residual.y
+                + first_tangent.y * residual.x)
                 / determinant;
-            first_parameter = (first_parameter + first_delta).clamp(
+            let next_first = (first_parameter + first_delta).clamp(
                 first.range().start.min(first.range().end),
                 first.range().start.max(first.range().end),
             );
-            second_parameter = (second_parameter + second_delta).clamp(
+            let next_second = (second_parameter + second_delta).clamp(
                 second.range().start.min(second.range().end),
                 second.range().start.max(second.range().end),
             );
-            if first_delta.abs().max(second_delta.abs()) <= tolerance.parameter {
+            // A clamped Newton step can stay at the same trim endpoint even
+            // when its unconstrained delta is large. Repeating it cannot help.
+            let stationary = next_first == first_parameter && next_second == second_parameter;
+            first_parameter = next_first;
+            second_parameter = next_second;
+            if stationary || first_delta.abs().max(second_delta.abs()) <= tolerance.parameter {
                 break;
             }
         }
-        let first_value = first.curve().evaluate(first_parameter)?;
-        let second_value = second.curve().evaluate(second_parameter)?;
-        let a = first_value.first_derivative;
-        let b = second_value.first_derivative;
+        let (first_point, a) = first.curve().first_order(first_parameter)?;
+        let (second_point, b) = second.curve().first_order(second_parameter)?;
         let sine = (a.x * b.y - a.y * b.x).abs() / (a.magnitude() * b.magnitude());
         if sine > 0.0 {
             // Near a tangential endpoint, roundoff in curve evaluation is
@@ -797,23 +804,23 @@ fn general_parametric_pair(
             // from it at that arithmetic precision.
             // Subtracting two evaluated points combines both error budgets.
             let evaluation_error = f64::EPSILON * 2048.0
-                * (first_value.point.to_vec().magnitude().max(1.0)
-                    + second_value.point.to_vec().magnitude().max(1.0));
+                * (first_point.to_vec().magnitude().max(1.0)
+                    + second_point.to_vec().magnitude().max(1.0));
             // Include the implicit evaluator's roundoff budget and the final
             // Newton residual. At a quadratic tangency the remaining root
             // distance is twice the residual divided by the intersection angle.
             let uncertainty = (evaluation_error
-                + first_value.point.distance(second_value.point) * 2.0) / sine;
+                + first_point.distance(second_point) * 2.0) / sine;
             if let Some((a, b, _)) = shared_endpoints.iter().find(|(_, _, point)| {
-                point.distance(first_value.point) <= uncertainty
-                    && point.distance(second_value.point) <= uncertainty
+                point.distance(first_point) <= uncertainty
+                    && point.distance(second_point) <= uncertainty
             }) {
                 first_parameter = *a;
                 second_parameter = *b;
             }
         }
-        let first_point = first.curve().evaluate(first_parameter)?.point;
-        let second_point = second.curve().evaluate(second_parameter)?.point;
+        let first_point = first.curve().first_order(first_parameter)?.0;
+        let second_point = second.curve().first_order(second_parameter)?.0;
         if first_point.distance(second_point) <= tolerance.linear * 8.0
             && !hits.iter().any(|hit: &CurvePairHit| {
                 (hit.first_parameter - first_parameter).abs() <= tolerance.parameter * 16.0

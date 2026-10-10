@@ -2941,7 +2941,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                         self.working.vertex(end_vertex)?.name(),
                         segment.provenance.vertices[1].iter().copied(),
                     );
-                    let matched = edges.iter().cloned().find(|candidate| {
+                    let matched = edges.iter().find(|candidate| {
                         let closed_circles_match = match (&candidate.curve, &segment.curve) {
                             (Curve3::Circle(first), Curve3::Circle(second)) => {
                                 candidate.start.distance(candidate.end) <= linear * 8.0
@@ -2953,7 +2953,17 @@ impl<'kernel> EulerTransaction<'kernel> {
                             }
                             _ => false,
                         };
-                        let middle_matches = candidate.middle.distance(middle) <= linear * 64.0
+                        if closed_circles_match { return true; }
+                        // Endpoint agreement is necessary before an exact
+                        // midpoint projection can identify this shared edge.
+                        if !((candidate.start.distance(start) <= linear * 8.0
+                            && candidate.end.distance(end) <= linear * 8.0)
+                            || (candidate.start.distance(end) <= linear * 8.0
+                                && candidate.end.distance(start) <= linear * 8.0))
+                        {
+                            return false;
+                        }
+                        candidate.middle.distance(middle) <= linear * 64.0
                             || candidate
                                 .curve
                                 .project_on_trim(middle, candidate.range, self.kernel.tolerance)
@@ -2962,14 +2972,8 @@ impl<'kernel> EulerTransaction<'kernel> {
                                         && candidate
                                             .range
                                             .contains(projection.parameter, self.kernel.tolerance)
-                                });
-                        closed_circles_match
-                            || (middle_matches
-                                && ((candidate.start.distance(start) <= linear * 8.0
-                                    && candidate.end.distance(end) <= linear * 8.0)
-                                    || (candidate.start.distance(end) <= linear * 8.0
-                                        && candidate.end.distance(start) <= linear * 8.0)))
-                    });
+                                })
+                    }).cloned();
                     let (edge, forward, pcurve) = if let Some(candidate) = matched {
                         let closed = candidate.start.distance(candidate.end) <= linear * 8.0
                             && start.distance(end) <= linear * 8.0;

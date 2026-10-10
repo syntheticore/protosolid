@@ -2952,45 +2952,207 @@ pub(crate) fn offset_faces(
     result.with_feature_parent(source, super::DerivationRole::OffsetFaces)
 }
 
-/// Construct closed rolling joins before changing the boundary graph. A contact
+fn rounded_join_center(
+    topology: &Topology,
+    edge_id: EdgeId,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<Curve3> {
+    let edge = topology.edge(edge_id)?;
+    let Curve3::SurfaceIntersection(intersection) = edge.curve() else { return Ok(edge.curve().clone()); };
+    if edge.vertices()[0] == edge.vertices()[1] { return Ok(edge.curve().clone()); }
+    let [start, end] = edge.vertices().map(|vertex| {
+        let faces = topology.vertex_edges(vertex)?.into_iter().map(|edge| topology.edge_faces(edge))
+            .collect::<KernelResult<Vec<_>>>()?.into_iter().flatten().collect::<BTreeSet<_>>();
+        let constraints = faces.iter().map(|face| Ok(CornerConstraint::Surface(topology.face(*face)?.surface())))
+            .collect::<KernelResult<Vec<_>>>()?;
+        // Tangential intersections amplify a model-tolerance residual into a
+        // visible trim gap. Refine the shared center before constructing joins.
+        let mut exact = tolerance;
+        exact.linear = 1.0e-12;
+        exact.relative = 1.0e-14;
+        refine_support_corner(topology.vertex(vertex)?.point(), &constraints, exact)
+    });
+    let mut corners = [start?, end?];
+    let range = edge.range();
+    let mut parameters = vec![range.start, range.end];
+    parameters.extend(intersection.first_pcurve().integration_breakpoints(range));
+    parameters.extend(intersection.second_pcurve().integration_breakpoints(range));
+    parameters.sort_by(f64::total_cmp);
+    parameters.dedup_by(|a, b| (*a - *b).abs() <= tolerance.parameter);
+    if range.span() < 0.0 { corners.swap(0, 1); }
+    let exact = intersection.exact_pcurves();
+    let guide = |curve: &Curve2, surface: &Surface3| -> KernelResult<Curve2> {
+        let mut points = parameters.iter().map(|parameter| curve.evaluate(*parameter).map(|value| value.point))
+            .collect::<KernelResult<Vec<_>>>()?;
+        for (index, point) in [(0, corners[0]), (points.len() - 1, corners[1])] {
+            let uv = surface.project(point, tolerance)?.parameters;
+            points[index] = Point2::new(uv.0, uv.1);
+        }
+        super::intersection::unwrap_periodic_points(&mut points, surface.domains());
+        let sampled = super::intersection::interpolating_nurbs_guide(&points, &parameters)?;
+        super::intersection::smooth_interpolating_guide(&sampled)
+    };
+    // Reparameterize only the retained edge interval. Its untrimmed support
+    // can extend past either shared corner and has different endpoints.
+    Ok(SurfaceIntersectionCurve::new(intersection.first_surface().clone(), intersection.second_surface().clone(),
+        guide(&exact[0], intersection.first_surface())?, guide(&exact[1], intersection.second_surface())?, range,
+        tolerance, intersection.achieved_error())?.into())
+}
+
+/// Construct rolling joins before changing the boundary graph. A contact
 /// rail may cross another offset face after a smaller blend has disappeared;
 /// arranging all three supports trims that overlap instead of reversing an edge.
 fn rounded_offset_regions(
     source: &Compound,
-    offset: &Compound,
+    offset: Option<&Compound>,
     joins: &[EdgeId],
     openings: &BTreeSet<FaceId>,
     radius: f64,
 ) -> KernelResult<Compound> {
-    use super::trim::{FaceCurve, align_pcurve_to_face_chart, face_boundary_curves,
+    use super::trim::{FaceCurve, align_pcurve_to_face_chart, face_boundary_curves, intersection_chart_copies,
         face_parameter_bounds as trim_bounds, point_in_trim, trim_to_faces};
     use super::brep_classification::{BrepClassifier, PointClassification};
     let tolerance = source.tolerance();
     let topology = source.topology();
-    let offset_topology = offset.topology();
-    let offset_faces = offset.faces().cloned().collect::<Vec<_>>();
-    let by_source = offset_faces.iter().enumerate().map(|(index, face)| {
-        (offset.topology_history().construction[&face.persistent_id()][0].name, index)
-    }).collect::<BTreeMap<_, _>>();
-    let mut supports = offset_faces.iter().map(|face| face.surface().clone()).collect::<Vec<_>>();
-    let mut orientations = offset_faces.iter().map(|face| offset_topology.face(face.topology_id()).map(|face| face.orientation()))
-        .collect::<KernelResult<Vec<_>>>()?;
-    let mut ancestry = offset_faces.iter().map(|face| {
-        vec![offset.topology_history().construction[&face.persistent_id()][0].name]
-    }).collect::<Vec<_>>();
-    let mut boundaries = offset_faces.iter().map(|face| {
-        face_boundary_curves(offset_topology, face.topology_id(), tolerance)?.into_iter().map(|curve| {
-            let mut provenance = SegmentProvenance::from_coedge(offset_topology, curve.provenance)?;
-            provenance.through(offset.topology_history());
+    let skin = offset.unwrap_or(source);
+    let skin_topology = skin.topology();
+    let mut skin_faces = Vec::new();
+    let mut supports = Vec::new();
+    let mut orientations = Vec::new();
+    let mut ancestry = Vec::new();
+    let mut boundaries = Vec::new();
+    for face in skin.faces() {
+        let value = skin_topology.face(face.topology_id())?;
+        let surface = if offset.is_some() || openings.contains(&face.topology_id()) {
+            face.surface().clone()
+        } else {
+            let sign = if value.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+            let bounds = face_parameter_bounds(topology, face.topology_id(), tolerance)?;
+            let base = extended_support(face.surface(), bounds, -radius, tolerance)?;
+            let distance = -radius * sign;
+            if collapsed_support(&base, distance, tolerance)?.is_some()
+                || matches!(&base, Surface3::Cylinder(cylinder) if cylinder.radius() + distance
+                    * cylinder.axis().dot(cylinder.x_radius().cross(cylinder.y_radius())).signum() <= tolerance.linear)
+            {
+                continue;
+            }
+            base.offset(distance, tolerance)?
+        };
+        let boundary = face_boundary_curves(skin_topology, face.topology_id(), tolerance)?.into_iter().map(|mut curve| {
+            let mut provenance = SegmentProvenance::from_coedge(skin_topology, curve.provenance)?;
+            if let Some(offset) = offset {
+                provenance.through(offset.topology_history());
+            } else {
+                provenance = provenance.modified();
+                curve.curve = surface.boundary_curve(curve.pcurve.clone(), curve.range, tolerance)?;
+            }
             Ok(curve.with_provenance(provenance))
-        }).collect::<KernelResult<Vec<_>>>()
-    }).collect::<KernelResult<Vec<_>>>()?;
+        }).collect::<KernelResult<Vec<_>>>()?;
+        ancestry.push(vec![offset.map_or(face.persistent_id(), |offset| {
+            offset.topology_history().construction[&face.persistent_id()][0].name
+        })]);
+        orientations.push(value.orientation());
+        supports.push(surface);
+        boundaries.push(boundary);
+        skin_faces.push(face.clone());
+    }
+    let by_source = ancestry.iter().enumerate().map(|(index, names)| (names[0], index)).collect::<BTreeMap<_, _>>();
     let mut curves = boundaries.clone();
     let mut parents = Vec::new();
     let candidate = |curve: Curve3, pcurve: Curve2, range: ParameterRange, seam: bool| FaceCurve {
         provenance: SegmentProvenance::default(), curve, pcurve, range,
         loop_end: false, loop_kind: super::LoopKind::Outer, parameter_seam: seam,
     };
+    let mut clipping_boundaries = boundaries.clone();
+    if offset.is_none() {
+        let mut extended_faces = BTreeSet::new();
+        let surviving = skin_faces.iter().map(FaceHandle::topology_id).collect::<BTreeSet<_>>();
+        let mut neighbors = BTreeMap::new();
+        for face in &skin_faces {
+            let mut pending = vec![face.topology_id()];
+            let mut visited = BTreeSet::new();
+            let mut adjacent = BTreeSet::new();
+            while let Some(id) = pending.pop() {
+                if !visited.insert(id) { continue; }
+                if id != face.topology_id() { extended_faces.insert(face.topology_id()); }
+                for edge in topology.face_edges(id)? {
+                    for neighbor in topology.edge_faces(edge)? {
+                        if neighbor == face.topology_id() { continue; }
+                        if surviving.contains(&neighbor) { adjacent.insert(neighbor); }
+                        else { pending.push(neighbor); }
+                    }
+                }
+            }
+            neighbors.insert(face.topology_id(), adjacent);
+        }
+        for (index, face) in skin_faces.iter().enumerate() {
+            if !extended_faces.contains(&face.topology_id()) { continue; }
+            let original = trim_bounds(&boundaries[index], tolerance)?;
+            let mut bounds = expanded_offset_bounds(&supports[index], original, -radius, tolerance)?;
+            // Surviving tangent neighbors retain their isoparametric contact
+            // rails. Expand across consumed blends, while keeping these chart
+            // limits so an intersection stops at the shared corner.
+            for edge_id in topology.face_edges(face.topology_id())? {
+                let adjacent = topology.edge_faces(edge_id)?;
+                let Some(other) = adjacent.into_iter().find(|id| *id != face.topology_id() && surviving.contains(id)) else { continue; };
+                if tangent_contact(topology, edge_id, face.topology_id(), other, tolerance)?.is_empty() { continue; }
+                let edge = topology.edge(edge_id)?;
+                let coedge = edge.coedges().iter().map(|id| topology.coedge(*id)).collect::<KernelResult<Vec<_>>>()?
+                    .into_iter().find(|coedge| topology.loop_(coedge.loop_id()).unwrap().face() == face.topology_id()).unwrap();
+                let range = coedge.range();
+                let points = [range.start, range.start + range.span() * 0.5, range.end].map(|t| coedge.pcurve().evaluate(t).map(|v|v.point));
+                let points = points.into_iter().collect::<KernelResult<Vec<_>>>()?;
+                for axis in 0..2 {
+                    if points.iter().all(|point| (point[axis] - original[axis].start).abs() <= tolerance.parameter * 64.0) { bounds[axis].start = original[axis].start; }
+                    if points.iter().all(|point| (point[axis] - original[axis].end).abs() <= tolerance.parameter * 64.0) { bounds[axis].end = original[axis].end; }
+                }
+            }
+            let points = [Point2::new(bounds[0].start, bounds[1].start),
+                Point2::new(bounds[0].end, bounds[1].start), Point2::new(bounds[0].end, bounds[1].end),
+                Point2::new(bounds[0].start, bounds[1].end)];
+            clipping_boundaries[index] = (0..4).map(|side| {
+                let pcurve: Curve2 = super::Line2::new(points[side], points[(side + 1) % 4] - points[side])?.into();
+                let range = ParameterRange::new(0.0, 1.0)?;
+                Ok(candidate(supports[index].boundary_curve(pcurve.clone(), range, tolerance)?, pcurve, range, false))
+            }).collect::<KernelResult<Vec<_>>>()?;
+            clipping_boundaries[index].last_mut().unwrap().loop_end = true;
+        }
+        for first in 0..supports.len() {
+            for second in 0..first {
+                let first_id = skin_faces[first].topology_id();
+                let second_id = skin_faces[second].topology_id();
+                let shared = topology.face_edges(first_id)?.into_iter().find(|edge| {
+                    topology.edge_faces(*edge).unwrap().contains(&second_id)
+                });
+                if !neighbors[&first_id].contains(&second_id) { continue; }
+                if let Some(edge) = shared {
+                    if joins.contains(&edge) || !tangent_contact(topology, edge, first_id, second_id, tolerance)?.is_empty() { continue; }
+                }
+                let intersections = supports[first].intersect_surface_in_bounds(&supports[second],
+                    trim_bounds(&clipping_boundaries[first], tolerance)?, trim_bounds(&clipping_boundaries[second], tolerance)?, tolerance)?;
+                let IntersectionSet::Isolated(intersections) = intersections else { continue; };
+                for intersection in intersections {
+                    let first_pcurve = align_pcurve_to_face_chart(&intersection.first_pcurve, None,
+                        &supports[first], &boundaries[first], tolerance)?;
+                    let second_pcurve = align_pcurve_to_face_chart(&intersection.second_pcurve, None,
+                        &supports[second], &boundaries[second], tolerance)?;
+                    let first_copies = intersection_chart_copies(intersection.curve.domain().bounds, &first_pcurve,
+                        &supports[first], trim_bounds(&boundaries[first], tolerance)?, tolerance)?;
+                    let second_copies = intersection_chart_copies(intersection.curve.domain().bounds, &second_pcurve,
+                        &supports[second], trim_bounds(&boundaries[second], tolerance)?, tolerance)?;
+                    for first_pcurve in &first_copies {
+                        for second_pcurve in &second_copies {
+                            for range in trim_to_faces(&intersection.curve, first_pcurve, &clipping_boundaries[first],
+                                second_pcurve, &clipping_boundaries[second], tolerance)? {
+                                curves[first].push(candidate(intersection.curve.clone(), first_pcurve.clone(), range, false));
+                                curves[second].push(candidate(intersection.curve.clone(), second_pcurve.clone(), range, false));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     for edge_id in joins {
         let edge = topology.edge(*edge_id)?;
         let uses = edge.coedges().iter().map(|id| topology.coedge(*id)).collect::<KernelResult<Vec<_>>>()?;
@@ -2998,45 +3160,67 @@ fn rounded_offset_regions(
         let parent_names = faces.iter().map(|id| topology.face(*id).map(|face| face.name())).collect::<KernelResult<Vec<_>>>()?;
         // Contact guides must follow the coedge order used by the center curve.
         let parent_indices = uses.iter().map(|coedge| {
-            Ok(by_source[&topology.face(topology.loop_(coedge.loop_id())?.face())?.name()])
+            Ok(by_source.get(&topology.face(topology.loop_(coedge.loop_id())?.face())?.name()).copied())
+        }).collect::<KernelResult<Vec<_>>>()?;
+        let contact_surfaces = uses.iter().zip(&parent_indices).map(|(coedge, index)| {
+            if let Some(index) = index { return Ok(supports[*index].clone()); }
+            let face = topology.face(topology.loop_(coedge.loop_id())?.face())?;
+            let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+            // A consumed face still defines the contact direction of its
+            // adjacent concave-edge envelope. Keep that continuation solely
+            // as a rail support; it cannot contribute an offset face.
+            super::OffsetSurface3::new(face.surface().clone(), -radius * sign, tolerance).map(Surface3::Offset)
         }).collect::<KernelResult<Vec<_>>>()?;
         let range = edge.range();
+        let closed = edge.vertices()[0] == edge.vertices()[1];
+        let center = if offset.is_none() {
+            rounded_join_center(topology, *edge_id, tolerance)?
+        } else { edge.curve().clone() };
+        let contact_guides = uses.iter().map(|coedge| {
+            if offset.is_some() { return Ok(coedge.pcurve().clone()); }
+            let face = topology.face(topology.loop_(coedge.loop_id())?.face())?;
+            Ok(super::SurfaceProjectionPcurve2::new(center.clone(), face.surface().clone(),
+                coedge.pcurve().clone(), range, tolerance)?.into())
+        }).collect::<KernelResult<Vec<Curve2>>>()?;
         let blend: Surface3 = super::RollingBallSurface3::new(
-            edge.curve().clone(), supports[parent_indices[0]].clone(), supports[parent_indices[1]].clone(),
-            uses[0].pcurve().clone(), uses[1].pcurve().clone(), range, radius, tolerance,
-        )?.with_center_period(Some(range.span().abs())).into();
+            center.clone(), contact_surfaces[0].clone(), contact_surfaces[1].clone(),
+            contact_guides[0].clone(), contact_guides[1].clone(), range, radius, tolerance,
+        )?.with_center_period(closed.then_some(range.span().abs())).into();
         let middle = (range.start + range.end) * 0.5;
         let value = blend.evaluate(middle, 0.5)?;
-        let center = edge.curve().evaluate(middle)?.point;
+        let center = center.evaluate(middle)?.point;
         let orientation = if value.normal()?.dot(value.point - center) < 0.0 {
             FaceOrientation::Forward
         } else { FaceOrientation::Reversed };
         let mut boundary = Vec::new();
         for (start, end, trim, seam) in [
             (Point2::new(0.0, 0.0), Point2::new(1.0, 0.0), range, false),
-            (Point2::new(range.end, 0.0), Point2::new(range.end, 1.0), ParameterRange::new(0.0, 1.0)?, true),
+            (Point2::new(range.end, 0.0), Point2::new(range.end, 1.0), ParameterRange::new(0.0, 1.0)?, closed),
             (Point2::new(0.0, 1.0), Point2::new(1.0, 1.0), range.reversed(), false),
-            (Point2::new(range.start, 0.0), Point2::new(range.start, 1.0), ParameterRange::new(1.0, 0.0)?, true),
+            (Point2::new(range.start, 0.0), Point2::new(range.start, 1.0), ParameterRange::new(1.0, 0.0)?, closed),
         ] {
             let pcurve: Curve2 = super::Line2::new(start, end - start)?.into();
             let curve = blend.boundary_curve(pcurve.clone(), trim, tolerance)?;
             boundary.push(candidate(curve, pcurve, trim, seam));
         }
         boundary.last_mut().unwrap().loop_end = true;
-        for side in 0..2 {
-            let rail = &boundary[if side == 0 { 0 } else { 2 }];
-            let pcurve = align_pcurve_to_face_chart(uses[side].pcurve(), Some(range),
-                &supports[parent_indices[side]], &boundaries[parent_indices[side]], tolerance)?;
-            curves[parent_indices[side]].push(candidate(rail.curve.clone(), pcurve, range, false));
+        if offset.is_some() {
+            for side in 0..2 {
+                let parent = parent_indices[side].unwrap();
+                let rail = &boundary[if side == 0 { 0 } else { 2 }];
+                let pcurve = align_pcurve_to_face_chart(&contact_guides[side], Some(range),
+                    &supports[parent], &boundaries[parent], tolerance)?;
+                curves[parent].push(candidate(rail.curve.clone(), pcurve, range, false));
+            }
         }
-        parents.push([parent_indices[0], parent_indices[1]]);
+        parents.push(parent_indices.into_iter().flatten().collect::<Vec<_>>());
         supports.push(blend);
         orientations.push(orientation);
         ancestry.push(parent_names);
         curves.push(boundary.clone());
         boundaries.push(boundary);
     }
-    let base_count = offset_faces.len();
+    let base_count = skin_faces.len();
     for first in base_count..supports.len() {
         for second in 0..first {
             if parents[first - base_count].contains(&second) { continue; }
@@ -3116,7 +3300,13 @@ fn rounded_offset_regions(
                 let is_opening = index < base_count && opening_names.contains(&ancestry[index][0]);
                 let retained = if is_opening {
                     point_in_trim(uv, &boundaries[index])? && distance >= radius - tolerance.linear * 8.0
-                } else { (distance - radius).abs() <= tolerance.linear * 8.0 };
+                } else {
+                    // These are points on exact offset supports. A model-sized
+                    // band admits both sides of a narrow overlap; allow only
+                    // evaluation roundoff on the side hidden by another face.
+                    distance >= radius - f64::EPSILON * point.to_vec().magnitude().max(radius) * 2048.0
+                        && distance <= radius + tolerance.linear * 8.0
+                };
                 Ok(retained.then_some(orientations[index]))
             })?;
         for region in &mut regions { region.sources = ancestry[index].clone(); }
@@ -3144,8 +3334,8 @@ pub(crate) fn shell(
         .iter()
         .map(FaceHandle::topology_id)
         .collect::<BTreeSet<_>>();
-    let (raw_offset, has_vanished_blends) = offset_body(source, &opening_ids, distance, false)?;
     if join_type == "sharp" {
+        let (raw_offset, _) = offset_body(source, &opening_ids, distance, false)?;
         return assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?
             .with_feature_parent(source, super::DerivationRole::Shell);
     }
@@ -3213,10 +3403,20 @@ pub(crate) fn shell(
         let edge = topology.edge(*id)?;
         Ok::<_, KernelError>(closed && edge.vertices()[0] == edge.vertices()[1])
     })?;
+    let curved_open_join = divergent_edges.iter().any(|id| {
+        let edge = topology.edge(*id).unwrap();
+        edge.vertices()[0] != edge.vertices()[1] && matches!(edge.curve(), Curve3::SurfaceIntersection(_))
+    });
+    if distance < 0.0 && curved_open_join {
+        let rounded = rounded_offset_regions(source, None, &divergent_edges, &opening_ids, distance.abs())?;
+        return assemble_shell_boundary(source, &rounded, &opening_ids, distance)?
+            .with_feature_parent(source, super::DerivationRole::Shell);
+    }
+    let (raw_offset, has_vanished_blends) = offset_body(source, &opening_ids, distance, false)?;
     if distance < 0.0 && has_vanished_blends && closed_joins
         && !divergent_edges.is_empty()
     {
-        let rounded = rounded_offset_regions(source, &raw_offset, &divergent_edges, &opening_ids, distance.abs())?;
+        let rounded = rounded_offset_regions(source, Some(&raw_offset), &divergent_edges, &opening_ids, distance.abs())?;
         return assemble_shell_boundary(source, &rounded, &opening_ids, distance)?
             .with_feature_parent(source, super::DerivationRole::Shell);
     }

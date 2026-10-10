@@ -859,19 +859,22 @@ pub(super) fn arrange_surface_regions(
     let weld_node = |nodes: &mut Vec<Point2>, point: Point2| -> KernelResult<usize> {
         let value = surface.evaluate(point.x, point.y)?;
         let linear = tolerance.linear_at_scale(value.point.to_vec().magnitude());
-        if let Some(index) = nodes.iter().position(|candidate| {
+        for (index, candidate) in nodes.iter().enumerate() {
             let delta = *candidate - point;
             // Intersection solvers converge in model units, not UV units.
             // Use the local surface metric while keeping distinct periodic
             // chart endpoints (whose raw UV separation is a full period).
-            candidate.distance(point) <= tolerance.parameter * 64.0
-                || (value.du * delta.x + value.dv * delta.y).magnitude() <= linear
-        }) {
-            Ok(index)
-        } else {
-            nodes.push(point);
-            Ok(nodes.len() - 1)
+            // At a collapsed rail the metric loses a direction, so also
+            // verify the actual spatial separation before welding.
+            if candidate.distance(point) <= tolerance.parameter * 64.0
+                || ((value.du * delta.x + value.dv * delta.y).magnitude() <= linear
+                    && surface.evaluate(candidate.x, candidate.y)?.point.distance(value.point) <= linear)
+            {
+                return Ok(index);
+            }
         }
+        nodes.push(point);
+        Ok(nodes.len() - 1)
     };
     for (curve, mut parameters) in curves.iter().zip(split_parameters) {
         for parameter in &mut parameters {
@@ -935,9 +938,14 @@ pub(super) fn arrange_surface_regions(
     for piece in &pieces {
         let parameter = piece.range.start + piece.range.span() * 0.5;
         let (mut uv, tangent) = piece.pcurve.first_order(parameter)?;
-        if matches!(piece.curve, Curve3::SurfaceIntersection(_)) {
+        if matches!(piece.curve, Curve3::SurfaceIntersection(_))
+            && !(matches!(surface, Surface3::RollingBall(_)) && surface.domains()[0].period.is_none()
+                && matches!(piece.pcurve, Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)))
+        {
             // A tracing spline selects the intersection branch but is not the
             // intersection itself. Center side probes on the corrected curve.
+            // Exact p-curves on open rolling joins already select that branch;
+            // a global blend projection can land on a different local minimum.
             let point = piece.curve.evaluate(parameter)?.point;
             let projection = surface.project(point, tolerance)?;
             let mut exact = Point2::new(projection.parameters.0, projection.parameters.1);
@@ -971,9 +979,11 @@ pub(super) fn arrange_surface_regions(
             else {
                 continue;
             };
+            // Allow for both curves' residuals without discarding resolved
+            // narrow gaps and probing across the neighboring boundary.
             let uncertainty = if let Curve3::SurfaceIntersection(intersection) = &curve.curve {
-                intersection.positional_uncertainty(projection.parameter)?.max(tolerance.linear) * 16.0
-            } else { tolerance.linear * 16.0 };
+                intersection.positional_uncertainty(projection.parameter)?.max(tolerance.linear) * 2.0
+            } else { tolerance.linear * 2.0 };
             if projection.distance > uncertainty {
                 probe = probe.min(projection.distance * 0.25);
             }

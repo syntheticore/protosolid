@@ -471,7 +471,8 @@ pub(super) fn integrate_face<const TERMS: usize>(
             };
             let raw_end = coedge.pcurve().evaluate(range.end)?.point;
             previous_end = Some(raw_end + chart_shift);
-            let breakpoints = coedge.pcurve().integration_breakpoints(range);
+            let mut breakpoints = coedge.pcurve().integration_breakpoints(range);
+            breakpoints.extend(coedge.pcurve().support_integration_breakpoints(range)?);
             let outer = adaptive_gauss_kronrod_partitioned(
                 range.start,
                 range.end,
@@ -486,10 +487,7 @@ pub(super) fn integrate_face<const TERMS: usize>(
                         return Ok([0.0; TERMS]);
                     }
                     let point = raw_point + chart_shift;
-                    let mut breaks = if let Surface3::Nurbs(spline) = support {
-                        let (u, v) = spline.knots();
-                        if primitive_axis == 0 { u.to_vec() } else { v.to_vec() }
-                    } else { Vec::new() };
+                    let mut breaks = support.integration_breakpoints(primitive_axis);
                     if let Some(period) = primitive_domain.period {
                         let lower = primitive_origin.min(point[primitive_axis]);
                         let upper = primitive_origin.max(point[primitive_axis]);

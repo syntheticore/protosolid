@@ -152,7 +152,18 @@ fn validate_curved_face_boundaries(
                                     && endpoints_b[j].distance(point) <= tolerance.linear * 8.0
                             }))
                         };
-                        if intersection.coincident || intersection.hits.iter().any(|hit| !represented(hit.point)) {
+                        let mut crossing = false;
+                        for hit in &intersection.hits {
+                            if represented(hit.point) { continue; }
+                            // UV charts can have very different scales from
+                            // model units. A near miss in UV is a crossing only
+                            // when the retained spatial curves also meet.
+                            let first = topology.edge(a.edge())?.curve().evaluate(hit.first_parameter)?.point;
+                            let second = topology.edge(b.edge())?.curve().evaluate(hit.second_parameter)?.point;
+                            let scale = first.to_vec().magnitude().max(second.to_vec().magnitude());
+                            crossing |= first.distance(second) <= tolerance.linear_at_scale(scale) * 8.0;
+                        }
+                        if intersection.coincident || crossing {
                             return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
                                 "face boundary crosses or touches itself away from a shared vertex"));
                         }

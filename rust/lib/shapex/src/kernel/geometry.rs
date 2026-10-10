@@ -642,6 +642,40 @@ impl Curve2 {
         }
     }
 
+    // A trim can cross knots in a supporting blend's spine even when its own
+    // guide is smooth. Map those knots into the boundary parameter for quadrature.
+    pub(crate) fn support_integration_breakpoints(&self, range: ParameterRange) -> KernelResult<Vec<f64>> {
+        let Self::SurfaceIntersection(pcurve) = self else { return Ok(Vec::new()); };
+        let curve = &pcurve.curve;
+        let mut result = Vec::new();
+        for (side, surface) in [curve.first_surface(), curve.second_surface()].into_iter().enumerate() {
+            for axis in 0..2 {
+                let knots = surface.integration_breakpoints(axis);
+                if knots.is_empty() { continue; }
+                let samples = (0..=64).map(|index| {
+                    let parameter = range.start + range.span() * index as f64 / 64.0;
+                    Ok((parameter, curve.corrected_parameters(parameter)?[side * 2 + axis]))
+                }).collect::<KernelResult<Vec<_>>>()?;
+                for knot in knots {
+                    for pair in samples.windows(2) {
+                        if (pair[0].1 - knot) * (pair[1].1 - knot) >= 0.0 { continue; }
+                        let mut low = pair[0];
+                        let mut high = pair[1];
+                        for _ in 0..48 {
+                            let parameter = (low.0 + high.0) * 0.5;
+                            let value = curve.corrected_parameters(parameter)?[side * 2 + axis];
+                            if (low.1 - knot) * (value - knot) > 0.0 {
+                                low = (parameter, value);
+                            } else { high = (parameter, value); }
+                        }
+                        result.push((low.0 + high.0) * 0.5);
+                    }
+                }
+            }
+        }
+        Ok(result)
+    }
+
     pub fn domain(&self) -> ParameterDomain {
         match self {
             Self::Line(_) => ParameterDomain::unbounded(),
@@ -1501,7 +1535,7 @@ pub struct SurfaceIntersectionCurve {
 /// Evaluations belong to immutable geometry and can be shared by its edge,
 /// p-curves and blend supports. Keys are exact parameter bits, never rounded.
 /// Keep the cache bounded and exclude its incidental contents from identity.
-type IntersectionEvaluation = ([f64; 4], Option<[f64; 4]>);
+type IntersectionEvaluation = ([f64; 4], Option<[f64; 4]>, Option<(Point3, Vec3)>);
 
 #[derive(Clone)]
 struct ParameterEvaluationCache<T>(
@@ -1768,6 +1802,7 @@ pub struct SurfaceProjectionPcurve2 {
     guide: Box<Curve2>,
     range: ParameterRange,
     tolerance: ModelTolerance,
+    evaluations: ParameterEvaluationCache<(Point2, Vec2)>,
 }
 
 impl SurfaceProjectionPcurve2 {
@@ -1792,6 +1827,7 @@ impl SurfaceProjectionPcurve2 {
             guide: Box::new(guide),
             range,
             tolerance,
+            evaluations: ParameterEvaluationCache::default(),
         };
         for parameter in [range.start, (range.start + range.end) * 0.5, range.end] {
             value.evaluate(parameter)?;
@@ -1895,15 +1931,15 @@ impl SurfaceProjectionPcurve2 {
             let a01 = du.dot(dv);
             let a11 = dv.magnitude2();
             let determinant = a00 * a11 - a01 * a01;
-            if determinant.abs() <= f64::EPSILON * a00.max(a11).powi(2) * 256.0 {
-                break;
-            }
             let b0 = -du.dot(residual);
             let b1 = -dv.dot(residual);
-            let delta = (
+            let delta = if determinant.abs() <= f64::EPSILON * a00.max(a11).powi(2) * 256.0 {
+                if a00 + a11 == 0.0 { break; }
+                (b0 / (a00 + a11), b1 / (a00 + a11))
+            } else { (
                 (b0 * a11 - b1 * a01) / determinant,
                 (b1 * a00 - b0 * a01) / determinant,
-            );
+            ) };
             let previous = residual.magnitude2();
             let mut damping = 1.0;
             let mut accepted = false;
@@ -1942,12 +1978,21 @@ impl SurfaceProjectionPcurve2 {
         ))
     }
 
-    fn solve_tangent(du: Vec3, dv: Vec3, vector: Vec3) -> KernelResult<Vec2> {
+    fn solve_tangent(du: Vec3, dv: Vec3, vector: Vec3, guide: impl FnOnce() -> KernelResult<Vec2>) -> KernelResult<Vec2> {
         let a00 = du.magnitude2();
         let a01 = du.dot(dv);
         let a11 = dv.magnitude2();
         let determinant = a00 * a11 - a01 * a01;
         if determinant.abs() <= f64::EPSILON * a00.max(a11).powi(2) * 256.0 {
+            // At a collapsed rail the inverse has one free chart direction.
+            // Retain the guide's component in that null space and solve the
+            // remaining spatial derivative in the rank-one tangent plane.
+            let trace = a00 + a11;
+            if trace > 0.0 {
+                let guide = guide()?;
+                let residual = vector - du * guide.x - dv * guide.y;
+                return Ok(guide + Vec2::new(du.dot(residual), dv.dot(residual)) / trace);
+            }
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
                 "surface-projection p-curve reached a singular parameterization",
@@ -1965,12 +2010,14 @@ impl SurfaceProjectionPcurve2 {
         let uv = self.corrected_parameters(parameter)?;
         let curve = self.curve.evaluate(parameter)?;
         let surface = self.surface.evaluate(uv.0, uv.1)?;
-        let first = Self::solve_tangent(surface.du, surface.dv, curve.first_derivative)?;
+        let first = Self::solve_tangent(surface.du, surface.dv, curve.first_derivative,
+            || Ok(self.guide.evaluate(parameter)?.first_derivative))?;
         let curvature = surface.duu * first.x.powi(2)
             + surface.duv * (2.0 * first.x * first.y)
             + surface.dvv * first.y.powi(2);
         let second =
-            Self::solve_tangent(surface.du, surface.dv, curve.second_derivative - curvature)?;
+            Self::solve_tangent(surface.du, surface.dv, curve.second_derivative - curvature,
+                || Ok(self.guide.evaluate(parameter)?.second_derivative))?;
         Ok(Curve2Evaluation {
             point: Point2::new(uv.0, uv.1),
             first_derivative: first,
@@ -1979,13 +2026,18 @@ impl SurfaceProjectionPcurve2 {
     }
 
     fn first_order(&self, parameter: f64) -> KernelResult<(Point2, Vec2)> {
+        if let Some(value) = self.evaluations.get(parameter) {
+            return Ok(value);
+        }
         let uv = self.corrected_parameters(parameter)?;
         let (_, curve_tangent) = self.curve.first_order(parameter)?;
         let (_, du, dv) = self.surface.first_order(uv.0, uv.1)?;
-        Ok((
+        let value = (
             Point2::new(uv.0, uv.1),
-            Self::solve_tangent(du, dv, curve_tangent)?,
-        ))
+            Self::solve_tangent(du, dv, curve_tangent, || Ok(self.guide.first_order(parameter)?.1))?,
+        );
+        self.evaluations.insert(parameter, value);
+        Ok(value)
     }
 }
 
@@ -2121,7 +2173,7 @@ impl SurfaceIntersectionCurve {
             self.range.start.min(self.range.end),
             self.range.start.max(self.range.end),
         );
-        if let Some((_, Some(derivative))) = self.evaluations.get(parameter) {
+        if let Some((_, Some(derivative), _)) = self.evaluations.get(parameter) {
             return Ok(derivative);
         }
         let first_guide = self.first_pcurve.evaluate(parameter)?;
@@ -2190,7 +2242,7 @@ impl SurfaceIntersectionCurve {
         let derivative =
             solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], guide_derivative)?;
         self.evaluations
-            .insert(parameter, (parameters, Some(derivative)));
+            .insert(parameter, (parameters, Some(derivative), None));
         Ok(derivative)
     }
 
@@ -2204,7 +2256,7 @@ impl SurfaceIntersectionCurve {
             self.range.start.min(self.range.end),
             self.range.start.max(self.range.end),
         );
-        if let Some((parameters, _)) = self.evaluations.get(parameter) {
+        if let Some((parameters, _, _)) = self.evaluations.get(parameter) {
             return Ok(parameters);
         }
         let first_guide = self.first_pcurve.evaluate(parameter)?;
@@ -2270,7 +2322,7 @@ impl SurfaceIntersectionCurve {
             let linear_target = f64::EPSILON * coordinate_scale * 2048.0;
             let parameter_target = f64::EPSILON * parameter_scale * 2048.0;
             if residual.magnitude() <= linear_target && gauge.abs() <= parameter_target {
-                self.evaluations.insert(parameter, (parameters, None));
+                self.evaluations.insert(parameter, (parameters, None, None));
                 return Ok(parameters);
             }
             let matrix = [
@@ -2387,9 +2439,16 @@ impl SurfaceIntersectionCurve {
     }
 
     fn first_order(&self, parameter: f64) -> KernelResult<(Point3, Vec3)> {
+        // Trim projections and boundary checks revisit the same parameters.
+        // Cache the exact spatial differential with the converged chart data.
+        if let Some((_, _, Some(value))) = self.evaluations.get(parameter) {
+            return Ok(value);
+        }
         let parameters = self.corrected_parameters(parameter)?;
         let derivative = self.parameter_derivative(parameter, parameters)?;
-        self.first_order_at(parameters, derivative)
+        let value = self.first_order_at(parameters, derivative)?;
+        self.evaluations.insert(parameter, (parameters, Some(derivative), Some(value)));
+        Ok(value)
     }
 
     fn first_order_at(
@@ -2803,6 +2862,10 @@ impl Curve3 {
             self.collect_parameter_breaks(&mut seeds);
         }
         seeds.retain(|parameter| *parameter >= low && *parameter <= high);
+        // Nested intersection guides share knots. Each distinct parameter
+        // needs one exact evaluation, irrespective of how many guides use it.
+        seeds.sort_by(f64::total_cmp);
+        seeds.dedup();
         let mut best = None;
         for parameter in seeds {
             let projected = self.first_order(parameter)?.0;
@@ -4260,6 +4323,18 @@ impl OffsetSurface3 {
     }
 
     fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
+        if let Surface3::RollingBall(blend) = self.base.as_ref() {
+            // The ball's radial normal and its derivatives are exact. Using
+            // finite-differenced surface curvature here magnifies spine knots.
+            let (point, du, dv) = blend.first_order(u, v)?;
+            let (center, tangent) = blend.center_curve.first_order(blend.center_parameter(u))?;
+            let radial = (point - center) / blend.radius;
+            let sign = du.cross(dv).dot(radial).signum();
+            let distance = (self.distance + self.v_slope * v) * sign;
+            return Ok((point + radial * distance,
+                du + (du - tangent) * (distance / blend.radius),
+                dv * (1.0 + distance / blend.radius) + radial * self.v_slope * sign));
+        }
         let value = self.base.evaluate(u, v)?;
         let cross = value.du.cross(value.dv);
         let magnitude = cross.magnitude();
@@ -4978,6 +5053,25 @@ pub enum Surface3 {
 }
 
 impl Surface3 {
+    pub(crate) fn integration_breakpoints(&self, axis: usize) -> Vec<f64> {
+        match self {
+            Self::Nurbs(surface) => {
+                let (u, v) = surface.knots();
+                if axis == 0 { u.to_vec() } else { v.to_vec() }
+            }
+            Self::RollingBall(surface) if axis == 0 => {
+                let mut knots = Vec::new();
+                surface.center_curve.collect_parameter_breaks(&mut knots);
+                surface.first_pcurve.collect_parameter_breaks(&mut knots);
+                surface.second_pcurve.collect_parameter_breaks(&mut knots);
+                knots.sort_by(f64::total_cmp);
+                knots.dedup();
+                knots
+            }
+            Self::Offset(surface) => surface.base().integration_breakpoints(axis),
+            _ => Vec::new(),
+        }
+    }
     fn parameter_periods(&self, uv: (f64, f64)) -> KernelResult<[Option<f64>; 2]> {
         let mut periods = self.domains().map(|domain| domain.period);
         match self {

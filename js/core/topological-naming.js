@@ -180,7 +180,7 @@ function addName(item, identity) {
 // Record the producer's incidence before subsequent operations change it.
 // A one-to-one descendant retains this origin; it must not acquire a
 // dependency on an unrelated feature merely because it was selected later.
-export function initializeTopologyOrigins(items, neighbors) {
+export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
   const branches = []
   for(const item of items) {
     const origin = item.topology.origin
@@ -192,6 +192,26 @@ export function initializeTopologyOrigins(items, neighbors) {
     const resolution = resolveRecipe(items, recipe, neighbors)
     origin.recipe = recipe
     origin.selectable = !!origin.feature && resolution.status == 'resolved' && resolution.items[0] === item
+    // Retain the producer's geometry, not a later modifier's preview. A pick
+    // can add oriented support constraints when named incidence is symmetric.
+    origin.pickRecipe = () => {
+      const constraints = sides(item)
+      const captured = { ...recipe, sides: [...constraints] }
+      const resolved = () => {
+        const result = resolveRecipe(items, captured, neighbors, sides)
+        return result.status == 'resolved' && result.items[0] === item
+      }
+      if(!origin.feature || !constraints.length || !resolved()) {
+        throw new Error('The selected topology cannot be distinguished by its construction and boundaries')
+      }
+      // Keep only the evidence needed to identify this cell. In particular,
+      // a bore rim needs its axial side, not unrelated supporting boundaries.
+      for(let i = captured.sides.length - 1; i >= 0; i--) {
+        const [constraint] = captured.sides.splice(i, 1)
+        if(!resolved()) captured.sides.splice(i, 0, constraint)
+      }
+      return captured
+    }
     if(item.topology.kind == 'body' && siblings.length > 1 && origin.selectable) {
       branches.push(item)
     }
@@ -241,10 +261,13 @@ export function initializeTopologyOrigins(items, neighbors) {
 // Capture a selected cell at its producer, not a changing current array slot.
 // The feature persists this recipe and rebinds it on each independent rebuild.
 export function captureTopologySelection(item, policy = 'single') {
-  const { feature, recipe, selectable } = item.topology.origin
-  if(!selectable) {
+  const origin = item.topology.origin
+  const { feature } = origin
+  if(!origin.selectable && !origin.pickRecipe) {
     throw new Error('The selected topology cannot be distinguished by its construction and boundaries')
   }
+  const recipe = origin.selectable ? origin.recipe : origin.pickRecipe()
+  if(!feature) throw new Error('Display-only topology cannot be referenced')
   return withTopologyNaming(feature, () => {
     const identity = topologyIdentity(recipe.kind, 'selection', [JSON.stringify(recipe)])
     feature.topologyNames.selections ||= []
@@ -256,16 +279,18 @@ export function captureTopologySelection(item, policy = 'single') {
   })
 }
 
-function resolveRecipe(items, recipe, neighbors) {
+function resolveRecipe(items, recipe, neighbors, sides = () => []) {
   const constrained = items.filter(item => matchesSelection(item, recipe) &&
-    recipe.branch.every(path => incidencePaths(item, neighbors, true).includes(path)))
+    recipe.branch.every(path => incidencePaths(item, neighbors, true).includes(path)) &&
+    (!recipe.sides || recipe.sides.every(constraint =>
+      sides(item).some(side => JSON.stringify(side) == JSON.stringify(constraint)))))
   return resolveTopology(constrained, recipe, neighbors)
 }
 
-export function restoreTopologySelections(feature, items, neighbors) {
+export function restoreTopologySelections(feature, items, neighbors, sides) {
   const failures = new Map()
   for(const binding of feature.topologyNames.selections || []) {
-    const result = resolveRecipe(items, binding.recipe, neighbors)
+    const result = resolveRecipe(items, binding.recipe, neighbors, sides)
     if(result.status == 'resolved') addName(result.items[0], binding.identity)
     else failures.set(binding.identity, result.status)
   }

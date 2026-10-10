@@ -58,6 +58,29 @@ test('a symmetric split reports ambiguity; all-descendants is explicit', () => {
   assert.deepEqual(resolveTopology(outputs, { ...selection, policy: 'all-descendants' }, neighbors).items, outputs)
 })
 
+test('an explicit pick distinguishes symmetric cells by support side without retargeting a missing side', () => {
+  const producer = { id: 'bore' }
+  const supportSide = item => [{ support: ['bore-wall'], frame: 'axis', axis: 2, side: item.side }]
+  const build = (owner, order) => withTopologyNaming(owner, () => {
+    const items = order.map(side => Object.assign(entity('edge'), { side }))
+    items.forEach(item => name(item, 'intersection'))
+    initializeTopologyOrigins(items, neighbors, supportSide)
+    restoreTopologySelections(owner, items, neighbors, supportSide)
+    return items
+  })
+  const initial = build(producer, [-1, 1])
+  const refs = initial.map(item => captureTopologySelection(item))
+  assert.notEqual(refs[0].identity, refs[1].identity)
+  const restored = JSON.parse(JSON.stringify(producer))
+  const rebuilt = build(restored, [1, -1])
+  for(let i = 0; i < refs.length; i++) {
+    assert.equal(resolveTopology(rebuilt, refs[i], neighbors).items[0].side, initial[i].side)
+  }
+  const surviving = build(restored, [1])
+  assert.equal(resolveTopology(surviving, refs[0], neighbors).status, 'deleted')
+  assert.equal(resolveTopology(surviving, refs[1], neighbors).items[0], surviving[0])
+})
+
 test('construction bindings survive serialization and reordered creation with a preceding feature', () => {
   const feature = { id: 'existing' }
   const a = entity('face'), b = entity('face')

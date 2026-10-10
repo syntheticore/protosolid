@@ -2,7 +2,7 @@
 
 `js/core/topological-naming.js` owns document identities and selection recipes.
 `js/core/occ-topology.js` translates OCC history and incidence into that model.
-The shared layer has no OCC types or geometric matching.
+The shared naming layer has no OCC types or geometric proximity matching.
 
 ## Construction and history
 
@@ -95,8 +95,20 @@ they can recover if their upstream topology returns. Cancel restores the origina
 selection and its cached editor bindings.
 
 Construction and incidence cannot distinguish every possible symmetric result.
-Picking such a cell raises an explicit error; an existing selection that becomes
-ambiguous fails to resolve. There is no nearest-geometry or first-output choice.
+The picker accepts timeline geometry even when those identities are ambiguous.
+An explicit pick can supplement its producer recipe with oriented side constraints
+relative to named supporting faces. A through-bore's two rims, for example, lie
+on opposite axial sides of its cylindrical wall's center. A constraint identifies
+the supporting face by its construction anchors and records a frame axis and
+side; it stores neither coordinates nor an output index. The producer reevaluates
+the constraint on reconstruction, before later operations propagate the selection.
+Each supporting face must resolve uniquely. Two cylindrical supports can also
+define a transverse direction to distinguish periodic rim segments; that direction
+rotates with the supports.
+Missing or conflicting evidence fails resolution even when only one candidate
+remains. Unsupported ambiguity produces an explicit selection error rather than
+silently hiding valid geometry. Display-only section boundaries remain excluded.
+There is no nearest-geometry or first-output choice.
 Unnamed body branches receive persistent identities only when construction and
 complete distinguishing incidence identify them uniquely. Rebuilds process saved
 bindings even for a sole remaining body. Conflicting bindings stay unresolved,
@@ -107,8 +119,7 @@ retargeting a body when the available evidence cannot establish continuity.
 Body IDs scope logical identities by component occurrence, preserving saved
 visibility and feature scope. Split identifies both sides before applying Keep,
 so its side identities are independent of Keep and of whether either side is
-empty. Symmetric results without sufficient construction or incidence evidence
-remain unselectable; transient display IDs are not a persistence mechanism.
+empty. Transient display IDs are not a persistence mechanism for symmetric results.
 Viewport object IDs and tessellation IDs are not persisted reference identities;
 unresolved split families may have temporary distinct viewport IDs.
 

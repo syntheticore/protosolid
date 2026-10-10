@@ -1,5 +1,5 @@
 {
-  "lastId": "60000n",
+  "lastId": "60050n",
   "timeline": {
     "$class": "Timeline",
     "marker": 2,
@@ -20,6 +20,10 @@
           }
         },
         "expressions": {},
+        "topologyNames": {
+          "version": 1,
+          "bindings": []
+        },
         "sketch": {
           "$class": "Sketch",
           "id": "id-6",
@@ -40,7 +44,8 @@
                 0,
                 1.5707963267948966
               ],
-              "forward": true
+              "forward": true,
+              "isReference": false
             },
             {
               "$class": "Line",
@@ -62,7 +67,8 @@
                     0
                   ]
                 }
-              ]
+              ],
+              "isReference": false
             },
             {
               "$class": "Line",
@@ -84,7 +90,8 @@
                     0
                   ]
                 }
-              ]
+              ],
+              "isReference": false
             }
           ],
           "constraints": [],
@@ -105,9 +112,9 @@
               "sketchId": "id-6",
               "rings": [
                 [
-                  "id-900",
+                  "id-902",
                   "id-901",
-                  "id-902"
+                  "id-900"
                 ]
               ]
             }
@@ -127,7 +134,76 @@
           "side": true,
           "operation": "join"
         },
-        "expressions": {}
+        "expressions": {},
+        "topologyNames": {
+          "version": 1,
+          "bindings": [
+            {
+              "description": "[\"face\",\"profile-side/turn-start\",[\"id-900\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60029"
+            },
+            {
+              "description": "[\"face\",\"profile-side/turn-end\",[\"id-900\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60030"
+            },
+            {
+              "description": "[\"face\",\"profile-side/turn-start\",[\"id-902\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60031"
+            },
+            {
+              "description": "[\"face\",\"profile-side/turn-end\",[\"id-902\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60032"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-50001/topology/id-60029\",\"id-50001/topology/id-60031\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60039"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-50001/topology/id-60029\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60040"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-50001/topology/id-60031\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60041"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-50001/topology/id-60029\",\"id-50001/topology/id-60030\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60042"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-50001/topology/id-60030\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60043"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-50001/topology/id-60030\",\"id-50001/topology/id-60032\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60044"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-50001/topology/id-60032\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60045"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-50001/topology/id-60031\",\"id-50001/topology/id-60032\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60046"
+            },
+            {
+              "description": "[\"body\",\"profile/body\",[\"id-900\",\"id-901\",\"id-902\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60047"
+            },
+            {
+              "description": "[\"body\",\"profile/body\",[\"id-902\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60048"
+            },
+            {
+              "description": "[\"body\",\"profile/body\",[\"id-901\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60049"
+            },
+            {
+              "description": "[\"body\",\"profile/body\",[\"id-900\"],\"id-50001\"]",
+              "id": "id-50001/topology/id-60050"
+            }
+          ]
+        }
       }
     ],
     "baseCompDef": {

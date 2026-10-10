@@ -1,5 +1,5 @@
 {
-  "lastId": "30000n",
+  "lastId": "30085n",
   "timeline": {
     "$class": "Timeline",
     "marker": 5,
@@ -20,6 +20,10 @@
           }
         },
         "expressions": {},
+        "topologyNames": {
+          "version": 1,
+          "bindings": []
+        },
         "sketch": {
           "$class": "Sketch",
           "id": "id-3",
@@ -35,7 +39,8 @@
                   0
                 ]
               },
-              "radius": 10
+              "radius": 10,
+              "isReference": false
             }
           ],
           "constraints": [],
@@ -66,9 +71,51 @@
           "distance": 20,
           "limitFace": null,
           "offset": 0,
+          "endOffset": 0,
           "operation": "join"
         },
-        "expressions": {}
+        "expressions": {},
+        "topologyNames": {
+          "version": 1,
+          "bindings": [
+            {
+              "description": "[\"face\",\"profile-end\",[\"id-1\"],\"id-6\"]",
+              "id": "id-6/topology/id-30022"
+            },
+            {
+              "description": "[\"face\",\"profile-start\",[\"id-1\"],\"id-6\"]",
+              "id": "id-6/topology/id-30023"
+            },
+            {
+              "description": "[\"face\",\"profile-side\",[\"id-1\"],\"id-6\"]",
+              "id": "id-6/topology/id-30024"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-6/topology/id-30023\",\"id-6/topology/id-30024\"],\"id-6\"]",
+              "id": "id-6/topology/id-30028"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-6/topology/id-30023\"],\"id-6\"]",
+              "id": "id-6/topology/id-30029"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-6/topology/id-30024\"],\"id-6\"]",
+              "id": "id-6/topology/id-30030"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-6/topology/id-30022\",\"id-6/topology/id-30024\"],\"id-6\"]",
+              "id": "id-6/topology/id-30031"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-6/topology/id-30022\"],\"id-6\"]",
+              "id": "id-6/topology/id-30032"
+            },
+            {
+              "description": "[\"body\",\"profile/body\",[\"id-1\"],\"id-6\"]",
+              "id": "id-6/topology/id-30033"
+            }
+          ]
+        }
       },
       {
         "$class": "CreateSketchFeature",
@@ -86,6 +133,10 @@
           }
         },
         "expressions": {},
+        "topologyNames": {
+          "version": 1,
+          "bindings": []
+        },
         "sketch": {
           "$class": "Sketch",
           "id": "id-18",
@@ -101,7 +152,8 @@
                   0
                 ]
               },
-              "radius": 3
+              "radius": 3,
+              "isReference": false
             }
           ],
           "constraints": [],
@@ -132,19 +184,117 @@
           "distance": 15,
           "limitFace": null,
           "offset": 0,
+          "endOffset": 0,
           "operation": "cut"
         },
-        "expressions": {}
+        "expressions": {},
+        "topologyNames": {
+          "version": 1,
+          "bindings": [
+            {
+              "description": "[\"face\",\"profile-end\",[\"id-16\"],\"id-21\"]",
+              "id": "id-21/topology/id-30040"
+            },
+            {
+              "description": "[\"face\",\"profile-start\",[\"id-16\"],\"id-21\"]",
+              "id": "id-21/topology/id-30041"
+            },
+            {
+              "description": "[\"face\",\"profile-side\",[\"id-16\"],\"id-21\"]",
+              "id": "id-21/topology/id-30042"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-21/topology/id-30041\",\"id-21/topology/id-30042\"],\"id-21\"]",
+              "id": "id-21/topology/id-30046"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-21/topology/id-30041\"],\"id-21\"]",
+              "id": "id-21/topology/id-30047"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-21/topology/id-30042\"],\"id-21\"]",
+              "id": "id-21/topology/id-30048"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-21/topology/id-30040\",\"id-21/topology/id-30042\"],\"id-21\"]",
+              "id": "id-21/topology/id-30049"
+            },
+            {
+              "description": "[\"edge\",\"profile/boundary\",[\"id-21/topology/id-30040\"],\"id-21\"]",
+              "id": "id-21/topology/id-30050"
+            },
+            {
+              "description": "[\"body\",\"profile/body\",[\"id-16\"],\"id-21\"]",
+              "id": "id-21/topology/id-30051"
+            },
+            {
+              "description": "[\"edge\",\"cut/boundary\",[\"id-21/topology/id-30042\",\"id-6/topology/id-30024\"],\"id-21\"]",
+              "id": "id-21/topology/id-30070"
+            },
+            {
+              "description": "[\"edge\",\"cut/boundary\",[\"id-6/topology/id-30024\"],\"id-21\"]",
+              "id": "id-21/topology/id-30071"
+            },
+            {
+              "description": "[\"edge\",\"cut/boundary\",[\"id-21/topology/id-30042\"],\"id-21\"]",
+              "id": "id-21/topology/id-30072"
+            },
+            {
+              "description": "[\"face\",\"selection\",[\"{\\\"version\\\":1,\\\"kind\\\":\\\"face\\\",\\\"identity\\\":\\\"id-21/topology/id-30042\\\",\\\"anchors\\\":[\\\"id-21/topology/id-30042\\\"],\\\"policy\\\":\\\"single\\\",\\\"context\\\":[\\\"[\\\\\\\"id-21/topology/id-30047\\\\\\\",\\\\\\\"id-21/topology/id-30041\\\\\\\"]\\\",\\\"[\\\\\\\"id-21/topology/id-30047\\\\\\\"]\\\",\\\"[\\\\\\\"id-21/topology/id-30048\\\\\\\",\\\\\\\"id-21/topology/id-30040\\\\\\\"]\\\",\\\"[\\\\\\\"id-21/topology/id-30048\\\\\\\",\\\\\\\"id-21/topology/id-30041\\\\\\\"]\\\",\\\"[\\\\\\\"id-21/topology/id-30048\\\\\\\"]\\\",\\\"[\\\\\\\"id-21/topology/id-30050\\\\\\\",\\\\\\\"id-21/topology/id-30040\\\\\\\"]\\\",\\\"[\\\\\\\"id-21/topology/id-30050\\\\\\\"]\\\"],\\\"branch\\\":[]}\"],\"id-21\"]",
+              "id": "id-21/topology/id-30073"
+            }
+          ],
+          "selections": [
+            {
+              "identity": "id-21/topology/id-30073",
+              "recipe": {
+                "version": 1,
+                "kind": "face",
+                "identity": "id-21/topology/id-30042",
+                "anchors": [
+                  "id-21/topology/id-30042"
+                ],
+                "policy": "single",
+                "context": [
+                  "[\"id-21/topology/id-30047\",\"id-21/topology/id-30041\"]",
+                  "[\"id-21/topology/id-30047\"]",
+                  "[\"id-21/topology/id-30048\",\"id-21/topology/id-30040\"]",
+                  "[\"id-21/topology/id-30048\",\"id-21/topology/id-30041\"]",
+                  "[\"id-21/topology/id-30048\"]",
+                  "[\"id-21/topology/id-30050\",\"id-21/topology/id-30040\"]",
+                  "[\"id-21/topology/id-30050\"]"
+                ],
+                "branch": []
+              }
+            }
+          ]
+        }
       },
       {
         "$class": "MoveFeature",
+        "id": "id-20001",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
         "values": {
           "faces": [
             {
               "$class": "FaceReference",
               "componentId": "id-0",
-              "solidId": "id-0/solid/0",
-              "topoId": "/extrude-id-21/swept/id-16"
+              "selection": {
+                "version": 1,
+                "kind": "face",
+                "identity": "id-21/topology/id-30073",
+                "policy": "single",
+                "context": [
+                  "[\"id-21/topology/id-30047\",\"id-21/topology/id-30041\"]",
+                  "[\"id-21/topology/id-30047\"]",
+                  "[\"id-21/topology/id-30048\",\"id-21/topology/id-30040\"]",
+                  "[\"id-21/topology/id-30048\",\"id-21/topology/id-30041\"]",
+                  "[\"id-21/topology/id-30048\"]",
+                  "[\"id-21/topology/id-30050\",\"id-21/topology/id-30040\"]",
+                  "[\"id-21/topology/id-30050\"]"
+                ]
+              }
             }
           ],
           "x": 1,
@@ -154,10 +304,11 @@
           "ry": 0,
           "rz": 0
         },
-        "id": "id-20001",
-        "componentId": "id-0",
-        "componentOccurrenceId": "id-0",
-        "expressions": {}
+        "expressions": {},
+        "topologyNames": {
+          "version": 1,
+          "bindings": []
+        }
       }
     ],
     "baseCompDef": {

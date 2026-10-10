@@ -13,7 +13,7 @@ and two planar caps.
 | --- | --- |
 | `002-eccentric-loft-shell.cad` | Eccentric circular loft, 1 mm inward shell with the upper cap open |
 | `003-box-perimeter-chamfer.cad` | Box, 2 mm chamfer around the top perimeter |
-| `005-cross-drilled-cylinder-chamfer.cad` | Transverse cylinder bore, 1 mm chamfer on both curved intersections |
+| `005-cross-drilled-cylinder-chamfer.cad` | Two transverse bore cuts, 1 mm chamfer on both curved intersections |
 | `006-l-block-perimeter-chamfer.cad` | L block, 1 mm top perimeter chamfer through a concave corner |
 | `007-box-bore-perimeter-chamfer.cad` | Box with a bore, outer top perimeter and bore rim chamfered together |
 | `008-box-asymmetric-perimeter-chamfer.cad` | Box, top perimeter chamfer with 1 and 2 mm setbacks |
@@ -76,5 +76,16 @@ side surface and its rim, replacing the former four patch selections. Operation
 dimensions and selected geometric regions are unchanged. Case numbering is
 preserved from the original failure catalogue.
 
-Cases 022–030 and 032–041 were promoted from the failure catalogue without changing their
+Cases 022–030 and 032–040 were promoted from the failure catalogue without changing their
 saved geometry, dimensions, or selections.
+
+The fixtures use persistent topology selections and producer manifests. Case 005
+was rebuilt with two semicircular arcs per circular profile and separate cuts
+in opposite directions. Both bore openings have individually selectable edge
+references. Its nominal dimensions are unchanged; the chamfer is regenerated
+from two closed rims instead of the original three curve segments, producing
+a small change in the resulting chamfer geometry.
+Case 041 was rebuilt
+with all eighteen edges selected and the original 0.5 and 0.75 mm setbacks. Its
+asymmetric side assignments follow the current face identities; they differ from
+the original positional names on some edges.

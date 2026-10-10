@@ -10,6 +10,11 @@ export class Reference {
     return this.item
   }
 
+  getItems() {
+    const item = this.getItem()
+    return item ? [item] : []
+  }
+
   update(_tree) {}
 
   clone() {
@@ -55,53 +60,46 @@ export class JointReference extends Reference {
 Serialize.register(JointReference, 'JointReference')
 
 class TopoReference extends Reference {
-  constructor(item, componentId, solidId, topoId) {
+  constructor(item, componentId, selection) {
     super(item)
-    this.componentId = componentId || item.solid.compound.componentId
-    this.solidId = solidId || item.solid.id
-    this.topoId = topoId || item.id
-    // const root = window.oc.mainDoc.Main()
-    // this.label = root.NewChild()
-    // this.selector = new window.oc.oc.TNaming_Selector(this.label)
-    // const geom = this.item.geom()
-    // console.log(this.selector.Select_2(geom, false, false))
+    const compound = item && (item.solid ? item.solid.compound : item.compound)
+    this.componentId = componentId || compound.componentId
+    this.selection = selection || compound.topologySelection(item)
+    this.items = item ? [item] : []
   }
 
   clone() {
-    return new this.constructor(this.item, this.componentId, this.solidId, this.topoId)
+    return new this.constructor(this.item, this.componentId, this.selection)
   }
 
   dump() {
     return {
       componentId: this.componentId,
-      solidId: this.solidId,
-      topoId: this.topoId,
+      selection: this.selection,
     }
   }
 
   static undump(dump) {
-    return new this(null, dump.componentId, dump.solidId, dump.topoId)
+    return new this(null, dump.componentId, dump.selection)
   }
 
-  updateTopology(tree, collection, label) {
-    const solids = tree.findChild(this.componentId)?.compound?.solids() || []
-    const preferred = solids.find(solid => solid.id == this.solidId)
-    let item = preferred?.[collection]().find(item => item.isSame(this.topoId))
-    if(!item) {
-      // Solid IDs encode their position in the compound. Deleting an unrelated
-      // body can change that position while the topology's stable name survives.
-      const matches = solids.filter(solid => solid !== preferred)
-        .flatMap(solid => solid[collection]().filter(item => item.isSame(this.topoId)))
-      if(matches.length == 1) item = matches[0]
+  getItems() { return this.items }
+
+  updateTopology(tree, label) {
+    const compound = tree.findChild(this.componentId)?.compound
+    const resolution = compound ? compound.resolveTopology(this.selection) : { status: 'deleted', items: [] }
+    this.items = resolution.items
+    this.item = this.items.length == 1 ? this.items[0] : null
+    if(resolution.status != 'resolved') return {
+      type: 'error',
+      msg: resolution.status == 'ambiguous' ? `${label} reference is ambiguous` : `${label} reference was deleted`,
     }
-    this.item = item || null
-    if(!item) return { type: 'error', msg: `${label} reference was lost` }
   }
 }
 
 export class FaceReference extends TopoReference {
   update(tree) {
-    return this.updateTopology(tree, 'faces', 'Face')
+    return this.updateTopology(tree, 'Face')
   }
 }
 Serialize.register(FaceReference, 'FaceReference')
@@ -109,45 +107,15 @@ Serialize.register(FaceReference, 'FaceReference')
 
 export class EdgeReference extends TopoReference {
   update(tree) {
-    // const labelMap = new window.oc.oc.TDF_LabelMap_1()
-    // this.selector.Solve(labelMap)
-    // const ns = this.selector.NamedShape().get()
-    // const shape = ns.Get()
-    // const edge = solid.edges().find(edge => edge.geom().IsSame(shape) )
-
-    return this.updateTopology(tree, 'edges', 'Edge')
+    return this.updateTopology(tree, 'Edge')
   }
 }
 Serialize.register(EdgeReference, 'EdgeReference')
 
 
-export class SolidReference extends Reference {
-  constructor(item, componentId, solidId) {
-    super(item)
-    this.componentId = componentId || item.compound.componentId
-    this.solidId = solidId || item.id
-  }
-
-  clone() {
-    return new SolidReference(this.item, this.componentId, this.solidId)
-  }
-
+export class SolidReference extends TopoReference {
   update(tree) {
-    const comp = tree.findChild(this.componentId)
-    const solid = comp.compound.solids().find(solid => solid.id == this.solidId )
-    if(!solid) return { type: 'error', msg: "Solid reference was lost" }
-    this.item = solid
-  }
-
-  dump() {
-    return {
-      componentId: this.componentId,
-      solidId: this.solidId,
-    }
-  }
-
-  static undump(dump) {
-    return new this(null, dump.componentId, dump.solidId)
+    return this.updateTopology(tree, 'Solid')
   }
 }
 Serialize.register(SolidReference, 'SolidReference')
@@ -221,7 +189,8 @@ export class PatternInputReference extends Reference {
   matches(item) {
     return this.featureId ? this.featureId == item.id :
       this.componentReference ? this.componentReference.componentId == item.id :
-      this.solidReference?.solidId == item.id
+      this.solidReference?.componentId == item.compound?.componentId &&
+        item.topology?.names.includes(this.solidReference.selection.identity)
   }
 
   dump() {

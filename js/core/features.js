@@ -12,6 +12,7 @@ import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame, faceGizmoFrame } from '../three/gizmos.js'
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
+import { withTopologyNaming } from './topological-naming.js'
 import {
   alignJointWorld,
   baselineWorldTransform,
@@ -89,7 +90,12 @@ export class Feature {
       return
     }
 
-    this.updateGeometry(tree, references)
+    withTopologyNaming(this, () => {
+      this.updateGeometry(tree, references)
+      if(this.error?.type == 'error') return
+      const components = new Set(this.modifiedComponents().flatMap(id => tree.findChild(id).getChildren()))
+      for(const component of components) component.compound.restoreTopologySelections(this)
+    })
   }
 
   updateGeometry(tree, references) {
@@ -129,10 +135,8 @@ export class Feature {
         settingError = (severe ? error : (settingError || error))
         if(severe) return
         if(!error) ref.update(tree) // Update intact references without user consent, such that their center etc. can be calculated
-        return clone.getItem()
-      }).filter(Boolean)
-
-      if(items.length && settingError) settingError.type = 'warning'
+        return clone.getItems()
+      }).flat().filter(Boolean)
 
       if(settingError) errors.push(settingError)
       results[key] = setting.multi ? items : items[0]
@@ -262,6 +266,7 @@ export class Feature {
       values: this.getValues(),
       expressions: this.expressions,
       visibilities: this.visibilities,
+      topologyNames: this.topologyNames,
     }
   }
 
@@ -271,6 +276,7 @@ export class Feature {
     feature.componentId = dump.componentId
     feature.componentOccurrenceId = dump.componentOccurrenceId || dump.componentId
     feature.visibilities = dump.visibilities
+    feature.topologyNames = dump.topologyNames
     feature.setValues(dump.values)
     feature.expressions = Object.fromEntries(
       Object.entries(dump.expressions || {}).filter(([key]) => feature.settings[key])
@@ -336,7 +342,7 @@ export class SolidFeature extends Feature {
       }
     }
     super.updateGeometry(tree, scopedReferences)
-    component.compound = component.compound.restoreSolids(solids, hidden)
+    component.compound = component.compound.subset([...component.compound.solids(), ...hidden]).cloneCached()
   }
 }
 
@@ -436,6 +442,12 @@ export class PatternFeature extends SolidFeature {
       Math.max(0, Math.floor(this.uCount) * Math.floor(this.vCount) - 1)
   }
 
+  instanceKeys() {
+    return this.patternType == 'radial' ?
+      Array.from({ length: this.instanceCount() }, (_, i) => `radial/${i + 1}`) :
+      this.gridTransforms().map(transform => transform.topologyKey)
+  }
+
   acceptsInput() { return true }
 
   updateFeature(tree, references) {
@@ -453,12 +465,12 @@ export class PatternFeature extends SolidFeature {
       this.radialTransforms(references.center) : this.gridTransforms()
 
     const componentSources = references.inputs.filter(input => input?.typename?.() == 'Component')
-    componentSources.forEach((source, sourceIndex) => {
+    componentSources.forEach(source => {
       const canonical = tree.findChild(source.sourceId())
       const ownerWorld = baselineWorldTransform(comp)
       const sourceInOwner = ownerWorld.clone().invert().multiply(baselineWorldTransform(source))
-      transforms.forEach((transform, transformIndex) => {
-        const id = `${this.id}/instance/${transformIndex}/${sourceIndex}`
+      transforms.forEach(transform => {
+        const id = `${this.id}/instance/${transform.topologyKey}/${source.id}`
         const placement = transform.clone().multiply(sourceInOwner)
         createComponentInstance(comp, canonical, id, placement)
       })
@@ -473,10 +485,10 @@ export class PatternFeature extends SolidFeature {
     }
 
     try {
-      const copies = transforms.flatMap((transform, transformIndex) =>
-        sources.map((source, sourceIndex) => {
+      const copies = transforms.flatMap(transform =>
+        sources.map(source => {
           const copy = source.transform(transform)
-          this.identifyCopy(copy, transformIndex, sourceIndex)
+          copy.namespaceTopology(`pattern/${transform.topologyKey}/${source.componentId}`)
           return copy
         })
       )
@@ -498,7 +510,9 @@ export class PatternFeature extends SolidFeature {
     for(let u = 0; u < Math.floor(this.uCount); u++) {
       for(let v = 0; v < Math.floor(this.vCount); v++) {
         if(u == 0 && v == 0) continue
-        transforms.push(new THREE.Matrix4().makeTranslation(u * this.uOffset, v * this.vOffset, 0))
+        const transform = new THREE.Matrix4().makeTranslation(u * this.uOffset, v * this.vOffset, 0)
+        transform.topologyKey = `grid/${u}/${v}`
+        transforms.push(transform)
       }
     }
     return transforms
@@ -510,11 +524,11 @@ export class PatternFeature extends SolidFeature {
     const transforms = []
     for(let i = 1; i < Math.floor(this.radialCount); i++) {
       const angle = rad(this.radialStep * i)
-      transforms.push(
-        new THREE.Matrix4().makeTranslation(center.clone().negate())
+      const transform = new THREE.Matrix4().makeTranslation(center.clone().negate())
           .premultiply(new THREE.Matrix4().makeRotationZ(angle))
           .premultiply(new THREE.Matrix4().makeTranslation(center))
-      )
+      transform.topologyKey = `radial/${i}`
+      transforms.push(transform)
     }
     return transforms
   }
@@ -568,16 +582,6 @@ export class PatternFeature extends SolidFeature {
     this.patternGizmos = null
   }
 
-  identifyCopy(compound, transformIndex, sourceIndex) {
-    compound.solids().forEach((solid, solidIndex) => {
-      solid.faces().forEach((face, faceIndex) => {
-        face.id = `/${this.id}/pattern/${transformIndex}/${sourceIndex}/${solidIndex}/face/${faceIndex}`
-      })
-      solid.edges().forEach((edge, edgeIndex) => {
-        edge.id = `/${this.id}/pattern/${transformIndex}/${sourceIndex}/${solidIndex}/edge/${edgeIndex}`
-      })
-    })
-  }
 }
 
 Serialize.register(PatternFeature, 'PatternFeature')
@@ -1519,7 +1523,13 @@ export class PlaceFeature extends Feature {
     if(this.suppressUpdate || !this.isComplete()) return
     this.error = null
     this.updateSourceVariant()
-    this.updateFeature(tree)
+    withTopologyNaming(this, () => {
+      this.updateFeature(tree)
+      if(this.error?.type == 'error') return
+      for(const component of tree.findChild(this.componentId).getChildren()) {
+        component.compound.restoreTopologySelections(this)
+      }
+    })
   }
 
   sourceVariant() {
@@ -1625,20 +1635,13 @@ export class PlaceFeature extends Feature {
 
   identifyImportedShapes(compound, sourceCompound) {
     const geometryRevision = `${this.sourceRevision}/variant-${this.variantOption ?? 'default'}`
-    const sourceSolids = sourceCompound.solids()
-    compound.solids().forEach((solid, solidIndex) => {
-      const sourceSolid = sourceSolids[solidIndex]
-      const sourceFaces = sourceSolid?.faces() || []
-      solid.faces().forEach((face, faceIndex) => {
-        const sourceFace = sourceFaces[faceIndex]
-        face.id = `${this.id}/import/face/${sourceFace?.id || faceIndex}`
-        face.tessId = `${this.id}/${geometryRevision}/face/${sourceFace?.tessId || faceIndex}`
+    compound.namespaceTopology(`import/${sourceCompound.componentId}`)
+    compound.solids().forEach(solid => {
+      solid.faces().forEach(face => {
+        face.tessId = `${this.id}/${geometryRevision}/face/${face.tessId}`
       })
-      const sourceEdges = sourceSolid?.edges() || []
-      solid.edges().forEach((edge, edgeIndex) => {
-        const sourceEdge = sourceEdges[edgeIndex]
-        edge.id = `${this.id}/import/edge/${sourceEdge?.id || edgeIndex}`
-        edge.tessId = `${this.id}/${geometryRevision}/edge/${sourceEdge?.tessId || edgeIndex}`
+      solid.edges().forEach(edge => {
+        edge.tessId = `${this.id}/${geometryRevision}/edge/${edge.tessId}`
       })
     })
   }
@@ -2504,7 +2507,7 @@ export class ShellFeature extends SolidFeature {
     const tree = this.document.top(this.document.timeline.features.indexOf(this))
     const compound = tree.findChild(this.componentId).compound
     const openings = this.faces ? this.faces().map(ref => ref.getItem()) : []
-    const retained = face => !openings.some(opening => opening.isSame(face))
+    const retained = face => !openings.some(opening => opening.geom().IsSame(face.geom()))
     const visible = compound.solids().filter(solid => this.isSolidVisible(tree, solid))
     const face = openings.filter(face => visible.some(solid => solid.id == face.solid.id)).at(-1)?.connectedFaces().find(retained) ||
       visible.flatMap(solid => solid.faces()).find(retained)

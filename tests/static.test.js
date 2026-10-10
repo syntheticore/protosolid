@@ -4,6 +4,20 @@ import * as THREE from 'three'
 
 import { StaticSimulation } from '../js/core/static.js'
 
+function reference(identity) {
+  return {
+    componentId: 'component',
+    selection: { identity },
+    clone() { return reference(identity) },
+    getItem() { return this.item },
+    update(tree) {
+      this.item = tree.findChild(this.componentId).compound.solids()
+        .flatMap(solid => solid.faces()).find(face => face.id == identity)
+      if(!this.item) return { type: 'error' }
+    },
+  }
+}
+
 
 function steppedCantilever(plateThickness) {
   const solid = { id: 'solid' }
@@ -49,8 +63,8 @@ test('static load resolves a thin fixed plate instead of locking its entire thic
   const simulation = new StaticSimulation('test')
   assert.equal(simulation.forceY, -100)
   assert.equal(simulation.forceZ, 0)
-  simulation.fixedFaces = [{ componentId: 'component', solidId: 'solid', topoId: 'fixed' }]
-  simulation.loadFaces = [{ componentId: 'component', solidId: 'solid', topoId: 'loaded' }]
+  simulation.fixedFaces = [reference('fixed')]
+  simulation.loadFaces = [reference('loaded')]
   assert.equal(simulation.resolve(tree, false), undefined)
   assert.equal(simulation.fixedFaces[0].item, undefined, 'render validation must not bind face references')
   simulation.solve(tree)
@@ -97,8 +111,8 @@ test('static load resolves a thin fixed plate instead of locking its entire thic
   assert.ok(meanStress(8, 30) > meanStress(175, 205), 'the arm should carry more bending strain near the plate')
 
   const alternate = new StaticSimulation('alternate')
-  alternate.fixedFaces = [{ componentId: 'component', solidId: 'solid', topoId: 'plate-left' }]
-  alternate.loadFaces = [{ componentId: 'component', solidId: 'solid', topoId: 'arm-front' }]
+  alternate.fixedFaces = [reference('plate-left')]
+  alternate.loadFaces = [reference('arm-front')]
   alternate.solve(tree)
   assert.ok(alternate.result)
   assert.deepEqual(alternate.result.steps, result.steps, 'grid spacing must not depend on selected faces')
@@ -134,8 +148,8 @@ test('linear elastic bar has physical stress and displacement units', () => {
     getMaterial: () => material,
   }) }
   const simulation = new StaticSimulation('bar')
-  simulation.fixedFaces = [{ componentId: 'component', solidId: 'bar', topoId: 'fixed' }]
-  simulation.loadFaces = [{ componentId: 'component', solidId: 'bar', topoId: 'loaded' }]
+  simulation.fixedFaces = [reference('fixed')]
+  simulation.loadFaces = [reference('loaded')]
   simulation.forceX = 1000
   simulation.forceY = 0
   simulation.solve(tree)

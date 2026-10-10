@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as THREE from 'three'
+import './browser-env.mjs'
 
 import {
   alignJointWorld,
@@ -152,7 +153,7 @@ test('spherical faces expose their center as a point reference', () => {
     } },
   }
   try {
-    const face = new Face({ compound: { componentId: 'component' }, id: 'solid' }, {})
+    const face = new Face({ compound: { componentId: 'component', topologySelection: () => ({ identity: 'face' }) }, id: 'solid' }, {})
     const center = new THREE.Vector3().setFromMatrixPosition(face.pointReference().getItem())
     assert.deepEqual(center.toArray(), [3, 4, 5])
   } finally {
@@ -291,7 +292,7 @@ test('component pattern inputs create component instances instead of fused bodie
 
   const instance = owner.children.find(component => component.instanceOf == source.id)
   assert.ok(instance)
-  assert.equal(instance.id, `${pattern.id}/instance/0/0`)
+  assert.equal(instance.id, `${pattern.id}/instance/grid/1/0/${source.id}`)
   assert.equal(instance.compound.componentId, instance.id)
 })
 

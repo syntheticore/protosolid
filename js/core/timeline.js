@@ -232,12 +232,11 @@ export class Timeline {
         const parent = tree.findChild(feature.componentId)
         const componentRefs = feature.inputs()
           .filter(reference => reference.componentReference)
-        const count = feature.instanceCount()
-        componentRefs.forEach((reference, sourceIndex) => {
+        componentRefs.forEach(reference => {
           const source = tree.findChild(reference.componentReference.componentId)
           if(!source || !parent) return
-          for(let transformIndex = 0; transformIndex < count; transformIndex++) {
-            createStructuralInstance(parent, source, `${feature.id}/instance/${transformIndex}/${sourceIndex}`)
+          for(const key of feature.instanceKeys()) {
+            createStructuralInstance(parent, source, `${feature.id}/instance/${key}/${source.id}`)
           }
         })
       } else if(feature.addStructuralComponents) {

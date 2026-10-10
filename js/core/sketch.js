@@ -1168,7 +1168,7 @@ export class Projection {
       point.applyMatrix4(relative).applyMatrix4(this.sketch.workplane.clone().invert())
       point.z = 0
       const suffix = isElementPoint ? `/${this.itemRef.index}` : ''
-      const elem = new ProjectedPoint(point, item.id + suffix + '/projected')
+      const elem = new ProjectedPoint(point, this.id + suffix + '/projected')
       return this.updateOutput(elem)
     }
 
@@ -1212,7 +1212,7 @@ export class Projection {
 
     const constructor = type === types.GeomAbs_Line ? Line :
       Math.abs(u2 - u1 - Math.PI * 2) <= EPSILON ? Circle : Arc
-    const elem = constructor.fromGeometry(trimmed, item.id + '/projected')
+    const elem = constructor.fromGeometry(trimmed, this.id + '/projected')
     return this.updateOutput(elem)
   }
 

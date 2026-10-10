@@ -6,6 +6,8 @@ import { Line } from './geom2d.js'
 import { ShapexGeometry } from '../kernels/shapex.js'
 import Expression from './expression.js'
 import preferences from '../preferences.js'
+import { trackOccTopology, trackOccOperations, seedOccTopology, resolveOccSelection, restoreOccSelections, identifyTopology, topologyItems, readShapeList } from './occ-topology.js'
+import { captureTopologySelection, namespaceTopology } from './topological-naming.js'
 import {
   arrayRange,
   rotationFromNormal,
@@ -148,7 +150,7 @@ export class Wire {
     return polyline
   }
 
-  geometry() {
+  geometry(sources) {
     let wire = new window.oc.oc.BRepBuilderAPI_MakeWire_1()
     this.segments.forEach(seg => {
       const geom = seg.geom()
@@ -156,14 +158,20 @@ export class Wire {
       const curve = seg.to3d ? seg.to3d(plane) : window.oc.oc.GeomAPI.To3d(geom, plane)
       const edge = new window.oc.oc.BRepBuilderAPI_MakeEdge_24(curve).Edge()
       wire.Add_1(edge)
+      if(sources) sources.push({ shape: wire.Edge(), source: seg.id.split('/')[0] })
     })
     wire = wire.Wire()
     window.oc.oc.BOPTools_AlgoTools.OrientEdgesOnWire(wire)
     return wire
   }
 
-  transformed(workplane) {
-    const shape = transformGeometry(this.geometry(), workplane).Shape()
+  transformed(workplane, sources) {
+    const originals = []
+    const transform = transformGeometry(this.geometry(originals), workplane)
+    const shape = transform.Shape()
+    if(sources) sources.push(...originals.map(source => ({
+      ...source, shape: transform.ModifiedShape(source.shape),
+    })))
     return window.oc.oc.TopoDS.Wire_1(shape)
   }
 }
@@ -216,40 +224,26 @@ export class Profile {
     return curve.id.split('/')[0]
   }
 
-  makeFace() {
-    const wires = this.rings.map(ring => ring.transformed(this.sketch.workplane) )
+  makeFace(sources) {
+    const wires = this.rings.map(ring => ring.transformed(this.sketch.workplane, sources) )
     const face = new window.oc.oc.BRepBuilderAPI_MakeFace_15(wires[0], true)
     wires.slice(1).forEach(wire => face.Add(wire) )
     return face.Face()
   }
 
-  makeCompound(componentId, shape, featureId, originals) {
+  makeCompound(componentId, shape, featureId, algorithm, sources) {
     const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
-
-    originals ||= this.rings.flatMap(ring => ring.segments )
-    const solid = compound.solids()[0]
-
-    // Name faces
-    const faces = solid.faces()
-    originals.forEach((seg, i) => {
-      faces[i].id = '/' + featureId + '/swept/' + this.getBaseId(seg)
-    })
-
-    // Full-turn revolutions of closed profiles can produce a periodic solid
-    // with no separate bottom/top cap faces (e.g. a circle becomes a torus).
-    // Only name caps when the result actually contains them.
-    if(faces.length >= originals.length + 2) {
-      faces[faces.length - 2].id = '/' + featureId + '/bottom'
-      faces[faces.length - 1].id = '/' + featureId + '/top'
-    }
-
-    // Name all edges in new solid according to their connected faces
-    solid.edges().forEach(edge => {
-      const faces = edge.connectedFaces()
-      edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
-    })
-
-    return compound
+    const profileSources = sources.map(source => source.source)
+    const roles = sources.map(source => ({
+      role: 'profile-side', sources: [source.source], shapes: readShapeList(algorithm.Generated(source.shape)),
+    }))
+    roles.push({ role: 'profile-start', sources: profileSources, shapes: [algorithm.FirstShape()] })
+    roles.push({ role: 'profile-end', sources: profileSources, shapes: [algorithm.LastShape()] })
+    const edgeRoles = sources.flatMap(source => [
+      { role: 'profile-start-edge', sources: [source.source], shapes: [algorithm.FirstShape_2(source.shape)] },
+      { role: 'profile-end-edge', sources: [source.source], shapes: [algorithm.LastShape_2(source.shape)] },
+    ])
+    return seedOccTopology(compound, roles, 'profile', profileSources, featureId, edgeRoles)
   }
 
   extrude(componentId, height, featureId, offset = 0) {
@@ -262,18 +256,18 @@ export class Profile {
       const translation = this.normal().normalize().multiplyScalar(offset)
       return compound.transform(new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z))
     }
-    let face = this.makeFace()
+    const sources = []
+    let face = this.makeFace(sources)
     const rot = new THREE.Quaternion().setFromRotationMatrix(this.sketch.workplane)
     if(offset) {
       const translation = new THREE.Vector3(0, 0, offset).applyQuaternion(rot)
-      face = transformGeometry(face, new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z)).Shape()
+      const transform = transformGeometry(face, new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z))
+      face = transform.Shape()
+      sources.forEach(source => source.shape = transform.ModifiedShape(source.shape))
     }
     const dir = ocVecFromVec(new THREE.Vector3(0,0,height).applyQuaternion(rot))
     const prism = new window.oc.oc.BRepPrimAPI_MakePrism_1(face, dir, true, true)
-    // const args = new window.oc.oc.TopTools_ListOfShape_1()
-    // args.Append_1(face)
-    // const history = new window.oc.oc.BRepTools_History_2(args, prism)
-    return this.makeCompound(componentId, prism.Shape(), 'extrude-' + featureId)
+    return this.makeCompound(componentId, prism.Shape(), featureId, prism, sources)
   }
 
   extrudeThroughAll(componentId, support, featureId, side = 'forward') {
@@ -302,7 +296,8 @@ export class Profile {
 
     const oc = window.oc.oc
     const extrudeSide = sign => {
-      const base = this.makeFace()
+      const named = []
+      const base = this.makeFace(named)
       const directionVector = profileDirection.clone().multiplyScalar(sign)
       const direction = ocDirFromVec(directionVector)
       const sketchFace = new oc.TopoDS_Face()
@@ -336,33 +331,24 @@ export class Profile {
           try { return first.get().isAliasOf(second.get()) }
           finally { first.delete(); second.delete() }
         }
-        const originals = this.rings.flatMap(ring => ring.segments)
-        const sources = collectShapes(base, 'edge').map((edge, index) => ({
-          id: '/extrude-' + featureId + '/swept/' + this.getBaseId(originals[index]),
-          generated: arrayFromOcList(prism.Generated(edge)),
+        const sources = named.map(source => ({
+          ...source, generated: readShapeList(prism.Generated(source.shape)),
         }))
         const origin = this.center()
-        const faceNamesUsed = {}
+        const roles = []
         result.solids().forEach(solid => {
           solid.faces().forEach(face => {
-            const source = sources.find(source =>
+            const origins = sources.filter(source =>
               source.generated.some(generated => sharesSurface(face.geom(), generated))
             )
             const cap = isBase(face.geom()) ? (sign > 0 ? 'bottom' : 'top') :
               (face.center().sub(origin).dot(profileDirection) < 0 ? 'bottom' : 'top')
-            const name = source?.id || '/extrude-' + featureId + '/' + cap
-            faceNamesUsed[name] = (faceNamesUsed[name] || 0) + 1
-            face.id = name + (faceNamesUsed[name] > 1 ? '/' + faceNamesUsed[name] : '')
+            roles.push({ role: origins.length ? 'profile-side' : `profile-${cap == 'bottom' ? 'start' : 'end'}`,
+              sources: origins.length ? origins.map(source => source.source) : named.map(source => source.source), shapes: [face.geom()] })
           })
         })
 
-        const edgeNamesUsed = {}
-        result.solids().flatMap(solid => solid.edges()).forEach(edge => {
-          const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
-          edgeNamesUsed[name] = (edgeNamesUsed[name] || 0) + 1
-          edge.id = name + '/' + edgeNamesUsed[name]
-        })
-        return result
+        return seedOccTopology(result, roles, 'profile', named.map(source => source.source), featureId)
       } finally {
         prism.delete()
         sketchFace.delete()
@@ -414,7 +400,9 @@ export class Profile {
     const planeBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(planeGeometry)
     const targetTransform = !plane && transformGeometry(target.solid.geom(), limitFrame)
     const targetShape = planeBuilder ? planeBuilder.Face() : targetTransform.ModifiedShape(target.geom())
-    const baseTransform = transformGeometry(this.makeFace(), frame.clone().setPosition(origin).invert())
+    const named = []
+    const baseTransform = transformGeometry(this.makeFace(named), frame.clone().setPosition(origin).invert())
+    named.forEach(source => source.shape = baseTransform.ModifiedShape(source.shape))
     const base = baseTransform.Shape()
     const prismDirection = ocDirFromVec(new THREE.Vector3(0, 0, 1))
     const sketchFace = new oc.TopoDS_Face()
@@ -423,7 +411,6 @@ export class Profile {
     const prism = new oc.BRepFeat_MakePrism_2(
       targetTransform ? targetTransform.Shape() : base, base, sketchFace, prismDirection, 2, false,
     )
-    const originals = this.rings.flatMap(ring => ring.segments)
     try {
       prism.Perform_2(targetShape)
       if(!prism.IsDone()) fail('The selected face could not trim the extrusion')
@@ -438,27 +425,21 @@ export class Profile {
       const result = new Compound(componentId, candidates[0])
       if(result.center().z <= EPSILON) fail('The selected face is behind the extrusion start')
       const solid = result.solids()[0]
-      const sources = collectShapes(base, 'edge').map((edge, index) => ({
-        id: '/extrude-' + featureId + '/swept/' + this.getBaseId(originals[index]),
-        edge,
-      }))
+      const sources = named
+      const roles = []
       solid.faces().forEach(face => {
         if(face.geom().IsSame(base)) {
-          face.id = '/extrude-' + featureId + '/bottom'
+          roles.push({ role: 'profile-start', sources: named.map(source => source.source), shapes: [face.geom()] })
           return
         }
         // Generated() can retain the untrimmed sides for curved limits.
         // The unchanged base edges identify their actual adjacent side faces.
         const edges = collectShapes(face.geom(), 'edge')
-        const source = sources.find(source => edges.some(edge => edge.IsSame(source.edge)))
-        face.id = source?.id || '/extrude-' + featureId + '/top'
+        const origins = sources.filter(source => edges.some(edge => edge.IsSame(source.shape)))
+        roles.push({ role: origins.length ? 'profile-side' : 'profile-end',
+          sources: origins.length ? origins.map(source => source.source) : named.map(source => source.source), shapes: [face.geom()] })
       })
-      const namesUsed = {}
-      solid.edges().forEach(edge => {
-        const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
-        namesUsed[name] = (namesUsed[name] || 0) + 1
-        edge.id = name + '/' + namesUsed[name]
-      })
+      seedOccTopology(result, roles, 'profile', named.map(source => source.source), featureId)
       if(!result.validate() || result.volume() <= EPSILON) fail('Up to face produced no valid extrusion volume')
       return result.transform(frame)
     } finally {
@@ -481,26 +462,18 @@ export class Profile {
       const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(offset)).multiply(axis.clone().invert())
       return compound.transform(turn)
     }
-    let face = this.makeFace()
+    const sources = []
+    let face = this.makeFace(sources)
     if(offset) {
       const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(offset)).multiply(axis.clone().invert())
-      face = transformGeometry(face, turn).Shape()
+      const transform = transformGeometry(face, turn)
+      face = transform.Shape()
+      sources.forEach(source => source.shape = transform.ModifiedShape(source.shape))
     }
     const ax = ocAx1FromMatrix(axis)
     let revolution = new window.oc.oc.BRepPrimAPI_MakeRevol_1(face, ax, angle, true)
 
-    // A profile segment lying on the revolution axis collapses instead of
-    // producing a swept face. Exclude it from the positional face-name map.
-    const axisOrigin = new THREE.Vector3().setFromMatrixPosition(axis)
-    const axisDirection = normalFromMatrix(axis)
-    const originals = this.rings
-      .flatMap(ring => ring.segments )
-      .filter(segment => ![0.0, 0.5, 1.0].every(u => {
-        const point = segment.sample(u).applyMatrix4(this.sketch.workplane)
-        return point.sub(axisOrigin).cross(axisDirection).length() < EPSILON
-      }))
-
-    return this.makeCompound(componentId, revolution.Shape(), 'revolve-' + featureId, originals)
+    return this.makeCompound(componentId, revolution.Shape(), featureId, revolution, sources)
   }
 
   revolveUpToFace(componentId, axis, target, featureId, forward = true, from = null) {
@@ -560,7 +533,11 @@ export class Profile {
         const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(Math.PI)).multiply(axis.clone().invert())
         const remaining = this.clone()
         remaining.sketch = { workplane: turn.clone().multiply(this.sketch.workplane) }
-        remaining.makeFace = () => oc.TopoDS.Face_1(transformGeometry(this.makeFace(), turn).Shape())
+        remaining.makeFace = sources => {
+          const transform = transformGeometry(this.makeFace(sources), turn)
+          if(sources) sources.forEach(source => source.shape = transform.ModifiedShape(source.shape))
+          return oc.TopoDS.Face_1(transform.Shape())
+        }
         return first.boolean(remaining.revolveUpToFace(componentId, axis, target, featureId, forward), 'join').repair()
       }
       const crossing = -a * Math.sin(angle) + b * Math.cos(angle)
@@ -574,7 +551,9 @@ export class Profile {
     const fromTransform = from && (from.solid.geom().IsSame(target.solid.geom()) ? targetTransform :
       transformGeometry(from.solid.geom(), inverseAxis))
     const fromShape = fromTransform && fromTransform.ModifiedShape(from.geom())
-    const baseTransform = transformGeometry(this.makeFace(), inverseAxis)
+    const named = []
+    const baseTransform = transformGeometry(this.makeFace(named), inverseAxis)
+    named.forEach(source => source.shape = baseTransform.ModifiedShape(source.shape))
     const base = baseTransform.Shape()
     const startPlane = plane && ocPlnFromMatrix(localStart)
     const startBuilder = plane && new oc.BRepBuilderAPI_MakeFace_3(startPlane)
@@ -626,32 +605,23 @@ export class Profile {
 
       const result = new Compound(componentId, candidates[0])
       if(!result.validate() || result.volume() <= EPSILON) fail('Up to face produced no valid revolution volume')
-      const originals = this.rings.flatMap(ring => ring.segments)
-      const sources = collectShapes(base, 'edge').map((edge, index) => ({
-        edge,
-        generated: arrayFromOcList(revolution.Generated(edge)),
-        id: '/revolve-' + featureId + '/swept/' + this.getBaseId(originals[index]),
+      const sources = named.map(source => ({
+        ...source, generated: readShapeList(revolution.Generated(source.shape)),
       })).filter(source => source.generated.length)
       const solid = result.solids()[0]
-      const faceNamesUsed = {}
+      const roles = []
       solid.faces().forEach(face => {
         if(isStart(face.geom())) {
-          face.id = '/revolve-' + featureId + '/bottom'
+          roles.push({ role: 'profile-start', sources: named.map(source => source.source), shapes: [face.geom()] })
           return
         }
         const edges = collectShapes(face.geom(), 'edge')
-        const source = sources.find(source => edges.some(edge => edge.IsSame(source.edge)) ||
+        const origins = sources.filter(source => edges.some(edge => edge.IsSame(source.shape)) ||
           source.generated.some(shape => sharesSurface(face.geom(), shape)))
-        const name = source?.id || '/revolve-' + featureId + '/top'
-        faceNamesUsed[name] = (faceNamesUsed[name] || 0) + 1
-        face.id = name + (faceNamesUsed[name] > 1 ? '/' + faceNamesUsed[name] : '')
+        roles.push({ role: origins.length ? 'profile-side' : 'profile-end',
+          sources: origins.length ? origins.map(source => source.source) : named.map(source => source.source), shapes: [face.geom()] })
       })
-      const namesUsed = {}
-      solid.edges().forEach(edge => {
-        const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
-        namesUsed[name] = (namesUsed[name] || 0) + 1
-        edge.id = name + '/' + namesUsed[name]
-      })
+      seedOccTopology(result, roles, 'profile', named.map(source => source.source), featureId)
       // Merge the two-limit sweep at the profile plane before transforming
       // its periodic surface; repair also fixes the unified face's seam.
       return (fromShape ? result.repair() : result).transform(frame)
@@ -722,21 +692,6 @@ export class Profile {
       fail('The limiting faces do not enclose a valid revolution')
     }
 
-    const prefix = '/revolve-' + featureId
-    const solid = result.solids()[0]
-    solid.faces().forEach(face => {
-      face.id = face.id.replace(prefix + '/from/top', prefix + '/bottom')
-        .replace(prefix + '/from/bottom', prefix + '/top')
-        .replace(prefix + '/until/top', prefix + '/top')
-        .replace(prefix + '/from/', prefix + '/')
-        .replace(prefix + '/until/', prefix + '/')
-    })
-    const namesUsed = {}
-    solid.edges().forEach(edge => {
-      const name = '(' + edge.connectedFaces().map(face => face.id).join('|') + ')'
-      namesUsed[name] = (namesUsed[name] || 0) + 1
-      edge.id = name + '/' + namesUsed[name]
-    })
     return result.repair()
   }
 
@@ -750,9 +705,13 @@ export class Profile {
       return new Compound(componentId, geometry).inheritShapexTopology([], 'loft', featureId)
     }
 
-    const wires = profiles.map(profile =>
-      profile.rings[0].transformed(profile.sketch.workplane)
-    )
+    const named = []
+    const wires = profiles.map(profile => {
+      const sources = []
+      const wire = profile.rings[0].transformed(profile.sketch.workplane, sources)
+      named.push(sources)
+      return wire
+    })
     const loft = new window.oc.oc.BRepOffsetAPI_ThruSections(true, false, 1.0e-06)
     wires.forEach(wire => loft.AddWire(wire) )
     loft.CheckCompatibility(untwist)
@@ -760,7 +719,13 @@ export class Profile {
     if(!loft.IsDone()) throw { type: 'error', msg: 'Loft could not be built' }
 
     const shape = loft.Shape()
-    return new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
+    const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(shape))
+    const roles = named.flat().map(source => ({
+      role: 'loft-side', sources: [source.source], shapes: readShapeList(loft.Generated(source.shape)),
+    }))
+    roles.push({ role: 'loft-start', sources: named[0].map(source => source.source), shapes: [loft.FirstShape()] })
+    roles.push({ role: 'loft-end', sources: named.at(-1).map(source => source.source), shapes: [loft.LastShape()] })
+    return seedOccTopology(compound, roles, 'loft', named.flat().map(source => source.source))
   }
 
   sweep(componentId, rail, bounds, featureId) {
@@ -779,7 +744,8 @@ export class Profile {
 
       // A wire profile produces a shell. Use the filled face so MakePipe
       // returns a solid that can participate in the feature boolean.
-      const profile = this.makeFace()
+      const named = []
+      const profile = this.makeFace(named)
       const plane = new window.oc.oc.gp_Pln_1()
       const curve = window.oc.oc.GeomAPI.To3d(rail.geom(), plane)
       const edge = new window.oc.oc.BRepBuilderAPI_MakeEdge_24(curve).Edge()
@@ -792,7 +758,14 @@ export class Profile {
       pipe.Build(new window.oc.oc.Message_ProgressRange_1())
       if(!pipe.IsDone()) throw { type: 'error', msg: 'Sweep could not be built' }
 
-      return new Compound(componentId, window.oc.oc.TopoDS.Solid_1(pipe.Shape()))
+      const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(pipe.Shape()))
+      const roles = named.map(source => ({
+        role: 'sweep-side', sources: [source.source, rail.id.split('/')[0]], shapes: readShapeList(pipe.Generated_1(source.shape)),
+      }))
+      const sources = [...named.map(source => source.source), rail.id.split('/')[0]]
+      roles.push({ role: 'sweep-start', sources, shapes: [pipe.FirstShape()] })
+      roles.push({ role: 'sweep-end', sources, shapes: [pipe.LastShape()] })
+      return seedOccTopology(compound, roles, 'sweep', sources)
     } catch(err) {
       if(typeof err == 'number') {
         const data = window.oc.oc.OCJS.getStandard_FailureData(err)
@@ -860,10 +833,6 @@ export class Profile {
 // BREP
 
 export class Shape {
-  isSame(otherOrId) {
-    return this.id == (otherOrId.id || otherOrId)
-  }
-
   area() {
     if(!this.geom) return 0
     if(this.isShapex || this.solid?.compound?.isShapex || this.compound?.isShapex) {
@@ -962,7 +931,7 @@ export class Face extends Shape {
     this.solid = solid
     this.geom = () => geom
     this.id = id
-    if(solid.compound.isShapex) this.kernelId = window.kernel.modeling.entityId(geom)
+    if(solid?.compound.isShapex) this.kernelId = window.kernel.modeling.entityId(geom)
     this.tessId = tessId || makeID()
   }
 
@@ -986,7 +955,7 @@ export class Face extends Shape {
   }
 
   getPlane() {
-    if(this.solid.compound.isShapex) {
+    if(this.solid?.compound.isShapex) {
       return window.kernel.modeling.facePlane(this.geom())
     }
     const surface = window.oc.oc.BRep_Tool.Surface_2(this.geom())
@@ -1232,7 +1201,7 @@ export class Solid extends Volumetric {
       return this.cachedFaces
     }
     this.cachedFaces = this.collectShapes('face')
-    this.cachedFaces.forEach((face, i) => face.id = this.id + '/face/' + i )
+    this.cachedFaces.forEach(face => face.id = makeID())
     return this.cachedFaces
   }
 
@@ -1245,7 +1214,7 @@ export class Solid extends Volumetric {
       return this.cachedEdges
     }
     this.cachedEdges = this.collectShapes('edge')
-    this.cachedEdges.forEach((edge, i) => edge.id = this.id + '/edge/' + i )
+    this.cachedEdges.forEach(edge => edge.id = makeID())
     return this.cachedEdges
   }
 
@@ -1263,8 +1232,12 @@ export class Solid extends Volumetric {
     const clone = new Solid(newCompound, this.geom())
     clone.id = this.id
     clone.cachedShapexFaceTessellations = this.cachedShapexFaceTessellations
+    clone.topology = this.topology
+    clone.topologyKind = this.topologyKind
     clone.cachedFaces = this.faces().map(face => new Face(clone, face.geom(), face.id, face.tessId) )
     clone.cachedEdges = this.edges().map(edge => new Edge(clone, edge.geom(), edge.id, edge.tessId) )
+    clone.cachedFaces.forEach((face, i) => { face.topology = this.faces()[i].topology; face.topologyKind = 'face' })
+    clone.cachedEdges.forEach((edge, i) => { edge.topology = this.edges()[i].topology; edge.topologyKind = 'edge' })
     return clone
   }
 
@@ -1303,18 +1276,22 @@ export class Compound extends Volumetric {
       this.kernelGeometry = geom
       this.geom = () => geom.raw
     } else if(geom) {
-      // // Wrap solid in compound
-      // if(geom.ShapeType() == window.oc.oc.TopAbs_ShapeEnum.TopAbs_SOLID) {
-      //   const compound = new window.oc.oc.TopoDS_Compound()
-      //   const builder = new window.oc.oc.BRep_Builder()
-      //   builder.MakeCompound(compound)
-      //   builder.Add(compound, geom)
-      //   geom = compound
-      // }
       this.geom = () => geom
     } else if(globalThis.window?.kernel?.modeling?.id == 'shapex') {
       this.isShapex = true
     }
+  }
+
+  topologySelection(item, policy) { return captureTopologySelection(item, policy) }
+
+  resolveTopology(selection) { return resolveOccSelection(this, selection) }
+
+  restoreTopologySelections(feature) { restoreOccSelections(this, feature) }
+
+  namespaceTopology(role) {
+    namespaceTopology(topologyItems(this), role)
+    identifyTopology(this)
+    return this
   }
 
   solids() {
@@ -1327,7 +1304,7 @@ export class Compound extends Volumetric {
       return this.cachedSolids
     }
     this.cachedSolids = this.collectShapes('solid')
-    this.cachedSolids.forEach((solid, i) => solid.id = this.componentId + '/solid/' + i )
+    this.cachedSolids.forEach(solid => solid.id = makeID())
     return this.cachedSolids
   }
 
@@ -1344,6 +1321,7 @@ export class Compound extends Volumetric {
 
   cloneCached(geom, cachedSolids) {
     const clone = this.clone(geom)
+    clone.topologyFailures = this.topologyFailures
     cachedSolids ||= this.solids()
     clone.cachedSolids = cachedSolids.map(solid => solid.cloneCached(clone) )
     return clone
@@ -1352,9 +1330,7 @@ export class Compound extends Volumetric {
   cloneForComponent(componentId) {
     const clone = this.cloneCached()
     clone.componentId = componentId
-    clone.cachedSolids.forEach(solid => {
-      solid.id = componentId + solid.id.slice(this.componentId.length)
-    })
+    for(const solid of clone.solids()) solid.id = componentId + solid.id.slice(this.componentId.length)
     return clone
   }
 
@@ -1461,6 +1437,7 @@ export class Compound extends Volumetric {
     }
 
     const out = new Compound(this.componentId)
+    out.topologyFailures = this.topologyFailures
     if(solids.length) {
       const geom = new window.oc.oc.TopoDS_Compound()
       const builder = new window.oc.oc.BRep_Builder()
@@ -1474,128 +1451,11 @@ export class Compound extends Volumetric {
     return out
   }
 
-  restoreSolids(originals, hidden) {
-    const results = this.solids().map(solid => solid.cloneCached(this))
-    const usedIds = new Set(hidden.map(solid => solid.id))
-    const visible = originals.filter(solid => !usedIds.has(solid.id))
-    const faceIds = visible.map(solid => new Set(solid.faces().map(face => face.id)))
-
-    // Keep body identities when operations merge, remove, or split solids.
-    // Hidden bodies retain both their geometry and their tree visibility IDs.
-    results.forEach(solid => {
-      const faces = solid.faces()
-      const matches = visible.map((original, index) => ({
-        original,
-        count: faces.filter(face => faceIds[index].has(face.id)).length,
-      })).filter(match => match.count && !usedIds.has(match.original.id))
-        .sort((a, b) => b.count - a.count)
-      solid.id = matches[0]?.original.id
-      if(solid.id) usedIds.add(solid.id)
-    })
-    results.filter(solid => !solid.id).forEach(solid => {
-      const original = visible.find(solid => !usedIds.has(solid.id))
-      let index = 0
-      let id = original?.id
-      while(!id || usedIds.has(id)) id = `${this.componentId}/solid/${index++}`
-      solid.id = id
-      usedIds.add(id)
-    })
-
-    const combined = [...results, ...hidden].sort((a, b) =>
-      Number(a.id.split('/').at(-1)) - Number(b.id.split('/').at(-1))
-    )
-    return this.subset(combined).cloneCached()
-  }
-
-  track(algorithm, algoName, other, featureId) {
+  track(algorithm, algoName, other, bodyParents) {
     const out = this.clone(algorithm.Shape ?
       algorithm.Shape() : algorithm.Apply(this.geom())
     )
-    const history = algorithm.Modified ?
-      algorithm
-      :
-      algorithm.History ?
-        algorithm.History().get()
-        :
-        algorithm.History_1 ?
-          algorithm.History_1().get()
-          :
-          algorithm.Context().get().History().get()
-
-    const solids = out.solids()
-    const oldSolids = this.solids().concat(other ? other.solids() : [])
-
-    const newFaces = solids.flatMap(solid => solid.faces() )
-    const newEdges = solids.flatMap(solid => solid.edges() )
-
-    const oldFaces = oldSolids.flatMap(solid => solid.faces() )
-    const oldEdges = oldSolids.flatMap(solid => solid.edges() )
-
-    // Find unchanged faces in new solids & use original IDs
-    const unchangedFaces = newFaces.map(face => {
-      const original = oldFaces.find(f => f.geom().IsSame(face.geom()) ) //XXX IsSame -> surface & location same, IsEqual -> orientation also same
-      if(!original) return
-      face.id = original.id
-      face.tessId = original.tessId
-      face.cachedTesselation = original.cachedTesselation
-      // return [face, original]
-    })//.filter(Boolean)
-
-    // // Unchanged faces are geometrically identical if all of their neighboors are unchanged too
-    // unchangedFaces.filter(([face, original]) => {
-    //   const neighboors = face.connectedFaces()
-    //   return neighboors.every(neighboor => unchangedFaces.find(([f, _]) => f == neighboor ) )
-    // }).forEach(([face, original]) => {
-    //   // Inherit tessId if faces are visually identical
-    //   face.tessId = original.tessId
-    //   face.cachedTesselation = original.cachedTesselation
-    // })
-
-    // Find unchanged edges & inherit tesselation
-    newEdges.forEach(edge => {
-      const original = oldEdges.find(e => e.geom().IsSame(edge.geom()) )
-      if(!original) return
-      edge.tessId = original.tessId
-      edge.cachedTesselation = original.cachedTesselation
-    })
-
-    // Find modified faces in new solids & use original IDs
-    oldFaces.forEach(oldFace => {
-      const modified = arrayFromOcList(history.Modified(oldFace.geom())).map(m => new window.oc.oc.TopoDS.Face_1(m) )
-      const faces = modified.map(modFace => newFaces.find(f => f.geom().IsSame(modFace) ) )
-      faces.forEach(f => f.id = oldFace.id )
-    });
-
-    // Find new faces generated from the original edges & faces and name them accordingly
-    [...oldEdges, ...oldFaces].forEach(old => {
-      const shapes = arrayFromOcList(history.Generated(old.geom()))
-      const generated = shapes.map(shape => {
-        try {
-          return window.oc.oc.TopoDS.Face_1(shape)
-        } catch(err) {}
-      }).filter(Boolean)
-      const faces = generated.map(genFace => newFaces.find(face => face.geom().IsSame(genFace) ) )
-      faces.forEach((face, i) => face.id = old.id + '/' + algoName + '/' + i )
-    })
-
-    // Find faces that have been generated out of thin air
-    newFaces
-      .filter(face => !face.id )
-      .forEach((face, i) => {
-        face.id = '/' + featureId + '/' + algoName + '/' + i
-      })
-
-    // Name all edges in new compound according to their connected faces
-    // Enumerate too, since circular faces may connect to the same neighboor twice
-    const namesUsed = {}
-    newEdges.forEach(edge => {
-      const faces = edge.connectedFaces()
-      edge.id = '(' + faces[0].id + '|' + faces[1].id + ')'
-      namesUsed[edge.id] = (namesUsed[edge.id] || 0) + 1
-      edge.id += '/' + namesUsed[edge.id]
-    })
-
-    return out
+    return trackOccTopology(out, [this, ...(other ? [other] : [])], algorithm, algoName, bodyParents)
   }
 
   transform(plane) {
@@ -1624,20 +1484,9 @@ export class Compound extends Volumetric {
     builder.MakeCompound(compound);
     [this, ...others].forEach(c => builder.Add(compound, c.geom()) )
 
-    const clone = this.clone(compound)
-    const solids = [...this.solids(), ...others.flatMap(other => other.solids() )]
-    clone.solids().forEach((cloneSolid, i) => {
-      const originSolid = solids[i]
-      const originFaces = originSolid.faces()
-      const originEdges = originSolid.edges()
-      cloneSolid.faces().forEach((cloneFace, j) => {
-        cloneFace.id = originFaces[j].id
-      })
-      cloneSolid.edges().forEach((cloneEdge, j) => {
-        cloneEdge.id = originEdges[j].id
-      })
-    })
-    return clone
+    const out = this.cloneCached(compound, [...this.solids(), ...others.flatMap(other => other.solids())])
+    out.topologyFailures = new Map([this, ...others].flatMap(parent => [...(parent.topologyFailures || [])]))
+    return out
   }
 
   repair() {
@@ -1722,7 +1571,9 @@ export class Compound extends Volumetric {
       ).inheritShapexTopology([this, other], op, featureId)
     }
     const algo = window.kernel.modeling.boolean(this.geom(), other.geom(), op)
-    return this.track(algo, op, other)
+    // Subtraction consumes its tool body; union and intersection continue
+    // bodies from both operands. Face and edge ancestry uses both in all cases.
+    return this.track(algo, op, other, op == 'cut' ? [this] : [this, other])
   }
 
   fillet(edges, radius, followTangentEdges=true) {
@@ -1815,7 +1666,7 @@ export class Compound extends Volumetric {
           // surfaces to rebuild a closed solid, without adding an inner wall.
           offset.Perform(solid.geom(), selectedShapes, distance)
           if(!offset.IsDone() || offset.Shape().IsNull()) throw null
-          const result = source.track(offset, 'offset-faces', null, featureId)
+          const result = source.track(offset, 'offset-faces')
           if(result.solids().length != 1 || !result.validate() || result.volume() <= EPSILON) throw null
           return result
         } finally {
@@ -1937,7 +1788,6 @@ export class Compound extends Volumetric {
     }
     return this.reshape('remove-shapes', reshaper => {
       shapes.forEach(shape => {
-        // reshaper.Remove(solid instanceof Solid ? solid.geom() : solid)
         reshaper.Remove(shape.geom())
       })
     })
@@ -1978,16 +1828,29 @@ export class Compound extends Volumetric {
   }
 
   split(plane, keep, featureId) {
+    if(!this.geom) return this
     if(this.isShapex) {
       const geometry = window.kernel.modeling.split(this.kernelGeometry, plane, keep)
       return new Compound(this.componentId, geometry)
         .inheritShapexTopology([this], 'split', featureId)
     }
-    const left = this.halfCut(plane, true, featureId)
-    const right = this.halfCut(plane, false, featureId)
-    if(keep == 'both') return left.merge([right])
-    if(keep == 'left') return left
-    return right
+    const operations = [true, false].map(side => {
+      const algorithm = this.halfCutAlgorithm(plane, side)
+      return { algorithm, operation: 'split', branch: side ? 'left' : 'right',
+        compound: this.clone(algorithm.Shape()), bodyParents: [this] }
+    })
+    try {
+      const out = operations[0].compound.merge(operations.slice(1).map(operation => operation.compound))
+      trackOccOperations(out, [this], operations)
+      if(keep == 'both') return out
+      // Identify the full split before discarding a side so the surviving
+      // body's branch identity is independent of the Keep setting.
+      const retained = operations[keep == 'left' ? 0 : 1].compound.solids()
+      return out.subset(out.solids().filter(solid =>
+        retained.some(original => original.geom().IsSame(solid.geom())))).cloneCached()
+    } finally {
+      for(const { algorithm } of operations) algorithm.delete()
+    }
   }
 
   halfCut(plane, side, featureId) {
@@ -2001,65 +1864,16 @@ export class Compound extends Volumetric {
         throw new Error(`Shapex section view failed: ${error?.message || error?.msg || error}`, { cause: error })
       }
     }
-    let box = new window.oc.oc.BRepPrimAPI_MakeBox_2(1000, 1000, side ? 1000 : -1000).Shape() //XXX determine bounding box automatically
-    box = transformGeometry(box, new THREE.Matrix4().makeTranslation(-500, -500, 0).premultiply(plane)).Shape()
-    const algo = new window.oc.oc.BRepAlgoAPI_Cut_3(this.geom(), box, new window.oc.oc.Message_ProgressRange_1())
-    return this.track(algo, 'split-' + side ? 'left' : 'right', null, featureId)
+    const algorithm = this.halfCutAlgorithm(plane, side)
+    try { return this.track(algorithm, 'section') }
+    finally { algorithm.delete() }
   }
 
-  // split(plane, side, featureId) {
-  //   if(!this.geom) return this
-  //   const pln = ocPlnFromMatrix(plane)
-  //   const face = new window.oc.oc.BRepBuilderAPI_MakeFace_9(pln, -1000, 1000, -1000, 1000).Face()
-  //   // const algo = new window.oc.oc.BOPAlgo_MakerVolume_1()
-  //   const algo = new window.oc.oc.BOPAlgo_Splitter_1()
-  //   // algo.SetAvoidInternalShapes(true)
-  //   algo.AddArgument(this.geom())
-  //   // algo.AddArgument(face)
-  //   algo.AddTool(face)
-  //   algo.Perform(new window.oc.oc.Message_ProgressRange_1())
-  //   return this.track(algo, 'split', null, featureId)
-  // }
-
-  // split(plane, side, featureId) {
-  //   const pln = ocPlnFromMatrix(plane)
-  //   const face = new window.oc.oc.BRepBuilderAPI_MakeFace_9(pln, -1000, 1000, -1000, 1000).Face()
-  //   const algo = new window.oc.oc.BRepAlgoAPI_Splitter_1()
-  //   algo.SetArguments(ocListOfShapeFromArray([this.geom()]))
-  //   algo.SetTools(ocListOfShapeFromArray([face]))
-  //   return this.track(algo, 'split', null, featureId)
-  // }
-
-  // split(plane, side) {
-  //   if(!this.geom) return this
-  //   const pln = ocPlnFromMatrix(plane)
-  //   const section = new window.oc.oc.BRepAlgoAPI_Section_5(this.geom(), pln, false) //XXX Use BRepAlgoAPI_Section_6 to split by surface
-
-  //   section.ComputePCurveOn1(true)
-  //   section.Approximation(true)
-  //   section.Build(new window.oc.oc.Message_ProgressRange_1())
-  //   if(!section.IsDone()) throw 'Cannot split'
-
-  //   const split = new window.oc.oc.BRepFeat_SplitShape_2(this.geom())
-  //   exploreShape(section.Shape(), 'edge', edge => {
-  //     exploreShape(this.geom(), 'face', face => {
-  //       if(section.HasAncestorFaceOn1(edge, face)) {
-  //         split.Add_3(edge, face)
-  //       }
-  //     })
-  //   })
-  //   split.Build(new window.oc.oc.Message_ProgressRange_1())
-
-  //   const comp = new window.oc.oc.TopoDS_Compound()
-  //   const builder = new window.oc.oc.BRep_Builder()
-  //   builder.MakeCompound(comp)
-
-  //   arrayFromOcList(split.DirectLeft()).forEach(face => {
-  //     builder.Add(comp, new window.oc.oc.TopoDS.Face_1(face))
-  //   })
-
-  //   return this.clone(comp)
-  // }
+  halfCutAlgorithm(plane, side) {
+    let box = new window.oc.oc.BRepPrimAPI_MakeBox_2(1000, 1000, side ? 1000 : -1000).Shape() //XXX determine bounding box automatically
+    box = transformGeometry(box, new THREE.Matrix4().makeTranslation(-500, -500, 0).premultiply(plane)).Shape()
+    return new window.oc.oc.BRepAlgoAPI_Cut_3(this.geom(), box, new window.oc.oc.Message_ProgressRange_1())
+  }
 
   tesselate() {
     if(!this.geom) return { positions: [], normals: [] }

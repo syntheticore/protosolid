@@ -69,7 +69,7 @@ export class StaticSimulation {
       return 'The selected faces do not reach the simulation grid'
     }
     this.result.componentId = this.fixedFaces[0].componentId
-    this.result.solidId = this.fixedFaces[0].solidId
+    this.result.solidId = solid.id
     this.revision++
   }
 

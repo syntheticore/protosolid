@@ -83,6 +83,63 @@ test(`${backend}: picking from an incomplete feature preview binds the upstream 
   }
 })
 
+test(`${backend}: both cross-bore rims can be picked, chamfered and rebound after save and dimension edits`, async () => {
+  const owners = { base: feature('cylinder'), tool: feature('bore-tool'), cut: feature('bore-cut') }
+  const circle = (id, radius, center, workplane) => {
+    const curve = new Circle(center, radius)
+    curve.id = id
+    return new Profile({ workplane }, [new Wire([curve])])
+  }
+  const build = (owners, radius, height, transform = new THREE.Matrix4()) => {
+    const base = withTopologyNaming(owners.base, () =>
+      circle('base-circle', radius, new THREE.Vector3(), new THREE.Matrix4())
+        .extrude('component', height, owners.base.id).transform(transform).repair())
+    const tool = withTopologyNaming(owners.tool, () =>
+      circle('bore-circle', 3, new THREE.Vector3(0, height / 2, 0), new THREE.Matrix4().makeRotationX(Math.PI / 2))
+        .extrude('component', 40, owners.tool.id, -20).transform(transform).repair())
+    return withTopologyNaming(owners.cut, () => {
+      const result = base.boolean(tool, 'cut').repair()
+      result.restoreTopologySelections(owners.cut)
+      return result
+    })
+  }
+  const original = build(owners, 10, 20)
+  const rims = original.edges().filter(edge => edge.isSemantic() && Math.abs(edge.center().y) > 8 &&
+    Math.abs(edge.center().z - 10) < 4)
+  assert.ok(rims.some(edge => edge.center().y < 0) && rims.some(edge => edge.center().y > 0))
+  const { EdgePickTool } = await import('../js/tools.js')
+  const references = []
+  for(const edge of rims) {
+    const viewport = { document: {}, renderer: {
+      objectsAtScreen: () => [{ alcObject: edge, alcTypes: ['edge'] }],
+    } }
+    assert.equal(await new EdgePickTool(null, viewport).getObject(null, true), edge)
+    references.push(edge.edgeReference())
+  }
+  const signs = rims.map(edge => Math.sign(edge.center().y))
+  const transverse = rims.map(edge => Math.abs(edge.center().x) > 2 ? Math.sign(edge.center().x) : 0)
+  const restored = Serialize.parse(Serialize.stringify({ owners, references }))
+  // Allocate unrelated topology before replaying the producer and reverse its
+  // output arrays. Neither allocation nor output order defines these picks.
+  extrude(feature('inserted-feature'))
+  const transform = new THREE.Matrix4().makeRotationZ(Math.PI / 6).setPosition(4, 7, 2)
+  const rebuilt = build(restored.owners, 12, 24, transform)
+  for(const solid of rebuilt.solids()) {
+    solid.cachedFaces.reverse()
+    solid.cachedEdges.reverse()
+  }
+  restored.references.forEach((reference, index) => {
+    assert.equal(reference.update(tree(rebuilt)), undefined)
+    const center = reference.getItem().center().applyMatrix4(transform.clone().invert())
+    assert.equal(Math.sign(center.y), signs[index])
+    if(transverse[index]) assert.equal(Math.sign(center.x), transverse[index])
+  })
+  const chamfer = withTopologyNaming(feature('chamfer'), () =>
+    rebuilt.chamfer(restored.references.map(ref => ref.getItem()), 1).repair())
+  assert.equal(chamfer.solids().length, 1)
+  assert.ok(chamfer.volume() > 0 && chamfer.volume() < rebuilt.volume())
+})
+
 test(`${backend}: viewport sections return compounds, retain upstream references and exclude transient picks`, async () => {
   const plane = new THREE.Matrix4().makeRotationY(Math.PI / 2).setPosition(5, 0, 0)
   assert.deepEqual(new Compound('component').halfCut(plane, false).solids(), [])

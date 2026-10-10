@@ -23,15 +23,6 @@
 
     .grab-handle.dynamic
 
-    nav
-
-      //- MenuButton(title="Tool Settings" icon="cloud")
-      //-   IconView
-
-      MenuButton.naked.account(title="Björn Breitgoff" icon="user")
-
-        .user-info
-
     .grab-handle.fixed
 
     .window-controls
@@ -160,21 +151,6 @@
 
         &:last-child
           background: #b70f0f
-
-  .account
-    font-weight: bold
-    flex: 0 0 auto
-    white-space: nowrap
-
-  .user-info
-    padding: 1rem
-
-  input[type="text"]
-  input[type="number"]
-    width: 47px
-
-  .inset
-    margin-left: 8px
 
 </style>
 

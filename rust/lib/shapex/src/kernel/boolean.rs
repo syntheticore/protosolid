@@ -175,44 +175,46 @@ pub(crate) fn boolean_brep_with_face_boundaries(
                             tolerance,
                         )?;
                         for range in trimmed {
-                            let first_curve = boundary_curve_for_intersection(
+                            // The original trim already participates in this
+                            // arrangement. Reimprinting a coincident intersection
+                            // would subdivide it using independently solved
+                            // parameters, separating shared contact vertices.
+                            if boundary_curve_for_intersection(
                                 &intersection.curve,
                                 range,
                                 first_boundary,
                                 tolerance,
-                            )?
-                            .unwrap_or_else(|| FaceCurve {
-                                provenance: Default::default(),
-                                curve: intersection.curve.clone(),
-                                pcurve: first_pcurve.clone(),
-                                range,
-                                loop_end: false,
-                                loop_kind: LoopKind::Outer,
-                                parameter_seam: false,
-                            });
-                            let second_curve = boundary_curve_for_intersection(
+                            )?.is_none() {
+                                face_curves.get_mut(&(0, first_index))
+                                    .expect("face curve map is complete")
+                                    .push(FaceCurve {
+                                        provenance: Default::default(),
+                                        curve: intersection.curve.clone(),
+                                        pcurve: first_pcurve.clone(),
+                                        range,
+                                        loop_end: false,
+                                        loop_kind: LoopKind::Outer,
+                                        parameter_seam: false,
+                                    });
+                            }
+                            if boundary_curve_for_intersection(
                                 &intersection.curve,
                                 range,
                                 second_boundary,
                                 tolerance,
-                            )?
-                            .unwrap_or_else(|| FaceCurve {
-                                provenance: Default::default(),
-                                curve: intersection.curve.clone(),
-                                pcurve: second_pcurve.clone(),
-                                range,
-                                loop_end: false,
-                                loop_kind: LoopKind::Outer,
-                                parameter_seam: false,
-                            });
-                            face_curves
-                                .get_mut(&(0, first_index))
-                                .expect("face curve map is complete")
-                                .push(first_curve);
-                            face_curves
-                                .get_mut(&(1, second_index))
-                                .expect("face curve map is complete")
-                                .push(second_curve);
+                            )?.is_none() {
+                                face_curves.get_mut(&(1, second_index))
+                                    .expect("face curve map is complete")
+                                    .push(FaceCurve {
+                                        provenance: Default::default(),
+                                        curve: intersection.curve.clone(),
+                                        pcurve: second_pcurve.clone(),
+                                        range,
+                                        loop_end: false,
+                                        loop_kind: LoopKind::Outer,
+                                        parameter_seam: false,
+                                    });
+                            }
                         }
                     }
                 }

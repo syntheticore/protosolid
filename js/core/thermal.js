@@ -41,7 +41,7 @@ export class ThermalSimulation {
       this.hotTemperature,
     )
     this.result.componentId = this.coldFaces[0].componentId
-    this.result.solidId = this.coldFaces[0].solidId
+    this.result.solidId = solid.id
     this.revision++
   }
 

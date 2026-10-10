@@ -521,7 +521,7 @@ class HighlightTool extends Tool {
           if(mapped.length) return mapped
           return obj.alcObject
         })
-      items = Array.from(new Set(items))
+      items = Array.from(new Set(items)).filter(item => item.topology?.origin.selectable !== false)
       const handle = this.viewport.hoveredHandle
       if(handle && this.realSelectors.includes('point') && !this.preferPointObjects) {
         items.unshift(new ElemRef(handle.elem, handle.index))

@@ -42,9 +42,11 @@ export class FluidSimulation {
 
   resolve(tree, bind=true) {
     if(!this.inletFaces.length || !this.outletFaces.length) return 'Pick inlet and outlet faces on the fluid volume'
-    const problem = resolveSimulationFaces(tree, [this.inletFaces, this.outletFaces], bind)
+    const [inlets, outlets] = [this.inletFaces, this.outletFaces].map(references =>
+      bind ? references : references.map(reference => reference.clone()))
+    const problem = resolveSimulationFaces(tree, [inlets, outlets])
     if(problem) return problem
-    if(this.inletFaces.some(inlet => this.outletFaces.some(outlet => inlet.topoId == outlet.topoId))) {
+    if(inlets.some(inlet => outlets.some(outlet => inlet.getItem() === outlet.getItem()))) {
       return 'A face cannot be both an inlet and an outlet'
     }
     if(!Number.isFinite(this.inletSpeed) || this.inletSpeed <= 0) return 'Enter a positive inlet speed'
@@ -69,7 +71,7 @@ export class FluidSimulation {
     if(problem) return problem
     const solid = this.inletFaces[0].item.solid
     const componentId = this.inletFaces[0].componentId
-    const solidId = this.inletFaces[0].solidId
+    const solidId = solid.id
     const worker = new Worker(new URL('./fluid-worker.js', import.meta.url), { type: 'module' })
     this.worker = worker
     const result = await new Promise(resolve => {

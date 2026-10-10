@@ -473,11 +473,11 @@
 
       selectPickedFace(key, face) {
         const references = this.simulation[key]
-        const existing = references.find(reference =>
-          reference.componentId == face.solid.compound.componentId &&
-          reference.solidId == face.solid.id &&
-          reference.topoId == face.id
-        )
+        const tree = this.document.top()
+        const existing = references.find(reference => {
+          const resolved = reference.clone()
+          return !resolved.update(tree) && resolved.getItem() === face
+        })
         if(existing) references.splice(references.indexOf(existing), 1)
         else references.push(face.faceReference())
         this.document.hasChanges = true
@@ -502,13 +502,14 @@
       updatePaths() {
         if(!this.expanded) return
         this.bus.emit('clear-pickers')
+        const tree = this.document.top()
         this.configuration.pickers.forEach(({ key }) => {
           const { pickerPos, color } = this.getPickerInfo(key)
           this.simulation[key].forEach(reference => {
-            const component = this.document.top().findChild(reference.componentId)
-            const solid = component && component.compound.solids().find(item => item.id == reference.solidId)
-            const face = solid && solid.faces().find(item => item.id == reference.topoId)
-            if(!face) return
+            const resolved = reference.clone()
+            if(resolved.update(tree)) return
+            const component = tree.findChild(reference.componentId)
+            const face = resolved.getItem()
             const center = face.center().applyMatrix4(worldTransform(component))
             this.bus.emit('show-picker', pickerPos, center, color)
           })

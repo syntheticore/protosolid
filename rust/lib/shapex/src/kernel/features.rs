@@ -3263,7 +3263,7 @@ pub(crate) fn shell(
     shell.fillet_with_options(
         &joins,
         super::FilletOptions::new(distance.abs()).with_tangent_propagation(false),
-    )
+    ).map(|result| result.with_construction_roles_from(&[&shell], &[]))
 }
 
 pub(crate) fn split(source: &Compound, plane: Plane3, keep: &str) -> KernelResult<Compound> {

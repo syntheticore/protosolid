@@ -92,7 +92,21 @@ export function trackShapexOperations(out, parents, operations) {
     }
     return records
   })
+  // Rounded shells previously omitted their skin roles. Keep those construction
+  // names as continuity aliases so saved selections still resolve, while new
+  // selections use the distinct source, offset and rim identities.
+  const shellNames = new Map()
+  if(operations.some(({ operation }) => operation == 'shell')) {
+    propagateTopology(outputs, correspondence.map(record => ({ ...record,
+      relation: record.source.topologyKind != 'body' && record.relation == 'modified' ? 'generated' : record.relation,
+    })), 'shell', topologyNeighbors)
+    for(const item of outputs) shellNames.set(item, [...item.topology.names])
+  }
   propagateTopology(outputs, correspondence, item => roles.get(item), topologyNeighbors)
+  for(const [item, names] of shellNames) {
+    for(const name of names) if(!item.topology.names.includes(name)) item.topology.names.push(name)
+    item.topology.names.sort()
+  }
   identifyTopology(out)
   return out
 }

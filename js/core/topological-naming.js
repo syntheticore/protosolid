@@ -126,7 +126,7 @@ function incidencePaths(item, neighbors, aliases = false, depth = 2, visited = n
     for(const name of names) {
       paths.push([name])
       if(depth > 1) {
-        for(const path of incidencePaths(neighbor, neighbors, aliases, depth - 1, nextVisited)) paths.push([name, ...path])
+        for(const path of incidencePaths(neighbor, neighbors, aliases, depth - 1, nextVisited)) paths.push([name, ...JSON.parse(path)])
       }
     }
   }

@@ -89,6 +89,11 @@ made before a split can request all descendants; a single selection must resolve
 uniquely. A selection made on one branch remains scoped to that branch under
 either policy.
 
+An explicit pick repairs that input by discarding unresolved references while
+retaining valid selections. Regeneration alone preserves failed references so
+they can recover if their upstream topology returns. Cancel restores the original
+selection and its cached editor bindings.
+
 Construction and incidence cannot distinguish every possible symmetric result.
 Picking such a cell raises an explicit error; an existing selection that becomes
 ambiguous fails to resolve. There is no nearest-geometry or first-output choice.

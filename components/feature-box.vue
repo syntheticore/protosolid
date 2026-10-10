@@ -517,24 +517,7 @@
           itemRef = new JointReference(item)
         }
 
-        // Add item reference to feature
-        if(setting.multi) {
-          // Toggle items in multi select mode
-          const currentItems = (this.activeFeature[key] && [...this.activeFeature[key]()]) || []
-          this.activeFeature[key] = () => currentItems
-          const oldItem = currentItems.find(otherRef => {
-            return otherRef.matches ? otherRef.matches(item) : otherRef.item.id == item.id
-          })
-          if(oldItem) {
-            currentItems.splice(currentItems.indexOf(oldItem), 1)
-          } else {
-            currentItems.push(itemRef)
-          }
-        } else {
-          // Hide heavy data from Vue in a closure
-          this.activeFeature[key] = () => itemRef
-        }
-        this.activeFeature.pickedInput?.(key, itemRef, item)
+        this.activeFeature.selectInput(key, itemRef, item)
         this.updatePaths()
       },
 
@@ -592,6 +575,7 @@
               const refs = Array.isArray(data()) ? data() : [data()]
               refs.forEach(ref => {
                 const item = ref.getItem()
+                if(!item) return // Lost references stay editable, but have no picker position.
                 this.bus.emit('show-picker', pickerPos, this.getCenter(item, ref), color)
                 // item.free()
               })

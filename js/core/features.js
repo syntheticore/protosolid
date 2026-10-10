@@ -6,7 +6,7 @@ import { Sketch } from './sketch.js'
 import { Compound } from './geom3d.js'
 import { PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
-import { normalFromMatrix, ocCatch, rad } from './utils.js'
+import { normalFromMatrix, rad } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame, faceGizmoFrame } from '../three/gizmos.js'
@@ -137,6 +137,29 @@ export class Feature {
     this.error = severe.length ? severe[0] : errors[0]
 
     return results
+  }
+
+  selectInput(key, reference, item) {
+    if(this.settings[key].multi) {
+      const tree = this.document.top(this.document.timeline.features.indexOf(this))
+      // An explicit pick repairs this input. Regeneration alone retains failed
+      // references so restoring their upstream topology can recover the feature.
+      const references = (this[key] ? this[key]() : []).filter(ref => {
+        // Cancel restores the original reference objects, including their cached
+        // editor bindings. Resolve a clone before discarding a failed reference.
+        if(ref.clone().update(tree)?.type == 'error') return false
+        ref.update(tree)
+        return true
+      })
+      const previous = references.find(ref => ref.matches ? ref.matches(item) :
+        ref.getItems().some(current => current.id == item.id))
+      if(previous) references.splice(references.indexOf(previous), 1)
+      else references.push(reference)
+      this[key] = () => references
+    } else {
+      this[key] = () => reference
+    }
+    this.pickedInput?.(key, reference, item)
   }
 
   needsPicker(setting, includeOptionals) {
@@ -2268,13 +2291,6 @@ export class FilletFeature extends SolidFeature {
       }
     }
   }
-
-  repair() {
-    const tree = this.document.top(this.document.timeline.previousFeature(this))
-    const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
-    this.edges = () => remainingEdges
-    this.error = null
-  }
 }
 
 Serialize.register(FilletFeature, 'FilletFeature')
@@ -2375,13 +2391,6 @@ export class ChamferFeature extends SolidFeature {
       }
     }
     return gizmos
-  }
-
-  repair() {
-    const tree = this.document.top(this.document.timeline.previousFeature(this))
-    const remainingEdges = this.edges().filter(edgeRef => !edgeRef.update(tree) )
-    this.edges = () => remainingEdges
-    this.error = null
   }
 
   updateGizmos() {

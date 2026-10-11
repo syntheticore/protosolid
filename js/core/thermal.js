@@ -106,10 +106,12 @@ export class ThermalSimulation {
 Serialize.register(ThermalSimulation, 'ThermalSimulation')
 
 
-function solveVoxelHeat(solid, coldFaces, hotFaces, coldTemperature, hotTemperature) {
+export function solveVoxelHeat(solid, coldFaces, hotFaces, coldTemperature, hotTemperature, onProgress=() => {}) {
   const coldTriangles = makeTriangles(coldFaces)
   const hotTriangles = makeTriangles(hotFaces)
-  const { bounds, step, nx, ny, nz, grid, points } = voxelizeSolid(solid)
+  const { bounds, step, nx, ny, nz, grid, points } = voxelizeSolid(solid, 14, Infinity, null,
+    value => onProgress(value * 20))
+  onProgress(20)
 
   const neighbors = points.map(() => [])
   const directions = [[-1,0,0], [1,0,0], [0,-1,0], [0,1,0], [0,0,-1], [0,0,1]]
@@ -145,6 +147,7 @@ function solveVoxelHeat(solid, coldFaces, hotFaces, coldTemperature, hotTemperat
   fixed.forEach((temperature, node) => temperatures[node] = temperature)
 
   for(let iteration = 0; iteration < 400; iteration++) {
+    if(iteration % 4 == 0) onProgress(30 + iteration / 400 * 65)
     points.forEach((_, node) => {
       if(fixed.has(node)) return
       const adjacent = neighbors[node]
@@ -152,6 +155,7 @@ function solveVoxelHeat(solid, coldFaces, hotFaces, coldTemperature, hotTemperat
     })
   }
 
+  onProgress(98)
   return {
     min: bounds.min.toArray(),
     step,

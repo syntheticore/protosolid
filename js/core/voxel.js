@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 
-export function voxelizeSolid(solid, resolution=14, maxCells=Infinity, targetSteps=null) {
+export function voxelizeSolid(solid, resolution=14, maxCells=Infinity, targetSteps=null, onProgress=() => {}) {
   const triangles = makeTriangles(solid.faces())
   const bounds = new THREE.Box3()
   triangles.forEach(triangle => {
@@ -24,6 +24,7 @@ export function voxelizeSolid(solid, resolution=14, maxCells=Infinity, targetSte
   const points = []
 
   for(let k = 0; k < nz; k++) {
+    onProgress(k / nz)
     for(let j = 0; j < ny; j++) {
       for(let i = 0; i < nx; i++) {
         const point = new THREE.Vector3(
@@ -38,6 +39,7 @@ export function voxelizeSolid(solid, resolution=14, maxCells=Infinity, targetSte
     }
   }
 
+  onProgress(1)
   return { bounds, size, step, steps, nx, ny, nz, grid, points }
 }
 

@@ -10,8 +10,10 @@ const boundaryTypes = { wall: 0, inlet: 1, interior: 2, outlet: 3 }
 // viscosity, then a pressure projection. Geometry is in mm; physics is in SI.
 // Unpicked boundaries are stationary no-slip walls; outlets fix gauge pressure.
 // Pressure discretization: https://www.cs.ubc.ca/~rbridson/fluidsimulation/fluids_notes.pdf
-export function solveVoxelFlow(solid, inletFaces, outletFaces, settings) {
-  const { bounds, step, nx, ny, nz, grid, points } = voxelizeSolid(solid, settings.resolution)
+export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgress=() => {}) {
+  const { bounds, step, nx, ny, nz, grid, points } = voxelizeSolid(solid, settings.resolution, Infinity, null,
+    value => onProgress(value * 20))
+  onProgress(20)
   if(!points.length) return 'The fluid volume is too thin for this grid'
   const h = step / 1000
   const nu = settings.viscosity / settings.density
@@ -168,6 +170,7 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings) {
   let continuityError = 0
   const flowTime = Math.max(nx, ny, nz) * h / settings.inletSpeed
   for(; iterations < 300; iterations++) {
+    if(iterations % 3 == 0) onProgress(30 + iterations / 300 * 65)
     let maximum = settings.inletSpeed
     for(let index = 0; index < faces.length; index++) maximum = Math.max(maximum, Math.abs(velocity[index]))
     const dt = 0.8 / (3 * maximum / h + 6 * nu / (h * h))
@@ -230,6 +233,7 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings) {
       break
     }
   }
+  onProgress(98)
   const velocities = new Float64Array(points.length * 3)
   const pressures = pressure.map(value => value + settings.outletPressure)
   let maxSpeed = 0

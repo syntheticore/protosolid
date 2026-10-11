@@ -75,22 +75,47 @@
               span Flow lines
               input(type="checkbox" :checked="simulation.showFlowLines" @change="displayChanged('showFlowLines', $event)")
 
-        fieldset.result-stats(v-if="simulation.mode == 'static' && simulation.result")
+        fieldset.result-stats(v-if="simulation.mode == 'static'")
 
           label.result-summary
             span Max von Mises
-            span {{ simulation.result.maxStress.toPrecision(3) }} MPa
+            span {{ simulation.result ? simulation.result.maxStress.toPrecision(3) + ' MPa' : '-' }}
 
           label.result-summary
             span Max displacement
-            span {{ simulation.result.maxDisplacement.toPrecision(3) }} mm
+            span {{ simulation.result ? simulation.result.maxDisplacement.toPrecision(3) + ' mm' : '-' }}
 
-          label.result-summary(v-if="simulation.result.relativeResidual > 0.001")
+          label.result-summary
             span Solver residual
-            span {{ (simulation.result.relativeResidual * 100).toFixed(1) }}% — results may be inaccurate
+            span
+              template(v-if="simulation.result")
+                | {{ (simulation.result.relativeResidual * 100).toFixed(1) }}%
+                template(v-if="simulation.result.relativeResidual > 0.001")  — results may be inaccurate
 
-        transition(name="fade")
-          .error-msg(v-if="warning") {{ warning }}
+              template(v-else) -
+
+        transition(
+          name="message"
+          mode="out-in"
+          @before-enter="prepareMessage"
+          @enter="enterMessage"
+          @after-enter="clearMessageHeight"
+          @leave="leaveMessage"
+        )
+
+          .message-area(v-if="progress != null || warning" :key="progress != null ? 'progress' : 'warning'")
+
+            .error-msg(
+              :role="progress != null ? 'progressbar' : null"
+              :aria-label="progress != null ? 'Simulation progress' : null"
+              :aria-valuemin="progress != null ? 0 : null"
+              :aria-valuemax="progress != null ? 100 : null"
+              :aria-valuenow="progress != null ? Math.round(progress) : null"
+            )
+
+              .progress-fill(v-if="progress != null" :style="{ width: progress + '%' }")
+
+              template(v-else) {{ warning }}
 
 </template>
 
@@ -114,21 +139,32 @@
   .invalid .box
     border-color: $warn !important
 
+  .message-area
+    overflow: hidden
+    transition: height 0.25s, opacity 0.25s
+
   .error-msg
+    position: relative
+    min-height: 16px
+    line-height: 16px
     font-size: 12px
     font-weight: bold
     padding: 6px 10px
-    transition: all 0.25s
     text-align: center
     color: lighten($warn, 65%)
     background: darken($warn, 50%)
 
-  .fade-enter-from
-  .fade-leave-to
+  .message-enter-from
+  .message-leave-to
     opacity: 0
-    padding-top: 0
-    padding-bottom: 0
-    margin-bottom: -12px
+
+  .progress-fill
+    position: absolute
+    top: 0
+    bottom: 0
+    left: 0
+    background: darken($warn, 20%)
+    transition: width 0.15s linear
 
   .picker
     width: 24px !important
@@ -171,12 +207,19 @@
     border-top: 1px solid $dark1 * 1.4
     padding-bottom: 0
 
+  .result-summary
+    display: flex
+
   .result-summary span:first-child
+    flex: 1
     font-weight: normal
 
   .result-summary span:last-child
-    justify-self: end
+    width: 65px
+    flex: 0 0 65px
     text-align: right
+    white-space: normal
+    overflow-wrap: anywhere
 
   .fluid-selector
     width: 120px
@@ -209,6 +252,7 @@
   import { fluidMaterials } from '../js/core/fluid.js'
   import { worldTransform } from '../js/core/assembly.js'
   import PickerSession from '../js/picker-session.js'
+  import { cancelSimulation, solveSimulation } from '../js/core/simulation-runner.js'
 
   const configurations = {
     fluid: {
@@ -272,6 +316,8 @@
         pickerElements: {},
         fluidMaterials,
         solveRevision: 0,
+        progress: null,
+        solveWarning: null,
         playing: false,
         playbackFrame: null,
         playbackTime: 0,
@@ -291,7 +337,7 @@
       warning() {
         this.document.timeline.marker
         const problem = this.simulation.resolve(this.document.top(), false)
-        return typeof problem == 'string' ? problem : problem?.warning ? problem.message : null
+        return typeof problem == 'string' ? problem : problem?.warning ? problem.message : this.solveWarning
       },
 
     },
@@ -305,7 +351,8 @@
         } else {
           this.stopPlayback(true)
           this.solveRevision++
-          this.simulation.cancelSolve?.()
+          cancelSimulation(this.simulation)
+          this.progress = null
           this.cancelPick()
           this.bus.emit('clear-pickers')
           this.bus.emit('activate-tool', ManipulationTool)
@@ -341,7 +388,7 @@
     beforeUnmount() {
       this.stopPlayback(true)
       this.solveRevision++
-      this.simulation.cancelSolve?.()
+      cancelSimulation(this.simulation)
       this.pickerSession.dispose()
       this.bus.off('resize', this.updatePaths)
       this.bus.off('tree-layout', this.updatePaths)
@@ -351,6 +398,24 @@
     },
 
     methods: {
+      prepareMessage(element) {
+        element.style.height = '0px'
+      },
+
+      enterMessage(element) {
+        element.style.height = `${element.scrollHeight}px`
+      },
+
+      clearMessageHeight(element) {
+        element.style.height = ''
+      },
+
+      leaveMessage(element) {
+        element.style.height = `${element.getBoundingClientRect().height}px`
+        element.offsetHeight
+        element.style.height = '0px'
+      },
+
       setPickerElement(key, element) {
         this.pickerElements[key] = element
       },
@@ -421,10 +486,36 @@
 
       async solve() {
         const revision = ++this.solveRevision
-        const pending = this.simulation.solve(this.document.top())
-        if(this.simulation.mode == 'fluid') this.bus.emit(this.configuration.resultEvent)
-        await pending
+
+        cancelSimulation(this.simulation)
+        this.solveWarning = null
+
+        if(this.warning) {
+          this.progress = null
+        } else {
+          this.progress = 0
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
+          if(revision != this.solveRevision) return
+        }
+
+        try {
+          const pending = solveSimulation(this.simulation, this.document.top(), progress => {
+            if(revision == this.solveRevision) this.progress = progress
+          })
+
+          if(this.configuration.resultEvent) this.bus.emit(this.configuration.resultEvent)
+          const warning = await pending
+          if(revision == this.solveRevision) this.solveWarning = warning || null
+        } catch {
+          if(revision == this.solveRevision) {
+            this.solveWarning = 'The simulation solver failed; check the geometry and settings'
+            cancelSimulation(this.simulation)
+          }
+        }
+
         if(revision != this.solveRevision) return
+
+        this.progress = null
         if(this.simulation.mode == 'static' && !this.simulation.result && this.playing) this.stopPlayback(true)
         if(this.configuration.resultEvent) this.bus.emit(this.configuration.resultEvent)
         this.bus.emit('render-needed')

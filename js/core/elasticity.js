@@ -70,7 +70,7 @@ function strainAndStress(input, nodes, offset, template, lambda, mu) {
 }
 
 
-function solveConjugateGradient(apply, right, diagonal, maxIterations) {
+function solveConjugateGradient(apply, right, diagonal, maxIterations, onProgress) {
   const displacement = new Float64Array(right.length)
   const residual = right.slice()
   const direction = new Float64Array(right.length)
@@ -85,6 +85,7 @@ function solveConjugateGradient(apply, right, diagonal, maxIterations) {
   const target = initialSquared * 1e-8
   let residualSquared = initialSquared
   for(let iteration = 0; iteration < maxIterations && residualSquared > target; iteration++) {
+    if(iteration % 5 == 0) onProgress(35 + iteration / maxIterations * 55)
     const applied = apply(direction)
     let product = 0
     for(let i = 0; i < right.length; i++) product += direction[i] * applied[i]
@@ -109,9 +110,11 @@ function solveConjugateGradient(apply, right, diagonal, maxIterations) {
 }
 
 
-export function solveElasticSolid(solid, fixedFaces, loadFaces, force, material, resolution, maxCells, targetSteps) {
+export function solveElasticSolid(solid, fixedFaces, loadFaces, force, material, resolution, maxCells, targetSteps, onProgress=() => {}) {
   const { bounds, size, step, steps, nx, ny, nz, grid: cells } =
-    voxelizeSolid(solid, resolution, maxCells, targetSteps)
+    voxelizeSolid(solid, resolution, maxCells, targetSteps,
+      value => onProgress(value * 20))
+  onProgress(20)
   const nodeDimensions = [nx + 1, ny + 1, nz + 1]
   const nodeGrid = new Int32Array(nodeDimensions[0] * nodeDimensions[1] * nodeDimensions[2]).fill(-1)
   const positions = []
@@ -228,11 +231,13 @@ export function solveElasticSolid(solid, fixedFaces, loadFaces, force, material,
     }
     return output
   }
-  const { displacement, relativeResidual } = solveConjugateGradient(apply, right, diagonal, 5000)
+  const { displacement, relativeResidual } = solveConjugateGradient(apply, right, diagonal, 5000, onProgress)
+  onProgress(90)
   if(!Number.isFinite(relativeResidual)) return
   const stresses = new Float64Array(positions.length)
   const weights = new Float64Array(positions.length)
   for(let offset = 0; offset < nodeIndices.length; offset += 8) {
+    if(offset % 8000 == 0) onProgress(90 + offset / nodeIndices.length * 8)
     for(const template of templates) {
       const [xx, yy, zz, xy, yz, zx] = strainAndStress(displacement, nodeIndices, offset, template, lambda, mu)
       const equivalent = Math.sqrt(

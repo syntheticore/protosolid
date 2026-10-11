@@ -56,50 +56,6 @@ export class FluidSimulation {
     if(!Number.isInteger(this.resolution) || this.resolution < 8 || this.resolution > 24) return 'Grid cells must be an integer from 8 to 24'
   }
 
-  cancelSolve() {
-    this.worker?.terminate()
-    this.worker = null
-    this.finishSolve?.()
-    this.finishSolve = null
-  }
-
-  async solve(tree) {
-    this.cancelSolve()
-    const problem = this.resolve(tree)
-    this.result = null
-    this.revision++
-    if(problem) return problem
-    const solid = this.inletFaces[0].item.solid
-    const componentId = this.inletFaces[0].componentId
-    const solidId = solid.id
-    const worker = new Worker(new URL('./fluid-worker.js', import.meta.url), { type: 'module' })
-    this.worker = worker
-    const result = await new Promise(resolve => {
-      this.finishSolve = resolve
-      worker.onmessage = event => resolve(event.data)
-      worker.onerror = () => resolve('The flow solver failed; check the fluid volume and settings')
-      const faces = solid.faces().map(face => ({
-        positions: Float64Array.from(face.tesselate().positions),
-        type: this.inletFaces.some(reference => reference.item === face) ? 'inlet'
-          : this.outletFaces.some(reference => reference.item === face) ? 'outlet' : 'wall',
-      }))
-      worker.postMessage({
-        faces,
-        settings: {
-          resolution: this.resolution, density: this.density, viscosity: this.viscosity,
-          inletSpeed: this.inletSpeed, outletPressure: this.outletPressure,
-        },
-      }, faces.map(face => face.positions.buffer))
-    })
-    if(this.worker !== worker) return
-    this.cancelSolve()
-    if(typeof result == 'string') return result
-    result.componentId = componentId
-    result.solidId = solidId
-    this.result = result
-    this.revision++
-  }
-
   sampleAt(position) {
     if(!this.result) return
     const node = findVoxelNode(this.result, position)

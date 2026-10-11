@@ -7,7 +7,7 @@ import { findVoxelNode, makeTriangles } from './voxel.js'
 import { solveElasticSolid } from './elasticity.js'
 
 
-const qualityLevels = {
+export const qualityLevels = {
   1: { resolution: 18, maxCells: 4000, thinLayers: 2 },
   2: { resolution: 24, maxCells: 9000, thinLayers: 3 },
   3: { resolution: 30, maxCells: 16000, thinLayers: 4 },
@@ -163,7 +163,7 @@ export class StaticSimulation {
 Serialize.register(StaticSimulation, 'StaticSimulation')
 
 
-function solidGridSteps(solid, thinLayers) {
+export function solidGridSteps(solid, thinLayers) {
   const faces = solid.faces().filter(face => face.getPlane()).map(face => {
     const triangles = makeTriangles([face])
     const normal = triangles[0].getNormal(new THREE.Vector3())

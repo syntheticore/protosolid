@@ -6725,6 +6725,56 @@ fn boolean_unifies_circular_rims_across_the_old_seam() {
 }
 
 #[test]
+fn cylinder_end_fillet_stops_at_chamfered_transverse_hole() {
+    // invalid-geom.cad: the end blend must not cross the chamfered bore.
+    let tolerance = ModelTolerance::default();
+    let circle = |radius| {
+        Profile::new(
+            Wire2::new(
+                [TrimmedCurve2::circle(Point2::new(0.0, 0.0), radius).unwrap()],
+                tolerance,
+            ).unwrap(),
+            [],
+            tolerance,
+        ).unwrap()
+    };
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, -40.0), Vec3::unit_x(), Vec3::unit_y(), tolerance,
+    ).unwrap();
+    let cylinder = circle(41.339009777411725)
+        .extrude(plane, Vec3::unit_z() * 80.0).unwrap();
+    let side = cylinder.faces()
+        .find(|face| matches!(face.surface(), Surface3::Cylinder(_))).unwrap().clone();
+    let tapered = cylinder.draft(&[side], plane, 0.04).unwrap();
+    let plane = Plane3::new(
+        Point3::new(0.0, 100.0, 0.0), Vec3::unit_x(), Vec3::unit_z(), tolerance,
+    ).unwrap();
+    let cutter = circle(13.975006382948514)
+        .extrude(plane, -Vec3::unit_y() * 200.0).unwrap();
+    for (label, source) in [("cylinder", cylinder), ("cone", tapered)] {
+        let cut = source.difference(&cutter).unwrap();
+        let bore_rim = cut.edges().find(|edge| {
+            let faces = edge.connected_faces().unwrap();
+            faces.len() == 2
+                && faces.iter().all(|face| matches!(face.surface(), Surface3::Cylinder(_) | Surface3::Cone(_)))
+                && edge.endpoints().unwrap().iter().all(|point| point.y > 0.0)
+        }).unwrap().clone();
+        let body = cut.chamfer_with_tangent_propagation(&[bore_rim], 4.0, true).unwrap();
+        let rim = body.edges().find(|edge| matches!(edge.curve(), Curve3::Circle(c)
+            if (c.center().z - 40.0).abs() < tolerance.linear)).unwrap().clone();
+        for radius in [1.0, 20.0] {
+            body.fillet(std::slice::from_ref(&rim), radius)
+                .unwrap_or_else(|error| panic!("{label}, valid radius {radius}: {error}"));
+        }
+        for radius in [25.0, 35.0] {
+            let error = body.fillet(std::slice::from_ref(&rim), radius).err()
+                .unwrap_or_else(|| panic!("{label}, radius {radius} must stop before the chamfered hole"));
+            assert!(error.to_string().contains("blend contact boundary"), "{label}, radius {radius}: {error}");
+        }
+    }
+}
+
+#[test]
 fn fillet_circular_cut_on_offset_rounded_shell() {
     let (cut, rim) = circular_cut_on_offset_rounded_shell();
     let volume = cut.volume();

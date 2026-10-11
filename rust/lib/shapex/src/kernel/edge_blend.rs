@@ -11,6 +11,10 @@ use super::euler::EulerTransaction;
 use super::history::{BlendRole, ChangeKind, DerivationRole};
 use super::modeling::{ChamferMode, ChamferSettings};
 use super::topology::{Edge, Vertex};
+use super::trim::{
+    align_pcurve_to_face_chart, face_boundary_curves, face_parameter_bounds,
+    intersection_chart_copies,
+};
 use super::validation::{validate, ValidationMode};
 use super::wire::{curve_loop_contains_point, curve_pair_intersection};
 use super::{
@@ -3730,18 +3734,24 @@ impl EulerTransaction<'_> {
     }
 
     /// Certify that each new contact curve remains in the trimmed domain of
-    /// its planar parent face. Crossing another loop would make the local
+    /// its parent face. Crossing another loop would make the local
     /// Euler rewrite publish a self-overlapping shell instead of a blend.
     fn certify_blend_contact_trims(&self, patches: &[BlendPatch]) -> KernelResult<()> {
         let tolerance = self.kernel.tolerance;
         for patch in patches {
             for parent_index in 0..2 {
                 let face_id = patch.spine.faces[parent_index];
-                if !matches!(self.working.face(face_id)?.surface, Surface3::Plane(_)) {
-                    continue;
-                }
+                let surface = &self.working.face(face_id)?.surface;
+                let face_boundary = face_boundary_curves(&self.working, face_id, tolerance)?;
                 let boundary = &patch.contact_boundaries[parent_index];
-                let contact = TrimmedCurve2::new(boundary.parent_pcurve.clone(), boundary.range)?;
+                let pcurve = align_pcurve_to_face_chart(
+                    &boundary.parent_pcurve, Some(boundary.range), surface, &face_boundary, tolerance,
+                )?;
+                let contacts = intersection_chart_copies(
+                    DomainBounds::Bounded(boundary.range), &pcurve, surface,
+                    face_parameter_bounds(&face_boundary, tolerance)?, tolerance,
+                )?;
+                let contact = TrimmedCurve2::new(pcurve, boundary.range)?;
                 let start = contact.curve().evaluate(contact.range().start)?.point;
                 let end = contact.curve().evaluate(contact.range().end)?.point;
                 let closed = start.distance(end) <= tolerance.linear;
@@ -3787,41 +3797,53 @@ impl EulerTransaction<'_> {
                         })
                         .map(|coedge_id| {
                             let coedge = self.working.coedge(coedge_id)?;
+                            let chart_curve = face_boundary.iter()
+                                .find(|curve| curve.provenance == coedge_id)
+                                .expect("face boundary contains every loop use");
                             Ok((
                                 coedge_id,
-                                TrimmedCurve2::new(coedge.pcurve.clone(), coedge.range)?,
+                                TrimmedCurve2::new(chart_curve.pcurve.clone(), coedge.range)?,
                             ))
                         })
                         .collect::<KernelResult<Vec<_>>>()?;
                     for (coedge_id, segment) in &identified_segments {
-                        let intersection = curve_pair_intersection(&contact, segment, tolerance)?;
-                        if locally_rewritten_uses.contains(coedge_id)
-                            && (intersection.coincident || !intersection.hits.is_empty())
-                        {
-                            crosses_locally_rewritten_boundary = true;
+                        // A periodic chart cut is not a material boundary.
+                        if self.working.edge_faces(self.working.coedge(*coedge_id)?.edge)?.len() == 1 {
+                            continue;
                         }
-                        if !locally_rewritten_uses.contains(coedge_id)
-                            && (intersection.coincident
-                                || intersection
-                                    .hits
-                                    .iter()
-                                    .any(|hit| closed || !at_contact_endpoint(hit.first_parameter)))
-                        {
-                            return Err(KernelError::new(
-                                DiagnosticKind::GeometryInvariant,
-                                "blend contact boundary crosses an existing face boundary",
-                            ));
+                        for pcurve in &contacts {
+                            let contact = TrimmedCurve2::new(pcurve.clone(), boundary.range)?;
+                            let intersection = curve_pair_intersection(&contact, segment, tolerance)?;
+                            if locally_rewritten_uses.contains(coedge_id)
+                                && (intersection.coincident || !intersection.hits.is_empty())
+                            {
+                                crosses_locally_rewritten_boundary = true;
+                            }
+                            if !locally_rewritten_uses.contains(coedge_id)
+                                && (intersection.coincident
+                                    || intersection
+                                        .hits
+                                        .iter()
+                                        .any(|hit| closed || !at_contact_endpoint(hit.first_parameter)))
+                            {
+                                return Err(KernelError::new(
+                                    DiagnosticKind::GeometryInvariant,
+                                    "blend contact boundary crosses an existing face boundary",
+                                ));
+                            }
                         }
                     }
-                    let segments = identified_segments
-                        .into_iter()
-                        .map(|(_, segment)| segment)
-                        .collect::<Vec<_>>();
-                    let contains = curve_loop_contains_point(&segments, middle, tolerance)?;
-                    match self.working.loop_(loop_id)?.kind {
-                        super::LoopKind::Outer => outer_contains_middle |= contains,
-                        super::LoopKind::Inner if contains => inside_existing_hole = true,
-                        super::LoopKind::Inner => {}
+                    if closed {
+                        let segments = identified_segments
+                            .into_iter()
+                            .map(|(_, segment)| segment)
+                            .collect::<Vec<_>>();
+                        let contains = curve_loop_contains_point(&segments, middle, tolerance)?;
+                        match self.working.loop_(loop_id)?.kind {
+                            super::LoopKind::Outer => outer_contains_middle |= contains,
+                            super::LoopKind::Inner if contains => inside_existing_hole = true,
+                            super::LoopKind::Inner => {}
+                        }
                     }
                 }
                 if closed && inside_existing_hole && !crosses_locally_rewritten_boundary {

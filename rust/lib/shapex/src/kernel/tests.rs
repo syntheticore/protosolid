@@ -6200,6 +6200,120 @@ fn shell_filleted_slot_with_floor_chamfer() {
     }
 }
 
+fn chamfered_slot_document_51() -> super::Compound {
+    let tol = ModelTolerance::default();
+    let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+    let cylinder = Profile::new(Wire2::new([
+        TrimmedCurve2::circle(Point2::new(-10.870896995734686, 3.449392582602713), 34.82132964454673).unwrap(),
+    ], tol).unwrap(), [], tol).unwrap().extrude(plane, Vec3::new(0.0, 50.0, 0.0)).unwrap();
+    let rim = cylinder.edges().find(|edge| matches!(edge.curve(), Curve3::Circle(c) if c.center().y > 49.0)).unwrap().clone();
+    let rounded = cylinder.fillet(&[rim], 9.0).unwrap();
+    let left = -8.257553330349758;
+    let right = 45.67580613259616;
+    let center = 8.675830244458682;
+    let radius = 7.3476627361900695;
+    let a = Point2::new(left, center + radius);
+    let b = Point2::new(right, center + radius);
+    let c = Point2::new(right, center - radius);
+    let d = Point2::new(left, center - radius);
+    let slot = Profile::new(Wire2::new([
+        TrimmedCurve2::line(a, b).unwrap(),
+        TrimmedCurve2::arc_through(b, Point2::new(right + radius, center), c).unwrap(),
+        TrimmedCurve2::line(c, d).unwrap(),
+        TrimmedCurve2::arc_through(d, Point2::new(left - radius, center), a).unwrap(),
+    ], tol).unwrap(), [], tol).unwrap();
+    let top = Plane3::new(Point3::new(0.0, 50.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+    let pocket = rounded.difference(&slot.extrude(top, Vec3::new(0.0, -30.0, 0.0)).unwrap()).unwrap();
+    let rim = pocket.edges().find(|edge| {
+        let faces = edge.connected_faces().unwrap();
+        faces.iter().any(|f| matches!(f.surface(), Surface3::Plane(p) if (p.origin().y - 20.0).abs() < tol.linear))
+            && faces.iter().any(|f| matches!(f.surface(), Surface3::Cylinder(c) if c.radius() > 34.0))
+    }).unwrap().clone();
+    pocket.chamfer_with_tangent_propagation(&[rim], 5.0, true).unwrap()
+}
+
+#[test]
+fn shell_chamfered_slot_document_51() {
+    let body = chamfered_slot_document_51();
+    let tol = ModelTolerance::default();
+    let bounds = super::bounds::compound(&body).unwrap();
+    for (_, edge) in body.topology().edges() {
+        for step in 0..=16 {
+            let t = edge.range().start + edge.range().span() * step as f64 / 16.0;
+            let point = edge.curve().evaluate(t).unwrap().point;
+            assert!((0..3).all(|axis| point[axis] >= bounds.0[axis] && point[axis] <= bounds.1[axis]));
+        }
+    }
+    let bottom = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.origin().y.abs() < tol.linear)).unwrap().clone();
+    for thickness in [1.0, 2.0] {
+        for openings in [vec![], vec![bottom.clone()]] {
+            let shell = body.shell(&openings, -thickness)
+                .unwrap_or_else(|error| panic!("{thickness} mm, {} openings: {error}", openings.len()));
+            assert_eq!(shell.solids().len(), 1);
+            assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+            shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+        }
+    }
+}
+
+fn filleted_chamfered_slot_document_51() -> super::Compound {
+    let tol = ModelTolerance::default();
+    let body = chamfered_slot_document_51();
+    let lip = body.edges().find(|edge| {
+        let faces = edge.connected_faces().unwrap();
+        faces.iter().any(|face| matches!(face.surface(), Surface3::Torus(_)))
+            && faces.iter().any(|face| matches!(face.surface(), Surface3::Plane(p) if (p.origin().z + 16.02349298064875).abs() < tol.linear))
+    }).unwrap().clone();
+    body.fillet_with_options(&[lip], FilletOptions::new(2.0)).unwrap()
+}
+
+#[test]
+#[ignore = "release-mode shell benchmark; run with --ignored --nocapture --test-threads=1"]
+fn benchmark_shell_document_51() {
+    let body = filleted_chamfered_slot_document_51();
+    let volume = body.volume();
+    for join in ["sharp", "rounded"] {
+        for thickness in [2.0, 10.0, 12.0] {
+            let mut samples = Vec::new();
+            for iteration in 0..4 {
+                let start = std::time::Instant::now();
+                let shell = body.shell_with_join(&[], -thickness, join).unwrap();
+                let elapsed = start.elapsed().as_secs_f64();
+                assert_eq!(shell.solids().len(), 1);
+                assert!(shell.volume() > 0.0 && shell.volume() < volume);
+                if iteration > 0 { samples.push(elapsed); }
+            }
+            samples.sort_by(f64::total_cmp);
+            println!("{join} {thickness} mm: median {:.6}s, samples {samples:?}", samples[1]);
+        }
+    }
+}
+
+#[test]
+fn shell_filleted_chamfered_slot_document_51() {
+    let tol = ModelTolerance::default();
+    let body = filleted_chamfered_slot_document_51();
+    let bottom = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.origin().y.abs() < tol.linear)).unwrap().clone();
+    let mut failures = Vec::new();
+    for join in ["sharp", "rounded"] {
+        for thickness in (1..=12).map(f64::from) {
+            for openings in [vec![], vec![bottom.clone()]] {
+                let shell = match body.shell_with_join(&openings, -thickness, join) {
+                    Ok(shell) => shell,
+                    Err(error) => {
+                        failures.push(format!("{join} {thickness} mm, {} openings: {error}", openings.len()));
+                        continue;
+                    }
+                };
+                assert_eq!(shell.solids().len(), 1);
+                assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+                shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn shell_past_circular_fillet_document_45() {
     let tol = ModelTolerance::default();

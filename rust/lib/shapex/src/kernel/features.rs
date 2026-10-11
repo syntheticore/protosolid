@@ -986,9 +986,14 @@ fn retarget_offset_intersection_endpoints(
     if !changed {
         return Ok(());
     }
-    if !closed && collapsed {
-        // The old guide does not span the retained edge. Continue the exact
-        // intersection between its distinct, topologically ordered vertices.
+    let folded = [&first_points, &second_points].into_iter().any(|points| {
+        (points[1] - points[0]).dot(points[2] - points[1]) < 0.0
+            || (points[32] - points[31]).dot(points[31] - points[30]) < 0.0
+    });
+    if !closed && (collapsed || folded) {
+        // Moving just an endpoint can fold the old guide back along the same
+        // intersection. Continue the entire retained branch between its new,
+        // topologically ordered vertices.
         for index in 1..32 {
             let fraction = index as f64 / 32.0;
             let a = first_points[0] + (first_points[32] - first_points[0]) * fraction;
@@ -1436,14 +1441,17 @@ fn offset_body(
     }
 
     let has_vanished_blends = !vanished_blends.is_empty();
+    let mut corner_blends = Vec::new();
     for face_id in vanished_blends {
-        let neighbors = topology.face_edges(face_id)?.into_iter()
-            .map(|edge| topology.edge_faces(edge))
-            .collect::<KernelResult<Vec<_>>>()?.into_iter().flatten()
-            .filter(|face| supports.contains_key(face))
-            .collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>();
-        let [first, second] = neighbors.as_slice() else {
-            return Err(unsupported("removal of a blend without two surviving neighbors"));
+        let neighbors = tangent_neighbors(topology, face_id, tolerance, |face| supports.contains_key(&face))?
+            .into_iter().collect::<Vec<_>>();
+        let (first, second) = match neighbors.as_slice() {
+            [first, second] => (first, second),
+            [face] => {
+                corner_blends.push((face_id, *face));
+                continue;
+            },
+            _ => return Err(unsupported("removal of a blend without surviving contact supports")),
         };
         let CollapsedSupport::Curve(guide) = &collapsed[&face_id] else {
             unreachable!()
@@ -1457,13 +1465,43 @@ fn offset_body(
                 break;
             }
         }
-        let super::DomainBounds::Bounded(range) = guide.domain().bounds else {
-            return Err(unsupported("unbounded collapsed blend guide"));
+        let range = match guide.domain().bounds {
+            super::DomainBounds::Bounded(range) => range,
+            _ => match topology.face(face_id)?.surface() {
+                Surface3::Cylinder(_) => face_parameter_bounds(topology, face_id, tolerance)?[1],
+                Surface3::RollingBall(blend) => blend.center_range(),
+                _ => return Err(unsupported("unbounded collapsed blend guide")),
+            },
         };
         let curve = intersect_collapsed_blend(
             &supports[first], &supports[second], guide, range, period, tolerance,
         )?;
         collapsed.insert(face_id, CollapsedSupport::Curve(curve));
+    }
+    for (face_id, contact) in corner_blends {
+        let range = face_parameter_bounds(topology, face_id, tolerance)?;
+        let point = topology.face(face_id)?.surface().evaluate(
+            (range[0].start + range[0].end) * 0.5, (range[1].start + range[1].end) * 0.5,
+        )?.point;
+        let mut best: Option<(f64, &Curve3, f64, (f64, f64))> = None;
+        for edge in topology.face_edges(face_id)? {
+            for neighbor in topology.edge_faces(edge)? {
+                if neighbor == face_id { continue; }
+                let Some(CollapsedSupport::Curve(curve)) = collapsed.get(&neighbor) else { continue; };
+                let projection = curve.project(point, tolerance)?;
+                let value = curve.evaluate(projection.parameter)?;
+                let uv = supports[&contact].project(value.point, tolerance)?.parameters;
+                let transverse = value.first_derivative.normalize()
+                    .dot(supports[&contact].normal(uv.0, uv.1)?).abs();
+                if transverse > tolerance.angular && best.as_ref().is_none_or(|candidate| transverse > candidate.0) {
+                    best = Some((transverse, curve, projection.parameter, uv));
+                }
+            }
+        }
+        let (_, guide, parameter, uv) = best
+            .ok_or_else(|| unsupported("collapsed blend corner without a transverse surviving rail"))?;
+        let point = guide.intersect_surface_near(&supports[&contact], parameter, uv, tolerance)?.point;
+        collapsed.insert(face_id, CollapsedSupport::Point(point));
     }
 
     let mut changed_supports = source_faces
@@ -1518,11 +1556,30 @@ fn offset_body(
                 .into_iter()
                 .flatten()
                 .collect::<BTreeSet<_>>();
-            let surviving = neighbors
+            let mut surviving = neighbors
                 .iter()
                 .filter(|face| supports.contains_key(face))
                 .copied()
                 .collect::<Vec<_>>();
+            if surviving.len() > 2 && matches!(topology.face(face_id)?.surface(), Surface3::Cone(_)) {
+                // A chamfer's end faces clip its angular sector; its two
+                // constant-height rails identify the supports that replace
+                // the strip when those rails cross.
+                let mut rails = BTreeSet::new();
+                for edge in &edges {
+                    let coedge = topology.edge(*edge)?.coedges().iter().map(|id| topology.coedge(*id))
+                        .collect::<KernelResult<Vec<_>>>()?.into_iter().find(|coedge|
+                            topology.loop_(coedge.loop_id()).unwrap().face() == face_id).unwrap();
+                    let range = coedge.range();
+                    let heights = [range.start, (range.start + range.end) * 0.5, range.end]
+                        .map(|t| coedge.pcurve().evaluate(t).map(|value| value.point.y));
+                    let heights = heights.into_iter().collect::<KernelResult<Vec<_>>>()?;
+                    if heights.iter().all(|height| (height - heights[0]).abs() <= tolerance.parameter * 64.0) {
+                        rails.extend(topology.edge_faces(*edge)?.into_iter().filter(|face| supports.contains_key(face)));
+                    }
+                }
+                surviving = rails.into_iter().collect();
+            }
             let support = match surviving.as_slice() {
                 [first, second] => {
                     let edge_id = edges
@@ -1576,8 +1633,154 @@ fn offset_body(
             collapsed.insert(face_id, support);
         }
     };
+    let mut patches = patches;
+    for shell in patches.values_mut() {
+        regularize_coincident_offset_faces(shell, distance, tolerance)?;
+    }
     let offset = commit_support_patches(source, patches, changed_supports)?;
     Ok((offset, has_vanished_blends))
+}
+
+fn regularize_coincident_offset_faces(
+    patches: &mut Vec<BrepPatch>,
+    distance: f64,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<()> {
+    // Move untouched geometry directly to the result. Only planar patches
+    // need grouping, with one representative comparison per existing group.
+    let mut groups: Vec<Vec<BrepPatch>> = Vec::new();
+    let mut result = Vec::new();
+    for patch in std::mem::take(patches) {
+        if !matches!(patch.surface, Surface3::Plane(_)) {
+            result.push(patch);
+            continue;
+        }
+        let mut group = None;
+        for (candidate, members) in groups.iter().enumerate() {
+            if super::trim::coincident_supports(&patch.surface, &members[0].surface, tolerance)? {
+                group = Some(candidate);
+                break;
+            }
+        }
+        if let Some(group) = group { groups[group].push(patch); }
+        else { groups.push(vec![patch]); }
+    }
+    let boundary = |patch: &BrepPatch, surface: &Surface3| {
+        patch.loops.iter().flat_map(|loop_| loop_.segments.iter().enumerate().map(|(index, segment)| {
+            let pcurve = if &patch.surface == surface { segment.pcurve.clone() } else {
+                SurfaceProjectionPcurve2::new(segment.curve.clone(), surface.clone(),
+                    segment.pcurve.clone(), segment.range, tolerance)?.into()
+            };
+            Ok(super::trim::FaceCurve {
+                provenance: segment.provenance.clone(), curve: segment.curve.clone(),
+                pcurve, range: segment.range,
+                loop_end: index + 1 == loop_.segments.len(), loop_kind: loop_.kind,
+                parameter_seam: false,
+            })
+        })).collect::<KernelResult<Vec<_>>>()
+    };
+    for group in groups {
+        let patch = &group[0];
+        let normal = patch.surface.normal(0.0, 0.0)?;
+        let orientations = group.iter().map(|other| {
+            Ok(if normal.dot(other.surface.normal(0.0, 0.0)?) < 0.0 {
+                other.orientation.reversed()
+            } else { other.orientation })
+        }).collect::<KernelResult<Vec<_>>>()?;
+        if orientations.iter().all(|orientation| *orientation == orientations[0]) {
+            result.extend(group);
+            continue;
+        }
+        // Opposite offset caps can meet when a wall reaches zero thickness.
+        // Cancel their overlap while retaining the surrounding cap regions.
+        let boundaries = group.iter().map(|other| boundary(other, &patch.surface))
+            .collect::<KernelResult<Vec<_>>>()?;
+        let curves = boundaries.iter().flatten().cloned().collect::<Vec<_>>();
+        let bounds = super::trim::face_parameter_bounds(&curves, tolerance)?;
+        let mut regions = super::boolean::arrange_surface_regions(&patch.surface, &curves,
+            distance.abs() * 1.0e-3, bounds[0].span().abs().min(bounds[1].span().abs()) * 0.05,
+            tolerance, |uv| {
+                let mut winding = 0;
+                for (orientation, boundary) in orientations.iter().zip(&boundaries) {
+                    if super::trim::point_in_trim(uv, boundary)? {
+                        winding += if *orientation == FaceOrientation::Forward { 1 } else { -1 };
+                    }
+                }
+                Ok(match winding.cmp(&0) {
+                    std::cmp::Ordering::Greater => Some(FaceOrientation::Forward),
+                    std::cmp::Ordering::Less => Some(FaceOrientation::Reversed),
+                    std::cmp::Ordering::Equal => None,
+                })
+            })?;
+        for region in &mut regions {
+            region.sources = group.iter().zip(&orientations).filter(|(_, orientation)| **orientation == region.orientation)
+                .flat_map(|(patch, _)| patch.sources.iter().copied()).collect();
+        }
+        result.extend(regions);
+    }
+    *patches = result;
+    Ok(())
+}
+
+#[cfg(test)]
+mod offset_cap_tests {
+    use super::*;
+
+    #[test]
+    fn cancel_caps_in_different_plane_charts() {
+        let tolerance = super::super::ModelTolerance::default();
+        let rectangle = |plane: Plane3, left: f64, orientation| {
+            let mut points = [Point3::new(left, 0.0, 0.0), Point3::new(left + 2.0, 0.0, 0.0),
+                Point3::new(left + 2.0, 1.0, 0.0), Point3::new(left, 1.0, 0.0)];
+            if plane.normal().z < 0.0 { points.reverse(); }
+            let segments = (0..4).map(|index| {
+                let a = points[index];
+                let b = points[(index + 1) % 4];
+                let uv = |point| {
+                    let (u, v) = plane.project(point).unwrap().parameters;
+                    Point2::new(u, v)
+                };
+                BrepPatchSegment {
+                    curve: Line3::new(a, b - a).unwrap().into(),
+                    pcurve: super::super::Line2::new(uv(a), uv(b) - uv(a)).unwrap().into(),
+                    range: ParameterRange::new(0.0, 1.0).unwrap(),
+                    provenance: SegmentProvenance::default(),
+                }
+            }).collect();
+            BrepPatch {
+                surface: plane.into(), orientation, sources: Vec::new(), preserved: Vec::new(),
+                loops: vec![BrepPatchLoop { kind: super::super::LoopKind::Outer, segments }],
+            }
+        };
+        for plane in [
+            Plane3::xy(),
+            Plane3::new(Point3::new(11.0, -7.0, 0.0), crate::Vec3::unit_y() * 2.0,
+                -crate::Vec3::unit_x() * 3.0, tolerance).unwrap(),
+            Plane3::new(Point3::new(11.0, -7.0, 0.0), crate::Vec3::unit_y() * 2.0,
+                crate::Vec3::unit_x() * 3.0, tolerance).unwrap(),
+        ] {
+            let orientation = if plane.normal().z > 0.0 { FaceOrientation::Reversed }
+                else { FaceOrientation::Forward };
+            let mut patches = vec![rectangle(Plane3::xy(), 0.0, FaceOrientation::Forward),
+                rectangle(plane, 1.0, orientation)];
+            regularize_coincident_offset_faces(&mut patches, -1.0, tolerance).unwrap();
+            assert_eq!(patches.len(), 2);
+            for patch in patches {
+                assert_eq!(patch.surface, Surface3::Plane(Plane3::xy()));
+                let segments = &patch.loops[0].segments;
+                let area = segments.iter().map(|segment| segment.pcurve
+                    .signed_area_contribution(segment.range, tolerance.parameter).unwrap()).sum::<f64>();
+                assert!((area.abs() - 1.0).abs() < tolerance.linear);
+                let left = if patch.orientation == FaceOrientation::Forward { 0.0 } else { 2.0 };
+                for segment in segments {
+                    for t in [segment.range.start, segment.range.end] {
+                        let x = segment.curve.evaluate(t).unwrap().point.x;
+                        assert!(x >= left - tolerance.linear && x <= left + 1.0 + tolerance.linear);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn offset_patch_collapsed(
@@ -1646,10 +1849,11 @@ fn collapsed_support(
                 .axis()
                 .dot(cylinder.x_radius().cross(cylinder.y_radius()))
                 .signum();
-            if zero(cylinder.radius() + distance * sign) {
+            let radius = cylinder.radius() + distance * sign;
+            if radius <= tolerance.linear {
                 Some((CollapsedSupport::Curve(
                     Line3::new(cylinder.origin(), cylinder.axis())?.into(),
-                ), false))
+                ), radius < -tolerance.linear))
             } else {
                 None
             }
@@ -1759,23 +1963,39 @@ fn collapsed_offset_vertex(
         .into_iter()
         .flatten()
         .collect::<BTreeSet<_>>();
-    let mut constraints = faces
-        .iter()
-        .map(|face| match collapsed.get(face) {
-            Some(CollapsedSupport::Curve(curve)) => CornerConstraint::Curve(curve),
-            Some(CollapsedSupport::Point(center)) => CornerConstraint::Point(*center),
-            None => CornerConstraint::Surface(&supports[face]),
-        })
-        .collect::<Vec<_>>();
+    let mut support_faces = faces.iter().filter(|face| supports.contains_key(face)).copied().collect::<BTreeSet<_>>();
+    let mut constraints = Vec::new();
+    for face in &faces {
+        let Some(collapsed) = collapsed.get(face) else { continue; };
+        let contacts = tangent_neighbors(topology, *face, tolerance, |face| supports.contains_key(&face))?;
+        match collapsed {
+            CollapsedSupport::Curve(curve) if contacts.is_empty() => constraints.push(CornerConstraint::Curve(curve)),
+            CollapsedSupport::Point(center) => constraints.push(CornerConstraint::Point(*center)),
+            _ => {},
+        }
+        support_faces.extend(contacts);
+    }
+    constraints.extend(support_faces.iter().map(|face| CornerConstraint::Surface(&supports[face])));
     // Surviving parameter seams still constrain the vertex after the blend
     // disappears. A nearest point on the new boundary alone can slide away
     // from a neighboring face's seam and leave its loop disconnected.
+    let mut contact_edges = BTreeSet::new();
+    for face in &support_faces {
+        for edge_id in topology.face_edges(*face)? {
+            let faces = topology.edge_faces(edge_id)?;
+            if faces.len() == 2 && faces.iter().all(|face| support_faces.contains(face))
+                && !tangent_contact(topology, edge_id, faces[0], faces[1], tolerance)?.is_empty() {
+                contact_edges.insert(edge_id);
+            }
+        }
+    }
     for edge_id in incident {
         let faces = topology.edge_faces(edge_id)?;
         if faces.len() == 1 && !collapsed.contains_key(&faces[0]) {
             constraints.push(CornerConstraint::Curve(&edges[&edge_id].curve));
         }
     }
+    constraints.extend(contact_edges.iter().map(|edge| CornerConstraint::Curve(&edges[edge].curve)));
     // At tangent supports, start on the replacement rail rather than correcting
     // from the old corner through a singular surface intersection.
     let mut seed = topology.vertex(vertex)?.point();
@@ -2999,15 +3219,60 @@ fn rounded_join_center(
         tolerance, intersection.achieved_error())?.into())
 }
 
-/// Construct rolling joins before changing the boundary graph. A contact
-/// rail may cross another offset face after a smaller blend has disappeared;
-/// arranging all three supports trims that overlap instead of reversing an edge.
-fn rounded_offset_regions(
+fn reparameterize_join_intersection(
+    intersection: super::SurfaceSurfaceCurve,
+    domains: [[ParameterRange; 2]; 2],
+    tolerance: super::ModelTolerance,
+) -> KernelResult<super::SurfaceSurfaceCurve> {
+    let Curve3::SurfaceIntersection(curve) = &intersection.curve else { return Ok(intersection); };
+    let range = curve.range();
+    let exact = curve.exact_pcurves();
+    let start = exact[0].evaluate(range.start)?.point;
+    let end = exact[0].evaluate(range.end)?.point;
+    if (start.y - end.y).abs() < 1.0 - tolerance.parameter * 64.0 { return Ok(intersection); }
+    // A contact rail is a second intersection branch at the end of a join.
+    // Continue across the join angle, rather than allowing the guide's gauge
+    // to flatten onto that rail near a consumed fillet.
+    let mut points = [vec![start], vec![exact[1].evaluate(range.start)?.point]];
+    for index in 1..64 {
+        let fraction = index as f64 / 64.0;
+        let v = start.y + (end.y - start.y) * fraction;
+        let mut low = range.start;
+        let mut high = range.end;
+        for _ in 0..32 {
+            let middle = (low + high) * 0.5;
+            let value = curve.first_pcurve().evaluate(middle)?.point.y;
+            if (value < v) == (start.y < end.y) { low = middle; } else { high = middle; }
+        }
+        let parameter = (low + high) * 0.5;
+        let a = curve.first_pcurve().evaluate(parameter)?.point;
+        let b = curve.second_pcurve().evaluate(parameter)?.point;
+        let uv = super::intersection::correct_surface_pair_with_gauge(curve.first_surface(), curve.second_surface(),
+                [a.x, v, b.x, b.y], [0.0, 1.0, 0.0, 0.0], domains[0], domains[1], tolerance)?
+                .ok_or_else(|| invalid("join intersection could not continue across its contact angle"))?;
+        points[0].push(Point2::new(uv[0], uv[1]));
+        points[1].push(Point2::new(uv[2], uv[3]));
+    }
+    points[0].push(end);
+    points[1].push(exact[1].evaluate(range.end)?.point);
+    let rebuilt = SurfaceIntersectionCurve::new(curve.first_surface().clone(), curve.second_surface().clone(),
+        super::intersection::smooth_nurbs_guide(&points[0], range)?.into(),
+        super::intersection::smooth_nurbs_guide(&points[1], range)?.into(), range, tolerance, curve.achieved_error())?;
+    let exact = rebuilt.exact_pcurves();
+    Ok(super::SurfaceSurfaceCurve { curve: rebuilt.into(), first_pcurve: exact[0].clone(),
+        second_pcurve: exact[1].clone(), achieved_error: intersection.achieved_error })
+}
+
+/// Arrange offset supports and optional rolling joins when their boundary graph
+/// changes. Intersections between newly adjacent faces trim overlaps after a
+/// smaller blend disappears or opposing offset caps cross.
+fn offset_regions_with_joins(
     source: &Compound,
     offset: Option<&Compound>,
     joins: &[EdgeId],
     openings: &BTreeSet<FaceId>,
     radius: f64,
+    sharp: bool,
 ) -> KernelResult<Compound> {
     use super::trim::{FaceCurve, align_pcurve_to_face_chart, face_boundary_curves, intersection_chart_copies,
         face_parameter_bounds as trim_bounds, point_in_trim, trim_to_faces};
@@ -3030,10 +3295,7 @@ fn rounded_offset_regions(
             let bounds = face_parameter_bounds(topology, face.topology_id(), tolerance)?;
             let base = extended_support(face.surface(), bounds, -radius, tolerance)?;
             let distance = -radius * sign;
-            if collapsed_support(&base, distance, tolerance)?.is_some()
-                || matches!(&base, Surface3::Cylinder(cylinder) if cylinder.radius() + distance
-                    * cylinder.axis().dot(cylinder.x_radius().cross(cylinder.y_radius())).signum() <= tolerance.linear)
-            {
+            if collapsed_support(&base, distance, tolerance)?.is_some() {
                 continue;
             }
             base.offset(distance, tolerance)?
@@ -3086,7 +3348,7 @@ fn rounded_offset_regions(
             neighbors.insert(face.topology_id(), adjacent);
         }
         for (index, face) in skin_faces.iter().enumerate() {
-            if !extended_faces.contains(&face.topology_id()) { continue; }
+            if !sharp && !extended_faces.contains(&face.topology_id()) { continue; }
             let original = trim_bounds(&boundaries[index], tolerance)?;
             let mut bounds = expanded_offset_bounds(&supports[index], original, -radius, tolerance)?;
             // Surviving tangent neighbors retain their isoparametric contact
@@ -3124,9 +3386,10 @@ fn rounded_offset_regions(
                 let shared = topology.face_edges(first_id)?.into_iter().find(|edge| {
                     topology.edge_faces(*edge).unwrap().contains(&second_id)
                 });
-                if !neighbors[&first_id].contains(&second_id) { continue; }
+                if !sharp && !neighbors[&first_id].contains(&second_id)
+                    && !extended_faces.contains(&first_id) && !extended_faces.contains(&second_id) { continue; }
                 if let Some(edge) = shared {
-                    if joins.contains(&edge) || !tangent_contact(topology, edge, first_id, second_id, tolerance)?.is_empty() { continue; }
+                    if !sharp && (joins.contains(&edge) || !tangent_contact(topology, edge, first_id, second_id, tolerance)?.is_empty()) { continue; }
                 }
                 let intersections = supports[first].intersect_surface_in_bounds(&supports[second],
                     trim_bounds(&clipping_boundaries[first], tolerance)?, trim_bounds(&clipping_boundaries[second], tolerance)?, tolerance)?;
@@ -3153,7 +3416,7 @@ fn rounded_offset_regions(
             }
         }
     }
-    for edge_id in joins {
+    for edge_id in joins.iter().filter(|_| !sharp) {
         let edge = topology.edge(*edge_id)?;
         let uses = edge.coedges().iter().map(|id| topology.coedge(*id)).collect::<KernelResult<Vec<_>>>()?;
         let faces = topology.edge_faces(*edge_id)?;
@@ -3186,12 +3449,6 @@ fn rounded_offset_regions(
             center.clone(), contact_surfaces[0].clone(), contact_surfaces[1].clone(),
             contact_guides[0].clone(), contact_guides[1].clone(), range, radius, tolerance,
         )?.with_center_period(closed.then_some(range.span().abs())).into();
-        let middle = (range.start + range.end) * 0.5;
-        let value = blend.evaluate(middle, 0.5)?;
-        let center = center.evaluate(middle)?.point;
-        let orientation = if value.normal()?.dot(value.point - center) < 0.0 {
-            FaceOrientation::Forward
-        } else { FaceOrientation::Reversed };
         let mut boundary = Vec::new();
         for (start, end, trim, seam) in [
             (Point2::new(0.0, 0.0), Point2::new(1.0, 0.0), range, false),
@@ -3204,6 +3461,32 @@ fn rounded_offset_regions(
             boundary.push(candidate(curve, pcurve, trim, seam));
         }
         boundary.last_mut().unwrap().loop_end = true;
+        if offset.is_none() {
+            for (side, coedge) in uses.iter().enumerate() {
+                if parent_indices[side].is_some() { continue; }
+                let face_id = topology.loop_(coedge.loop_id())?.face();
+                let face = topology.face(face_id)?;
+                let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                if !matches!(collapsed_support(face.surface(), -radius * sign, tolerance)?, Some((_, false))) { continue; }
+                // At exact collapse the join's constructive contact rail lies
+                // on the surviving tangent support. Share that rail directly;
+                // projecting a different curve onto the singular join corner
+                // gives an unstable p-curve even when the points agree.
+                for contact in tangent_neighbors(topology, face_id, tolerance, |_| true)? {
+                    let Some(&parent) = by_source.get(&topology.face(contact)?.name()) else { continue; };
+                    let rail = &boundary[if side == 0 { 0 } else { 2 }];
+                    let points = (0..=16).map(|index| {
+                        let point = rail.curve.evaluate(range.start + range.span() * index as f64 / 16.0)?.point;
+                        let uv = supports[parent].project(point, tolerance)?.parameters;
+                        Ok(Point2::new(uv.0, uv.1))
+                    }).collect::<KernelResult<Vec<_>>>()?;
+                    let guide = super::intersection::smooth_nurbs_guide(&points, range)?.into();
+                    let pcurve = SurfaceProjectionPcurve2::new(rail.curve.clone(), supports[parent].clone(), guide, range, tolerance)?.into();
+                    let pcurve = align_pcurve_to_face_chart(&pcurve, Some(range), &supports[parent], &boundaries[parent], tolerance)?;
+                    curves[parent].insert(0, candidate(rail.curve.clone(), pcurve, range, false));
+                }
+            }
+        }
         if offset.is_some() {
             for side in 0..2 {
                 let parent = parent_indices[side].unwrap();
@@ -3215,7 +3498,6 @@ fn rounded_offset_regions(
         }
         parents.push(parent_indices.into_iter().flatten().collect::<Vec<_>>());
         supports.push(blend);
-        orientations.push(orientation);
         ancestry.push(parent_names);
         curves.push(boundary.clone());
         boundaries.push(boundary);
@@ -3228,6 +3510,8 @@ fn rounded_offset_regions(
                 trim_bounds(&boundaries[first], tolerance)?, trim_bounds(&boundaries[second], tolerance)?, tolerance)?;
             let IntersectionSet::Isolated(intersections) = intersections else { continue; };
             for intersection in intersections {
+                let intersection = reparameterize_join_intersection(intersection,
+                    [trim_bounds(&boundaries[first], tolerance)?, trim_bounds(&boundaries[second], tolerance)?], tolerance)?;
                 let first_pcurve = align_pcurve_to_face_chart(&intersection.first_pcurve, None,
                     &supports[first], &boundaries[first], tolerance)?;
                 let second_pcurve = align_pcurve_to_face_chart(&intersection.second_pcurve, None,
@@ -3260,6 +3544,7 @@ fn rounded_offset_regions(
         uv
     };
     let classifier = BrepClassifier::for_compound(source)?;
+    let contact_cache = std::cell::RefCell::new(BTreeMap::new());
     // Keep the radius-distance envelope of the trimmed source boundary.
     // Extended supports alone include pieces hidden behind another source face.
     let distance_to_source = |point: Point3| -> KernelResult<f64> {
@@ -3272,8 +3557,66 @@ fn rounded_offset_regions(
                 distance = distance.min(point.distance(surface.evaluate(uv.x, uv.y)?.point));
             }
         }
-        for (_, edge) in topology.edges() {
-            distance = distance.min(edge.curve().project_on_trim(point, edge.range(), tolerance)?.distance);
+        for (edge_id, edge) in topology.edges() {
+            let projection = edge.curve().project_on_trim(point, edge.range(), tolerance)?;
+            let edge_distance = if sharp && joins.contains(&edge_id) {
+                // A sharp concave crease uses the larger signed depth of its
+                // contact supports inside their common wedge. Include the
+                // corner contacts when the nearest point reaches an end.
+                let mut faces = topology.edge_faces(edge_id)?.into_iter().collect::<BTreeSet<_>>();
+                if edge.vertices()[0] != edge.vertices()[1] {
+                    let closest = edge.curve().evaluate(projection.parameter)?.point;
+                    for vertex in edge.vertices() {
+                        if closest.distance(topology.vertex(vertex)?.point()) <= tolerance.linear_at_scale(closest.to_vec().magnitude()) * 16.0 {
+                            faces.extend(topology.vertex_faces(vertex)?);
+                        }
+                    }
+                }
+                // The same incident-face set recurs at many probes. Resolve
+                // its surviving tangent contacts only on the first visit.
+                let mut cache = contact_cache.borrow_mut();
+                if !cache.contains_key(&faces) {
+                    let mut pending = faces.iter().copied().collect::<Vec<_>>();
+                    let mut visited = BTreeSet::new();
+                    let mut contacts = BTreeSet::new();
+                    while let Some(id) = pending.pop() {
+                        if !visited.insert(id) { continue; }
+                        let face = topology.face(id)?;
+                        let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                        if collapsed_support(face.surface(), -radius * sign, tolerance)?.is_none() {
+                            contacts.insert(id);
+                            continue;
+                        }
+                        pending.extend(tangent_neighbors(topology, id, tolerance, |_| true)?);
+                    }
+                    cache.insert(faces.clone(), contacts);
+                }
+                let depths = cache[&faces].iter().map(|id| {
+                    let face = topology.face(*id)?;
+                    let face_projection = face.surface().project(point, tolerance)?;
+                    let bounds = original_boundaries[&face.name()].2;
+                    let mut uv = in_source_chart(Point2::new(face_projection.parameters.0, face_projection.parameters.1), face.surface(), bounds);
+                    // An ended crease cannot constrain a distant angular
+                    // sector of a curved support. Beyond that sector use the
+                    // corner's contact normal, rather than another periodic
+                    // branch of the untrimmed surface.
+                    if (0..2).any(|axis| face.surface().domains()[axis].period.is_some()
+                        && !bounds[axis].contains(uv[axis], tolerance)) {
+                        let closest = edge.curve().evaluate(projection.parameter)?.point;
+                        let contact = face.surface().project(closest, tolerance)?.parameters;
+                        uv = Point2::new(contact.0, contact.1);
+                    }
+                    let value = face.surface().evaluate(uv.x, uv.y)?;
+                    let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                    Ok((value.point - point).dot(value.normal()? * sign))
+                }).collect::<KernelResult<Vec<_>>>()?;
+                if depths.iter().any(|depth| *depth < -tolerance.linear) {
+                    projection.distance
+                } else { depths.into_iter().fold(f64::NEG_INFINITY, f64::max) }
+            } else {
+                projection.distance
+            };
+            distance = distance.min(edge_distance);
         }
         Ok(distance)
     };
@@ -3285,7 +3628,7 @@ fn rounded_offset_regions(
         let mut regions = super::boolean::arrange_surface_regions(surface, &curves[index],
             radius * 1.0e-3, uv_probe_limit, tolerance, |uv| {
                 if index >= base_count && !point_in_trim(uv, &boundaries[index])? { return Ok(None); }
-                if index < base_count {
+                if index < base_count && !sharp {
                     let (_, original, bounds) = &original_boundaries[&ancestry[index][0]];
                     let original_uv = in_source_chart(uv, surface, *bounds);
                     // On tangent supports a distance probe alone cannot
@@ -3307,11 +3650,24 @@ fn rounded_offset_regions(
                     distance >= radius - f64::EPSILON * point.to_vec().magnitude().max(radius) * 2048.0
                         && distance <= radius + tolerance.linear * 8.0
                 };
-                Ok(retained.then_some(orientations[index]))
+                if !retained { return Ok(None); }
+                let orientation = if index >= base_count {
+                    let Surface3::RollingBall(blend) = surface else { unreachable!() };
+                    let center = blend.center_curve().evaluate(uv.x)?.point;
+                    let normal = surface.normal(uv.x, uv.y)?;
+                    // Continuing across consumed blends can reverse the join's
+                    // chart normal along the source edge. Orient each retained
+                    // region toward its center, rather than using one sample
+                    // for the entire support.
+                    if normal.dot(point - center) < 0.0 { FaceOrientation::Forward }
+                    else { FaceOrientation::Reversed }
+                } else { orientations[index] };
+                Ok(Some(orientation))
             })?;
         for region in &mut regions { region.sources = ancestry[index].clone(); }
         patches.extend(regions);
     }
+    if sharp { regularize_coincident_offset_faces(&mut patches, -radius, tolerance)?; }
     let mut kernel = Kernel::new(tolerance)?;
     let mut transaction = kernel.begin_operation();
     transaction.brep_shell(&patches)?;
@@ -3334,11 +3690,6 @@ pub(crate) fn shell(
         .iter()
         .map(FaceHandle::topology_id)
         .collect::<BTreeSet<_>>();
-    if join_type == "sharp" {
-        let (raw_offset, _) = offset_body(source, &opening_ids, distance, false)?;
-        return assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?
-            .with_feature_parent(source, super::DerivationRole::Shell);
-    }
 
     // A rolling ball of radius |distance| between the diverging offset
     // supports has its center on their original edge. Only convex edges of
@@ -3407,8 +3758,60 @@ pub(crate) fn shell(
         let edge = topology.edge(*id).unwrap();
         edge.vertices()[0] != edge.vertices()[1] && matches!(edge.curve(), Curve3::SurfaceIntersection(_))
     });
+    if join_type == "sharp" {
+        let mut disjoint_contacts = false;
+        let mut crossed_caps = false;
+        if distance < 0.0 && curved_open_join {
+            let caps = source.faces().filter(|face| !opening_ids.contains(&face.topology_id()))
+                .filter_map(|face| match face.surface() {
+                    Surface3::Plane(plane) => Some((face.topology_id(), plane)),
+                    _ => None,
+                }).collect::<Vec<_>>();
+            for first in 0..caps.len() {
+                let sign = if topology.face(caps[first].0)?.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                let normal = caps[first].1.normal() * sign;
+                for second in 0..first {
+                    let other_sign = if topology.face(caps[second].0)?.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                    if normal.dot(caps[second].1.normal() * other_sign) > -1.0 + source.tolerance().angular { continue; }
+                    let gap = (caps[second].1.origin() - caps[first].1.origin()).dot(normal);
+                    if gap < -source.tolerance().linear && gap - 2.0 * distance > source.tolerance().linear {
+                        crossed_caps = true;
+                    }
+                }
+            }
+            for face in source.faces() {
+                let id = face.topology_id();
+                let value = topology.face(id)?;
+                let sign = if value.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                if collapsed_support(face.surface(), distance * sign, source.tolerance())?.is_none() { continue; }
+                let mut contacts = Vec::new();
+                for neighbor in tangent_neighbors(topology, id, source.tolerance(), |_| true)? {
+                    let face = topology.face(neighbor)?;
+                    if !matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_)) { continue; }
+                    let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                    if collapsed_support(face.surface(), distance * sign, source.tolerance())?.is_some() { continue; }
+                    contacts.push(face.surface().offset(distance * sign, source.tolerance())?);
+                }
+                for first in 0..contacts.len() {
+                    for second in 0..first {
+                        if matches!(contacts[first].intersect_surface(&contacts[second], source.tolerance())?, IntersectionSet::Empty) {
+                            disjoint_contacts = true;
+                        }
+                    }
+                }
+            }
+        }
+        // Reusing the original edge graph cannot represent a wall that has
+        // disappeared, or caps that have passed each other. Arrange the sharp
+        // support envelope directly at those topology transitions.
+        let raw_offset = if disjoint_contacts || crossed_caps {
+            offset_regions_with_joins(source, None, &divergent_edges, &opening_ids, distance.abs(), true)?
+        } else { offset_body(source, &opening_ids, distance, false)?.0 };
+        return assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?
+            .with_feature_parent(source, super::DerivationRole::Shell);
+    }
     if distance < 0.0 && curved_open_join {
-        let rounded = rounded_offset_regions(source, None, &divergent_edges, &opening_ids, distance.abs())?;
+        let rounded = offset_regions_with_joins(source, None, &divergent_edges, &opening_ids, distance.abs(), false)?;
         return assemble_shell_boundary(source, &rounded, &opening_ids, distance)?
             .with_feature_parent(source, super::DerivationRole::Shell);
     }
@@ -3416,7 +3819,7 @@ pub(crate) fn shell(
     if distance < 0.0 && has_vanished_blends && closed_joins
         && !divergent_edges.is_empty()
     {
-        let rounded = rounded_offset_regions(source, Some(&raw_offset), &divergent_edges, &opening_ids, distance.abs())?;
+        let rounded = offset_regions_with_joins(source, Some(&raw_offset), &divergent_edges, &opening_ids, distance.abs(), false)?;
         return assemble_shell_boundary(source, &rounded, &opening_ids, distance)?
             .with_feature_parent(source, super::DerivationRole::Shell);
     }
@@ -3587,6 +3990,22 @@ pub(crate) fn move_faces(
 }
 
 type BlendContacts = BTreeMap<FaceId, Vec<(FaceId, Point3, crate::Vec3)>>;
+
+fn tangent_neighbors(
+    topology: &Topology, face: FaceId, tolerance: super::ModelTolerance,
+    include: impl Fn(FaceId) -> bool,
+) -> KernelResult<BTreeSet<FaceId>> {
+    let mut neighbors = BTreeSet::new();
+    for edge in topology.face_edges(face)? {
+        for other in topology.edge_faces(edge)? {
+            if other != face && include(other) && !neighbors.contains(&other)
+                && !tangent_contact(topology, edge, face, other, tolerance)?.is_empty() {
+                neighbors.insert(other);
+            }
+        }
+    }
+    Ok(neighbors)
+}
 
 fn tangent_contact(
     topology: &Topology,

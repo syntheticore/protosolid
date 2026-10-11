@@ -464,6 +464,10 @@ pub(super) fn trim_to_faces<P, Q>(
         super::DomainBounds::Bounded(range) => Some(range),
         _ => None,
     };
+    let curve_natural = match (curve.domain().bounds, curve.domain().period) {
+        (super::DomainBounds::Bounded(range), None) => Some(range),
+        _ => None,
+    };
     // The two p-curves share the spatial curve parameter.  An unbounded
     // p-curve (most commonly `u = t` on a periodic cylinder) must not shorten
     // the bounded domain supplied by its mate merely because the face's UV
@@ -478,6 +482,7 @@ pub(super) fn trim_to_faces<P, Q>(
             ParameterRange::new(start, end)?
         }
         (Some(range), None) | (None, Some(range)) => range,
+        (None, None) if curve_natural.is_some() => curve_natural.unwrap(),
         (None, None) => {
             let first_domain = finite_domain(first, first_boundary, tolerance)?;
             let second_domain = finite_domain(second, second_boundary, tolerance)?;
@@ -495,6 +500,14 @@ pub(super) fn trim_to_faces<P, Q>(
             ParameterRange::new(start, end)?
         }
     };
+    // An analytic p-curve can be unbounded even when its spatial curve wraps
+    // a projection certified only over a retained source interval.
+    let domain = if let Some(range) = curve_natural {
+        let start = domain.start.min(domain.end).max(range.start.min(range.end));
+        let end = domain.start.max(domain.end).min(range.start.max(range.end));
+        if end - start <= tolerance.parameter * 16.0 { return Ok(Vec::new()); }
+        ParameterRange::new(start, end)?
+    } else { domain };
     let inside = |parameter: f64| -> KernelResult<bool> {
         Ok(
             point_in_trim(first.evaluate(parameter)?.point, first_boundary)?

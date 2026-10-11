@@ -215,6 +215,27 @@ fn intersection(
             curve.evaluate(range.start)?.point,
             curve.evaluate(range.end)?.point,
         ])),
+        (Surface3::Cone(cone), Surface3::Plane(plane))
+        | (Surface3::Plane(plane), Surface3::Cone(cone)) => {
+            let normal = plane.normal().normalize();
+            let radial = normal.dot(cone.x_radius()).hypot(normal.dot(cone.y_radius()));
+            if normal.dot(cone.axis()).abs() > radial {
+                return cone_intersection(first, second).or_else(|_| cone_intersection(second, first));
+            }
+            // A hyperbolic or parabolic section has no interior maximum of
+            // |height| on a finite continuous branch. Its trimmed endpoints
+            // therefore bound the axial extent, even though its supports have
+            // an unbounded intersection. Include all azimuths at those heights.
+            let height = [range.start, range.end].into_iter().try_fold(0.0_f64, |height, t| {
+                let axial = (curve.evaluate(t)?.point - cone.apex()).dot(cone.axis())
+                    / cone.axis().magnitude2();
+                Ok::<_, KernelError>(height.max(axial.abs()))
+            })?;
+            Ok(Bounds::points([
+                cone.apex() - cone.axis() * height,
+                cone.apex() + cone.axis() * height,
+            ]).expanded(height * cone.x_radius().magnitude().max(cone.y_radius().magnitude())))
+        }
         _ => cone_intersection(first, second).or_else(|_| cone_intersection(second, first)),
     }
 }

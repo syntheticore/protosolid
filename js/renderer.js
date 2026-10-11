@@ -408,6 +408,7 @@ export default class Renderer {
   }
 
   render() {
+    this.emitter.emit('before-render')
     // Camera-dependent dimension geometry must be ready before Three.js
     // culls objects and uploads their buffers for this frame.
     this.activeCamera.updateMatrixWorld()

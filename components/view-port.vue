@@ -415,10 +415,10 @@
       this.renderer.sketchPlane.setSketch(this.document.activeSketch)
       this.renderer.setDisplayMode(this.displayMode)
       this.renderer.setProjectionMode(this.projectionMode)
+      this.renderer.on('before-render', () => this.syncSelectionTransformGizmo())
       this.renderer.on('render', () => {
         this.frame++
         this.updateSketchSectionSide()
-        this.syncSelectionTransformGizmo()
         this.updateWidgets()
       })
       this.renderer.on('change-view', (position, target) => {

@@ -104,11 +104,14 @@
   const renderNeeded = ref(false)
   provide('render-needed', renderNeeded)
 
-  watch(renderNeeded, () => {
-    if(!renderNeeded.value) return
-    window.alcRenderer && window.alcRenderer.render()
-    renderNeeded.value = false
-  })
+  // Observe every flag transition immediately, then render after mesh updates.
+  watch(renderNeeded, needed => {
+    if(!needed) return
+    nextTick(() => {
+      renderNeeded.value = false
+      window.alcRenderer && window.alcRenderer.render()
+    })
+  }, { flush: 'sync' })
 
   // const store = useMainStore()
 

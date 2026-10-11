@@ -458,7 +458,7 @@
         if(!await this.pickerSession.start(key)) return
         const pickerIndex = this.configuration.pickers.findIndex(picker => picker.key == key)
         const nextPicker = this.configuration.pickers[pickerIndex + 1]
-        if(nextPicker) this.pick(nextPicker.key)
+        if(nextPicker && !this.simulation[nextPicker.key].length) this.pick(nextPicker.key)
       },
 
       activatePicker(key) {

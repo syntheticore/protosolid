@@ -398,7 +398,7 @@
       },
 
       effectiveColorMode: function() {
-        if(this.document.activeSimulation) return this.document.activeSimulation.mode
+        if(this.document.activeSimulation && !this.document.activeSimulationPicker) return this.document.activeSimulation.mode
         if(this.activeTool?.interferenceMode) return 'interference'
         const savedMode = this.document.previewView?.displaySettings?.colorMode
         return this.activeTool?.diagnosticMode
@@ -412,7 +412,7 @@
       },
 
       effectiveDisplayMode: function() {
-        if(this.document.activeSimulation) return 'shaded'
+        if(this.document.activeSimulation && !this.document.activeSimulationPicker) return 'shaded'
         const exportConfig = this.document.activeExportConfig
         if(exportConfig && exportConfig.format != 'STEP') return 'exportPreview'
         const savedMode = this.document.previewView?.displaySettings?.displayMode

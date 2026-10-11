@@ -158,22 +158,27 @@
       })
     }
     if(!sections.length) return props.component.compound
-    const originalFaces = props.component.compound.solids().flatMap(solid => solid.faces())
-    const planes = sections.map(section => section.getTransform())
-    const cut = sections.reduce((shape, section, index) => {
-      if(!shape) return null
-      // Every subsequent cut is a subset of the original compound. Its cached
-      // enclosure remains safe, without meshing intermediate Boolean results.
-      const relation = sectionPlaneRelation(bounds.value, planes[index])
-      if(relation) {
-        const keepsShape = section.side ? relation < 0 : relation > 0
-        return keepsShape ? shape : null
-      }
-      return shape.halfCut(planes[index], section.side)
-    }, props.component.compound)
-    if(!cut) return null
-    if(cut !== props.component.compound) markSectionFaces(cut, planes, originalFaces)
-    return cut
+    try {
+      const originalFaces = props.component.compound.solids().flatMap(solid => solid.faces())
+      const planes = sections.map(section => section.getTransform())
+      const cut = sections.reduce((shape, section, index) => {
+        if(!shape) return null
+        // Every subsequent cut is a subset of the original compound. Its cached
+        // enclosure remains safe, without meshing intermediate Boolean results.
+        const relation = sectionPlaneRelation(bounds.value, planes[index])
+        if(relation) {
+          const keepsShape = section.side ? relation < 0 : relation > 0
+          return keepsShape ? shape : null
+        }
+        return shape.halfCut(planes[index], section.side)
+      }, props.component.compound)
+      if(!cut) return null
+      if(cut !== props.component.compound) markSectionFaces(cut, planes, originalFaces)
+      return cut
+    } catch(error) {
+      console.error(`Section view failed for component ${props.component.id}:`, error)
+      return props.component.compound
+    }
   })
 
   function markSectionFaces(compound, planes, originalFaces) {

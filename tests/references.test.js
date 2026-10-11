@@ -42,7 +42,8 @@ for(const failure of ['deleted', 'ambiguous']) {
     document.timeline.features.push(feature)
     feature.edges = () => [lostRef, keptRef]
     feature.updateReferences(upstream)
-    assert.match(feature.error.msg, new RegExp(failure))
+    assert.equal(feature.error.type, 'warning')
+    assert.equal(feature.error.msg, 'Selection has been repaired')
     assert.deepEqual(feature.edges(), [lostRef, keptRef], 'regeneration preserves failed references')
 
     const replacementRef = reference(replacement)

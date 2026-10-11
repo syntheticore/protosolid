@@ -83,17 +83,21 @@ references survive independent reconstruction and save/reload, including feature
 insertion before the producer or between the producer and the consumer.
 
 Resolution returns `resolved`, `deleted`, or `ambiguous`. Losing a selected split
-branch cannot retarget the reference to its sole remaining sibling. A multi-item
-feature fails if any required selection fails, rather than quietly dropping it.
+branch cannot retarget the reference to its sole remaining sibling. Multi-item
+edge, face, and body inputs use their surviving selections with a warning when
+some references fail. If none survive, the input still fails. Single-item inputs
+and ordered profile inputs still require all their references to resolve.
 The shared API also supports an explicit `all-descendants` policy. A selection
 made before a split can request all descendants; a single selection must resolve
 uniquely. A selection made on one branch remains scoped to that branch under
 either policy.
 
-An explicit pick repairs that input by discarding unresolved references while
-retaining valid selections. Regeneration alone preserves failed references so
-they can recover if their upstream topology returns. Cancel restores the original
-selection and its cached editor bindings.
+Accepting a warned feature persists its surviving selections and repaired sketch
+profiles, then regenerates it to clear the warning. An explicit pick also repairs
+that input by discarding unresolved references while retaining valid selections.
+Regeneration alone preserves failed references so they can recover if their
+upstream topology returns. Cancel restores the original selection and its cached
+editor bindings.
 
 Construction and incidence cannot distinguish every possible symmetric result.
 The picker accepts timeline geometry even when those identities are ambiguous.

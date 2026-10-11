@@ -568,16 +568,16 @@
         setTimeout(() => {
           if(this.destroyed) return
           this.bus.emit('clear-pickers')
+          const tree = this.document.top(this.document.timeline.features.indexOf(this.activeFeature))
           for(const key in this.activeFeature.settings) {
             const data = this.activeFeature[key]
             if(data && this.activeFeature.needsPicker(key, true) && data()) {
               const { pickerPos, color } = this.getPickerInfo(key)
-              const refs = Array.isArray(data()) ? data() : [data()]
-              refs.forEach(ref => {
-                const item = ref.getItem()
-                if(!item) return // Lost references stay editable, but have no picker position.
-                this.bus.emit('show-picker', pickerPos, this.getCenter(item, ref), color)
-                // item.free()
+              const { references } = this.activeFeature.resolveInputReferences(key, tree)
+              references.forEach(ref => {
+                ref.getItems().forEach(item =>
+                  this.bus.emit('show-picker', pickerPos, this.getCenter(item, ref), color)
+                )
               })
             }
           }
@@ -659,7 +659,10 @@
         }
         if(!this.canConfirm) return
         this.status = 'confirmed'
-        if(this.error) this.activeFeature.repair()
+        if(this.error) {
+          this.activeFeature.repair()
+          await this.update()
+        }
         if(!this.showHeader) this.activeFeature.confirm()
         this.activeFeature.commit?.()
         this.close()

@@ -124,42 +124,20 @@ export class Feature {
       if(!this[key] || !this.needsPicker(key, true)) return
 
       const setting = this.settings[key]
-      const refs = setting.multi ? this[key]() : [this[key]()]
-
-      let settingError
-
-      const items = refs.map(ref => {
-        const clone = ref.clone()
-        const error = clone.update(tree)
-        const severe = (error && error.type == 'error')
-        settingError = (severe ? error : (settingError || error))
-        if(severe) return
-        if(!error) ref.update(tree) // Update intact references without user consent, such that their center etc. can be calculated
-        return clone.getItems()
-      }).flat().filter(Boolean)
-
-      if(settingError) errors.push(settingError)
+      const { references, error } = this.resolveInputReferences(key, tree)
+      const items = references.flatMap(ref => ref.getItems())
+      if(error) errors.push(error)
       results[key] = setting.multi ? items : items[0]
     })
 
-    const severe = errors.filter(error => error.type == 'error' )
-    this.error = severe.length ? severe[0] : errors[0]
+    this.error = errors.find(error => error.type == 'error') || errors[0]
 
     return results
   }
 
   selectInput(key, reference, item) {
     if(this.settings[key].multi) {
-      const tree = this.document.top(this.document.timeline.features.indexOf(this))
-      // An explicit pick repairs this input. Regeneration alone retains failed
-      // references so restoring their upstream topology can recover the feature.
-      const references = (this[key] ? this[key]() : []).filter(ref => {
-        // Cancel restores the original reference objects, including their cached
-        // editor bindings. Resolve a clone before discarding a failed reference.
-        if(ref.clone().update(tree)?.type == 'error') return false
-        ref.update(tree)
-        return true
-      })
+      const { references } = this.resolveInputReferences(key)
       const previous = references.find(ref => ref.matches ? ref.matches(item) :
         ref.getItems().some(current => current.id == item.id))
       if(previous) references.splice(references.indexOf(previous), 1)
@@ -240,7 +218,40 @@ export class Feature {
     return !componentId || componentId == this.componentId
   }
 
-  repair() {}
+  resolveInputReferences(key, tree = this.document.top(this.document.timeline.features.indexOf(this))) {
+    let error
+    const references = (this[key] ? [this[key]()].flat() : []).flatMap(ref => {
+      // Preserve failed bindings for cancel and upstream recovery. Warnings
+      // carry repaired geometry on the clone until the selection is accepted.
+      const clone = ref.clone()
+      const result = clone.update(tree)
+      if(result?.type == 'error' || !error) error = result
+      if(result?.type == 'error') return []
+      if(result) return [clone]
+      ref.update(tree)
+      return [ref]
+    })
+    const setting = this.settings[key]
+    if(error?.type == 'error' && references.some(ref => ref.getItems().length) &&
+      setting.multi && ['edge', 'face', 'solid'].includes(setting.type)) {
+      error = { type: 'warning', msg: 'Selection has been repaired' }
+    }
+    return { references, error }
+  }
+
+  inputItems(key) {
+    return this.resolveInputReferences(key).references.flatMap(ref => ref.getItems())
+  }
+
+  repair() {
+    const tree = this.document.top(this.document.timeline.features.indexOf(this))
+    for(const key of Object.keys(this.settings)) {
+      if(!this[key] || !this.needsPicker(key, true)) continue
+      const { references } = this.resolveInputReferences(key, tree)
+      this[key] = this.settings[key].multi ? () => references : () => references[0]
+    }
+    this.error = null
+  }
 
   involvedSketches() {
     return Object.keys(this.settings).flatMap(key => {
@@ -1911,15 +1922,6 @@ export class ExtrudeFeature extends SolidFeature {
     }
   }
 
-  repair() {
-    const newProfiles = this.profiles().filter(profileRef => {
-      const error = profileRef.update(this.document.top())
-      return !error || error.type == 'warning'
-    })
-    this.profiles = () => newProfiles
-    this.error = null
-  }
-
   updateGizmos() {
     if(this.extent != 'distance') {
       if(this.distanceGizmo) window.alcRenderer.removeGizmo(this.distanceGizmo())
@@ -2114,15 +2116,6 @@ export class LoftFeature extends SolidFeature {
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }
   }
-
-  repair() {
-    const newProfiles = this.profiles().filter(profileRef => {
-      const error = profileRef.update(this.document.top())
-      return !error || error.type == 'warning'
-    })
-    this.profiles = () => newProfiles
-    this.error = null
-  }
 }
 
 Serialize.register(LoftFeature, 'LoftFeature')
@@ -2204,8 +2197,9 @@ export class DraftFeature extends SolidFeature {
   }
 
   updateGizmos() {
-    if(this.isComplete()) {
-      const center = this.faces().at(-1).getItem().center().clone()
+    const face = this.isComplete() && this.inputItems('faces').at(-1)
+    if(face) {
+      const center = face.center().clone()
       const component = this.document.top().findChild(this.componentOccurrenceId) ||
         this.document.top().findChild(this.componentId)
       if(component) center.applyMatrix4(worldTransform(component))
@@ -2324,9 +2318,11 @@ export class FilletFeature extends SolidFeature {
   }
 
   getGizmo() {
+    const edge = this.inputItems('edges').at(-1)
+    if(!edge) return
     return {
       distance: {
-        center: this.edges().at(-1).getItem().center(),
+        center: edge.center(),
         direction: new THREE.Vector3(0,1,0),
         distance: this.radius,
         side: true,
@@ -2416,7 +2412,8 @@ export class ChamferFeature extends SolidFeature {
   }
 
   getGizmo() {
-    const edge = this.edges().at(-1).getItem()
+    const edge = this.inputItems('edges').at(-1)
+    if(!edge) return {}
     const faces = edge.connectedFaces().sort((a, b) => a.id.localeCompare(b.id))
     if(this.chamferType != 'equal' && this.flipSides) faces.reverse()
     const points = edge.solid.compound.isShapex ? edge.tesselate().map(point => point.toArray()) : edge.tesselate()
@@ -2515,7 +2512,7 @@ export class ShellFeature extends SolidFeature {
   getGizmo() {
     const tree = this.document.top(this.document.timeline.features.indexOf(this))
     const compound = tree.findChild(this.componentId).compound
-    const openings = this.faces ? this.faces().map(ref => ref.getItem()) : []
+    const openings = this.inputItems('faces')
     const retained = face => !openings.some(opening => compound.isShapex ?
       opening.kernelId == face.kernelId : opening.geom().IsSame(face.geom()))
     const visible = compound.solids().filter(solid => this.isSolidVisible(tree, solid))

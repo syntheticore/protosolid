@@ -820,7 +820,7 @@ export class Profile {
       return newWire
     })
     if(error) return error
-    if(wasRepairNeeded) return { type: 'warning', msg: "Profile has been repaired" }
+    if(wasRepairNeeded) return { type: 'warning', msg: 'Selection has been repaired' }
   }
 
   clone() {

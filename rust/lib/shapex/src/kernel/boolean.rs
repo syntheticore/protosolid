@@ -106,6 +106,16 @@ pub(crate) fn boolean_brep_with_face_boundaries(
             );
         }
     }
+    let source_curves = face_curves.clone();
+    for (operand, faces, opposite) in [
+        (0, first_faces.as_slice(), second_faces.as_slice()),
+        (1, second_faces.as_slice(), first_faces.as_slice()),
+    ] {
+        for (index, face) in faces.iter().enumerate() {
+            rechart_periodic_band(face.surface(), face_curves.get_mut(&(operand, index)).unwrap(),
+                opposite, &source_curves, 1 - operand, tolerance)?;
+        }
+    }
     let original_curves = face_curves.clone();
     let first_classifier = BrepClassifier::for_compound(first)?;
     let second_classifier = BrepClassifier::for_compound(second)?;
@@ -302,7 +312,7 @@ pub(crate) fn boolean_brep_with_face_boundaries(
             first_faces.as_slice()
         };
         for (index, face) in faces.iter().enumerate() {
-            let mut original = boundary_curves(compound, face.topology_id())?;
+            let mut original = original_curves[&(operand, index)].clone();
             let has_coincident_support = opposite_faces.iter().any(|opposite| {
                 face.surface()
                     .intersect_surface(opposite.surface(), tolerance)
@@ -614,6 +624,86 @@ fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec
             let provenance = SegmentProvenance::from_coedge(topology, curve.provenance)?;
             Ok(curve.with_provenance(provenance))
         }).collect()
+}
+
+// A full periodic band can choose its chart cut freely. Keep that cut out of
+// localized intersections so a closed material rim is not split by the chart.
+fn rechart_periodic_band(
+    surface: &Surface3,
+    boundary: &mut [FaceCurve],
+    opposite: &[super::FaceHandle],
+    sources: &BTreeMap<(usize, usize), Vec<FaceCurve>>,
+    operand: usize,
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    if !matches!(surface, Surface3::Cylinder(_)) || boundary.len() != 4
+        || boundary.iter().filter(|curve| curve.parameter_seam).count() != 2
+        || boundary.iter().any(|curve| !matches!(curve.pcurve, Curve2::Line(_)))
+        || boundary.iter().any(|curve| !curve.parameter_seam && !matches!(curve.curve, Curve3::Circle(_)))
+    {
+        return Ok(());
+    }
+    let bounds = face_parameter_bounds(boundary, tolerance)?;
+    let period = std::f64::consts::TAU;
+    if (bounds[0].span() - period).abs() > tolerance.parameter * 64.0 {
+        return Ok(());
+    }
+    let mut occupied = Vec::new();
+    for (index, face) in opposite.iter().enumerate() {
+        let other = &sources[&(operand, index)];
+        if face_bounds_separated(surface, boundary, face.surface(), other, tolerance)? { continue; }
+        let intersections = surface.intersect_surface_in_bounds(face.surface(), bounds,
+            face_parameter_bounds(other, tolerance)?, tolerance)?;
+        let IntersectionSet::Isolated(intersections) = intersections else { continue; };
+        for intersection in intersections {
+            let super::DomainBounds::Bounded(range) = intersection.curve.domain().bounds else { continue; };
+            let mut minimum = f64::INFINITY;
+            let mut maximum = f64::NEG_INFINITY;
+            for index in 0..=64 {
+                let u = intersection.first_pcurve.evaluate(range.start + range.span() * index as f64 / 64.0)?.point.x;
+                minimum = minimum.min(u);
+                maximum = maximum.max(u);
+            }
+            if maximum - minimum >= period - tolerance.parameter * 64.0 { return Ok(()); }
+            let start = (minimum - bounds[0].start).rem_euclid(period);
+            let end = start + maximum - minimum;
+            occupied.push((start, end.min(period)));
+            if end > period { occupied.push((0.0, end - period)); }
+        }
+    }
+    if occupied.is_empty() { return Ok(()); }
+    occupied.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut end = occupied[0].1;
+    let mut gap = (0.0, 0.0);
+    for interval in &occupied[1..] {
+        if interval.0 - end > gap.1 - gap.0 { gap = (end, interval.0); }
+        end = end.max(interval.1);
+    }
+    if occupied[0].0 + period - end > gap.1 - gap.0 { gap = (end, occupied[0].0 + period); }
+    if gap.1 - gap.0 <= tolerance.parameter * 64.0 { return Ok(()); }
+    // Preserve a seam that already lies in the free interval.
+    if occupied[0].0 > tolerance.parameter * 64.0 && end < period - tolerance.parameter * 64.0 {
+        return Ok(());
+    }
+    let seam = bounds[0].start + (gap.0 + gap.1) * 0.5;
+    for curve in boundary {
+        let Curve2::Line(line) = curve.pcurve else { unreachable!() };
+        if curve.parameter_seam {
+            let old_u = line.origin().x;
+            let u = seam + if (old_u - bounds[0].end).abs() < tolerance.parameter * 64.0 { period } else { 0.0 };
+            let origin = Point2::new(u, line.origin().y);
+            curve.pcurve = super::Line2::new(origin, line.direction())?.into();
+            let point = surface.evaluate(origin.x, origin.y)?.point;
+            let next = surface.evaluate(origin.x + line.direction().x, origin.y + line.direction().y)?.point;
+            curve.curve = super::Line3::new(point, next - point)?.into();
+        } else {
+            let shift = (seam - bounds[0].start) / line.direction().x;
+            curve.range = ParameterRange::new(curve.range.start + shift, curve.range.end + shift)?;
+        }
+        curve.provenance = curve.provenance.modified();
+        curve.provenance.vertices = Default::default();
+    }
+    Ok(())
 }
 
 /// Reuse an existing exact face-boundary curve when a surface/surface

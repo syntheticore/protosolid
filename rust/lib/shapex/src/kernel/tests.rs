@@ -6753,6 +6753,18 @@ fn cylinder_end_fillet_stops_at_chamfered_transverse_hole() {
         .extrude(plane, -Vec3::unit_y() * 200.0).unwrap();
     for (label, source) in [("cylinder", cylinder), ("cone", tapered)] {
         let cut = source.difference(&cutter).unwrap();
+        if label == "cylinder" {
+            let rims = cut.edges().filter(|edge| {
+                let faces = edge.connected_faces().unwrap();
+                faces.len() == 2 && faces.iter().all(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+            }).cloned().collect::<Vec<_>>();
+            assert_eq!(rims.len(), 2, "each bore opening must have one native edge");
+            for rim in &rims {
+                let ends = rim.endpoints().unwrap();
+                assert!(ends[0].distance(ends[1]) < tolerance.linear);
+            }
+            cut.chamfer_with_tangent_propagation(&rims, 4.0, true).unwrap();
+        }
         let bore_rim = cut.edges().find(|edge| {
             let faces = edge.connected_faces().unwrap();
             faces.len() == 2

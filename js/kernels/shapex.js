@@ -486,6 +486,7 @@ export class ShapexBackend {
     const u = new THREE.Vector3(...plane.u().toArray()).normalize()
     const v = new THREE.Vector3(...plane.v().toArray())
     v.addScaledVector(u, -v.dot(u)).normalize()
+    if(shapexValue(raw).orientation() == 'reversed') v.negate()
     return new THREE.Matrix4()
       .makeBasis(u, v, new THREE.Vector3().crossVectors(u, v).normalize())
       .setPosition(new THREE.Vector3(...plane.origin().toArray()))

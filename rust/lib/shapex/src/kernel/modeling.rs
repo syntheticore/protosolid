@@ -211,6 +211,7 @@ pub struct FaceHandle {
     name: PersistentId,
     revision: uuid::Uuid,
     surface: super::Surface3,
+    orientation: super::FaceOrientation,
     surface_properties: Arc<OnceLock<KernelResult<super::SurfaceProperties>>>,
 }
 
@@ -220,6 +221,9 @@ impl FaceHandle {
     }
     pub fn surface(&self) -> &super::Surface3 {
         &self.surface
+    }
+    pub fn orientation(&self) -> super::FaceOrientation {
+        self.orientation
     }
     pub fn surface_properties(&self) -> KernelResult<super::SurfaceProperties> {
         self.surface_properties.get_or_init(|| {
@@ -1714,6 +1718,7 @@ fn build_face_handle(
     let entity = topology.face(face)?;
     let name = entity.name();
     let surface = entity.surface().clone();
+    let orientation = entity.orientation();
     let revision = revisions[&name];
     Ok(FaceHandle {
         state,
@@ -1722,6 +1727,7 @@ fn build_face_handle(
         name,
         revision,
         surface,
+        orientation,
         surface_properties: Arc::new(OnceLock::new()),
     })
 }

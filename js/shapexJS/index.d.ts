@@ -234,6 +234,7 @@ export interface NativeValue {
 
 export interface Face extends NativeValue {
   id(): string
+  orientation(): 'forward' | 'reversed'
   surface(): { kind: string, value?: Plane3, axis?: Axis3, center?: Point3 }
   boundaryEdges(): Edge[]
   tessellate(options?: TessellationOptions): TriangleMesh

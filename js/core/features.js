@@ -1868,13 +1868,24 @@ export class ExtrudeFeature extends SolidFeature {
     this.offset = 0
     this.endOffset = 0
     this.side = 'forward'
+    this.sideChangedByUser = false
   }
 
   settingChanged(key, value) {
-    if(key == 'extent' && value == 'through') this.operation = 'cut'
+    if(key == 'side') this.sideChangedByUser = true
+    if(key == 'extent' && value == 'through') {
+      this.operation = 'cut'
+      this.settingChanged('operation', 'cut')
+    }
+    if(key == 'operation' && value == 'cut' && !this.sideChangedByUser) this.side = 'reverse'
+  }
+
+  getValues() {
+    return { ...super.getValues(), sideChangedByUser: this.sideChangedByUser }
   }
 
   setValues(values) {
+    this.sideChangedByUser = values.sideChangedByUser ?? true
     // Preserve the direction of documents saved with the old boolean toggle.
     super.setValues({
       ...values,
@@ -1919,7 +1930,11 @@ export class ExtrudeFeature extends SolidFeature {
         cb: (dist, side) => {
           this.setExpression('distance', null)
           this.distance = dist
-          if(this.side != 'both') this.side = side ? 'forward' : 'reverse'
+          if(this.side != 'both') {
+            const direction = side ? 'forward' : 'reverse'
+            if(this.side != direction) this.sideChangedByUser = true
+            this.side = direction
+          }
         },
       }
     }

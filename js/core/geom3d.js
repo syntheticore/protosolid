@@ -963,8 +963,11 @@ export class Face extends Shape {
     const surface = window.oc.oc.BRep_Tool.Surface_2(this.geom())
     const isPlanar = new window.oc.oc.GeomLib_IsPlanarSurface(surface, 1.0e-7) //XXX Surface->IsKind(STANDARD_TYPE(Geom_Plane)) could be faster
     if(!isPlanar.IsPlanar()) return
-    const plane = isPlanar.Plan()
-    return matrixFromOcPln(plane)
+    const plane = matrixFromOcPln(isPlanar.Plan())
+    if(this.geom().Orientation_1() == window.oc.oc.TopAbs_Orientation.TopAbs_REVERSED) {
+      plane.multiply(new THREE.Matrix4().makeScale(1, -1, -1))
+    }
+    return plane
   }
 
   getAxis() {

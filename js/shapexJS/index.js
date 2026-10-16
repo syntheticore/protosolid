@@ -716,6 +716,7 @@ export function createShapex(bindings) {
 
   class Face extends NativeValue {
     id() { return this._raw().id }
+    orientation() { return this._raw().orientation }
     surfaceProperties() {
       if(!this._surfaceProperties) {
         const [area, x, y, z] = nativeCall(() => Array.from(this._raw().surfaceProperties()))

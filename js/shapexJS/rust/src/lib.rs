@@ -461,6 +461,14 @@ impl NativeFace {
         id_string(self.inner.persistent_id())
     }
 
+    #[wasm_bindgen(getter)]
+    pub fn orientation(&self) -> String {
+        match self.inner.orientation() {
+            shapex::kernel::FaceOrientation::Forward => "forward",
+            shapex::kernel::FaceOrientation::Reversed => "reversed",
+        }.to_owned()
+    }
+
     #[wasm_bindgen(js_name = surfaceProperties)]
     pub fn surface_properties(&self) -> Result<Float64Array, JsValue> {
         let properties = self.inner.surface_properties().map_err(js_error)?;

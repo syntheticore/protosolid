@@ -378,11 +378,24 @@ export default class Document extends Emitter {
         ownsItemsHidden: Object.hasOwn(comp.creator, 'itemsHidden'),
       }))
 
-      this.applyPartVisibilities(feature.visibilities)
+      const applyVisibilities = () => {
+        this.applyPartVisibilities(feature.visibilities)
+        // Reordering can bring sketches into a feature's history that were
+        // absent from its saved visibility snapshot. Preserve sketch visibility
+        // from before editing, then reveal only this feature's input sketches.
+        this.oldVisibility.forEach(({ id, itemsHidden }) => {
+          const component = this.getComponent(id)
+          if(!component) return
+          component.sketches.forEach(sketch => {
+            component.creator.itemsHidden[sketch.id] = itemsHidden[sketch.id]
+          })
+        })
+      }
+      applyVisibilities()
 
       // Regenerate at feature position
       if(!this.timeline.isCurrentFeature(feature)) await this.regenerate(feature)
-      this.applyPartVisibilities(feature.visibilities)
+      applyVisibilities()
 
       // Activate matching component
       this.activeComponent = this.getComponent(feature.componentId)

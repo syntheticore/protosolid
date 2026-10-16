@@ -256,7 +256,7 @@ export class Feature {
 
   involvedSketches() {
     return Object.keys(this.settings).flatMap(key => {
-      if(this.settings[key].type != 'profile') return []
+      if(!['profile', 'curve'].includes(this.settings[key].type)) return []
       if(!this[key]) return []
       const refs = this[key]()
       return (Array.isArray(refs) ? refs : [refs]).map(ref => ref.getItem().sketch )

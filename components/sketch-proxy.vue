@@ -126,7 +126,12 @@
     })
 
     const set = {}
-    handles.forEach(handle => set[JSON.stringify(handle.pos)] = handle )
+    handles.forEach(handle => {
+      const key = JSON.stringify(handle.pos)
+      // Prefer draggable geometry over the origin and other readonly handles.
+      if(set[key] && !set[key].readonly && handle.readonly) return
+      set[key] = handle
+    })
     return Object.values(set)
   })
 

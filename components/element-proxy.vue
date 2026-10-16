@@ -7,8 +7,9 @@
   import { SketchPoint, Spline } from '../js/core/geom2d.js'
   import { Constraint } from '../js/core/sketch.js'
   import { ScreenPointObject } from '../js/three/helper-objects.js'
+  import HiddenLine from '../js/three/hidden-line.js'
 
-  const props = defineProps(['document', 'component', 'element', 'activeTool', 'showSplineControls', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'element', 'displayMode', 'activeTool', 'showSplineControls', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
@@ -26,15 +27,25 @@
   )
 
   let mesh
+  let hiddenMesh
   let controlMesh
 
   const getMesh = () => mesh
 
-  function renderElement() {
+  function removeMeshes() {
+    if(hiddenMesh) {
+      mesh.remove(hiddenMesh)
+      hiddenMesh.material.dispose()
+      hiddenMesh = null
+    }
     window.alcRenderer.remove(mesh)
     window.alcRenderer.remove(controlMesh)
     mesh = null
     controlMesh = null
+  }
+
+  function renderElement() {
+    removeMeshes()
 
     if(props.element instanceof SketchPoint) {
       mesh = new ScreenPointObject(22)
@@ -60,6 +71,12 @@
     mesh.alcObject = props.element
     if(!(props.element instanceof SketchPoint)) {
       window.alcRenderer.offsetSketchObject(mesh)
+      if(mesh.isLine2) {
+        hiddenMesh = new HiddenLine(mesh)
+        hiddenMesh.visible = props.displayMode == 'hiddenLines'
+        window.alcRenderer.offsetSketchObject(hiddenMesh)
+        mesh.add(hiddenMesh)
+      }
     }
 
     props.element.mesh = getMesh
@@ -72,11 +89,12 @@
   watch(() => props.element, renderElement, { immediate: true, deep: 1 })
   watch(() => props.showSplineControls, renderElement)
 
-  watch([highlighted, selected, toolSelected, fullyConstrained], () => {
+  watch([highlighted, selected, toolSelected, fullyConstrained, () => props.displayMode], () => {
     // Zero-length drawing elements have no mesh, but their reactive selection
     // state can still change before Vue unmounts their proxy.
     if(!mesh) return
     mesh.material = getMaterial()
+    if(hiddenMesh) hiddenMesh.visible = props.displayMode == 'hiddenLines'
     renderNeeded.value = true
   })
 
@@ -107,7 +125,7 @@
       if(selected.value || toolSelected.value || highlighted.value) return materials.highlightUiPoint
       return fullyConstrained.value ? materials.constrainedUiPoint : materials.uiPoint
     }
-    return materials.table.curve[
+    const material = materials.table.curve[
       highlighted.value ? 'highlighted' :
         ((selected.value || toolSelected.value) ? 'selected' :
           (fullyConstrained.value ? 'constrained' : 'unselected'))
@@ -116,11 +134,13 @@
     ][
       props.element.isReference ? 'reference' : 'actual'
     ]
+    return props.displayMode == 'hiddenLines' && material == materials.highlightLine
+      ? materials.visibleHighlightLine
+      : material
   }
 
   onUnmounted(() => {
-    window.alcRenderer.remove(mesh)
-    window.alcRenderer.remove(controlMesh)
+    removeMeshes()
     props.element.mesh = null
     renderNeeded.value = true
   })

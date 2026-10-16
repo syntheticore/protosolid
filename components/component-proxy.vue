@@ -29,6 +29,7 @@
       :document="document"
       :component="component"
       :sketch="sketch"
+      :display-mode="displayMode"
       :active-handle="activeHandle"
       :active-tool="activeTool"
       :parent-transform="transform"

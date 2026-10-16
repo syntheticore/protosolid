@@ -553,6 +553,10 @@ export class ManipulationTool extends HighlightTool {
     this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'solid'])
   }
 
+  acceptsInput(item) {
+    return !(item instanceof PointHelper)
+  }
+
   shouldPickImmediately(items) {
     // Items retain raycast order, so the first solid has the nearest hit.
     const [closest, ...others] = items

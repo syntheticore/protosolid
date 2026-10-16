@@ -360,7 +360,7 @@
             icon: 'volleyball-ball',
           },
         },
-        displayMode: 'wireShade',
+        displayMode: 'hiddenLines',
         previewDisplayMode: null,
         colorMode: 'material',
         previewColorMode: null,

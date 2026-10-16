@@ -4,8 +4,8 @@
 
   import { toRaw } from 'vue'
   import * as THREE from 'three'
-  import { Line2 } from 'three/examples/jsm/lines/Line2.js'
   import materials from '../js/materials.js'
+  import HiddenLine from '../js/three/hidden-line.js'
 
   const props = defineProps(['component', 'edge', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
@@ -16,28 +16,8 @@
   const edgeMesh = window.alcRenderer.convertLine(props.edge.tesselate(), getMaterial())
   edgeMesh.alcTypes = ['edge', props.edge.getAxis() && 'axis'].filter(Boolean)
 
-  const hiddenMaterial = materials.hiddenLine.clone()
-  const hiddenMesh = edgeMesh.isLine2 ? new Line2(edgeMesh.geometry, hiddenMaterial) : new THREE.Object3D()
-  hiddenMesh.visible = false
-  // Draw hidden edges before the visible edges and sketch overlays. They must
-  // compare against face depth, not depth written by another edge.
-  hiddenMesh.renderOrder = -1
-  hiddenMesh.raycast = () => {}
+  const hiddenMesh = edgeMesh.isLine2 ? new HiddenLine(edgeMesh) : new THREE.Object3D()
   edgeMesh.add(hiddenMesh)
-
-  const dashPosition = new THREE.Vector4()
-  hiddenMesh.onBeforeRender = function(renderer, scene, camera) {
-    Line2.prototype.onBeforeRender.call(this, renderer)
-    hiddenMaterial.color.copy(edgeMesh.material.color)
-    hiddenMaterial.toneMapped = edgeMesh.material.toneMapped
-    // Keep dashes in screen pixels as the camera zooms or changes projection.
-    const center = this.geometry.boundingSphere.center
-    dashPosition.set(center.x, center.y, center.z, 1)
-      .applyMatrix4(this.matrixWorld)
-      .applyMatrix4(camera.matrixWorldInverse)
-      .applyMatrix4(camera.projectionMatrix)
-    hiddenMaterial.dashScale = hiddenMaterial.resolution.y * camera.projectionMatrix.elements[5] / (2 * Math.abs(dashPosition.w))
-  }
 
   watch(() => props.edge, () => {
     props.edge.mesh = () => edgeMesh
@@ -79,7 +59,7 @@
 
   onUnmounted(() => {
     edgeMesh.remove(hiddenMesh)
-    hiddenMaterial.dispose()
+    if(edgeMesh.isLine2) hiddenMesh.material.dispose()
     window.alcRenderer.remove(edgeMesh)
     props.edge.mesh = null
     renderNeeded.value = true

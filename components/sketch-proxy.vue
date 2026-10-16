@@ -6,6 +6,7 @@
     :document="document"
     :component="component"
     :element="elem"
+    :display-mode="displayMode"
     :active-tool="activeTool"
     :show-spline-controls="active"
     :parent-highlighted="highlighted"
@@ -75,7 +76,7 @@
   import { ProjectedPoint, ElemRef } from '../js/core/sketch.js'
   import { layoutConstraintIcons } from '../js/three/constraint-icons.js'
 
-  const props = defineProps(['document', 'component', 'sketch', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'sketch', 'displayMode', 'activeHandle', 'activeTool', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 

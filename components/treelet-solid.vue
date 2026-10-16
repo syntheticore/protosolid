@@ -3,22 +3,27 @@
   li.treelet-solid(
     @mouseenter="$emit('update:highlight', solid)"
     @mouseleave="$emit('update:highlight', null)"
-    @click="document.selection.handle(solid, bus.isCtrlPressed)"
     :class="{ hidden: isHidden }"
   )
 
     .box(:class="{ highlighted: solid.id == (highlight && highlight.id), selected: document.selection.hasId(solid.id) }")
 
-      header
+      TreeItemHeader(
+        :model-value="component.itemTitle(solid.id, `Solid ${index + 1}`)"
+        :selected="document.selection.hasId(solid.id)"
+        :disabled="component.readOnly"
+        @click="document.selection.handle(solid, bus.isCtrlPressed)"
+        @rename="document.renameTreeItem(component, solid.id, $event)"
+      )
 
-        Icon.eye(
-          icon="eye"
-          @click.stop="toggleVisibility"
-        )
+        template(#icon)
+          Icon.eye(
+            icon="eye"
+            @click.stop="toggleVisibility"
+            @dblclick.stop
+          )
 
-        Icon(icon="layer-group" fixed-width)
-
-        h2 Solid {{ index + 1 }}
+          Icon(icon="layer-group" fixed-width)
 
         .controls.wide(v-if="!component.readOnly")
 
@@ -35,11 +40,6 @@
           )
 
 </template>
-
-
-<style lang="stylus" scoped>
-
-</style>
 
 
 <script setup>

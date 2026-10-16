@@ -4,16 +4,22 @@
 
     .box
 
-      header(@click="toggle")
+      TreeItemHeader(
+        :model-value="simulation.title"
+        :selected="expanded"
+        :disabled="component.readOnly"
+        label-only
+        @click="toggle"
+        @rename="rename"
+      )
 
-        Icon.simulation-icon(
-          :icon="configuration.icon"
-          :class="{ problem: warning }"
-          :title="warning || null"
-          fixed-width
-        )
-
-        h2 {{ simulation.title }}
+        template(#icon)
+          Icon.simulation-icon(
+            :icon="configuration.icon"
+            :class="{ problem: warning }"
+            :title="warning || null"
+            fixed-width
+          )
 
         Icon.expand(icon="angle-right")
 
@@ -427,6 +433,11 @@
           this.document.activateComponent(this.component)
           this.document.activateSimulation(this.simulation)
         }
+      },
+
+      rename(title) {
+        this.simulation.title = title
+        this.document.markChanged()
       },
 
       togglePlayback() {

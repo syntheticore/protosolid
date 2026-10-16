@@ -6,16 +6,23 @@
 
     .box
 
-      header(@click="expanded = !expanded")
+      TreeItemHeader(
+        :model-value="component.itemTitle(section.id, `Section ${index + 1}`)"
+        :selected="expanded"
+        :disabled="component.readOnly"
+        label-only
+        @click="expanded = !expanded"
+        @rename="document.renameTreeItem(component, section.id, $event)"
+      )
 
-        Icon.eye(
-          icon="eye"
-          @click.stop="toggleVisibility"
-        )
+        template(#icon)
+          Icon.eye(
+            icon="eye"
+            @click.stop="toggleVisibility"
+            @dblclick.stop
+          )
 
-        Icon.icon(icon="object-group" fixed-width)
-
-        h2 Section {{ index + 1 }}
+          Icon.icon(icon="object-group" fixed-width)
 
         Icon.expand(icon="angle-right")
 
@@ -65,7 +72,7 @@
   .icon
     padding-left: 3px
 
-  h2
+  :deep(h2.tree-item-name)
     margin: 0 !important
 
   .expand

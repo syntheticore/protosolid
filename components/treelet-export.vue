@@ -2,11 +2,18 @@
 
   .box.treelet-export(:class="{ expanded }")
 
-    header(@click="toggle")
+    TreeItemHeader(
+      :model-value="config.title"
+      :suffix="` - ${config.format.toUpperCase()}`"
+      :selected="expanded"
+      :disabled="component.readOnly"
+      label-only
+      @click="toggle"
+      @rename="rename"
+    )
 
-      Icon(icon="file-export" fixed-width)
-
-      h2 {{ config.title }} - {{ config.format.toUpperCase() }}
+      template(#icon)
+        Icon(icon="file-export" fixed-width)
 
       Icon.expand(icon="angle-right")
 
@@ -58,7 +65,7 @@
 <style lang="stylus" scoped>
 
   header
-    h2
+    :deep(h2.tree-item-name)
       margin: 0 !important
 
   .expand
@@ -121,6 +128,11 @@
     },
 
     methods: {
+      rename(title) {
+        this.config.title = title
+        this.document.markChanged()
+      },
+
       toggle: function() {
         if(this.expanded) {
           this.document.activateExport(null)

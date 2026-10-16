@@ -3,10 +3,8 @@
   li.tree-item(:class="{ hidden: !isVisible }")
 
     header(
-      @dblclick="activateComponent"
       @mouseenter="$emit('update:highlight', component)"
       @mouseleave="$emit('update:highlight', null)"
-      @click="selectComponent"
     )
 
       Icon.expander(
@@ -19,20 +17,29 @@
 
       .box(:class="{ active: component.id === document.activeComponent?.id, selected: document.selection.has(component) }")
 
-        header
+        TreeItemHeader(
+          :model-value="component.creator.title"
+          :suffix="isInstance ? ' <Inst>' : ''"
+          label-tag="span"
+          :selected="document.selection.has(component)"
+          :disabled="component.readOnly"
+          @click="selectComponent"
+          @dblclick="activateComponent"
+          @rename="document.renameComponent(component, $event)"
+        )
 
-          Icon.eye(
-            v-if="!isTop"
-            icon="eye" fixed-width
-            @click.stop="toggleVisibility"
-          )
+          template(#icon)
+            Icon.eye(
+              v-if="!isTop"
+              icon="eye" fixed-width
+              @click.stop="toggleVisibility"
+              @dblclick.stop
+            )
 
-          Icon.component(
-            :icon="componentIcon"
-            :style="{'--color': component.creator.color}"
-          )
-
-          span.name {{ component.creator.title }}{{ isInstance ? ' <Inst>' : '' }}
+            Icon.component(
+              :icon="componentIcon"
+              :style="{'--color': component.creator.color}"
+            )
 
           .controls.wide(
             v-if="!component.readOnly"
@@ -116,6 +123,7 @@
         :key="plane.id"
         v-bind="$attrs"
         :component="component"
+        :document="document"
         :plane="plane"
         :index="i"
       )
@@ -207,10 +215,6 @@
 
   .blank
     visibility: hidden
-
-  .name
-    margin-right: 6px
-    white-space: nowrap
 
   .widgets
     margin-left: 43px
@@ -385,12 +389,6 @@
       document: Object,
       component: Object,
       parentHidden: Boolean,
-    },
-
-    data() {
-      return {
-        foo: Math.random(),
-      };
     },
 
     computed: {

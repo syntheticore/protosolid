@@ -6,18 +6,24 @@
     :class="{ hidden: isHidden }"
   )
 
-    .box
+    .box(:class="{ selected: document.selection.hasId(plane.id) }")
 
-      header
+      TreeItemHeader(
+        :model-value="component.itemTitle(plane.id, `Plane ${index + 1}`)"
+        :selected="document.selection.hasId(plane.id)"
+        :disabled="component.readOnly"
+        @click="document.selection.handle(plane, bus.isCtrlPressed)"
+        @rename="document.renameTreeItem(component, plane.id, $event)"
+      )
 
-        Icon.eye(
-          icon="eye"
-          @click.stop="toggleVisibility"
-        )
+        template(#icon)
+          Icon.eye(
+            icon="eye"
+            @click.stop="toggleVisibility"
+            @dblclick.stop
+          )
 
-        Icon.icon(icon="map" fixed-width)
-
-        h2 {{ title }}
+          Icon.icon(icon="map" fixed-width)
 
 </template>
 
@@ -32,11 +38,10 @@
 
 <script setup>
 
-  const props = defineProps(['component', 'plane', 'index'])
+  const props = defineProps(['document', 'component', 'plane', 'index'])
+  const bus = inject('bus')
 
   const isHidden = computed(() => props.component.isItemHidden(props.plane.id))
-
-  const title = computed(() => `Plane ${props.index + 1}`)
 
   function toggleVisibility() {
     const itemId = props.component.sourceItemId(props.plane.id)

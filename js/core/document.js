@@ -113,6 +113,21 @@ export default class Document extends Emitter {
     this.isFresh = false
   }
 
+  renameComponent(component, title) {
+    if(component.readOnly) return
+    const source = this.getComponent(component.sourceId())
+    source.creator.title = title
+    const feature = this.timeline.features.find(feature => feature.id === source.id)
+    if(feature instanceof CreateComponentFeature) feature.title = title
+    this.markChanged()
+  }
+
+  renameTreeItem(component, itemId, title) {
+    if(component.readOnly) return
+    component.creator.itemNames[component.sourceItemId(itemId)] = title
+    this.markChanged()
+  }
+
   async createComponent(parent) {
     if(parent.readOnly) return
     const feature = new CreateComponentFeature(this, parent.sourceId())

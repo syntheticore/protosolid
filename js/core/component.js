@@ -24,6 +24,7 @@ export class ComponentDefinition {
     this.simulations = []
     this.canvases = []
     this.itemsHidden = {}
+    this.itemNames = {}
     this.color = color
     this.compMaterial = materials.surface.clone()
     this.compLineMaterial = materials.wire.clone()
@@ -328,6 +329,10 @@ export class Component {
 
   isItemHidden(itemId) {
     return !!this.creator.itemsHidden[this.sourceItemId(itemId)]
+  }
+
+  itemTitle(itemId, defaultTitle) {
+    return this.creator.itemNames[this.sourceItemId(itemId)] || defaultTitle
   }
 
   // Terminate component during serialization to avoid cyclic references

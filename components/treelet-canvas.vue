@@ -6,16 +6,24 @@
 
     .box
 
-      header(@click="expanded = !expanded")
+      TreeItemHeader(
+        :model-value="component.itemTitle(canvas.id, sourceName)"
+        :title="canvas.src"
+        :selected="expanded"
+        :disabled="component.readOnly"
+        label-only
+        @click="expanded = !expanded"
+        @rename="document.renameTreeItem(component, canvas.id, $event)"
+      )
 
-        Icon.eye(
-          icon="eye"
-          @click.stop="toggleVisibility"
-        )
+        template(#icon)
+          Icon.eye(
+            icon="eye"
+            @click.stop="toggleVisibility"
+            @dblclick.stop
+          )
 
-        Icon.icon(icon="image" fixed-width)
-
-        h2(:title="canvas.src") {{ sourceName }}
+          Icon.icon(icon="image" fixed-width)
 
         Icon.expand(icon="angle-right")
 
@@ -67,7 +75,7 @@
   .icon
     padding-left: 3px
 
-  h2
+  :deep(h2.tree-item-name)
     margin: 0 !important
     text-overflow: ellipsis
     white-space: nowrap

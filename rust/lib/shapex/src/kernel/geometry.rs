@@ -353,8 +353,9 @@ impl NurbsCurve2 {
         let mut controls = spans[0].1.clone();
         let mut knots = vec![spans[0].0.start; self.degree + 1];
         for (span, next) in spans.iter().skip(1) {
-            knots.extend(vec![span.start; self.degree]);
-            controls.extend_from_slice(&next[1..]);
+            let shared = controls.last() == next.first();
+            knots.extend(vec![span.start; self.degree + usize::from(!shared)]);
+            controls.extend_from_slice(&next[usize::from(shared)..]);
         }
         knots.extend(vec![spans[last].0.end; self.degree + 1]);
         Self::new(
@@ -2047,7 +2048,137 @@ impl From<SurfaceProjectionPcurve2> for Curve2 {
     }
 }
 
+// Splice rational guide spans without fitting a new approximation or extending
+// either certified branch beyond its trim. Full knot multiplicity retains each
+// guide's own gauge at the junction; the corrected spatial curve is continuous.
+fn join_intersection_guides(
+    first: &Curve2, first_range: ParameterRange,
+    second: &Curve2, second_range: ParameterRange,
+    join: f64, offset: Vec2,
+) -> KernelResult<Option<NurbsCurve2>> {
+    let spans = |curve: &Curve2, trim: ParameterRange| -> KernelResult<Option<(usize, Vec<(ParameterRange, Vec<Vec3>)>)>> {
+        Ok(match curve {
+            Curve2::Nurbs(curve) => Some((curve.degree, curve.bezier_spans()?)),
+            Curve2::Line(line) => {
+                let range = ParameterRange::new(trim.start.min(trim.end), trim.start.max(trim.end))?;
+                let a = line.evaluate(range.start)?.point;
+                let b = line.evaluate(range.end)?.point;
+                Some((1, vec![(range, vec![Vec3::new(a.x, a.y, 1.0), Vec3::new(b.x, b.y, 1.0)])]))
+            }
+            _ => None,
+        })
+    };
+    let Some((first_degree, first_spans)) = spans(first, first_range)? else { return Ok(None); };
+    let Some((second_degree, second_spans)) = spans(second, second_range)? else { return Ok(None); };
+    let degree = first_degree.max(second_degree);
+    let mut pieces = Vec::new();
+    for (source_degree, spans, source_range, target, shift) in [
+        (first_degree, first_spans, first_range, ParameterRange::new(0.0, join)?, Vec2::new(0.0, 0.0)),
+        (second_degree, second_spans, second_range, ParameterRange::new(join, 1.0)?, offset),
+    ] {
+        for (span, controls) in spans {
+            let start = span.start.max(source_range.start.min(source_range.end));
+            let end = span.end.min(source_range.start.max(source_range.end));
+            if end <= start { continue; }
+            let (start, end) = if source_range.span() > 0.0 { (start, end) } else { (end, start) };
+            let a = (start - span.start) / span.span();
+            let b = (end - span.start) / span.span();
+            let mut controls = (0..=source_degree).map(|index| {
+                let mut work = controls.clone();
+                for step in 0..source_degree {
+                    let t = if step < source_degree - index { a } else { b };
+                    for j in 0..source_degree - step {
+                        work[j] = work[j] * (1.0 - t) + work[j + 1] * t;
+                    }
+                }
+                work[0]
+            }).collect::<Vec<_>>();
+            // Degree elevation in homogeneous coordinates is exact.
+            while controls.len() <= degree {
+                let n = controls.len();
+                controls = (0..=n).map(|i| {
+                    if i == 0 { controls[0] }
+                    else if i == n { controls[n - 1] }
+                    else { controls[i - 1] * (i as f64 / n as f64) + controls[i] * (1.0 - i as f64 / n as f64) }
+                }).collect();
+            }
+            for point in &mut controls {
+                point.x += shift.x * point.z;
+                point.y += shift.y * point.z;
+            }
+            let map = |t| target.start + (t - source_range.start) / source_range.span() * target.span();
+            pieces.push((map(start), map(end), controls));
+        }
+    }
+    pieces.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut controls = Vec::new();
+    let mut knots = Vec::new();
+    for (start, _, points) in &pieces {
+        knots.extend(vec![*start; degree + 1]);
+        controls.extend_from_slice(points);
+    }
+    knots.extend(vec![1.0; degree + 1]);
+    Ok(Some(NurbsCurve2::new(degree,
+        controls.iter().map(|p| Point2::new(p.x / p.z, p.y / p.z)).collect(),
+        controls.iter().map(|p| p.z).collect(), knots,
+    )?))
+}
+
 impl SurfaceIntersectionCurve {
+    /// Join adjacent trims of the same support pair. Only the branch guides
+    /// are reparameterized; evaluation still solves the exact two surfaces.
+    pub(crate) fn joined(
+        &self,
+        range: ParameterRange,
+        other: &Self,
+        other_range: ParameterRange,
+    ) -> KernelResult<Option<Self>> {
+        let swapped = self.first_surface == other.second_surface
+            && self.second_surface == other.first_surface;
+        if !swapped && (self.first_surface != other.first_surface
+            || self.second_surface != other.second_surface) {
+            return Ok(None);
+        }
+        let end = self.evaluate(range.end)?;
+        let start = other.evaluate(other_range.start)?;
+        let a = end.first_derivative * range.span().signum();
+        let b = start.first_derivative * other_range.span().signum();
+        if end.point.distance(start.point) > self.tolerance.linear_at_scale(end.point.to_vec().magnitude()) * 8.0
+            || a.normalize().dot(b.normalize()) <= 0.0
+            || a.normalize().cross(b.normalize()).magnitude() > self.tolerance.angular * 8.0 {
+            return Ok(None);
+        }
+        let length = a.magnitude() * range.span().abs();
+        let other_length = b.magnitude() * other_range.span().abs();
+        let join = length / (length + other_length);
+        let parameters = self.corrected_parameters(range.end)?;
+        let other_parameters = other.corrected_parameters(other_range.start)?;
+        let guides = [&self.first_pcurve, &self.second_pcurve];
+        let other_guides = if swapped { [&other.second_pcurve, &other.first_pcurve] }
+            else { [&other.first_pcurve, &other.second_pcurve] };
+        let surfaces = [self.first_surface.as_ref(), self.second_surface.as_ref()];
+        let mut joined = Vec::new();
+        for side in 0..2 {
+            let other_side = if swapped { 1 - side } else { side };
+            let domains = surfaces[side].domains();
+            let offset = Vec2::new(
+                domains[0].period.map_or(0.0, |period|
+                    ((parameters[side * 2] - other_parameters[other_side * 2]) / period).round() * period),
+                domains[1].period.map_or(0.0, |period|
+                    ((parameters[side * 2 + 1] - other_parameters[other_side * 2 + 1]) / period).round() * period),
+            );
+            let Some(guide) = join_intersection_guides(
+                guides[side], range, other_guides[side], other_range, join, offset,
+            )? else { return Ok(None); };
+            joined.push(guide.into());
+        }
+        Ok(Some(Self::new(
+            *self.first_surface.clone(), *self.second_surface.clone(),
+            joined.remove(0), joined.remove(0), ParameterRange::new(0.0, 1.0)?,
+            self.tolerance, self.achieved_error.max(other.achieved_error),
+        )?))
+    }
+
     pub(crate) fn extended(&self, range: ParameterRange) -> KernelResult<Self> {
         let range = ParameterRange::new(
             range.start.min(self.range.start),

@@ -329,6 +329,7 @@ struct EdgeMerge {
     survivor: EdgeId,
     removed: EdgeId,
     prepend: bool,
+    curve: Curve3,
     range: ParameterRange,
     coedges: Vec<CoedgeMerge>,
 }
@@ -1600,6 +1601,48 @@ impl<'kernel> EulerTransaction<'kernel> {
         {
             return Ok(None);
         }
+        if let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) = (&first.curve, &second.curve) {
+            let prepend = first.vertices[0] == vertex;
+            let other_range = if (second.vertices[0] == vertex) == prepend {
+                second.range.reversed()
+            } else { second.range };
+            let joined = if prepend { b.joined(other_range, a, first.range)? }
+                else { a.joined(first.range, b, other_range)? };
+            let Some(curve) = joined else { return Ok(None); };
+            let exact = curve.exact_pcurves();
+            let mut coedges = Vec::new();
+            for id in &first.coedges {
+                let keep = self.working.coedge(*id)?;
+                let Some(other) = second.coedges.iter().copied().find(|other| {
+                    self.working.coedge(*other).is_ok_and(|value|
+                        value.loop_id == keep.loop_id && (keep.next == *other || keep.previous == *other))
+                }) else { return Ok(None); };
+                let surface = &self.working.face(self.working.loop_(keep.loop_id)?.face)?.surface;
+                let pcurve = if surface == curve.first_surface() { &exact[0] }
+                    else if surface == curve.second_surface() { &exact[1] }
+                    else { return Ok(None); };
+                // Keep each use in its existing chart, including opposite
+                // lifts of a periodic seam on the same support.
+                let anchor = if prepend { 1.0 } else { 0.0 };
+                let old_anchor = if prepend == keep.forward { keep.range.end } else { keep.range.start };
+                let delta = keep.pcurve.evaluate(old_anchor)?.point - pcurve.evaluate(anchor)?.point;
+                let domains = surface.domains();
+                let offset = Vec2::new(
+                    domains[0].period.map_or(0.0, |period| (delta.x / period).round() * period),
+                    domains[1].period.map_or(0.0, |period| (delta.y / period).round() * period),
+                );
+                coedges.push(CoedgeMerge {
+                    survivor: *id, removed: other,
+                    pcurve: super::trim::translate_pcurve(pcurve, offset, self.kernel.tolerance)?,
+                    range: if keep.forward { curve.range() } else { curve.range().reversed() },
+                });
+            }
+            if coedges[0].removed == coedges[1].removed { return Ok(None); }
+            return Ok(Some(EdgeMerge {
+                vertex, survivor: edges[0], removed: edges[1], prepend,
+                range: curve.range(), curve: curve.into(), coedges,
+            }));
+        }
         let Some(range) = same_domain_edge_range(first, second, vertex, self.kernel.tolerance)? else {
             return Ok(None);
         };
@@ -1671,6 +1714,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             survivor: edges[0],
             removed: edges[1],
             prepend: first.vertices[0] == vertex,
+            curve: first.curve.clone(),
             range,
             coedges,
         }))
@@ -1683,6 +1727,7 @@ impl<'kernel> EulerTransaction<'kernel> {
             survivor,
             removed,
             prepend,
+            curve,
             range,
             coedges,
         } = candidate;
@@ -1718,6 +1763,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         }
         let edge = self.working.edges.get_mut(survivor)?;
         edge.vertices[if prepend { 0 } else { 1 }] = other_vertex;
+        edge.curve = curve;
         edge.range = range;
         let name = edge.name;
         self.working.edges.remove(removed)?;

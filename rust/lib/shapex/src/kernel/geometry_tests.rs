@@ -2,6 +2,53 @@ use super::*;
 use super::super::{IntersectionKind, IntersectionSet};
 
 #[test]
+fn joins_independent_intersection_charts_with_reversed_parameters_and_supports() {
+    let tol = ModelTolerance::default();
+    let xy: Surface3 = Plane3::xy().into();
+    let xz: Surface3 = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), Vec3::unit_z(), tol).unwrap().into();
+    let guide: Curve2 = Line2::new(Point2::new(0.0, 0.0), Vec2::unit_x()).unwrap().into();
+    let first_range = ParameterRange::new(2.0, 4.0).unwrap();
+    let first = SurfaceIntersectionCurve::new(xy.clone(), xz.clone(), guide.clone(), guide,
+        first_range, tol, 0.0).unwrap();
+    let guide: Curve2 = Line2::new(Point2::new(10.0, 0.0), Vec2::new(-2.0, 0.0)).unwrap().into();
+    let second = SurfaceIntersectionCurve::new(xz, xy, guide.clone(), guide,
+        ParameterRange::new(2.0, 3.0).unwrap(), tol, 0.0).unwrap();
+    let joined = first.joined(first_range, &second, ParameterRange::new(3.0, 2.0).unwrap())
+        .unwrap().unwrap();
+    for i in 0..=32 {
+        let t = i as f64 / 32.0;
+        let value = joined.evaluate(t).unwrap();
+        assert!(value.point.distance(Point3::new(2.0 + 4.0 * t, 0.0, 0.0)) < tol.linear);
+        assert!((value.first_derivative - Vec3::unit_x() * 4.0).magnitude() < tol.linear);
+    }
+}
+
+#[test]
+fn spliced_rational_guides_preserve_trims_lifts_and_extension() {
+    let first: Curve2 = NurbsCurve2::new(2,
+        vec![Point2::new(0.0, 0.0), Point2::new(1.0, 2.0), Point2::new(3.0, 1.0)],
+        vec![1.0, 0.75, 2.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap().into();
+    let second: Curve2 = Line2::new(Point2::new(2.0, 3.0), Vec2::new(4.0, 1.0)).unwrap().into();
+    let first_range = ParameterRange::new(0.8, 0.2).unwrap();
+    let second_range = ParameterRange::new(5.0, 7.0).unwrap();
+    let offset = Vec2::new(std::f64::consts::TAU, 0.0);
+    let joined = join_intersection_guides(&first, first_range, &second, second_range, 0.4, offset)
+        .unwrap().unwrap();
+    let extended = joined.extended(ParameterRange::new(-0.1, 1.1).unwrap()).unwrap();
+    for i in 0..=32 {
+        let fraction = i as f64 / 32.0;
+        let a = first.evaluate(first_range.start + first_range.span() * fraction).unwrap().point;
+        let b = second.evaluate(second_range.start + second_range.span() * fraction).unwrap().point + offset;
+        if i < 32 {
+            assert!(joined.evaluate(fraction * 0.4).unwrap().point.distance(a) < 1e-12);
+            assert!(extended.evaluate(fraction * 0.4).unwrap().point.distance(a) < 1e-12);
+        }
+        assert!(joined.evaluate(0.4 + fraction * 0.6).unwrap().point.distance(b) < 1e-12);
+        assert!(extended.evaluate(0.4 + fraction * 0.6).unwrap().point.distance(b) < 1e-12);
+    }
+}
+
+#[test]
 fn distant_line_origin_preserves_circle_tangency() {
     let tolerance = ModelTolerance::default();
     // Coordinates from the extrusion that split one tangent into two nearby hits.

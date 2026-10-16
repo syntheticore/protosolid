@@ -1,6 +1,6 @@
 # Shapex saved-document regressions
 
-This directory contains thirty-seven passing `.cad` regressions.
+This directory contains thirty-eight passing `.cad` regressions.
 All files exercise real modeling workflows and saved references.
 Every feature in a passing regression must complete without an error or partial
 reference loss.
@@ -44,6 +44,7 @@ reference loss.
 | `040-bulging-square-loft-side-offset.cad` | Bulging square loft with an offset side |
 | `041-l-block-asymmetric-all-edge-chamfer.cad` | L block with asymmetric chamfers on all edges |
 | `042-reverse-revolution-between-spline-faces.cad` | Reverse circular revolution between two spline faces across a trim gap |
+| `044-joined-revolution-upper-rim-fillet.cad` | Joined revolution between spline faces with a 1 mm upper rim fillet |
 
 From the repository root:
 
@@ -52,7 +53,7 @@ node tests/shapex-cad/check.mjs
 ```
 
 The checker rebuilds Shapex WASM from the current Rust source, loads every
-document in this directory (excluding `failing/`), and exits **1** if any feature
+document in this directory, and exits **1** if any feature
 fails or loses a reference. It verifies
 that blend selections are semantic edges joining two faces and checks the
 loft face counts. It continues after a failed document to report the whole suite.

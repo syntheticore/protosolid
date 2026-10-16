@@ -308,13 +308,18 @@ test('document 9: fillet joined revolution and bounded spline edges', () => {
       faces.some(face => construction(face, 'id-42724', 'profile-start') || construction(face, 'id-42724', 'profile-end'))
   }).map(edge => edge.id))
   assert.equal(edges.filter(edge => unsupportedRims.has(edge.id)).length, 2)
-  // The periodic lower rim is one closed edge; the upper rim has two arcs.
-  assert.equal(edges.filter(edge => revolutionEdge(edge)).length, 3)
+  const rims = edges.filter(edge => revolutionEdge(edge))
+  assert.equal(rims.length, 2)
+  for(const edge of rims) {
+    const endpoints = edge.vertices()
+    assert.ok(endpoints[0].distanceTo(endpoints[1]) < 1e-7)
+    const selection = edge.edgeReference().selection
+    assert.equal(selection.policy, 'single')
+    assert.equal(joined.resolveTopology(selection).status, 'resolved')
+  }
   const lowerRim = edges.filter(edge => revolutionEdge(edge)
     && edge.connectedFaces().some(face => face.id == lower.id))
   assert.equal(lowerRim.length, 1)
-  const endpoints = lowerRim[0].vertices()
-  assert.ok(endpoints[0].distanceTo(endpoints[1]) < 1e-7)
   const errors = []
   for(const edge of edges.filter(edge => !unsupportedRims.has(edge.id))) {
     for(const radius of [0.25, 0.5, 1, 2, 5]) {

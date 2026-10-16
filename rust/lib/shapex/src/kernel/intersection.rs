@@ -1754,11 +1754,16 @@ fn trace_surface_intersections_in_domains(
     let base_step = parameter_scale / if nested_intersection { 192.0 } else { 48.0 };
     let mut traced = Vec::<Vec<[f64; 4]>>::new();
     for seed in seeds {
-        if traced.iter().any(|curve| {
-            curve
-                .iter()
-                .any(|parameters| parameter_distance(*parameters, seed) <= base_step * 1.5)
-        }) {
+        let mut covered = false;
+        let neighborhood = base_step * 1.5;
+        for curve in &traced {
+            if curve.iter().any(|parameters| parameter_distance(*parameters, seed) <= neighborhood)
+                && trace_reaches_seed(first, second, curve, seed, neighborhood, first_domains, second_domains, tolerance)? {
+                covered = true;
+                break;
+            }
+        }
+        if covered {
             continue;
         }
         let backward = trace_surface_intersection_direction(
@@ -2320,6 +2325,51 @@ fn correct_surface_pair(
         }
     }
     Ok(None)
+}
+
+/// Test branch membership on the corrected supports, not by proximity to a
+/// trace sample. A large face box can make the tracing step wider than the
+/// separation between two different intersection branches.
+fn trace_reaches_seed(
+    first: &Surface3,
+    second: &Surface3,
+    trace: &[[f64; 4]],
+    seed: [f64; 4],
+    neighborhood: f64,
+    first_domains: [super::ParameterRange; 2],
+    second_domains: [super::ParameterRange; 2],
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
+    let parameter_error = seed.iter().map(|v| v.abs()).fold(1.0_f64, f64::max)
+        * f64::EPSILON * 4096.0;
+    let allowed = parameter_error.max(tolerance.parameter * 64.0);
+    for pair in trace.windows(2) {
+        let delta: [f64; 4] = std::array::from_fn(|i| pair[1][i] - pair[0][i]);
+        let axis = (0..4).max_by(|a, b| delta[*a].abs().total_cmp(&delta[*b].abs())).unwrap();
+        if delta[axis].abs() <= tolerance.parameter { continue; }
+        let fraction = (seed[axis] - pair[0][axis]) / delta[axis];
+        // Limit continuation to one sampled segment beyond either endpoint.
+        // A large tracing step alone cannot justify a distant extrapolation.
+        if fraction < -1.0 || fraction > 2.0 { continue; }
+        let guide = std::array::from_fn(|i| pair[0][i] + delta[i] * fraction);
+        let nearest = std::array::from_fn(|i| pair[0][i] + delta[i] * fraction.clamp(0.0, 1.0));
+        // A trim box can cut a short gap out of one support intersection.
+        // Continue the local branch to a nearby seed beyond the sampled end;
+        // requiring it to lie inside a segment retraces the overlapping branch.
+        if parameter_distance(guide, nearest) > neighborhood { continue; }
+        let mut gauge = [0.0; 4];
+        gauge[axis] = 1.0;
+        // Start on this trace and hold its monotone coordinate at the seed.
+        // Starting Newton at the seed itself would trivially accept every
+        // branch, since each seed already satisfies both support equations.
+        let corrected = correct_surface_pair_with_gauge(
+            first, second, guide, gauge, first_domains, second_domains, tolerance,
+        )?;
+        if let Some(parameters) = corrected {
+            if parameter_distance(parameters, seed) <= allowed { return Ok(true); }
+        }
+    }
+    Ok(false)
 }
 
 fn trace_surface_intersection_direction(

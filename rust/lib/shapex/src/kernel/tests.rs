@@ -3120,6 +3120,78 @@ fn move_faces_resizes_round_slot_ends_between_parallel_walls() {
 }
 
 #[test]
+fn bounded_plane_cone_intersections_keep_both_nearby_branches() {
+    let tolerance = ModelTolerance::default();
+    let cone: Surface3 = super::Cone3::new(
+        Point3::origin(), Vec3::unit_z(), Vec3::unit_x(), Vec3::unit_y(), tolerance,
+    ).unwrap().into();
+    let plane: Surface3 = Plane3::new(
+        Point3::new(1.0, 0.0, 0.0), Vec3::unit_y(), Vec3::unit_z(), tolerance,
+    ).unwrap().into();
+    let cone_bounds = [
+        ParameterRange::new(0.0, std::f64::consts::TAU).unwrap(),
+        ParameterRange::new(13.0, 14.0).unwrap(),
+    ];
+    // The half-space cutter is much larger than the small chamfer it cuts.
+    // Its parameter span must not become a radius for merging distinct curves.
+    for extent in [50.0, 500.0, 5000.0] {
+        let plane_bounds = [ParameterRange::new(-extent, extent).unwrap(); 2];
+        for reverse in [false, true] {
+            let intersections = if reverse {
+                plane.intersect_surface_in_bounds(&cone, plane_bounds, cone_bounds, tolerance)
+            } else {
+                cone.intersect_surface_in_bounds(&plane, cone_bounds, plane_bounds, tolerance)
+            }.unwrap();
+            let IntersectionSet::Isolated(curves) = intersections else {
+                panic!("two hyperbola branches expected")
+            };
+            assert_eq!(curves.len(), 2, "extent {extent}, reverse {reverse}");
+            for sign in [-1.0, 1.0] {
+                assert!(curves.iter().any(|curve| {
+                    let super::DomainBounds::Bounded(range) = curve.curve.domain().bounds else {
+                        panic!("bounded trace expected")
+                    };
+                    curve.curve.evaluate((range.start + range.end) * 0.5).unwrap().point.y * sign > 12.0
+                }), "missing branch {sign}, extent {extent}, reverse {reverse}");
+            }
+        }
+    }
+}
+
+#[test]
+fn sections_across_chamfered_hole_keep_closed_caps() {
+    // A wide body with a small chamfer reproduces complex.cad.cad's missing
+    // section edges without its unrelated feature history.
+    let tolerance = ModelTolerance::default();
+    let plane = Plane3::new(
+        Point3::new(0.0, 53.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tolerance,
+    ).unwrap();
+    let circle = |radius| Wire2::new(
+        [TrimmedCurve2::circle(Point2::origin(), radius).unwrap()], tolerance,
+    ).unwrap();
+    let body = Profile::new(circle(300.0), [circle(14.0)], tolerance).unwrap()
+        .extrude(plane, Vec3::unit_y() * 4.0).unwrap();
+    let rims = body.edges().filter(|edge| matches!(edge.curve(), Curve3::Circle(c)
+        if (c.radius() - 14.0).abs() < 1e-7)).cloned().collect::<Vec<_>>();
+    assert_eq!(rims.len(), 2);
+    let body = body.chamfer(&rims, 1.0).unwrap();
+    let plane = Plane3::new(
+        Point3::new(-4.0, 0.0, 0.0), -Vec3::unit_z(), Vec3::unit_y(), tolerance,
+    ).unwrap();
+    let left = body.split(plane, "left").unwrap();
+    let right = body.split(plane, "right").unwrap();
+    assert_eq!(left.solids().len(), 1);
+    assert_eq!(right.solids().len(), 1);
+    assert!((left.volume() + right.volume() - body.volume()).abs() < body.volume() * 1e-8);
+    for cut in [&left, &right] {
+        assert!(cut.volume() > 0.0);
+        for face in cut.faces() {
+            assert!(!face.tessellate(TessellationOptions::default()).unwrap().positions.is_empty());
+        }
+    }
+}
+
+#[test]
 fn section_of_shelled_chamfered_cylinder() {
     // untitled(32).cad: sectioning at the outer cap must preserve both seam
     // uses; the inner cap also needs the offset fillet's exact contact rail.

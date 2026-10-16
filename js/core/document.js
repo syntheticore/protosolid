@@ -8,6 +8,7 @@ import { Selection } from '../selection.js'
 import { Component, SectionView } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
+import { KernelMismatchError, parseDocument } from './document-format.js'
 import { makeID, lastId, setLastId } from './id.js'
 import Expression from './expression.js'
 import preferences from '../preferences.js'
@@ -602,6 +603,7 @@ export default class Document extends Emitter {
   async save(as) {
     await this.cancelFeature()
     const dump = {
+      kernel: window.kernel.modeling.id,
       lastId,
       timeline: this.timeline,
       views: this.views.map(view => {
@@ -622,10 +624,16 @@ export default class Document extends Emitter {
 
   async load(path) {
     let file
+    let dump
+    const materials = []
     try {
       file = await loadFile('.cad', 'text', path)
+      dump = parseDocument(file.data, { document: this, sketches: {}, materials })
     } catch(error) {
-      if(error != 'canceled') alert(error)
+      if(error != 'canceled') {
+        console.error(error)
+        alert(error instanceof KernelMismatchError ? error.message : 'The document could not be opened.')
+      }
       throw error
     }
     const calculationId = ++nextCalculationId
@@ -639,8 +647,6 @@ export default class Document extends Emitter {
       this.filePath = file.path
       this.isFresh = false
       this.treeletsExpandedByDefault = false
-      const materials = []
-      const dump = Serialize.parse(file.data, { document: this, sketches: {}, materials })
       setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
       this.timeline = dump.timeline
       this.materials = materials

@@ -335,7 +335,7 @@
     data() {
       return {
         preferences,
-        activeSection: 'units',
+        activeSection: 'modeling',
         isHighDPI: window.devicePixelRatio > 1,
         restartRequired: false,
         sections: [

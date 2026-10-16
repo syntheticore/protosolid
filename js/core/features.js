@@ -9,6 +9,7 @@ import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, rad } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
+import { KernelMismatchError, parseDocument } from './document-format.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame, faceGizmoFrame } from '../three/gizmos.js'
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
@@ -1531,11 +1532,13 @@ export class PlaceFeature extends Feature {
       }
     } catch(error) {
       if(linkCheck != this.linkCheck) return
+      console.error(error)
       this.pendingData = null
       this.pendingTree = null
       this.activationError = {
         type: 'error',
-        msg: 'The imported document could not be read. Choose a replacement file or cancel.',
+        msg: error instanceof KernelMismatchError ? error.message :
+          'The imported document could not be read. Choose a replacement file or cancel.',
       }
     }
   }
@@ -1710,7 +1713,7 @@ export class PlaceFeature extends Feature {
   parseSource(data, variantOption=null) {
     const previousLastId = lastId
     try {
-      const dump = Serialize.parse(data, { document: this.document, sketches: {} })
+      const dump = parseDocument(data, { document: this.document, sketches: {} })
       if(!dump.timeline?.evaluate) throw new Error('Not a ProtoSolid document')
 
       const selected = this.normalizedVariantOption(dump.timeline.baseCompDef, variantOption)

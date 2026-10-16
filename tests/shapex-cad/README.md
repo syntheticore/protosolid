@@ -1,13 +1,9 @@
 # Shapex saved-document regressions
 
-The thirty-six `.cad` files in this directory are passing regressions.
-Removed case 031 is not reused.
+This directory contains thirty-seven passing `.cad` regressions.
 All files exercise real modeling workflows and saved references.
 Every feature in a passing regression must complete without an error or partial
-reference loss. Circular
-lofts must publish one curved side surface and two planar caps; tapered square
-lofts must retain six planar faces; bulging square lofts retain four curved sides
-and two planar caps.
+reference loss.
 
 | File | Operation |
 | --- | --- |
@@ -47,6 +43,7 @@ and two planar caps.
 | `039-bulging-square-loft-rim-fillet.cad` | Bulging square loft with an upper rim fillet |
 | `040-bulging-square-loft-side-offset.cad` | Bulging square loft with an offset side |
 | `041-l-block-asymmetric-all-edge-chamfer.cad` | L block with asymmetric chamfers on all edges |
+| `042-reverse-revolution-between-spline-faces.cad` | Reverse circular revolution between two spline faces across a trim gap |
 
 From the repository root:
 
@@ -55,37 +52,14 @@ node tests/shapex-cad/check.mjs
 ```
 
 The checker rebuilds Shapex WASM from the current Rust source, loads every
-document, and exits **1** if any feature
+document in this directory (excluding `failing/`), and exits **1** if any feature
 fails or loses a reference. It verifies
 that blend selections are semantic edges joining two faces and checks the
 loft face counts. It continues after a failed document to report the whole suite.
 It does not build or launch the application.
-Case 019 checks that all chamfer boundary edges are visible. Case 020 applies
-1 and 2 mm inward shells, with and without a planar opening, and verifies volume
-and face tessellation. It also adds four circular rims to the upstream fillet
-and checks that the shell keeps the original opening reference after regeneration.
-Case 021 sections both ways at every large planar side face after each modeling
-feature, verifies conservation of volume, and tessellates the resulting faces.
 
 `runtime.mjs` uses the production serializer, timeline, feature classes, reference
 resolution, repair, and viewport face tessellation. OpenCascade supplies the
 existing 2D sketch utilities and PlaneGCS solver; all 3D operations use Shapex.
 
-The loft selections in cases 013, 014, 015, and 017 refer to the single continuous
-side surface and its rim, replacing the former four patch selections. Operation
-dimensions and selected geometric regions are unchanged. Case numbering is
-preserved from the original failure catalogue.
-
-Cases 022–030 and 032–040 were promoted from the failure catalogue without changing their
-saved geometry, dimensions, or selections.
-
-The fixtures use persistent topology selections and producer manifests. Case 005
-was rebuilt with two semicircular arcs per circular profile and separate cuts
-in opposite directions. Both bore openings have individually selectable edge
-references. Its nominal dimensions are unchanged; the chamfer is regenerated
-from two closed rims instead of the original three curve segments, producing
-a small change in the resulting chamfer geometry.
-Case 041 was rebuilt
-with all eighteen edges selected and the original 0.5 and 0.75 mm setbacks. Its
-asymmetric side assignments follow the current face identities; they differ from
-the original positional names on some edges.
+The fixtures use persistent topology selections and producer manifests.

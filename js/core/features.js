@@ -2796,7 +2796,7 @@ Serialize.register(MoveFeature, 'MoveFeature')
 export class ReplaceFeature extends SolidFeature {
   static icon = 'exchange-alt'
   constructor(doc) {
-    super(doc, false, 'Move', {
+    super(doc, false, 'Replace', {
       face: {
         title: 'Replace',
         type: 'face',
@@ -2808,6 +2808,7 @@ export class ReplaceFeature extends SolidFeature {
     })
 
     this.face = null
+    this.replacement = null
   }
 
   updateFeature(tree, references) {

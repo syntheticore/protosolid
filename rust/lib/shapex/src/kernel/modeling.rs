@@ -239,6 +239,10 @@ impl FaceHandle {
     pub(crate) fn topology_id(&self) -> FaceId {
         self.face
     }
+    pub(crate) fn parameter_bounds(&self) -> KernelResult<[super::ParameterRange; 2]> {
+        let boundary = super::trim::face_boundary_curves(self.state.topology(), self.face, self.state.tolerance())?;
+        super::trim::face_parameter_bounds(&boundary, self.state.tolerance())
+    }
     pub fn boundary_edges(&self) -> KernelResult<Vec<EdgeHandle>> {
         self.state
             .topology()
@@ -1559,30 +1563,28 @@ impl Compound {
         super::features::move_faces(self, faces, transform)
     }
 
+    /// Replace a face's support and extend or trim its neighbors to meet it.
+    /// The replacement supplies geometry only; other solids are retained.
     pub fn replace_face(
         &self,
         target: &FaceHandle,
         replacement: &FaceHandle,
     ) -> KernelResult<Self> {
+        if !self.faces().any(|face| face == target) {
+            return Err(KernelError::new(DiagnosticKind::InvalidInput,
+                "replacement target face does not belong to this compound revision"));
+        }
         if self.solids.len() > 1 {
-            let mut found = false;
             let mut results = Vec::new();
             for solid in &self.solids {
                 let contains = solid
                     .faces()
-                    .any(|face| face.persistent_id() == target.persistent_id());
+                    .any(|face| face == target);
                 if contains {
-                    found = true;
                     results.push(solid.to_compound().replace_face(target, replacement)?);
                 } else {
                     results.push(solid.to_compound());
                 }
-            }
-            if !found {
-                return Err(KernelError::new(
-                    DiagnosticKind::InvalidInput,
-                    "replacement target face does not belong to the compound",
-                ));
             }
             return combine_compounds(results, self.state.tolerance());
         }

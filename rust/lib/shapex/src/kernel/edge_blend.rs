@@ -755,7 +755,7 @@ impl EulerTransaction<'_> {
                         supports.insert(face, surface);
                     }
                     let patches = super::features::support_patches(
-                        &self.working, tolerance, supports, bounds, BTreeSet::new(), true, true, &BTreeMap::new(),
+                        &self.working, tolerance, supports, bounds, BTreeSet::new(), true, true, &BTreeSet::new(), &BTreeMap::new(),
                     )?;
                     let source = self.working.clone();
                     self.working = super::Topology::new();

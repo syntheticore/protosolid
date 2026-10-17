@@ -425,11 +425,12 @@
                 isDisabled: () => !window.kernel?.modeling.capabilities.moveFaces },
               { title: 'Fillet', feature: FilletFeature, hotKey: 'F', keyCode: 70 },
               { title: 'Chamfer', feature: ChamferFeature, hotKey: 'H', keyCode: 72 },
-              { title: 'Replace', feature: ReplaceFeature, disabled: true },
+              { title: 'Replace', feature: ReplaceFeature,
+                isDisabled: () => !window.kernel?.modeling.capabilities.replaceFace },
               { title: 'Dissolve', feature: DissolveFeature },
               { title: 'Draft', feature: DraftFeature },
               { title: 'Split', feature: SplitFeature },
-              { title: 'Align', icon: 'layer-group' }, //XXX also -> Replace Face
+              { title: 'Align', icon: 'layer-group' },
             ],
           },
           {

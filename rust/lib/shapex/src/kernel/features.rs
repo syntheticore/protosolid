@@ -317,12 +317,16 @@ fn offset_edge(
     bounds: &BTreeMap<FaceId, [ParameterRange; 2]>,
     tolerance: super::ModelTolerance,
     retain: bool,
+    reparameterized: &BTreeSet<FaceId>,
 ) -> KernelResult<OffsetEdge> {
     let faces = topology.edge_faces(edge)?;
     if faces.len() == 1 {
         // A one-face edge is a periodic parameter seam. Its existing p-curve
         // remains the exact seam on the normally offset support.
         let face = faces[0];
+        if reparameterized.contains(&face) {
+            return Err(unsupported("replacement of a periodic seam face"));
+        }
         let coedge_id = topology.edge(edge)?.coedges()[0];
         let coedge = topology.coedge(coedge_id)?;
         let range = coedge.range();
@@ -386,25 +390,28 @@ fn offset_edge(
     let mut shared_pcurves = BTreeMap::new();
     let mut shared_curve = None;
     let mut shared_points = Vec::<Vec<Point3>>::new();
-    for coedge_id in source.coedges() {
-        let coedge = topology.coedge(*coedge_id)?;
-        let face = topology.loop_(coedge.loop_id())?.face();
-        shared_pcurves.insert(*coedge_id, coedge.pcurve().clone());
-        if shared_curve.is_none() {
-            shared_curve = Some(carried_curve(face, coedge.pcurve())?);
+    let same_charts = !faces.iter().any(|face| reparameterized.contains(face));
+    if same_charts {
+        for coedge_id in source.coedges() {
+            let coedge = topology.coedge(*coedge_id)?;
+            let face = topology.loop_(coedge.loop_id())?.face();
+            shared_pcurves.insert(*coedge_id, coedge.pcurve().clone());
+            if shared_curve.is_none() {
+                shared_curve = Some(carried_curve(face, coedge.pcurve())?);
+            }
+            shared_points.push(
+                [0.0, 0.25, 0.5, 0.75, 1.0]
+                    .into_iter()
+                    .map(|fraction| {
+                        let parameter = source_range.start + source_range.span() * fraction;
+                        let uv = coedge.pcurve().evaluate(parameter)?.point;
+                        supports[&face]
+                            .evaluate(uv.x, uv.y)
+                            .map(|value| value.point)
+                    })
+                    .collect::<KernelResult<Vec<_>>>()?,
+            );
         }
-        shared_points.push(
-            [0.0, 0.25, 0.5, 0.75, 1.0]
-                .into_iter()
-                .map(|fraction| {
-                    let parameter = source_range.start + source_range.span() * fraction;
-                    let uv = coedge.pcurve().evaluate(parameter)?.point;
-                    supports[&face]
-                        .evaluate(uv.x, uv.y)
-                        .map(|value| value.point)
-                })
-                .collect::<KernelResult<Vec<_>>>()?,
-        );
     }
     // A spherical corner meets an equal-radius cylinder on a great circle.
     // Keep its full periodic support: rotating a neighboring face can extend
@@ -464,7 +471,7 @@ fn offset_edge(
     // Tangent contacts may move along an invariant neighbor, changing its UV
     // coordinates while retaining an exact rail on the other support. Such a
     // rail cannot be recovered by a transverse surface-intersection solver.
-    if !tangent_contact(topology, edge, first, second, tolerance)?.is_empty() {
+    if same_charts && !tangent_contact(topology, edge, first, second, tolerance)?.is_empty() {
         for coedge_id in source.coedges() {
             let coedge = topology.coedge(*coedge_id)?;
             let face = topology.loop_(coedge.loop_id())?.face();
@@ -521,16 +528,17 @@ fn offset_edge(
             });
             for index in 0..=32 {
                 let parameter = source_range.start + source_range.span() * index as f64 / 32.0;
-                let first_uv = topology
-                    .coedge(uses[0])?
-                    .pcurve()
-                    .evaluate(parameter)?
-                    .point;
-                let second_uv = topology
-                    .coedge(uses[1])?
-                    .pcurve()
-                    .evaluate(parameter)?
-                    .point;
+                let seed = |side: usize, face: FaceId| -> KernelResult<Point2> {
+                    if reparameterized.contains(&face) {
+                        let point = source.curve().evaluate(parameter)?.point;
+                        let uv = supports[&face].project(point, tolerance)?.parameters;
+                        Ok(Point2::new(uv.0, uv.1))
+                    } else {
+                        Ok(topology.coedge(uses[side])?.pcurve().evaluate(parameter)?.point)
+                    }
+                };
+                let first_uv = seed(0, first)?;
+                let second_uv = seed(1, second)?;
                 let corrected = if supports[&first]
                     .evaluate(first_uv.x, first_uv.y)?
                     .point
@@ -585,6 +593,9 @@ fn offset_edge(
     let intersections = match intersections {
         IntersectionSet::Isolated(intersections) => intersections,
         IntersectionSet::Coincident => {
+            if !same_charts {
+                return Err(unsupported("replacement coincident with an adjacent face"));
+            }
             // Boolean imprinting may retain an exact split edge between two
             // patches on the same analytical support. Their offsets remain
             // coincident, so carry that split through the shared parameters.
@@ -1525,6 +1536,7 @@ fn offset_body(
             changed_supports.clone(),
             false,
             false,
+            &BTreeSet::new(),
             &collapsed,
         )?;
         let mut removed = BTreeSet::new();
@@ -2026,6 +2038,7 @@ fn rebuild_supports(
         changed_supports.clone(),
         preserve_orientation,
         false,
+        &BTreeSet::new(),
         collapsed,
     )?;
     commit_support_patches(source, patches_by_shell, changed_supports)
@@ -2065,6 +2078,7 @@ pub(super) fn support_patches(
     changed_supports: BTreeSet<FaceId>,
     preserve_orientation: bool,
     reconstruct_edges: bool,
+    reparameterized: &BTreeSet<FaceId>,
     collapsed: &BTreeMap<FaceId, CollapsedSupport>,
 ) -> KernelResult<BTreeMap<super::ShellId, Vec<BrepPatch>>> {
     let source_faces = supports.keys().copied().collect::<BTreeSet<_>>();
@@ -2097,6 +2111,7 @@ pub(super) fn support_patches(
                 &bounds,
                 tolerance,
                 !reconstruct_edges,
+                reparameterized,
             )?,
         );
     }
@@ -4005,7 +4020,7 @@ pub(crate) fn dissolve_faces(source: &Compound, faces: &[FaceHandle]) -> KernelR
     for id in collapsed.keys() {
         for edge in topology.face_edges(*id)? { changed.extend(topology.edge_faces(edge)?); }
     }
-    let mut patches = support_patches(topology, tolerance, supports, bounds, changed.clone(), true, false, &collapsed)?;
+    let mut patches = support_patches(topology, tolerance, supports, bounds, changed.clone(), true, false, &BTreeSet::new(), &collapsed)?;
     for patch in patches.values_mut().flatten() {
         patch.loops.retain(|loop_| !loop_.segments.is_empty());
     }
@@ -4434,11 +4449,46 @@ fn adjust_move_blends(
 }
 
 pub(crate) fn replace_face(
-    _source: &Compound,
-    _target: &FaceHandle,
-    _replacement: &FaceHandle,
+    source: &Compound,
+    target: &FaceHandle,
+    replacement: &FaceHandle,
 ) -> KernelResult<Compound> {
-    Err(unsupported("face replacement"))
+    let topology = source.topology();
+    let tolerance = source.tolerance();
+    if target == replacement {
+        return source.unchanged();
+    }
+    let id = target.topology_id();
+    let mut displacement = 0.0_f64;
+    for edge in target.boundary_edges()? {
+        for point in edge.endpoints()? {
+            displacement = displacement.max(replacement.surface().project(point, tolerance)?.distance);
+        }
+    }
+    let mut supports = BTreeMap::new();
+    let mut bounds = BTreeMap::new();
+    for face in source.faces() {
+        let face_id = face.topology_id();
+        let (surface, face_bounds) = if face_id == id {
+            // The replacement supplies its support, not its trim or orientation.
+            // Its UV chart is independent of the face being replaced.
+            (replacement.surface(), replacement.parameter_bounds()?)
+        } else {
+            (face.surface(), face_parameter_bounds(topology, face_id, tolerance)?)
+        };
+        let surface = extended_support(surface, face_bounds, displacement, tolerance)?;
+        bounds.insert(face_id, expanded_offset_bounds(
+            &surface, face_bounds, displacement, tolerance,
+        )?);
+        supports.insert(face_id, surface);
+    }
+    let changed = BTreeSet::from([id]);
+    let patches = support_patches(
+        topology, tolerance, supports, bounds, changed.clone(),
+        false, false, &changed, &BTreeMap::new(),
+    )?;
+    commit_support_patches(source, patches, changed)?
+        .with_feature_parent(source, super::DerivationRole::ReplaceFace)
 }
 
 impl Profile {

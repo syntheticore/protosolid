@@ -146,6 +146,9 @@ The current publisher certifies:
   ruled spline faces with sections parallel to the neutral plane; spline drafts
   use an affine normal-offset law on the neutral section's pull extrusion;
 - plane splits retaining either or both sides, including disconnected solids;
+- face replacement by independently parameterized supports, rebuilding shared
+  boundary curves and adjacent trims while retaining the other solids and face
+  adjacency (periodic seam replacement and coincident adjacent faces are unsupported);
 - rigid transforms of those bodies.
 
 Planar bodies receive intersection/contact checks and mass properties from their
@@ -169,7 +172,7 @@ across earlier fillets. Periodic
 seam continuity and display bands use a consistent parameter chart, with retained
 seams selecting the intended sweep interval at and beyond a half turn.
 
-Offset, move, and blend reconstruction share support continuation and a corner
+Offset, move, replace, and blend reconstruction share support continuation and a corner
 projection solver. Sweep continuation extends the profile and rail while retaining
 the original frame. Surface constraints locate regular intersections; tangent
 contact rails and one periodic seam anchor supply the missing constraints at

@@ -79,6 +79,7 @@ export class ShapexBackend {
       boolean: true,
       transform: true,
       moveFaces: true,
+      replaceFace: true,
       tessellate: true,
       revolve: true,
       revolveUpToFace: true,

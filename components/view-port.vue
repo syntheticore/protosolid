@@ -1023,6 +1023,7 @@
         if(this.activeTool) this.activeTool.dispose()
         this.resetProxyInteraction()
         this.pickingPath = { target: null, color, origin: pickerCoords }
+        this.renderer.setGizmosHidden(true)
         const tool = new Tool(this.document.activeComponent, this, (item) => {
           this.bus.emit('picked', item)
         })
@@ -1098,6 +1099,7 @@
         if(this.activeTool) this.activeTool.dispose()
         this.resetProxyInteraction()
         this.pickingPath = null
+        this.renderer.setGizmosHidden(false)
         this.snapper.reset()
         if(!Tool) return
         const tool = new Tool(this.document.activeComponent, this, this.document.activeSketch)

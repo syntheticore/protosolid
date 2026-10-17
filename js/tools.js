@@ -807,7 +807,7 @@ export class ManipulationTool extends HighlightTool {
 
 
 export class ProjectTool extends HighlightTool {
-  static icon = 'layer-group'
+  static icon = 'sketch-project'
 
   constructor(component, viewport, sketch) {
     super(component, viewport, ['point', 'edge'])
@@ -840,7 +840,7 @@ export class ProjectTool extends HighlightTool {
 
 
 export class SketchFilletTool extends HighlightTool {
-  static icon = 'bezier-curve'
+  static icon = 'sketch-fillet'
   static hasOptions = true
 
   constructor(component, viewport, sketch) {
@@ -976,7 +976,7 @@ export class SketchFilletTool extends HighlightTool {
 
 
 export class TrimTool extends Tool {
-  static icon = 'route'
+  static icon = 'sketch-trim'
 
   constructor(component, viewport, sketch) {
     super(component, viewport)
@@ -1217,7 +1217,7 @@ export class PasteSketchTool extends SketchTool {
 }
 
 export class LineTool extends SketchTool {
-  static icon = 'pen'
+  static icon = 'sketch-line'
 
   constrainCompletedLine(line, endSnap) {
     this.constrainPoint(line, 1, endSnap)
@@ -1307,7 +1307,7 @@ export class LineTool extends SketchTool {
 
 
 export class PointTool extends SketchTool {
-  static icon = 'asterisk'
+  static icon = 'sketch-point'
 
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
@@ -1327,7 +1327,7 @@ export class PointTool extends SketchTool {
 
 
 export class SplineTool extends SketchTool {
-  static icon = 'route'
+  static icon = 'sketch-spline'
   static hasOptions = true
 
   constructor(component, viewport, sketch) {
@@ -1549,7 +1549,7 @@ export class SplineTool extends SketchTool {
 
 
 export class CircleTool extends SketchTool {
-  static icon = 'ban'
+  static icon = 'sketch-circle'
 
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
@@ -1588,7 +1588,7 @@ export class CircleTool extends SketchTool {
 
 
 export class RectangleTool extends SketchTool {
-  static icon = 'vector-square'
+  static icon = 'sketch-rectangle'
 
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
@@ -1665,7 +1665,7 @@ export class RectangleTool extends SketchTool {
 
 
 export class SlotTool extends SketchTool {
-  static icon = 'capsules'
+  static icon = 'sketch-slot'
 
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
@@ -1789,7 +1789,7 @@ export class SlotTool extends SketchTool {
 
 
 export class PolygonTool extends SketchTool {
-  static icon = 'draw-polygon'
+  static icon = 'sketch-polygon'
   static hasOptions = true
 
   constructor(component, viewport, sketch) {
@@ -1899,7 +1899,7 @@ export class PolygonTool extends SketchTool {
 
 
 export class ArcTool extends SketchTool {
-  static icon = 'bezier-curve'
+  static icon = 'sketch-arc'
 
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
@@ -2000,7 +2000,7 @@ export class ConstraintTool extends HighlightTool {
 
 export class TouchConstraintTool extends ConstraintTool {
   static constraintType = TouchConstraint
-  static icon = 'asterisk'
+  static icon = 'constraint-touch'
   static selectors = ['point', 'curve']
 
   isComplete(counts) { return counts.point == 1 && counts.curve == 1 }
@@ -2022,7 +2022,7 @@ export class TouchConstraintTool extends ConstraintTool {
 
 export class HorVertConstraintTool extends ConstraintTool {
   static constraintType = HorVertConstraint
-  static icon = 'ruler-horizontal'
+  static icon = 'constraint-horizontal'
   static selectors = ['point', 'axis']
 
   isComplete(counts) { return counts.point == 2 || (counts.axis == 1 && !counts.point) }
@@ -2038,7 +2038,7 @@ export class FixConstraintTool extends ConstraintTool {
 
 export class PerpendicularConstraintTool extends ConstraintTool {
   static constraintType = PerpendicularConstraint
-  static icon = 'angle-up'
+  static icon = 'constraint-perpendicular'
   static selectors = ['curve']
 
   isComplete(counts) { return counts.curve == 2 }
@@ -2050,7 +2050,7 @@ export class PerpendicularConstraintTool extends ConstraintTool {
 
 export class ParallelConstraintTool extends ConstraintTool {
   static constraintType = ParallelConstraint
-  static icon = 'exchange-alt'
+  static icon = 'constraint-parallel'
   static selectors = ['axis']
 
   isComplete(counts) { return counts.axis == 2 }
@@ -2073,7 +2073,7 @@ export class EqualConstraintTool extends ConstraintTool {
 
 export class ConcentricConstraintTool extends ConstraintTool {
   static constraintType = ConcentricConstraint
-  static icon = 'bullseye'
+  static icon = 'constraint-concentric'
   static selectors = ['curve']
 
   isComplete(counts) { return counts.curve == 2 }
@@ -2083,7 +2083,7 @@ export class ConcentricConstraintTool extends ConstraintTool {
 
 export class TangentConstraintTool extends ConstraintTool {
   static constraintType = TangentConstraint
-  static icon = 'bezier-curve'
+  static icon = 'constraint-tangent'
   static selectors = ['curve']
 
   isComplete(counts) { return counts.curve == 2 }
@@ -2103,7 +2103,7 @@ export class TangentConstraintTool extends ConstraintTool {
 }
 
 export class OffsetTool extends HighlightTool {
-  static icon = 'layer-group'
+  static icon = 'sketch-offset'
 
   constructor(component, viewport, sketch) {
     super(component, viewport, ['curve', 'profile'])
@@ -2226,7 +2226,7 @@ export class OffsetTool extends HighlightTool {
 }
 
 export class DimensionTool extends HighlightTool {
-  static icon = 'ruler'
+  static icon = 'dimension'
 
   acceptsInput(item) {
     const isPoint = item instanceof ElemRef && item.index !== undefined

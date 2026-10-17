@@ -58,9 +58,9 @@
     margin-left: -9px
     margin-top: -9px
     border-radius: 99px
-    padding: 2px
-    width: 16px
-    height: 16px
+    padding: 4px
+    width: 12px
+    height: 12px
     transition: background 0.1s
     color: #1c2127
     background: $bright1

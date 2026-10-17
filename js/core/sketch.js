@@ -1314,7 +1314,7 @@ export class Constraint {
 }
 
 export class HorVertConstraint extends Constraint {
-  static icon = 'ruler-horizontal'
+  static icon = 'constraint-horizontal'
 
   constructor(...items) {
     super(...items)
@@ -1329,7 +1329,7 @@ export class HorVertConstraint extends Constraint {
 
   typename() { return (this.isVertical ? 'Vertical' : 'Horizontal') + ' Constraint' }
 
-  icon() { return this.isVertical ? 'ruler-vertical' : 'ruler-horizontal' }
+  icon() { return this.isVertical ? 'constraint-vertical' : 'constraint-horizontal' }
 
   dump() {
     return {
@@ -1347,37 +1347,37 @@ export class FixConstraint extends Constraint {
 Serialize.register(FixConstraint, 'FixConstraint')
 
 export class CoincidentConstraint extends Constraint {
-  static icon = 'dot-circle'
+  static icon = 'constraint-coincident'
   typename() { return 'Coincident Constraint' }
 }
 Serialize.register(CoincidentConstraint, 'CoincidentConstraint')
 
 export class TouchConstraint extends Constraint {
-  static icon = 'asterisk'
+  static icon = 'constraint-touch'
   typename() { return 'Touch Constraint' }
 }
 Serialize.register(TouchConstraint, 'TouchConstraint')
 
 export class MidpointConstraint extends Constraint {
-  static icon = 'expand-alt'
+  static icon = 'constraint-midpoint'
   typename() { return 'Midpoint Constraint' }
 }
 Serialize.register(MidpointConstraint, 'MidpointConstraint')
 
 export class IntersectionConstraint extends Constraint {
-  static icon = 'crosshairs'
+  static icon = 'constraint-intersection'
   typename() { return 'Intersection Constraint' }
 }
 Serialize.register(IntersectionConstraint, 'IntersectionConstraint')
 
 export class PerpendicularConstraint extends Constraint {
-  static icon = 'angle-up'
+  static icon = 'constraint-perpendicular'
   typename() { return 'Perpendicular Constraint' }
 }
 Serialize.register(PerpendicularConstraint, 'PerpendicularConstraint')
 
 export class ParallelConstraint extends Constraint {
-  static icon = 'exchange-alt'
+  static icon = 'constraint-parallel'
   typename() { return 'Parallel Constraint' }
 }
 Serialize.register(ParallelConstraint, 'ParallelConstraint')
@@ -1389,19 +1389,19 @@ export class EqualConstraint extends Constraint {
 Serialize.register(EqualConstraint, 'EqualConstraint')
 
 export class ConcentricConstraint extends Constraint {
-  static icon = 'bullseye'
+  static icon = 'constraint-concentric'
   typename() { return 'Concentric Constraint' }
 }
 Serialize.register(ConcentricConstraint, 'ConcentricConstraint')
 
 export class TangentConstraint extends Constraint {
-  static icon = 'bezier-curve'
+  static icon = 'constraint-tangent'
   typename() { return 'Tangent Constraint' }
 }
 Serialize.register(TangentConstraint, 'TangentConstraint')
 
 export class Dimension extends Constraint {
-  static icon = 'ruler'
+  static icon = 'dimension'
   typename() { return 'Dimension' }
 
   constructor(items, pos, distance) {
@@ -1485,7 +1485,7 @@ export class Dimension extends Constraint {
 Serialize.register(Dimension, 'Dimension')
 
 export class OffsetConstraint extends Dimension {
-  static icon = 'layer-group'
+  static icon = 'sketch-offset'
   typename() { return 'Offset' }
 
   constructor(items, position) {
@@ -1505,7 +1505,7 @@ export class OffsetConstraint extends Dimension {
 Serialize.register(OffsetConstraint, 'OffsetConstraint')
 
 export class ProfileOffsetConstraint extends Dimension {
-  static icon = 'layer-group'
+  static icon = 'sketch-offset'
   typename() { return 'Offset' }
 
   constructor(groups, outputs, position, distance) {

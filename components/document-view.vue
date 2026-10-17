@@ -327,23 +327,23 @@
         displayModes: {
           wireShade: {
             title: 'Shaded + Wire',
-            icon: 'wine-bottle',
+            icon: 'display-shaded-edges',
           },
           wireframe: {
             title: 'Wireframe',
-            icon: 'atlas',
+            icon: 'display-wireframe',
           },
           hiddenLines: {
             title: 'Shaded + Hidden Lines',
-            icon: 'vector-square',
+            icon: 'display-hidden-lines',
           },
           shaded: {
             title: 'Shaded',
-            icon: 'umbrella-beach',
+            icon: 'display-shaded',
           },
           pathTraced: {
             title: 'Path traced',
-            icon: 'camera-retro',
+            icon: 'display-path-traced',
           },
         },
         colorModes: {

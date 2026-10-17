@@ -344,8 +344,8 @@
               { title: 'Sketch', feature: CreateSketchFeature, hotKey: 'S', keyCode: 83 },
               // { title: 'Plane', tool: PlaneTool, icon: 'edit', hotKey: 'P', keyCode: 80 },
               { title: 'Plane', feature: PlaneFeature },
-              { title: 'Axis', icon: 'grip-lines' },
-              { title: 'Point', icon: 'asterisk' },
+              { title: 'Axis', icon: 'construction-axis' },
+              { title: 'Point', icon: 'construction-point' },
               { title: 'Centroid', action: this.addCog, icon: 'atom' },
               { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
               {
@@ -369,7 +369,7 @@
               { title: 'Spline', tool: SplineTool, hotKey: 'B', keyCode: 66},
               { title: 'Slot', tool: SlotTool },
               { title: 'Polygon', tool: PolygonTool },
-              { title: 'Text', icon: 'layer-group' },
+              { title: 'Text', icon: 'font' },
               { title: 'Split all', action: this.splitAll, icon: 'file-export' },
             ]
           },
@@ -379,11 +379,11 @@
             tools: [
               { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
               { title: 'Fillet', tool: SketchFilletTool, hotKey: 'F', keyCode: 70 },
-              { title: 'Break', icon: 'layer-group' },
-              { title: 'Extend', icon: 'layer-group' },
+              { title: 'Break', icon: 'sketch-break' },
+              { title: 'Extend', icon: 'sketch-extend' },
               { title: 'Offset', tool: OffsetTool },
               { title: 'Project', tool: ProjectTool, hotKey: 'P', keyCode: 80 },
-              { title: 'Intersect', icon: 'layer-group' },
+              { title: 'Intersect', icon: 'sketch-intersect' },
             ]
           },
           {
@@ -406,13 +406,13 @@
             tools: [
               { title: 'Extrude', feature: ExtrudeFeature, hotKey: 'E', keyCode: 69 },
               { title: 'Revolve', feature: RevolveFeature, hotKey: 'V', keyCode: 86 },
-              { title: 'Loft', feature: LoftFeature, icon: 'layer-group' },
+              { title: 'Loft', feature: LoftFeature },
               { title: 'Sweep', feature: SweepFeature },
-              { title: 'Thicken', icon: 'hotdog' },
-              { title: 'Coil', icon: 'fan' },
-              { title: 'Web', icon: 'spider' },
+              { title: 'Thicken', icon: 'thicken' },
+              { title: 'Coil', icon: 'coil' },
+              { title: 'Web', icon: 'rib' },
               { title: 'Pattern', feature: PatternFeature },
-              { title: 'Mirror', icon: 'band-aid' },
+              { title: 'Mirror', icon: 'mirror' },
             ],
           },
           {
@@ -430,7 +430,7 @@
               { title: 'Dissolve', feature: DissolveFeature },
               { title: 'Draft', feature: DraftFeature },
               { title: 'Split', feature: SplitFeature },
-              { title: 'Align', icon: 'layer-group' },
+              { title: 'Align', icon: 'align' },
             ],
           },
           {
@@ -456,9 +456,9 @@
             title: 'Inspect',
             tools: [
               { title: 'Interference', tool: InterferenceTool },
-              { title: 'Curvature', icon: 'route' },
+              { title: 'Curvature', icon: 'curvature' },
               { title: 'Diagnostic Shading', tool: DiagnosticShadingTool },
-              { title: 'Section View', icon: 'object-group', action: this.addSectionView },
+              { title: 'Section View', icon: 'section-view', action: this.addSectionView },
             ],
           },
           {

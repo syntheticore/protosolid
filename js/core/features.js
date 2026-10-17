@@ -47,19 +47,19 @@ export class Feature {
       options: {
         join: {
           title: 'Join',
-          icon: 'magnet',
+          icon: 'boolean-union',
         },
         cut: {
           title: 'Cut',
-          icon: 'clone',
+          icon: 'boolean-subtract',
         },
         intersect: {
           title: 'Intersect',
-          icon: 'box',
+          icon: 'boolean-intersect',
         },
         create: {
           title: 'Create',
-          icon: 'edit',
+          icon: 'body-new',
         },
       },
     }
@@ -397,7 +397,7 @@ export class PatternFeature extends SolidFeature {
         type: 'enum',
         options: {
           grid: { title: 'Grid', icon: 'th' },
-          radial: { title: 'Radial', icon: 'sun' },
+          radial: { title: 'Radial', icon: 'pattern-radial' },
         },
       },
       center: {
@@ -764,7 +764,7 @@ function matricesAlmostEqual(left, right, epsilon=1e-8) {
 
 
 export class JointFeature extends Feature {
-  static icon = 'code-branch'
+  static icon = 'kinematic-joint'
 
   constructor(doc) {
     const is = type => feature => feature.jointType == type
@@ -1301,7 +1301,7 @@ Serialize.register(CreateSketchFeature, 'CreateSketchFeature')
 
 
 export class PlaneFeature extends Feature {
-  static icon = 'map'
+  static icon = 'construction-plane'
   constructor(doc) {
     super(doc, false, 'Plane', {
       base: {
@@ -1803,7 +1803,7 @@ Serialize.register(PlaceFeature, 'ImportFeature')
 
 
 export class ExtrudeFeature extends SolidFeature {
-  static icon = 'layer-group'
+  static icon = 'extrude'
   constructor(doc) {
     super(doc, true, 'Extrusion', {
       extent: {
@@ -1811,7 +1811,7 @@ export class ExtrudeFeature extends SolidFeature {
         type: 'select',
         options: {
           distance: { title: 'Distance', icon: 'ruler-vertical' },
-          face: { title: 'Up to face', icon: 'sign-in-alt' },
+          face: { title: 'Up to face', icon: 'extent-to-face' },
           through: { title: 'Through all', icon: 'infinity' },
         },
       },
@@ -1958,7 +1958,7 @@ Serialize.register(ExtrudeFeature, 'ExtrudeFeature')
 
 
 export class RevolveFeature extends SolidFeature {
-  static icon = 'wave-square'
+  static icon = 'revolve'
   constructor(document) {
     super(document, true, 'Revolution', {
       extent: {
@@ -1966,7 +1966,7 @@ export class RevolveFeature extends SolidFeature {
         type: 'select',
         options: {
           angle: { title: 'Angle', icon: 'drafting-compass' },
-          face: { title: 'Up to face', icon: 'sign-in-alt' },
+          face: { title: 'Up to face', icon: 'extent-to-face' },
           between: { title: 'Between faces', icon: 'exchange-alt' },
         },
       },
@@ -2097,7 +2097,7 @@ Serialize.register(RevolveFeature, 'RevolveFeature')
 
 
 export class LoftFeature extends SolidFeature {
-  static icon = 'layer-group'
+  static icon = 'loft'
   constructor(doc) {
     super(doc, true, 'Loft', {
       profiles: {
@@ -2140,7 +2140,7 @@ Serialize.register(LoftFeature, 'LoftFeature')
 
 
 export class SplitFeature extends SolidFeature {
-  static icon = 'divide'
+  static icon = 'split'
   constructor(document) {
     super(document, false, 'Split', {
       plane: {
@@ -2179,7 +2179,7 @@ Serialize.register(SplitFeature, 'SplitFeature')
 
 
 export class DraftFeature extends SolidFeature {
-  static icon = 'clone'
+  static icon = 'draft'
   constructor(document) {
     super(document, true, 'Draft', {
       ref_plane: {
@@ -2255,7 +2255,7 @@ Serialize.register(DraftFeature, 'DraftFeature')
 
 
 export class SweepFeature extends SolidFeature {
-  static icon = 'route'
+  static icon = 'sweep'
   constructor(document) {
     super(document, true, 'Sweep', {
       profile: {
@@ -2303,7 +2303,7 @@ function edgePropagationSetting() {
 
 
 export class FilletFeature extends SolidFeature {
-  static icon = 'scroll'
+  static icon = 'fillet'
   constructor(doc) {
     super(doc, false, 'Fillet', {
       edges: {
@@ -2357,7 +2357,7 @@ Serialize.register(FilletFeature, 'FilletFeature')
 
 
 export class ChamferFeature extends SolidFeature {
-  static icon = 'screwdriver'
+  static icon = 'chamfer'
   static undump(dump, context) {
     const feature = super.undump(dump, context)
     // Existing chamfers predate propagation and used only their selection.
@@ -2483,7 +2483,7 @@ Serialize.register(ChamferFeature, 'ChamferFeature')
 
 
 export class ShellFeature extends SolidFeature {
-  static icon = 'dot-circle'
+  static icon = 'shell'
   constructor(doc) {
     super(doc, false, 'Shell', {
       faces: {
@@ -2557,7 +2557,7 @@ Serialize.register(ShellFeature, 'ShellFeature')
 
 
 export class OffsetFeature extends SolidFeature {
-  static icon = 'arrows-alt'
+  static icon = 'offset-faces'
   constructor(doc) {
     super(doc, false, 'Offset', {
       faces: {
@@ -2601,7 +2601,7 @@ Serialize.register(OffsetFeature, 'OffsetFeature')
 
 
 export class DissolveFeature extends SolidFeature {
-  static icon = 'virus-slash'
+  static icon = 'dissolve'
   constructor(doc) {
     super(doc, false, 'Dissolve', {
       faces: {
@@ -2626,7 +2626,7 @@ Serialize.register(DissolveFeature, 'DissolveFeature')
 
 
 export class BooleanFeature extends SolidFeature {
-  static icon = 'boxes'
+  static icon = 'boolean-union'
   constructor(doc) {
     super(doc, true, 'Boolean', {
       tools: {

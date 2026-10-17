@@ -23,8 +23,9 @@ export function topologyNeighbors(item) {
 // only its oriented side, never coordinates, output ranks or kernel IDs.
 export function topologySides(item) {
   if(item.cachedTopologySides) return item.cachedTopologySides
-  const faces = item.topologyKind == 'edge' ? topologyNeighbors(item) :
-    item.topologyKind == 'body' ? item.faces() : item.solid.faces()
+  // A cut can split both faces adjacent to an edge into symmetric branches.
+  // Other named faces on the same solid still provide stable support frames.
+  const faces = item.topologyKind == 'body' ? item.faces() : item.solid.faces()
   const supportFaces = (item.topologyKind == 'body' ? item.compound : item.solid.compound)
     .solids().flatMap(solid => solid.faces())
   const points = item.topologyKind == 'edge' ? item.tesselate().map(point =>

@@ -118,6 +118,79 @@ fn shell_support_extension_preserves_rational_surface_chart() {
 }
 
 #[test]
+fn chamfer_cut_shell_after_lower_corner_fillets() {
+    let tolerance = ModelTolerance::default();
+    let plane = Plane3::new(Point3::origin(), Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
+    let body = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(Point2::new(0.0, 0.0), 36.74094683895966).unwrap()],
+            tolerance,
+        ).unwrap(),
+        [],
+        tolerance,
+    ).unwrap().extrude(plane, Vec3::unit_y() * 48.0).unwrap();
+    let rim = body.edges().find(|edge| {
+        edge.endpoints().unwrap().iter().all(|point| (point.y - 48.0).abs() < tolerance.linear)
+    }).unwrap().clone();
+    let body = body.fillet(&[rim], 18.0).unwrap();
+    let opening = body.faces().find(|face| {
+        matches!(face.surface(), Surface3::Plane(plane) if plane.origin().y.abs() < tolerance.linear)
+    }).unwrap().clone();
+    let body = body.shell(&[opening], -9.0).unwrap();
+    let half_width = 13.249811649142934;
+    let upper = 48.725361129211365;
+    let lower = -51.204523903515636;
+    let profile = Profile::new(
+        Wire2::new([
+            TrimmedCurve2::arc_through(
+                Point2::new(half_width, upper),
+                Point2::new(-2.433950913814231e-15, 61.9751727783543),
+                Point2::new(-half_width, upper),
+            ).unwrap(),
+            TrimmedCurve2::line(Point2::new(-half_width, upper), Point2::new(-half_width, lower)).unwrap(),
+            TrimmedCurve2::arc_through(
+                Point2::new(-half_width, lower),
+                Point2::new(8.113169712714104e-16, -64.45433555265856),
+                Point2::new(half_width, lower),
+            ).unwrap(),
+            TrimmedCurve2::line(Point2::new(half_width, lower), Point2::new(half_width, upper)).unwrap(),
+        ], tolerance).unwrap(),
+        [],
+        tolerance,
+    ).unwrap();
+    let limit = body.faces().find(|face| {
+        matches!(face.surface(), Surface3::Plane(plane) if (plane.origin().y - 39.0).abs() < tolerance.linear)
+    }).unwrap().clone();
+    let tool = profile.extrude_up_to_face(
+        Plane3::new(Point3::origin(), Vec3::unit_x(), Vec3::unit_z(), tolerance).unwrap(),
+        &body, &limit, 0.0, 0.0,
+    ).unwrap();
+    let body = body.difference(&tool).unwrap();
+    let corners = body.edges().filter(|edge| {
+        matches!(edge.curve(), Curve3::Line(_))
+            && edge.endpoints().unwrap().iter().all(|point| point.y.abs() < tolerance.linear)
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(corners.len(), 4);
+    let body = body.fillet(&corners, 6.0).unwrap();
+    let edge = body.edges().find(|edge| {
+        matches!(edge.curve(), Curve3::Line(_))
+            && edge.endpoints().unwrap().iter().all(|point| {
+                (point.x + half_width).abs() < tolerance.linear
+                    && (point.z + 34.26863968536679).abs() < tolerance.linear
+            })
+    }).unwrap().clone();
+    let mut previous_volume = body.volume();
+    for distance in [0.3, 0.5, 0.6, 1.0, 2.0] {
+        let chamfer = body.chamfer_with_tangent_propagation(std::slice::from_ref(&edge), distance, true)
+            .unwrap_or_else(|error| panic!("distance {distance}: {error}"));
+        assert_eq!(chamfer.solids().len(), 1);
+        assert!(chamfer.volume() < previous_volume);
+        previous_volume = chamfer.volume();
+        chamfer.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn fillet_through_cut_rounded_cylinder_shell() {
     let tol = ModelTolerance::default();
     let plane = Plane3::new(

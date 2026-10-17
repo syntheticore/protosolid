@@ -1168,11 +1168,14 @@ impl EulerTransaction<'_> {
                 }
                 Err(_) => {
                     local_guide = true;
+                    // Chamfers need the same angular continuation as fillets:
+                    // an unconstrained guide can fold across a rounded corner.
                     vec![self.local_offset_intersection(
                         uses,
                         &offsets,
+                        radius,
                         tolerance,
-                        kind == EdgeBlendKind::Fillet,
+                        true,
                     )?]
                 }
             }
@@ -5005,6 +5008,7 @@ impl EulerTransaction<'_> {
         &self,
         uses: [CoedgeId; 2],
         offsets: &[Surface3; 2],
+        size: f64,
         tolerance: ModelTolerance,
         cylindrical_chart: bool,
     ) -> KernelResult<SurfaceSurfaceCurve> {
@@ -5095,15 +5099,27 @@ impl EulerTransaction<'_> {
                 boundary_parameters[side][index].x = start + (end - start) * index as f64 / 16.0;
             }
         }
-        // Keep open curved-edge continuation local to the retained sector.
-        // Extending an entire edge length can wrap around a curved
-        // support and introduce another inverse branch into the same guide.
+        // Continue open curved edges by a size-dependent collar. A fixed
+        // fraction of the source edge can end before a larger blend's contact
+        // reaches its terminating support. Use each endpoint's spatial step
+        // to keep the continuation local to the requested treatment.
         let extension = if source.vertices[0] == source.vertices[1]
             || matches!(source.curve, Curve3::Line(_))
         {
-            16
+            [16; 2]
         } else {
-            2
+            let parent_loop = self.working.coedge(uses[0])?.loop_id;
+            let support = &self.working.face(self.working.loop_(parent_loop)?.face)?.surface;
+            // Transition connectors have zero topological length; their
+            // retained p-curves still describe the supporting traversal.
+            let padding = |index: usize, neighbor: usize| -> KernelResult<i32> {
+                let first = boundary_parameters[0][index];
+                let second = boundary_parameters[0][neighbor];
+                let step = support.evaluate(first.x, first.y)?.point
+                    .distance(support.evaluate(second.x, second.y)?.point);
+                Ok((2.0 * size / step).ceil().max(2.0) as i32)
+            };
+            [padding(0, 1)?, padding(16, 15)?]
         };
         let closed = source.vertices[0] == source.vertices[1];
         let extrapolated = |side: usize, index: i32| -> Point2 {
@@ -5143,10 +5159,10 @@ impl EulerTransaction<'_> {
         };
         let mut first_index = 0;
         let mut last_index = 16;
-        while first_index > -extension && in_domains(first_index - 1) {
+        while first_index > -extension[0] && in_domains(first_index - 1) {
             first_index -= 1;
         }
-        while last_index < 16 + extension && in_domains(last_index + 1) {
+        while last_index < 16 + extension[1] && in_domains(last_index + 1) {
             last_index += 1;
         }
         let support_range =
@@ -5188,7 +5204,7 @@ impl EulerTransaction<'_> {
                     // Some torus/cylinder intersections turn in the angular
                     // coordinate. Rebuild the whole guide in the general
                     // chart; mixing charts sample by sample creates folds.
-                    return self.local_offset_intersection(uses, offsets, tolerance, false);
+                    return self.local_offset_intersection(uses, offsets, size, tolerance, false);
                 }
                 corrected.ok_or_else(|| {
                     KernelError::new(

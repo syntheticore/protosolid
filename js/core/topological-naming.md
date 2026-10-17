@@ -76,6 +76,9 @@ recipe, and shared selection annotations. Selecting it after a later modifier
 therefore binds the producer's cached cell too. Removing that modifier cannot
 delete the selection. Splits and merges establish separate cell origins and
 annotation lists; they do not share new branch selections with their ancestors.
+Within the producing feature, intermediate operations refresh the origin recipe
+on their result. A cutter's boundary frame can change when the Boolean trims it,
+so its intermediate recipe must not identify a pick on the completed feature.
 
 After regeneration, the producer restores those selection names from its
 recipes. Subsequent operations propagate the names through history. Therefore

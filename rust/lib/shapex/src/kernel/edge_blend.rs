@@ -1,6 +1,8 @@
 //! Local edge treatments: shared discovery, trimming, junction topology and
 //! transactional publication for circular blends and ruled chamfers.
 
+mod seams;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::prelude::*;
@@ -218,6 +220,17 @@ impl EulerTransaction<'_> {
         kind: EdgeBlendKind,
         chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<()> {
+        let input_state = (
+            self.working.clone(),
+            self.history.clone(),
+            self.names.clone(),
+            self.touched_bodies.clone(),
+        );
+        let input_names = selected
+            .iter()
+            .map(|edge| self.working.edge(*edge).map(|edge| edge.name))
+            .collect::<KernelResult<Vec<_>>>()?;
+        let input_chamfer = chamfer;
         // General rolling supports must share one chart before their temporary
         // arcs are built, otherwise structurally different guides prevent KEF.
         let mut closed_spines = Vec::new();
@@ -677,6 +690,39 @@ impl EulerTransaction<'_> {
                             Point2::new(uv.0, uv.1),
                         )?;
                     }
+                }
+                let consumed = self.consumed_blend_boundaries(&patches)?;
+                if !consumed.is_empty() {
+                    let prepared = (
+                        self.working.clone(),
+                        self.history.clone(),
+                        self.names.clone(),
+                        self.touched_bodies.clone(),
+                    );
+                    for (boundary, vertex) in consumed {
+                        // Normalize the input, before temporary periodic splits.
+                        // Replaying a partially split network would lose pieces
+                        // of another selected closed rim when its seam moves.
+                        self.working = input_state.0.clone();
+                        self.history = input_state.1.clone();
+                        self.names = input_state.2.clone();
+                        self.touched_bodies = input_state.3.clone();
+                        if self.normalize_blend_boundary(boundary, vertex, kind)? {
+                            let (selected, settings) =
+                                self.rebind_blend_selection(&input_names, input_chamfer)?;
+                            return self.blend_network_unchecked(
+                                selected,
+                                radius,
+                                follow_tangent_edges,
+                                kind,
+                                settings.as_ref(),
+                            );
+                        }
+                    }
+                    self.working = prepared.0;
+                    self.history = prepared.1;
+                    self.names = prepared.2;
+                    self.touched_bodies = prepared.3;
                 }
                 self.certify_blend_contact_trims(&patches)?;
                 self.rewrite_blend_network(

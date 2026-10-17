@@ -118,6 +118,286 @@ fn shell_support_extension_preserves_rational_surface_chart() {
 }
 
 #[test]
+fn fillet_through_cut_rounded_cylinder_shell() {
+    let tol = ModelTolerance::default();
+    let plane = Plane3::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::unit_x(),
+        -Vec3::unit_z(),
+        tol,
+    )
+    .unwrap();
+    let body = Profile::new(
+        Wire2::new(
+            [TrimmedCurve2::circle(
+                Point2::new(11.867787165729352, 3.114060304138553),
+                15.80864991584739,
+            )
+            .unwrap()],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap()
+    .extrude(plane, Vec3::unit_y() * 18.0)
+    .unwrap();
+    let rim = body
+        .edges()
+        .find(|edge| edge.endpoints().unwrap().iter().all(|p| p.y > 17.9))
+        .unwrap()
+        .clone();
+    let body = body.fillet(&[rim], 3.0).unwrap();
+    let opening = body
+        .faces()
+        .find(
+            |face| matches!(face.surface(), Surface3::Plane(p) if p.origin().y.abs() < tol.linear),
+        )
+        .unwrap()
+        .clone();
+    let body = body.shell(&[opening], -2.0).unwrap();
+    let tool = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(-13.472482788884726, 13.26818252144573),
+                Point2::new(11.267128061979122, 13.26818252144573),
+                Point2::new(11.267128061979122, -2.9986976407578023),
+                Point2::new(-13.472482788884726, -2.9986976407578023),
+            ],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap()
+    .extrude(
+        Plane3::new(
+            Point3::new(0.0, 0.0, -40.0),
+            Vec3::unit_x(),
+            Vec3::unit_y(),
+            tol,
+        )
+        .unwrap(),
+        Vec3::unit_z() * 80.0,
+    )
+    .unwrap();
+    let cut = body.difference(&tool).unwrap();
+    let edges = cut
+        .edges()
+        .filter(|edge| {
+            let points = edge.endpoints().unwrap();
+            points
+                .iter()
+                .all(|p| (p.x - 11.267128061979122).abs() < tol.linear)
+                && matches!(edge.curve(), Curve3::Line(_))
+        })
+        .map(|edge| edge.persistent_id())
+        .collect::<Vec<_>>();
+    assert_eq!(edges.len(), 8);
+    let motion = RigidTransform3::new(
+        Matrix3::from_angle_x(cgmath::Rad(0.7)) * Matrix3::from_angle_z(cgmath::Rad(0.4)),
+        Vec3::new(-7.0, 3.0, 5.0),
+        tol,
+    )
+    .unwrap();
+    for cut in [cut.clone(), cut.transformed(motion).unwrap()] {
+        for edge in cut
+            .edges()
+            .filter(|edge| edges.contains(&edge.persistent_id()))
+        {
+            for size in [0.1, 0.5, 1.0] {
+                let rounded = cut
+                    .check_edge_blends(std::slice::from_ref(edge), size)
+                    .unwrap_or_else(|error| {
+                        panic!("edge {:?}, size {size}: {error}", edge.endpoints().unwrap())
+                    });
+                assert_eq!(rounded.solids().len(), 1);
+                rounded
+                    .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                    .unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn edge_blends_cross_chart_seams_on_annular_prisms() {
+    let tol = ModelTolerance::default();
+    for radius in [8.0, 20.0] {
+        let wire = |radius| {
+            Wire2::new(
+                [TrimmedCurve2::circle(Point2::new(0.0, 0.0), radius).unwrap()],
+                tol,
+            )
+            .unwrap()
+        };
+        let plane = Plane3::new(Point3::origin(), Vec3::unit_x(), -Vec3::unit_z(), tol).unwrap();
+        let body = Profile::new(wire(radius), [wire(radius - 2.0)], tol)
+            .unwrap()
+            .extrude(plane, Vec3::unit_y() * 20.0)
+            .unwrap();
+        for offset in [-0.2, 0.2] {
+            let tool = Profile::new(
+                Wire2::polygon(
+                    [
+                        Point2::new(-radius * 2.0, -1.0),
+                        Point2::new(offset, -1.0),
+                        Point2::new(offset, 12.0),
+                        Point2::new(-radius * 2.0, 12.0),
+                    ],
+                    tol,
+                )
+                .unwrap(),
+                [],
+                tol,
+            )
+            .unwrap()
+            .extrude(
+                Plane3::new(
+                    Point3::new(0.0, 0.0, -radius * 2.0),
+                    Vec3::unit_x(),
+                    Vec3::unit_y(),
+                    tol,
+                )
+                .unwrap(),
+                Vec3::unit_z() * radius * 4.0,
+            )
+            .unwrap();
+            let cut = body.difference(&tool).unwrap();
+            let edges = cut
+                .edges()
+                .filter(|edge| {
+                    let points = edge.endpoints().unwrap();
+                    matches!(edge.curve(), Curve3::Line(_))
+                        && points
+                            .iter()
+                            .all(|point| (point.x - offset).abs() < tol.linear && point.z > 0.0)
+                        && (points[0].y - points[1].y).abs() > 10.0
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(edges.len(), 2);
+            for edge in edges {
+                for size in [0.25, 1.0] {
+                    cut.check_edge_blends(&[edge.clone()], size)
+                        .unwrap_or_else(|error| {
+                            panic!("radius {radius}, offset {offset}, size {size}: {error}")
+                        });
+                }
+                let wall = edge
+                    .connected_faces()
+                    .unwrap()
+                    .into_iter()
+                    .find(|face| matches!(face.surface(), Surface3::Cylinder(_)))
+                    .unwrap();
+                let rim = cut
+                    .edges()
+                    .find(|rim| {
+                        matches!(rim.curve(), Curve3::Circle(circle) if (circle.center().y - 20.0).abs() < tol.linear)
+                            && rim.connected_faces().unwrap().iter().any(|face| {
+                                face.persistent_id() == wall.persistent_id()
+                            })
+                    })
+                    .unwrap()
+                    .clone();
+                cut.check_edge_blends(&[edge.clone(), rim.clone()], 0.25)
+                    .expect("a seam relocation must retain a simultaneously selected closed rim");
+                cut.chamfer_with_options(
+                    &[edge, rim],
+                    &[wall.clone(), wall],
+                    0.25,
+                    super::ChamferMode::TwoDistances(0.4),
+                    true,
+                )
+                .expect("seam normalization must rebind asymmetric chamfer reference faces");
+            }
+        }
+    }
+}
+
+#[test]
+fn edge_blends_cross_chart_seams_on_conical_rings() {
+    let tol = ModelTolerance::default();
+    let ring = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(8.0, 0.0),
+                Point2::new(10.0, 0.0),
+                Point2::new(12.0, 20.0),
+                Point2::new(10.0, 20.0),
+            ],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap()
+    .revolve(
+        Plane3::xy(),
+        Axis3::new(Point3::origin(), Vec3::unit_y()).unwrap(),
+        std::f64::consts::TAU,
+    )
+    .unwrap()
+    .transformed(
+        RigidTransform3::new(
+            Matrix3::from_angle_y(cgmath::Rad(-std::f64::consts::FRAC_PI_2)),
+            Vec3::new(0.0, 0.0, 0.0),
+            tol,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let tool = Profile::new(
+        Wire2::polygon(
+            [
+                Point2::new(-20.0, -1.0),
+                Point2::new(-0.2, -1.0),
+                Point2::new(-0.2, 12.0),
+                Point2::new(-20.0, 12.0),
+            ],
+            tol,
+        )
+        .unwrap(),
+        [],
+        tol,
+    )
+    .unwrap()
+    .extrude(
+        Plane3::new(
+            Point3::new(0.0, 0.0, -30.0),
+            Vec3::unit_x(),
+            Vec3::unit_y(),
+            tol,
+        )
+        .unwrap(),
+        Vec3::unit_z() * 60.0,
+    )
+    .unwrap();
+    let cut = ring.difference(&tool).unwrap();
+    let edges = cut
+        .edges()
+        .filter(|edge| {
+            let points = edge.endpoints().unwrap();
+            points
+                .iter()
+                .all(|point| (point.x + 0.2).abs() < tol.linear && point.z > 0.0)
+                && (points[0].y - points[1].y).abs() > 10.0
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(edges.len(), 2);
+    for edge in edges {
+        for size in [0.25, 1.0] {
+            cut.check_edge_blends(&[edge.clone()], size)
+                .unwrap_or_else(|error| panic!("conical ring, size {size}: {error}"));
+        }
+    }
+}
+
+#[test]
 fn shell_twice_filleted_sector() {
     let tol = ModelTolerance::default();
     let a = Point2::new(100.0, 0.0);

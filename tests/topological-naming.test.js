@@ -94,6 +94,31 @@ test('construction bindings survive serialization and reordered creation with a 
   assert.equal(restored.topologyNames.bindings.length, 2)
 })
 
+test('a feature captures picks on its final geometry instead of its intermediate cutter', () => {
+  const producer = { id: 'through-cut' }
+  const sides = item => [{ support: ['cut-plane'], frame: 'plane', axis: 1, side: item.side }]
+  const build = owner => withTopologyNaming(owner, () => {
+    const cutter = [-1, 1].map(side => Object.assign(entity('edge'), { side }))
+    cutter.forEach(item => name(item, 'boundary'))
+    initializeTopologyOrigins(cutter, neighbors, sides)
+    // Trimming the support changes its center and flips the side evidence.
+    const result = cutter.map(item => Object.assign(entity('edge'), { side: -item.side }))
+    propagateTopology(result, cutter.map((source, i) => ({
+      source, relation: 'modified', outputs: [result[i]],
+    })), 'cut', neighbors)
+    initializeTopologyOrigins(result, neighbors, sides)
+    restoreTopologySelections(owner, result, neighbors, sides)
+    return result
+  })
+  const original = build(producer)
+  const selections = original.map(item => captureTopologySelection(item))
+  const rebuilt = build(JSON.parse(JSON.stringify(producer))).reverse()
+  for(const [i, selection] of selections.entries()) {
+    assert.deepEqual(resolveTopology(original, selection, neighbors).items, [original[i]])
+    assert.equal(resolveTopology(rebuilt, selection, neighbors).items[0].side, original[i].side)
+  }
+})
+
 test('semantic branches retain identity when a side disappears and selection policies remain distinct', () => {
   const producer = { id: 'producer' }, split = { id: 'split' }
   const source = entity('body')

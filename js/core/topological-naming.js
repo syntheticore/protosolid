@@ -44,9 +44,10 @@ function inherit(item, sources, oneToOne) {
   item.topology = Object.freeze({
     kind: item.topologyKind,
     identity,
-    // A bijective history mapping preserves the cell's producer and its
-    // shared selection annotations. Splits and merges establish new cells.
-    origin: oneToOne ? sources[0].topology.origin :
+    // A bijective history mapping preserves an earlier feature's producer.
+    // Within one feature, recapture recipes on its completed geometry: a
+    // cutter's support sides can change when the Boolean trims its faces.
+    origin: oneToOne && sources[0].topology.origin.feature != activeFeature ? sources[0].topology.origin :
       { feature: activeFeature || sources[0].topology.origin.feature },
     anchors: Object.freeze(unique(sources.flatMap(source => source.topology.anchors))),
     ancestors: Object.freeze(ancestry(sources)),

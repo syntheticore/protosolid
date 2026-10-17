@@ -1464,71 +1464,97 @@ impl<'kernel> EulerTransaction<'kernel> {
     /// supports, and disconnected face regions intact.
     fn merge_periodic_face_partitions(&mut self) -> KernelResult<()> {
         loop {
-            let mut candidate = None;
-            for (edge_id, edge) in self.working.edges() {
+            let mut candidates = Vec::new();
+            for (id, edge) in self.working.edges() {
                 if edge.coedges.len() != 2 {
                     continue;
                 }
-                let first_use = self.working.coedge(edge.coedges[0])?;
-                let second_use = self.working.coedge(edge.coedges[1])?;
-                let first_loop = self.working.loop_(first_use.loop_id)?;
-                let second_loop = self.working.loop_(second_use.loop_id)?;
-                if first_loop.face == second_loop.face
-                    || first_loop.kind != LoopKind::Outer
-                    || second_loop.kind != LoopKind::Outer
-                {
-                    continue;
-                }
-                let first = self.working.face(first_loop.face)?;
-                let second = self.working.face(second_loop.face)?;
-                if first.surface != second.surface
-                    || first.orientation != second.orientation
-                    || second.loops.len() != 1
-                    || !matches!(first.surface, Surface3::Cylinder(_) | Surface3::Torus(_))
-                {
-                    continue;
-                }
-                // Put the removed patch in the survivor's periodic chart
-                // before splicing its boundary. A complete period is the only
-                // permissible change to these exact p-curves.
-                let first_uv = first_use.pcurve.evaluate(first_use.range.start)?.point;
-                let second_uv = second_use.pcurve.evaluate(second_use.range.end)?.point;
-                let domains = first.surface.domains();
-                let delta = first_uv - second_uv;
-                let offset = Vec2::new(
-                    domains[0]
-                        .period
-                        .map_or(0.0, |period| (delta.x / period).round() * period),
-                    domains[1]
-                        .period
-                        .map_or(0.0, |period| (delta.y / period).round() * period),
-                );
-                if (delta - offset).magnitude() > self.kernel.tolerance.parameter * 16.0 {
-                    continue;
-                }
-                candidate = Some((edge_id, second_loop.face, second_use.loop_id, offset));
-                break;
-            }
-            let Some((edge, removed_face, removed_loop, offset)) = candidate else {
-                break;
-            };
-            if offset.magnitude2() > 0.0 {
-                for coedge in self.collect_loop(removed_loop)? {
-                    let translated = super::trim::translate_pcurve(
-                        &self.working.coedge(coedge)?.pcurve,
-                        offset,
-                        self.kernel.tolerance,
-                    )?;
-                    self.working.coedges.get_mut(coedge)?.pcurve = translated;
+                let face = self
+                    .working
+                    .loop_(self.working.coedge(edge.coedges[0])?.loop_id)?
+                    .face;
+                if matches!(
+                    self.working.face(face)?.surface,
+                    Surface3::Cylinder(_) | Surface3::Torus(_)
+                ) {
+                    candidates.push(id);
                 }
             }
-            let removed_name = self.working.face(removed_face)?.name;
-            let survivor = self.kef_unchecked(edge, removed_face)?.surviving_face;
-            let survivor_name = self.working.face(survivor)?.name;
-            self.history
-                .changed(removed_name, ChangeKind::Merged, [survivor_name]);
+            let mut merged = false;
+            for edge in candidates {
+                if self.merge_face_partition(edge)? {
+                    merged = true;
+                    break;
+                }
+            }
+            if !merged {
+                break;
+            }
         }
         Ok(())
+    }
+
+    /// Join adjacent patches of one exact support without changing material.
+    /// Blend contacts may consume these representation boundaries just as
+    /// they consume parameter seams within one face.
+    pub(super) fn merge_face_partition(&mut self, edge: EdgeId) -> KernelResult<bool> {
+        let value = self.working.edge(edge)?;
+        if value.coedges.len() != 2 {
+            return Ok(false);
+        }
+        let first_use = self.working.coedge(value.coedges[0])?;
+        let second_use = self.working.coedge(value.coedges[1])?;
+        let first_loop = self.working.loop_(first_use.loop_id)?;
+        let second_loop = self.working.loop_(second_use.loop_id)?;
+        if first_loop.face == second_loop.face
+            || first_loop.kind != LoopKind::Outer
+            || second_loop.kind != LoopKind::Outer
+        {
+            return Ok(false);
+        }
+        let first = self.working.face(first_loop.face)?;
+        let second = self.working.face(second_loop.face)?;
+        if first.surface != second.surface
+            || first.orientation != second.orientation
+            || second.loops.len() != 1
+        {
+            return Ok(false);
+        }
+        // Align the removed patch with the survivor using whole periods only.
+        let delta = first_use.pcurve.evaluate(first_use.range.start)?.point
+            - second_use.pcurve.evaluate(second_use.range.end)?.point;
+        let domains = first.surface.domains();
+        let offset = Vec2::new(
+            domains[0]
+                .period
+                .map_or(0.0, |period| (delta.x / period).round() * period),
+            domains[1]
+                .period
+                .map_or(0.0, |period| (delta.y / period).round() * period),
+        );
+        if (delta - offset).magnitude() > self.kernel.tolerance.parameter * 16.0 {
+            return Ok(false);
+        }
+        let removed_face = second_loop.face;
+        let removed_loop = second_use.loop_id;
+        if offset.magnitude2() > 0.0 {
+            for id in self.collect_loop(removed_loop)? {
+                let pcurve = super::trim::translate_pcurve(
+                    &self.working.coedge(id)?.pcurve,
+                    offset,
+                    self.kernel.tolerance,
+                )?;
+                self.working.coedges.get_mut(id)?.pcurve = pcurve;
+            }
+        }
+        let name = self.working.face(removed_face)?.name;
+        let survivor = self.kef_unchecked(edge, removed_face)?.surviving_face;
+        self.history.changed(
+            name,
+            ChangeKind::Merged,
+            [self.working.face(survivor)?.name],
+        );
+        Ok(true)
     }
 
     pub(super) fn repair_outgoing(&mut self, vertex: VertexId) -> KernelResult<()> {
@@ -1578,6 +1604,16 @@ impl<'kernel> EulerTransaction<'kernel> {
                 edges.remove(&removed);
                 edges.insert(survivor);
                 pending.insert(endpoint);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn unify_edge_vertex(&mut self, vertex: VertexId) -> KernelResult<()> {
+        let edges = self.working.vertex_edges(vertex)?;
+        if let [first, second] = edges.as_slice() {
+            if let Some(candidate) = self.prepare_edge_merge(vertex, [*first, *second])? {
+                self.apply_edge_merge(candidate)?;
             }
         }
         Ok(())
@@ -1885,7 +1921,7 @@ impl<'kernel> EulerTransaction<'kernel> {
         result
     }
 
-    fn kemr_unchecked(&mut self, edge: EdgeId, inner_use: CoedgeId) -> KernelResult<KemrResult> {
+    pub(super) fn kemr_unchecked(&mut self, edge: EdgeId, inner_use: CoedgeId) -> KernelResult<KemrResult> {
         let (uses, edge_name, vertices) = {
             let edge = self.working.edge(edge)?;
             (edge.coedges.clone(), edge.name, edge.vertices)
@@ -2016,7 +2052,7 @@ impl<'kernel> EulerTransaction<'kernel> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn mekr_unchecked(
+    pub(super) fn mekr_unchecked(
         &mut self,
         outer: CoedgeId,
         inner: CoedgeId,

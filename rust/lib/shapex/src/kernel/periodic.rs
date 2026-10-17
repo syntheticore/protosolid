@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{Point2, Vec2};
 
-use super::euler::{same_domain_edge_range, EulerTransaction};
+use super::canonicalize::same_domain_edge_range;
+use super::transaction::Transaction;
 use super::history::{ChangeKind, DerivationRole};
 use super::trim::{face_boundary_curves, face_parameter_bounds, translate_pcurve};
 use super::wire::curve_pair_intersection;
@@ -15,7 +16,7 @@ pub(super) enum SeamPlacement {
     AllowBoundarySplits,
 }
 
-impl EulerTransaction<'_> {
+impl Transaction<'_> {
     fn continuous_boundary_edges(
         &self,
         vertex: VertexId,
@@ -243,7 +244,8 @@ impl EulerTransaction<'_> {
         else {
             return Ok(false);
         };
-        let period = surface.domains()[axis].period.unwrap();
+        let domain = surface.domains()[axis];
+        let period = domain.period.unwrap();
         let other_axis = 1 - axis;
         let target_uv = target;
         let target = target[axis];
@@ -265,11 +267,8 @@ impl EulerTransaction<'_> {
             let mut crossing = Vec::<(EdgeId, f64, Option<VertexId>, f64)>::new();
             while !seam.coedges.contains(&current) {
                 let value = self.working.coedge(current)?;
-                let midpoint = value
-                    .pcurve
-                    .evaluate((value.range.start + value.range.end) * 0.5)?
-                    .point[axis];
-                let lifted = target + ((midpoint - target) / period).round() * period;
+                let midpoint = value.pcurve.evaluate(value.range.middle())?.point[axis];
+                let lifted = domain.nearest(target, midpoint);
                 let mut origin = Point2::new(0.0, 0.0);
                 origin[axis] = lifted;
                 let mut direction = Vec2::new(0.0, 0.0);
@@ -338,7 +337,7 @@ impl EulerTransaction<'_> {
         }) {
             return Ok(false);
         }
-        let loops = self.kemr_unchecked(seam_id, seam.coedges[0])?;
+        let loops = self.kemr(seam_id, seam.coedges[0])?;
         let mut outgoing = Vec::new();
         for (edge, parameter, vertex, _) in rings {
             let vertex = match vertex {
@@ -378,7 +377,7 @@ impl EulerTransaction<'_> {
                 let value = self.working.coedge(current)?.clone();
                 let uv = value.pcurve.evaluate(value.range.start)?.point;
                 let mut offset = Vec2::new(0.0, 0.0);
-                offset[axis] = ((previous - uv[axis]) / period).round() * period;
+                offset[axis] = domain.whole_periods(previous - uv[axis]);
                 let pcurve = translate_pcurve(&value.pcurve, offset, tolerance)?;
                 previous = pcurve.evaluate(value.range.end)?.point[axis];
                 self.working.coedges.get_mut(current)?.pcurve = pcurve;
@@ -402,7 +401,7 @@ impl EulerTransaction<'_> {
         origin[axis] = endpoints[0][axis];
         let reverse: Curve2 = Line2::new(origin, direction)?.into();
         let curve = surface.boundary_curve(forward.clone(), range, tolerance)?;
-        let relocated = self.mekr_unchecked(
+        let relocated = self.mekr(
             outgoing[0],
             outgoing[1],
             curve,

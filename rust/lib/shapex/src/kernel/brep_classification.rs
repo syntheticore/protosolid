@@ -5,8 +5,8 @@ use cgmath::prelude::*;
 use crate::{Point2, Point3, Vec3};
 use super::trim::{face_boundary_curves, face_parameter_bounds, point_in_trim, coincident_supports, FaceCurve};
 use super::bounds::Bounds;
-use super::{Compound, Curve3, FaceId, FaceOrientation, IntersectionKind, IntersectionSet,
-    KernelResult, Line3, ModelTolerance, ParameterRange, ShellId, Surface3, Topology};
+use super::{box_center, nearest_uv, Compound, Curve3, FaceId, FaceOrientation, IntersectionKind,
+    IntersectionSet, KernelResult, Line3, ModelTolerance, ParameterRange, ShellId, Surface3, Topology};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PointClassification { Inside, Outside, Boundary }
@@ -100,7 +100,7 @@ impl<'a> BrepClassifier<'a> {
                 continue;
             }
             if !self.in_trim(face, projection.parameters)? { continue; }
-            let sign = if value.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+            let sign = value.orientation().sign();
             let forward = surface.normal(projection.parameters.0, projection.parameters.1)?.dot(normal) * sign > 0.0;
             sides.0 |= forward;
             sides.1 |= !forward;
@@ -128,13 +128,11 @@ impl<'a> BrepClassifier<'a> {
 
     fn in_trim(&self, face: &ClassificationFace, parameters: (f64, f64)) -> KernelResult<bool> {
         let surface = self.topology.face(face.id)?.surface();
-        let mut uv = Point2::new(parameters.0, parameters.1);
-        for axis in 0..2 {
-            if let Some(period) = surface.domains()[axis].period {
-                let center = (face.parameters[axis].start + face.parameters[axis].end) * 0.5;
-                uv[axis] += ((center - uv[axis]) / period).round() * period;
-            }
-        }
+        let uv = nearest_uv(
+            surface.domains(),
+            Point2::new(parameters.0, parameters.1),
+            box_center(face.parameters),
+        );
         point_in_trim(uv, &face.boundary)
     }
 
@@ -243,7 +241,7 @@ impl<'a> BrepClassifier<'a> {
             if lower > minimum.distance + linear { break; }
             let value = self.topology.face(face.id)?;
             let surface = value.surface();
-            let sign = orientation * if value.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+            let sign = orientation * value.orientation().sign();
             if let Ok(projection) = surface.project(point, self.tolerance) {
                 if self.in_trim(face, projection.parameters)? {
                     if projection.distance <= linear { return Ok(PointClassification::Boundary); }

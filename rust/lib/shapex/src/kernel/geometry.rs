@@ -2,25 +2,22 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec2, Vec3, Vec4};
 
+use super::linalg::solve_linear;
 use super::{
-    DiagnosticKind, DomainBounds, KernelError, KernelResult, ModelTolerance, ParameterDomain,
-    ParameterRange,
+    invalid, DiagnosticKind, DomainBounds, KernelError, KernelResult, ModelTolerance,
+    ParameterDomain, ParameterRange,
 };
 
 #[cfg(test)]
 #[path = "geometry_tests.rs"]
 mod tests;
 
-fn finite_point(point: Point3) -> bool {
+pub(crate) fn finite_point(point: Point3) -> bool {
     point.x.is_finite() && point.y.is_finite() && point.z.is_finite()
 }
 
 fn finite_vector(vector: Vec3) -> bool {
     vector.x.is_finite() && vector.y.is_finite() && vector.z.is_finite()
-}
-
-fn invalid(message: impl Into<String>) -> KernelError {
-    KernelError::new(DiagnosticKind::InvalidInput, message)
 }
 
 /// A finite directed axis with a unit direction.
@@ -524,6 +521,17 @@ pub enum Curve2 {
 }
 
 impl Curve2 {
+    /// A short human-readable name of the curve type, for diagnostics.
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Line(_) => "line",
+            Self::Circle(_) => "circle",
+            Self::Nurbs(_) => "NURBS",
+            Self::SurfaceIntersection(_) => "surface intersection",
+            Self::SurfaceProjection(_) => "surface projection",
+        }
+    }
+
     pub(crate) fn extended(&self, range: ParameterRange) -> KernelResult<Self> {
         if self.domain().contains_range(range, 0.0) {
             return Ok(self.clone());
@@ -565,13 +573,10 @@ impl Curve2 {
                     let anchor = (pcurve.range.start + pcurve.range.end) * 0.5;
                     let previous = self.evaluate(anchor)?.point;
                     let current = guide.evaluate(anchor)?.point;
-                    for (axis, domain) in pcurve.surface.domains().iter().enumerate() {
-                        if let Some(period) = domain.period {
-                            let shift = ((previous[axis] - current[axis]) / period).round() * period;
-                            for point in &mut points {
-                                point[axis] += shift;
-                            }
-                        }
+                    let shift =
+                        super::whole_periods(pcurve.surface.domains(), previous - current);
+                    for point in &mut points {
+                        *point += shift;
                     }
                     return Ok(SurfaceProjectionPcurve2::new(
                         *pcurve.curve.clone(),
@@ -710,13 +715,7 @@ impl Curve2 {
     pub fn domain(&self) -> ParameterDomain {
         match self {
             Self::Line(_) => ParameterDomain::unbounded(),
-            Self::Circle(_) => ParameterDomain {
-                bounds: DomainBounds::Bounded(ParameterRange {
-                    start: 0.0,
-                    end: std::f64::consts::TAU,
-                }),
-                period: Some(std::f64::consts::TAU),
-            },
+            Self::Circle(_) => ParameterDomain::ANGLE,
             Self::Nurbs(curve) => curve.domain(),
             Self::SurfaceIntersection(curve) => ParameterDomain {
                 bounds: DomainBounds::Bounded(curve.curve.range()),
@@ -796,13 +795,14 @@ impl Curve2 {
                         Ok(sum)
                     } else {
                         Ok(sum
-                            + adaptive_simpson(
-                                &integrand,
+                            + super::integration::adaptive_simpson(
                                 interval[0],
                                 interval[1],
-                                interval_tolerance,
+                                |parameter| Ok([integrand(parameter)?]),
+                                [interval_tolerance],
                                 24,
-                            )?)
+                                "adaptive p-curve area integration did not converge",
+                            )?[0])
                     }
                 })
             }
@@ -860,93 +860,6 @@ impl Curve2 {
             }
         }
     }
-}
-
-fn adaptive_simpson<F>(
-    function: &F,
-    start: f64,
-    end: f64,
-    tolerance: f64,
-    maximum_depth: u8,
-) -> KernelResult<f64>
-where
-    F: Fn(f64) -> KernelResult<f64>,
-{
-    let middle = (start + end) * 0.5;
-    let start_value = function(start)?;
-    let middle_value = function(middle)?;
-    let end_value = function(end)?;
-    let whole = (end - start) * (start_value + 4.0 * middle_value + end_value) / 6.0;
-    adaptive_simpson_interval(
-        function,
-        start,
-        end,
-        start_value,
-        middle_value,
-        end_value,
-        whole,
-        tolerance,
-        0,
-        maximum_depth,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn adaptive_simpson_interval<F>(
-    function: &F,
-    start: f64,
-    end: f64,
-    start_value: f64,
-    middle_value: f64,
-    end_value: f64,
-    whole: f64,
-    tolerance: f64,
-    depth: u8,
-    maximum_depth: u8,
-) -> KernelResult<f64>
-where
-    F: Fn(f64) -> KernelResult<f64>,
-{
-    let middle = (start + end) * 0.5;
-    let left_middle = (start + middle) * 0.5;
-    let right_middle = (middle + end) * 0.5;
-    let left_middle_value = function(left_middle)?;
-    let right_middle_value = function(right_middle)?;
-    let left = (middle - start) * (start_value + 4.0 * left_middle_value + middle_value) / 6.0;
-    let right = (end - middle) * (middle_value + 4.0 * right_middle_value + end_value) / 6.0;
-    let error = (left + right - whole).abs() / 15.0;
-    if error <= tolerance {
-        return Ok(left + right + (left + right - whole) / 15.0);
-    }
-    if depth >= maximum_depth {
-        return Err(KernelError::new(
-            DiagnosticKind::NumericalFailure,
-            "adaptive p-curve area integration did not converge",
-        ));
-    }
-    Ok(adaptive_simpson_interval(
-        function,
-        start,
-        middle,
-        start_value,
-        left_middle_value,
-        middle_value,
-        left,
-        tolerance * 0.5,
-        depth + 1,
-        maximum_depth,
-    )? + adaptive_simpson_interval(
-        function,
-        middle,
-        end,
-        middle_value,
-        right_middle_value,
-        end_value,
-        right,
-        tolerance * 0.5,
-        depth + 1,
-        maximum_depth,
-    )?)
 }
 
 impl From<Line2> for Curve2 {
@@ -2190,12 +2103,12 @@ impl SurfaceIntersectionCurve {
         let mut joined = Vec::new();
         for side in 0..2 {
             let other_side = if swapped { 1 - side } else { side };
-            let domains = surfaces[side].domains();
-            let offset = Vec2::new(
-                domains[0].period.map_or(0.0, |period|
-                    ((parameters[side * 2] - other_parameters[other_side * 2]) / period).round() * period),
-                domains[1].period.map_or(0.0, |period|
-                    ((parameters[side * 2 + 1] - other_parameters[other_side * 2 + 1]) / period).round() * period),
+            let offset = super::whole_periods(
+                surfaces[side].domains(),
+                Vec2::new(
+                    parameters[side * 2] - other_parameters[other_side * 2],
+                    parameters[side * 2 + 1] - other_parameters[other_side * 2 + 1],
+                ),
             );
             let Some(guide) = join_intersection_guides(
                 guides[side], range, other_guides[side], other_range, join, offset,
@@ -2497,7 +2410,7 @@ impl SurfaceIntersectionCurve {
                 tangent,
             ];
             let Some(delta) =
-                solve_linear_4(matrix, [-residual.x, -residual.y, -residual.z, -gauge])
+                solve_linear(matrix, [-residual.x, -residual.y, -residual.z, -gauge])
             else {
                 break;
             };
@@ -2725,36 +2638,6 @@ fn parameters_in_surface_domains(
         && surface.domains()[1].contains(parameters[1], tolerance.parameter)
 }
 
-fn solve_linear_4(mut matrix: [[f64; 4]; 4], mut right: [f64; 4]) -> Option<[f64; 4]> {
-    for column in 0..4 {
-        let pivot = (column..4).max_by(|first, second| {
-            matrix[*first][column]
-                .abs()
-                .total_cmp(&matrix[*second][column].abs())
-        })?;
-        if matrix[pivot][column].abs() <= f64::EPSILON * 256.0 {
-            return None;
-        }
-        matrix.swap(column, pivot);
-        right.swap(column, pivot);
-        let divisor = matrix[column][column];
-        for value in &mut matrix[column][column..] {
-            *value /= divisor;
-        }
-        right[column] /= divisor;
-        for row in 0..4 {
-            if row == column {
-                continue;
-            }
-            let factor = matrix[row][column];
-            for index in column..4 {
-                matrix[row][index] -= factor * matrix[column][index];
-            }
-            right[row] -= factor * right[column];
-        }
-    }
-    Some(right)
-}
 
 /// Solve `matrix * value = right`, choosing the solution closest to
 /// `reference` when the system loses rank at a tangential intersection.
@@ -2773,7 +2656,7 @@ fn solve_affine_least_squares_4(
     // condition number and can manufacture a discontinuous rank transition
     // near an otherwise regular endpoint. Only use the affine pseudoinverse
     // below when the original system is genuinely rank deficient.
-    if let Some(solution) = solve_linear_4(matrix, right) {
+    if let Some(solution) = solve_linear(matrix, right) {
         let achieved = (0..4)
             .map(|row| {
                 ((0..4)
@@ -2943,13 +2826,7 @@ impl Curve3 {
     pub fn domain(&self) -> ParameterDomain {
         match self {
             Self::Line(_) => ParameterDomain::unbounded(),
-            Self::Circle(_) => ParameterDomain {
-                bounds: DomainBounds::Bounded(ParameterRange {
-                    start: 0.0,
-                    end: std::f64::consts::TAU,
-                }),
-                period: Some(std::f64::consts::TAU),
-            },
+            Self::Circle(_) => ParameterDomain::ANGLE,
             Self::Nurbs(curve) => curve.domain(),
             Self::SurfaceIntersection(curve) => ParameterDomain {
                 bounds: DomainBounds::Bounded(curve.range()),
@@ -3017,10 +2894,8 @@ impl Curve3 {
                 let delta = point - circle.center();
                 delta.dot(circle.x_radius()) == 0.0 && delta.dot(circle.y_radius()) == 0.0
             });
-            let mut parameter = if on_axis { low } else { self.project(point, tolerance)?.parameter };
-            if let Some(period) = self.domain().period {
-                parameter += (((low + high) * 0.5 - parameter) / period).round() * period;
-            }
+            let parameter = if on_axis { low } else { self.project(point, tolerance)?.parameter };
+            let parameter = self.domain().nearest(parameter, (low + high) * 0.5);
             seeds.push(parameter.clamp(low, high));
         } else {
             seeds.extend((1..32).map(|i| low + (high - low) * i as f64 / 32.0));
@@ -3159,6 +3034,100 @@ impl Plane3 {
     }
     pub fn normal(self) -> Vec3 {
         self.u.cross(self.v).normalize()
+    }
+
+    /// The spatial point at plane coordinates `uv`.
+    pub fn point_at(self, uv: Point2) -> Point3 {
+        self.origin + self.vector_at(uv.to_vec())
+    }
+
+    /// The spatial direction of the plane-coordinate vector `uv`.
+    pub fn vector_at(self, uv: Vec2) -> Vec3 {
+        self.u * uv.x + self.v * uv.y
+    }
+
+    /// Plane coordinates of the orthogonal projection of `point`.
+    pub(crate) fn coordinates(self, point: Point3) -> KernelResult<Point2> {
+        let (u, v) = self.project(point)?.parameters;
+        Ok(Point2::new(u, v))
+    }
+
+    /// Lift an exact curve given in plane coordinates into space.
+    pub(crate) fn lift_curve(self, curve: &Curve2, tolerance: ModelTolerance) -> KernelResult<Curve3> {
+        Ok(match curve {
+            Curve2::Line(line) => {
+                Line3::new(self.point_at(line.origin()), self.vector_at(line.direction()))?.into()
+            }
+            Curve2::Circle(circle) => Circle3::new(
+                self.point_at(circle.center()),
+                self.u * circle.radius(),
+                self.v * circle.radius(),
+                tolerance,
+            )?
+            .into(),
+            Curve2::Nurbs(curve) => NurbsCurve3::new(
+                curve.degree(),
+                curve.control_points().iter().map(|point| self.point_at(*point)).collect(),
+                curve.weights().to_vec(),
+                curve.knots().to_vec(),
+            )?
+            .into(),
+            Curve2::SurfaceIntersection(curve) if curve.lies_on(&Surface3::Plane(self)) => {
+                curve.spatial_curve()
+            }
+            Curve2::SurfaceProjection(curve) if curve.surface() == &Surface3::Plane(self) => {
+                curve.curve().clone()
+            }
+            Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => {
+                return Err(super::unsupported(
+                    "an implicit p-curve can only be lifted onto its retained plane",
+                ))
+            }
+        })
+    }
+
+    /// The exact plane-coordinate image of a line, circle or NURBS curve lying
+    /// in this plane. Other curve types have no closed form here.
+    pub(crate) fn flatten_curve(
+        self,
+        curve: &Curve3,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Option<Curve2>> {
+        Ok(match curve {
+            Curve3::Line(line) => {
+                let origin = self.coordinates(line.origin())?;
+                let end = self.coordinates(line.origin() + line.direction())?;
+                Some(Line2::new(origin, end - origin)?.into())
+            }
+            Curve3::Nurbs(curve) => Some(
+                NurbsCurve2::new(
+                    curve.degree(),
+                    curve
+                        .control_points()
+                        .iter()
+                        .map(|point| self.coordinates(*point))
+                        .collect::<KernelResult<_>>()?,
+                    curve.weights().to_vec(),
+                    curve.knots().to_vec(),
+                )?
+                .into(),
+            ),
+            Curve3::Circle(circle) => {
+                let center = self.coordinates(circle.center())?;
+                let x = self.coordinates(circle.center() + circle.x_radius())? - center;
+                let y = self.coordinates(circle.center() + circle.y_radius())? - center;
+                let scale = x.magnitude().max(y.magnitude()).max(1.0);
+                let allowed = tolerance.parameter * scale * 64.0;
+                (x.x > 0.0
+                    && y.y > 0.0
+                    && x.y.abs() <= allowed
+                    && y.x.abs() <= allowed
+                    && (x.x - y.y).abs() <= allowed)
+                    .then(|| Circle2::new(center, (x.x + y.y) * 0.5).map(Into::into))
+                    .transpose()?
+            }
+            Curve3::SurfaceIntersection(_) | Curve3::SurfaceCurve(_) => None,
+        })
     }
 
     pub(crate) fn evaluate(self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {
@@ -5299,6 +5268,23 @@ pub enum Surface3 {
 }
 
 impl Surface3 {
+    /// A short human-readable name of the support type, for diagnostics.
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Plane(_) => "plane",
+            Self::Cylinder(_) => "cylinder",
+            Self::Cone(_) => "cone",
+            Self::Sphere(_) => "sphere",
+            Self::Torus(_) => "torus",
+            Self::Revolved(_) => "revolved",
+            Self::Swept(_) => "swept",
+            Self::Nurbs(_) => "NURBS",
+            Self::Offset(_) => "offset",
+            Self::RollingBall(_) => "rolling-ball",
+            Self::Ruled(_) => "ruled",
+        }
+    }
+
     pub(crate) fn integration_breakpoints(&self, axis: usize) -> Vec<f64> {
         match self {
             Self::Nurbs(surface) => {
@@ -5509,34 +5495,11 @@ impl Surface3 {
     pub fn domains(&self) -> [ParameterDomain; 2] {
         match self {
             Self::Plane(_) => [ParameterDomain::unbounded(), ParameterDomain::unbounded()],
-            Self::Cylinder(_) => [
-                ParameterDomain {
-                    bounds: DomainBounds::Bounded(ParameterRange {
-                        start: 0.0,
-                        end: std::f64::consts::TAU,
-                    }),
-                    period: Some(std::f64::consts::TAU),
-                },
-                ParameterDomain::unbounded(),
-            ],
-            Self::Cone(_) => [
-                ParameterDomain {
-                    bounds: DomainBounds::Bounded(ParameterRange {
-                        start: 0.0,
-                        end: std::f64::consts::TAU,
-                    }),
-                    period: Some(std::f64::consts::TAU),
-                },
-                ParameterDomain::unbounded(),
-            ],
+            Self::Cylinder(_) | Self::Cone(_) => {
+                [ParameterDomain::ANGLE, ParameterDomain::unbounded()]
+            }
             Self::Sphere(_) => [
-                ParameterDomain {
-                    bounds: DomainBounds::Bounded(ParameterRange {
-                        start: 0.0,
-                        end: std::f64::consts::TAU,
-                    }),
-                    period: Some(std::f64::consts::TAU),
-                },
+                ParameterDomain::ANGLE,
                 ParameterDomain {
                     bounds: DomainBounds::Bounded(ParameterRange {
                         start: -std::f64::consts::FRAC_PI_2,
@@ -5545,32 +5508,8 @@ impl Surface3 {
                     period: None,
                 },
             ],
-            Self::Torus(_) => [
-                ParameterDomain {
-                    bounds: DomainBounds::Bounded(ParameterRange {
-                        start: 0.0,
-                        end: std::f64::consts::TAU,
-                    }),
-                    period: Some(std::f64::consts::TAU),
-                },
-                ParameterDomain {
-                    bounds: DomainBounds::Bounded(ParameterRange {
-                        start: 0.0,
-                        end: std::f64::consts::TAU,
-                    }),
-                    period: Some(std::f64::consts::TAU),
-                },
-            ],
-            Self::Revolved(surface) => [
-                ParameterDomain {
-                    bounds: DomainBounds::Bounded(ParameterRange {
-                        start: 0.0,
-                        end: std::f64::consts::TAU,
-                    }),
-                    period: Some(std::f64::consts::TAU),
-                },
-                surface.profile_domain(),
-            ],
+            Self::Torus(_) => [ParameterDomain::ANGLE, ParameterDomain::ANGLE],
+            Self::Revolved(surface) => [ParameterDomain::ANGLE, surface.profile_domain()],
             Self::Swept(surface) => surface.domains(),
             Self::Nurbs(surface) => surface.domains(),
             Self::Offset(surface) => surface.base.domains(),

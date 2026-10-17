@@ -1,37 +1,51 @@
 //! The invariant-preserving BREP kernel.
 //!
 //! This module is independent from document models, user interfaces,
-//! serialization transports, and platform bindings. Topology changes are made
-//! transactionally through Euler operators and become visible only after complete
-//! topological and physical validation.
+//! serialization transports, and platform bindings. Every topology change is
+//! made inside a [`transaction::Transaction`] and becomes visible only after
+//! complete topological and physical validation.
+//!
+//! Operations build topology in one of two ways. Global operations (Booleans,
+//! offsets, sweeps, lofts, face edits) produce exact trimmed face patches that
+//! `sew` assembles into shells. Primitive construction and local edits (blends,
+//! seam relocation, canonicalization) use the Euler operators of `euler` and
+//! the low-level edits of `transaction`.
 
 mod arena;
 mod boolean;
 mod brep_classification;
 mod bounds;
+mod canonicalize;
 mod domain;
 mod edge_blend;
 mod error;
 mod euler;
+mod extrude;
 mod features;
 mod geometry;
 mod history;
 mod identity;
 mod integration;
 mod intersection;
+mod linalg;
 mod mass_properties;
 mod modeling;
 mod naming;
 mod physical;
 mod periodic;
+mod polygon;
+#[cfg(test)]
 mod polyhedron;
+mod primitives;
 mod profile;
+mod sew;
 mod sweep;
 mod sweep_limits;
 mod sweeps;
 mod tessellation;
 mod tolerance;
 mod topology;
+mod transaction;
 mod trim;
 mod transform;
 mod validation;
@@ -43,11 +57,9 @@ mod tests;
 pub use arena::Handle;
 pub use boolean::BooleanKind;
 pub use domain::{DomainBounds, ParameterDomain, ParameterRange};
+pub(crate) use domain::{box_center, nearest_uv, whole_periods};
 pub use error::{Diagnostic, DiagnosticKind, KernelError, KernelResult};
-pub use euler::{
-    EulerTransaction, KefResult, KemrResult, KevResult, KfmrhResult, MefInput, MefResult,
-    MekrResult, MevInput, MevResult, MfkrhResult, MvfsResult,
-};
+pub(crate) use error::{geometry_error, invalid, topology_error, unsupported};
 pub use sweep::SweptSurface3;
 pub use geometry::{
     Axis3, Circle2, Circle3, Cone3, Curve2, Curve2Evaluation, Curve3, CurveEvaluation, Cylinder3,
@@ -67,10 +79,11 @@ pub use intersection::{
 pub use mass_properties::{MassProperties, SurfaceProperties};
 pub use modeling::{
     ChamferMode, Compound, EdgeHandle, FaceHandle, FilletOptions, Resolution, ResolvableEntity,
-    Solid, VertexHandle,
+    Solid, SplitKeep, VertexHandle,
 };
 pub use naming::PersistentId;
-pub use polyhedron::PolyhedralMesh;
+#[cfg(test)]
+pub(crate) use polyhedron::PolyhedralMesh;
 pub use profile::Profile;
 pub use tessellation::{Polyline, Tessellate, TessellationOptions, TriangleMesh};
 pub use tolerance::ModelTolerance;
@@ -82,7 +95,7 @@ pub use transform::RigidTransform3;
 pub use validation::ValidationReport;
 pub use wire::{TrimmedCurve2, Wire2};
 
-/// Owns one mutable BREP state for advanced Euler-level use.
+/// Owns one BREP state. Results of modeling operations each own a kernel.
 #[derive(Debug)]
 pub struct Kernel {
     tolerance: ModelTolerance,
@@ -108,17 +121,13 @@ impl Kernel {
 
     /// Re-run the complete publication invariant suite.
     pub fn validate(&self) -> ValidationReport {
-        validation::validate(
-            &self.topology,
-            self.tolerance,
-            validation::ValidationMode::Published,
-        )
+        validation::validate(&self.topology, self.tolerance)
     }
 
-    /// Begin an isolated Euler transaction with an automatically generated
-    /// operation identity. Dropping it rolls back; committing validates and
-    /// atomically publishes it.
-    pub fn begin_operation(&mut self) -> EulerTransaction<'_> {
-        EulerTransaction::new(self, identity::fresh_uuid())
+    /// Begin an isolated transaction with an automatically generated operation
+    /// identity. Dropping it rolls back; finishing validates and atomically
+    /// publishes it.
+    pub(crate) fn begin_operation(&mut self) -> transaction::Transaction<'_> {
+        transaction::Transaction::new(self, identity::fresh_uuid())
     }
 }

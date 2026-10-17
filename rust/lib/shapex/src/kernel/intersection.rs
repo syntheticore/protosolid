@@ -2,8 +2,9 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec3, Vec4};
 
+use super::linalg::solve_linear;
 use super::{
-    Circle3, Curve2, Curve3, DiagnosticKind, DomainBounds, KernelError, KernelResult, Line2, Line3,
+    unsupported, Circle3, Curve2, Curve3, DiagnosticKind, DomainBounds, KernelError, KernelResult, Line2, Line3,
     ModelTolerance, NurbsCurve2, Plane3, Surface3, SurfaceIntersectionCurve,
     SurfaceProjectionPcurve2,
 };
@@ -252,7 +253,7 @@ impl Curve3 {
                     -surface_value.dv.z,
                 ],
             ];
-            let Some(delta) = solve_linear_3(matrix, [-residual.x, -residual.y, -residual.z])
+            let Some(delta) = solve_linear(matrix, [-residual.x, -residual.y, -residual.z])
             else {
                 break;
             };
@@ -506,7 +507,7 @@ pub(crate) fn correct_surface_pair_near(
         ];
         let normal = multiply_3x4_by_transpose(jacobian);
         let lambda =
-            solve_linear_3(normal, [-residual.x, -residual.y, -residual.z]).ok_or_else(|| {
+            solve_linear(normal, [-residual.x, -residual.y, -residual.z]).ok_or_else(|| {
                 KernelError::new(
                     DiagnosticKind::NumericalFailure,
                     "local surface-intersection correction is singular",
@@ -1895,9 +1896,7 @@ fn trace_surface_intersections_in_domains(
                     (point, projection)
                 };
                 for (index, domain) in first.domains().into_iter().chain(second.domains()).enumerate() {
-                    if let Some(period) = domain.period {
-                        endpoint[index] += ((values[index] - endpoint[index]) / period).round() * period;
-                    }
+                    endpoint[index] = domain.nearest(endpoint[index], values[index]);
                 }
                 if projection.distance <= f64::EPSILON * point.to_vec().magnitude().max(1.0) * 256.0
                     && preserves_bounds(endpoint, *values)
@@ -2273,7 +2272,7 @@ fn correct_surface_pair(
         // Each pass fixes at least one of the four parameters.
         for _ in 0..=4 {
             let normal = multiply_3x4_by_transpose(jacobian);
-            let Some(lambda) = solve_linear_3(normal, [-residual.x, -residual.y, -residual.z])
+            let Some(lambda) = solve_linear(normal, [-residual.x, -residual.y, -residual.z])
             else {
                 return Ok(None);
             };
@@ -2574,7 +2573,7 @@ pub(crate) fn correct_surface_pair_with_gauge(
             [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
             tangent,
         ];
-        let Some(delta) = solve_linear_4(matrix, [-residual.x, -residual.y, -residual.z, -gauge])
+        let Some(delta) = solve_linear(matrix, [-residual.x, -residual.y, -residual.z, -gauge])
         else {
             return Ok(None);
         };
@@ -2681,13 +2680,7 @@ pub(crate) fn periodic_nurbs_guide(
 /// creates a false high-speed excursion through the middle of the chart.
 pub(crate) fn unwrap_periodic_points(points: &mut [Point2], domains: [super::ParameterDomain; 2]) {
     for index in 1..points.len() {
-        let previous = points[index - 1];
-        if let Some(period) = domains[0].period {
-            points[index].x += ((previous.x - points[index].x) / period).round() * period;
-        }
-        if let Some(period) = domains[1].period {
-            points[index].y += ((previous.y - points[index].y) / period).round() * period;
-        }
+        points[index] = super::nearest_uv(domains, points[index], points[index - 1]);
     }
 }
 
@@ -2727,67 +2720,7 @@ fn multiply_3x4_by_transpose(matrix: [[f64; 4]; 3]) -> [[f64; 3]; 3] {
     })
 }
 
-pub(crate) fn solve_linear_3(mut matrix: [[f64; 3]; 3], mut right: [f64; 3]) -> Option<[f64; 3]> {
-    for column in 0..3 {
-        let pivot = (column..3).max_by(|first, second| {
-            matrix[*first][column]
-                .abs()
-                .total_cmp(&matrix[*second][column].abs())
-        })?;
-        if matrix[pivot][column].abs() <= f64::EPSILON * 256.0 {
-            return None;
-        }
-        matrix.swap(column, pivot);
-        right.swap(column, pivot);
-        let divisor = matrix[column][column];
-        for value in &mut matrix[column][column..] {
-            *value /= divisor;
-        }
-        right[column] /= divisor;
-        for row in 0..3 {
-            if row == column {
-                continue;
-            }
-            let factor = matrix[row][column];
-            for index in column..3 {
-                matrix[row][index] -= factor * matrix[column][index];
-            }
-            right[row] -= factor * right[column];
-        }
-    }
-    Some(right)
-}
 
-fn solve_linear_4(mut matrix: [[f64; 4]; 4], mut right: [f64; 4]) -> Option<[f64; 4]> {
-    for column in 0..4 {
-        let pivot = (column..4).max_by(|first, second| {
-            matrix[*first][column]
-                .abs()
-                .total_cmp(&matrix[*second][column].abs())
-        })?;
-        if matrix[pivot][column].abs() <= f64::EPSILON * 256.0 {
-            return None;
-        }
-        matrix.swap(column, pivot);
-        right.swap(column, pivot);
-        let divisor = matrix[column][column];
-        for value in &mut matrix[column][column..] {
-            *value /= divisor;
-        }
-        right[column] /= divisor;
-        for row in 0..4 {
-            if row == column {
-                continue;
-            }
-            let factor = matrix[row][column];
-            for index in column..4 {
-                matrix[row][index] -= factor * matrix[column][index];
-            }
-            right[row] -= factor * right[column];
-        }
-    }
-    Some(right)
-}
 
 fn null_vector_3x4(matrix: [[f64; 4]; 3]) -> [f64; 4] {
     std::array::from_fn(|column| {
@@ -3229,8 +3162,4 @@ fn swap_curve_hits(set: IntersectionSet<CurveCurveHit>) -> IntersectionSet<Curve
         IntersectionSet::Empty => IntersectionSet::Empty,
         IntersectionSet::Coincident => IntersectionSet::Coincident,
     }
-}
-
-fn unsupported(message: impl Into<String>) -> KernelError {
-    KernelError::new(DiagnosticKind::UnsupportedGeometry, message)
 }

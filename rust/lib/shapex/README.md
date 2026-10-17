@@ -1,6 +1,6 @@
 # Shapex
 
-Shapex is a full BREP cad kernel with fully analytical/implicit/nurbs surfaces and watertight topology guarantees, based on euler operators for internal consistency and mathematical elegance. Its safe API returns a solid only after topology, trimming geometry, manifoldness, and physical volume have been
+Shapex is a full BREP cad kernel with fully analytical/implicit/nurbs surfaces and watertight topology guarantees. Its safe API returns a solid only after topology, trimming geometry, manifoldness, and physical volume have been
 validated. It's pleasant to use directly in any rust application, but also make it easy to use in parametrical cad applications, which need to deal with the topological naming problem and re-identify faces and edges across operations. Geometry is always represented using the simplest possible mathematical form. For instance, a cylindrical surface can be described as a surface of revolution, instead of using NURBS. Neighboring surfaces of the same type get unified automatically if possible. (Two planar surfaces of the same orientation for instance)
 
 The old implementation is available only through
@@ -62,10 +62,9 @@ side faces, while a future fillet can report faces generated from its input edge
 Applications may associate those roles with their own document references without
 assigning names inside Shapex.
 
-Advanced clients can use `Kernel`, `EulerTransaction`, and the classical Euler
-operators directly. Each operator validates construction topology; dropping a
-transaction rolls it back, and committing runs the complete physical publication
-suite atomically.
+Internally every operation edits an isolated transaction that is published
+atomically, only after the complete topological, geometric, and physical
+validation of the bodies it produced.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the invariants, ownership model,
 certification boundary, and current supported geometry.

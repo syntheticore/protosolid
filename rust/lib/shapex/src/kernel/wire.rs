@@ -2,8 +2,9 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Vec2, Vec3};
 
+use super::polygon::{on_segment, segments_intersect};
 use super::{
-    Circle2, Curve2, DiagnosticKind, KernelError, KernelResult, Line2, ModelTolerance,
+    invalid, Circle2, Curve2, DiagnosticKind, KernelError, KernelResult, Line2, ModelTolerance,
     ParameterRange,
 };
 
@@ -542,7 +543,7 @@ pub(crate) fn curve_loop_contains_point(
             Curve2::Line(_) => {
                 let start = segment.start()?;
                 let end = segment.end()?;
-                if point_on_segment(point, start, end, tolerance.linear) {
+                if on_segment(point, start, end, tolerance.linear) {
                     return Ok(false);
                 }
                 let cross = (end.x - start.x) * (ray_point.y - start.y)
@@ -651,19 +652,6 @@ pub(crate) fn curve_loop_contains_point(
     Ok(winding != 0)
 }
 
-fn point_on_segment(point: Point2, start: Point2, end: Point2, tolerance: f64) -> bool {
-    let direction = end - start;
-    let length = direction.magnitude();
-    if length == 0.0 {
-        return point.distance(start) <= tolerance;
-    }
-    let cross = direction.x * (point.y - start.y) - direction.y * (point.x - start.x);
-    cross.abs() <= tolerance * length
-        && point.x >= start.x.min(end.x) - tolerance
-        && point.x <= start.x.max(end.x) + tolerance
-        && point.y >= start.y.min(end.y) - tolerance
-        && point.y <= start.y.max(end.y) + tolerance
-}
 
 fn periodic_parameters_in_range(range: ParameterRange, base: f64) -> Vec<f64> {
     let low = range.start.min(range.end);
@@ -1524,41 +1512,4 @@ fn bounds_separated(
 
 fn bounds_size(bounds: (f64, f64, f64, f64)) -> f64 {
     (bounds.1 - bounds.0).hypot(bounds.3 - bounds.2)
-}
-
-pub(crate) fn segments_intersect(
-    a: Point2,
-    b: Point2,
-    c: Point2,
-    d: Point2,
-    tolerance: f64,
-) -> bool {
-    let cross = |first: Vec2, second: Vec2| first.x * second.y - first.y * second.x;
-    let ab = b - a;
-    let cd = d - c;
-    let denominator = cross(ab, cd);
-    if denominator.abs() <= tolerance * tolerance {
-        let collinear = cross(c - a, ab).abs() <= tolerance * ab.magnitude().max(1.0)
-            && cross(d - a, ab).abs() <= tolerance * ab.magnitude().max(1.0);
-        if !collinear {
-            return false;
-        }
-        let use_x = ab.x.abs() >= ab.y.abs();
-        let projection = |point: Point2| if use_x { point.x } else { point.y };
-        let first = [projection(a), projection(b)];
-        let second = [projection(c), projection(d)];
-        return first[0].min(first[1]) <= second[0].max(second[1]) + tolerance
-            && second[0].min(second[1]) <= first[0].max(first[1]) + tolerance;
-    }
-    let ac = c - a;
-    let first = cross(ac, cd) / denominator;
-    let second = cross(ac, ab) / denominator;
-    -tolerance <= first
-        && first <= 1.0 + tolerance
-        && -tolerance <= second
-        && second <= 1.0 + tolerance
-}
-
-fn invalid(message: impl Into<String>) -> KernelError {
-    KernelError::new(DiagnosticKind::InvalidInput, message)
 }

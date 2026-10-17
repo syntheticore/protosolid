@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::prelude::*;
@@ -8,10 +9,12 @@ use super::brep_classification::{BrepClassifier, PointClassification};
 use super::trim::{align_pcurve_to_face_chart, coincident_supports, curve_intersections,
     face_boundary_curves, face_parameter_bounds, intersection_chart_copies,
     point_in_trim, sample_pcurve, translate_pcurve, trim_to_faces};
-use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
+use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
+use super::polygon::point_in_polygon;
 use super::{
-    Compound, Curve2, Curve3, DiagnosticKind, FaceOrientation, IntersectionSet, Kernel,
-    KernelError, KernelResult, LoopKind, ModelTolerance, ParameterRange, Surface3,
+    box_center, nearest_uv, whole_periods, Compound, Curve2, Curve3, DiagnosticKind, FaceHandle,
+    FaceOrientation, IntersectionSet, Kernel, KernelError, KernelResult, LoopKind, ModelTolerance,
+    ParameterRange, Surface3,
 };
 
 /// Material-set operation requested by the high-level exact BREP Boolean API.
@@ -61,6 +64,17 @@ fn occupied(kind: BooleanKind, first: bool, second: bool) -> bool {
     }
 }
 
+/// How faces of both operands lying on one support are arranged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CoincidentFaces {
+    /// Merge them into one set of material regions.
+    Merge,
+    /// Keep every first-operand face boundary. Sectioning by a half-space
+    /// needs the boundary between an existing face and a coplanar cut cap,
+    /// even when both have the same support and orientation.
+    PreserveFirst,
+}
+
 /// Feature-neutral regularized Boolean evaluation over two arbitrary BREP
 /// boundaries.  Every retained face keeps its original analytical support;
 /// newly introduced edges retain both intersected surfaces through an implicit
@@ -70,426 +84,38 @@ pub(crate) fn boolean_brep(
     second: &Compound,
     kind: BooleanKind,
 ) -> KernelResult<Compound> {
-    boolean_brep_with_face_boundaries(first, second, kind, false)
+    boolean_brep_with(first, second, kind, CoincidentFaces::Merge)
 }
 
-// Sections need the boundary between an existing coincident face and a new
-// cut cap, even when both regions have the same support and orientation.
-pub(crate) fn boolean_brep_with_face_boundaries(
+pub(crate) fn boolean_brep_with(
     first: &Compound,
     second: &Compound,
     kind: BooleanKind,
-    preserve_first_faces: bool,
+    coincident: CoincidentFaces,
 ) -> KernelResult<Compound> {
     let tolerance = first.tolerance();
-    let scale = first
-        .vertices()
-        .chain(second.vertices())
-        .map(|vertex| vertex.point().to_vec().magnitude())
-        .fold(1.0_f64, f64::max);
-    // Preserve the arrangement's existing geometric probe spacing independently
-    // of rendering or classification meshes.
-    let classification_offset = (tolerance.linear_at_scale(scale) * 32.0)
-        .max(scale * 5.0e-4) * 8.0;
-
-    let first_faces = first.faces().cloned().collect::<Vec<_>>();
-    let second_faces = second.faces().cloned().collect::<Vec<_>>();
-    let mut face_curves = BTreeMap::<(usize, usize), Vec<FaceCurve>>::new();
-    for (operand, faces, compound) in [
-        (0_usize, first_faces.as_slice(), first),
-        (1_usize, second_faces.as_slice(), second),
-    ] {
-        for (index, face) in faces.iter().enumerate() {
-            face_curves.insert(
-                (operand, index),
-                boundary_curves(compound, face.topology_id())?,
-            );
-        }
-    }
-    let source_curves = face_curves.clone();
-    for (operand, faces, opposite) in [
-        (0, first_faces.as_slice(), second_faces.as_slice()),
-        (1, second_faces.as_slice(), first_faces.as_slice()),
-    ] {
-        for (index, face) in faces.iter().enumerate() {
-            rechart_periodic_band(face.surface(), face_curves.get_mut(&(operand, index)).unwrap(),
-                opposite, &source_curves, 1 - operand, tolerance)?;
-        }
-    }
-    let original_curves = face_curves.clone();
-    let first_classifier = BrepClassifier::for_compound(first)?;
-    let second_classifier = BrepClassifier::for_compound(second)?;
-    let classifiers = [&first_classifier, &second_classifier];
-
-    for (first_index, first_face) in first_faces.iter().enumerate() {
-        for (second_index, second_face) in second_faces.iter().enumerate() {
-            let first_boundary = &original_curves[&(0, first_index)];
-            let second_boundary = &original_curves[&(1, second_index)];
-            if face_bounds_separated(
-                first_face.surface(),
-                first_boundary,
-                second_face.surface(),
-                second_boundary,
-                tolerance,
-            )? {
-                continue;
-            }
-            let first_bounds = face_parameter_bounds(first_boundary, tolerance)?;
-            let second_bounds = face_parameter_bounds(second_boundary, tolerance)?;
-            let intersections = first_face.surface().intersect_surface_in_bounds(
-                second_face.surface(),
-                first_bounds,
-                second_bounds,
-                tolerance,
-            )?;
-            let IntersectionSet::Isolated(intersections) = intersections else {
-                continue;
-            };
-            for intersection in intersections {
-                let first_pcurve = align_pcurve_to_face_chart(
-                    &intersection.first_pcurve,
-                    None,
-                    first_face.surface(),
-                    first_boundary,
-                    tolerance,
-                )?;
-                let second_pcurve = align_pcurve_to_face_chart(
-                    &intersection.second_pcurve,
-                    None,
-                    second_face.surface(),
-                    second_boundary,
-                    tolerance,
-                )?;
-                let first_copies = intersection_chart_copies(
-                    intersection.curve.domain().bounds,
-                    &first_pcurve,
-                    first_face.surface(),
-                    first_bounds,
-                    tolerance,
-                )?;
-                let second_copies = intersection_chart_copies(
-                    intersection.curve.domain().bounds,
-                    &second_pcurve,
-                    second_face.surface(),
-                    second_bounds,
-                    tolerance,
-                )?;
-                for first_pcurve in &first_copies {
-                    for second_pcurve in &second_copies {
-                        let trimmed = trim_to_faces(
-                            &intersection.curve,
-                            &first_pcurve,
-                            first_boundary,
-                            &second_pcurve,
-                            second_boundary,
-                            tolerance,
-                        )?;
-                        for range in trimmed {
-                            // The original trim already participates in this
-                            // arrangement. Reimprinting a coincident intersection
-                            // would subdivide it using independently solved
-                            // parameters, separating shared contact vertices.
-                            if boundary_curve_for_intersection(
-                                &intersection.curve,
-                                range,
-                                first_boundary,
-                                tolerance,
-                            )?.is_none() {
-                                face_curves.get_mut(&(0, first_index))
-                                    .expect("face curve map is complete")
-                                    .push(FaceCurve {
-                                        provenance: Default::default(),
-                                        curve: intersection.curve.clone(),
-                                        pcurve: first_pcurve.clone(),
-                                        range,
-                                        loop_end: false,
-                                        loop_kind: LoopKind::Outer,
-                                        parameter_seam: false,
-                                    });
-                            }
-                            if boundary_curve_for_intersection(
-                                &intersection.curve,
-                                range,
-                                second_boundary,
-                                tolerance,
-                            )?.is_none() {
-                                face_curves.get_mut(&(1, second_index))
-                                    .expect("face curve map is complete")
-                                    .push(FaceCurve {
-                                        provenance: Default::default(),
-                                        curve: intersection.curve.clone(),
-                                        pcurve: second_pcurve.clone(),
-                                        range,
-                                        loop_end: false,
-                                        loop_kind: LoopKind::Outer,
-                                        parameter_seam: false,
-                                    });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Coincident supports form one arrangement even when their source faces
-    // have different trim loops.  Overlay both complete boundary graphs on
-    // each support; otherwise a union of coplanar faces would leave each
-    // operand holding only an open fragment of the result outline.
-    // Include intersections imprinted by other faces, not just original trim
-    // edges. The opposite shared-support face is skipped during publication,
-    // so omitting its intersections loses material boundaries (for example
-    // where a torus crosses its start plane again after half a turn).
-    // Intersections already represented by either trim boundary are excluded:
-    // projecting them again can introduce differently subdivided duplicates.
-    let imprinted_curves = face_curves.clone();
-    for (first_index, first_face) in first_faces.iter().enumerate() {
-        for (second_index, second_face) in second_faces.iter().enumerate() {
-            let coincident = coincident_supports(first_face.surface(), second_face.surface(), tolerance)?;
-            if !coincident {
-                continue;
-            }
-            let first_boundary = &original_curves[&(0, first_index)];
-            let second_boundary = &original_curves[&(1, second_index)];
-            for (target_key, source_key, target, target_boundary, source_boundary) in [
-                ((0, first_index), (1, second_index), first_face, first_boundary, second_boundary),
-                ((1, second_index), (0, first_index), second_face, second_boundary, first_boundary),
-            ] {
-                // A union can enlarge a partial source face. Overlay in one
-                // complete chart, rather than clipping to the source trim.
-                let mut chart = face_parameter_bounds(target_boundary, tolerance)?;
-                for (axis, domain) in target.surface().domains().iter().enumerate() {
-                    if let Some(period) = domain.period {
-                        chart[axis].end = chart[axis].start + period;
-                    }
-                }
-                for (index, source) in imprinted_curves[&source_key].iter().enumerate() {
-                    if index >= source_boundary.len()
-                        && (boundary_curve_for_intersection(&source.curve, source.range, first_boundary, tolerance)?.is_some()
-                            || boundary_curve_for_intersection(&source.curve, source.range, second_boundary, tolerance)?.is_some())
-                    {
-                        continue;
-                    }
-                    let projected: Curve2 = if first_face.surface() == second_face.surface() {
-                        source.pcurve.clone()
-                    } else {
-                        super::SurfaceProjectionPcurve2::new(
-                            source.curve.clone(), target.surface().clone(), source.pcurve.clone(), source.range, tolerance,
-                        )?.into()
-                    };
-                    let projected = align_pcurve_to_face_chart(
-                        &projected, Some(source.range), target.surface(), target_boundary, tolerance,
-                    )?;
-                    for pcurve in intersection_chart_copies(
-                        super::DomainBounds::Bounded(source.range), &projected, target.surface(), chart, tolerance,
-                    )? {
-                        face_curves.get_mut(&target_key).expect("face curve map is complete").push(FaceCurve {
-                            provenance: source.provenance.clone(),
-                            curve: source.curve.clone(),
-                            pcurve,
-                            range: source.range,
-                            loop_end: false,
-                            loop_kind: source.loop_kind,
-                            parameter_seam: source.parameter_seam,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    let mut patches = Vec::new();
-    for (operand, faces, compound) in [
-        (0_usize, first_faces.as_slice(), first),
-        (1_usize, second_faces.as_slice(), second),
-    ] {
-        let opposite_faces = if operand == 0 {
-            second_faces.as_slice()
-        } else {
-            first_faces.as_slice()
-        };
-        for (index, face) in faces.iter().enumerate() {
-            let mut original = original_curves[&(operand, index)].clone();
-            let mut has_coincident_support = false;
-            for opposite in opposite_faces {
-                has_coincident_support |= coincident_supports(face.surface(), opposite.surface(), tolerance)?;
-            }
-            // Prefer an existing complete periodic band over a small contact
-            // patch whose arbitrary chart cut can split that band. Retain the
-            // first operand's chart when it already covers a full period.
-            let mut shared_owner = None;
-            if has_coincident_support {
-                let mut chart_bounds = [[
-                    Point2::new(f64::INFINITY, f64::INFINITY),
-                    Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
-                ]; 2];
-                let mut singular = false;
-                for (side, candidates) in [&first_faces, &second_faces].into_iter().enumerate() {
-                    for (candidate_index, candidate) in candidates.iter().enumerate() {
-                        if coincident_supports(face.surface(), candidate.surface(), tolerance)? {
-                            let bounds = face_parameter_bounds(&original_curves[&(side, candidate_index)], tolerance)?;
-                            for axis in 0..2 {
-                                chart_bounds[side][0][axis] = chart_bounds[side][0][axis].min(bounds[axis].start);
-                                chart_bounds[side][1][axis] = chart_bounds[side][1][axis].max(bounds[axis].end);
-                            }
-                            for curve in &original_curves[&(side, candidate_index)] {
-                                for parameter in [curve.range.start, curve.range.end] {
-                                    let uv = curve.pcurve.evaluate(parameter)?.point;
-                                    let (_, du, dv) = candidate.surface().first_order(uv.x, uv.y)?;
-                                    singular |= du.cross(dv).magnitude() <= tolerance.linear * du.magnitude().max(dv.magnitude());
-                                }
-                            }
-                        }
-                    }
-                }
-                let full_band = |side: usize| face.surface().domains().iter().enumerate().any(|(axis, domain)| {
-                    domain.period.is_some_and(|period| chart_bounds[side][1][axis] - chart_bounds[side][0][axis]
-                        >= period - tolerance.parameter * 64.0)
-                });
-                let canonical = usize::from(!preserve_first_faces && !full_band(0) && full_band(1));
-                if singular && !preserve_first_faces {
-                    shared_owner = Some(canonical);
-                } else if operand != canonical {
-                    continue;
-                }
-            }
-            let mut combined_curves = Vec::new();
-            if has_coincident_support && shared_owner.is_none() {
-                // A shell can have several disjoint faces on this support.
-                // Arrange their combined boundaries once, or each face can
-                // independently publish the opposite operand's end cap.
-                let mut matching = Vec::new();
-                for (other_index, other) in faces.iter().enumerate() {
-                    if coincident_supports(face.surface(), other.surface(), tolerance)? {
-                        matching.push(other_index);
-                    }
-                }
-                if matching[0] != index { continue; }
-                for other_index in matching {
-                    let other = &faces[other_index];
-                    for (curve_index, curve) in face_curves[&(operand, other_index)].iter().enumerate() {
-                        let mut curve = curve.clone();
-                        if other.surface() != face.surface() {
-                            curve.pcurve = super::SurfaceProjectionPcurve2::new(
-                                curve.curve.clone(),
-                                face.surface().clone(),
-                                curve.pcurve.clone(),
-                                curve.range,
-                                tolerance,
-                            )?
-                            .into();
-                            curve.pcurve = align_pcurve_to_face_chart(
-                                &curve.pcurve,
-                                Some(curve.range),
-                                face.surface(),
-                                &original,
-                                tolerance,
-                            )?;
-                        }
-                        if other_index != index && curve_index < original_curves[&(operand, other_index)].len() {
-                            original.push(curve.clone());
-                        }
-                        combined_curves.push(curve);
-                    }
-                }
-            }
-            let exclude_existing_faces = preserve_first_faces && has_coincident_support;
-            let mut arranged = Vec::new();
-            if exclude_existing_faces {
-                // A coincident half-space retains each existing face boundary.
-                // Arrange the remaining cut cap separately.
-                for (index, original_face) in first_faces.iter().enumerate() {
-                    if !coincident_supports(face.surface(), original_face.surface(), tolerance)? {
-                        continue;
-                    }
-                    let boundary = &original_curves[&(0, index)];
-                    arranged.extend(arrange_face(
-                        0,
-                        original_face.surface(),
-                        first
-                            .topology()
-                            .face(original_face.topology_id())?
-                            .orientation(),
-                        boundary,
-                        boundary,
-                        true,
-                        None,
-                        false,
-                        classifiers,
-                        kind,
-                        classification_offset,
-                        tolerance,
-                    )?);
-                }
-            }
-            arranged.extend(arrange_face(
-                operand,
-                face.surface(),
-                compound.topology().face(face.topology_id())?.orientation(),
-                &original,
-                if has_coincident_support && shared_owner.is_none() {
-                    &combined_curves
-                } else {
-                    &face_curves[&(operand, index)]
-                },
-                has_coincident_support,
-                shared_owner,
-                exclude_existing_faces,
-                classifiers,
-                kind,
-                classification_offset,
-                tolerance,
-            )?);
-            for patch in &mut arranged {
-                if has_coincident_support {
-                    // A shared-support arrangement can contain several disjoint
-                    // source faces. Attribute only the trimmed regions it uses.
-                    for parent in [first, second] {
-                        for candidate in parent.faces() {
-                            if coincident_supports(&patch.surface, candidate.surface(), tolerance)?
-                                && patch_uses_face(patch, parent, candidate, tolerance)?
-                            {
-                                patch.sources.push(candidate.persistent_id());
-                                if patch
-                                    .retains_boundary(parent.topology(), candidate.topology_id())?
-                                {
-                                    patch.preserved.push(candidate.persistent_id());
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    patch.sources.push(face.persistent_id());
-                    if patch.retains_boundary(compound.topology(), face.topology_id())? {
-                        patch.preserved.push(face.persistent_id());
-                    }
-                }
-            }
-            patches.extend(arranged);
-        }
-    }
-    if preserve_first_faces {
+    let mut arrangement = Arrangement::new([first, second], kind, coincident)?;
+    arrangement.imprint_intersections()?;
+    arrangement.overlay_coincident_boundaries()?;
+    let mut patches = arrangement.face_patches()?;
+    if coincident == CoincidentFaces::PreserveFirst {
         for patch in &mut patches {
             let Surface3::Plane(plane) = &patch.surface else {
                 continue;
             };
             for segment in patch.loops.iter_mut().flat_map(|loop_| &mut loop_.segments) {
-                if let Curve3::Line(line) = &segment.curve {
-                    let origin = plane.project(line.origin())?.parameters;
-                    let end = plane.project(line.origin() + line.direction())?.parameters;
-                    segment.pcurve = super::Line2::new(
-                        Point2::new(origin.0, origin.1),
-                        Vec2::new(end.0 - origin.0, end.1 - origin.1),
-                    )?
-                    .into();
+                if let Curve3::Line(_) = &segment.curve {
+                    segment.pcurve = plane
+                        .flatten_curve(&segment.curve, tolerance)?
+                        .expect("a line has an exact plane image");
                 }
             }
         }
     }
-    super::euler::conform_brep_interfaces(&mut patches, tolerance)?;
+    super::sew::conform_brep_interfaces(&mut patches, tolerance)?;
     // Section regions partition each shared support exactly once. Boundary-only
     // containment would mistake a cap for a duplicate of its surrounding face.
-    if !preserve_first_faces {
+    if coincident == CoincidentFaces::Merge {
         deduplicate_patches(&mut patches, tolerance)?;
     }
     // Let the Euler weld choose the simplest exact representation when more
@@ -513,6 +139,516 @@ pub(crate) fn boolean_brep_with_face_boundaries(
     let committed = transaction.finish()?;
     Compound::from_operation(kernel, committed, [first, second])?
         .with_boolean_parents(first, second, super::DerivationRole::Boolean(kind))
+}
+
+/// A face of either operand, addressed as `(operand, index)`.
+type FaceKey = (usize, usize);
+
+/// How a face being arranged shares its support with the other operand.
+#[derive(Debug, Clone, Copy)]
+enum Support {
+    /// No face of the other operand lies on this support.
+    Own,
+    /// Faces of both operands lie on this support. With an `owner`, each of
+    /// that operand's trims is one chart cell; with `exclude_first`, regions
+    /// covered by first-operand faces are left to those faces.
+    Shared {
+        owner: Option<usize>,
+        exclude_first: bool,
+    },
+}
+
+/// The faces of both operands with their trims, as intersections are imprinted
+/// and coincident boundaries overlaid before regions are classified.
+struct Arrangement<'a> {
+    operands: [&'a Compound; 2],
+    faces: [Vec<FaceHandle>; 2],
+    kind: BooleanKind,
+    coincident: CoincidentFaces,
+    tolerance: ModelTolerance,
+    /// Probe distance used to classify the material side of a region.
+    classification_offset: f64,
+    /// Each face's own trim, recharted against the other operand.
+    original: BTreeMap<FaceKey, Vec<FaceCurve>>,
+    /// The trim plus every curve imprinted on the face.
+    imprinted: BTreeMap<FaceKey, Vec<FaceCurve>>,
+    supports: RefCell<BTreeMap<(FaceKey, FaceKey), bool>>,
+}
+
+impl<'a> Arrangement<'a> {
+    fn new(
+        operands: [&'a Compound; 2],
+        kind: BooleanKind,
+        coincident: CoincidentFaces,
+    ) -> KernelResult<Self> {
+        let tolerance = operands[0].tolerance();
+        let scale = operands
+            .iter()
+            .flat_map(|operand| operand.vertices())
+            .map(|vertex| vertex.point().to_vec().magnitude())
+            .fold(1.0_f64, f64::max);
+        let faces = operands.map(|operand| operand.faces().cloned().collect::<Vec<_>>());
+        let mut curves = BTreeMap::new();
+        for operand in 0..2 {
+            for (index, face) in faces[operand].iter().enumerate() {
+                curves.insert(
+                    (operand, index),
+                    boundary_curves(operands[operand], face.topology_id())?,
+                );
+            }
+        }
+        let source = curves.clone();
+        for operand in 0..2 {
+            for (index, face) in faces[operand].iter().enumerate() {
+                rechart_periodic_band(
+                    face.surface(),
+                    curves.get_mut(&(operand, index)).expect("every face has a trim"),
+                    &faces[1 - operand],
+                    &source,
+                    1 - operand,
+                    tolerance,
+                )?;
+            }
+        }
+        Ok(Self {
+            operands,
+            faces,
+            kind,
+            coincident,
+            tolerance,
+            classification_offset: (tolerance.linear_at_scale(scale) * 32.0).max(scale * 5.0e-4)
+                * 8.0,
+            original: curves.clone(),
+            imprinted: curves,
+            supports: RefCell::default(),
+        })
+    }
+
+    fn face(&self, key: FaceKey) -> &FaceHandle {
+        &self.faces[key.0][key.1]
+    }
+
+    fn keys(&self, operand: usize) -> impl Iterator<Item = FaceKey> {
+        (0..self.faces[operand].len()).map(move |index| (operand, index))
+    }
+
+    /// Whether two faces lie on one support, computed once per ordered pair.
+    fn same_support(&self, first: FaceKey, second: FaceKey) -> KernelResult<bool> {
+        if let Some(value) = self.supports.borrow().get(&(first, second)) {
+            return Ok(*value);
+        }
+        let value = coincident_supports(
+            self.face(first).surface(),
+            self.face(second).surface(),
+            self.tolerance,
+        )?;
+        self.supports.borrow_mut().insert((first, second), value);
+        Ok(value)
+    }
+
+    /// Imprint every trimmed intersection of two operand faces on both faces.
+    fn imprint_intersections(&mut self) -> KernelResult<()> {
+        let tolerance = self.tolerance;
+        let faces = &self.faces;
+        let original = &self.original;
+        let imprinted = &mut self.imprinted;
+        for (first_index, first_face) in faces[0].iter().enumerate() {
+            for (second_index, second_face) in faces[1].iter().enumerate() {
+                let first_boundary = &original[&(0, first_index)];
+                let second_boundary = &original[&(1, second_index)];
+                if face_bounds_separated(
+                    first_face.surface(),
+                    first_boundary,
+                    second_face.surface(),
+                    second_boundary,
+                    tolerance,
+                )? {
+                    continue;
+                }
+                let first_bounds = face_parameter_bounds(first_boundary, tolerance)?;
+                let second_bounds = face_parameter_bounds(second_boundary, tolerance)?;
+                let IntersectionSet::Isolated(intersections) = first_face
+                    .surface()
+                    .intersect_surface_in_bounds(
+                        second_face.surface(),
+                        first_bounds,
+                        second_bounds,
+                        tolerance,
+                    )?
+                else {
+                    continue;
+                };
+                for intersection in intersections {
+                    let chart_copies = |pcurve: &Curve2,
+                                        face: &FaceHandle,
+                                        boundary: &[FaceCurve],
+                                        bounds: [ParameterRange; 2]| {
+                        let aligned = align_pcurve_to_face_chart(
+                            pcurve,
+                            None,
+                            face.surface(),
+                            boundary,
+                            tolerance,
+                        )?;
+                        intersection_chart_copies(
+                            intersection.curve.domain().bounds,
+                            &aligned,
+                            face.surface(),
+                            bounds,
+                            tolerance,
+                        )
+                    };
+                    let first_copies = chart_copies(
+                        &intersection.first_pcurve,
+                        first_face,
+                        first_boundary,
+                        first_bounds,
+                    )?;
+                    let second_copies = chart_copies(
+                        &intersection.second_pcurve,
+                        second_face,
+                        second_boundary,
+                        second_bounds,
+                    )?;
+                    for first_pcurve in &first_copies {
+                        for second_pcurve in &second_copies {
+                            let trimmed = trim_to_faces(
+                                &intersection.curve,
+                                first_pcurve,
+                                first_boundary,
+                                second_pcurve,
+                                second_boundary,
+                                tolerance,
+                            )?;
+                            for range in trimmed {
+                                // The original trim already participates in this
+                                // arrangement. Reimprinting a coincident
+                                // intersection would subdivide it using
+                                // independently solved parameters, separating
+                                // shared contact vertices.
+                                for (key, pcurve, boundary) in [
+                                    ((0, first_index), first_pcurve, first_boundary),
+                                    ((1, second_index), second_pcurve, second_boundary),
+                                ] {
+                                    if boundary_curve_for_intersection(
+                                        &intersection.curve,
+                                        range,
+                                        boundary,
+                                        tolerance,
+                                    )?
+                                    .is_none()
+                                    {
+                                        imprinted
+                                            .get_mut(&key)
+                                            .expect("every face has a trim")
+                                            .push(FaceCurve {
+                                                provenance: Default::default(),
+                                                curve: intersection.curve.clone(),
+                                                pcurve: pcurve.clone(),
+                                                range,
+                                                loop_end: false,
+                                                loop_kind: LoopKind::Outer,
+                                                parameter_seam: false,
+                                            });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Coincident supports form one arrangement even when their source faces
+    /// have different trim loops. Overlay both complete boundary graphs on each
+    /// support; otherwise a union of coplanar faces would leave each operand
+    /// holding only an open fragment of the result outline.
+    ///
+    /// Intersections imprinted by other faces are included, not just original
+    /// trim edges: the opposite shared-support face is skipped during
+    /// publication, so omitting its intersections loses material boundaries.
+    /// Intersections already represented by either trim are excluded, since
+    /// projecting them again can introduce differently subdivided duplicates.
+    fn overlay_coincident_boundaries(&mut self) -> KernelResult<()> {
+        let tolerance = self.tolerance;
+        let mut overlays = Vec::new();
+        for first_key in self.keys(0) {
+            for second_key in self.keys(1) {
+                if !self.same_support(first_key, second_key)? {
+                    continue;
+                }
+                let first_boundary = &self.original[&first_key];
+                let second_boundary = &self.original[&second_key];
+                let same_surface =
+                    self.face(first_key).surface() == self.face(second_key).surface();
+                for (target_key, source_key) in [(first_key, second_key), (second_key, first_key)] {
+                    let target = self.face(target_key).surface();
+                    let target_boundary = &self.original[&target_key];
+                    // A union can enlarge a partial source face. Overlay in one
+                    // complete chart, rather than clipping to the source trim.
+                    let mut chart = face_parameter_bounds(target_boundary, tolerance)?;
+                    for (axis, domain) in target.domains().iter().enumerate() {
+                        if let Some(period) = domain.period {
+                            chart[axis].end = chart[axis].start + period;
+                        }
+                    }
+                    let source_boundary = &self.original[&source_key];
+                    for (index, source) in self.imprinted[&source_key].iter().enumerate() {
+                        if index >= source_boundary.len()
+                            && (boundary_curve_for_intersection(
+                                &source.curve,
+                                source.range,
+                                first_boundary,
+                                tolerance,
+                            )?
+                            .is_some()
+                                || boundary_curve_for_intersection(
+                                    &source.curve,
+                                    source.range,
+                                    second_boundary,
+                                    tolerance,
+                                )?
+                                .is_some())
+                        {
+                            continue;
+                        }
+                        let projected: Curve2 = if same_surface {
+                            source.pcurve.clone()
+                        } else {
+                            super::SurfaceProjectionPcurve2::new(
+                                source.curve.clone(),
+                                target.clone(),
+                                source.pcurve.clone(),
+                                source.range,
+                                tolerance,
+                            )?
+                            .into()
+                        };
+                        let projected = align_pcurve_to_face_chart(
+                            &projected,
+                            Some(source.range),
+                            target,
+                            target_boundary,
+                            tolerance,
+                        )?;
+                        for pcurve in intersection_chart_copies(
+                            super::DomainBounds::Bounded(source.range),
+                            &projected,
+                            target,
+                            chart,
+                            tolerance,
+                        )? {
+                            overlays.push((
+                                target_key,
+                                FaceCurve {
+                                    provenance: source.provenance.clone(),
+                                    curve: source.curve.clone(),
+                                    pcurve,
+                                    range: source.range,
+                                    loop_end: false,
+                                    loop_kind: source.loop_kind,
+                                    parameter_seam: source.parameter_seam,
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        for (key, curve) in overlays {
+            self.imprinted
+                .get_mut(&key)
+                .expect("every face has a trim")
+                .push(curve);
+        }
+        Ok(())
+    }
+
+    /// Split every face into regions and keep those bounding the result,
+    /// each attributed to the source faces whose trims it occupies.
+    fn face_patches(&self) -> KernelResult<Vec<BrepPatch>> {
+        let tolerance = self.tolerance;
+        let preserve_first = self.coincident == CoincidentFaces::PreserveFirst;
+        let first_classifier = BrepClassifier::for_compound(self.operands[0])?;
+        let second_classifier = BrepClassifier::for_compound(self.operands[1])?;
+        let classifiers = [&first_classifier, &second_classifier];
+        let mut patches = Vec::new();
+        for operand in 0..2 {
+            let compound = self.operands[operand];
+            for key in self.keys(operand) {
+                let face = self.face(key);
+                let mut original = self.original[&key].clone();
+                let mut has_coincident_support = false;
+                for opposite in self.keys(1 - operand) {
+                    has_coincident_support |= self.same_support(key, opposite)?;
+                }
+                // Prefer an existing complete periodic band over a small contact
+                // patch whose arbitrary chart cut can split that band. Retain the
+                // first operand's chart when it already covers a full period.
+                let mut shared_owner = None;
+                if has_coincident_support {
+                    let mut chart_bounds = [[
+                        Point2::new(f64::INFINITY, f64::INFINITY),
+                        Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+                    ]; 2];
+                    let mut singular = false;
+                    for side in 0..2 {
+                        for candidate_key in self.keys(side) {
+                            if !self.same_support(key, candidate_key)? {
+                                continue;
+                            }
+                            let candidate_boundary = &self.original[&candidate_key];
+                            let bounds = face_parameter_bounds(candidate_boundary, tolerance)?;
+                            for axis in 0..2 {
+                                chart_bounds[side][0][axis] =
+                                    chart_bounds[side][0][axis].min(bounds[axis].start);
+                                chart_bounds[side][1][axis] =
+                                    chart_bounds[side][1][axis].max(bounds[axis].end);
+                            }
+                            let candidate = self.face(candidate_key).surface();
+                            for curve in candidate_boundary {
+                                for parameter in [curve.range.start, curve.range.end] {
+                                    let uv = curve.pcurve.evaluate(parameter)?.point;
+                                    let (_, du, dv) = candidate.first_order(uv.x, uv.y)?;
+                                    singular |= du.cross(dv).magnitude()
+                                        <= tolerance.linear * du.magnitude().max(dv.magnitude());
+                                }
+                            }
+                        }
+                    }
+                    let full_band = |side: usize| {
+                        face.surface().domains().iter().enumerate().any(|(axis, domain)| {
+                            domain.period.is_some_and(|period| {
+                                chart_bounds[side][1][axis] - chart_bounds[side][0][axis]
+                                    >= period - tolerance.parameter * 64.0
+                            })
+                        })
+                    };
+                    let canonical = usize::from(!preserve_first && !full_band(0) && full_band(1));
+                    if singular && !preserve_first {
+                        shared_owner = Some(canonical);
+                    } else if operand != canonical {
+                        continue;
+                    }
+                }
+                let mut combined_curves = Vec::new();
+                if has_coincident_support && shared_owner.is_none() {
+                    // A shell can have several disjoint faces on this support.
+                    // Arrange their combined boundaries once, or each face can
+                    // independently publish the opposite operand's end cap.
+                    let mut matching = Vec::new();
+                    for other_key in self.keys(operand) {
+                        if self.same_support(key, other_key)? {
+                            matching.push(other_key);
+                        }
+                    }
+                    if matching[0] != key {
+                        continue;
+                    }
+                    for other_key in matching {
+                        let other = self.face(other_key);
+                        for (curve_index, curve) in self.imprinted[&other_key].iter().enumerate() {
+                            let mut curve = curve.clone();
+                            if other.surface() != face.surface() {
+                                curve.pcurve = super::SurfaceProjectionPcurve2::new(
+                                    curve.curve.clone(),
+                                    face.surface().clone(),
+                                    curve.pcurve.clone(),
+                                    curve.range,
+                                    tolerance,
+                                )?
+                                .into();
+                                curve.pcurve = align_pcurve_to_face_chart(
+                                    &curve.pcurve,
+                                    Some(curve.range),
+                                    face.surface(),
+                                    &original,
+                                    tolerance,
+                                )?;
+                            }
+                            if other_key != key && curve_index < self.original[&other_key].len() {
+                                original.push(curve.clone());
+                            }
+                            combined_curves.push(curve);
+                        }
+                    }
+                }
+                let exclude_first = preserve_first && has_coincident_support;
+                let mut arranged = Vec::new();
+                if exclude_first {
+                    // A coincident half-space retains each existing face
+                    // boundary. Arrange the remaining cut cap separately.
+                    for first_key in self.keys(0) {
+                        if !self.same_support(key, first_key)? {
+                            continue;
+                        }
+                        let boundary = &self.original[&first_key];
+                        for patch in self.arrange_face(
+                            classifiers,
+                            first_key,
+                            boundary,
+                            boundary,
+                            Support::Shared {
+                                owner: None,
+                                exclude_first: false,
+                            },
+                        )? {
+                            arranged.push((first_key, patch));
+                        }
+                    }
+                }
+                let support = if has_coincident_support {
+                    Support::Shared {
+                        owner: shared_owner,
+                        exclude_first,
+                    }
+                } else {
+                    Support::Own
+                };
+                let curves = if has_coincident_support && shared_owner.is_none() {
+                    &combined_curves
+                } else {
+                    &self.imprinted[&key]
+                };
+                for patch in self.arrange_face(classifiers, key, &original, curves, support)? {
+                    arranged.push((key, patch));
+                }
+                for (patch_key, mut patch) in arranged {
+                    if has_coincident_support {
+                        // A shared-support arrangement can contain several
+                        // disjoint source faces. Attribute only the trimmed
+                        // regions it uses.
+                        for parent_operand in 0..2 {
+                            let parent = self.operands[parent_operand];
+                            for candidate_key in self.keys(parent_operand) {
+                                let candidate = self.face(candidate_key);
+                                if self.same_support(patch_key, candidate_key)?
+                                    && patch_uses_face(&patch, parent, candidate, tolerance)?
+                                {
+                                    patch.sources.push(candidate.persistent_id());
+                                    if patch.retains_boundary(
+                                        parent.topology(),
+                                        candidate.topology_id(),
+                                    )? {
+                                        patch.preserved.push(candidate.persistent_id());
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        patch.sources.push(face.persistent_id());
+                        if patch.retains_boundary(compound.topology(), face.topology_id())? {
+                            patch.preserved.push(face.persistent_id());
+                        }
+                    }
+                    patches.push(patch);
+                }
+            }
+        }
+        Ok(patches)
+    }
 }
 
 fn curve_complexity(curve: &Curve3) -> u8 {
@@ -758,14 +894,11 @@ fn boundary_curve_for_intersection(
                 matches = false;
                 break;
             };
-            let mut projected = projection.parameter;
-            if let Some(period) = candidate.curve.domain().period {
-                let reference = parameters
-                    .last()
-                    .copied()
-                    .unwrap_or((candidate.range.start + candidate.range.end) * 0.5);
-                projected += ((reference - projected) / period).round() * period;
-            }
+            let reference = parameters
+                .last()
+                .copied()
+                .unwrap_or(candidate.range.middle());
+            let projected = candidate.curve.domain().nearest(projection.parameter, reference);
             let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0;
             if projection.distance > allowed || !candidate.range.contains(projected, tolerance) {
                 matches = false;
@@ -795,20 +928,34 @@ fn boundary_curve_for_intersection(
     Ok(None)
 }
 
+impl Arrangement<'_> {
+/// Split the face `key`, bounded by `original_boundary`, along `curves` and
+/// keep the regions on the result boundary with their material orientation.
 fn arrange_face(
-    operand: usize,
-    surface: &Surface3,
-    source_orientation: FaceOrientation,
+    &self,
+    classifiers: [&BrepClassifier<'_>; 2],
+    key: FaceKey,
     original_boundary: &[FaceCurve],
     curves: &[FaceCurve],
-    has_coincident_support: bool,
-    shared_owner: Option<usize>,
-    exclude_existing_faces: bool,
-    classifiers: [&BrepClassifier<'_>; 2],
-    kind: BooleanKind,
-    classification_offset: f64,
-    tolerance: ModelTolerance,
+    support: Support,
 ) -> KernelResult<Vec<BrepPatch>> {
+    let operand = key.0;
+    let face = self.face(key);
+    let surface = face.surface();
+    let source_orientation = self.operands[operand]
+        .topology()
+        .face(face.topology_id())?
+        .orientation();
+    let (has_coincident_support, shared_owner, exclude_existing_faces) = match support {
+        Support::Own => (false, None, false),
+        Support::Shared {
+            owner,
+            exclude_first,
+        } => (true, owner, exclude_first),
+    };
+    let kind = self.kind;
+    let classification_offset = self.classification_offset;
+    let tolerance = self.tolerance;
     let mut uv_bounds = [
         Point2::new(f64::INFINITY, f64::INFINITY),
         Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
@@ -957,6 +1104,7 @@ fn arrange_face(
         surface, curves, classification_offset, uv_probe_limit, tolerance, orientation_at,
     )
 }
+}
 
 /// Split a support's candidate trims and retain the regions selected by the
 /// operation's material classifier. Offsets use the same arrangement as Booleans
@@ -1078,13 +1226,11 @@ pub(super) fn arrange_surface_regions(
             // a global blend projection can land on a different local minimum.
             let point = piece.curve.evaluate(parameter)?.point;
             let projection = surface.project(point, tolerance)?;
-            let mut exact = Point2::new(projection.parameters.0, projection.parameters.1);
-            for axis in 0..2 {
-                if let Some(period) = surface.domains()[axis].period {
-                    exact[axis] += ((uv[axis] - exact[axis]) / period).round() * period;
-                }
-            }
-            uv = exact;
+            uv = nearest_uv(
+                surface.domains(),
+                Point2::new(projection.parameters.0, projection.parameters.1),
+                uv,
+            );
         }
         let tangent = tangent * piece.range.span().signum();
         if tangent.magnitude2() <= tolerance.parameter.powi(2) {
@@ -1175,11 +1321,10 @@ pub(super) fn arrange_surface_regions(
                     .curve
                     .project_on_trim(middle, candidate.range, tolerance)
                     .is_ok_and(|projection| {
-                        let mut parameter = projection.parameter;
-                        if let Some(period) = candidate.curve.domain().period {
-                            let center = (candidate.range.start + candidate.range.end) * 0.5;
-                            parameter += ((center - parameter) / period).round() * period;
-                        }
+                        let parameter = candidate
+                            .curve
+                            .domain()
+                            .nearest(projection.parameter, candidate.range.middle());
                         projection.distance <= tolerance.linear * 16.0
                             && candidate.range.contains(parameter, tolerance)
                     });
@@ -1229,11 +1374,7 @@ pub(super) fn arrange_surface_regions(
         if loops.is_empty() {
             continue;
         }
-        let orientation_sign: f64 = if orientation == FaceOrientation::Forward {
-            1.0
-        } else {
-            -1.0
-        };
+        let orientation_sign = orientation.sign();
         let mut loops = loops
             .into_iter()
             .map(|loop_| {
@@ -1630,12 +1771,7 @@ fn connect_loops(
                         // Follow the material side at a point contact. Reversed
                         // faces wind clockwise in the surface chart, so choosing
                         // a counterclockwise turn would splice separate caps.
-                        let angle = if orientation == FaceOrientation::Reversed {
-                            -angle
-                        } else {
-                            angle
-                        };
-                        angle.rem_euclid(std::f64::consts::TAU)
+                        (angle * orientation.sign()).rem_euclid(std::f64::consts::TAU)
                     };
                     turn(*first).total_cmp(&turn(*second))
                 })
@@ -1678,20 +1814,6 @@ fn loop_polyline(loop_: &[DirectedPiece]) -> KernelResult<Vec<Point2>> {
         }
     }
     Ok(polygon)
-}
-
-fn point_in_polygon(point: Point2, polygon: &[Point2]) -> bool {
-    let mut inside = false;
-    for index in 0..polygon.len() {
-        let first = polygon[index];
-        let second = polygon[(index + 1) % polygon.len()];
-        if (first.y > point.y) != (second.y > point.y)
-            && point.x < (second.x - first.x) * (point.y - first.y) / (second.y - first.y) + first.x
-        {
-            inside = !inside;
-        }
-    }
-    inside
 }
 
 fn polygon_interior_point(polygon: &[Point2]) -> KernelResult<Point2> {
@@ -1856,14 +1978,7 @@ fn patch_uses_face(
     let bounds = face_parameter_bounds(&boundary, tolerance)?;
     let original_bounds = face_parameter_bounds(&original, tolerance)?;
     let domains = patch.surface.domains();
-    let mut offset = Vec2::new(0.0, 0.0);
-    for axis in 0..2 {
-        if let Some(period) = domains[axis].period {
-            let center = (bounds[axis].start + bounds[axis].end) * 0.5;
-            let original_center = (original_bounds[axis].start + original_bounds[axis].end) * 0.5;
-            offset[axis] = ((center - original_center) / period).round() * period;
-        }
-    }
+    let offset = whole_periods(domains, box_center(bounds) - box_center(original_bounds));
     // Move the complete chart together. Shifting individual seam uses can
     // collapse a full-period region into a zero-width boundary.
     if offset.magnitude2() != 0.0 {
@@ -1872,14 +1987,8 @@ fn patch_uses_face(
         }
     }
     let original_bounds = face_parameter_bounds(&original, tolerance)?;
-    let inside = |mut point: Point2, curves: &[FaceCurve], bounds: [ParameterRange; 2]| {
-        for axis in 0..2 {
-            if let Some(period) = domains[axis].period {
-                let center = (bounds[axis].start + bounds[axis].end) * 0.5;
-                point[axis] += ((center - point[axis]) / period).round() * period;
-            }
-        }
-        point_in_trim(point, curves)
+    let inside = |point: Point2, curves: &[FaceCurve], bounds: [ParameterRange; 2]| {
+        point_in_trim(nearest_uv(domains, point, box_center(bounds)), curves)
     };
     for (a, ab, b, bb) in [
         (&boundary, bounds, &original, original_bounds),

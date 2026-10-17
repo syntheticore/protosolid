@@ -5,7 +5,7 @@ use cgmath::prelude::*;
 
 use crate::{Point3, Vec3};
 
-use super::euler::CommittedOperation;
+use super::transaction::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
     BodyId, BooleanKind, ChangeKind, DerivationRole, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel, KernelError,
@@ -437,6 +437,16 @@ pub struct Solid {
     revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
 }
 
+/// The side of a split plane whose material is kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitKeep {
+    /// Material opposite the plane normal.
+    Left,
+    /// Material along the plane normal.
+    Right,
+    Both,
+}
+
 /// The second measurement of an asymmetric chamfer; angles are in radians.
 #[derive(Debug, Clone, Copy)]
 pub enum ChamferMode {
@@ -714,7 +724,7 @@ impl Compound {
         roles
     }
 
-    pub(crate) fn with_construction_roles_from(mut self, tools: &[&Self], limits: &[(PersistentId, super::CreationRole)]) -> Self {
+    pub(crate) fn with_construction_roles_from(self, tools: &[&Self], limits: &[(PersistentId, super::CreationRole)]) -> Self {
         let mut roles = BTreeMap::<PersistentId, Vec<super::CreationRole>>::new();
         for tool in tools {
             for face in tool.faces() {
@@ -734,8 +744,12 @@ impl Compound {
             }
         }
         for (face, role) in limits { roles.insert(*face, vec![role.clone()]); }
-        let history = Arc::make_mut(&mut self.history);
-        history.construction_roles.extend(roles);
+        self.edit_history(|history| history.construction_roles.extend(roles))
+    }
+
+    /// Amend the operation history shared by this compound and its solids.
+    fn edit_history(mut self, edit: impl FnOnce(&mut OperationHistory)) -> Self {
+        edit(Arc::make_mut(&mut self.history));
         for solid in &mut self.solids {
             solid.history = Arc::clone(&self.history);
         }
@@ -977,34 +991,33 @@ impl Compound {
     }
 
     pub(crate) fn with_creation_roles(
-        mut self,
+        self,
         roles: impl IntoIterator<Item = (PersistentId, super::CreationRole)>,
     ) -> Self {
-        let history = Arc::make_mut(&mut self.history);
-        for (name, role) in roles {
-            history.construction_roles.insert(name, vec![role]);
-        }
-        for solid in &mut self.solids {
-            solid.history = Arc::clone(&self.history);
-        }
-        self
+        self.edit_history(|history| {
+            history
+                .construction_roles
+                .extend(roles.into_iter().map(|(name, role)| (name, vec![role])));
+        })
     }
 
-    pub(crate) fn with_patch_roles(mut self, tokens: &BTreeMap<PersistentId, super::CreationRole>) -> Self {
-        let history = Arc::make_mut(&mut self.history);
-        for (output, records) in &history.construction {
-            let mut roles = Vec::new();
-            for role in records.iter().filter_map(|record| tokens.get(&record.name)) {
-                if !roles.contains(role) { roles.push(role.clone()); }
-            }
-            if !roles.is_empty() {
-                history.construction_roles.insert(*output, roles);
-            }
-        }
-        for solid in &mut self.solids {
-            solid.history = Arc::clone(&self.history);
-        }
-        self
+    pub(crate) fn with_patch_roles(self, tokens: &BTreeMap<PersistentId, super::CreationRole>) -> Self {
+        self.edit_history(|history| {
+            let roles = history
+                .construction
+                .iter()
+                .filter_map(|(output, records)| {
+                    let mut roles = Vec::new();
+                    for role in records.iter().filter_map(|record| tokens.get(&record.name)) {
+                        if !roles.contains(role) {
+                            roles.push(role.clone());
+                        }
+                    }
+                    (!roles.is_empty()).then_some((*output, roles))
+                })
+                .collect::<Vec<_>>();
+            history.construction_roles.extend(roles);
+        })
     }
 
     pub fn union(&self, other: &Self) -> KernelResult<Self> {
@@ -1325,16 +1338,13 @@ impl Compound {
 
     /// Publish an identity operation while sharing topology, certificates and lineage.
     pub(crate) fn unchanged(&self) -> KernelResult<Self> {
-        let mut result = self.clone();
         let mut names = Vec::new();
         for solid in &self.solids {
             names.extend(self.topology().body_entity_names(solid.body)?);
         }
-        result.history = Arc::new(self.history.identity(names));
-        for solid in &mut result.solids {
-            solid.history = Arc::clone(&result.history);
-        }
-        Ok(result)
+        Ok(self
+            .clone()
+            .edit_history(|history| *history = history.identity(names)))
     }
 
     pub fn combined(&self, others: &[Self]) -> KernelResult<Self> {
@@ -1467,7 +1477,7 @@ impl Compound {
         combine_compounds(results, self.tolerance())
     }
 
-    pub fn split(&self, plane: Plane3, keep: &str) -> KernelResult<Self> {
+    pub fn split(&self, plane: Plane3, keep: SplitKeep) -> KernelResult<Self> {
         if self.solids.len() > 1 {
             let results = self
                 .solids
@@ -1849,23 +1859,8 @@ fn certify_bodies(
     kernel: &Kernel,
     bodies: &[BodyId],
 ) -> KernelResult<BTreeMap<BodyId, PhysicalCertificate>> {
-    let all = super::physical::certify_topology(kernel.topology(), kernel.tolerance())
-        .map_err(KernelError::from_diagnostics)?;
-    bodies
-        .iter()
-        .copied()
-        .map(|body| {
-            all.get(&body)
-                .cloned()
-                .map(|value| (body, value))
-                .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "published solid is missing its physical certificate",
-                    )
-                })
-        })
-        .collect()
+    super::physical::certify_bodies(kernel.topology(), kernel.tolerance(), bodies)
+        .map_err(KernelError::from_diagnostics)
 }
 
 fn ensure_compatible_tolerances(

@@ -10,25 +10,25 @@ It does not own application feature keys, parameters, expressions, or dependenci
 ## Non-negotiable invariants
 
 1. Safe public APIs never publish invalid topology or a physically invalid body.
-2. Connectivity changes are expressed as Euler operators with explicit inverses.
-3. An Euler operation is atomic. Failure restores topology, names, and provenance.
-4. Construction topology is validated after every Euler operation.
-5. A construction transaction becomes visible only after closed-volume geometric
-   validation succeeds.
-6. Every edge use on a face owns an oriented 2D p-curve. A 3D curve alone is not
+2. Topology changes happen only inside a transaction. A transaction is atomic:
+   dropping it, or a failure to finish it, leaves the kernel unchanged.
+3. A transaction becomes visible only after the complete published-body
+   invariants (closed manifold shells, consistent p-curves and loop winding,
+   physical volume) are proven for every body it touched.
+4. Every edge use on a face owns an oriented 2D p-curve. A 3D curve alone is not
    a valid trimmed-surface boundary.
-7. Every geometric assertion has an achieved tolerance governed by the model's
+5. Every geometric assertion has an achieved tolerance governed by the model's
    scale-aware tolerance policy.
-8. Every topology-changing operation emits complete generated, modified, split,
+6. Every topology-changing operation emits complete generated, modified, split,
    merged, and deleted provenance.
-9. Entity identity is assigned when topology is created and is never reconstructed
+7. Entity identity is assigned when topology is created and is never reconstructed
    later through geometric coincidence.
-10. Unsupported geometry returns a structured error. It is never interpreted as
-    an empty intersection or successful no-op.
+8. Unsupported geometry returns a structured error. It is never interpreted as
+   an empty intersection or successful no-op.
 
 ## Ownership
 
-The advanced `Kernel` API owns generational arenas. Ordinary modeling operations
+A `Kernel` owns generational arenas. Ordinary modeling operations
 return immutable `Solid` and `Compound` snapshots with lightweight entity values.
 No topology entity owns another through `Rc`, and no public API exposes interior
 mutability.
@@ -50,18 +50,34 @@ periodic seams and differing parameterizations without special cases.
 
 ## Editing and publication
 
-`Kernel::begin_operation` clones a lightweight kernel state into an isolated Euler
-transaction. Operators validate construction invariants before returning. Dropping
-the transaction rolls it back. Committing runs published-body validation and swaps
-the state into the kernel only on success.
+Every operation edits an isolated copy of a kernel's topology inside a
+`Transaction` (`transaction.rs`). Edits are not validated individually; an
+operation may pass through open, partially built states. Finishing the
+transaction runs the complete published-body validation once, certifies the
+physical properties of the bodies it touched, and only then swaps the result into
+the kernel. Dropping it discards every edit. Where an operation tries alternative
+constructions, it does so under a transaction checkpoint (`atomic`), which
+restores topology, names, and provenance when an attempt fails.
 
-Bulk algorithms such as booleans may compose many Euler operators inside one
-transaction. Their intermediate open shells are valid cell-complex construction
-states but are never observable as finished bodies.
+Operations build topology in one of two ways:
 
-Disconnected boundary shells use reversible body/shell Euler operators. This is
-how a Boolean cavity becomes a negatively oriented closed shell of its containing
-material body without a direct topology rewrite.
+- **Patch sewing** (`sew.rs`). Global operations — Booleans, offsets and shells,
+  face moves, drafts and replacements, sweeps, lofts, revolutions and face-limited
+  extrusions — describe their result as exact trimmed face patches carrying
+  segment provenance. Sewing conforms the patch boundaries to each other, welds
+  them into shared edges and vertices, separates point-contact vertex fans, and
+  seals the shell. It knows nothing about the operation that produced the
+  patches. Disconnected component shells are then nested by signed volume and
+  classification, so a cavity becomes a negatively oriented shell of its
+  containing material body.
+- **Euler operators** (`euler.rs`) and the low-level edits of `transaction.rs`.
+  Primitive construction (`primitives.rs`), straight profile extrusion
+  (`extrude.rs`), periodic seam relocation (`periodic.rs`), and edge blends
+  (`edge_blend.rs`) edit topology locally.
+
+After construction, `canonicalize.rs` removes boundaries without material
+meaning: partitions of one periodic face support and degree-two subdivisions of
+one curve. Periodic charts are normalized once more when a transaction finishes.
 
 ## Geometry
 
@@ -131,8 +147,8 @@ The current publisher certifies:
   genus introduced by through-holes;
 - analytical BREP Boolean union, intersection, and difference, including curved
   supports, disconnected material bodies, and fully enclosed cavity shells;
-- exact right cylinders, cones, spheres, and regular ring tori constructed by the
-  kernel's Euler compositions;
+- exact right cylinders, cones, spheres, and regular ring tori, with closed-form
+  mass properties;
 - normal extrusions of profiles bounded by exact lines and circular arcs,
   including multiple holes;
 - exact inward and outward shelling of manifold analytical BREP bodies, including
@@ -204,7 +220,7 @@ preserved, modified, split, merged, deleted, and unrelated entities. Cross-type
 generation remains available separately, such as faces generated from an edge.
 Lineage is keyed by both persistent name and source revision, so an older modified
 handle and a handle to the current face remain distinct. Operation history is
-authoritative: transforms report motion directly, Euler publication completes only
+authoritative: transforms report motion directly, transaction publication completes only
 implicit retained/deleted records, and owned results consume those records without
 reclassifying geometry. Identity operations share their immutable geometry and
 physical certificates.

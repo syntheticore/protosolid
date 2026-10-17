@@ -3,8 +3,8 @@ use cgmath::prelude::*;
 use super::wire::curve_pair_intersection;
 use super::wire::{wire_contains_point, wires_intersect};
 use super::{
-    BooleanKind, Curve2, DiagnosticKind, KernelError, KernelResult, ModelTolerance, ParameterRange,
-    TrimmedCurve2, Wire2,
+    invalid, BooleanKind, Curve2, DiagnosticKind, KernelError, KernelResult, ModelTolerance,
+    ParameterRange, TrimmedCurve2, Wire2,
 };
 
 /// A validated planar region bounded by exact 2D curve wires.
@@ -458,8 +458,4 @@ fn merge_adjacent_fragments(
         }
     }
     Ok(segments)
-}
-
-fn invalid(message: impl Into<String>) -> KernelError {
-    KernelError::new(DiagnosticKind::InvalidInput, message)
 }

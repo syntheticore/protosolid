@@ -4,28 +4,20 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3};
 
-use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
+use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::{
     Axis3, CoedgeId, Compound, Curve2, Curve3, DiagnosticKind, EdgeId, FaceHandle, FaceId,
     FaceOrientation, IntersectionSet, Kernel, KernelError, KernelResult, Line3, ParameterRange,
     PersistentId, Plane3, Profile, RigidTransform3, Surface3,
     SurfaceIntersectionCurve, SurfaceProjectionPcurve2, Topology,
-    TrimmedCurve2, VertexId, Wire2,
+    SplitKeep, TrimmedCurve2, VertexId, Wire2, box_center, invalid, nearest_uv, unsupported,
+    whole_periods,
 };
 
-fn invalid(message: impl Into<String>) -> KernelError {
-    KernelError::new(DiagnosticKind::InvalidInput, message)
-}
-
-fn unsupported(operation: &str) -> KernelError {
-    KernelError::new(
-        DiagnosticKind::UnsupportedGeometry,
-        format!("exact analytical {operation} is not implemented for the supplied geometry"),
-    )
-}
-
-fn on_plane(plane: Plane3, point: Point2) -> Point3 {
-    plane.origin() + plane.u() * point.x + plane.v() * point.y
+fn not_implemented(operation: &str) -> KernelError {
+    unsupported(format!(
+        "exact analytical {operation} is not implemented for the supplied geometry"
+    ))
 }
 
 fn publish_torus(
@@ -76,7 +68,7 @@ fn exact_full_revolution(
 
     if let [segment] = profile.outer().segments() {
         if let Curve2::Circle(circle) = segment.curve() {
-            let section_center = on_plane(plane, circle.center());
+            let section_center = plane.point_at(circle.center());
             let center = axis.origin()
                 + axis_direction * (section_center - axis.origin()).dot(axis_direction);
             let x_major = section_center - center;
@@ -101,7 +93,7 @@ fn exact_full_revolution(
         .map(TrimmedCurve2::start)
         .collect::<KernelResult<Vec<_>>>()?
         .into_iter()
-        .map(|point| on_plane(plane, point))
+        .map(|point| plane.point_at(point))
         .collect::<Vec<_>>();
     let axial = points
         .iter()
@@ -221,43 +213,9 @@ pub(super) fn exact_pcurve(
     fallback: &Curve2,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<Curve2> {
-    if let (Curve3::Nurbs(curve), Surface3::Plane(plane)) = (curve, surface) {
-        let controls = curve.control_points().iter().map(|point| {
-            let uv = plane.project(*point)?.parameters;
-            Ok(Point2::new(uv.0, uv.1))
-        }).collect::<KernelResult<Vec<_>>>()?;
-        return super::NurbsCurve2::new(curve.degree(), controls,
-            curve.weights().to_vec(), curve.knots().to_vec()).map(Into::into);
-    }
-    if let (Curve3::Line(line), Surface3::Plane(plane)) = (curve, surface) {
-        let origin = plane.project(line.origin())?.parameters;
-        let end = plane.project(line.origin() + line.direction())?.parameters;
-        return super::Line2::new(
-            Point2::new(origin.0, origin.1),
-            crate::Vec2::new(end.0 - origin.0, end.1 - origin.1),
-        )
-        .map(Into::into);
-    }
-    if let (Curve3::Circle(circle), Surface3::Plane(plane)) = (curve, surface) {
-        let center = plane.project(circle.center())?.parameters;
-        let x = plane
-            .project(circle.center() + circle.x_radius())?
-            .parameters;
-        let y = plane
-            .project(circle.center() + circle.y_radius())?
-            .parameters;
-        let x = Point2::new(x.0 - center.0, x.1 - center.1);
-        let y = Point2::new(y.0 - center.0, y.1 - center.1);
-        let scale = x.to_vec().magnitude().max(y.to_vec().magnitude()).max(1.0);
-        let allowed = tolerance.parameter * scale * 64.0;
-        if x.x > 0.0
-            && y.y > 0.0
-            && x.y.abs() <= allowed
-            && y.x.abs() <= allowed
-            && (x.x - y.y).abs() <= allowed
-        {
-            return super::Circle2::new(Point2::new(center.0, center.1), (x.x + y.y) * 0.5)
-                .map(Into::into);
+    if let Surface3::Plane(plane) = surface {
+        if let Some(pcurve) = plane.flatten_curve(curve, tolerance)? {
+            return Ok(pcurve);
         }
     }
     Ok(match curve {
@@ -325,7 +283,7 @@ fn offset_edge(
         // remains the exact seam on the normally offset support.
         let face = faces[0];
         if reparameterized.contains(&face) {
-            return Err(unsupported("replacement of a periodic seam face"));
+            return Err(not_implemented("replacement of a periodic seam face"));
         }
         let coedge_id = topology.edge(edge)?.coedges()[0];
         let coedge = topology.coedge(coedge_id)?;
@@ -594,7 +552,7 @@ fn offset_edge(
         IntersectionSet::Isolated(intersections) => intersections,
         IntersectionSet::Coincident => {
             if !same_charts {
-                return Err(unsupported("replacement coincident with an adjacent face"));
+                return Err(not_implemented("replacement coincident with an adjacent face"));
             }
             // Boolean imprinting may retain an exact split edge between two
             // patches on the same analytical support. Their offsets remain
@@ -850,7 +808,7 @@ fn refine_support_corner(
         for axis in 0..3 {
             matrix[axis][axis] += 1e-12;
         }
-        let Some(step) = super::intersection::solve_linear_3(matrix, rhs) else {
+        let Some(step) = super::linalg::solve_linear(matrix, rhs) else {
             break;
         };
         let step = crate::Vec3::new(step[0], step[1], step[2]);
@@ -983,15 +941,7 @@ fn retarget_offset_intersection_endpoints(
             (&mut first_points, intersection.first_surface()),
             (&mut second_points, intersection.second_surface()),
         ] {
-            let domains = surface.domains();
-            if let Some(period) = domains[0].period {
-                points[endpoint].x +=
-                    ((points[neighbor].x - points[endpoint].x) / period).round() * period;
-            }
-            if let Some(period) = domains[1].period {
-                points[endpoint].y +=
-                    ((points[neighbor].y - points[endpoint].y) / period).round() * period;
-            }
+            points[endpoint] = nearest_uv(surface.domains(), points[endpoint], points[neighbor]);
         }
     }
     if !changed {
@@ -1092,7 +1042,7 @@ fn trim_offset_edge(
             let projection = edge.curve.project_on_trim(reference, source.range(), tolerance)?;
             let period = source.range().span().abs();
             let start = projection.parameter
-                + (((bounds.start + bounds.end) * 0.5 - projection.parameter) / period).round() * period;
+                + ((bounds.middle() - projection.parameter) / period).round() * period;
             return ParameterRange::new(
                 start,
                 start + direction * period,
@@ -1102,8 +1052,7 @@ fn trim_offset_edge(
             // Projection identifies a point modulo a full turn. Keep the
             // source chart's turn so its p-curves remain continuous at the
             // seam; an equivalent 3D range can cross their UV branch cut.
-            let start = projection.parameter
-                + ((source.range().start - projection.parameter) / period).round() * period;
+            let start = domain.nearest(projection.parameter, source.range().start);
             ParameterRange::new(
                 start,
                 start + direction * period,
@@ -1462,7 +1411,7 @@ fn offset_body(
                 corner_blends.push((face_id, *face));
                 continue;
             },
-            _ => return Err(unsupported("removal of a blend without surviving contact supports")),
+            _ => return Err(not_implemented("removal of a blend without surviving contact supports")),
         };
         let CollapsedSupport::Curve(guide) = &collapsed[&face_id] else {
             unreachable!()
@@ -1481,7 +1430,7 @@ fn offset_body(
             _ => match topology.face(face_id)?.surface() {
                 Surface3::Cylinder(_) => face_parameter_bounds(topology, face_id, tolerance)?[1],
                 Surface3::RollingBall(blend) => blend.center_range(),
-                _ => return Err(unsupported("unbounded collapsed blend guide")),
+                _ => return Err(not_implemented("unbounded collapsed blend guide")),
             },
         };
         let curve = intersect_collapsed_blend(
@@ -1510,7 +1459,7 @@ fn offset_body(
             }
         }
         let (_, guide, parameter, uv) = best
-            .ok_or_else(|| unsupported("collapsed blend corner without a transverse surviving rail"))?;
+            .ok_or_else(|| not_implemented("collapsed blend corner without a transverse surviving rail"))?;
         let point = guide.intersect_surface_near(&supports[&contact], parameter, uv, tolerance)?.point;
         collapsed.insert(face_id, CollapsedSupport::Point(point));
     }
@@ -1531,13 +1480,13 @@ fn offset_body(
         let patches = support_patches(
             topology,
             tolerance,
-            supports.clone(),
-            bounds.clone(),
-            changed_supports.clone(),
-            false,
-            false,
-            &BTreeSet::new(),
-            &collapsed,
+            SupportEdit {
+                supports: supports.clone(),
+                bounds: bounds.clone(),
+                changed: changed_supports.clone(),
+                collapsed: collapsed.clone(),
+                ..Default::default()
+            },
         )?;
         let mut removed = BTreeSet::new();
         for patch in patches.values().flatten() {
@@ -1617,7 +1566,7 @@ fn offset_body(
                             Some(CollapsedSupport::Curve(curve)) => Some(curve),
                             _ => None,
                         })
-                        .ok_or_else(|| unsupported("collapsed offset face without a surviving rail"))?;
+                        .ok_or_else(|| not_implemented("collapsed offset face without a surviving rail"))?;
                     let range = face_parameter_bounds(topology, face_id, tolerance)?;
                     let source_point = topology.face(face_id)?
                         .surface()
@@ -1637,7 +1586,7 @@ fn offset_body(
                     )
                 }
                 _ => {
-                    return Err(unsupported(
+                    return Err(not_implemented(
                         "removal of an offset face without two surviving supports",
                     ));
                 }
@@ -1799,11 +1748,7 @@ fn offset_patch_collapsed(
     patch: &BrepPatch,
     tolerance: super::ModelTolerance,
 ) -> KernelResult<bool> {
-    let sign = if patch.orientation == FaceOrientation::Forward {
-        1.0
-    } else {
-        -1.0
-    };
+    let sign = patch.orientation.sign();
     let domains = patch.surface.domains();
     for loop_ in &patch.loops {
         if loop_.kind != super::LoopKind::Outer {
@@ -2020,28 +1965,30 @@ fn collapsed_offset_vertex(
     refine_support_corner(seed, &constraints, tolerance)
 }
 
-fn rebuild_supports(
-    source: &Compound,
-    supports: BTreeMap<FaceId, Surface3>,
-    bounds: BTreeMap<FaceId, [ParameterRange; 2]>,
-    changed_supports: BTreeSet<FaceId>,
-    preserve_orientation: bool,
-    collapsed: &BTreeMap<FaceId, CollapsedSupport>,
-) -> KernelResult<Compound> {
-    let topology = source.topology();
-    let tolerance = source.tolerance();
-    let patches_by_shell = support_patches(
-        topology,
-        tolerance,
-        supports,
-        bounds,
-        changed_supports.clone(),
-        preserve_orientation,
-        false,
-        &BTreeSet::new(),
-        collapsed,
-    )?;
-    commit_support_patches(source, patches_by_shell, changed_supports)
+/// A body's faces with edited supports, from which support reconstruction
+/// rebuilds every affected boundary.
+#[derive(Default)]
+pub(super) struct SupportEdit {
+    /// The (possibly new) support of every face.
+    pub supports: BTreeMap<FaceId, Surface3>,
+    /// The parameter box each rebuilt face trim may occupy.
+    pub bounds: BTreeMap<FaceId, [ParameterRange; 2]>,
+    /// Faces whose supports were edited.
+    pub changed: BTreeSet<FaceId>,
+    /// Keep every face's orientation instead of deriving it from its support.
+    pub preserve_orientation: bool,
+    /// Recompute every edge from its supports, retaining none unchanged.
+    pub reconstruct_edges: bool,
+    /// Faces whose parameterization changed although their support did not.
+    pub reparameterized: BTreeSet<FaceId>,
+    /// Edited supports that collapse to a curve or a point.
+    pub collapsed: BTreeMap<FaceId, CollapsedSupport>,
+}
+
+fn rebuild_supports(source: &Compound, edit: SupportEdit) -> KernelResult<Compound> {
+    let changed = edit.changed.clone();
+    let patches_by_shell = support_patches(source.topology(), source.tolerance(), edit)?;
+    commit_support_patches(source, patches_by_shell, changed)
 }
 
 fn commit_support_patches(
@@ -2073,14 +2020,18 @@ fn commit_support_patches(
 pub(super) fn support_patches(
     topology: &Topology,
     tolerance: super::ModelTolerance,
-    supports: BTreeMap<FaceId, Surface3>,
-    bounds: BTreeMap<FaceId, [ParameterRange; 2]>,
-    changed_supports: BTreeSet<FaceId>,
-    preserve_orientation: bool,
-    reconstruct_edges: bool,
-    reparameterized: &BTreeSet<FaceId>,
-    collapsed: &BTreeMap<FaceId, CollapsedSupport>,
+    edit: SupportEdit,
 ) -> KernelResult<BTreeMap<super::ShellId, Vec<BrepPatch>>> {
+    let SupportEdit {
+        supports,
+        bounds,
+        changed: changed_supports,
+        preserve_orientation,
+        reconstruct_edges,
+        reparameterized,
+        collapsed,
+    } = edit;
+    let (reparameterized, collapsed) = (&reparameterized, &collapsed);
     let source_faces = supports.keys().copied().collect::<BTreeSet<_>>();
     let mut source_edges = BTreeSet::new();
     for face_id in &source_faces {
@@ -2236,12 +2187,7 @@ pub(super) fn support_patches(
                             }) {
                                 continue;
                             }
-                            let face = topology.face(excluded)?;
-                            let sign = if face.orientation() == FaceOrientation::Forward {
-                                1.0
-                            } else {
-                                -1.0
-                            };
+                            let sign = topology.face(excluded)?.orientation().sign();
                             if (ends[side].0 - projection.point)
                                 .dot(supports[&excluded].normal(uv.0, uv.1)?)
                                 * sign
@@ -2338,12 +2284,7 @@ pub(super) fn support_patches(
                 edge.curve = supports[face].boundary_curve(pcurve.clone(), range, tolerance)?;
                 for id in original.coedges() {
                     let old_uv = topology.coedge(*id)?.pcurve().evaluate(range.start)?.point;
-                    let mut shift = crate::Vec2::new(0.0, 0.0);
-                    for (axis, domain) in supports[face].domains().iter().enumerate() {
-                        if let Some(period) = domain.period {
-                            shift[axis] = ((old_uv[axis] - uv[0][axis]) / period).round() * period;
-                        }
-                    }
+                    let shift = whole_periods(supports[face].domains(), old_uv - uv[0]);
                     edge.pcurves.insert(*id, super::Line2::new(uv[0] + shift - direction * range.start, direction)?.into());
                 }
             }
@@ -2533,10 +2474,8 @@ pub(super) fn support_patches(
                         >= 0.0;
                     if same {
                         face.orientation()
-                    } else if face.orientation() == FaceOrientation::Forward {
-                        FaceOrientation::Reversed
                     } else {
-                        FaceOrientation::Forward
+                        face.orientation().reversed()
                     }
                 },
                 loops,
@@ -2664,11 +2603,10 @@ fn split_rim_segments(
                 if projection.distance > linear {
                     continue;
                 }
-                let mut parameter = projection.parameter;
-                if let Some(period) = segment.curve.domain().period {
-                    let center = (segment.range.start + segment.range.end) * 0.5;
-                    parameter += ((center - parameter) / period).round() * period;
-                }
+                let parameter = segment
+                    .curve
+                    .domain()
+                    .nearest(projection.parameter, segment.range.middle());
                 if segment.range.contains(parameter, tolerance) {
                     parameters.push(parameter);
                 }
@@ -2859,8 +2797,9 @@ fn assemble_shell_boundary(
     let offset_by_source = raw_offset
         .faces()
         .map(|face| {
-            let source_name =
-                raw_offset.topology_history().construction[&face.persistent_id()][0].name;
+            let source_name = raw_offset
+                .topology_history()
+                .primary_source(face.persistent_id());
             (source_by_name[&source_name], face.topology_id())
         })
         .collect::<BTreeMap<_, _>>();
@@ -2895,7 +2834,7 @@ fn assemble_shell_boundary(
             .collect::<KernelResult<Vec<_>>>()?;
         let offset_skin = raw_offset.faces()
             .filter(|face| {
-                let name = raw_offset.topology_history().construction[&face.persistent_id()][0].name;
+                let name = raw_offset.topology_history().primary_source(face.persistent_id());
                 let source_face = source_by_name[&name];
                 shell_faces.contains(&source_face) && !openings.contains(&source_face)
             })
@@ -3081,11 +3020,7 @@ fn adjust_offset_blends(
         if adjacent.iter().flatten().all(|id| retained.contains(id)) {
             continue;
         }
-        let orientation = if face.orientation() == FaceOrientation::Forward {
-            1.0
-        } else {
-            -1.0
-        };
+        let orientation = face.orientation().sign();
         let mut neighbors = BTreeSet::new();
         let mut contacts = Vec::new();
         for (edge_id, adjacent) in edges.into_iter().zip(adjacent) {
@@ -3118,7 +3053,7 @@ fn adjust_offset_blends(
         // prevent a translation alone, also solve for a uniform normal offset.
         let adjustment = solve_blend_contacts(&equations, false, tolerance)
             .or_else(|| solve_blend_contacts(&equations, true, tolerance))
-            .ok_or_else(|| unsupported("blend adjustment for incompatible face offsets"))?;
+            .ok_or_else(|| not_implemented("blend adjustment for incompatible face offsets"))?;
         let translation = crate::Vec3::new(adjustment[0], adjustment[1], adjustment[2]);
         let offset = adjustment[3];
         let surface = if offset.abs() > tolerance.linear {
@@ -3136,23 +3071,18 @@ fn adjust_offset_blends(
         // surfaces before allowing topology reconstruction to publish a solid.
         for (neighbor, point, normal) in contacts {
             let moved = point + normal * offset + translation;
-            let target = supports.get(&neighbor).ok_or_else(|| unsupported(
+            let target = supports.get(&neighbor).ok_or_else(|| not_implemented(
                 "tangent blend adjustment against a collapsed offset support",
             ))?;
             let projection = target.project(moved, tolerance)?;
             let allowed = tolerance.linear_at_scale(moved.to_vec().magnitude()) * 8.0;
-            let other = topology.face(neighbor)?;
-            let sign = if other.orientation() == FaceOrientation::Forward {
-                1.0
-            } else {
-                -1.0
-            };
+            let sign = topology.face(neighbor)?.orientation().sign();
             let target_normal =
                 target.normal(projection.parameters.0, projection.parameters.1)? * sign;
             if projection.distance > allowed
                 || (target_normal - normal).magnitude() > tolerance.angular * 8.0
             {
-                return Err(unsupported(
+                return Err(not_implemented(
                     "blend adjustment that cannot preserve tangent contacts",
                 ));
             }
@@ -3306,7 +3236,7 @@ fn offset_regions_with_joins(
         let surface = if offset.is_some() || openings.contains(&face.topology_id()) {
             face.surface().clone()
         } else {
-            let sign = if value.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+            let sign = value.orientation().sign();
             let bounds = face_parameter_bounds(topology, face.topology_id(), tolerance)?;
             let base = extended_support(face.surface(), bounds, -radius, tolerance)?;
             let distance = -radius * sign;
@@ -3326,7 +3256,7 @@ fn offset_regions_with_joins(
             Ok(curve.with_provenance(provenance))
         }).collect::<KernelResult<Vec<_>>>()?;
         ancestry.push(vec![offset.map_or(face.persistent_id(), |offset| {
-            offset.topology_history().construction[&face.persistent_id()][0].name
+            offset.topology_history().primary_source(face.persistent_id())
         })]);
         orientations.push(value.orientation());
         supports.push(surface);
@@ -3443,7 +3373,7 @@ fn offset_regions_with_joins(
         let contact_surfaces = uses.iter().zip(&parent_indices).map(|(coedge, index)| {
             if let Some(index) = index { return Ok(supports[*index].clone()); }
             let face = topology.face(topology.loop_(coedge.loop_id())?.face())?;
-            let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+            let sign = face.orientation().sign();
             // A consumed face still defines the contact direction of its
             // adjacent concave-edge envelope. Keep that continuation solely
             // as a rail support; it cannot contribute an offset face.
@@ -3481,7 +3411,7 @@ fn offset_regions_with_joins(
                 if parent_indices[side].is_some() { continue; }
                 let face_id = topology.loop_(coedge.loop_id())?.face();
                 let face = topology.face(face_id)?;
-                let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                let sign = face.orientation().sign();
                 if !matches!(collapsed_support(face.surface(), -radius * sign, tolerance)?, Some((_, false))) { continue; }
                 // At exact collapse the join's constructive contact rail lies
                 // on the surviving tangent support. Share that rail directly;
@@ -3549,14 +3479,8 @@ fn offset_regions_with_joins(
     }).collect::<KernelResult<BTreeMap<_, _>>>()?;
     let opening_names = openings.iter().map(|id| topology.face(*id).map(|face| face.name()))
         .collect::<KernelResult<BTreeSet<_>>>()?;
-    let in_source_chart = |mut uv: Point2, surface: &Surface3, bounds: [ParameterRange; 2]| {
-        for axis in 0..2 {
-            if let Some(period) = surface.domains()[axis].period {
-                let center = (bounds[axis].start + bounds[axis].end) * 0.5;
-                uv[axis] += ((center - uv[axis]) / period).round() * period;
-            }
-        }
-        uv
+    let in_source_chart = |uv: Point2, surface: &Surface3, bounds: [ParameterRange; 2]| {
+        nearest_uv(surface.domains(), uv, box_center(bounds))
     };
     let classifier = BrepClassifier::for_compound(source)?;
     let contact_cache = std::cell::RefCell::new(BTreeMap::new());
@@ -3597,7 +3521,7 @@ fn offset_regions_with_joins(
                     while let Some(id) = pending.pop() {
                         if !visited.insert(id) { continue; }
                         let face = topology.face(id)?;
-                        let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                        let sign = face.orientation().sign();
                         if collapsed_support(face.surface(), -radius * sign, tolerance)?.is_none() {
                             contacts.insert(id);
                             continue;
@@ -3622,7 +3546,7 @@ fn offset_regions_with_joins(
                         uv = Point2::new(contact.0, contact.1);
                     }
                     let value = face.surface().evaluate(uv.x, uv.y)?;
-                    let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                    let sign = face.orientation().sign();
                     Ok((value.point - point).dot(value.normal()? * sign))
                 }).collect::<KernelResult<Vec<_>>>()?;
                 if depths.iter().any(|depth| *depth < -tolerance.linear) {
@@ -3743,18 +3667,7 @@ pub(crate) fn shell(
         let tangent = sample.first_derivative.normalize() * uses[0].range().span().signum();
         let normals = faces
             .iter()
-            .map(|face| {
-                let uv = face
-                    .surface()
-                    .project(sample.point, source.tolerance())?
-                    .parameters;
-                let normal = face.surface().normal(uv.0, uv.1)?.normalize();
-                Ok(if face.orientation() == FaceOrientation::Reversed {
-                    -normal
-                } else {
-                    normal
-                })
-            })
+            .map(|face| face.oriented_normal_near(sample.point, source.tolerance()))
             .collect::<KernelResult<Vec<_>>>()?;
         if tangent.dot(normals[0].cross(normals[1])) * distance.signum()
             > source.tolerance().angular
@@ -3783,10 +3696,10 @@ pub(crate) fn shell(
                     _ => None,
                 }).collect::<Vec<_>>();
             for first in 0..caps.len() {
-                let sign = if topology.face(caps[first].0)?.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                let sign = topology.face(caps[first].0)?.orientation().sign();
                 let normal = caps[first].1.normal() * sign;
                 for second in 0..first {
-                    let other_sign = if topology.face(caps[second].0)?.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                    let other_sign = topology.face(caps[second].0)?.orientation().sign();
                     if normal.dot(caps[second].1.normal() * other_sign) > -1.0 + source.tolerance().angular { continue; }
                     let gap = (caps[second].1.origin() - caps[first].1.origin()).dot(normal);
                     if gap < -source.tolerance().linear && gap - 2.0 * distance > source.tolerance().linear {
@@ -3797,13 +3710,13 @@ pub(crate) fn shell(
             for face in source.faces() {
                 let id = face.topology_id();
                 let value = topology.face(id)?;
-                let sign = if value.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                let sign = value.orientation().sign();
                 if collapsed_support(face.surface(), distance * sign, source.tolerance())?.is_none() { continue; }
                 let mut contacts = Vec::new();
                 for neighbor in tangent_neighbors(topology, id, source.tolerance(), |_| true)? {
                     let face = topology.face(neighbor)?;
                     if !matches!(face.surface(), Surface3::Plane(_) | Surface3::Cylinder(_)) { continue; }
-                    let sign = if face.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                    let sign = face.orientation().sign();
                     if collapsed_support(face.surface(), distance * sign, source.tolerance())?.is_some() { continue; }
                     contacts.push(face.surface().offset(distance * sign, source.tolerance())?);
                 }
@@ -3844,7 +3757,7 @@ pub(crate) fn shell(
         .faces()
         .filter(|face| {
             !opening_names.contains(
-                &raw_offset.topology_history().construction[&face.persistent_id()][0].name,
+                &raw_offset.topology_history().primary_source(face.persistent_id()),
             )
         })
         .map(|face| face.surface().clone())
@@ -3867,8 +3780,8 @@ pub(crate) fn shell(
             continue;
         }
         let mut pair = [
-            shell.topology_history().construction[&faces[0].name()][0].name,
-            shell.topology_history().construction[&faces[1].name()][0].name,
+            shell.topology_history().primary_source(faces[0].name()),
+            shell.topology_history().primary_source(faces[1].name()),
         ];
         pair.sort();
         if divergent.contains(&pair) {
@@ -3884,19 +3797,24 @@ pub(crate) fn shell(
     ).map(|result| result.with_construction_roles_from(&[&shell], &[]))
 }
 
-pub(crate) fn split(source: &Compound, plane: Plane3, keep: &str) -> KernelResult<Compound> {
-    if !matches!(keep, "left" | "right" | "both") {
-        return Err(invalid("split keep mode must be left, right, or both"));
-    }
+pub(crate) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> KernelResult<Compound> {
     if source.solids().len() == 0 {
         return source.unchanged();
     }
+    // The cutter occupies the half-space along the plane normal.
     let cutter = half_space_cutter(source, plane)?;
-    let cut = |kind| super::boolean::boolean_brep_with_face_boundaries(source, &cutter, kind, true);
+    let cut = |kind| {
+        super::boolean::boolean_brep_with(
+            source,
+            &cutter,
+            kind,
+            super::boolean::CoincidentFaces::PreserveFirst,
+        )
+    };
     match keep {
-        "left" => cut(super::BooleanKind::Difference),
-        "right" => cut(super::BooleanKind::Intersection),
-        _ => {
+        SplitKeep::Left => cut(super::BooleanKind::Difference),
+        SplitKeep::Right => cut(super::BooleanKind::Intersection),
+        SplitKeep::Both => {
             let left = cut(super::BooleanKind::Difference)?;
             let right = cut(super::BooleanKind::Intersection)?;
             left.combined(&[right])
@@ -4020,7 +3938,18 @@ pub(crate) fn dissolve_faces(source: &Compound, faces: &[FaceHandle]) -> KernelR
     for id in collapsed.keys() {
         for edge in topology.face_edges(*id)? { changed.extend(topology.edge_faces(edge)?); }
     }
-    let mut patches = support_patches(topology, tolerance, supports, bounds, changed.clone(), true, false, &BTreeSet::new(), &collapsed)?;
+    let mut patches = support_patches(
+        topology,
+        tolerance,
+        SupportEdit {
+            supports,
+            bounds,
+            changed: changed.clone(),
+            preserve_orientation: true,
+            collapsed,
+            ..Default::default()
+        },
+    )?;
     for patch in patches.values_mut().flatten() {
         patch.loops.retain(|loop_| !loop_.segments.is_empty());
     }
@@ -4083,11 +4012,13 @@ pub(crate) fn move_faces(
     )?);
     let result = rebuild_supports(
         source,
-        supports,
-        bounds,
-        changed_supports,
-        true,
-        &BTreeMap::new(),
+        SupportEdit {
+            supports,
+            bounds,
+            changed: changed_supports,
+            preserve_orientation: true,
+            ..Default::default()
+        },
     )?;
     // A valid closed shell alone does not certify that a former fillet is still
     // tangent. Check the reconstructed contact rails before publishing it.
@@ -4105,8 +4036,12 @@ pub(crate) fn move_faces(
             continue;
         };
         let pair = (
-            result.topology_history().construction[&result_topology.face(*first)?.name()][0].name,
-            result.topology_history().construction[&result_topology.face(*second)?.name()][0].name,
+            result
+                .topology_history()
+                .primary_source(result_topology.face(*first)?.name()),
+            result
+                .topology_history()
+                .primary_source(result_topology.face(*second)?.name()),
         );
         if !tangent_pairs.contains(&pair) {
             continue;
@@ -4120,7 +4055,7 @@ pub(crate) fn move_faces(
         )?
         .is_empty()
         {
-            return Err(unsupported(
+            return Err(not_implemented(
                 "face movement that cannot preserve blend tangency",
             ));
         }
@@ -4164,17 +4099,8 @@ fn tangent_contact(
             .curve()
             .evaluate(edge.range().start + edge.range().span() * fraction)?
             .point;
-        let normal = |face: &super::topology::Face| -> KernelResult<crate::Vec3> {
-            let uv = face.surface().project(point, tolerance)?.parameters;
-            let sign = if face.orientation() == FaceOrientation::Forward {
-                1.0
-            } else {
-                -1.0
-            };
-            Ok(face.surface().normal(uv.0, uv.1)? * sign)
-        };
-        let n = normal(first)?;
-        if (n - normal(other)?).magnitude() > tolerance.angular * 8.0 {
+        let n = first.oriented_normal_near(point, tolerance)?;
+        if (n - other.oriented_normal_near(point, tolerance)?).magnitude() > tolerance.angular * 8.0 {
             return Ok(Vec::new());
         }
         contacts.push((second, point, n));
@@ -4287,11 +4213,7 @@ fn adjust_move_blends(
                     let point = motion.transform_point(*point);
                     let projection = supports[other].project(point, tolerance)?;
                     let uv = projection.parameters;
-                    let sign = if topology.face(*other)?.orientation() == FaceOrientation::Forward {
-                        1.0
-                    } else {
-                        -1.0
-                    };
+                    let sign = topology.face(*other)?.orientation().sign();
                     if projection.distance
                         > tolerance.linear_at_scale(point.to_vec().magnitude()) * 8.0
                         || (supports[other].normal(uv.0, uv.1)? * sign
@@ -4439,7 +4361,7 @@ fn adjust_move_blends(
             break;
         }
         let Some((id, surface)) = resolved else {
-            return Err(unsupported("face movement of this connected blend network"));
+            return Err(not_implemented("face movement of this connected blend network"));
         };
         pending.remove(&id);
         supports.insert(id, surface);
@@ -4484,8 +4406,15 @@ pub(crate) fn replace_face(
     }
     let changed = BTreeSet::from([id]);
     let patches = support_patches(
-        topology, tolerance, supports, bounds, changed.clone(),
-        false, false, &changed, &BTreeMap::new(),
+        topology,
+        tolerance,
+        SupportEdit {
+            supports,
+            bounds,
+            changed: changed.clone(),
+            reparameterized: changed.clone(),
+            ..Default::default()
+        },
     )?;
     commit_support_patches(source, patches, changed)?
         .with_feature_parent(source, super::DerivationRole::ReplaceFace)
@@ -4588,11 +4517,7 @@ pub(crate) fn draft(
     for handle in source.faces() {
         let face = source.topology().face(handle.topology_id())?;
         let mut surface = face.surface().clone();
-        let orientation = if face.orientation() == FaceOrientation::Forward {
-            1.0
-        } else {
-            -1.0
-        };
+        let orientation = face.orientation().sign();
         if selected.contains(&face.name()) {
             surface = match surface {
                 Surface3::Plane(plane) => {
@@ -4610,7 +4535,7 @@ pub(crate) fn draft(
                 }
                 Surface3::Cylinder(cylinder) => {
                     if cylinder.axis().normalize().dot(direction).abs() < 1.0 - tolerance.angular {
-                        return Err(unsupported(
+                        return Err(not_implemented(
                             "draft of a cylinder oblique to the pull direction",
                         ));
                     }
@@ -4637,7 +4562,7 @@ pub(crate) fn draft(
                 }
                 Surface3::Cone(cone) => {
                     if cone.axis().normalize().dot(direction).abs() < 1.0 - tolerance.angular {
-                        return Err(unsupported("draft of a cone oblique to the pull direction"));
+                        return Err(not_implemented("draft of a cone oblique to the pull direction"));
                     }
                     let neutral_parameter = (neutral.origin() - cone.apex()).dot(direction)
                         / cone.axis().dot(direction);
@@ -4672,7 +4597,7 @@ pub(crate) fn draft(
                     if (heights[1] - heights[0]).abs() <= tolerance.linear
                         || controls.iter().enumerate().any(|(row, points)| points.iter().any(|p|
                             ((p - neutral.origin()).dot(direction) - heights[row]).abs() > tolerance.linear)) {
-                        return Err(unsupported("draft requires sections parallel to the neutral plane"));
+                        return Err(not_implemented("draft requires sections parallel to the neutral plane"));
                     }
                     let fraction = -heights[0] / (heights[1] - heights[0]);
                     let section = controls[0].iter().zip(&controls[1])
@@ -4688,7 +4613,7 @@ pub(crate) fn draft(
                         heights[0].abs().max(heights[1].abs()) * angle.tan(), tolerance)?;
                     super::OffsetSurface3::with_linear_distance(base.extended_bezier(padding)?.into(), distance, slope, tolerance)?.into()
                 }
-                _ => return Err(unsupported("draft of this face support")),
+                _ => return Err(not_implemented("draft of this face support")),
             };
         }
         bounds.insert(
@@ -4700,11 +4625,12 @@ pub(crate) fn draft(
     let changed_supports = faces.iter().map(FaceHandle::topology_id).collect();
     let result = rebuild_supports(
         source,
-        supports,
-        bounds,
-        changed_supports,
-        false,
-        &BTreeMap::new(),
+        SupportEdit {
+            supports,
+            bounds,
+            changed: changed_supports,
+            ..Default::default()
+        },
     )?;
     result.with_feature_parent(source, super::DerivationRole::Draft)
 }

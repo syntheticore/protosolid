@@ -1,18 +1,14 @@
 //! Face-limited sweeps. Construction envelopes are disposable; published faces
 //! retain the exact surfaces, trim curves and certified Boolean topology.
 use super::{
-    Axis3, Compound, DiagnosticKind, FaceHandle, KernelError, KernelResult, ModelTolerance,
-    PersistentId, Plane3, Profile, Resolution, ResolvableEntity, RigidTransform3, Surface3,
-    TessellationOptions,
+    invalid, Axis3, Compound, FaceHandle, KernelResult,
+    ModelTolerance, PersistentId, Plane3, Profile, Resolution, ResolvableEntity, RigidTransform3,
+    Surface3, TessellationOptions,
 };
 use crate::{Matrix3, Point3, Vec3};
 use cgmath::prelude::*;
 use std::collections::BTreeSet;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
-
-fn invalid(message: &str) -> KernelError {
-    KernelError::new(DiagnosticKind::InvalidInput, message)
-}
 
 fn names<T: ResolvableEntity>(result: &Compound, source: &T) -> BTreeSet<PersistentId> {
     match result.resolve(source) {
@@ -93,7 +89,7 @@ fn join_cells(
             barriers.push(limits.contains(&face.persistent_id()));
         }
     }
-    super::euler::conform_brep_interfaces(&mut patches, first.tolerance())?;
+    super::sew::conform_brep_interfaces(&mut patches, first.tolerance())?;
     let samples = patches
         .iter()
         .map(super::boolean::patch_edge_samples)
@@ -109,7 +105,7 @@ fn join_cells(
                 continue;
             }
             let point = samples[i][0][1];
-            let oriented_normal = |patch: &super::euler::BrepPatch| -> KernelResult<Vec3> {
+            let oriented_normal = |patch: &super::sew::BrepPatch| -> KernelResult<Vec3> {
                 let uv = patch.surface.project(point, first.tolerance())?.parameters;
                 let normal = patch.surface.normal(uv.0, uv.1)?;
                 Ok(if patch.orientation == super::FaceOrientation::Forward {
@@ -147,7 +143,7 @@ fn join_cells(
         .enumerate()
         .filter_map(|(i, p)| (!removed.contains(&i)).then_some(p))
         .collect::<Vec<_>>();
-    super::euler::conform_brep_boundaries(&mut patches, first.tolerance())?;
+    super::sew::conform_brep_boundaries(&mut patches, first.tolerance())?;
     let mut kernel = super::Kernel::new(first.tolerance())?;
     let mut transaction = kernel.begin_operation();
     transaction.brep_shell(&patches)?;
@@ -174,7 +170,7 @@ fn trim(
         _ => None,
     };
     let mut partitions = if let Some(plane) = plane {
-        vec![tool.split(plane, "both")?]
+        vec![tool.split(plane, super::SplitKeep::Both)?]
     } else {
         vec![tool.difference(target)?, tool.intersection(target)?]
     };

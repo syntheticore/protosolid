@@ -113,3 +113,19 @@ impl fmt::Display for KernelError {
 }
 
 impl Error for KernelError {}
+
+pub(crate) fn invalid(message: impl Into<String>) -> KernelError {
+    KernelError::new(DiagnosticKind::InvalidInput, message)
+}
+
+pub(crate) fn unsupported(message: impl Into<String>) -> KernelError {
+    KernelError::new(DiagnosticKind::UnsupportedGeometry, message)
+}
+
+pub(crate) fn topology_error(message: impl Into<String>) -> KernelError {
+    KernelError::new(DiagnosticKind::TopologyInvariant, message)
+}
+
+pub(crate) fn geometry_error(message: impl Into<String>) -> KernelError {
+    KernelError::new(DiagnosticKind::GeometryInvariant, message)
+}

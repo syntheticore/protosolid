@@ -37,6 +37,14 @@ impl FaceOrientation {
             Self::Reversed => Self::Forward,
         }
     }
+
+    /// `1` when the material normal follows the surface normal, else `-1`.
+    pub fn sign(self) -> f64 {
+        match self {
+            Self::Forward => 1.0,
+            Self::Reversed => -1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +160,23 @@ impl Coedge {
     pub fn previous(&self) -> CoedgeId {
         self.previous
     }
+
+    /// The parameter on `edge`'s curve where this use's p-curve is at
+    /// `parameter`. A use traverses its edge with an affine parameter
+    /// correspondence, reversed when it runs against the edge.
+    pub(crate) fn edge_parameter(&self, edge: &Edge, parameter: f64) -> f64 {
+        let fraction = (parameter - self.range.start) / self.range.span();
+        let fraction = if self.forward { fraction } else { 1.0 - fraction };
+        edge.range.start + edge.range.span() * fraction
+    }
+
+    /// The p-curve parameter of this use at `edge`'s curve parameter; the
+    /// inverse of [`Self::edge_parameter`].
+    pub(crate) fn use_parameter(&self, edge: &Edge, parameter: f64) -> f64 {
+        let fraction = (parameter - edge.range.start) / edge.range.span();
+        let fraction = if self.forward { fraction } else { 1.0 - fraction };
+        self.range.start + self.range.span() * fraction
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +228,21 @@ impl Face {
     pub fn tolerance(&self) -> f64 {
         self.tolerance
     }
+    /// The unit material normal at surface parameters `(u, v)`.
+    pub fn oriented_normal(&self, u: f64, v: f64) -> KernelResult<crate::Vec3> {
+        Ok(self.surface.normal(u, v)? * self.orientation.sign())
+    }
+
+    /// The unit material normal at the surface projection of `point`.
+    pub(crate) fn oriented_normal_near(
+        &self,
+        point: Point3,
+        tolerance: super::ModelTolerance,
+    ) -> KernelResult<crate::Vec3> {
+        let (u, v) = self.surface.project(point, tolerance)?.parameters;
+        self.oriented_normal(u, v)
+    }
+
     pub fn loops(&self) -> &[LoopId] {
         &self.loops
     }
@@ -246,7 +286,7 @@ impl Body {
     }
 }
 
-/// All BREP connectivity for a model. Mutation is restricted to Euler operators.
+/// All BREP connectivity for a model. Mutation is restricted to transactions.
 #[derive(Debug, Clone, Default)]
 pub struct Topology {
     pub(crate) vertices: Arena<Vertex>,

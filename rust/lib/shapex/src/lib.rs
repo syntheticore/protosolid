@@ -22,8 +22,8 @@ pub use kernel::{
     BlendRole, ChamferMode, Circle2, Compound, CreationRole, Curve2, DerivationRole,
     EdgeHandle, FaceHandle, FilletOptions,
     Frame3, Line2, MassProperties, Plane3, Polyline, Profile, ProfileBoundary, Resolution,
-    RevolvedSurface3, Solid, SweptSurface3, Tessellate, TessellationOptions, TriangleMesh,
-    TrimmedCurve2, VertexHandle, Wire2,
+    RevolvedSurface3, Solid, SplitKeep, SweptSurface3, Tessellate, TessellationOptions,
+    TriangleMesh, TrimmedCurve2, VertexHandle, Wire2,
 };
 pub use kernel::{Kernel, KernelError, KernelResult, ModelTolerance};
 #[cfg(not(feature = "legacy"))]

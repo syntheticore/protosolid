@@ -6,8 +6,9 @@ use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::brep_classification::{BrepClassifier, PointClassification};
 use super::integration::{adaptive_gauss_kronrod_partitioned, adaptive_simpson};
+use super::polygon::{on_polygon_boundary, point_in_polygon, point_segment_distance};
 use super::{
-    BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, DomainBounds, FaceId, Kernel, KernelError,
+    BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, DomainBounds, FaceId, KernelError,
     KernelResult, MassProperties, ModelTolerance, ShellId, Surface3, Topology,
 };
 
@@ -85,24 +86,35 @@ pub(crate) fn validate_supplied_properties(
     Ok(())
 }
 
+/// Certify every body of `topology`.
 pub(crate) fn certify_topology(
     topology: &Topology,
     tolerance: ModelTolerance,
 ) -> Result<BTreeMap<BodyId, PhysicalCertificate>, Vec<Diagnostic>> {
-    let kernel = Kernel {
-        tolerance,
-        topology: topology.clone(),
-    };
+    let bodies = topology.bodies().map(|(id, _)| id).collect::<Vec<_>>();
+    certify_bodies(topology, tolerance, &bodies)
+}
+
+/// Certify the given bodies, reporting every failure with its body's name.
+pub(crate) fn certify_bodies(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    bodies: &[BodyId],
+) -> Result<BTreeMap<BodyId, PhysicalCertificate>, Vec<Diagnostic>> {
     let mut certificates = BTreeMap::new();
     let mut diagnostics = Vec::new();
-    for (body_id, body) in topology.bodies() {
-        match certify_body(&kernel, body_id) {
+    for body_id in bodies.iter().copied() {
+        match certify_body(topology, tolerance, body_id) {
             Ok(certificate) => {
                 certificates.insert(body_id, certificate);
             }
             Err(error) => {
+                let name = topology.body(body_id).map(|body| body.name());
                 for diagnostic in error.diagnostics() {
-                    diagnostics.push(diagnostic.clone().with_entity(body.name()));
+                    diagnostics.push(match name {
+                        Ok(name) => diagnostic.clone().with_entity(name),
+                        Err(_) => diagnostic.clone(),
+                    });
                 }
             }
         }
@@ -114,8 +126,11 @@ pub(crate) fn certify_topology(
     }
 }
 
-fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertificate> {
-    let topology = kernel.topology();
+fn certify_body(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    body_id: BodyId,
+) -> KernelResult<PhysicalCertificate> {
     let body = topology.body(body_id)?;
     if body.shells().is_empty() {
         return Err(KernelError::new(
@@ -123,9 +138,9 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
             "a physical body needs at least one shell",
         ));
     }
-    // Curved bodies are handled by structural analytical recognizers above.
-    // The remaining polyhedral path integrates the exact planar BREP boundary;
-    // publication never depends on rendering tessellation.
+    // Analytic primitive bodies are certified by the closed-form recognizers
+    // below. Other bodies integrate their exact trimmed boundary; publication
+    // never depends on rendering tessellation.
     let shell_ids: BTreeSet<_> = body.shells().iter().copied().collect();
     let face_ids: BTreeSet<_> = shell_ids
         .iter()
@@ -136,22 +151,10 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
                 .unwrap_or_default()
         })
         .collect();
-    let edge_ids: BTreeSet<_> = topology
-        .edges()
-        .filter_map(|(edge_id, edge)| {
-            edge.coedges()
-                .iter()
-                .any(|coedge_id| {
-                    topology
-                        .coedge(*coedge_id)
-                        .ok()
-                        .and_then(|coedge| topology.loop_(coedge.loop_id()).ok())
-                        .map(|loop_| face_ids.contains(&loop_.face()))
-                        .unwrap_or(false)
-                })
-                .then_some(edge_id)
-        })
-        .collect();
+    let mut edge_ids = BTreeSet::new();
+    for face_id in &face_ids {
+        edge_ids.extend(topology.face_edges(*face_id)?);
+    }
     let body_scale = edge_ids.iter().try_fold(1.0_f64, |scale, edge_id| {
         let edge = topology.edge(*edge_id)?;
         let first = topology
@@ -167,8 +170,8 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
         Ok::<f64, KernelError>(scale.max(first).max(second))
     })?;
     let physical_tolerance = ModelTolerance {
-        linear: kernel.tolerance().linear_at_scale(body_scale),
-        ..kernel.tolerance()
+        linear: tolerance.linear_at_scale(body_scale),
+        ..tolerance
     };
     let has_general_surface = face_ids.iter().any(|face_id| {
         topology
@@ -186,26 +189,28 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
             })
             .unwrap_or(true)
     });
+    // Closed-form certificates for analytic primitives are much cheaper than
+    // adaptive boundary integration and are tried first.
     if !has_general_surface {
-        if let Some(certificate) =
-            try_certify_torus(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
-        {
-            return Ok(certificate);
-        }
-        if let Some(certificate) =
-            try_certify_sphere(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
-        {
-            return Ok(certificate);
-        }
-        if let Some(certificate) =
-            try_certify_cone(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
-        {
-            return Ok(certificate);
-        }
-        if let Some(certificate) =
-            try_certify_cylinder(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
-        {
-            return Ok(certificate);
+        type Recognizer = fn(
+            &Topology,
+            BodyId,
+            &BTreeSet<FaceId>,
+            &BTreeSet<super::EdgeId>,
+            ModelTolerance,
+        ) -> KernelResult<Option<PhysicalCertificate>>;
+        let recognizers: [Recognizer; 4] = [
+            try_certify_torus,
+            try_certify_sphere,
+            try_certify_cone,
+            try_certify_cylinder,
+        ];
+        for recognize in recognizers {
+            if let Some(certificate) =
+                recognize(topology, body_id, &face_ids, &edge_ids, physical_tolerance)?
+            {
+                return Ok(certificate);
+            }
         }
         if let Some(certificate) =
             try_certify_right_prism(topology, body_id, &face_ids, physical_tolerance)?
@@ -265,7 +270,6 @@ fn certify_body(kernel: &Kernel, body_id: BodyId) -> KernelResult<PhysicalCertif
                 "certified physical publication currently requires planar faces",
             ));
         }
-        validate_planar_trim(topology, face_id, physical_tolerance)?;
     }
 
     let mut shell_properties = Vec::new();
@@ -524,8 +528,8 @@ pub(super) fn integrate_face<const TERMS: usize>(
                     DiagnosticKind::NumericalFailure,
                     format!(
                         "{error} (face support {}, boundary p-curve {}, parameter range [{}, {}])",
-                        surface_kind(face.surface()),
-                        curve2_kind(coedge.pcurve()),
+                        face.surface().kind_name(),
+                        coedge.pcurve().kind_name(),
                         range.start,
                         range.end,
                     ),
@@ -574,7 +578,7 @@ pub(super) fn shell_signed_volume(
     let mut volume = 0.0;
     for face_id in topology.shell(shell_id)?.faces() {
         let face = topology.face(*face_id)?;
-        let orientation = if face.orientation() == super::FaceOrientation::Forward { 1.0 } else { -1.0 };
+        let orientation = face.orientation().sign();
         let scale = topology.face_vertices(*face_id)?.iter()
             .map(|id| topology.vertex(*id).map(|vertex| vertex.point().to_vec().magnitude()))
             .collect::<KernelResult<Vec<_>>>()?.into_iter().fold(1.0_f64, f64::max);
@@ -698,32 +702,6 @@ fn brep_shell_properties(
         centroid,
         inertia,
     })
-}
-
-fn surface_kind(surface: &super::Surface3) -> &'static str {
-    match surface {
-        super::Surface3::Plane(_) => "plane",
-        super::Surface3::Cylinder(_) => "cylinder",
-        super::Surface3::Cone(_) => "cone",
-        super::Surface3::Sphere(_) => "sphere",
-        super::Surface3::Torus(_) => "torus",
-        super::Surface3::Revolved(_) => "revolved",
-        super::Surface3::Swept(_) => "swept",
-        super::Surface3::Nurbs(_) => "NURBS",
-        super::Surface3::Offset(_) => "offset",
-        super::Surface3::RollingBall(_) => "rolling-ball",
-        super::Surface3::Ruled(_) => "ruled",
-    }
-}
-
-fn curve2_kind(curve: &super::Curve2) -> &'static str {
-    match curve {
-        super::Curve2::Line(_) => "line",
-        super::Curve2::Circle(_) => "circle",
-        super::Curve2::Nurbs(_) => "NURBS",
-        super::Curve2::SurfaceIntersection(_) => "surface intersection",
-        super::Curve2::SurfaceProjection(_) => "surface projection",
-    }
 }
 
 fn polyhedral_shell_properties(
@@ -1017,8 +995,8 @@ fn try_certify_right_prism(
                     continue;
                 }
             }
-            let first_edges = face_edges(topology, first_id)?;
-            let second_edges = face_edges(topology, second_id)?;
+            let first_edges = BTreeSet::from_iter(topology.face_edges(first_id)?);
+            let second_edges = BTreeSet::from_iter(topology.face_edges(second_id)?);
             if !validate_prism_side_incidence(
                 topology,
                 face_ids,
@@ -1313,15 +1291,6 @@ fn prism_covariance(
     covariance
 }
 
-fn face_edges(topology: &Topology, face_id: FaceId) -> KernelResult<BTreeSet<super::EdgeId>> {
-    let mut result = BTreeSet::new();
-    for loop_id in topology.face(face_id)?.loops() {
-        for coedge_id in topology.loop_coedges(*loop_id)? {
-            result.insert(topology.coedge(coedge_id)?.edge());
-        }
-    }
-    Ok(result)
-}
 
 #[derive(Clone, Copy)]
 struct PrismCap<'a> {
@@ -1384,7 +1353,7 @@ fn validate_prism_side_incidence(
                 _ => return Ok(false),
             }
         }
-        let edges = face_edges(topology, *face_id)?;
+        let edges = BTreeSet::from_iter(topology.face_edges(*face_id)?);
         let on_first = edges.intersection(first_cap.edges).count();
         let on_second = edges.intersection(second_cap.edges).count();
         if on_first == 0 || on_second == 0 {
@@ -2043,191 +2012,6 @@ fn near(first: f64, second: f64, tolerance: f64) -> bool {
     (first - second).abs() <= tolerance
 }
 
-fn validate_planar_trim(
-    topology: &Topology,
-    face_id: FaceId,
-    tolerance: ModelTolerance,
-) -> KernelResult<()> {
-    let face = topology.face(face_id)?;
-    let Surface3::Plane(plane) = face.surface() else {
-        return Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "planar trim validation requires a plane",
-        ));
-    };
-    let e = plane.u().magnitude2();
-    let f = plane.u().dot(plane.v());
-    let g = plane.v().magnitude2();
-    let minimum_metric = ((e + g - ((e - g).powi(2) + 4.0 * f * f).sqrt()) * 0.5)
-        .max(f64::MIN_POSITIVE)
-        .sqrt();
-    let uv_tolerance = tolerance.parameter.max(tolerance.linear / minimum_metric);
-    let mut rings = Vec::<(super::LoopKind, Vec<Point2>)>::new();
-    for loop_id in face.loops() {
-        let loop_value = topology.loop_(*loop_id)?;
-        let first = loop_value.first().ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "physical face contains an empty loop",
-            )
-        })?;
-        let mut points = Vec::new();
-        let mut current = first;
-        loop {
-            let coedge = topology.coedge(current)?;
-            points.push(coedge.pcurve().evaluate(coedge.range().start)?.point);
-            current = coedge.next();
-            if current == first {
-                break;
-            }
-        }
-        if points.len() < 3 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "physical face loop needs at least three edges",
-            ));
-        }
-        validate_simple_polygon(&points, uv_tolerance)?;
-        rings.push((loop_value.kind(), points));
-    }
-    rings.sort_by_key(|(kind, _)| match kind {
-        super::LoopKind::Outer => 0,
-        super::LoopKind::Inner => 1,
-    });
-    let Some((super::LoopKind::Outer, outer)) = rings.first() else {
-        return Err(KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "physical face has no outer loop",
-        ));
-    };
-    for (_, inner) in rings.iter().skip(1) {
-        if polygons_touch_or_cross(outer, inner, uv_tolerance)
-            || !point_in_polygon2(inner[0], outer, uv_tolerance)
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "face hole must lie strictly inside its outer loop",
-            ));
-        }
-    }
-    for first in 1..rings.len() {
-        for second in first + 1..rings.len() {
-            if polygons_touch_or_cross(&rings[first].1, &rings[second].1, uv_tolerance)
-                || point_in_polygon2(rings[first].1[0], &rings[second].1, uv_tolerance)
-                || point_in_polygon2(rings[second].1[0], &rings[first].1, uv_tolerance)
-            {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "face holes may not touch, overlap, or contain one another",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_simple_polygon(points: &[Point2], tolerance: f64) -> KernelResult<()> {
-    for first in 0..points.len() {
-        let first_next = (first + 1) % points.len();
-        if points[first].distance(points[first_next]) <= tolerance {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "face loop contains a zero-length UV edge",
-            ));
-        }
-        for second in first + 1..points.len() {
-            let second_next = (second + 1) % points.len();
-            let adjacent = first == second || first_next == second || second_next == first;
-            if adjacent {
-                continue;
-            }
-            if segments_intersect2(
-                points[first],
-                points[first_next],
-                points[second],
-                points[second_next],
-                tolerance,
-            ) {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "face loop self-intersects in UV space",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn polygons_touch_or_cross(first: &[Point2], second: &[Point2], tolerance: f64) -> bool {
-    (0..first.len()).any(|a| {
-        (0..second.len()).any(|b| {
-            segments_intersect2(
-                first[a],
-                first[(a + 1) % first.len()],
-                second[b],
-                second[(b + 1) % second.len()],
-                tolerance,
-            )
-        })
-    })
-}
-
-fn orient_point2(a: Point2, b: Point2, c: Point2) -> f64 {
-    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-}
-
-fn on_segment2(point: Point2, start: Point2, end: Point2, tolerance: f64) -> bool {
-    orient_point2(start, end, point).abs() <= tolerance * tolerance
-        && point.x >= start.x.min(end.x) - tolerance
-        && point.x <= start.x.max(end.x) + tolerance
-        && point.y >= start.y.min(end.y) - tolerance
-        && point.y <= start.y.max(end.y) + tolerance
-}
-
-fn segments_intersect2(a: Point2, b: Point2, c: Point2, d: Point2, tolerance: f64) -> bool {
-    let values = [
-        orient_point2(a, b, c),
-        orient_point2(a, b, d),
-        orient_point2(c, d, a),
-        orient_point2(c, d, b),
-    ];
-    let area_tolerance = tolerance * tolerance;
-    if values[0] * values[1] < -area_tolerance * area_tolerance
-        && values[2] * values[3] < -area_tolerance * area_tolerance
-    {
-        return true;
-    }
-    (values[0].abs() <= area_tolerance && on_segment2(c, a, b, tolerance))
-        || (values[1].abs() <= area_tolerance && on_segment2(d, a, b, tolerance))
-        || (values[2].abs() <= area_tolerance && on_segment2(a, c, d, tolerance))
-        || (values[3].abs() <= area_tolerance && on_segment2(b, c, d, tolerance))
-}
-
-fn point_in_polygon2(point: Point2, polygon: &[Point2], tolerance: f64) -> bool {
-    if (0..polygon.len()).any(|index| {
-        on_segment2(
-            point,
-            polygon[index],
-            polygon[(index + 1) % polygon.len()],
-            tolerance,
-        )
-    }) {
-        return false;
-    }
-    let mut inside = false;
-    for index in 0..polygon.len() {
-        let start = polygon[index];
-        let end = polygon[(index + 1) % polygon.len()];
-        if (start.y > point.y) != (end.y > point.y) {
-            let x = start.x + (point.y - start.y) * (end.x - start.x) / (end.y - start.y);
-            if x > point.x {
-                inside = !inside;
-            }
-        }
-    }
-    inside
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrimLocation {
     Outside,
@@ -2264,17 +2048,10 @@ fn face_trim_location(
                 Ok(value.pcurve().evaluate(value.range().start)?.point)
             })
             .collect::<KernelResult<Vec<_>>>()?;
-        if (0..polygon.len()).any(|index| {
-            on_segment2(
-                uv,
-                polygon[index],
-                polygon[(index + 1) % polygon.len()],
-                tolerance.parameter.max(tolerance.linear),
-            )
-        }) {
+        if on_polygon_boundary(uv, &polygon, tolerance.parameter.max(tolerance.linear)) {
             return Ok(TrimLocation::Boundary);
         }
-        let inside = point_in_polygon2(uv, &polygon, tolerance.parameter.max(tolerance.linear));
+        let inside = point_in_polygon(uv, &polygon);
         match loop_value.kind() {
             super::LoopKind::Outer => inside_outer = inside,
             super::LoopKind::Inner if inside => return Ok(TrimLocation::Outside),
@@ -2332,16 +2109,10 @@ fn validate_polyhedral_face_pair(
             "polyhedral intersection validation requires planar faces",
         ));
     };
-    let first_edges = topology
-        .face_edges(first)?
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    let second_edges = topology
-        .face_edges(second)?
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    let first_vertices = face_vertices(topology, first);
-    let second_vertices = face_vertices(topology, second);
+    let first_edges = BTreeSet::from_iter(topology.face_edges(first)?);
+    let second_edges = BTreeSet::from_iter(topology.face_edges(second)?);
+    let first_vertices = BTreeSet::from_iter(topology.face_vertices(first)?);
+    let second_vertices = BTreeSet::from_iter(topology.face_vertices(second)?);
     let parallel = first_plane
         .normal()
         .cross(second_plane.normal())
@@ -2492,43 +2263,4 @@ fn allowed_face_contact(
         }
     }
     false
-}
-
-fn face_vertices(topology: &Topology, face: FaceId) -> BTreeSet<super::VertexId> {
-    let mut output = BTreeSet::new();
-    if let Ok(face) = topology.face(face) {
-        for loop_id in face.loops() {
-            let Ok(loop_value) = topology.loop_(*loop_id) else {
-                continue;
-            };
-            let Some(first) = loop_value.first() else {
-                continue;
-            };
-            let mut current = first;
-            loop {
-                if let Ok(vertices) = topology.coedge_vertices(current) {
-                    output.extend(vertices);
-                }
-                let Ok(coedge) = topology.coedge(current) else {
-                    break;
-                };
-                current = coedge.next();
-                if current == first {
-                    break;
-                }
-            }
-        }
-    }
-    output
-}
-
-fn point_segment_distance(point: Point3, start: Point3, end: Point3) -> f64 {
-    let segment = end - start;
-    let parameter = if segment.magnitude2() == 0.0 {
-        0.0
-    } else {
-        (point - start).dot(segment) / segment.magnitude2()
-    }
-    .clamp(0.0, 1.0);
-    point.distance(start + segment * parameter)
 }

@@ -6,7 +6,7 @@ use super::{
     Axis3, BodyId, BooleanKind, Circle3, Curve2, Curve3, FilletOptions, IntersectionSet, Kernel,
     Line3, MassProperties, ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, ParameterRange,
     Plane3, PolyhedralMesh, Profile, Resolution, RevolvedSurface3, RigidTransform3, Sphere3,
-    Surface3, TessellationOptions, TrimmedCurve2, Wire2,
+    SplitKeep, Surface3, TessellationOptions, TrimmedCurve2, Wire2,
 };
 
 // Run both cross sections on the same source revision and selection. Keeping
@@ -3778,8 +3778,8 @@ fn sections_across_chamfered_hole_keep_closed_caps() {
     let plane = Plane3::new(
         Point3::new(-4.0, 0.0, 0.0), -Vec3::unit_z(), Vec3::unit_y(), tolerance,
     ).unwrap();
-    let left = body.split(plane, "left").unwrap();
-    let right = body.split(plane, "right").unwrap();
+    let left = body.split(plane, SplitKeep::Left).unwrap();
+    let right = body.split(plane, SplitKeep::Right).unwrap();
     assert_eq!(left.solids().len(), 1);
     assert_eq!(right.solids().len(), 1);
     assert!((left.volume() + right.volume() - body.volume()).abs() < body.volume() * 1e-8);
@@ -3838,8 +3838,8 @@ fn section_of_shelled_chamfered_cylinder() {
         let section = Plane3::new(
             Point3::new(0.0, height, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tolerance,
         ).unwrap();
-        let below = body.split(section, "left").unwrap();
-        let above = body.split(section, "right").unwrap();
+        let below = body.split(section, SplitKeep::Left).unwrap();
+        let above = body.split(section, SplitKeep::Right).unwrap();
         assert!((below.volume() + above.volume() - volume).abs() < volume * 1e-8);
         if height == 28.0 {
             assert_eq!(below.solids().len(), 1);
@@ -3939,10 +3939,10 @@ fn section_of_chamfered_and_filleted_slot_frame() {
         tolerance,
     )
     .unwrap();
-    let retained = rounded.split(section, "left").unwrap();
+    let retained = rounded.split(section, SplitKeep::Left).unwrap();
     assert_eq!(retained.solids().len(), 1);
     assert!((retained.volume() - rounded.volume()).abs() < rounded.volume() * 1e-8);
-    assert_eq!(rounded.split(section, "right").unwrap().solids().len(), 0);
+    assert_eq!(rounded.split(section, SplitKeep::Right).unwrap().solids().len(), 0);
     let top = rounded
         .faces()
         .find(|face| {
@@ -3981,7 +3981,7 @@ fn section_of_chamfered_and_filleted_slot_frame() {
         if p.normal().y.abs() > 0.99 && (p.origin().y - 14.0).abs() < 1e-7)
         })
         .unwrap();
-    let retained = with_boss.split(section, "left").unwrap();
+    let retained = with_boss.split(section, SplitKeep::Left).unwrap();
     assert!(matches!(retained.resolve(top), Resolution::Preserved(_)));
     let section_faces = retained
         .faces()
@@ -5427,7 +5427,7 @@ fn multi_solid_sections_preserve_uncut_face_history() {
         )
         .unwrap()
     };
-    let unchanged = pair.split(plane(13.0), "left").unwrap();
+    let unchanged = pair.split(plane(13.0), SplitKeep::Left).unwrap();
     assert!((unchanged.volume() - pair.volume()).abs() < 1e-6);
     for face in pair.faces() {
         assert!(
@@ -5437,12 +5437,12 @@ fn multi_solid_sections_preserve_uncut_face_history() {
         );
     }
     // A second section also traverses the recombined result's lineage.
-    let repeated = unchanged.split(plane(13.0), "left").unwrap();
+    let repeated = unchanged.split(plane(13.0), SplitKeep::Left).unwrap();
     for face in pair.faces().chain(first.faces()) {
         assert!(matches!(repeated.resolve(face), Resolution::Preserved(_)));
     }
 
-    let cut = pair.split(plane(6.0), "left").unwrap();
+    let cut = pair.split(plane(6.0), SplitKeep::Left).unwrap();
     assert!((cut.volume() - pair.volume() * 6.0 / 13.0).abs() < 1e-6);
     for face in pair.faces() {
         if let Surface3::Plane(p) = face.surface() {
@@ -5634,7 +5634,7 @@ fn unchanged_history_distinguishes_section_caps_from_existing_faces() {
         })
         .unwrap();
     let section = Plane3::from_origin_normal(Point3::new(0.0, 0.0, 5.0), Vec3::unit_z()).unwrap();
-    let cut = pocketed.split(section, "left").unwrap();
+    let cut = pocketed.split(section, SplitKeep::Left).unwrap();
     assert!(
         matches!(cut.resolve(floor), Resolution::Preserved(_)),
         "coincident floor remains separate from the cut cap"
@@ -5649,7 +5649,7 @@ fn unchanged_history_distinguishes_section_caps_from_existing_faces() {
             "current revision resolves unchanged"
         );
     }
-    let untouched = cut.split(section, "left").unwrap();
+    let untouched = cut.split(section, SplitKeep::Left).unwrap();
     for face in cut.faces() {
         assert!(
             matches!(untouched.resolve(face), Resolution::Preserved(_)),
@@ -7258,7 +7258,7 @@ fn unifies_subdivided_straight_edges_but_preserves_box_corners() {
                                 let range = ParameterRange::new(7.0, -3.0).unwrap();
                                 let direction = (b - a) / range.span();
                                 let uv_direction = (uv_b - uv_a) / range.span();
-                                super::euler::BrepPatchSegment {
+                                super::sew::BrepPatchSegment {
                                     provenance: Default::default(),
                                     curve: Line3::new(a - direction * range.start, direction)
                                         .unwrap()
@@ -7323,7 +7323,7 @@ fn unifies_periodic_edges_with_bounded_projection_pcurves() {
                         segment.range.start + segment.range.span() * (index + 1) as f64 / 3.0,
                     )
                     .unwrap();
-                    segments.push(super::euler::BrepPatchSegment {
+                    segments.push(super::sew::BrepPatchSegment {
                         provenance: Default::default(),
                         curve: segment.curve.clone(),
                         pcurve: super::SurfaceProjectionPcurve2::new(

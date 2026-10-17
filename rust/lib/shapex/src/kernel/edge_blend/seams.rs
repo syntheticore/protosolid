@@ -2,7 +2,7 @@ use super::super::periodic::SeamPlacement;
 use super::super::PersistentId;
 use super::*;
 
-impl EulerTransaction<'_> {
+impl Transaction<'_> {
     /// Keep chart cuts out of terminating vertex gaps while preparing a blend.
     /// Temporary subdivisions are rebound to the selection, then normalized
     /// back to real corners when the completed operation is published.
@@ -95,18 +95,15 @@ impl EulerTransaction<'_> {
                         .iter()
                         .position(|vertex| *vertex == end.old_vertex)
                         .unwrap();
-                    let mut parameter = edge
-                        .curve
-                        .project(end.contact_points[parent], tolerance)?
-                        .parameter;
-                    if let Some(period) = edge.curve.domain().period {
-                        let anchor = if endpoint == 0 {
-                            edge.range.start
-                        } else {
-                            edge.range.end
-                        };
-                        parameter += ((anchor - parameter) / period).round() * period;
-                    }
+                    let anchor = if endpoint == 0 {
+                        edge.range.start
+                    } else {
+                        edge.range.end
+                    };
+                    let parameter = edge.curve.domain().nearest(
+                        edge.curve.project(end.contact_points[parent], tolerance)?.parameter,
+                        anchor,
+                    );
                     let remaining = if endpoint == 0 {
                         edge.range.end - parameter
                     } else {

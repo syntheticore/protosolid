@@ -312,6 +312,12 @@ impl OperationHistory {
         self.origins.get(&output)
     }
 
+    /// The first entity an operation reported as constructing `output`.
+    /// Feature construction records its primary source first.
+    pub(crate) fn primary_source(&self, output: PersistentId) -> PersistentId {
+        self.construction[&output][0].name
+    }
+
     pub(crate) fn created(&mut self, output: PersistentId) {
         self.origins.insert(output, Origin::Created { role: None });
     }

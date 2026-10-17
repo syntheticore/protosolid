@@ -4,7 +4,9 @@ use cgmath::prelude::*;
 
 use crate::Point3;
 
-use super::{DiagnosticKind, KernelError, KernelResult, ModelTolerance};
+use super::geometry::finite_point;
+use super::polygon::ordered;
+use super::{invalid, KernelResult, ModelTolerance};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PolyhedralVertex {
@@ -71,7 +73,7 @@ impl PolyhedralMesh {
         if vertices.iter().any(|vertex| {
             vertex.key.is_empty()
                 || !vertex_keys.insert(vertex.key.clone())
-                || !finite(vertex.point)
+                || !finite_point(vertex.point)
         }) {
             return Err(invalid(
                 "polyhedron vertices need unique nonempty keys and finite points",
@@ -191,18 +193,3 @@ impl PolyhedralMesh {
     }
 }
 
-fn finite(point: Point3) -> bool {
-    point.x.is_finite() && point.y.is_finite() && point.z.is_finite()
-}
-
-pub(crate) fn ordered(first: usize, second: usize) -> (usize, usize) {
-    if first < second {
-        (first, second)
-    } else {
-        (second, first)
-    }
-}
-
-fn invalid(message: impl Into<String>) -> KernelError {
-    KernelError::new(DiagnosticKind::InvalidInput, message)
-}

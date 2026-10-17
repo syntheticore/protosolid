@@ -1,66 +1,11 @@
 //! Exact section-based feature construction. Display triangles never enter BREP.
-use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment};
+use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment};
 use super::*;
 use crate::{Point2, Point3, Vec2, Vec3};
 use cgmath::prelude::*;
 
-fn invalid(message: &str) -> KernelError {
-    KernelError::new(DiagnosticKind::InvalidInput, message)
-}
-fn unsupported(message: &str) -> KernelError {
-    KernelError::new(DiagnosticKind::UnsupportedGeometry, message)
-}
 fn range(a: f64, b: f64) -> KernelResult<ParameterRange> {
     ParameterRange::new(a, b)
-}
-fn lift(plane: Plane3, point: Point2) -> Point3 {
-    plane.origin() + plane.u() * point.x + plane.v() * point.y
-}
-pub(super) fn lift_curve(plane: Plane3, curve: &Curve2, tolerance: ModelTolerance) -> KernelResult<Curve3> {
-    Ok(match curve {
-        Curve2::Line(line) => Line3::new(
-            lift(plane, line.origin()),
-            plane.u() * line.direction().x + plane.v() * line.direction().y,
-        )?
-        .into(),
-        Curve2::Circle(circle) => Circle3::new(
-            lift(plane, circle.center()),
-            plane.u() * circle.radius(),
-            plane.v() * circle.radius(),
-            tolerance,
-        )?
-        .into(),
-        Curve2::Nurbs(curve) => NurbsCurve3::new(
-            curve.degree(),
-            curve
-                .control_points()
-                .iter()
-                .map(|p| lift(plane, *p))
-                .collect(),
-            curve.weights().to_vec(),
-            curve.knots().to_vec(),
-        )?
-        .into(),
-        _ => {
-            return Err(unsupported(
-                "section curves must be lines, circles, or NURBS",
-            ))
-        }
-    })
-}
-fn reverse(patch: &mut BrepPatch) {
-    patch.orientation = if patch.orientation == FaceOrientation::Forward {
-        FaceOrientation::Reversed
-    } else {
-        FaceOrientation::Forward
-    };
-    for loop_ in &mut patch.loops {
-        loop_.segments.reverse();
-        for edge in &mut loop_.segments {
-            edge.range = edge.range.reversed();
-            edge.provenance = edge.provenance.reversed();
-        }
-    }
 }
 pub(super) fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelResult<BrepPatch> {
     let mut loops = Vec::new();
@@ -74,7 +19,7 @@ pub(super) fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelRes
             .map(|segment| {
                 Ok(BrepPatchSegment {
                     provenance: Default::default(),
-                    curve: lift_curve(plane, segment.curve(), profile.tolerance())?,
+                    curve: plane.lift_curve(segment.curve(), profile.tolerance())?,
                     pcurve: segment.curve().clone(),
                     range: segment.range(),
                 })
@@ -97,7 +42,7 @@ pub(super) fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelRes
         loops,
     };
     if reversed {
-        reverse(&mut patch);
+        patch.reverse();
     }
     Ok(patch)
 }
@@ -135,8 +80,7 @@ fn radial_profile(
     let mut radial = Vec3::new(0.0, 0.0, 0.0);
     for segment in profile.outer().segments() {
         for fraction in [0.0, 0.25, 0.5, 0.75] {
-            let p = lift(
-                plane,
+            let p = plane.point_at(
                 segment
                     .curve()
                     .evaluate(segment.range().start + segment.range().span() * fraction)?
@@ -159,7 +103,7 @@ fn radial_profile(
         tolerance,
     )?;
     let map = |point: Point2| {
-        let p = lift(plane, point) - axis.origin();
+        let p = plane.point_at(point) - axis.origin();
         Point2::new(p.dot(radial), p.dot(axis.direction()))
     };
     let mut wires = Vec::new();
@@ -303,7 +247,7 @@ pub(super) fn revolve(
                         index,
                         BrepPatchSegment {
                             provenance: Default::default(),
-                            curve: lift_curve(section_plane(a)?, segment.curve(), tolerance)?,
+                            curve: section_plane(a)?.lift_curve(segment.curve(), tolerance)?,
                             pcurve: Line2::new(Point2::new(a, 0.0), Vec2::unit_y())?.into(),
                             range: range(start, end)?,
                         },
@@ -321,7 +265,7 @@ pub(super) fn revolve(
                     }],
                 };
                 if segment.range().span() < 0.0 {
-                    reverse(&mut patch);
+                    patch.reverse();
                 }
                 promote_revolution(&mut patch, frame, segment, tolerance)?;
                 patches.push(patch);
@@ -404,11 +348,7 @@ fn promote_revolution(
     let old = patch.surface.evaluate(0.0, mid)?;
     let uv = surface.project(old.point, tolerance)?.parameters;
     if old.normal()?.dot(surface.normal(uv.0, uv.1)?) < 0.0 {
-        patch.orientation = if patch.orientation == FaceOrientation::Forward {
-            FaceOrientation::Reversed
-        } else {
-            FaceOrientation::Forward
-        };
+        patch.orientation = patch.orientation.reversed();
     }
     for edge in &mut patch.loops[0].segments {
         edge.pcurve = if let Some((offset, scale)) = axial_map {
@@ -480,7 +420,7 @@ impl SectionCurve {
         .into())
     }
     fn curve3(&self, plane: Plane3) -> KernelResult<Curve3> {
-        lift_curve(plane, &self.curve2()?, ModelTolerance::default())
+        plane.lift_curve(&self.curve2()?, ModelTolerance::default())
     }
     fn reversed(&self) -> Self {
         Self {
@@ -664,7 +604,7 @@ fn section_cap(
         .map(|c| {
             Ok(BrepPatchSegment {
                 provenance: Default::default(),
-                curve: lift_curve(plane, &c.curve2()?, tolerance)?,
+                curve: plane.lift_curve(&c.curve2()?, tolerance)?,
                 pcurve: c.curve2()?,
                 range: range(0.0, 1.0)?,
             })
@@ -681,7 +621,7 @@ fn section_cap(
         }],
     };
     if reversed {
-        reverse(&mut patch);
+        patch.reverse();
     }
     Ok(patch)
 }
@@ -780,7 +720,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             let center = |section: &[SectionCurve], plane: Plane3| {
                 section
                     .iter()
-                    .map(|c| lift(plane, c.points[0]).to_vec())
+                    .map(|c| plane.point_at(c.points[0]).to_vec())
                     .fold(Vec3::new(0.0, 0.0, 0.0), |a, b| a + b)
                     / count as f64
             };
@@ -800,9 +740,11 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
                 for shift in 0..count {
                     let score = (0..count)
                         .map(|j| {
-                            let a =
-                                lift(sections[i - 1].0, previous[j].points[0]).to_vec() - a_center;
-                            let b = lift(sections[i].0, candidate[(j + shift) % count].points[0])
+                            let a = sections[i - 1].0.point_at(previous[j].points[0]).to_vec()
+                                - a_center;
+                            let b = sections[i]
+                                .0
+                                .point_at(candidate[(j + shift) % count].points[0])
                                 .to_vec()
                                 - b_center;
                             (a - b).magnitude2()
@@ -866,11 +808,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
     )?
     .is_counter_clockwise();
     if !signed_area {
-        end_cap.orientation = if end_cap.orientation == FaceOrientation::Forward {
-            FaceOrientation::Reversed
-        } else {
-            FaceOrientation::Forward
-        };
+        end_cap.orientation = end_cap.orientation.reversed();
     }
     patches.push(end_cap);
     for index in 0..curves[0].len() {
@@ -895,7 +833,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
                 for (i, factor) in row.iter().enumerate() {
                     let c = &curves[i][index];
                     let w = c.weights[u] * factor;
-                    point += lift(sections[i].0, c.points[u]).to_vec() * w;
+                    point += sections[i].0.point_at(c.points[u]).to_vec() * w;
                     weight += w;
                 }
                 if weight <= 0.0 {
@@ -975,7 +913,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             }
         }
         if !forward {
-            reverse(&mut patch);
+            patch.reverse();
         }
         patches.push(patch);
         roles.push(CreationRole::ProfileSide { chart: None, generators: curves.iter().enumerate()
@@ -1082,7 +1020,7 @@ mod tests {
         }).unwrap().clone()];
         let chamfered = rounded.chamfer_with_tangent_propagation(&rim_edges, 0.2, true).unwrap();
         let section = Plane3::from_origin_normal(Point3::new(0.0, 0.0, -3.0), Vec3::unit_z()).unwrap();
-        chamfered.split(section, "right").unwrap();
+        chamfered.split(section, SplitKeep::Right).unwrap();
     }
     fn rectangle(x: f64, y: f64, w: f64, h: f64) -> Profile {
         let t = ModelTolerance::default();
@@ -1649,16 +1587,16 @@ mod tests {
         let body = rectangle(-2.0, -2.0, 4.0, 4.0)
             .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 4.0))
             .unwrap();
-        assert!((body.split(upper(1.0), "left").unwrap().volume() - 16.0).abs() < 1.0e-6);
-        assert!((body.split(upper(1.0), "right").unwrap().volume() - 48.0).abs() < 1.0e-6);
-        let both = body.split(upper(1.0), "both").unwrap();
+        assert!((body.split(upper(1.0), SplitKeep::Left).unwrap().volume() - 16.0).abs() < 1.0e-6);
+        assert!((body.split(upper(1.0), SplitKeep::Right).unwrap().volume() - 48.0).abs() < 1.0e-6);
+        let both = body.split(upper(1.0), SplitKeep::Both).unwrap();
         assert_eq!(both.solids().len(), 2);
         assert!((both.volume() - 64.0).abs() < 1.0e-6);
         let cylinder = circle(2.0)
             .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 4.0))
             .unwrap();
         assert!(
-            (cylinder.split(upper(1.0), "left").unwrap().volume() - 4.0 * std::f64::consts::PI)
+            (cylinder.split(upper(1.0), SplitKeep::Left).unwrap().volume() - 4.0 * std::f64::consts::PI)
                 .abs()
                 < 1.0e-6
         );
@@ -2167,15 +2105,15 @@ mod tests {
         let touching = Plane3::from_origin_normal(
             Point3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 1.0, 1.0),
         ).unwrap();
-        assert!(cylinder.split(touching, "both").is_err());
+        assert!(cylinder.split(touching, SplitKeep::Both).is_err());
         let slanted =
             Plane3::from_origin_normal(Point3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.8, 1.0))
                 .unwrap();
-        let both = cylinder.split(slanted, "both").unwrap();
+        let both = cylinder.split(slanted, SplitKeep::Both).unwrap();
         assert_eq!(both.solids().len(), 2);
         assert!((both.volume() - cylinder.volume()).abs() < 1.0e-5);
-        assert!((body.split(upper(20.0), "left").unwrap().volume() - body.volume()).abs() < 1.0e-7);
-        assert_eq!(body.split(upper(20.0), "right").unwrap().solids().len(), 0);
+        assert!((body.split(upper(20.0), SplitKeep::Left).unwrap().volume() - body.volume()).abs() < 1.0e-7);
+        assert_eq!(body.split(upper(20.0), SplitKeep::Right).unwrap().solids().len(), 0);
         let face = cylinder
             .faces()
             .find(|f| matches!(f.surface(), Surface3::Cylinder(_)))

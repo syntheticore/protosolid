@@ -1,3 +1,5 @@
+use crate::{Point2, Vec2};
+
 use super::{DiagnosticKind, KernelError, KernelResult, ModelTolerance};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,6 +21,10 @@ impl ParameterRange {
 
     pub fn span(self) -> f64 {
         self.end - self.start
+    }
+
+    pub fn middle(self) -> f64 {
+        (self.start + self.end) * 0.5
     }
 
     pub fn reversed(self) -> Self {
@@ -51,6 +57,15 @@ pub struct ParameterDomain {
 }
 
 impl ParameterDomain {
+    /// One full turn of an angular parameter, `[0, 2π)` with period `2π`.
+    pub const ANGLE: Self = Self {
+        bounds: DomainBounds::Bounded(ParameterRange {
+            start: 0.0,
+            end: std::f64::consts::TAU,
+        }),
+        period: Some(std::f64::consts::TAU),
+    };
+
     pub fn bounded(start: f64, end: f64) -> KernelResult<Self> {
         Ok(Self {
             bounds: DomainBounds::Bounded(ParameterRange::new(start, end)?),
@@ -77,6 +92,17 @@ impl ParameterDomain {
             bounds: DomainBounds::Unbounded,
             period: None,
         }
+    }
+
+    /// The whole-period part of a parameter displacement; zero when aperiodic.
+    pub fn whole_periods(self, delta: f64) -> f64 {
+        self.period
+            .map_or(0.0, |period| (delta / period).round() * period)
+    }
+
+    /// The representative of `parameter` nearest `reference`.
+    pub fn nearest(self, parameter: f64, reference: f64) -> f64 {
+        parameter + self.whole_periods(reference - parameter)
     }
 
     pub fn normalize(self, parameter: f64) -> f64 {
@@ -127,4 +153,22 @@ impl ParameterDomain {
     pub fn contains_range(self, range: ParameterRange, tolerance: f64) -> bool {
         self.contains(range.start, tolerance) && self.contains(range.end, tolerance)
     }
+}
+
+/// The whole-period part of a surface-parameter displacement.
+pub(crate) fn whole_periods(domains: [ParameterDomain; 2], delta: Vec2) -> Vec2 {
+    Vec2::new(
+        domains[0].whole_periods(delta.x),
+        domains[1].whole_periods(delta.y),
+    )
+}
+
+/// The center of a surface-parameter box.
+pub(crate) fn box_center(bounds: [ParameterRange; 2]) -> Point2 {
+    Point2::new(bounds[0].middle(), bounds[1].middle())
+}
+
+/// The representative of surface parameters `uv` nearest `reference`.
+pub(crate) fn nearest_uv(domains: [ParameterDomain; 2], uv: Point2, reference: Point2) -> Point2 {
+    uv + whole_periods(domains, reference - uv)
 }

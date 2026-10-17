@@ -5,24 +5,9 @@ use cgmath::prelude::*;
 use crate::Point2;
 
 use super::{
-    CoedgeId, Diagnostic, DiagnosticKind, FaceOrientation, KernelError, KernelResult, LoopKind,
-    ModelTolerance, PersistentId, ShellKind, Topology,
+    Coedge, CoedgeId, Diagnostic, DiagnosticKind, Face, FaceId, KernelError,
+    KernelResult, LoopKind, ModelTolerance, PersistentId, ShellKind, Topology,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValidationMode {
-    /// Euler workspace: connectivity must be internally consistent, but shells may
-    /// be open and loops may temporarily contain Euler spikes.
-    Construction,
-    /// Published model: every body must bound a closed, geometrically consistent volume.
-    Published,
-}
-
-impl ValidationMode {
-    fn is_published(self) -> bool {
-        matches!(self, Self::Published)
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct ValidationReport {
@@ -57,40 +42,28 @@ impl ValidationReport {
     }
 }
 
-pub(crate) fn validate(
-    topology: &Topology,
-    tolerance: ModelTolerance,
-    mode: ValidationMode,
-) -> ValidationReport {
-    let mut report = validate_structure(topology, tolerance, mode);
-    if mode == ValidationMode::Published {
-        validate_physical_volumes(topology, tolerance, &mut report);
-    }
+/// Prove that every body of `topology` bounds a closed, geometrically
+/// consistent and physically valid volume.
+pub(crate) fn validate(topology: &Topology, tolerance: ModelTolerance) -> ValidationReport {
+    let mut report = validate_structure(topology, tolerance);
+    validate_physical_volumes(topology, tolerance, &mut report);
     report
 }
 
 /// Check published topology and geometry without discarding a newly computed
 /// physical certificate. Commit performs certification once and retains it.
-pub(crate) fn validate_structure(
-    topology: &Topology,
-    tolerance: ModelTolerance,
-    mode: ValidationMode,
-) -> ValidationReport {
+pub(crate) fn validate_structure(topology: &Topology, tolerance: ModelTolerance) -> ValidationReport {
     let mut report = ValidationReport::default();
     validate_names(topology, &mut report);
-    validate_ownership(topology, mode, &mut report);
-    validate_loops(topology, mode, &mut report);
-    validate_edges(topology, mode, &mut report);
-    validate_vertices(topology, mode, &mut report);
-    if mode.is_published() {
-        validate_manifold_vertices(topology, &mut report);
-        validate_shell_euler_characteristic(topology, &mut report);
-    }
-    validate_geometry(topology, tolerance, mode, &mut report);
-    if mode.is_published() {
-        validate_planar_face_regions(topology, tolerance, &mut report);
-        validate_curved_face_boundaries(topology, tolerance, &mut report);
-    }
+    validate_ownership(topology, &mut report);
+    validate_loops(topology, &mut report);
+    validate_edges(topology, &mut report);
+    validate_vertices(topology, &mut report);
+    validate_manifold_vertices(topology, &mut report);
+    validate_shell_euler_characteristic(topology, &mut report);
+    validate_geometry(topology, tolerance, &mut report);
+    validate_planar_face_regions(topology, tolerance, &mut report);
+    validate_curved_face_boundaries(topology, tolerance, &mut report);
     report
 }
 
@@ -116,12 +89,7 @@ fn validate_curved_face_boundaries(
                     let mut pcurve = coedge.pcurve().clone();
                     if let Some(end) = previous {
                         let start = pcurve.evaluate(coedge.range().start)?.point;
-                        let mut shift = crate::Vec2::new(0.0, 0.0);
-                        for (axis, domain) in face.surface().domains().iter().enumerate() {
-                            if let Some(period) = domain.period {
-                                shift[axis] = ((end[axis] - start[axis]) / period).round() * period;
-                            }
-                        }
+                        let shift = super::whole_periods(face.surface().domains(), end - start);
                         if shift.magnitude2() > 0.0 {
                             pcurve = super::trim::translate_pcurve(&pcurve, shift, tolerance)?;
                         }
@@ -152,14 +120,18 @@ fn validate_curved_face_boundaries(
                                     && endpoints_b[j].distance(point) <= tolerance.linear * 8.0
                             }))
                         };
+                        let spatial = |coedge: &Coedge, parameter| -> KernelResult<crate::Point3> {
+                            let edge = topology.edge(coedge.edge())?;
+                            Ok(edge.curve().evaluate(coedge.edge_parameter(edge, parameter))?.point)
+                        };
                         let mut crossing = false;
                         for hit in &intersection.hits {
                             if represented(hit.point) { continue; }
                             // UV charts can have very different scales from
                             // model units. A near miss in UV is a crossing only
                             // when the retained spatial curves also meet.
-                            let first = topology.edge(a.edge())?.curve().evaluate(hit.first_parameter)?.point;
-                            let second = topology.edge(b.edge())?.curve().evaluate(hit.second_parameter)?.point;
+                            let first = spatial(a, hit.first_parameter)?;
+                            let second = spatial(b, hit.second_parameter)?;
                             let scale = first.to_vec().magnitude().max(second.to_vec().magnitude());
                             crossing |= first.distance(second) <= tolerance.linear_at_scale(scale) * 8.0;
                         }
@@ -297,12 +269,12 @@ fn validate_names(topology: &Topology, report: &mut ValidationReport) {
     }
 }
 
-fn validate_ownership(topology: &Topology, mode: ValidationMode, report: &mut ValidationReport) {
+fn validate_ownership(topology: &Topology, report: &mut ValidationReport) {
     let mut shell_owners = BTreeMap::new();
     let mut face_owners = BTreeMap::new();
     let mut loop_owners = BTreeMap::new();
     for (body_id, body) in topology.bodies() {
-        if mode.is_published() && body.shells.is_empty() {
+        if body.shells.is_empty() {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -346,7 +318,7 @@ fn validate_ownership(topology: &Topology, mode: ValidationMode, report: &mut Va
                 .with_entity(shell.name),
             );
         }
-        if mode.is_published() && shell.kind != ShellKind::Closed {
+        if shell.kind != ShellKind::Closed {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -444,19 +416,17 @@ fn validate_ownership(topology: &Topology, mode: ValidationMode, report: &mut Va
     }
 }
 
-fn validate_loops(topology: &Topology, mode: ValidationMode, report: &mut ValidationReport) {
+fn validate_loops(topology: &Topology, report: &mut ValidationReport) {
     let mut globally_reached = BTreeSet::new();
     for (loop_id, loop_) in topology.loops() {
         let Some(first) = loop_.first else {
-            if mode.is_published() {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "a published face loop may not be empty",
-                    )
-                    .with_entity(loop_.name),
-                );
-            }
+            report.error(
+                Diagnostic::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "a published face loop may not be empty",
+                )
+                .with_entity(loop_.name),
+            );
             continue;
         };
 
@@ -550,7 +520,7 @@ fn validate_loops(topology: &Topology, mode: ValidationMode, report: &mut Valida
                 .coedge(first)
                 .and_then(|coedge| topology.edge(coedge.edge))
                 .is_ok_and(|edge| edge.vertices[0] == edge.vertices[1]);
-        if mode.is_published() && visited.len() < 2 && !is_closed_single_edge {
+        if visited.len() < 2 && !is_closed_single_edge {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -573,7 +543,7 @@ fn validate_loops(topology: &Topology, mode: ValidationMode, report: &mut Valida
     }
 }
 
-fn validate_edges(topology: &Topology, mode: ValidationMode, report: &mut ValidationReport) {
+fn validate_edges(topology: &Topology, report: &mut ValidationReport) {
     for (edge_id, edge) in topology.edges() {
         if topology.vertex(edge.vertices[0]).is_err() || topology.vertex(edge.vertices[1]).is_err()
         {
@@ -594,7 +564,7 @@ fn validate_edges(topology: &Topology, mode: ValidationMode, report: &mut Valida
                 .with_entity(edge.name),
             );
         }
-        if mode.is_published() && edge.coedges.len() != 2 {
+        if edge.coedges.len() != 2 {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -672,7 +642,7 @@ fn validate_edges(topology: &Topology, mode: ValidationMode, report: &mut Valida
     }
 }
 
-fn validate_vertices(topology: &Topology, mode: ValidationMode, report: &mut ValidationReport) {
+fn validate_vertices(topology: &Topology, report: &mut ValidationReport) {
     for (vertex_id, vertex) in topology.vertices() {
         let outgoing_uses: Vec<_> = topology
             .coedges()
@@ -703,7 +673,7 @@ fn validate_vertices(topology: &Topology, mode: ValidationMode, report: &mut Val
                 .with_entity(vertex.name),
             );
         }
-        if mode.is_published() && outgoing_uses.is_empty() {
+        if outgoing_uses.is_empty() {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::TopologyInvariant,
@@ -850,12 +820,7 @@ fn validate_shell_euler_characteristic(topology: &Topology, report: &mut Validat
     }
 }
 
-fn validate_geometry(
-    topology: &Topology,
-    tolerance: ModelTolerance,
-    mode: ValidationMode,
-    report: &mut ValidationReport,
-) {
+fn validate_geometry(topology: &Topology, tolerance: ModelTolerance, report: &mut ValidationReport) {
     let scale = topology
         .vertices()
         .map(|(_, vertex)| vertex.point.to_vec().magnitude())
@@ -938,341 +903,335 @@ fn validate_geometry(
     }
 
     for (_, coedge) in topology.coedges() {
-        let Ok(loop_) = topology.loop_(coedge.loop_id) else {
-            continue;
+        validate_coedge_geometry(topology, tolerance, scale, coedge, report);
+    }
+    for (_, face) in topology.faces() {
+        validate_face_loops(topology, tolerance, face, report);
+    }
+}
+
+/// Validate one face's boundary geometry and loop winding in isolation.
+pub(crate) fn validate_face(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    face_id: FaceId,
+) -> KernelResult<()> {
+    let mut report = ValidationReport::default();
+    let scale = topology
+        .vertices()
+        .map(|(_, vertex)| vertex.point.to_vec().magnitude())
+        .fold(1.0_f64, f64::max);
+    let face = topology.face(face_id)?;
+    for loop_id in &face.loops {
+        for coedge in topology.loop_coedges(*loop_id)? {
+            validate_coedge_geometry(topology, tolerance, scale, topology.coedge(coedge)?, &mut report);
+        }
+    }
+    validate_face_loops(topology, tolerance, face, &mut report);
+    report.into_result()
+}
+
+/// Check that a coedge's p-curve lies on its face and follows its edge.
+fn validate_coedge_geometry(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    scale: f64,
+    coedge: &Coedge,
+    report: &mut ValidationReport,
+) {
+    let Ok(loop_) = topology.loop_(coedge.loop_id) else {
+        return;
+    };
+    let Ok(face) = topology.face(loop_.face) else {
+        return;
+    };
+    let Ok(edge) = topology.edge(coedge.edge) else {
+        return;
+    };
+    if !coedge
+        .pcurve
+        .domain()
+        .contains_range(coedge.range, tolerance.parameter)
+    {
+        report.error(
+            Diagnostic::new(
+                DiagnosticKind::GeometryInvariant,
+                "coedge trim range lies outside its p-curve's natural domain",
+            )
+            .with_entity(coedge.name),
+        );
+        return;
+    }
+    let vertices = if coedge.forward {
+        edge.vertices
+    } else {
+        [edge.vertices[1], edge.vertices[0]]
+    };
+    let report_error = |report: &mut ValidationReport, error: KernelError, entity| {
+        for diagnostic in error.diagnostics() {
+            report.error(diagnostic.clone().with_entity(entity));
+        }
+    };
+    let surface_point = |report: &mut ValidationReport, parameter: f64| {
+        let uv = match coedge.pcurve.evaluate(parameter) {
+            Ok(value) => value.point,
+            Err(error) => {
+                report_error(report, error, coedge.name);
+                return None;
+            }
         };
-        let Ok(face) = topology.face(loop_.face) else {
-            continue;
+        match face.surface.evaluate(uv.x, uv.y) {
+            Ok(value) => Some(value.point),
+            Err(error) => {
+                report_error(report, error, face.name);
+                None
+            }
+        }
+    };
+    let Some(surface_start) = surface_point(report, coedge.range.start) else {
+        return;
+    };
+    let Some(surface_end) = surface_point(report, coedge.range.end) else {
+        return;
+    };
+    let Ok(start) = topology.vertex(vertices[0]) else {
+        return;
+    };
+    let Ok(end) = topology.vertex(vertices[1]) else {
+        return;
+    };
+    let achieved = face
+        .tolerance
+        .max(edge.tolerance)
+        .max(tolerance.linear_at_scale(scale));
+    let endpoint_error = surface_start
+        .distance(start.point)
+        .max(surface_end.distance(end.point));
+    if endpoint_error > achieved {
+        report.error(
+            Diagnostic::new(
+                DiagnosticKind::GeometryInvariant,
+                "coedge p-curve endpoints do not agree with face and edge geometry",
+            )
+            .with_entity(coedge.name)
+            .with_accuracy(achieved, endpoint_error),
+        );
+    }
+    let domains = face.surface.domains();
+    for sample in 1..8 {
+        let fraction = sample as f64 / 8.0;
+        let edge_parameter = if coedge.forward {
+            edge.range.start + edge.range.span() * fraction
+        } else {
+            edge.range.end - edge.range.span() * fraction
         };
-        let Ok(edge) = topology.edge(coedge.edge) else {
-            continue;
+        let pcurve_parameter = coedge.range.start + coedge.range.span() * fraction;
+        let edge_point = match edge.curve.evaluate(edge_parameter) {
+            Ok(value) => value.point,
+            Err(error) => {
+                report_error(report, error, edge.name);
+                break;
+            }
         };
-        if !coedge
-            .pcurve
-            .domain()
-            .contains_range(coedge.range, tolerance.parameter)
+        let uv = match coedge.pcurve.evaluate(pcurve_parameter) {
+            Ok(value) => value.point,
+            Err(error) => {
+                report_error(report, error, coedge.name);
+                break;
+            }
+        };
+        if !domains[0].contains(uv.x, tolerance.parameter)
+            || !domains[1].contains(uv.y, tolerance.parameter)
         {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::GeometryInvariant,
-                    "coedge trim range lies outside its p-curve's natural domain",
+                    "p-curve leaves its face surface's natural parameter domain",
                 )
                 .with_entity(coedge.name),
             );
-            continue;
+            break;
         }
-        let vertices = if coedge.forward {
-            edge.vertices
-        } else {
-            [edge.vertices[1], edge.vertices[0]]
-        };
-        let uv_start = match coedge.pcurve.evaluate(coedge.range.start) {
-            Ok(value) => value.point,
-            Err(error) => {
-                for diagnostic in error.diagnostics() {
-                    report.error(diagnostic.clone().with_entity(coedge.name));
-                }
-                continue;
-            }
-        };
-        let uv_end = match coedge.pcurve.evaluate(coedge.range.end) {
-            Ok(value) => value.point,
-            Err(error) => {
-                for diagnostic in error.diagnostics() {
-                    report.error(diagnostic.clone().with_entity(coedge.name));
-                }
-                continue;
-            }
-        };
-        let surface_start = match face.surface.evaluate(uv_start.x, uv_start.y) {
-            Ok(value) => value.point,
-            Err(error) => {
-                for diagnostic in error.diagnostics() {
-                    report.error(diagnostic.clone().with_entity(face.name));
-                }
-                continue;
-            }
-        };
-        let surface_end = match face.surface.evaluate(uv_end.x, uv_end.y) {
-            Ok(value) => value.point,
-            Err(error) => {
-                for diagnostic in error.diagnostics() {
-                    report.error(diagnostic.clone().with_entity(face.name));
-                }
-                continue;
-            }
-        };
-        let Ok(start) = topology.vertex(vertices[0]) else {
-            continue;
-        };
-        let Ok(end) = topology.vertex(vertices[1]) else {
-            continue;
-        };
-        let achieved = face
-            .tolerance
-            .max(edge.tolerance)
-            .max(tolerance.linear_at_scale(scale));
-        let endpoint_error = surface_start
-            .distance(start.point)
-            .max(surface_end.distance(end.point));
-        if endpoint_error > achieved {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "coedge p-curve endpoints do not agree with face and edge geometry",
-                )
-                .with_entity(coedge.name)
-                .with_accuracy(achieved, endpoint_error),
-            );
-        }
-        for sample in 1..8 {
-            let fraction = sample as f64 / 8.0;
-            let edge_parameter = if coedge.forward {
-                edge.range.start + edge.range.span() * fraction
-            } else {
-                edge.range.end - edge.range.span() * fraction
-            };
-            let pcurve_parameter = coedge.range.start + coedge.range.span() * fraction;
-            let edge_point = match edge.curve.evaluate(edge_parameter) {
-                Ok(value) => value.point,
-                Err(error) => {
-                    for diagnostic in error.diagnostics() {
-                        report.error(diagnostic.clone().with_entity(edge.name));
-                    }
-                    break;
-                }
-            };
-            let uv = match coedge.pcurve.evaluate(pcurve_parameter) {
-                Ok(value) => value.point,
-                Err(error) => {
-                    for diagnostic in error.diagnostics() {
-                        report.error(diagnostic.clone().with_entity(coedge.name));
-                    }
-                    break;
-                }
-            };
-            let domains = face.surface.domains();
-            if !domains[0].contains(uv.x, tolerance.parameter)
-                || !domains[1].contains(uv.y, tolerance.parameter)
-            {
+        match face.surface.evaluate(uv.x, uv.y) {
+            Ok(value) if value.point.distance(edge_point) <= achieved => {}
+            Ok(value) => {
+                let interior_error = value.point.distance(edge_point);
                 report.error(
                     Diagnostic::new(
                         DiagnosticKind::GeometryInvariant,
-                        "p-curve leaves its face surface's natural parameter domain",
+                        "edge and p-curve disagree in the interior of their trim ranges",
                     )
-                    .with_entity(coedge.name),
+                    .with_entity(coedge.name)
+                    .with_accuracy(achieved, interior_error),
                 );
                 break;
             }
-            match face.surface.evaluate(uv.x, uv.y) {
-                Ok(value) if value.point.distance(edge_point) <= achieved => {}
-                Ok(value) => {
-                    let interior_error = value.point.distance(edge_point);
-                    report.error(
-                        Diagnostic::new(
-                            DiagnosticKind::GeometryInvariant,
-                            "edge and p-curve disagree in the interior of their trim ranges",
-                        )
-                        .with_entity(coedge.name)
-                        .with_accuracy(achieved, interior_error),
-                    );
-                    break;
-                }
-                Err(error) => {
-                    for diagnostic in error.diagnostics() {
-                        report.error(diagnostic.clone().with_entity(face.name));
-                    }
-                    break;
-                }
+            Err(error) => {
+                report_error(report, error, face.name);
+                break;
             }
         }
     }
-
-    validate_face_parameter_loops(topology, tolerance, mode, report);
 }
 
-fn validate_face_parameter_loops(
+/// Check that every loop of `face` is continuous in its parameter chart and
+/// winds consistently with the face orientation.
+fn validate_face_loops(
     topology: &Topology,
     tolerance: ModelTolerance,
-    mode: ValidationMode,
+    face: &Face,
     report: &mut ValidationReport,
 ) {
-    for (_, face) in topology.faces() {
-        let domains = face.surface.domains();
-        for loop_id in &face.loops {
-            let Ok(loop_value) = topology.loop_(*loop_id) else {
-                continue;
-            };
-            let Some(first) = loop_value.first else {
-                continue;
-            };
-            let mut current = first;
-            let mut signed_area = 0.0;
-            let mut principal_area = 0.0;
-            let mut previous_end = None;
-            loop {
-                let Ok(coedge) = topology.coedge(current) else {
-                    break;
-                };
-                let start = coedge.pcurve.evaluate(coedge.range.start);
-                let end = coedge.pcurve.evaluate(coedge.range.end);
-                let chart_shift = match (previous_end, &start) {
-                    (Some(previous), Ok(start)) => {
-                        let delta: crate::Vec2 = previous - start.point;
-                        let shift = |value: f64, period: Option<f64>| {
-                            period
-                                .map(|period| {
-                                    let candidate = (value / period).round() * period;
-                                    if (value - candidate).abs() <= tolerance.parameter * 64.0 {
-                                        candidate
-                                    } else {
-                                        0.0
-                                    }
-                                })
-                                .unwrap_or(0.0)
-                        };
-                        crate::Vec2::new(
-                            shift(delta.x, domains[0].period),
-                            shift(delta.y, domains[1].period),
-                        )
-                    }
-                    _ => crate::Vec2::new(0.0, 0.0),
-                };
-                match coedge
-                    .pcurve
-                    .signed_area_contribution(coedge.range, tolerance.parameter)
-                {
-                    Ok(mut area) => {
-                        principal_area += area;
-                        if let (Ok(start), Ok(end)) = (&start, &end) {
-                            area += 0.5
-                                * (chart_shift.x * (end.point.y - start.point.y)
-                                    - chart_shift.y * (end.point.x - start.point.x));
-                        }
-                        signed_area += area;
-                    }
-                    Err(error) => {
-                        for diagnostic in error.diagnostics() {
-                            report.error(diagnostic.clone().with_entity(coedge.name));
-                        }
-                    }
-                }
-                if let Ok(end) = &end {
-                    previous_end = Some(end.point + chart_shift);
-                }
-                if let Ok(next) = topology.coedge(coedge.next) {
-                    let start = next.pcurve.evaluate(next.range.start);
-                    if let (Ok(end), Ok(start)) = (&end, start) {
-                        if !domains[0].equivalent(end.point.x, start.point.x, tolerance.parameter)
-                            || !domains[1].equivalent(
-                                end.point.y,
-                                start.point.y,
-                                tolerance.parameter,
-                            )
-                        {
-                            let (collapsed_bridge, bridge_start) = face
-                                .surface
-                                .evaluate(end.point.x, end.point.y)
-                                .and_then(|end_value| {
-                                    face.surface
-                                        .evaluate(start.point.x, start.point.y)
-                                        .and_then(|start_value| {
-                                            // Compare the short interval in one
-                                            // periodic chart. Raw representatives
-                                            // near opposite sides of a seam can
-                                            // differ by a full turn plus harmless
-                                            // numerical error in the other axis.
-                                            let mut aligned_start = start.point;
-                                            for axis in 0..2 {
-                                                if let Some(period) = domains[axis].period {
-                                                    let derivative = if axis == 0 {
-                                                        end_value.du
-                                                    } else {
-                                                        end_value.dv
-                                                    };
-                                                    if derivative.magnitude() > tolerance.linear {
-                                                        aligned_start[axis] += ((end.point[axis]
-                                                            - aligned_start[axis])
-                                                            / period)
-                                                            .round()
-                                                            * period;
-                                                    }
-                                                }
-                                            }
-                                            let middle = Point2::from_vec(
-                                                (end.point.to_vec() + aligned_start.to_vec()) * 0.5,
-                                            );
-                                            face.surface.evaluate(middle.x, middle.y).map(
-                                                |middle_value| {
-                                                    let allowed = tolerance.linear_at_scale(
-                                                        scale_from_point(end_value.point),
-                                                    );
-                                                    (
-                                                        end_value.point.distance(start_value.point)
-                                                            <= allowed
-                                                            && end_value
-                                                                .point
-                                                                .distance(middle_value.point)
-                                                                <= allowed,
-                                                        aligned_start,
-                                                    )
-                                                },
-                                            )
-                                        })
-                                })
-                                .unwrap_or((false, start.point));
-                            if !collapsed_bridge {
-                                report.error(
-                                    Diagnostic::new(
-                                        DiagnosticKind::GeometryInvariant,
-                                        "consecutive p-curves are not continuous in parameter space or across a collapsed surface interval",
-                                    )
-                                    .with_entity(coedge.name),
-                                );
-                            } else {
-                                // A surface pole can collapse a finite
-                                // parameter-space interval to one topological
-                                // vertex. Account for that implicit bridge in
-                                // the loop winding without inventing a
-                                // zero-length 3D edge.
-                                let bridge = 0.5
-                                    * (end.point.x * bridge_start.y - bridge_start.x * end.point.y);
-                                signed_area += bridge;
-                                principal_area += bridge;
-                            }
-                        }
-                    }
-                }
-                current = coedge.next;
-                if current == first {
-                    break;
-                }
-            }
-            let orientation = match face.orientation {
-                FaceOrientation::Forward => 1.0,
-                FaceOrientation::Reversed => -1.0,
-            };
-            let correct = |area: f64| match loop_value.kind {
-                LoopKind::Outer => area * orientation > tolerance.parameter.powi(2),
-                LoopKind::Inner => area * orientation < -tolerance.parameter.powi(2),
-            };
-            // Existing canonical primitive builders may retain a valid loop
-            // wholly inside the principal chart. Boolean and shell rebuilds
-            // can instead retain equivalent seam endpoints in adjacent chart
-            // copies. Accept the principal representation when it already has
-            // the required winding; otherwise use its continuous periodic lift.
-            let correct_winding = correct(principal_area) || correct(signed_area);
-            if mode.is_published() && !correct_winding {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "face loop has zero area or winding inconsistent with face orientation",
-                    )
-                    .with_entity(loop_value.name),
-                );
-            }
+    for loop_id in &face.loops {
+        let Ok(loop_value) = topology.loop_(*loop_id) else {
+            continue;
+        };
+        let Some(first) = loop_value.first else {
+            continue;
+        };
+        let (principal_area, lifted_area) = loop_areas(topology, tolerance, face, first, report);
+        let orientation = face.orientation.sign();
+        let correct = |area: f64| match loop_value.kind {
+            LoopKind::Outer => area * orientation > tolerance.parameter.powi(2),
+            LoopKind::Inner => area * orientation < -tolerance.parameter.powi(2),
+        };
+        // Existing canonical primitive builders may retain a valid loop wholly
+        // inside the principal chart. Boolean and shell rebuilds can instead
+        // retain equivalent seam endpoints in adjacent chart copies. Accept the
+        // principal representation when it already has the required winding;
+        // otherwise use its continuous periodic lift.
+        if !(correct(principal_area) || correct(lifted_area)) {
+            report.error(
+                Diagnostic::new(
+                    DiagnosticKind::GeometryInvariant,
+                    "face loop has zero area or winding inconsistent with face orientation",
+                )
+                .with_entity(loop_value.name),
+            );
         }
     }
+}
+
+/// The signed parameter-space area of the loop starting at `first`, both in
+/// its principal chart and continuously lifted across periodic seams.
+/// Reports consecutive p-curves that are not continuous.
+fn loop_areas(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    face: &Face,
+    first: CoedgeId,
+    report: &mut ValidationReport,
+) -> (f64, f64) {
+    let domains = face.surface.domains();
+    // A whole-period jump between consecutive uses, within parameter tolerance.
+    let seam_jump = |value: f64, axis: usize| {
+        let candidate = domains[axis].whole_periods(value);
+        if (value - candidate).abs() <= tolerance.parameter * 64.0 {
+            candidate
+        } else {
+            0.0
+        }
+    };
+    let mut current = first;
+    let mut lifted_area = 0.0;
+    let mut principal_area = 0.0;
+    let mut previous_end = None;
+    loop {
+        let Ok(coedge) = topology.coedge(current) else {
+            break;
+        };
+        let start = coedge.pcurve.evaluate(coedge.range.start);
+        let end = coedge.pcurve.evaluate(coedge.range.end);
+        let chart_shift = match (previous_end, &start) {
+            (Some(previous), Ok(start)) => {
+                let delta: crate::Vec2 = previous - start.point;
+                crate::Vec2::new(seam_jump(delta.x, 0), seam_jump(delta.y, 1))
+            }
+            _ => crate::Vec2::new(0.0, 0.0),
+        };
+        match coedge
+            .pcurve
+            .signed_area_contribution(coedge.range, tolerance.parameter)
+        {
+            Ok(mut area) => {
+                principal_area += area;
+                if let (Ok(start), Ok(end)) = (&start, &end) {
+                    area += 0.5
+                        * (chart_shift.x * (end.point.y - start.point.y)
+                            - chart_shift.y * (end.point.x - start.point.x));
+                }
+                lifted_area += area;
+            }
+            Err(error) => {
+                for diagnostic in error.diagnostics() {
+                    report.error(diagnostic.clone().with_entity(coedge.name));
+                }
+            }
+        }
+        if let Ok(end) = &end {
+            previous_end = Some(end.point + chart_shift);
+        }
+        if let (Ok(next), Ok(end)) = (topology.coedge(coedge.next), &end) {
+            if let Ok(start) = next.pcurve.evaluate(next.range.start) {
+                let (end, start) = (end.point, start.point);
+                if !domains[0].equivalent(end.x, start.x, tolerance.parameter)
+                    || !domains[1].equivalent(end.y, start.y, tolerance.parameter)
+                {
+                    match collapsed_bridge(face, tolerance, end, start) {
+                        // A surface pole can collapse a finite parameter-space
+                        // interval to one topological vertex. Account for that
+                        // implicit bridge in the loop winding without inventing
+                        // a zero-length 3D edge.
+                        Some(bridge_start) => {
+                            let bridge = 0.5 * (end.x * bridge_start.y - bridge_start.x * end.y);
+                            lifted_area += bridge;
+                            principal_area += bridge;
+                        }
+                        None => report.error(
+                            Diagnostic::new(
+                                DiagnosticKind::GeometryInvariant,
+                                "consecutive p-curves are not continuous in parameter space or across a collapsed surface interval",
+                            )
+                            .with_entity(coedge.name),
+                        ),
+                    }
+                }
+            }
+        }
+        current = coedge.next;
+        if current == first {
+            break;
+        }
+    }
+    (principal_area, lifted_area)
+}
+
+/// When the parameter interval from `end` to `start` collapses to one point
+/// of `face`'s surface, the start aligned to `end`'s periodic chart.
+fn collapsed_bridge(
+    face: &Face,
+    tolerance: ModelTolerance,
+    end: Point2,
+    start: Point2,
+) -> Option<Point2> {
+    let end_value = face.surface.evaluate(end.x, end.y).ok()?;
+    let start_value = face.surface.evaluate(start.x, start.y).ok()?;
+    // Compare the short interval in one periodic chart. Raw representatives
+    // near opposite sides of a seam can differ by a full turn plus harmless
+    // numerical error in the other axis.
+    let domains = face.surface.domains();
+    let mut aligned_start = start;
+    for (axis, derivative) in [end_value.du, end_value.dv].into_iter().enumerate() {
+        if derivative.magnitude() > tolerance.linear {
+            aligned_start[axis] = domains[axis].nearest(aligned_start[axis], end[axis]);
+        }
+    }
+    let middle = Point2::from_vec((end.to_vec() + aligned_start.to_vec()) * 0.5);
+    let middle_value = face.surface.evaluate(middle.x, middle.y).ok()?;
+    let allowed = tolerance.linear_at_scale(scale_from_point(end_value.point));
+    (end_value.point.distance(start_value.point) <= allowed
+        && end_value.point.distance(middle_value.point) <= allowed)
+        .then_some(aligned_start)
 }
 
 fn scale_from_point(point: crate::Point3) -> f64 {

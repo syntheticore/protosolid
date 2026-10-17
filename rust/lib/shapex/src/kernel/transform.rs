@@ -4,7 +4,6 @@ use cgmath::prelude::*;
 
 use crate::{Matrix3, Point3, Quaternion, Vec3};
 
-use super::validation::ValidationMode;
 use super::{
     ChangeKind, Cone3, Curve3, Cylinder3, DiagnosticKind, FaceId, Frame3, Kernel, KernelError,
     KernelResult, Line3, ModelTolerance, NurbsCurve3, NurbsSurface3, OffsetSurface3,
@@ -76,6 +75,13 @@ impl RigidTransform3 {
         Self {
             rotation: Matrix3::identity(),
             translation: Vec3::new(0.0, 0.0, 0.0),
+        }
+    }
+
+    pub fn from_translation(translation: Vec3) -> Self {
+        Self {
+            rotation: Matrix3::identity(),
+            translation,
         }
     }
 
@@ -165,14 +171,13 @@ impl Kernel {
             let face = working.faces.get_mut(face_id)?;
             face.surface = transform_surface(face.surface.clone(), transform, self.tolerance)?;
         }
-        super::validation::validate(&working, self.tolerance, ValidationMode::Published)
-            .into_result()?;
+        super::validation::validate(&working, self.tolerance).into_result()?;
         self.topology = working;
         Ok(history)
     }
 }
 
-fn transform_curve(
+pub(crate) fn transform_curve(
     curve: Curve3,
     transform: RigidTransform3,
     tolerance: ModelTolerance,

@@ -1,7 +1,8 @@
 //! Trimmed-face geometry shared by classification, intersections, and operations.
 use cgmath::prelude::*;
 use crate::{Point2, Point3, Vec2};
-use super::{Curve2, Curve3, DiagnosticKind, IntersectionSet, KernelError, KernelResult,
+use super::polygon::point_segment_distance;
+use super::{box_center, nearest_uv, whole_periods, Curve2, Curve3, DiagnosticKind, IntersectionSet, KernelError, KernelResult,
     LoopKind, ModelTolerance, ParameterRange, Surface3};
 
 /// A directed trim with caller-owned metadata. Geometry utilities never inspect
@@ -98,27 +99,12 @@ pub(super) fn align_pcurve_to_face_chart<P>(
         .map(super::DomainBounds::Bounded)
         .unwrap_or(pcurve.domain().bounds)
     {
-        super::DomainBounds::Bounded(range) => (range.start + range.end) * 0.5,
+        super::DomainBounds::Bounded(range) => range.middle(),
         _ => 0.0,
     };
     let point = pcurve.evaluate(parameter)?.point;
-    let domains = surface.domains();
-    let coordinates = [point.x, point.y];
-    let centers = [
-        (bounds[0].x + bounds[1].x) * 0.5,
-        (bounds[0].y + bounds[1].y) * 0.5,
-    ];
-    let mut offset = Vec2::new(0.0, 0.0);
-    for axis in 0..2 {
-        if let Some(period) = domains[axis].period {
-            let shift = ((centers[axis] - coordinates[axis]) / period).round() * period;
-            if axis == 0 {
-                offset.x = shift;
-            } else {
-                offset.y = shift;
-            }
-        }
-    }
+    let center = bounds[0].midpoint(bounds[1]);
+    let offset = whole_periods(surface.domains(), center - point);
     if offset.magnitude2() <= tolerance.parameter.powi(2) {
         return Ok(pcurve.clone());
     }
@@ -240,12 +226,12 @@ pub(super) fn face_boundary_curves(
                 // At a pole the angular coordinate is unconstrained. Keep
                 // each incident meridian's own chart rather than rounding a
                 // half-turn bridge onto the opposite side of the face.
-                let shift = |axis: usize| domains[axis].period
-                    .filter(|_| rates[axis] > tolerance.linear)
-                    .map_or(0.0, |period| (delta[axis] / period).round() * period);
-                let offset = Vec2::new(
-                    shift(0), shift(1),
-                );
+                let shift = |axis: usize| if rates[axis] > tolerance.linear {
+                    domains[axis].whole_periods(delta[axis])
+                } else {
+                    0.0
+                };
+                let offset = Vec2::new(shift(0), shift(1));
                 if offset.magnitude2() > tolerance.parameter.powi(2) {
                     pcurve = translate_pcurve(&pcurve, offset, tolerance)?;
                 }
@@ -333,14 +319,6 @@ pub(super) fn sample_pcurve<P>(curve: &FaceCurve<P>, count: usize) -> KernelResu
         .collect()
 }
 
-pub(super) fn point_segment_distance(point: Point2, start: Point2, end: Point2) -> f64 {
-    let direction = end - start;
-    if direction.magnitude2() <= f64::EPSILON {
-        return point.distance(start);
-    }
-    let parameter = (point - start).dot(direction) / direction.magnitude2();
-    point.distance(start + direction * parameter.clamp(0.0, 1.0))
-}
 
 pub(super) fn trimmed_faces_intersect(
     topology: &super::Topology,
@@ -393,13 +371,11 @@ pub(super) fn trimmed_faces_intersect(
                     for fraction in [0.0, 0.5, 1.0] {
                         let point = edge.curve.evaluate(edge.range.start + edge.range.span() * fraction)?.point;
                         let projection = target.project(point, tolerance)?;
-                        let mut uv = Point2::new(projection.parameters.0, projection.parameters.1);
-                        for axis in 0..2 {
-                            if let Some(period) = target.domains()[axis].period {
-                                let center = (bounds[axis].start + bounds[axis].end) * 0.5;
-                                uv[axis] += ((center - uv[axis]) / period).round() * period;
-                            }
-                        }
+                        let uv = nearest_uv(
+                            target.domains(),
+                            Point2::new(projection.parameters.0, projection.parameters.1),
+                            box_center(bounds),
+                        );
                         if point_in_trim(uv, target_boundary)? { return Ok(true); }
                     }
                 }
@@ -609,11 +585,7 @@ pub(super) fn curve_intersections<P, Q>(
     let endpoint_hits = || -> KernelResult<Vec<(f64, f64)>> {
         let fit = |curve: &Curve3, range: ParameterRange, point: Point3| -> Option<f64> {
             let projection = curve.project_on_trim(point, range, tolerance).ok()?;
-            let mut parameter = projection.parameter;
-            if let Some(period) = curve.domain().period {
-                let center = (range.start + range.end) * 0.5;
-                parameter += ((center - parameter) / period).round() * period;
-            }
+            let parameter = curve.domain().nearest(projection.parameter, range.middle());
             let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0;
             (projection.distance <= allowed && range.contains(parameter, tolerance))
                 .then_some(parameter.clamp(range.start.min(range.end), range.start.max(range.end)))
@@ -668,11 +640,8 @@ pub(super) fn curve_intersections<P, Q>(
                 let mut hits = hits
                     .into_iter()
                     .filter_map(|hit| {
-                        let fit = |mut parameter: f64, curve: &Curve3, range: ParameterRange| {
-                            if let Some(period) = curve.domain().period {
-                                let center = (range.start + range.end) * 0.5;
-                                parameter += ((center - parameter) / period).round() * period;
-                            }
+                        let fit = |parameter: f64, curve: &Curve3, range: ParameterRange| {
+                            let parameter = curve.domain().nearest(parameter, range.middle());
                             range.contains(parameter, tolerance).then_some(parameter)
                         };
                         fit(hit.first_parameter, &first.curve, first.range).zip(fit(

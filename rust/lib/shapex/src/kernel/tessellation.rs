@@ -4,8 +4,9 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec3};
 
+use super::polygon::ordered;
 use super::{
-    BodyId, Diagnostic, DiagnosticKind, Edge, EdgeId, FaceId, FaceOrientation, Kernel, KernelError,
+    nearest_uv, BodyId, Diagnostic, DiagnosticKind, Edge, EdgeId, FaceId, FaceOrientation, Kernel, KernelError,
     KernelResult, LoopId, ModelTolerance, ShellId,
 };
 
@@ -364,7 +365,7 @@ impl Kernel {
                 flat_uv.extend([vertex.uv.x, vertex.uv.y]);
                 uvs.push(vertex.uv);
                 positions.push(vertex.point);
-                boundary_edges.insert(ordered_edge(
+                boundary_edges.insert(ordered(
                     ring_offset + index,
                     ring_offset + (index + 1) % ring.len(),
                 ));
@@ -617,12 +618,7 @@ impl Kernel {
                 .collect::<KernelResult<Vec<_>>>()?;
             for sample in &mut samples {
                 if let Some(prior) = previous {
-                    for axis in 0..2 {
-                        if let Some(period) = domains[axis].period {
-                            sample[axis] +=
-                                ((prior[axis] - sample[axis]) / period).round() * period;
-                        }
-                    }
+                    *sample = nearest_uv(domains, *sample, prior);
                 }
                 previous = Some(*sample);
             }
@@ -704,12 +700,7 @@ impl Kernel {
         let coedges = self.topology().loop_coedges(loop_id)?;
         let parameter_tolerance = self.tolerance().parameter * 64.0;
         let coordinates = |point: Point2| [point.x, point.y];
-        let aligned = |value: f64, reference: f64, axis: usize| {
-            domains[axis]
-                .period
-                .map(|period| value + ((reference - value) / period).round() * period)
-                .unwrap_or(value)
-        };
+        let aligned = |value: f64, reference: f64, axis: usize| domains[axis].nearest(value, reference);
 
         // A genuine chart seam has two uses in this face. Its periodic
         // coordinate is constant while the transverse coordinate changes.
@@ -859,15 +850,15 @@ fn rectangular_surface_seed(
     }
     let mut boundary_edges = BTreeSet::new();
     for column in 0..columns - 1 {
-        boundary_edges.insert(ordered_edge(column, column + 1));
+        boundary_edges.insert(ordered(column, column + 1));
         let upper = (rows - 1) * columns + column;
-        boundary_edges.insert(ordered_edge(upper, upper + 1));
+        boundary_edges.insert(ordered(upper, upper + 1));
     }
     for row in 0..rows - 1 {
         let lower = row * columns;
         let upper = (row + 1) * columns;
-        boundary_edges.insert(ordered_edge(lower, upper));
-        boundary_edges.insert(ordered_edge(lower + columns - 1, upper + columns - 1));
+        boundary_edges.insert(ordered(lower, upper));
+        boundary_edges.insert(ordered(lower + columns - 1, upper + columns - 1));
     }
     let mut triangles = Vec::with_capacity((columns - 1) * (rows - 1) * 2);
     for row in 0..rows - 1 {
@@ -1183,43 +1174,21 @@ fn unwrap_periodic_ring(
         }
         vertex.uv = Point2::new(projection.parameters.0, projection.parameters.1);
     }
-    for (coordinate, period) in domains
-        .iter()
-        .enumerate()
-        .filter_map(|(coordinate, domain)| domain.period.map(|period| (coordinate, period)))
-    {
-        let Some(first) = ring.first() else {
+    for (coordinate, domain) in domains.iter().enumerate() {
+        let Some(first) = ring.first().filter(|_| domain.period.is_some()) else {
             continue;
         };
-        let mut previous = if coordinate == 0 {
-            first.uv.x
-        } else {
-            first.uv.y
-        };
+        let mut previous = first.uv[coordinate];
         let mut previous_point = first.point;
         for vertex in ring.iter_mut().skip(1) {
-            let collapsed_bridge = previous_point.distance(vertex.point) <= tolerance.linear;
-            let value = if coordinate == 0 {
-                &mut vertex.uv.x
-            } else {
-                &mut vertex.uv.y
-            };
-            if !collapsed_bridge {
-                *value += ((previous - *value) / period).round() * period;
+            if previous_point.distance(vertex.point) > tolerance.linear {
+                vertex.uv[coordinate] = domain.nearest(vertex.uv[coordinate], previous);
             }
-            previous = *value;
+            previous = vertex.uv[coordinate];
             previous_point = vertex.point;
         }
     }
     Ok(())
-}
-
-fn ordered_edge(first: usize, second: usize) -> (usize, usize) {
-    if first < second {
-        (first, second)
-    } else {
-        (second, first)
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1336,7 +1305,7 @@ fn refine_surface_triangles(
                 DiagnosticKind::NumericalFailure,
                 format!(
                     "adaptive {} surface tessellation could not satisfy requested tolerances at depth {} ({} triangles; chord error {}, requested {}; angular error {}, requested {})",
-                    surface_kind(surface),
+                    surface.kind_name(),
                     options.maximum_depth,
                     triangles.len(),
                     worst_chord,
@@ -1364,9 +1333,9 @@ fn refine_surface_triangles(
         let old_triangles = std::mem::take(triangles);
         for (index, triangle) in old_triangles.into_iter().enumerate() {
             let [a, b, c] = triangle;
-            let ab = midpoints.get(&ordered_edge(a, b)).copied();
-            let bc = midpoints.get(&ordered_edge(b, c)).copied();
-            let ca = midpoints.get(&ordered_edge(c, a)).copied();
+            let ab = midpoints.get(&ordered(a, b)).copied();
+            let bc = midpoints.get(&ordered(b, c)).copied();
+            let ca = midpoints.get(&ordered(c, a)).copied();
             match (ab, bc, ca) {
                 (None, None, None) if centroid_splits.contains(&index) => {
                     let uv = Point2::from_vec(
@@ -1413,22 +1382,6 @@ fn uv_triangle_is_degenerate(triangle: [usize; 3], uvs: &[Point2]) -> bool {
     let determinant = positive - negative;
     let rounding_bound = (positive.abs() + negative.abs()) * f64::EPSILON * 64.0;
     determinant.abs() <= rounding_bound
-}
-
-fn surface_kind(surface: &super::Surface3) -> &'static str {
-    match surface {
-        super::Surface3::Plane(_) => "plane",
-        super::Surface3::Cylinder(_) => "cylinder",
-        super::Surface3::Cone(_) => "cone",
-        super::Surface3::Sphere(_) => "sphere",
-        super::Surface3::Torus(_) => "torus",
-        super::Surface3::Revolved(_) => "revolved",
-        super::Surface3::Swept(_) => "swept",
-        super::Surface3::Nurbs(_) => "NURBS",
-        super::Surface3::Offset(_) => "offset",
-        super::Surface3::RollingBall(_) => "rolling-ball",
-        super::Surface3::Ruled(_) => "ruled",
-    }
 }
 
 fn collapsed_periodic_angular_error(
@@ -1559,9 +1512,9 @@ fn surface_point_normal(surface: &super::Surface3, u: f64, v: f64) -> KernelResu
 
 fn triangle_edges(triangle: [usize; 3]) -> [(usize, usize); 3] {
     [
-        ordered_edge(triangle[0], triangle[1]),
-        ordered_edge(triangle[1], triangle[2]),
-        ordered_edge(triangle[2], triangle[0]),
+        ordered(triangle[0], triangle[1]),
+        ordered(triangle[1], triangle[2]),
+        ordered(triangle[2], triangle[0]),
     ]
 }
 
@@ -1876,13 +1829,13 @@ mod tests {
                         area += signed;
                         for (a, b) in [(0, 1), (1, 2), (2, 0)] {
                             *edges
-                                .entry(ordered_edge(triangle[a], triangle[b]))
+                                .entry(ordered(triangle[a], triangle[b]))
                                 .or_insert(0) += 1;
                         }
                     }
                     assert!((area - polygon_area).abs() < 1.0e-12);
                     let boundary = (0..points.len())
-                        .map(|i| ordered_edge(i, (i + 1) % points.len()))
+                        .map(|i| ordered(i, (i + 1) % points.len()))
                         .collect::<BTreeSet<_>>();
                     assert_eq!(
                         edges

@@ -13,7 +13,7 @@ use shapex::kernel::{
 };
 use shapex::{
     ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
-    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, Solid,
+    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, Solid, SplitKeep,
     TessellationOptions, TriangleMesh, TrimmedCurve2, Vec2, Vec3, VertexHandle, Wire2,
 };
 use wasm_bindgen::prelude::*;
@@ -1203,6 +1203,12 @@ impl NativeCompound {
         tolerance_values: &[f64],
     ) -> Result<Self, JsValue> {
         let tolerance = tolerance(tolerance_values)?;
+        let keep = match keep {
+            "left" => SplitKeep::Left,
+            "right" => SplitKeep::Right,
+            "both" => SplitKeep::Both,
+            _ => return Err(js_error("split keep mode must be left, right, or both")),
+        };
         self.inner
             .split(plane(plane_values, tolerance)?, keep)
             .map(|inner| Self { inner })

@@ -1,18 +1,8 @@
 //! Sweeps along regular planar sketch rails, retaining the exact moving section.
-use super::euler::{BrepPatch, BrepPatchLoop, BrepPatchSegment};
+use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment};
 use super::*;
 use crate::{Point2, Point3, Vec2, Vec3};
 use cgmath::prelude::*;
-
-fn invalid(message: &str) -> KernelError {
-    KernelError::new(DiagnosticKind::InvalidInput, message)
-}
-fn point(plane: Plane3, p: Point2) -> Point3 {
-    plane.origin() + vector(plane, p.to_vec())
-}
-fn vector(plane: Plane3, v: Vec2) -> Vec3 {
-    plane.u() * v.x + plane.v() * v.y
-}
 
 /// Exact planar-rail sweep. The section rotates with the rail tangent about
 /// its fixed plane normal, remaining continuous through spline inflections.
@@ -37,18 +27,16 @@ impl SweptSurface3 {
     ) -> KernelResult<Self> {
         tolerance.validate()?;
         let start = rail.curve().evaluate(rail.range().start)?;
-        let rail_origin = point(rail_plane, start.point);
-        let rail_tangent = vector(rail_plane, start.first_derivative);
+        let rail_origin = rail_plane.point_at(start.point);
+        let rail_tangent = rail_plane.vector_at(start.first_derivative);
         if rail_tangent.magnitude2() <= tolerance.linear.powi(2) {
             return Err(invalid("sweep rail has a singular tangent"));
         }
         let rail_tangent = rail_tangent.normalize();
         let closed_rail = start.point.distance(rail.end()?) <= tolerance.linear;
         if closed_rail {
-            let end = vector(
-                rail_plane,
-                rail.curve().evaluate(rail.range().end)?.first_derivative,
-            );
+            let end = rail_plane
+                .vector_at(rail.curve().evaluate(rail.range().end)?.first_derivative);
             if end.magnitude2() <= tolerance.linear.powi(2)
                 || rail_tangent.dot(end.normalize()) < 1.0 - tolerance.angular * 16.0
             {
@@ -124,8 +112,8 @@ impl SweptSurface3 {
     fn frame(&self, v: f64) -> KernelResult<(Point3, Vec3, Vec3, f64, f64, f64)> {
         let v = self.rail_parameter(v);
         let rail = self.rail.curve().evaluate(v)?;
-        let tangent = vector(self.rail_plane, rail.first_derivative);
-        let acceleration = vector(self.rail_plane, rail.second_derivative);
+        let tangent = self.rail_plane.vector_at(rail.first_derivative);
+        let acceleration = self.rail_plane.vector_at(rail.second_derivative);
         if tangent.magnitude2() <= self.tolerance.linear.powi(2) {
             return Err(invalid("sweep rail has a singular tangent"));
         }
@@ -134,7 +122,7 @@ impl SweptSurface3 {
         let sine = normal.dot(self.rail_tangent.cross(tangent.normalize()));
         let omega = normal.dot(tangent.cross(acceleration)) / tangent.magnitude2();
         Ok((
-            point(self.rail_plane, rail.point),
+            self.rail_plane.point_at(rail.point),
             tangent,
             acceleration,
             cosine,
@@ -160,31 +148,30 @@ impl SweptSurface3 {
         let profile = self.profile.curve().evaluate(u)?;
         let (rail, tangent, _, c, s, omega) = self.frame(v)?;
         let start = self.rail_origin;
-        let delta = self.rotate(point(self.profile_plane, profile.point) - start, c, s);
+        let delta = self.rotate(self.profile_plane.point_at(profile.point) - start, c, s);
         Ok((
             rail + delta,
-            self.rotate(vector(self.profile_plane, profile.first_derivative), c, s),
+            self.rotate(self.profile_plane.vector_at(profile.first_derivative), c, s),
             tangent + self.rail_plane.normal().cross(delta) * omega,
         ))
     }
     pub(crate) fn evaluate(&self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {
         let profile = self.profile.curve().evaluate(u)?;
         let (rail, tangent, acceleration, c, s, omega) = self.frame(v)?;
-        let jerk = vector(
-            self.rail_plane,
-            self.rail.curve().third_derivative(self.rail_parameter(v))?,
-        );
+        let jerk = self
+            .rail_plane
+            .vector_at(self.rail.curve().third_derivative(self.rail_parameter(v))?);
         let normal = self.rail_plane.normal();
         let omega_derivative = normal.dot(tangent.cross(jerk)) / tangent.magnitude2()
             - omega * 2.0 * tangent.dot(acceleration) / tangent.magnitude2();
         let start = self.rail_origin;
-        let delta = self.rotate(point(self.profile_plane, profile.point) - start, c, s);
-        let du = self.rotate(vector(self.profile_plane, profile.first_derivative), c, s);
+        let delta = self.rotate(self.profile_plane.point_at(profile.point) - start, c, s);
+        let du = self.rotate(self.profile_plane.vector_at(profile.first_derivative), c, s);
         Ok(SurfaceEvaluation {
             point: rail + delta,
             du,
             dv: tangent + normal.cross(delta) * omega,
-            duu: self.rotate(vector(self.profile_plane, profile.second_derivative), c, s),
+            duu: self.rotate(self.profile_plane.vector_at(profile.second_derivative), c, s),
             duv: normal.cross(du) * omega,
             dvv: acceleration
                 + normal.cross(normal.cross(delta)) * omega.powi(2)
@@ -280,15 +267,15 @@ impl Profile {
         if !self.holes().is_empty() {
             return Err(invalid("sweeps with holes are not supported"));
         }
-        let start = point(rail_plane, rail.start()?);
-        let end = point(rail_plane, rail.end()?);
+        let start = rail_plane.point_at(rail.start()?);
+        let end = rail_plane.point_at(rail.end()?);
         if matches!(rail.curve(), Curve2::Line(_)) {
             return self.extrude(plane, end - start);
         }
         if let Curve2::Circle(circle) = rail.curve() {
             return self.revolve(
                 plane,
-                Axis3::new(point(rail_plane, circle.center()), rail_plane.normal())?,
+                Axis3::new(rail_plane.point_at(circle.center()), rail_plane.normal())?,
                 rail.range().span(),
             );
         }
@@ -302,10 +289,9 @@ impl Profile {
             rail.clone(),
             tolerance,
         )?;
-        let tangent = vector(
-            rail_plane,
-            rail.curve().evaluate(rail.range().start)?.first_derivative,
-        ) * rail.range().span().signum();
+        let tangent = rail_plane
+            .vector_at(rail.curve().evaluate(rail.range().start)?.first_derivative)
+            * rail.range().span().signum();
         let alignment = tangent.normalize().dot(plane.normal());
         if alignment.abs() <= tolerance.angular {
             return Err(invalid(
@@ -362,7 +348,7 @@ impl Profile {
                         // Exact section curves share their native parameter with
                         // caps; longitudinal edges retain the swept support.
                         let plane = frame.section_plane(a.y)?;
-                        let curve = super::sweeps::lift_curve(plane, section.curve(), tolerance)?;
+                        let curve = plane.lift_curve(section.curve(), tolerance)?;
                         let pcurve = Line2::new(Point2::new(0.0, a.y), Vec2::unit_x())?.into();
                         segments.push(BrepPatchSegment {
                             provenance: Default::default(),
@@ -517,7 +503,7 @@ mod tests {
             } else {
                 rail.clone()
             };
-            let origin = point(Plane3::xy(), rail.start().unwrap());
+            let origin = Plane3::xy().point_at(rail.start().unwrap());
             let plane = Plane3::new(origin, Vec3::unit_y(), Vec3::unit_z(), t).unwrap();
             let result = p.sweep(plane, Plane3::xy(), &rail).unwrap();
             verify(&result, p.area() * length);

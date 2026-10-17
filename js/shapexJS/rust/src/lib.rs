@@ -1121,6 +1121,13 @@ impl NativeCompound {
             .map(|inner| Self { inner })
             .map_err(js_error)
     }
+    #[wasm_bindgen(js_name = dissolveFaces)]
+    pub fn dissolve_faces(&self, faces: &NativeFaceList) -> Result<Self, JsValue> {
+        self.inner
+            .dissolve_faces(&faces.values)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
     pub fn shell(
         &self,
         openings: &NativeFaceList,

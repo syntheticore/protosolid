@@ -832,6 +832,13 @@ export function createShapex(bindings) {
         return nativeCall(() => new Compound(result._raw().combined(other._raw())))
       }, this)
     }
+    dissolveFaces(faces) {
+      const list = new bindings.NativeFaceList()
+      try {
+        array(faces, 'faces').forEach((face, index) => list.add(instance(face, Face, `faces[${index}]`)._raw()))
+        return nativeCall(() => new Compound(this._raw().dissolveFaces(list)))
+      } finally { free(list) }
+    }
     offsetFaces(faces, distance) {
       const list = new bindings.NativeFaceList()
       try {

@@ -1699,6 +1699,13 @@ export class Compound extends Volumetric {
   }
 
   dissolveFaces(faces) {
+    if(this.isShapex) {
+      const geometry = window.kernel.modeling.dissolveFaces(
+        this.kernelGeometry, faces.map(face => face.geom()),
+      )
+      return new Compound(this.componentId, geometry)
+        .trackShapex([this], 'remove-faces')
+    }
     try {
       const remove = new window.oc.oc.BOPAlgo_RemoveFeatures()
       remove.SetShape(this.geom())

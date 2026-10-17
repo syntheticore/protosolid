@@ -641,6 +641,98 @@ fn owned_cuboid(minimum: Point3, maximum: Point3) -> super::Compound {
 }
 
 #[test]
+fn dissolve_faces_heals_bores_pockets_and_bosses() {
+    let base = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 10.0));
+    let tolerance = ModelTolerance::default();
+    let cylinder = |height: f64| Profile::new(
+        Wire2::new([TrimmedCurve2::circle(Point2::new(10.0, 10.0), 3.0).unwrap()], tolerance).unwrap(),
+        [], tolerance,
+    ).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * height).unwrap();
+    for (name, edited) in [
+        ("bore", base.difference(&cylinder(10.0)).unwrap()),
+        ("pocket", base.difference(&cylinder(6.0)).unwrap()),
+        ("boss", base.union(&cylinder(14.0)).unwrap()),
+    ] {
+        let selected = edited.faces().filter(|face| matches!(face.surface(), Surface3::Cylinder(_))
+            || matches!(face.surface(), Surface3::Plane(p) if p.origin().z == 6.0 || p.origin().z == 14.0))
+            .cloned().collect::<Vec<_>>();
+        let result = edited.dissolve_faces(&selected).unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(result.faces().count(), 6, "{name}");
+        assert!((result.volume() - 4000.0).abs() < 1e-6, "{name}");
+        result.tessellate(TessellationOptions::default()).unwrap();
+        assert!(selected.iter().all(|face| matches!(result.resolve(face), Resolution::Deleted)));
+    }
+}
+
+#[test]
+fn dissolve_faces_reconstructs_fillet_and_chamfer_supports() {
+    let base = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
+    let edge = base.edges().find(|edge| {
+        let p = edge.endpoints().unwrap(); (p[1].z - p[0].z).abs() > 4.9
+    }).unwrap().clone();
+    for edited in [base.fillet(&[edge.clone()], 1.0).unwrap(), base.chamfer(&[edge], 1.0).unwrap()] {
+        let selected = edited.faces().filter(|face| !matches!(face.surface(), Surface3::Plane(p)
+            if p.normal().x.abs() > 0.999 || p.normal().y.abs() > 0.999 || p.normal().z.abs() > 0.999))
+            .cloned().collect::<Vec<_>>();
+        let result = edited.dissolve_faces(&selected).unwrap();
+        assert_eq!(result.faces().count(), 6);
+        assert!((result.volume() - 1000.0).abs() < 1e-6);
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+}
+
+#[test]
+fn dissolve_faces_heals_periodic_blends_and_preserves_other_bodies() {
+    let tolerance = ModelTolerance::default();
+    let cylinder = Profile::new(
+        Wire2::new([TrimmedCurve2::circle(Point2::new(0.0, 0.0), 10.0).unwrap()], tolerance).unwrap(),
+        [], tolerance,
+    ).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * 20.0).unwrap();
+    let top = cylinder.edges().find(|edge| edge.endpoints().unwrap().iter().all(|p| p.z > 19.9)).unwrap().clone();
+    let other = owned_cuboid(Point3::new(30.0, 0.0, 0.0), Point3::new(40.0, 10.0, 10.0));
+    for edited in [cylinder.fillet(&[top.clone()], 1.0).unwrap(), cylinder.chamfer(&[top], 1.0).unwrap()] {
+        let combined = edited.combined(&[other.clone()]).unwrap();
+        let selected = combined.faces().filter(|face| matches!(face.surface(), Surface3::Torus(_)
+            | Surface3::RollingBall(_) | Surface3::Cone(_))).cloned().collect::<Vec<_>>();
+        let result = combined.dissolve_faces(&selected).unwrap();
+        assert_eq!(result.solids().len(), 2);
+        assert!((result.volume() - cylinder.volume() - other.volume()).abs() < 1e-6);
+        assert!(other.faces().all(|face| matches!(result.resolve(face), Resolution::Preserved(_))));
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+}
+
+#[test]
+fn dissolve_faces_heals_short_chamfers_and_rejects_open_results() {
+    let base = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 0.5));
+    let edge = base.edges().find(|edge| {
+        let p = edge.endpoints().unwrap(); (p[1].z - p[0].z).abs() > 0.49
+    }).unwrap().clone();
+    let edited = base.chamfer(&[edge], 1.0).unwrap();
+    let selected = edited.faces().filter(|face| matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().x.abs() > 0.1 && p.normal().y.abs() > 0.1)).cloned().collect::<Vec<_>>();
+    assert!((edited.dissolve_faces(&selected).unwrap().volume() - 50.0).abs() < 1e-6);
+    assert!(base.dissolve_faces(&[base.faces().next().unwrap().clone()]).is_err());
+    assert!(base.dissolve_faces(&base.faces().cloned().collect::<Vec<_>>()).is_err());
+    assert!(base.dissolve_faces(&[]).is_err());
+}
+
+#[test]
+fn dissolve_faces_heals_blends_meeting_at_corners() {
+    let base = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    let edges = base.edges().cloned().collect::<Vec<_>>();
+    for edited in [base.fillet(&edges, 1.0).unwrap(), base.chamfer(&edges, 1.0).unwrap()] {
+        let selected = edited.faces().filter(|face| !matches!(face.surface(), Surface3::Plane(p)
+            if p.normal().x.abs() > 0.999 || p.normal().y.abs() > 0.999 || p.normal().z.abs() > 0.999))
+            .cloned().collect::<Vec<_>>();
+        let result = edited.dissolve_faces(&selected).unwrap();
+        assert_eq!(result.faces().count(), 6);
+        assert!((result.volume() - 1000.0).abs() < 1e-6);
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+}
+
+#[test]
 fn rolling_ball_fillet_rewrites_only_local_brep() {
     let cuboid = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));
     let edge = cuboid

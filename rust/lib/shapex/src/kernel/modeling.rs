@@ -1013,6 +1013,27 @@ impl Compound {
         self.boolean(other, BooleanKind::Intersection)
     }
 
+    /// Remove a feature and extend its surviving support surfaces to close it.
+    pub fn dissolve_faces(&self, faces: &[FaceHandle]) -> KernelResult<Self> {
+        let selected = faces.iter().map(FaceHandle::persistent_id).collect::<BTreeSet<_>>();
+        if faces.is_empty() || selected.len() != faces.len()
+            || faces.iter().any(|face| !self.faces().any(|candidate| candidate == face))
+        {
+            return Err(KernelError::new(DiagnosticKind::InvalidInput,
+                "dissolve needs distinct faces from this compound revision"));
+        }
+        let mut results = Vec::new();
+        for solid in &self.solids {
+            let local = faces.iter().filter(|face| solid.faces().any(|candidate| candidate == *face))
+                .cloned().collect::<Vec<_>>();
+            let body = solid.to_compound();
+            results.push(if local.is_empty() { body } else {
+                super::features::dissolve_faces(&body, &local)?
+            });
+        }
+        combine_compounds(results, self.tolerance())
+    }
+
     /// Offset selected faces along their outward normals, extending adjacent
     /// supports and adjusting tangent blends to keep each solid closed.
     pub fn offset_faces(&self, faces: &[FaceHandle], distance: f64) -> KernelResult<Self> {

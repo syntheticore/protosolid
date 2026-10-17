@@ -5,6 +5,7 @@ import materials from '../materials.js'
 
 const LEADER_LENGTH_PX = 50
 const ARC_EXTENSION_STEPS = 32
+const ARROW_LENGTH_PX = 12
 
 
 export default class DimensionControls extends THREE.Object3D {
@@ -13,6 +14,8 @@ export default class DimensionControls extends THREE.Object3D {
 
     this.alcTypes = ['dimension']
     this.alcObject = constraint
+    this.renderer = renderer
+    this.layout = () => {}
 
     const itemL = constraint.items[0]
     const itemR = constraint.items[1]
@@ -114,11 +117,35 @@ export default class DimensionControls extends THREE.Object3D {
     )
   }
 
-  updateLayout() {}
+  updateLayout() {
+    this.layout()
+    this.scaleArrows()
+  }
+
+  // Keep arrow heads at a constant on-screen size regardless of zoom.
+  scaleArrows() {
+    const camera = this.renderer.activeCamera
+    const canvas = this.renderer.renderer.domElement
+    const width = canvas.width / this.renderer.getPixelRatio()
+    const height = canvas.height / this.renderer.getPixelRatio()
+    this.updateWorldMatrix(true, false)
+    const project = point => point.applyMatrix4(this.matrixWorld).project(camera)
+    for(const arrow of this.children) {
+      if(!(arrow instanceof THREE.ArrowHelper)) continue
+      const origin = project(arrow.position.clone())
+      const projectedLength = offset => {
+        const point = project(arrow.position.clone().add(offset))
+        return Math.hypot((point.x - origin.x) * width * 0.5, (point.y - origin.y) * height * 0.5)
+      }
+      const pixelsPerUnit = (projectedLength(new THREE.Vector3(1, 0, 0)) + projectedLength(new THREE.Vector3(0, 1, 0))) * 0.5
+      arrow.scale.setScalar(ARROW_LENGTH_PX / pixelsPerUnit)
+      arrow.updateMatrixWorld(true)
+    }
+  }
 }
 
 function makeArrow(pos, dir) {
-  return new THREE.ArrowHelper(dir, pos, 0.0, 'darkgray', 1.5, 0.75)
+  return new THREE.ArrowHelper(dir, pos, 0.0, 'darkgray', 1, 0.5)
 }
 
 function makeCircularDimension(controls, renderer, circle, constraint, isDiameter, parentTransform) {
@@ -214,7 +241,7 @@ function makeCircularDimension(controls, renderer, circle, constraint, isDiamete
       extension.computeLineDistances()
     }
   }
-  controls.updateLayout = update
+  controls.layout = update
   update()
 }
 

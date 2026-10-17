@@ -51,6 +51,9 @@ pub enum DerivationRole {
     ReplaceFace,
     Draft,
     SweepJoinCells,
+    PeriodicSeamVertex,
+    PeriodicSeamEdge,
+    PeriodicSeamUse,
     Fillet(BlendRole),
     Chamfer(BlendRole),
 }
@@ -116,6 +119,9 @@ impl std::fmt::Display for DerivationRole {
             Self::ReplaceFace => "replace-face",
             Self::Draft => "draft",
             Self::SweepJoinCells => "sweep.join_cells",
+            Self::PeriodicSeamVertex => "periodic-seam.vertex",
+            Self::PeriodicSeamEdge => "periodic-seam.edge",
+            Self::PeriodicSeamUse => "periodic-seam.use",
             Self::Fillet(role) => return write!(f, "fillet.{role}"),
             Self::Chamfer(role) => return write!(f, "chamfer.{role}"),
         };

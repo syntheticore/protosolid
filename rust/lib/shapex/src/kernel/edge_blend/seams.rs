@@ -1,8 +1,78 @@
-use super::super::trim::translate_pcurve;
+use super::super::periodic::SeamPlacement;
 use super::super::PersistentId;
 use super::*;
 
 impl EulerTransaction<'_> {
+    /// Keep chart cuts out of terminating vertex gaps while preparing a blend.
+    /// Temporary subdivisions are rebound to the selection, then normalized
+    /// back to real corners when the completed operation is published.
+    pub(super) fn relocate_blend_endpoint_seams(
+        &mut self,
+        selected: &BTreeSet<EdgeId>,
+        kind: EdgeBlendKind,
+    ) -> KernelResult<()> {
+        let shells = selected
+            .iter()
+            .flat_map(|edge| self.working.edge_faces(*edge).unwrap())
+            .map(|face| self.working.face(face).unwrap().shell)
+            .collect::<BTreeSet<_>>();
+        let seams = self
+            .working
+            .edges()
+            .filter_map(|(id, edge)| {
+                let faces = self.working.edge_faces(id).unwrap();
+                (faces.len() == 1
+                    && edge.coedges.len() == 2
+                    && shells.contains(&self.working.face(faces[0]).unwrap().shell))
+                .then(|| (id, faces[0], edge.vertices))
+            })
+            .collect::<Vec<_>>();
+        'seams: for (seam, face, vertices) in seams {
+            for vertex in vertices {
+                if self.working.vertex_faces(vertex)?.len() <= 2 {
+                    continue;
+                }
+                for boundary in self.working.vertex_edges(vertex)? {
+                    if self.working.edge_faces(boundary)?.len() == 2 {
+                        let edge = self.working.edge(boundary)?;
+                        let use_id = edge
+                            .coedges
+                            .iter()
+                            .find(|id| {
+                                self.working
+                                    .loop_(self.working.coedge(**id).unwrap().loop_id)
+                                    .unwrap()
+                                    .face
+                                    == face
+                            })
+                            .copied();
+                        if let Some(use_id) = use_id {
+                            let coedge = self.working.coedge(use_id)?;
+                            let target = coedge
+                                .pcurve
+                                .evaluate((coedge.range.start + coedge.range.end) * 0.5)?
+                                .point;
+                            if self.relocate_periodic_seam(
+                                seam,
+                                face,
+                                target,
+                                SeamPlacement::AllowBoundarySplits,
+                                [
+                                    kind.role(BlendRole::PeriodicSplitVertex),
+                                    kind.role(BlendRole::PeriodicSplitEdge),
+                                    kind.role(BlendRole::PeriodicSplitUse),
+                                ],
+                            )? {
+                                continue 'seams;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Find boundary fragments that a blend contact would consume or reverse.
     /// Seams and redundant partitions at their far ends can be normalized
     /// before the network is prepared again.
@@ -125,80 +195,7 @@ impl EulerTransaction<'_> {
         names
     }
 
-    fn split_blend_boundary(
-        &mut self,
-        edge_id: EdgeId,
-        parameter: f64,
-        kind: EdgeBlendKind,
-    ) -> KernelResult<VertexId> {
-        let edge = self.working.edge(edge_id)?.clone();
-        let fraction = (parameter - edge.range.start) / edge.range.span();
-        let name = self
-            .names
-            .next_derived(kind.role(BlendRole::PeriodicSplitVertex))?;
-        let vertex = self.make_vertex(name, edge.curve.evaluate(parameter)?.point);
-        self.history
-            .derived(name, [edge.name], kind.role(BlendRole::PeriodicSplitVertex));
-        let name = self
-            .names
-            .next_derived(kind.role(BlendRole::PeriodicSplitEdge))?;
-        let second = self.make_edge(
-            name,
-            [vertex, edge.vertices[1]],
-            edge.curve.clone(),
-            ParameterRange::new(parameter, edge.range.end)?,
-        )?;
-        self.history
-            .derived(name, [edge.name], kind.role(BlendRole::PeriodicSplitEdge));
-        self.working.edges.get_mut(edge_id)?.vertices[1] = vertex;
-        self.working.edges.get_mut(edge_id)?.range.end = parameter;
-        for id in edge.coedges {
-            let old = self.working.coedge(id)?.clone();
-            let split = old.range.start
-                + old.range.span()
-                    * if old.forward {
-                        fraction
-                    } else {
-                        1.0 - fraction
-                    };
-            let range = if old.forward {
-                ParameterRange::new(split, old.range.end)?
-            } else {
-                ParameterRange::new(old.range.start, split)?
-            };
-            let name = self
-                .names
-                .next_derived(kind.role(BlendRole::PeriodicSplitUse))?;
-            let added = self.make_coedge(
-                name,
-                second,
-                old.loop_id,
-                old.forward,
-                old.pcurve.clone(),
-                range,
-            )?;
-            self.history
-                .derived(name, [old.name], kind.role(BlendRole::PeriodicSplitUse));
-            if old.forward {
-                self.working.coedges.get_mut(id)?.range.end = split;
-                self.insert_loop_coedge(id, old.next, added)?;
-            } else {
-                self.working.coedges.get_mut(id)?.range.start = split;
-                self.insert_loop_coedge(old.previous, id, added)?;
-            }
-            self.history.modified(old.name);
-        }
-        for vertex in [edge.vertices[0], vertex, edge.vertices[1]] {
-            self.repair_outgoing(vertex)?;
-        }
-        self.history
-            .changed(edge.name, ChangeKind::Split, [edge.name, name]);
-        Ok(vertex)
-    }
-
-    /// Relocate a constant-parameter seam between two winding boundary rings.
-    /// This uses the surface's periodic chart, not a world axis or a particular
-    /// solid type. Other faces retain their exact curves when a ring is split.
+    /// Move the seam beyond a boundary that the blend would consume.
     fn relocate_periodic_blend_seam(
         &mut self,
         seam_id: EdgeId,
@@ -207,33 +204,6 @@ impl EulerTransaction<'_> {
         vertex: VertexId,
         kind: EdgeBlendKind,
     ) -> KernelResult<bool> {
-        let tolerance = self.kernel.tolerance;
-        let surface = self.working.face(face)?.surface.clone();
-        let seam = self.working.edge(seam_id)?.clone();
-        if seam.coedges.len() != 2 {
-            return Ok(false);
-        }
-        let first = self.working.coedge(seam.coedges[0])?;
-        let second = self.working.coedge(seam.coedges[1])?;
-        if first.loop_id != second.loop_id {
-            return Ok(false);
-        }
-        let Curve2::Line(line) = &first.pcurve else {
-            return Ok(false);
-        };
-        let Some(axis) = surface
-            .domains()
-            .iter()
-            .enumerate()
-            .find_map(|(axis, domain)| {
-                (domain.period.is_some() && line.direction()[axis].abs() <= tolerance.parameter)
-                    .then_some(axis)
-            })
-        else {
-            return Ok(false);
-        };
-        let period = surface.domains()[axis].period.unwrap();
-        let other_axis = 1 - axis;
         let continuation = self.working.vertex_edges(vertex)?.into_iter().find(|edge| {
             *edge != boundary
                 && *edge != seam_id
@@ -261,132 +231,17 @@ impl EulerTransaction<'_> {
         let target = coedge
             .pcurve
             .evaluate((coedge.range.start + coedge.range.end) * 0.5)?
-            .point[axis];
-        // Removing the seam exposes two rings. Locate a unique crossing on
-        // each before editing; a chart cut must stay inside the retained face.
-        let mut rings = Vec::new();
-        let bounds = face_parameter_bounds(
-            &face_boundary_curves(&self.working, face, tolerance)?,
-            tolerance,
-        )?;
-        for start in [first.next, second.next] {
-            let mut current = start;
-            let mut crossing = Vec::new();
-            while !seam.coedges.contains(&current) {
-                let value = self.working.coedge(current)?;
-                let midpoint = value
-                    .pcurve
-                    .evaluate((value.range.start + value.range.end) * 0.5)?
-                    .point[axis];
-                let lifted = target + ((midpoint - target) / period).round() * period;
-                let mut origin = Point2::new(0.0, 0.0);
-                origin[axis] = lifted;
-                let mut direction = Vec2::new(0.0, 0.0);
-                direction[other_axis] = 1.0;
-                let cut = TrimmedCurve2::new(Line2::new(origin, direction)?, bounds[other_axis])?;
-                let segment = TrimmedCurve2::new(value.pcurve.clone(), value.range)?;
-                let intersection = curve_pair_intersection(&segment, &cut, tolerance)?;
-                if intersection.coincident {
-                    return Ok(false);
-                }
-                for hit in intersection.hits {
-                    let parameter = hit.first_parameter;
-                    let fraction = (parameter - value.range.start) / value.range.span();
-                    if fraction > tolerance.parameter && fraction < 1.0 - tolerance.parameter {
-                        let edge = self.working.edge(value.edge)?;
-                        let parameter = edge.range.start
-                            + edge.range.span()
-                                * if value.forward {
-                                    fraction
-                                } else {
-                                    1.0 - fraction
-                                };
-                        crossing.push((value.edge, parameter));
-                    }
-                }
-                current = value.next;
-            }
-            if crossing.len() != 1 {
-                return Ok(false);
-            }
-            rings.push(crossing[0]);
-        }
-        let loops = self.kemr_unchecked(seam_id, seam.coedges[0])?;
-        let mut outgoing = Vec::new();
-        for (edge, parameter) in rings {
-            let vertex = self.split_blend_boundary(edge, parameter, kind)?;
-            let id = self
-                .working
-                .vertex_edges(vertex)?
-                .into_iter()
-                .flat_map(|edge| self.working.edge(edge).unwrap().coedges.clone())
-                .find(|id| {
-                    self.working.coedge_vertices(*id).unwrap()[0] == vertex
-                        && self
-                            .working
-                            .loop_(self.working.coedge(*id).unwrap().loop_id)
-                            .unwrap()
-                            .face
-                            == face
-                })
-                .unwrap();
-            outgoing.push(id);
-        }
-        outgoing.sort_by_key(|id| self.working.coedge(*id).unwrap().loop_id != loops.outer_loop);
-        let mut anchor = target;
-        let mut endpoints = Vec::new();
-        for start in &outgoing {
-            let mut current = *start;
-            let start_uv = self
-                .working
-                .coedge(current)?
-                .pcurve
-                .evaluate(self.working.coedge(current)?.range.start)?
-                .point;
-            let mut previous = anchor;
-            loop {
-                let value = self.working.coedge(current)?.clone();
-                let uv = value.pcurve.evaluate(value.range.start)?.point;
-                let mut offset = Vec2::new(0.0, 0.0);
-                offset[axis] = ((previous - uv[axis]) / period).round() * period;
-                let pcurve = translate_pcurve(&value.pcurve, offset, tolerance)?;
-                previous = pcurve.evaluate(value.range.end)?.point[axis];
-                self.working.coedges.get_mut(current)?.pcurve = pcurve;
-                self.history.modified(value.name);
-                current = value.next;
-                if current == *start {
-                    break;
-                }
-            }
-            let mut uv = start_uv;
-            uv[axis] = anchor;
-            endpoints.push(uv);
-            anchor = previous;
-        }
-        let range = ParameterRange::new(0.0, 1.0)?;
-        let mut direction = Vec2::new(0.0, 0.0);
-        direction[other_axis] = endpoints[1][other_axis] - endpoints[0][other_axis];
-        let mut origin = endpoints[0];
-        origin[axis] = endpoints[1][axis];
-        let forward: Curve2 = Line2::new(origin, direction)?.into();
-        origin[axis] = endpoints[0][axis];
-        let reverse: Curve2 = Line2::new(origin, direction)?.into();
-        let curve = surface.boundary_curve(forward.clone(), range, tolerance)?;
-        let relocated = self.mekr_unchecked(
-            outgoing[0],
-            outgoing[1],
-            curve,
-            range,
-            forward,
-            reverse,
-            range,
-        )?;
-        let name = self.working.edge(relocated.edge)?.name;
-        self.history
-            .changed(seam.name, ChangeKind::Modified, [name]);
-        for vertex in seam.vertices {
-            self.unify_edge_vertex(vertex)?;
-        }
-        Ok(true)
+            .point;
+        self.relocate_periodic_seam(
+            seam_id,
+            face,
+            target,
+            SeamPlacement::AllowBoundarySplits,
+            [
+                kind.role(BlendRole::PeriodicSplitVertex),
+                kind.role(BlendRole::PeriodicSplitEdge),
+                kind.role(BlendRole::PeriodicSplitUse),
+            ],
+        )
     }
 }

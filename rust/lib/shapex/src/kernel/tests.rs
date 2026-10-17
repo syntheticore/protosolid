@@ -117,7 +117,7 @@ fn shell_support_extension_preserves_rational_surface_chart() {
     }
 }
 
-fn cut_shell_after_lower_corner_fillets() -> super::Compound {
+fn cut_shell_before_lower_corner_fillets() -> super::Compound {
     let tolerance = ModelTolerance::default();
     let plane = Plane3::new(Point3::origin(), Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
     let body = Profile::new(
@@ -164,7 +164,12 @@ fn cut_shell_after_lower_corner_fillets() -> super::Compound {
         Plane3::new(Point3::origin(), Vec3::unit_x(), Vec3::unit_z(), tolerance).unwrap(),
         &body, &limit, 0.0, 0.0,
     ).unwrap();
-    let body = body.difference(&tool).unwrap();
+    body.difference(&tool).unwrap()
+}
+
+fn cut_shell_after_lower_corner_fillets() -> super::Compound {
+    let body = cut_shell_before_lower_corner_fillets();
+    let tolerance = ModelTolerance::default();
     let corners = body.edges().filter(|edge| {
         matches!(edge.curve(), Curve3::Line(_))
             && edge.endpoints().unwrap().iter().all(|point| point.y.abs() < tolerance.linear)
@@ -173,23 +178,45 @@ fn cut_shell_after_lower_corner_fillets() -> super::Compound {
     body.fillet(&corners, 6.0).unwrap()
 }
 
-#[test]
-fn fillet_upper_cut_shell_rim_after_lower_corner_fillets() {
-    let body = cut_shell_after_lower_corner_fillets();
-    let edges = body.edges().filter(|edge| {
+fn upper_cut_shell_rims(body: &super::Compound) -> Vec<super::EdgeHandle> {
+    body.edges().filter(|edge| {
         let points = edge.endpoints().unwrap();
         points.iter().all(|point| (point.y - 39.0).abs() < 1e-7)
             && edge.connected_faces().unwrap().iter().any(|face| {
                 matches!(face.surface(), Surface3::Torus(torus) if torus.minor_radius() > 17.0)
             })
-    }).cloned().collect::<Vec<_>>();
-    assert_eq!(edges.len(), 3);
+    }).cloned().collect()
+}
+
+#[test]
+fn boolean_cut_keeps_whole_periodic_shell_rims() {
+    let body = cut_shell_before_lower_corner_fillets();
+    let edges = upper_cut_shell_rims(&body);
+    assert_eq!(edges.len(), 2, "Boolean publication must normalize the rims without a later blend");
+    for edge in edges {
+        let ends = edge.endpoints().unwrap();
+        assert!(ends[0].x * ends[1].x < 0.0, "a rim must span both sides of the hidden seam");
+    }
+}
+
+#[test]
+fn fillet_upper_cut_shell_rim_after_lower_corner_fillets() {
+    let body = cut_shell_after_lower_corner_fillets();
+    let edges = upper_cut_shell_rims(&body);
+    assert_eq!(edges.len(), 2, "each upper rim must be one edge across the hidden chart seam");
+    let mut result_counts = Vec::new();
     for edge in edges {
         let result = body.fillet(&[edge], 1.0).unwrap();
+        result_counts.push((result.faces().count(), result.edges().count()));
+        let remaining = upper_cut_shell_rims(&result);
+        assert_eq!(remaining.len(), 1, "the unselected rim must remain a whole edge");
+        let ends = remaining[0].endpoints().unwrap();
+        assert!(ends[0].x * ends[1].x < 0.0);
         assert_eq!(result.solids().len(), 1);
         assert!(result.volume() < body.volume());
         result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
     }
+    assert_eq!(result_counts[0], result_counts[1], "the fillet must not inherit a chart-seam subdivision");
 }
 
 #[test]

@@ -220,17 +220,21 @@ impl EulerTransaction<'_> {
         kind: EdgeBlendKind,
         chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<()> {
+        let input_names = selected
+            .iter()
+            .map(|edge| self.working.edge(*edge).map(|edge| edge.name))
+            .collect::<KernelResult<Vec<_>>>()?;
+        self.relocate_blend_endpoint_seams(&selected, kind)?;
+        let (rebound, settings) = self.rebind_blend_selection(&input_names, chamfer)?;
+        selected = rebound;
+        let chamfer = settings.as_ref();
+        let input_chamfer = chamfer;
         let input_state = (
             self.working.clone(),
             self.history.clone(),
             self.names.clone(),
             self.touched_bodies.clone(),
         );
-        let input_names = selected
-            .iter()
-            .map(|edge| self.working.edge(*edge).map(|edge| edge.name))
-            .collect::<KernelResult<Vec<_>>>()?;
-        let input_chamfer = chamfer;
         // General rolling supports must share one chart before their temporary
         // arcs are built, otherwise structurally different guides prevent KEF.
         let mut closed_spines = Vec::new();
@@ -3510,8 +3514,17 @@ impl EulerTransaction<'_> {
             .flatten()
             .fold(f64::NEG_INFINITY, f64::max);
         let center_domain = spine.center.curve.domain();
-        let blend_support_range = match center_domain.bounds {
-            _ if center_domain.period.is_some() => {
+        // A periodic support belongs to the whole circle, independently of
+        // temporary spine trims. Keep one chart for adjacent blend patches.
+        let periodic_range = center_domain.period
+            .map(|period| ParameterRange::new(0.0, period).unwrap())
+            .filter(|range| {
+                spine.center.first_pcurve.domain().contains_range(*range, tolerance.parameter)
+                    && spine.center.second_pcurve.domain().contains_range(*range, tolerance.parameter)
+            });
+        let blend_support_range = match (periodic_range, center_domain.bounds) {
+            (Some(range), _) => range,
+            (None, _) if center_domain.period.is_some() => {
                 let range = ParameterRange::new(minimum, maximum).map_err(|_| {
                     KernelError::new(
                         DiagnosticKind::GeometryInvariant,
@@ -3533,7 +3546,7 @@ impl EulerTransaction<'_> {
                 let padding = spine.offset / speed;
                 ParameterRange::new(range.start - padding, range.end + padding)?
             }
-            DomainBounds::Bounded(range) => range,
+            (None, DomainBounds::Bounded(range)) => range,
             _ => {
                 let span = (maximum - minimum).abs().max(1.0);
                 ParameterRange::new(minimum - span, maximum + span)?
@@ -3568,7 +3581,7 @@ impl EulerTransaction<'_> {
                 let blend_pcurve = blend_parameterization.contact_pcurve(parent_index)?;
                 // Temporary arcs trim one shared rail. Do not bake each arc's
                 // trim into a different bounded SurfaceCurve support.
-                let support_range = if spine.shared_seam.is_some() {
+                let support_range = if spine.shared_seam.is_some() || periodic_range.is_some() {
                     blend_support_range
                 } else {
                     range
@@ -4971,13 +4984,13 @@ impl EulerTransaction<'_> {
                 }
             }
         }
-        // Removing construction face joins exposes their degree-two rail
-        // vertices. Consume those subdivisions in the same transaction.
-        self.unify_same_domain_edges()?;
         for face in modified_faces {
             let name = self.working.face(face)?.name;
             self.history.changed(name, ChangeKind::Modified, [name]);
         }
+        // Removing construction face joins exposes their degree-two rail
+        // vertices. Consume those subdivisions in the same transaction.
+        self.unify_same_domain()?;
         let body = self.working.shell(shell)?.body;
         if !self.touched_bodies.contains(&body) {
             self.touched_bodies.push(body);

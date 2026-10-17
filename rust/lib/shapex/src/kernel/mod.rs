@@ -23,6 +23,7 @@ mod mass_properties;
 mod modeling;
 mod naming;
 mod physical;
+mod periodic;
 mod polyhedron;
 mod profile;
 mod sweep;

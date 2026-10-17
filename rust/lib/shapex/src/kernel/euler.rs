@@ -343,7 +343,7 @@ struct CoedgeMerge {
 
 /// Retain an exact curve and extend its trim across a compatible subdivision.
 /// Non-analytic curves currently require identical supports and join parameters.
-fn same_domain_edge_range(
+pub(super) fn same_domain_edge_range(
     first: &Edge,
     second: &Edge,
     vertex: VertexId,
@@ -1476,6 +1476,7 @@ impl<'kernel> EulerTransaction<'kernel> {
                 if matches!(
                     self.working.face(face)?.surface,
                     Surface3::Cylinder(_) | Surface3::Torus(_)
+                        | Surface3::RollingBall(_) | Surface3::Ruled(_)
                 ) {
                     candidates.push(id);
                 }
@@ -5706,6 +5707,7 @@ impl<'kernel> EulerTransaction<'kernel> {
     }
 
     pub(crate) fn finish(mut self) -> KernelResult<CommittedOperation> {
+        self.normalize_periodic_edge_subdivisions()?;
         super::validation::validate_structure(
             &self.working,
             self.kernel.tolerance,

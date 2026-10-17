@@ -3180,6 +3180,109 @@ fn face_offset_adjusts_a_fillet_between_planar_supports() {
 }
 
 #[test]
+fn replace_face_contact_supports_boolean_operations() {
+    let tolerance = ModelTolerance::default();
+    let spline = |height: f64| TrimmedCurve2::new(
+        NurbsCurve2::new(3, vec![
+            Point2::new(-5.0, 3.0 + height), Point2::new(-2.0, 6.0 + height),
+            Point2::new(2.0, 1.0 + height), Point2::new(5.0, 4.0 + height),
+        ], vec![1.0; 4], vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap(),
+        ParameterRange::new(0.0, 1.0).unwrap(),
+    ).unwrap();
+    let upper = Profile::new(Wire2::new([
+        spline(0.0),
+        TrimmedCurve2::line(Point2::new(5.0, 4.0), Point2::new(5.0, 6.0)).unwrap(),
+        spline(2.0).reversed(),
+        TrimmedCurve2::line(Point2::new(-5.0, 5.0), Point2::new(-5.0, 3.0)).unwrap(),
+    ], tolerance).unwrap(), [], tolerance).unwrap().extrude(
+        Plane3::new(Point3::new(0.0, 0.0, -2.0), Vec3::unit_x(), Vec3::unit_y(), tolerance).unwrap(),
+        Vec3::unit_z() * 4.0,
+    ).unwrap();
+    let underside = upper.faces().filter(|face| matches!(face.surface(), Surface3::Nurbs(_)))
+        .min_by(|a, b| a.centroid().unwrap().y.total_cmp(&b.centroid().unwrap().y)).unwrap().clone();
+    let Surface3::Nurbs(spline) = underside.surface() else { unreachable!() };
+    let continuation = Surface3::Nurbs(spline.extended_bezier([0.5, 0.5]).unwrap());
+    let outside = continuation.evaluate(1.2, 0.5).unwrap().point;
+    let classifier = super::brep_classification::BrepClassifier::for_compound(&upper).unwrap();
+    assert!(!classifier.covers_on_support(&continuation, outside).unwrap());
+    assert_eq!(classifier.sides_on_support(&continuation, outside,
+        continuation.normal(1.2, 0.5).unwrap()).unwrap(), (false, false));
+    for width in [2.0, 3.0] {
+        let lower = owned_cuboid(Point3::new(-width, -4.0, -1.0), Point3::new(width, 0.0, 1.0));
+        let top = lower.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+            if plane.normal().y.abs() > 0.9 && plane.origin().y.abs() < tolerance.linear)).unwrap().clone();
+        check_replace_face_boolean_contact(&upper, &lower, &top, &underside);
+    }
+}
+
+fn check_replace_face_boolean_contact(
+    upper: &super::Compound, lower: &super::Compound,
+    top: &super::FaceHandle, underside: &super::FaceHandle,
+) {
+    let bodies = upper.combined(&[lower.clone()]).unwrap();
+    let replaced = bodies.replace_face(top, underside).unwrap();
+    assert_eq!(replaced.solids().len(), 2);
+    let lower_result = replaced.solids().find(|solid| solid.persistent_id() != upper.solids().next().unwrap().persistent_id())
+        .unwrap().to_compound();
+    assert!((lower_result.volume() - lower.volume()).abs() > 1.0e-3);
+    let motion = RigidTransform3::new(
+        Matrix3::from_angle_z(cgmath::Rad(0.37)) * Matrix3::from_angle_y(cgmath::Rad(-0.21)),
+        Vec3::new(3.0, -7.0, 2.0), ModelTolerance::default(),
+    ).unwrap();
+    for (upper, lower) in [(upper.clone(), lower_result.clone()),
+        (upper.transformed(motion).unwrap(), lower_result.transformed(motion).unwrap())] {
+        for (first, second) in [(&upper, &lower), (&lower, &upper)] {
+            // Different exact trim partitions use independent surface quadrature.
+            let volume_tolerance = (first.volume() + second.volume()) * 1.0e-5;
+            let joined = first.union(second).unwrap_or_else(|e| panic!("join (first volume {}): {e}", first.volume()));
+            assert_eq!(joined.solids().len(), 1);
+            assert!((joined.volume() - first.volume() - second.volume()).abs() < volume_tolerance,
+                "join volume {} != {} + {}", joined.volume(), first.volume(), second.volume());
+            joined.tessellate(TessellationOptions::new(0.02, 0.1, 24).unwrap()).unwrap();
+            let difference = first.difference(second).unwrap();
+            assert_eq!(difference.solids().len(), 1);
+            assert!((difference.volume() - first.volume()).abs() < volume_tolerance,
+                "difference volume {} != {}", difference.volume(), first.volume());
+            assert_eq!(first.intersection(second).unwrap().solids().len(), 0);
+        }
+    }
+}
+
+#[test]
+fn replace_face_analytic_contact_supports_boolean_operations() {
+    let tolerance = ModelTolerance::default();
+    let upper = owned_cuboid(Point3::new(-2.0, -1.0, -2.0), Point3::new(2.0, 1.0, 2.0));
+    let underside = upper.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+        if plane.normal().y.abs() > 0.9 && (plane.origin().y + 1.0).abs() < tolerance.linear)).unwrap().clone();
+    let lower = owned_cuboid(Point3::new(-0.6, -5.0, -0.5), Point3::new(0.6, -3.0, 0.5));
+    let top = lower.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+        if plane.normal().y.abs() > 0.9 && (plane.origin().y + 3.0).abs() < tolerance.linear)).unwrap().clone();
+    check_replace_face_boolean_contact(&upper, &lower, &top, &underside);
+    for kind in ["cylinder", "sphere", "cone", "torus"] {
+        let mut kernel = Kernel::new(tolerance).unwrap();
+        let mut transaction = kernel.begin_operation();
+        match kind {
+            "cylinder" => transaction.cylinder(Point3::new(-3.0, 0.0, 0.0),
+                Vec3::unit_y() * 2.0, Vec3::unit_z() * 2.0, Vec3::unit_x() * 6.0),
+            "sphere" => transaction.sphere(Point3::new(0.0, 0.0, 0.0),
+                Vec3::unit_x() * 2.0, Vec3::unit_y() * 2.0, Vec3::unit_z() * 2.0),
+            "cone" => transaction.cone(Point3::new(-4.0, 0.0, 0.0), Vec3::unit_x() * 8.0,
+                Vec3::unit_y() * 4.0, Vec3::unit_z() * 4.0),
+            "torus" => transaction.torus(Point3::new(0.0, 0.0, -4.0),
+                Vec3::unit_x() * 4.0, Vec3::unit_z() * 4.0, 2.0),
+            _ => unreachable!(),
+        }.unwrap();
+        let committed = transaction.finish().unwrap();
+        let upper = super::Compound::from_operation(kernel, committed, []).unwrap();
+        let underside = upper.faces().find(|face| !matches!(face.surface(), Surface3::Plane(_))).unwrap().clone();
+        let lower = owned_cuboid(Point3::new(-0.6, -5.0, -0.5), Point3::new(0.6, -3.0, 0.5));
+        let top = lower.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+            if plane.normal().y.abs() > 0.9 && (plane.origin().y + 3.0).abs() < tolerance.linear)).unwrap().clone();
+        check_replace_face_boolean_contact(&upper, &lower, &top, &underside);
+    }
+}
+
+#[test]
 fn move_faces_retrims_planar_neighbors_and_preserves_history() {
     let tolerance = ModelTolerance::default();
     let body = owned_cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 5.0));

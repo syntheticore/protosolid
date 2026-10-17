@@ -2,6 +2,69 @@ use super::*;
 use super::super::{IntersectionKind, IntersectionSet};
 
 #[test]
+fn spline_support_coincidence_uses_rational_polynomials_across_knots_and_degrees() {
+    let tolerance = ModelTolerance::default();
+    let surface = NurbsSurface3::new((2, 1), vec![
+        vec![Point3::new(-3.0, 0.0, 0.0), Point3::new(0.0, 2.0, 1.0), Point3::new(4.0, 0.0, 2.0)],
+        vec![Point3::new(-3.0, 0.0, 3.0), Point3::new(0.0, 2.0, 4.0), Point3::new(4.0, 0.0, 5.0)],
+    ], vec![vec![1.0, 0.8, 1.2]; 2], (
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0],
+    )).unwrap();
+    let extended = surface.extended_bezier([0.2, 0.3]).unwrap();
+
+    // Multiplying the homogeneous polynomial by a positive linear factor
+    // changes its degree and rational weights without changing any point.
+    let multiply = |controls: &[Vec4]| {
+        let degree = controls.len();
+        (0..=degree).map(|index| {
+            let t = index as f64 / degree as f64;
+            let mut point = Vec4::new(0.0, 0.0, 0.0, 0.0);
+            if index < degree { point += controls[index] * (1.0 - t); }
+            if index > 0 { point += controls[index - 1] * (2.0 * t); }
+            point
+        }).collect::<Vec<_>>()
+    };
+    let mut net = surface.homogeneous_rows().iter().map(|row| multiply(row)).collect::<Vec<_>>();
+    let columns = (0..net[0].len()).map(|column| {
+        multiply(&net.iter().map(|row| row[column]).collect::<Vec<_>>())
+    }).collect::<Vec<_>>();
+    net = (0..columns[0].len()).map(|row| columns.iter().map(|column| column[row]).collect()).collect();
+    let mut u_knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    for row in &mut net {
+        let mut knots = u_knots.clone();
+        insert_homogeneous_knot4(3, 0.4, &mut knots, row).unwrap();
+    }
+    u_knots.insert(4, 0.4);
+    let mut v_knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let columns = (0..net[0].len()).map(|column| {
+        let mut controls = net.iter().map(|row| row[column]).collect::<Vec<_>>();
+        let mut knots = v_knots.clone();
+        insert_homogeneous_knot4(2, 0.6, &mut knots, &mut controls).unwrap();
+        controls
+    }).collect::<Vec<_>>();
+    net = (0..columns[0].len()).map(|row| columns.iter().map(|column| column[row]).collect()).collect();
+    v_knots.insert(3, 0.6);
+    let refined = NurbsSurface3::new((3, 2), net.iter().map(|row| row.iter().map(|p| {
+        Point3::new(p.x / p.w, p.y / p.w, p.z / p.w)
+    }).collect()).collect(), net.iter().map(|row| row.iter().map(|p| p.w).collect()).collect(),
+        (u_knots, v_knots)).unwrap();
+    for other in [&extended, &refined] {
+        assert!(surface.coincident_support(other, tolerance).unwrap());
+        assert!(other.coincident_support(&surface, tolerance).unwrap());
+        let a = Surface3::Nurbs(surface.clone());
+        let b = Surface3::Nurbs(other.clone());
+        assert!(matches!(a.intersect_surface(&b, tolerance).unwrap(), IntersectionSet::Coincident));
+        assert!(super::super::trim::coincident_supports(&a, &b, tolerance).unwrap());
+    }
+    assert!(extended.coincident_support(&refined, tolerance).unwrap());
+    let mut controls = refined.control_points().to_vec();
+    controls[1][1].z += 0.001;
+    let different = NurbsSurface3::new(refined.degrees(), controls, refined.weights().to_vec(),
+        (refined.knots().0.to_vec(), refined.knots().1.to_vec())).unwrap();
+    assert!(!surface.coincident_support(&different, tolerance).unwrap());
+}
+
+#[test]
 fn joins_independent_intersection_charts_with_reversed_parameters_and_supports() {
     let tol = ModelTolerance::default();
     let xy: Surface3 = Plane3::xy().into();

@@ -89,11 +89,16 @@ impl<'a> BrepClassifier<'a> {
         for face in &self.faces {
             let value = self.topology.face(face.id)?;
             let surface = value.surface();
-            if surface != support && !surface.intersect_surface(support, self.tolerance)
-                .is_ok_and(|set| matches!(set, IntersectionSet::Coincident)) {
+            if !coincident_supports(surface, support, self.tolerance)? {
                 continue;
             }
             let projection = surface.project(point, self.tolerance)?;
+            // Equivalent supports can have different bounded spline domains.
+            // A closest point clamped to one domain's edge does not cover a
+            // point on the other's continuation.
+            if projection.distance > self.tolerance.linear_at_scale(point.to_vec().magnitude()) {
+                continue;
+            }
             if !self.in_trim(face, projection.parameters)? { continue; }
             let sign = if value.orientation() == FaceOrientation::Forward { 1.0 } else { -1.0 };
             let forward = surface.normal(projection.parameters.0, projection.parameters.1)?.dot(normal) * sign > 0.0;
@@ -112,6 +117,9 @@ impl<'a> BrepClassifier<'a> {
             let surface = self.topology.face(face.id)?.surface();
             if coincident_supports(support, surface, self.tolerance)? {
                 let projection = surface.project(point, self.tolerance)?;
+                if projection.distance > self.tolerance.linear_at_scale(point.to_vec().magnitude()) {
+                    continue;
+                }
                 if self.in_trim(face, projection.parameters)? { return Ok(true); }
             }
         }

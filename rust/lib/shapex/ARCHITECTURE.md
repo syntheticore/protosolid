@@ -76,6 +76,12 @@ is never reported as an empty intersection. General NURBS subdivision and interv
 certification remain deliberately outside the supported set until they can provide
 the same completeness guarantee.
 
+Spline supports sharing a parameter map are certified coincident in common boxes
+using Bernstein coefficients of the homogeneous cross-products. This recognizes exact
+continuations, different knot subdivisions, degrees, and rational weights without
+relying on point samples. Shared-support Boolean arrangements retain chart cells
+at singular boundaries, including poles, and publish each overlapping region once.
+
 Faces, edges, solids, and compounds all implement entity-level tessellation.
 Surface tessellation begins from one shared adaptive polyline per topological edge,
 then performs conforming, local refinement in face parameter space. Exact boundary

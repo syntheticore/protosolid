@@ -1570,10 +1570,10 @@ impl Compound {
         target: &FaceHandle,
         replacement: &FaceHandle,
     ) -> KernelResult<Self> {
-        if !self.faces().any(|face| face == target) {
-            return Err(KernelError::new(DiagnosticKind::InvalidInput,
-                "replacement target face does not belong to this compound revision"));
-        }
+        let target = self.faces().find(|face| *face == target).ok_or_else(|| {
+            KernelError::new(DiagnosticKind::InvalidInput,
+                "replacement target face does not belong to this compound revision")
+        })?;
         if self.solids.len() > 1 {
             let mut results = Vec::new();
             for solid in &self.solids {

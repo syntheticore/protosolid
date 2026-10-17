@@ -233,9 +233,18 @@ pub(super) fn face_boundary_curves(
             if let Some(previous) = previous {
                 let start = pcurve.evaluate(coedge.range().start)?.point;
                 let delta = previous - start;
+                let rates = if domains.iter().any(|domain| domain.period.is_some()) {
+                    let (_, du, dv) = surface.first_order(previous.x, previous.y)?;
+                    [du.magnitude(), dv.magnitude()]
+                } else { [f64::INFINITY; 2] };
+                // At a pole the angular coordinate is unconstrained. Keep
+                // each incident meridian's own chart rather than rounding a
+                // half-turn bridge onto the opposite side of the face.
+                let shift = |axis: usize| domains[axis].period
+                    .filter(|_| rates[axis] > tolerance.linear)
+                    .map_or(0.0, |period| (delta[axis] / period).round() * period);
                 let offset = Vec2::new(
-                    domains[0].period.map_or(0.0, |p| (delta.x / p).round() * p),
-                    domains[1].period.map_or(0.0, |p| (delta.y / p).round() * p),
+                    shift(0), shift(1),
                 );
                 if offset.magnitude2() > tolerance.parameter.powi(2) {
                     pcurve = translate_pcurve(&pcurve, offset, tolerance)?;
@@ -776,6 +785,7 @@ pub(super) fn coincident_supports(
         return Ok(true);
     }
     match (first, second) {
+        (Surface3::Nurbs(first), Surface3::Nurbs(second)) => first.coincident_support(second, tolerance),
         (Surface3::Torus(_), Surface3::Torus(_)) => Ok(matches!(
             first.intersect_surface(second, tolerance),
             Ok(IntersectionSet::Coincident)

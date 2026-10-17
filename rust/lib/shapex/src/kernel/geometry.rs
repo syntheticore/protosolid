@@ -3237,6 +3237,75 @@ pub(crate) struct BezierSurfacePatch {
     pub(crate) controls: Vec<Vec<Vec4>>,
 }
 
+fn bezier_controls_on_interval(controls: &[Vec4], a: f64, b: f64) -> Vec<Vec4> {
+    let degree = controls.len() - 1;
+    (0..=degree).map(|index| {
+        let mut work = controls.to_vec();
+        for step in 0..degree {
+            let t = if step < degree - index { a } else { b };
+            for j in 0..degree - step {
+                work[j] = work[j] * (1.0 - t) + work[j + 1] * t;
+            }
+        }
+        work[0]
+    }).collect()
+}
+
+impl BezierSurfacePatch {
+    pub(crate) fn controls_in_bounds(&self, bounds: [ParameterRange; 2]) -> Vec<Vec<Vec4>> {
+        let a = (bounds[0].start - self.u_range.start) / self.u_range.span();
+        let b = (bounds[0].end - self.u_range.start) / self.u_range.span();
+        let mut net = self.controls.iter()
+            .map(|row| bezier_controls_on_interval(row, a, b)).collect::<Vec<_>>();
+        let a = (bounds[1].start - self.v_range.start) / self.v_range.span();
+        let b = (bounds[1].end - self.v_range.start) / self.v_range.span();
+        for column in 0..net[0].len() {
+            let controls = net.iter().map(|row| row[column]).collect::<Vec<_>>();
+            for (row, value) in bezier_controls_on_interval(&controls, a, b).into_iter().enumerate() {
+                net[row][column] = value;
+            }
+        }
+        net
+    }
+
+    fn coincident_in_bounds(&self, other: &Self, bounds: [ParameterRange; 2], tolerance: ModelTolerance) -> bool {
+        let first = self.controls_in_bounds(bounds);
+        let second = other.controls_in_bounds(bounds);
+        let degrees = |net: &[Vec<Vec4>]| (net[0].len() - 1, net.len() - 1);
+        let (p, q) = degrees(&first);
+        let (r, s) = degrees(&second);
+        let binomial = |degree: usize, index: usize| {
+            (0..index.min(degree - index)).fold(1.0, |value, i| value * (degree - i) as f64 / (i + 1) as f64)
+        };
+        let factors = |a: usize, b: usize| (0..=a).map(|i| (0..=b).map(|j| {
+            binomial(a, i) * binomial(b, j) / binomial(a + b, i + j)
+        }).collect::<Vec<_>>()).collect::<Vec<_>>();
+        let u_factors = factors(p, r);
+        let v_factors = factors(q, s);
+        let mut residual = vec![vec![Vec3::new(0.0, 0.0, 0.0); p + r + 1]; q + s + 1];
+        let mut denominator = vec![vec![0.0; p + r + 1]; q + s + 1];
+        for (v, row) in first.iter().enumerate() {
+            for (u, a) in row.iter().enumerate() {
+                for (w, row) in second.iter().enumerate() {
+                    for (t, b) in row.iter().enumerate() {
+                        let factor = u_factors[u][t] * v_factors[v][w];
+                        residual[v + w][u + t] += (a.truncate() * b.w - b.truncate() * a.w) * factor;
+                        denominator[v + w][u + t] += a.w * b.w * factor;
+                    }
+                }
+            }
+        }
+        let scale = first.iter().flatten().chain(second.iter().flatten())
+            .map(|point| (point.truncate() / point.w).magnitude()).fold(1.0_f64, f64::max);
+        let linear = tolerance.linear_at_scale(scale);
+        // Bernstein weights form a positive partition of unity. Bounding each
+        // coefficient of A.xyz * B.w - B.xyz * A.w by its denominator therefore
+        // bounds the distance everywhere in this patch, without point sampling.
+        residual.iter().flatten().zip(denominator.iter().flatten())
+            .all(|(error, weight)| *weight > 0.0 && error.magnitude() <= linear * weight)
+    }
+}
+
 impl NurbsSurface3 {
     pub fn new(
         degrees: (usize, usize),
@@ -3383,6 +3452,30 @@ impl NurbsSurface3 {
             .collect()
     }
 
+    /// Compare the complete rational control nets in a common parameter box.
+    /// Continuation changes knots and controls, but retains this polynomial
+    /// identity. Point samples alone cannot certify coincident spline supports.
+    pub(crate) fn coincident_support(&self, other: &Self, tolerance: ModelTolerance) -> KernelResult<bool> {
+        let first = self.bezier_patches()?;
+        let second = other.bezier_patches()?;
+        let mut overlap = false;
+        for a in &first {
+            for b in &second {
+                let start = [a.u_range.start.max(b.u_range.start), a.v_range.start.max(b.v_range.start)];
+                let end = [a.u_range.end.min(b.u_range.end), a.v_range.end.min(b.v_range.end)];
+                if (0..2).any(|axis| end[axis] - start[axis] <= tolerance.parameter) {
+                    continue;
+                }
+                overlap = true;
+                let bounds = [ParameterRange::new(start[0], end[0])?, ParameterRange::new(start[1], end[1])?];
+                if !a.coincident_in_bounds(b, bounds, tolerance) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(overlap)
+    }
+
     /// Continue a single rational Bezier patch without changing its parameter
     /// chart or its values on the original domain. Shell openings can require
     /// an intersection just beyond a spline's original endpoint.
@@ -3409,21 +3502,9 @@ impl NurbsSurface3 {
             if padding[axis] == 0.0 {
                 return controls.to_vec();
             }
-            let degree = controls.len() - 1;
             let a = -padding[axis] / ranges[axis].span();
             let b = 1.0 - a;
-            (0..=degree)
-                .map(|index| {
-                    let mut work = controls.to_vec();
-                    for step in 0..degree {
-                        let t = if step < degree - index { a } else { b };
-                        for j in 0..degree - step {
-                            work[j] = work[j] * (1.0 - t) + work[j + 1] * t;
-                        }
-                    }
-                    work[0]
-                })
-                .collect()
+            bezier_controls_on_interval(controls, a, b)
         };
         let mut net = self
             .homogeneous_rows()

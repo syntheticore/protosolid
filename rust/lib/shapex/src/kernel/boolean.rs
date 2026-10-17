@@ -245,10 +245,7 @@ pub(crate) fn boolean_brep_with_face_boundaries(
     let imprinted_curves = face_curves.clone();
     for (first_index, first_face) in first_faces.iter().enumerate() {
         for (second_index, second_face) in second_faces.iter().enumerate() {
-            let coincident = first_face
-                .surface()
-                .intersect_surface(second_face.surface(), tolerance)
-                .is_ok_and(|intersection| matches!(intersection, IntersectionSet::Coincident));
+            let coincident = coincident_supports(first_face.surface(), second_face.surface(), tolerance)?;
             if !coincident {
                 continue;
             }
@@ -313,57 +310,86 @@ pub(crate) fn boolean_brep_with_face_boundaries(
         };
         for (index, face) in faces.iter().enumerate() {
             let mut original = original_curves[&(operand, index)].clone();
-            let has_coincident_support = opposite_faces.iter().any(|opposite| {
-                face.surface()
-                    .intersect_surface(opposite.surface(), tolerance)
-                    .is_ok_and(|intersection| matches!(intersection, IntersectionSet::Coincident))
-            });
-            // Both operands' complete trim graphs were overlaid above.  Emit
-            // the shared-support arrangement once, using the first operand as
-            // the canonical parameterization, instead of publishing duplicate
-            // coplanar faces from both source shells.
-            if operand == 1 && has_coincident_support {
-                continue;
+            let mut has_coincident_support = false;
+            for opposite in opposite_faces {
+                has_coincident_support |= coincident_supports(face.surface(), opposite.surface(), tolerance)?;
+            }
+            // Prefer an existing complete periodic band over a small contact
+            // patch whose arbitrary chart cut can split that band. Retain the
+            // first operand's chart when it already covers a full period.
+            let mut shared_owner = None;
+            if has_coincident_support {
+                let mut chart_bounds = [[
+                    Point2::new(f64::INFINITY, f64::INFINITY),
+                    Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+                ]; 2];
+                let mut singular = false;
+                for (side, candidates) in [&first_faces, &second_faces].into_iter().enumerate() {
+                    for (candidate_index, candidate) in candidates.iter().enumerate() {
+                        if coincident_supports(face.surface(), candidate.surface(), tolerance)? {
+                            let bounds = face_parameter_bounds(&original_curves[&(side, candidate_index)], tolerance)?;
+                            for axis in 0..2 {
+                                chart_bounds[side][0][axis] = chart_bounds[side][0][axis].min(bounds[axis].start);
+                                chart_bounds[side][1][axis] = chart_bounds[side][1][axis].max(bounds[axis].end);
+                            }
+                            for curve in &original_curves[&(side, candidate_index)] {
+                                for parameter in [curve.range.start, curve.range.end] {
+                                    let uv = curve.pcurve.evaluate(parameter)?.point;
+                                    let (_, du, dv) = candidate.surface().first_order(uv.x, uv.y)?;
+                                    singular |= du.cross(dv).magnitude() <= tolerance.linear * du.magnitude().max(dv.magnitude());
+                                }
+                            }
+                        }
+                    }
+                }
+                let full_band = |side: usize| face.surface().domains().iter().enumerate().any(|(axis, domain)| {
+                    domain.period.is_some_and(|period| chart_bounds[side][1][axis] - chart_bounds[side][0][axis]
+                        >= period - tolerance.parameter * 64.0)
+                });
+                let canonical = usize::from(!preserve_first_faces && !full_band(0) && full_band(1));
+                if singular && !preserve_first_faces {
+                    shared_owner = Some(canonical);
+                } else if operand != canonical {
+                    continue;
+                }
             }
             let mut combined_curves = Vec::new();
-            if has_coincident_support {
+            if has_coincident_support && shared_owner.is_none() {
                 // A shell can have several disjoint faces on this support.
                 // Arrange their combined boundaries once, or each face can
                 // independently publish the opposite operand's end cap.
-                let same_support = |other: &super::FaceHandle| {
-                    face.surface()
-                        .intersect_surface(other.surface(), tolerance)
-                        .is_ok_and(|set| matches!(set, IntersectionSet::Coincident))
-                };
-                if faces[..index].iter().any(same_support) {
-                    continue;
-                }
+                let mut matching = Vec::new();
                 for (other_index, other) in faces.iter().enumerate() {
-                    if same_support(other) {
-                        for (curve_index, curve) in face_curves[&(operand, other_index)].iter().enumerate() {
-                            let mut curve = curve.clone();
-                            if other.surface() != face.surface() {
-                                curve.pcurve = super::SurfaceProjectionPcurve2::new(
-                                    curve.curve.clone(),
-                                    face.surface().clone(),
-                                    curve.pcurve.clone(),
-                                    curve.range,
-                                    tolerance,
-                                )?
-                                .into();
-                                curve.pcurve = align_pcurve_to_face_chart(
-                                    &curve.pcurve,
-                                    Some(curve.range),
-                                    face.surface(),
-                                    &original,
-                                    tolerance,
-                                )?;
-                            }
-                            if other_index != index && curve_index < original_curves[&(operand, other_index)].len() {
-                                original.push(curve.clone());
-                            }
-                            combined_curves.push(curve);
+                    if coincident_supports(face.surface(), other.surface(), tolerance)? {
+                        matching.push(other_index);
+                    }
+                }
+                if matching[0] != index { continue; }
+                for other_index in matching {
+                    let other = &faces[other_index];
+                    for (curve_index, curve) in face_curves[&(operand, other_index)].iter().enumerate() {
+                        let mut curve = curve.clone();
+                        if other.surface() != face.surface() {
+                            curve.pcurve = super::SurfaceProjectionPcurve2::new(
+                                curve.curve.clone(),
+                                face.surface().clone(),
+                                curve.pcurve.clone(),
+                                curve.range,
+                                tolerance,
+                            )?
+                            .into();
+                            curve.pcurve = align_pcurve_to_face_chart(
+                                &curve.pcurve,
+                                Some(curve.range),
+                                face.surface(),
+                                &original,
+                                tolerance,
+                            )?;
                         }
+                        if other_index != index && curve_index < original_curves[&(operand, other_index)].len() {
+                            original.push(curve.clone());
+                        }
+                        combined_curves.push(curve);
                     }
                 }
             }
@@ -387,6 +413,7 @@ pub(crate) fn boolean_brep_with_face_boundaries(
                         boundary,
                         boundary,
                         true,
+                        None,
                         false,
                         classifiers,
                         kind,
@@ -400,12 +427,13 @@ pub(crate) fn boolean_brep_with_face_boundaries(
                 face.surface(),
                 compound.topology().face(face.topology_id())?.orientation(),
                 &original,
-                if has_coincident_support {
+                if has_coincident_support && shared_owner.is_none() {
                     &combined_curves
                 } else {
                     &face_curves[&(operand, index)]
                 },
                 has_coincident_support,
+                shared_owner,
                 exclude_existing_faces,
                 classifiers,
                 kind,
@@ -774,6 +802,7 @@ fn arrange_face(
     original_boundary: &[FaceCurve],
     curves: &[FaceCurve],
     has_coincident_support: bool,
+    shared_owner: Option<usize>,
     exclude_existing_faces: bool,
     classifiers: [&BrepClassifier<'_>; 2],
     kind: BooleanKind,
@@ -798,6 +827,17 @@ fn arrange_face(
         * 5.0e-2;
     let classify_orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
         let value = surface.evaluate(uv.x, uv.y)?;
+        if let Some(owner) = shared_owner {
+            // Arrange each source trim as one chart cell. This retains pole
+            // meridians and periodic cuts instead of collapsing an entire
+            // closed support into a singular one-face boundary. The other
+            // operand contributes only regions outside the owner's trims.
+            if !point_in_trim(uv, original_boundary)?
+                || (operand != owner && classifiers[owner].covers_on_support(surface, value.point)?)
+            {
+                return Ok(None);
+            }
+        }
         if exclude_existing_faces && classifiers[0].covers_on_support(surface, value.point)? {
             return Ok(None);
         }

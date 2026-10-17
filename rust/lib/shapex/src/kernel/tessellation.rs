@@ -145,6 +145,15 @@ fn sphere_tessellation_chart(
     let super::Surface3::Sphere(sphere) = surface else {
         return Ok(None);
     };
+    // A retained pole on the boundary already has explicit meridian charts.
+    // Reorienting such a cell can put a new pole inside it; keep its native
+    // chart and the collapsed boundary bridge instead.
+    if rings.iter().flatten().any(|vertex| {
+        (vertex.point - sphere.center()).dot(sphere.z_radius()).abs()
+            >= sphere.radius().powi(2) - tolerance.linear * sphere.radius()
+    }) {
+        return Ok(None);
+    }
     let directions = rings
         .iter()
         .flatten()
@@ -295,6 +304,15 @@ impl Kernel {
         let chart = sphere_tessellation_chart(face.surface(), &rings, self.tolerance())?;
         let tessellation_surface = chart.as_ref().unwrap_or_else(|| face.surface());
         for ring in &mut rings {
+            if chart.is_some() {
+                // The retained UVs belong to the BREP frame. Rebind them before
+                // unwrapping so a former pole is not mistaken for a pole of
+                // the independently oriented rendering chart.
+                for vertex in ring.iter_mut() {
+                    let uv = tessellation_surface.project(vertex.point, self.tolerance())?.parameters;
+                    vertex.uv = Point2::new(uv.0, uv.1);
+                }
+            }
             unwrap_periodic_ring(tessellation_surface, self.tolerance(), ring)?;
         }
         if rings.is_empty() || rings[0].len() < 3 {

@@ -766,6 +766,11 @@ impl Surface3 {
         if self == other {
             return Ok(IntersectionSet::Coincident);
         }
+        if let (Self::Nurbs(first), Self::Nurbs(second)) = (self, other) {
+            if first.coincident_support(second, tolerance)? {
+                return Ok(IntersectionSet::Coincident);
+            }
+        }
         match (self, other) {
             (Self::Torus(first), Self::Torus(second)) => {
                 let linear = tolerance.linear_at_scale(
@@ -1676,8 +1681,8 @@ fn trace_surface_intersections_in_domains(
         && matches!(second, Surface3::Nurbs(_) | Surface3::Offset(_))
     {
         let mut stack = Vec::new();
-        let second_cells = rational_surface_cells(second)?;
-        for first_cell in rational_surface_cells(first)? {
+        let second_cells = rational_surface_cells(second, second_domains)?;
+        for first_cell in rational_surface_cells(first, first_domains)? {
             for second_cell in &second_cells {
                 stack.push((first_cell.clone(), second_cell.clone(), 0_u8));
             }
@@ -2017,17 +2022,6 @@ struct RationalSurfaceCell {
     padding: f64,
 }
 
-impl From<super::geometry::BezierSurfacePatch> for RationalSurfaceCell {
-    fn from(value: super::geometry::BezierSurfacePatch) -> Self {
-        Self {
-            u_range: value.u_range,
-            v_range: value.v_range,
-            controls: value.controls,
-            padding: 0.0,
-        }
-    }
-}
-
 impl RationalSurfaceCell {
     fn euclidean(control: Vec4) -> KernelResult<Point3> {
         if control.w <= 0.0 || !control.w.is_finite() {
@@ -2179,15 +2173,24 @@ impl RationalSurfaceCell {
     }
 }
 
-fn rational_surface_cells(surface: &Surface3) -> KernelResult<Vec<RationalSurfaceCell>> {
+fn rational_surface_cells(surface: &Surface3, bounds: [super::ParameterRange; 2]) -> KernelResult<Vec<RationalSurfaceCell>> {
     match surface {
-        Surface3::Nurbs(surface) => Ok(surface
-            .bezier_patches()?
-            .into_iter()
-            .map(RationalSurfaceCell::from)
-            .collect()),
+        Surface3::Nurbs(surface) => {
+            let mut cells = Vec::new();
+            for patch in surface.bezier_patches()? {
+                let start = [patch.u_range.start.max(bounds[0].start), patch.v_range.start.max(bounds[1].start)];
+                let end = [patch.u_range.end.min(bounds[0].end), patch.v_range.end.min(bounds[1].end)];
+                if (0..2).any(|axis| start[axis] >= end[axis]) { continue; }
+                let bounds = [super::ParameterRange::new(start[0], end[0])?, super::ParameterRange::new(start[1], end[1])?];
+                cells.push(RationalSurfaceCell {
+                    u_range: bounds[0], v_range: bounds[1],
+                    controls: patch.controls_in_bounds(bounds), padding: 0.0,
+                });
+            }
+            Ok(cells)
+        }
         Surface3::Offset(offset) => {
-            let mut cells = rational_surface_cells(offset.base())?;
+            let mut cells = rational_surface_cells(offset.base(), bounds)?;
             for cell in &mut cells {
                 cell.padding += offset.maximum_distance();
             }

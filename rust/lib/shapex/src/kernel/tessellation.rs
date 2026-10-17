@@ -1472,7 +1472,7 @@ fn collapsed_periodic_angular_error(
 
 fn surface_point_normal(surface: &super::Surface3, u: f64, v: f64) -> KernelResult<(Point3, Vec3)> {
     let (point, du, dv) = surface.first_order(u, v)?;
-    let mut normal = match surface {
+    let normal = match surface {
         // Longitude is singular at a sphere's poles even though the exact
         // surface normal remains well defined there.
         super::Surface3::Sphere(sphere) => point - sphere.center(),
@@ -1482,21 +1482,18 @@ fn surface_point_normal(surface: &super::Surface3, u: f64, v: f64) -> KernelResu
             let (_, tangent, generator) = surface.first_order(u, 1.0)?;
             tangent.cross(generator)
         }
+        super::Surface3::Revolved(revolved) => {
+            // The angular derivative carries the profile radius. At an axis
+            // pole that radius vanishes, and roundoff can even make it slightly
+            // negative. Remove the radius factor to retain the one-sided normal
+            // of the nonnegative-radius profile, including tangent poles.
+            let frame = revolved.frame();
+            let (sin, cos) = u.sin_cos();
+            let tangent = -frame.x() * sin + frame.y() * cos;
+            tangent.cross(dv)
+        }
         _ => du.cross(dv),
     };
-    if normal.magnitude2() == 0.0 {
-        if let super::Surface3::Revolved(revolved) = surface {
-            let range = revolved.profile_range();
-            let inset = range.span().abs().max(1.0) * f64::EPSILON.sqrt();
-            let shifted = if (v - range.start).abs() <= (v - range.end).abs() {
-                range.start + range.span().signum() * inset
-            } else {
-                range.end - range.span().signum() * inset
-            };
-            let (_, shifted_du, shifted_dv) = surface.first_order(u, shifted)?;
-            normal = shifted_du.cross(shifted_dv);
-        }
-    }
     if normal.magnitude2() == 0.0
         || !normal.x.is_finite()
         || !normal.y.is_finite()

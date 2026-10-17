@@ -1370,6 +1370,50 @@ mod tests {
         assert!((reversed.volume() - all.volume()).abs() < 1e-5);
     }
     #[test]
+    fn tilted_round_ended_profile_revolution() {
+        let tolerance = ModelTolerance::default();
+        let center = Point2::new(-52.88068565071396, -86.18951841790492);
+        let arc = TrimmedCurve2::new(
+            Circle2::new(center, 15.0).unwrap(),
+            range(-0.4014257279586958, -3.543018381548489).unwrap(),
+        )
+        .unwrap();
+        let upper = Point2::new(-27.61514560357321, 11.721933854678209);
+        let origin = Point2::new(0.0, 0.0);
+        let profile = Profile::new(
+            Wire2::new(
+                [
+                    TrimmedCurve2::line(arc.end().unwrap(), upper).unwrap(),
+                    TrimmedCurve2::line(upper, origin).unwrap(),
+                    TrimmedCurve2::line(origin, arc.start().unwrap()).unwrap(),
+                    arc,
+                ],
+                tolerance,
+            ).unwrap(),
+            [],
+            tolerance,
+        ).unwrap();
+        // The long-edge axis makes the arc tangent to the axis. Its mapped
+        // circle center rounds just below its radius, reversing du at the pole.
+        for direction in [
+            Vec3::unit_z(),
+            Vec3::new(-39.07311284892735, 0.0, -92.05048534524403),
+            Vec3::new(upper.x, 0.0, upper.y),
+        ] {
+            for angle in [std::f64::consts::PI, -std::f64::consts::PI] {
+                let body = profile.revolve(
+                    Plane3::xz(),
+                    Axis3::new(Point3::new(0.0, 0.0, 0.0), direction).unwrap(),
+                    angle,
+                ).unwrap();
+                assert!(!body
+                    .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                    .unwrap()
+                    .is_empty());
+            }
+        }
+    }
+    #[test]
     fn feature_partial_revolution() {
         let p = rectangle(2.0, 0.0, 2.0, 3.0);
         let axis = Axis3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_y()).unwrap();

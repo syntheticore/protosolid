@@ -117,8 +117,7 @@ fn shell_support_extension_preserves_rational_surface_chart() {
     }
 }
 
-#[test]
-fn chamfer_cut_shell_after_lower_corner_fillets() {
+fn cut_shell_after_lower_corner_fillets() -> super::Compound {
     let tolerance = ModelTolerance::default();
     let plane = Plane3::new(Point3::origin(), Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
     let body = Profile::new(
@@ -171,7 +170,33 @@ fn chamfer_cut_shell_after_lower_corner_fillets() {
             && edge.endpoints().unwrap().iter().all(|point| point.y.abs() < tolerance.linear)
     }).cloned().collect::<Vec<_>>();
     assert_eq!(corners.len(), 4);
-    let body = body.fillet(&corners, 6.0).unwrap();
+    body.fillet(&corners, 6.0).unwrap()
+}
+
+#[test]
+fn fillet_upper_cut_shell_rim_after_lower_corner_fillets() {
+    let body = cut_shell_after_lower_corner_fillets();
+    let edges = body.edges().filter(|edge| {
+        let points = edge.endpoints().unwrap();
+        points.iter().all(|point| (point.y - 39.0).abs() < 1e-7)
+            && edge.connected_faces().unwrap().iter().any(|face| {
+                matches!(face.surface(), Surface3::Torus(torus) if torus.minor_radius() > 17.0)
+            })
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(edges.len(), 3);
+    for edge in edges {
+        let result = body.fillet(&[edge], 1.0).unwrap();
+        assert_eq!(result.solids().len(), 1);
+        assert!(result.volume() < body.volume());
+        result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn chamfer_cut_shell_after_lower_corner_fillets() {
+    let body = cut_shell_after_lower_corner_fillets();
+    let tolerance = ModelTolerance::default();
+    let half_width = 13.249811649142934;
     let edge = body.edges().find(|edge| {
         matches!(edge.curve(), Curve3::Line(_))
             && edge.endpoints().unwrap().iter().all(|point| {

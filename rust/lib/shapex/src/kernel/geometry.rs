@@ -350,16 +350,46 @@ impl NurbsCurve2 {
                 *span = ParameterRange::new(start, end)?;
             }
         }
+        Self::from_bezier_spans(self.degree, spans)
+    }
+
+    // Intersection guides choose a branch; their terminal polynomial is not
+    // the modeled geometry. Continue its tangent rather than extrapolating
+    // high-order curvature that can fold far away from the exact supports.
+    fn extended_guide(&self, range: ParameterRange) -> KernelResult<Self> {
+        let mut spans = self.bezier_spans()?;
+        let start = spans[0].0.start;
+        let end = spans.last().unwrap().0.end;
+        let tangent_span = |range: ParameterRange, endpoint: f64| -> KernelResult<Vec<Vec3>> {
+            let value = self.evaluate(endpoint)?;
+            Ok((0..=self.degree).map(|index| {
+                let parameter = range.start + range.span() * index as f64 / self.degree as f64;
+                let point = value.point + value.first_derivative * (parameter - endpoint);
+                Vec3::new(point.x, point.y, 1.0)
+            }).collect())
+        };
+        if range.start < start {
+            let extension = ParameterRange::new(range.start, start)?;
+            spans.insert(0, (extension, tangent_span(extension, start)?));
+        }
+        if range.end > end {
+            let extension = ParameterRange::new(end, range.end)?;
+            spans.push((extension, tangent_span(extension, end)?));
+        }
+        Self::from_bezier_spans(self.degree, spans)
+    }
+
+    fn from_bezier_spans(degree: usize, spans: Vec<(ParameterRange, Vec<Vec3>)>) -> KernelResult<Self> {
         let mut controls = spans[0].1.clone();
-        let mut knots = vec![spans[0].0.start; self.degree + 1];
+        let mut knots = vec![spans[0].0.start; degree + 1];
         for (span, next) in spans.iter().skip(1) {
             let shared = controls.last() == next.first();
-            knots.extend(vec![span.start; self.degree + usize::from(!shared)]);
+            knots.extend(vec![span.start; degree + usize::from(!shared)]);
             controls.extend_from_slice(&next[usize::from(shared)..]);
         }
-        knots.extend(vec![spans[last].0.end; self.degree + 1]);
+        knots.extend(vec![spans.last().unwrap().0.end; degree + 1]);
         Self::new(
-            self.degree,
+            degree,
             controls
                 .iter()
                 .map(|p| Point2::new(p.x / p.z, p.y / p.z))
@@ -2184,11 +2214,15 @@ impl SurfaceIntersectionCurve {
             range.start.min(self.range.start),
             range.end.max(self.range.end),
         )?;
+        let extend = |guide: &Curve2| match guide {
+            Curve2::Nurbs(curve) => curve.extended_guide(range).map(Curve2::Nurbs),
+            _ => guide.extended(range),
+        };
         Self::new(
             *self.first_surface.clone(),
             *self.second_surface.clone(),
-            self.first_pcurve.extended(range)?,
-            self.second_pcurve.extended(range)?,
+            extend(&self.first_pcurve)?,
+            extend(&self.second_pcurve)?,
             range,
             self.tolerance,
             self.achieved_error,

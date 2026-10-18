@@ -62,10 +62,27 @@ export async function useOC() {
         return solver
       }
 
+      const solveWithObjectives = solver => {
+        let status = solver.solve(0)
+        // PlaneGCS's redundant-system pass can discard temporary objectives.
+        // Remove only fully redundant equations from this solver instance so
+        // dragging and movement probes can use the remaining freedom.
+        while(!solver.has_gcs_conflicting_constraints() && solver.has_gcs_redundant_constraints()) {
+          const redundant = solver.gcs.get_redundant()
+          for(let index = 0; index < redundant.size(); index++) {
+            solver.gcs.clear_by_id(redundant.get(index))
+          }
+          redundant.delete()
+          status = solver.solve(0)
+        }
+        return status
+      }
+
       const solver = makeSolver()
       // BFGS is cheaper for unreachable pointer objectives. Structural
       // solves keep the default DogLeg algorithm.
-      const status = solver.solve(primitives.some(primitive => primitive.temporary) ? 0 : undefined)
+      const status = primitives.some(primitive => primitive.temporary) ?
+        solveWithObjectives(solver) : solver.solve()
       const conflicting = solver.has_gcs_conflicting_constraints()
       const failed = status >= 2
       // Redundant equations can have a valid solution. They are not a
@@ -117,7 +134,7 @@ export async function useOC() {
         // A negative tag makes this an objective on the remaining freedom,
         // rather than an additional equation in the structural diagnosis.
         probe.gcs.add_constraint_equal(index, target, -1, true, 0, 1)
-        const status = probe.solve(0) // BFGS, as for temporary pointer objectives.
+        const status = solveWithObjectives(probe)
         probe.gcs.apply_solution()
         const constrained = status < 2 &&
           Math.abs(probe.gcs.get_p_param(index) - value) <= movementTolerance

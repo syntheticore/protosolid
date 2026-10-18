@@ -185,7 +185,7 @@
       transition: none
 
     .active &
-      margin-right: -0.5rem
+      margin-right: -0.25rem
 
   .hidden
     opacity: 0

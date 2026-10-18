@@ -1281,6 +1281,8 @@ export class ElemRef {
     return this.curveRef.getItem()
   }
 
+  typename() { return this.index === undefined ? this.curve().typename() : 'Point' }
+
   // isPoint() { return this.index !== undefined }
 
   static undump(dump) { return new ElemRef(dump.curveRef, dump.index) }

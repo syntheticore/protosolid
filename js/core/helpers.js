@@ -21,6 +21,8 @@ export class PlaneHelper extends ConstructionHelper {
     this.transform = plane
   }
 
+  typename() { return 'Plane' }
+
   planarReference() {
     return new PlanarReference(new HelperReference(this))
   }
@@ -35,6 +37,8 @@ export class AxisHelper extends ConstructionHelper {
     super(componentId, id)
     this.transform = axis
   }
+
+  typename() { return 'Axis' }
 
   axialReference() {
     return new AxialReference(new HelperReference(this))
@@ -57,6 +61,8 @@ export class PointHelper extends ConstructionHelper {
     super(componentId, id)
     this.transform = point
   }
+
+  typename() { return 'Point' }
 
   pointReference() {
     return new PointReference(new HelperReference(this))

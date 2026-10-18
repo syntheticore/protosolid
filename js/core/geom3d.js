@@ -187,6 +187,8 @@ export class Profile {
     this.id = makeID() //XXX is this being used?
   }
 
+  typename() { return 'Profile' }
+
   reference() {
     return new ProfileReference(this)
   }
@@ -937,6 +939,8 @@ export class Face extends Shape {
     this.tessId = tessId || makeID()
   }
 
+  typename() { return 'Face' }
+
   planarReference() {
     if(!this.getPlane()) throw "Cannot provide plane from non-planar face"
     return new PlanarReference(new FaceReference(this))
@@ -1105,6 +1109,8 @@ export class Edge extends Shape {
     if(solid.compound.isShapex) this.kernelId = window.kernel.modeling.entityId(geom)
     this.tessId = tessId || makeID()
   }
+
+  typename() { return 'Edge' }
 
   axialReference() {
     if(!this.getAxis()) throw "Cannot provide axis from non-linear edge"

@@ -1092,6 +1092,12 @@ export class CurvePickTool extends PickTool {
   }
 }
 
+export class PathPickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['path'], callback)
+  }
+}
+
 export class ProfilePickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['profile'], callback)

@@ -246,6 +246,7 @@
     DummyTool,
     ManipulationTool,
     CurvePickTool,
+    PathPickTool,
     ProfilePickTool,
     EdgePickTool,
     FacePickTool,
@@ -452,6 +453,7 @@
         this.handlePick(pickerCoords, color, {
           profile: ProfilePickTool,
           curve: CurvePickTool,
+          path: PathPickTool,
           axis: AxisPickTool,
           edge: EdgePickTool,
           face: FacePickTool,

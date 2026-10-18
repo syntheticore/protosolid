@@ -66,7 +66,7 @@
     mesh.alcTypes = props.element instanceof SketchPoint ?
       ['point']
       :
-      ['curve', props.element.getAxis && 'axis']
+      ['curve', 'path', props.element.getAxis && 'axis']
     mesh.material = getMaterial()
     mesh.alcObject = props.element
     if(!(props.element instanceof SketchPoint)) {

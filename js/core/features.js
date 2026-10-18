@@ -6,7 +6,7 @@ import { Sketch } from './sketch.js'
 import { Compound } from './geom3d.js'
 import { PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
-import { normalFromMatrix, rad } from './utils.js'
+import { normalFromMatrix, rad, rotationFromNormal } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
 import { KernelMismatchError, checkedOutData, parseDocument } from './document-format.js'
@@ -152,13 +152,13 @@ export class Feature {
 
   needsPicker(setting, includeOptionals) {
     setting = this.settings[setting]
-    return this.isSettingVisible(setting) && ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].some(type =>
+    return this.isSettingVisible(setting) && ['profile', 'curve', 'path', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].some(type =>
       type == setting.type && (!setting.optional || includeOptionals)
     )
   }
 
   isPickerSetting(setting) {
-    return ['profile', 'curve', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].includes(setting.type)
+    return ['profile', 'curve', 'path', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].includes(setting.type)
   }
 
   isSettingVisible(setting) {
@@ -175,11 +175,9 @@ export class Feature {
 
   confirm() {
     const comp = this.document.top().findChild(this.componentId)
-    Object.entries(this.settings)
-      .filter(([key, setting]) => this[key] && ['profile', 'curve'].some(type => type == setting.type ) )
-      .forEach(([key, _]) =>
-        [this[key]()].flat().forEach(elem => comp.creator.itemsHidden[elem.getItem().sketch.id] = true )
-      )
+    // Hide sketches whose geometry was consumed by the feature
+    this.involvedSketches(setting => ['profile', 'curve'].includes(setting.type) || setting.consumesSketch)
+      .forEach(sketch => comp.creator.itemsHidden[sketch.id] = true )
   }
 
   updateFeature(tree, references) {}
@@ -254,12 +252,13 @@ export class Feature {
     this.error = null
   }
 
-  involvedSketches() {
+  involvedSketches(filter = setting => ['profile', 'curve', 'path'].includes(setting.type)) {
     return Object.keys(this.settings).flatMap(key => {
-      if(!['profile', 'curve'].includes(this.settings[key].type)) return []
+      if(!filter(this.settings[key])) return []
       if(!this[key]) return []
       const refs = this[key]()
-      return (Array.isArray(refs) ? refs : [refs]).map(ref => ref.getItem().sketch )
+      // Paths may also be model edges, which have no sketch
+      return (Array.isArray(refs) ? refs : [refs]).map(ref => ref.getItem().sketch ).filter(Boolean)
     })
   }
 
@@ -1300,13 +1299,123 @@ export class CreateSketchFeature extends Feature {
 Serialize.register(CreateSketchFeature, 'CreateSketchFeature')
 
 
+// Builds a plane matrix whose X axis follows xHint as closely as possible.
+function planeFrame(origin, normal, xHint) {
+  if(normal.lengthSq() < 1e-12) return null
+  normal = normal.clone().normalize()
+  const xAxis = xHint.clone().projectOnPlane(normal)
+  if(xAxis.lengthSq() < 1e-12) return rotationFromNormal(normal).setPosition(origin)
+  xAxis.normalize()
+  return new THREE.Matrix4().makeBasis(xAxis, normal.clone().cross(xAxis), normal).setPosition(origin)
+}
+
+// Planes halfway between parallel planes, or bisecting the acute angle
+// between intersecting ones. The origin lies central to both base origins.
+function midplaneFrame(first, second) {
+  const normalA = normalFromMatrix(first)
+  const normalB = normalFromMatrix(second)
+  const originA = new THREE.Vector3().setFromMatrixPosition(first)
+  const originB = new THREE.Vector3().setFromMatrixPosition(second)
+  const line = normalA.clone().cross(normalB)
+  let normal, support
+  if(line.lengthSq() < 1e-12) {
+    normal = normalA
+    support = originA.clone().addScaledVector(normalA, originB.clone().sub(originA).dot(normalA) / 2)
+  } else {
+    normal = normalA.dot(normalB) >= 0 ? normalA.clone().add(normalB) : normalA.clone().sub(normalB)
+    // Point on the intersection line of both planes
+    support = normalB.clone().cross(line).multiplyScalar(normalA.dot(originA))
+      .add(line.clone().cross(normalA).multiplyScalar(normalB.dot(originB)))
+      .divideScalar(line.lengthSq())
+  }
+  normal = normal.clone().normalize()
+  const center = originA.clone().add(originB).multiplyScalar(0.5)
+  const origin = center.clone().addScaledVector(normal, -center.clone().sub(support).dot(normal))
+  return planeFrame(origin, normal, new THREE.Vector3().setFromMatrixColumn(first, 0))
+}
+
+// Plane normal to a path at a fraction of its length. Tangents are blended
+// between polyline vertices to stay accurate on tessellated curves.
+function curveFrame(path, fraction) {
+  const points = path.getPath()
+  const chords = points.slice(1).map((point, i) => point.clone().sub(points[i]))
+  const lengths = chords.reduce((sums, chord) => [...sums, sums.at(-1) + chord.length()], [0])
+  const tangents = points.map((_, i) =>
+    (chords[i - 1] || chords[i]).clone().normalize().add((chords[i] || chords[i - 1]).clone().normalize())
+  )
+  const target = lengths.at(-1) * THREE.MathUtils.clamp(fraction, 0, 1)
+  const index = THREE.MathUtils.clamp(lengths.findIndex(length => length >= target), 1, points.length - 1)
+  const t = (target - lengths[index - 1]) / ((lengths[index] - lengths[index - 1]) || 1)
+  const origin = points[index - 1].clone().lerp(points[index], t)
+  const tangent = tangents[index - 1].clone().lerp(tangents[index], t).normalize()
+  return rotationFromNormal(tangent).setPosition(origin)
+}
+
 export class PlaneFeature extends Feature {
   static icon = 'construction-plane'
   constructor(doc) {
+    const modes = modes => feature => modes.includes(feature.mode)
     super(doc, false, 'Plane', {
+      mode: {
+        title: 'Mode',
+        type: 'select',
+        options: {
+          offset: { title: 'Offset & angle', icon: 'layer-group' },
+          parallel: { title: 'Parallel through point', icon: 'grip-lines' },
+          midplane: { title: 'Midplane', icon: 'grip-lines-vertical' },
+          threePoints: { title: 'Three points', icon: 'draw-polygon' },
+          axisAngle: { title: 'Through axis at angle', icon: 'sync-alt' },
+          edgePoint: { title: 'Through axis and point', icon: 'project-diagram' },
+          curve: { title: 'Normal to curve', icon: 'bezier-curve' },
+        },
+      },
+      axis: {
+        title: 'Axis',
+        type: 'axis',
+        when: modes(['axisAngle', 'edgePoint']),
+      },
+      path: {
+        title: 'Curve',
+        type: 'path',
+        when: modes(['curve']),
+      },
       base: {
         title: 'Base',
         type: 'plane',
+        when: modes(['offset', 'parallel', 'midplane', 'axisAngle']),
+      },
+      base2: {
+        title: 'Second plane',
+        type: 'plane',
+        when: modes(['midplane']),
+      },
+      point: {
+        title: 'Point',
+        type: 'point',
+        when: modes(['parallel', 'threePoints', 'edgePoint']),
+      },
+      point2: {
+        title: 'Second point',
+        type: 'point',
+        when: modes(['threePoints']),
+      },
+      point3: {
+        title: 'Third point',
+        type: 'point',
+        when: modes(['threePoints']),
+      },
+      angle: {
+        title: 'Angle',
+        type: 'angle',
+        allowNegative: true,
+        when: modes(['axisAngle']),
+      },
+      position: {
+        title: 'Position %',
+        type: 'number',
+        min: 0,
+        max: 100,
+        when: modes(['curve']),
       },
       offset: {
         title: 'Offset',
@@ -1317,15 +1426,26 @@ export class PlaneFeature extends Feature {
         title: 'Rotation X',
         type: 'angle',
         allowNegative: true,
+        when: modes(['offset']),
       },
       rotationY: {
         title: 'Rotation Y',
         type: 'angle',
         allowNegative: true,
+        when: modes(['offset']),
       },
     })
 
+    this.mode = 'offset'
     this.base = null
+    this.base2 = null
+    this.axis = null
+    this.path = null
+    this.point = null
+    this.point2 = null
+    this.point3 = null
+    this.angle = 0
+    this.position = 0
     this.offset = 1.0
     this.rotationX = 0
     this.rotationY = 0
@@ -1336,11 +1456,72 @@ export class PlaneFeature extends Feature {
     this.planeId = makeID()
   }
 
+  settingChanged(key, value) {
+    if(key != 'mode') return
+    // Only the free placement mode starts away from its inputs
+    this.setExpression('offset', null)
+    this.offset = value == 'offset' ? 1.0 : 0
+  }
+
+  // Plane before offset and rotation are applied, or null if the
+  // inputs do not define one. Items are looked up by setting key.
+  placement(item) {
+    const point = key => new THREE.Vector3().setFromMatrixPosition(item(key))
+    switch(this.mode) {
+      case 'parallel':
+        return item('base').clone().setPosition(point('point'))
+      case 'midplane':
+        return midplaneFrame(item('base'), item('base2'))
+      case 'threePoints': {
+        const [first, second, third] = ['point', 'point2', 'point3'].map(point)
+        const xAxis = second.clone().sub(first)
+        return planeFrame(first, xAxis.clone().cross(third.clone().sub(first)), xAxis)
+      }
+      case 'axisAngle': {
+        const direction = normalFromMatrix(item('axis'))
+        const normal = normalFromMatrix(item('base')).projectOnPlane(direction)
+          .applyAxisAngle(direction, rad(this.angle))
+        return planeFrame(point('axis'), normal, direction)
+      }
+      case 'edgePoint': {
+        const direction = normalFromMatrix(item('axis'))
+        const origin = point('axis')
+        const toPoint = point('point').sub(origin)
+        const foot = origin.clone().addScaledVector(direction, toPoint.dot(direction))
+        return planeFrame(foot, direction.clone().cross(toPoint), direction)
+      }
+      case 'curve':
+        return curveFrame(item('path'), this.position / 100)
+      default:
+        return item('base').clone()
+    }
+  }
+
+  placementError() {
+    return {
+      threePoints: 'Points must not be collinear',
+      axisAngle: 'Axis must not be perpendicular to the base plane',
+      edgePoint: 'Point must not lie on the axis',
+    }[this.mode]
+  }
+
+  currentPlacement() {
+    return this.placement(key => this[key]().getItem())
+  }
+
+  // Full plane in component space, including offset and rotation
+  finishPlacement(placement) {
+    const plane = placement.multiply(new THREE.Matrix4().makeTranslation(0, 0, this.offset))
+    return this.mode == 'offset' ? plane.multiply(this.getRotation()) : plane
+  }
+
   updateFeature(tree, references) {
-    const plane = references.base.clone()
-      .multiply(new THREE.Matrix4().makeTranslation(0, 0, this.offset))
-      .multiply(this.getRotation())
-    const helper = new PlaneHelper(this.componentId, plane, this.planeId)
+    const placement = this.placement(key => references[key])
+    if(!placement) {
+      this.error = { type: 'error', msg: this.placementError() }
+      return
+    }
+    const helper = new PlaneHelper(this.componentId, this.finishPlacement(placement), this.planeId)
     tree.findChild(this.componentId).helpers.push(helper)
   }
 
@@ -1357,11 +1538,12 @@ export class PlaneFeature extends Feature {
   }
 
   getGizmo() {
-    const base = this.base().getItem()
+    const placement = this.currentPlacement()
+    if(!placement) return
     return {
       distance: {
-        center: new THREE.Vector3().setFromMatrixPosition(base),
-        direction: normalFromMatrix(base),
+        center: new THREE.Vector3().setFromMatrixPosition(placement),
+        direction: normalFromMatrix(placement),
         distance: Math.abs(this.offset),
         side: this.offset >= 0,
         cb: (distance, side) => {
@@ -1374,15 +1556,13 @@ export class PlaneFeature extends Feature {
 
   updateGizmos() {
     super.updateGizmos()
-    if(!this.isComplete()) {
+    if(!this.isComplete() || this.mode != 'offset') {
       this.clearRotationGizmo()
       return
     }
     const component = this.document.top().findChild(this.componentOccurrenceId) ||
       this.document.top().findChild(this.componentId)
-    const transform = worldTransform(component).multiply(this.base().getItem())
-      .multiply(new THREE.Matrix4().makeTranslation(0, 0, this.offset))
-      .multiply(this.getRotation())
+    const transform = worldTransform(component).multiply(this.finishPlacement(this.currentPlacement()))
     if(this.rotationGizmo) {
       if(!this.rotationGizmo.dragging) this.rotationGizmo.setTransform(transform)
       return
@@ -2266,7 +2446,8 @@ export class SweepFeature extends SolidFeature {
       },
       rail: {
         title: 'Rail',
-        type: 'curve',
+        type: 'path',
+        consumesSketch: true,
       },
       bounds: {
         title: 'Bounds',

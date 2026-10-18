@@ -741,21 +741,29 @@ export class Profile {
         throw { type: 'error', msg: 'Partial rail sweeps are not supported' }
       }
 
+      // Rails are sketch curves or model edges. Edge ids are not stable
+      // across regenerations, so model edges name the rail generically.
+      const isEdge = rail instanceof Edge
+      const railSource = isEdge ? 'rail' : rail.id.split('/')[0]
+
       if(window.kernel.modeling.id == 'shapex') {
+        if(isEdge) window.kernel.modeling.unsupported('sweeps along model edges')
         const geometry = window.kernel.modeling.sweep(this, rail)
-        return new Compound(componentId, geometry).seedShapexTopology([this], featureId, [rail.id.split('/')[0]])
+        return new Compound(componentId, geometry).seedShapexTopology([this], featureId, [railSource])
       }
 
       // A wire profile produces a shell. Use the filled face so MakePipe
       // returns a solid that can participate in the feature boolean.
       const named = []
       const profile = this.makeFace(named)
-      const plane = new window.oc.oc.gp_Pln_1()
-      const curve = window.oc.oc.GeomAPI.To3d(rail.geom(), plane)
-      const edge = new window.oc.oc.BRepBuilderAPI_MakeEdge_24(curve).Edge()
       const pathBuilder = new window.oc.oc.BRepBuilderAPI_MakeWire_1()
-      pathBuilder.Add_1(edge)
-      const path = window.oc.oc.TopoDS.Wire_1(
+      if(isEdge) {
+        pathBuilder.Add_1(rail.geom())
+      } else {
+        const curve = window.oc.oc.GeomAPI.To3d(rail.geom(), new window.oc.oc.gp_Pln_1())
+        pathBuilder.Add_1(new window.oc.oc.BRepBuilderAPI_MakeEdge_24(curve).Edge())
+      }
+      const path = isEdge ? pathBuilder.Wire() : window.oc.oc.TopoDS.Wire_1(
         transformGeometry(pathBuilder.Wire(), rail.sketch.workplane).Shape()
       )
       const pipe = new window.oc.oc.BRepOffsetAPI_MakePipe_1(path, profile)
@@ -764,9 +772,9 @@ export class Profile {
 
       const compound = new Compound(componentId, window.oc.oc.TopoDS.Solid_1(pipe.Shape()))
       const roles = named.map(source => ({
-        role: 'sweep-side', sources: [source.source, rail.id.split('/')[0]], shapes: readShapeList(pipe.Generated_1(source.shape)),
+        role: 'sweep-side', sources: [source.source, railSource], shapes: readShapeList(pipe.Generated_1(source.shape)),
       }))
-      const sources = [...named.map(source => source.source), rail.id.split('/')[0]]
+      const sources = [...named.map(source => source.source), railSource]
       roles.push({ role: 'sweep-start', sources, shapes: [pipe.FirstShape()] })
       roles.push({ role: 'sweep-end', sources, shapes: [pipe.LastShape()] })
       return seedOccTopology(compound, roles, 'sweep', sources)
@@ -1119,6 +1127,15 @@ export class Edge extends Shape {
 
   edgeReference() {
     return new EdgeReference(this)
+  }
+
+  pathReference() {
+    return this.edgeReference()
+  }
+
+  // Polyline in component space
+  getPath() {
+    return this.tesselate().map(point => point.isVector3 ? point.clone() : new THREE.Vector3(...point))
   }
 
   isSemantic() {

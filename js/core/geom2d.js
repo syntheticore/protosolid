@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
-import { AxialReference, CurveReference } from './references.js'
+import { AxialReference, CurveReference, PointReference } from './references.js'
 import {
   EPSILON,
   arrayRange,
@@ -104,6 +104,15 @@ export class SketchElement {
   tesselate() {
     if(!this.geom) return
     return tesselateCurveFixed(this.geom().get(), this.tesselationSteps())
+  }
+
+  pathReference() {
+    return new CurveReference(this)
+  }
+
+  // Polyline in component space
+  getPath() {
+    return this.tesselate().map(([x, y]) => new THREE.Vector3(x, y, 0).applyMatrix4(this.sketch.workplane))
   }
 
   intersect(others) {
@@ -210,6 +219,14 @@ export class SketchPoint extends SketchElement {
   handles() { return [this.point] }
   setHandles(handles) { this.point = handles[0] }
   _clone() { return new SketchPoint(this.point.clone()) }
+
+  pointReference() {
+    return new PointReference(new CurveReference(this))
+  }
+
+  getPoint() {
+    return new THREE.Matrix4().setPosition(this.point.clone().applyMatrix4(this.sketch.workplane))
+  }
 
   dump() {
     return {

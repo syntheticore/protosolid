@@ -14,7 +14,7 @@
   const renderNeeded = inject('render-needed')
 
   const edgeMesh = window.alcRenderer.convertLine(props.edge.tesselate(), getMaterial())
-  edgeMesh.alcTypes = ['edge', props.edge.getAxis() && 'axis'].filter(Boolean)
+  edgeMesh.alcTypes = ['edge', 'path', props.edge.getAxis() && 'axis'].filter(Boolean)
 
   const hiddenMesh = edgeMesh.isLine2 ? new HiddenLine(edgeMesh) : new THREE.Object3D()
   edgeMesh.add(hiddenMesh)

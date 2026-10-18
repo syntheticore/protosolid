@@ -2496,6 +2496,7 @@ export class DimensionTool extends HighlightTool {
   placeDimension(position) {
     const toSketch = this.sketch.workplane.clone().invert()
     const constraint = new Dimension(this.items, position.clone().applyMatrix4(toSketch))
+    constraint.active = true
     this.sketch.addConstraint(constraint)
     this.viewport.updateRegions(true)
     this.items = []

@@ -8,10 +8,11 @@
       :key="field.key"
       :class="{ locked: field.key in tool.locks, focused: focused == index, problem: problems[field.key] }"
     )
-      span.label {{ field.label }}
-      //- The hidden sizer sets the input width to its text width
-      .value
-        span.sizer {{ display(field) }}
+      span.label
+        span(:class="{ 'diameter-symbol': field.key == 'diameter' }") {{ field.label }}
+
+      .value(:style="{ width: Math.max(2, display(field).length * 10.5) + 'px' }")
+
         input(
           type="text"
           :ref="el => inputs[index] = el"
@@ -39,7 +40,7 @@
     display: flex
     align-items: center
     height: 20px
-    padding: 0 6px
+    padding-left: 6px
     border-radius: 3px
     background: $bright1
     border: 2px solid transparent
@@ -63,32 +64,31 @@
     font-weight: 900
     color: $dark1
 
-  .value
-    display: grid
-    color: $dark2
+    .diameter-symbol
+      font-size: 1.7em
+      line-height: 0
+      position: relative
+      top: 2px
+      margin-left: -4px
 
-    .sizer
+  .value
+    color: $dark2
+    transition: width 0.2s
+
     input
-      grid-area: 1 / 1
       font-size: 12px
       font-weight: 900
       font-family: Orbitron
       line-height: 16px
       white-space: pre
-
-    .sizer
-      visibility: hidden
-
-    input
-      // Zero intrinsic width so only the sizer determines the column
-      width: 0
-      min-width: 100%
+      width: 100%
       border: none
       background: none
       outline: none
       padding: 0
       margin: 0
       color: inherit
+
       &::selection
         background: none
 

@@ -1,6 +1,6 @@
 <template lang="pug">
 
-  .bordered.feature-box(:class="{'has-header': this.showHeader}")
+  .bordered.feature-box(v-pixel-snap="'.confirmation'" :class="{'has-header': this.showHeader}")
 
     header(v-if="showHeader")
 

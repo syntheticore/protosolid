@@ -316,6 +316,7 @@
   import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
   import { CurveReference, JointReference, PatternInputReference } from './../js/core/references.js'
+  import { SketchElement } from './../js/core/geom2d.js'
   import { referenceComponentId, worldTransform } from './../js/core/assembly.js'
   import PickerSession from './../js/picker-session.js'
 
@@ -346,15 +347,12 @@
         return this.document.isRegenerating || this.pendingUpdates > 0
       },
       autoFocusSetting() {
-        const keys = types => Object.keys(this.orderedSettings).filter(key => {
+        const keys = Object.keys(this.orderedSettings).filter(key => {
           const setting = this.orderedSettings[key]
-          return types.includes(setting.type) &&
+          return ['length', 'angle', 'integer', 'number'].includes(setting.type) &&
             setting.autoFocus !== false && this.activeFeature.isSettingVisible(setting)
         })
-        // Any numeric field keeps focus once used, but only
-        // dimensions are focused initially.
-        return keys(['length', 'angle', 'integer', 'number']).includes(this.focusedSetting) ?
-          this.focusedSetting : keys(['length', 'angle'])[0]
+        return keys.includes(this.focusedSetting) ? this.focusedSetting : keys[0]
       },
 
       orderedSettings: function() {
@@ -601,6 +599,8 @@
           return component
             ? new THREE.Vector3().setFromMatrixPosition(worldTransform(component).multiply(item.frameA))
             : new THREE.Vector3()
+        } else if(item instanceof SketchElement) {
+          center = item.center().clone().applyMatrix4(item.sketch.workplane)
         } else {
           center = item.center()
         }
@@ -641,6 +641,8 @@
 
       updateSetting: async function(key, value) {
         this.activeFeature.settingChanged?.(key, value)
+        // Options may change the visible fields, so focus the first one again
+        this.focusedSetting = null
         if(this.activePicker && !this.activeFeature.needsPicker(this.activePicker, true)) {
           this.cancelPick()
         }

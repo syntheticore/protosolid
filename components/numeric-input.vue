@@ -2,7 +2,7 @@
 
   .numeric-input(:class="{ 'has-tool': icon, parameterized }")
 
-    button.button(v-if="icon" type="button")
+    button.button(v-if="icon" type="button" tabindex="-1")
       Icon(:icon="icon")
 
     input.input(
@@ -20,10 +20,10 @@
 
     .controls
 
-      button.button(type="button" @mousedown.prevent @click="$emit('increase')")
+      button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('increase')")
         Icon(icon="caret-up")
 
-      button.button(type="button" @mousedown.prevent @click="$emit('decrease')")
+      button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('decrease')")
         Icon(icon="caret-down")
 
 </template>
@@ -119,6 +119,12 @@
       inputStyle() {
         const width = 24 + Math.max(2, String(this.value).length * 11)
         return { width: String(width) + 'px' }
+      },
+    },
+
+    watch: {
+      autoFocus(value) {
+        if(value) this.focusInput()
       },
     },
 

@@ -99,6 +99,15 @@
         :style="{ top: snapAnchor.pos.y + 'px', left: snapAnchor.pos.x + 'px' }"
       )
 
+      //- Numeric input for the shape being drawn
+      DrawingInput(
+        v-if="hasDrawingInput"
+        :key="activeTool.inputStage"
+        :tool="activeTool"
+        :component="document.top()"
+        :position="pointerCoords"
+      )
+
       //- Floating UI widgets
       TransitionGroup(name="hide-selector")
         SelectorWidget(
@@ -297,6 +306,7 @@
         thermalProbe: null,
         exportPreviewMesh: null,
         sketchSectionSide: false,
+        pointerCoords: null,
       }
     },
 
@@ -386,6 +396,10 @@
           return `${item?.id || ''}:${component?.id || ''}`
         })
         return `${feature?.id || ''}|${creatingFeature?.id || ''}|${sketch?.id || ''}|${panel || ''}|${items.join(',')}`
+      },
+
+      hasDrawingInput: function() {
+        return this.pointerCoords && this.activeTool?.inputFields().length > 0
       },
 
       allPaths: function() {
@@ -974,6 +988,7 @@
         if(this.isZooming) return
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
+        this.pointerCoords = coords
         if(this.pickingPath && vec) this.pickingPath.target = vec
         if(vec || this.activeTool.probesSurface) this.activeTool.mouseMove(vec, coords)
         // At close zoom, background rays can miss the projection plane.

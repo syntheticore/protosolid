@@ -107,6 +107,10 @@ class Tool {
 
   tangentSnapStart() { return null }
 
+  // Numeric fields shown next to the cursor while drawing:
+  // [{ key, label, dimension, value }]
+  inputFields() { return [] }
+
   snapExclusions() { return this.curve ? [this.curve] : [] }
 
   historyState() {
@@ -250,6 +254,47 @@ function addCapturedGuideConstraints(sketch, snap, elem, index) {
     constraint.isVertical = axis == 'x'
     sketch.addConstraint(constraint)
   })
+}
+
+// Apply locked length and angle (degrees from the sketch x axis) to a point
+// relative to start.
+function polarPoint(start, point, locks) {
+  const delta = point.clone().sub(start).setZ(0)
+  const direction = locks.angle === undefined ?
+    delta.clone().normalize()
+    :
+    new THREE.Vector3(
+      Math.cos(THREE.MathUtils.degToRad(locks.angle)),
+      Math.sin(THREE.MathUtils.degToRad(locks.angle)),
+      0,
+    )
+  if(direction.lengthSq() < EPSILON) direction.set(1, 0, 0)
+  const length = locks.length ?? (locks.angle === undefined ? delta.length() : delta.dot(direction))
+  return start.clone().addScaledVector(direction, length)
+}
+
+function radialPoint(center, point, radius) {
+  const direction = point.clone().sub(center).setZ(0).normalize()
+  if(direction.lengthSq() < EPSILON) direction.set(1, 0, 0)
+  return center.clone().addScaledVector(direction, radius)
+}
+
+function polarFields(start, end) {
+  const delta = end.clone().sub(start)
+  const angle = THREE.MathUtils.radToDeg(Math.atan2(delta.y, delta.x))
+  return [
+    { key: 'length', label: 'L', dimension: 'length', value: delta.length() },
+    { key: 'angle', label: '∠', dimension: 'angle', value: (angle + 360) % 360 },
+  ]
+}
+
+// Dimension label position beside a line, facing away from center if given.
+function dimensionPosition(line, offset, center) {
+  const midpoint = line.midpoint()
+  const direction = line.direction().normalize()
+  const normal = new THREE.Vector3(-direction.y, direction.x, 0)
+  if(center && normal.dot(midpoint.clone().sub(center)) < 0) normal.negate()
+  return midpoint.addScaledVector(normal, offset)
 }
 
 function addInferredTangentConstraint(sketch, line, snap, endpointIndex=1) {
@@ -1135,6 +1180,38 @@ export class SketchTool extends Tool {
     this.snapToGuides = true
     this.snapToPoints = true
     this.cursor = 'crosshair'
+    this.locks = {}
+    this.inputStage = 0
+  }
+
+  setLock(key, value) {
+    if(value === undefined) delete this.locks[key]
+    else this.locks[key] = value
+    if(this.pointer) this.mouseMove(this.pointer)
+  }
+
+  hasLocks() { return Object.keys(this.locks).length > 0 }
+
+  resetInput() {
+    this.locks = {}
+    this.inputStage++
+  }
+
+  // Locked values override the cursor position, so the snapped target
+  // under the cursor no longer describes the placed point.
+  pointerSnap() {
+    return this.hasLocks() ? undefined : captureSnap(this.viewport.snapper)
+  }
+
+  submitInput() {
+    if(!this.pointer) return
+    this.mouseDown(this.pointer, null)
+    this.viewport.updateRegions(false)
+  }
+
+  addLockedDimension(key, items, position) {
+    if(this.locks[key] === undefined) return
+    this.sketch.addConstraint(new Dimension(items, position))
   }
 
   constrainPoint(elem, index, snap) {
@@ -1167,6 +1244,7 @@ export class SketchTool extends Tool {
   }
 
   snappedDirectlyToOrigin() {
+    if(this.hasLocks()) return false
     const origin = this.sketch.originPoint()
     const { x, y } = this.viewport.snapper.snapped || {}
     return origin && x && y && x.almost(origin) && y.almost(origin)
@@ -1219,7 +1297,18 @@ export class PasteSketchTool extends SketchTool {
 export class LineTool extends SketchTool {
   static icon = 'sketch-line'
 
+  inputFields() {
+    if(!this.curve) return []
+    const start = this.curve.endpoints()[0]
+    return polarFields(start, polarPoint(start, this.pointer || start, this.locks))
+  }
+
+  constrained(vec) {
+    return this.curve ? polarPoint(this.curve.endpoints()[0], vec, this.locks) : vec
+  }
+
   constrainCompletedLine(line, endSnap) {
+    this.addLockedDimension('length', [line], dimensionPosition(line, line.length() * 0.2))
     this.constrainPoint(line, 1, endSnap)
     if(endSnap?.lineRelation) {
       const { elem, perpendicular } = endSnap.lineRelation
@@ -1236,8 +1325,9 @@ export class LineTool extends SketchTool {
 
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
+    vec = this.constrained(vec)
     this.mouseMove(vec)
-    const snap = captureSnap(this.viewport.snapper)
+    const snap = this.pointerSnap()
 
     const old = this.curve
     const elems = [...this.sketch.elements]
@@ -1272,12 +1362,14 @@ export class LineTool extends SketchTool {
       this.startSnap = snap
       this.previousSegment = old
     }
+    this.resetInput()
   }
 
   mouseMove(vec) {
+    this.pointer = vec
     if(!this.curve) return
     let p1 = this.curve.endpoints()[0]
-    this.curve.setHandles([p1, vec], false)
+    this.curve.setHandles([p1, this.constrained(vec)], false)
     this.viewport.elementChanged()
   }
 
@@ -1555,9 +1647,24 @@ export class CircleTool extends SketchTool {
     super(component, viewport, sketch)
   }
 
+  inputFields() {
+    if(!this.center) return []
+    const point = this.constrained(this.pointer || this.center)
+    return [{ key: 'diameter', label: '⌀', dimension: 'length', value: point.distanceTo(this.center) * 2.0 }]
+  }
+
+  constrained(vec) {
+    if(!this.center || this.locks.diameter === undefined) return vec
+    return radialPoint(this.center, vec, this.locks.diameter / 2.0)
+  }
+
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
     if(this.center) {
+      this.mouseMove(vec)
+      const radiusPoint = this.constrained(vec)
+      this.addLockedDimension('diameter', [this.curve],
+        this.center.clone().lerp(radiusPoint, 1.5))
       this.center = null
       this.curve = null
     } else {
@@ -1569,13 +1676,15 @@ export class CircleTool extends SketchTool {
       this.constrainPoint(this.curve, 0)
       // this.curve.sketch = this.sketch
     }
+    this.resetInput()
     this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
+    this.pointer = vec
     if(!this.center) return
     // this.curve.setHandles([this.center.toArray(), vec.toArray()], false)
-    this.curve.setHandles([this.center, vec], false)
+    this.curve.setHandles([this.center, this.constrained(vec)], false)
     this.viewport.elementChanged()
   }
 
@@ -1597,9 +1706,28 @@ export class RectangleTool extends SketchTool {
 
   snapExclusions() { return this.lines }
 
+  inputFields() {
+    if(!this.corner) return []
+    const point = this.constrained(this.pointer || this.corner)
+    return [
+      { key: 'width', label: 'W', dimension: 'length', value: Math.abs(point.x - this.corner.x) },
+      { key: 'height', label: 'H', dimension: 'length', value: Math.abs(point.y - this.corner.y) },
+    ]
+  }
+
+  constrained(vec) {
+    if(!this.corner) return vec
+    const point = vec.clone()
+    const { width, height } = this.locks
+    if(width !== undefined) point.x = this.corner.x + (Math.sign(vec.x - this.corner.x) || 1) * width
+    if(height !== undefined) point.y = this.corner.y + (Math.sign(vec.y - this.corner.y) || 1) * height
+    return point
+  }
+
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    const snap = captureSnap(this.viewport.snapper)
+    vec = this.constrained(vec)
+    const snap = this.pointerSnap()
 
     if(!this.corner) {
       this.corner = vec.clone()
@@ -1618,12 +1746,15 @@ export class RectangleTool extends SketchTool {
       this.startSnap = null
       this.lines.length = 0
     }
+    this.resetInput()
     this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
+    this.pointer = vec
     if(!this.corner) return
 
+    vec = this.constrained(vec)
     const [x, y] = [vec.x, vec.y]
     const [cornerX, cornerY] = [this.corner.x, this.corner.y]
     const points = [
@@ -1652,6 +1783,11 @@ export class RectangleTool extends SketchTool {
     })
     this.sketch.addConstraint(new HorVertConstraint(bottom))
 
+    const center = bottom.midpoint().lerp(top.midpoint(), 0.5)
+    const offset = Math.max(bottom.length(), right.length()) * 0.15
+    this.addLockedDimension('width', [bottom], dimensionPosition(bottom, offset, center))
+    this.addLockedDimension('height', [right], dimensionPosition(right, offset, center))
+
     this.constrainPoint(bottom, 0, this.startSnap)
     this.constrainPoint(top, 0, endSnap)
   }
@@ -1678,9 +1814,35 @@ export class SlotTool extends SketchTool {
     return this.firstCenter && !this.secondCenter ? [this.firstCenter] : []
   }
 
+  inputFields() {
+    if(!this.firstCenter) return []
+    const point = this.constrained(this.pointer || this.firstCenter)
+    if(!this.secondCenter) return polarFields(this.firstCenter, point)
+    return [{ key: 'radius', label: 'R', dimension: 'length', value: this.radiusAt(point) }]
+  }
+
+  constrained(vec) {
+    if(!this.firstCenter) return vec
+    if(!this.secondCenter) return polarPoint(this.firstCenter, vec, this.locks)
+    if(this.locks.radius === undefined) return vec
+    const normal = this.slotNormal()
+    if(normal.dot(vec.clone().sub(this.firstCenter)) < 0) normal.negate()
+    return this.firstCenter.clone().addScaledVector(normal, this.locks.radius)
+  }
+
+  slotNormal() {
+    const axis = this.secondCenter.clone().sub(this.firstCenter).normalize()
+    return new THREE.Vector3(-axis.y, axis.x, 0)
+  }
+
+  radiusAt(sizePoint) {
+    return Math.abs(sizePoint.clone().sub(this.firstCenter).dot(this.slotNormal()))
+  }
+
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    const snap = captureSnap(this.viewport.snapper)
+    vec = this.constrained(vec)
+    const snap = this.pointerSnap()
 
     if(!this.firstCenter) {
       this.firstCenter = vec.clone()
@@ -1689,6 +1851,7 @@ export class SlotTool extends SketchTool {
       if(vec.distanceToSquared(this.firstCenter) < 1e-12) return
       this.secondCenter = vec.clone()
       this.secondCenterSnap = snap
+      this.lockedLength = this.locks.length
     } else {
       if(!this.updateShape(vec)) return
       this.commit()
@@ -1696,14 +1859,17 @@ export class SlotTool extends SketchTool {
       this.secondCenter = null
       this.firstCenterSnap = null
       this.secondCenterSnap = null
+      this.lockedLength = undefined
       this.elements = []
     }
+    this.resetInput()
     this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
+    this.pointer = vec
     if(!this.firstCenter || !this.secondCenter) return
-    if(this.updateShape(vec)) this.viewport.elementChanged()
+    if(this.updateShape(this.constrained(vec))) this.viewport.elementChanged()
   }
 
   slotPoints(sizePoint) {
@@ -1775,6 +1941,17 @@ export class SlotTool extends SketchTool {
         new ElemRef(firstArc, 0), new ElemRef(secondArc, 0)
       ))
     }
+    const radius = firstArc.radius
+    if(this.lockedLength !== undefined) {
+      const axisCenter = this.firstCenter.clone().lerp(this.secondCenter, 0.5)
+      const outside = axisCenter.clone().sub(top.midpoint()).normalize()
+      this.sketch.addConstraint(new Dimension(
+        [new ElemRef(firstArc, 0), new ElemRef(secondArc, 0)],
+        axisCenter.addScaledVector(outside, radius * 2.0),
+      ))
+    }
+    this.addLockedDimension('radius', [firstArc],
+      this.firstCenter.clone().addScaledVector(this.slotNormal(), radius * 1.5))
     this.constrainPoint(firstArc, 0, this.firstCenterSnap)
     this.constrainPoint(secondArc, 0, this.secondCenterSnap)
   }
@@ -1817,9 +1994,21 @@ export class PolygonTool extends SketchTool {
     this.viewport.elementChanged()
   }
 
+  inputFields() {
+    if(!this.center) return []
+    const point = this.constrained(this.pointer || this.center)
+    return [{ key: 'radius', label: 'R', dimension: 'length', value: point.distanceTo(this.center) }]
+  }
+
+  constrained(vec) {
+    if(!this.center || this.locks.radius === undefined) return vec
+    return radialPoint(this.center, vec, this.locks.radius)
+  }
+
   mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
-    const snap = captureSnap(this.viewport.snapper)
+    vec = this.constrained(vec)
+    const snap = this.pointerSnap()
 
     if(!this.center) {
       this.center = vec.clone()
@@ -1830,12 +2019,14 @@ export class PolygonTool extends SketchTool {
       this.radiusPoint = null
       this.lines = []
     }
+    this.resetInput()
     this.viewport.elementChanged()
   }
 
   mouseMove(vec) {
+    this.pointer = vec
     if(!this.center) return
-    if(this.updatePolygon(vec)) this.viewport.elementChanged()
+    if(this.updatePolygon(this.constrained(vec))) this.viewport.elementChanged()
   }
 
   rebuildLines() {

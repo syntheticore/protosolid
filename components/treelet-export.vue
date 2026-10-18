@@ -5,7 +5,6 @@
     TreeItemHeader(
       :model-value="config.title"
       :suffix="` - ${config.format.toUpperCase()}`"
-      :selected="expanded"
       :disabled="component.readOnly"
       label-only
       @click="toggle"

@@ -8,7 +8,6 @@
 
       TreeItemHeader(
         :model-value="component.itemTitle(section.id, `Section ${index + 1}`)"
-        :selected="expanded"
         :disabled="component.readOnly"
         label-only
         @click="expanded = !expanded"

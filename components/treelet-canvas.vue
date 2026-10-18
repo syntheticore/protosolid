@@ -9,7 +9,6 @@
       TreeItemHeader(
         :model-value="component.itemTitle(canvas.id, sourceName)"
         :title="canvas.src"
-        :selected="expanded"
         :disabled="component.readOnly"
         label-only
         @click="expanded = !expanded"

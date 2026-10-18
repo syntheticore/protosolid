@@ -1,6 +1,6 @@
 <template lang="pug">
 
-  header(@click="click" @dblclick="emit('dblclick', $event)")
+  header(@click="click" @dblclick="dblclick")
 
     slot(name="icon")
 
@@ -62,15 +62,29 @@
   const draft = ref('')
   const input = ref(null)
 
-  async function click(event) {
-    if(event.detail > 1) return
-    const canRename = props.selected && !props.disabled && !bus.componentPickerActive &&
-      (!props.labelOnly || !!event.target.closest('.tree-item-name')) &&
+  function canRename(event) {
+    return !props.disabled && !bus.componentPickerActive &&
       !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
-    if(!canRename) {
+  }
+
+  function click(event) {
+    if(event.detail > 1) return
+    if(props.labelOnly || !props.selected || !canRename(event)) {
       emit('click', event)
       return
     }
+    startRename()
+  }
+
+  function dblclick(event) {
+    if(props.labelOnly && event.target.closest('.tree-item-name') && canRename(event)) {
+      startRename()
+      return
+    }
+    emit('dblclick', event)
+  }
+
+  async function startRename() {
     draft.value = props.modelValue
     renaming.value = true
     await nextTick()

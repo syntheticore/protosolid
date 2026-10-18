@@ -6,7 +6,6 @@
 
       TreeItemHeader(
         :model-value="simulation.title"
-        :selected="expanded"
         :disabled="component.readOnly"
         label-only
         @click="toggle"
@@ -128,7 +127,7 @@
 
 <style lang="stylus" scoped>
 
-  header h2
+  :deep(h2.tree-item-name)
     margin: 0 !important
 
   .expand

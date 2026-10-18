@@ -62,6 +62,10 @@ export class PlaneHelperObject extends THREE.Mesh {
     this.alcTypes = ['plane']
     this.alcObject = alcObject
 
+    const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geo), materials.planeOutline)
+    outline.raycast = () => {}
+    this.add(outline)
+
     this.applyMatrix4(alcObject.transform)
   }
 

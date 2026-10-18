@@ -172,6 +172,12 @@ class Materials {
       depthTest: false,
     })
 
+    this.planeOutline = new THREE.LineBasicMaterial({
+      transparent: true,
+      opacity: 0.075,
+      depthTest: false,
+    })
+
     this.highlightPlane = new THREE.MeshBasicMaterial({
       side: THREE.DoubleSide,
       color: '#0070ff',

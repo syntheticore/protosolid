@@ -2,94 +2,96 @@
 
   .view-chooser.bordered(@mouseleave="unhover")
 
-    transition-group(
-      name="list"
-      tag="ul"
-      v-if="document.views.length"
-    )
-      li(
-        v-for="(view, i) in document.views"
-        :key="view.id",
-        :class="{ active: document.activeView?.id == view.id, editing: view.editing }"
-        @click="clickView(view, i, $event)"
-        @mouseenter="previewView(view, i, $event)"
+    .content
+
+      transition-group(
+        name="list"
+        tag="ul"
+        v-if="document.views.length"
       )
+        li(
+          v-for="(view, i) in document.views"
+          :key="view.id",
+          :class="{ active: document.activeView?.id == view.id, editing: view.editing }"
+          @click="clickView(view, i, $event)"
+          @mouseenter="previewView(view, i, $event)"
+        )
 
-        .anchor
+          .anchor
 
-          .title(:class="{ hidden: view.editing }") {{ view.title }}
+            .title(:class="{ hidden: view.editing }") {{ view.title }}
 
-          input.input(
-            type="text"
-            ref="input"
-            v-model="view.title"
-            @input="document.markChanged()"
-            :class="{ hidden: !view.editing }"
-            @keydown.enter.esc="delete view.editing"
-            @keydown.stop
-            @blur="delete view.editing"
-            @click.stop
-          )
+            input.input(
+              type="text"
+              ref="input"
+              v-model="view.title"
+              @input="document.markChanged()"
+              :class="{ hidden: !view.editing }"
+              @keydown.enter.esc="delete view.editing"
+              @keydown.stop
+              @blur="delete view.editing"
+              @click.stop
+            )
 
-        Icon.delete-btn(v-if="!view.system" icon="trash" @click.stop="deleteView(i)")
+          Icon.delete-btn(v-if="!view.system" icon="trash" @click.stop="deleteView(i)")
 
-    transition(name="fade" mode="out-in")
+      transition(name="fade" mode="out-in")
 
-      .controls(
-        v-show="!!document.dirtyView"
-        :class="{ settingsOpen, saveCamera: saveCamera && settingsOpen }"
-        @mouseenter="unhover"
-      )
+        .controls(
+          v-show="!!document.dirtyView"
+          :class="{ settingsOpen, saveCamera: saveCamera && settingsOpen }"
+          @mouseenter="unhover"
+        )
 
-        .buttons
+          .buttons
 
-          Icon.plus(icon="plus" @click="createView")
+            Icon.plus(icon="plus" @click="createView")
 
-          Icon.create-settings(icon="ellipsis-v" @click="settingsOpen = !settingsOpen")
+            Icon.create-settings(icon="ellipsis-v" @click="settingsOpen = !settingsOpen")
 
-        .settings
+          .settings
 
-          h1 Save State
-
-          label
-            input(type="checkbox" v-model="saveCamera")
-            | Camera
-
-          label
-            input(type="checkbox" v-model="saveVisibility")
-            | Part Visibility
-
-          label
-            input(type="checkbox" v-model="saveSections")
-            | Section Views
-
-          label
-            input(type="checkbox" v-model="saveActiveComp")
-            | Active Comp.
-
-          label
-            input(type="checkbox" v-model="saveMarker")
-            | History Marker
-
-          label
-            input(type="checkbox" v-model="saveExpansion")
-            | Tree Expansion
-
-          label
-            input(type="checkbox" v-model="saveDisplay")
-            | Display Settings
-
-          .cam-settings
-
-            h1 Camera Settings
+            h1 Save State
 
             label
-              input(type="checkbox" v-model="zoomToFit")
-              | Zoom to fit
+              input(type="checkbox" v-model="saveCamera")
+              | Camera
 
             label
-              input(type="checkbox" v-model="rotationOnly")
-              | Rotation only
+              input(type="checkbox" v-model="saveVisibility")
+              | Part Visibility
+
+            label
+              input(type="checkbox" v-model="saveSections")
+              | Section Views
+
+            label
+              input(type="checkbox" v-model="saveActiveComp")
+              | Active Comp.
+
+            label
+              input(type="checkbox" v-model="saveMarker")
+              | History Marker
+
+            label
+              input(type="checkbox" v-model="saveExpansion")
+              | Tree Expansion
+
+            label
+              input(type="checkbox" v-model="saveDisplay")
+              | Display Settings
+
+            .cam-settings
+
+              h1 Camera Settings
+
+              label
+                input(type="checkbox" v-model="zoomToFit")
+                | Zoom to fit
+
+              label
+                input(type="checkbox" v-model="rotationOnly")
+                | Rotation only
 
 </template>
 
@@ -98,7 +100,15 @@
 
   .view-chooser
     pointer-events: auto
+    display: flex
+    flex-direction: column
+    min-height: 0
+
+  // Clip inside the border, as clipping the chooser itself would cut off its blurred backdrop
+  .content
     overflow: hidden
+    border-radius: 4px
+    flex: 1 1 auto
     display: flex
     flex-direction: column
 

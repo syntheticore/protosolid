@@ -9,7 +9,7 @@
     //-   | Bring up actions
 
     transition(name="fade")
-      .selection-info.bordered(v-if="calculation || toast || document.selection.items.length")
+      .selection-info.bordered(v-pixel-snap v-if="calculation || toast || document.selection.items.length")
 
         template(v-if="calculation")
           div

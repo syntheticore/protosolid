@@ -206,9 +206,10 @@ input[type="color"]
       z-index: -1
       pointer-events: none
       border-radius: inherit
-      border: 1px solid transparent
+      // Repaint the border on top of the backdrop, as Chrome blurs over the original one
+      border: 1px solid
+      border-color: inherit
       background: rgba($dark2, 0.875)
-      background-clip: padding-box
       backdrop-filter: blur(32px)
 
 .tipped

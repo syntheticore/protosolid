@@ -1,6 +1,7 @@
 <template lang="pug">
 
   footer.feature-bar.bordered(
+    v-pixel-snap
     :aria-busy="document.isRegenerating"
     :class="{ calculating: document.isRegenerating }"
   )

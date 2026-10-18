@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { markRaw } from 'vue'
+import { markRaw, toRaw } from 'vue'
 
 // import {
 //   vecToThree,
@@ -156,7 +156,7 @@ function pointTargetsAtPosition(sketch, position, excludedElem) {
     ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
   ]
   return candidates.flatMap(candidate =>
-    candidate == excludedElem || !candidate.handles ? [] : candidate.handles().map((point, index) => ({
+    toRaw(candidate) == toRaw(excludedElem) || !candidate.handles ? [] : candidate.handles().map((point, index) => ({
       elem: candidate,
       index,
       point,

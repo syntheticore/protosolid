@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { nextTick } from 'vue'
+import { nextTick, toRaw } from 'vue'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
@@ -163,24 +163,28 @@ export class Sketch {
   }
 
   remove(elem) {
+    // Callers may pass freshly created raw objects, while the sketch's
+    // reactive arrays hand out proxies. Compare raw identities.
+    elem = toRaw(elem)
     const offsets = this.constraints.filter(constraint => constraint instanceof ProfileOffsetConstraint &&
-      (constraint == elem || constraint.items.some(item => item.curve() == elem)))
+      (toRaw(constraint) == elem || constraint.items.some(item => toRaw(item.curve()) == elem)))
     offsets.forEach(constraint => {
       constraint.outputs().forEach(curve => {
-        this.elements = this.elements.filter(element => element != curve)
-        this.constraints = this.constraints.filter(other => other == constraint || !other.items.some(item => item.curve() == curve))
+        curve = toRaw(curve)
+        this.elements = this.elements.filter(element => toRaw(element) != curve)
+        this.constraints = this.constraints.filter(other => other == constraint || !other.items.some(item => toRaw(item.curve()) == curve))
         curve.clear()
       })
       this.constraints = this.constraints.filter(other => other != constraint)
     })
     this.elements.forEach(element => element.fullyConstrained = false)
     if(elem instanceof SketchElement) {
-      this.elements = this.elements.filter(e => e != elem )
-      this.constraints = this.constraints.filter(c => !c.items.some(item => item.curve() == elem ) )
-      if(elem.projection) this.projections = this.projections.filter(p => p != elem.projection )
+      this.elements = this.elements.filter(e => toRaw(e) != elem )
+      this.constraints = this.constraints.filter(c => !c.items.some(item => toRaw(item.curve()) == elem ) )
+      if(elem.projection) this.projections = this.projections.filter(p => toRaw(p) != toRaw(elem.projection) )
 
     } else if(elem instanceof Constraint) {
-      this.constraints = this.constraints.filter(c => c != elem )
+      this.constraints = this.constraints.filter(c => toRaw(c) != elem )
     }
   }
 

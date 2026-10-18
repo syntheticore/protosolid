@@ -39,7 +39,9 @@
 
         .controls(
           v-show="!!document.dirtyView"
-          :class="{ settingsOpen, saveCamera: saveCamera && settingsOpen }"
+          ref="controls"
+          :class="{ saveCamera: saveCamera && settingsOpen }"
+          :style="settingsOpen ? { height: `${settingsHeight - (saveCamera ? 0 : camSettingsHeight)}px` } : null"
           @mouseenter="unhover"
         )
 
@@ -47,7 +49,7 @@
 
             Icon.plus(icon="plus" @click="createView")
 
-            Icon.create-settings(icon="ellipsis-v" @click="settingsOpen = !settingsOpen")
+            Icon.create-settings(icon="ellipsis-v" @click="toggleSettings")
 
           .settings
 
@@ -81,7 +83,7 @@
               input(type="checkbox" v-model="saveDisplay")
               | Display Settings
 
-            .cam-settings
+            .cam-settings(ref="camSettings")
 
               h1 Camera Settings
 
@@ -215,11 +217,7 @@
       margin-top: 0
       border: none
 
-    &.settingsOpen
-      height: 218px
-
     &.saveCamera
-      height: 286px
 
       .cam-settings
         opacity: 1
@@ -268,6 +266,7 @@
       margin-right: 0.35rem
 
   .cam-settings
+    display: flow-root
     opacity: 0
     transition: all 0.25s 0.2s
 
@@ -312,6 +311,16 @@
   const rotationOnly = ref(false)
 
   const input = ref(null)
+  const controls = ref(null)
+  const camSettings = ref(null)
+  const settingsHeight = ref(0)
+  const camSettingsHeight = ref(0)
+
+  function toggleSettings() {
+    settingsHeight.value = controls.value.scrollHeight + controls.value.offsetHeight - controls.value.clientHeight
+    camSettingsHeight.value = camSettings.value.offsetHeight
+    settingsOpen.value = !settingsOpen.value
+  }
 
   function createView() {
     const allComps = props.document.top().getChildren()

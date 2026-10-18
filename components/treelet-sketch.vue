@@ -6,7 +6,7 @@
     :class="{ hidden: isHidden }"
   )
 
-    .box(:class="{ selected: document.selection.has(sketch) }")
+    .box(:class="{ highlighted: isHighlighted, selected: document.selection.has(sketch) }")
 
       TreeItemHeader(
         :model-value="component.itemTitle(sketch.id, `Sketch ${index + 1}`)"
@@ -51,7 +51,7 @@
   export default {
     name: 'TreeletSketch',
 
-    inject: ['bus'],
+    inject: ['bus', 'highlight'],
 
     props: {
       document: Object,
@@ -61,6 +61,10 @@
     },
 
     computed: {
+      isHighlighted: function() {
+        return this.highlight?.id == this.sketch.id || this.highlight?.sketch?.id == this.sketch.id
+      },
+
       isHidden: function() {
         return this.component.creator.itemsHidden[this.sketch.id]
       },

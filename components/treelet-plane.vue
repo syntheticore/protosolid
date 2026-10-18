@@ -6,7 +6,7 @@
     :class="{ hidden: isHidden }"
   )
 
-    .box(:class="{ selected: document.selection.hasId(plane.id) }")
+    .box(:class="{ highlighted: plane.id == (highlight && highlight.id), selected: document.selection.hasId(plane.id) }")
 
       TreeItemHeader(
         :model-value="component.itemTitle(plane.id, `Plane ${index + 1}`)"
@@ -40,6 +40,7 @@
 
   const props = defineProps(['document', 'component', 'plane', 'index'])
   const bus = inject('bus')
+  const highlight = inject('highlight')
 
   const isHidden = computed(() => props.component.isItemHidden(props.plane.id))
 

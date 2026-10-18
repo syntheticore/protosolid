@@ -595,10 +595,14 @@ export class ManipulationTool extends HighlightTool {
     super(component, viewport, [])
     this.localSpace = true
     this.preferPointObjects = true
-    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'solid'])
+    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'solid', 'plane'])
   }
 
   acceptsInput(item) {
+    if(item instanceof PlaneHelper) {
+      const defaultPlaneIds = ['XY', 'XZ', 'YZ'].map(name => `${item.componentId}/${name}`)
+      return !defaultPlaneIds.includes(item.id)
+    }
     return !(item instanceof PointHelper)
   }
 

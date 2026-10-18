@@ -3,7 +3,7 @@ use std::cell::OnceCell;
 use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec3};
-use super::trim::{face_boundary_curves, face_parameter_bounds, point_in_trim, coincident_supports, FaceCurve};
+use super::trim::{face_boundary_curves, face_parameter_bounds, point_in_periodic_trim, coincident_supports, FaceCurve};
 use super::bounds::Bounds;
 use super::{box_center, nearest_uv, Compound, Curve3, FaceId, FaceOrientation, IntersectionKind,
     IntersectionSet, KernelResult, Line3, ModelTolerance, ParameterRange, ShellId, Surface3, Topology};
@@ -133,7 +133,7 @@ impl<'a> BrepClassifier<'a> {
             Point2::new(parameters.0, parameters.1),
             box_center(face.parameters),
         );
-        point_in_trim(uv, &face.boundary)
+        point_in_periodic_trim(uv, &face.boundary, surface.domains(), face.parameters, self.tolerance)
     }
 
     pub(super) fn contains(&self, point: Point3) -> KernelResult<bool> {

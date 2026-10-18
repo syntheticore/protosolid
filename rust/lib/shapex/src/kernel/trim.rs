@@ -309,6 +309,33 @@ pub(super) fn point_in_trim<P>(point: Point2, boundary: &[FaceCurve<P>]) -> Kern
     Ok(crossings % 2 == 1)
 }
 
+/// Test every periodic representative that lies within the trim's chart bounds.
+/// A relocated seam can make that chart wider than one period, so the copy
+/// nearest its bounding-box center is not sufficient to classify a point.
+pub(super) fn point_in_periodic_trim<P>(
+    point: Point2,
+    boundary: &[FaceCurve<P>],
+    domains: [super::ParameterDomain; 2],
+    bounds: [ParameterRange; 2],
+    tolerance: ModelTolerance,
+) -> KernelResult<bool> {
+    if point_in_trim(point, boundary)? { return Ok(true); }
+    let copies: [Vec<f64>; 2] = std::array::from_fn(|axis| {
+        if let Some(period) = domains[axis].period {
+            let first = ((bounds[axis].start - point[axis] - tolerance.parameter) / period).ceil() as i64;
+            let last = ((bounds[axis].end - point[axis] + tolerance.parameter) / period).floor() as i64;
+            (first..=last).map(|turn| point[axis] + turn as f64 * period).collect()
+        } else { vec![point[axis]] }
+    });
+    for u in &copies[0] {
+        for v in &copies[1] {
+            let copy = Point2::new(*u, *v);
+            if copy != point && point_in_trim(copy, boundary)? { return Ok(true); }
+        }
+    }
+    Ok(false)
+}
+
 pub(super) fn sample_pcurve<P>(curve: &FaceCurve<P>, count: usize) -> KernelResult<Vec<(f64, Point2)>> {
     (0..=count)
         .map(|index| {

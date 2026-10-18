@@ -1278,4 +1278,43 @@ mod tests {
             p.area() * curve_length(rail, range),
         );
     }
+
+    #[test]
+    fn swept_circle_through_cuts_from_cut_fails_document() {
+        let t = ModelTolerance::default();
+        let rail: Curve3 = NurbsCurve3::new(
+            4,
+            vec![
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(-37.169861177805814, 0.0, 0.0),
+                Point3::new(-45.73255171091292, 37.85098428839387, 0.0),
+                Point3::new(-71.80983651628452, 68.59882756636935, 0.0),
+                Point3::new(-118.12620803627291, 41.353903142846775, 0.0),
+            ],
+            vec![1.0; 5],
+            vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        ).unwrap().into();
+        let profile = Profile::new(
+            Wire2::new([TrimmedCurve2::circle(Point2::new(0.0, 0.0), 15.3255258862366).unwrap()], t).unwrap(),
+            [], t,
+        ).unwrap();
+        let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), -Vec3::unit_z(), Vec3::unit_y(), t).unwrap();
+        let body = profile.sweep(plane, &rail, ParameterRange::new(0.0, 1.0).unwrap()).unwrap();
+        let polygons = [
+            [(-106.20972552812498, 11.868346132014786), (-53.986287235871465, -14.172223915621164),
+             (-44.940053217144865, 12.550922107568695), (-64.08968090020764, 34.50590926012473)],
+            [(-49.85963952340458, 74.76414919788961), (-58.356989810373555, 39.26282314317854),
+             (-46.525691178162795, 28.773218170290647), (1.9369041779040828, 51.85413948384922)],
+        ];
+        let cutters = polygons.map(|points| {
+            Profile::new(Wire2::polygon(points.map(|(x, y)| Point2::new(x, y)), t).unwrap(), [], t).unwrap()
+                .extrude(Plane3::new(Point3::new(0.0, 0.0, -15.7255258862366), Vec3::unit_x(), Vec3::unit_y(), t).unwrap(),
+                    Vec3::new(0.0, 0.0, 31.4510517724732)).unwrap()
+        });
+        let cutters = cutters.map(|cutter| cutter.intersection(&body).unwrap());
+        let tool = cutters[1].union(&cutters[0]).unwrap();
+        let cut = body.difference(&tool).expect("both through cuts must close on the periodic swept face");
+        assert!(cut.volume() > 0.0 && cut.volume() < body.volume());
+        assert!(!cut.tessellate(TessellationOptions::new(0.05, 0.15, 24).unwrap()).unwrap().triangles.is_empty());
+    }
 }

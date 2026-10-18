@@ -8,7 +8,7 @@ use crate::{Point2, Point3, Vec2};
 use super::brep_classification::{BrepClassifier, PointClassification};
 use super::trim::{align_pcurve_to_face_chart, coincident_supports, curve_intersections,
     face_boundary_curves, face_parameter_bounds, intersection_chart_copies,
-    point_in_trim, sample_pcurve, translate_pcurve, trim_to_faces};
+    point_in_trim, point_in_periodic_trim, sample_pcurve, translate_pcurve, trim_to_faces};
 use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::polygon::point_in_polygon;
 use super::{
@@ -972,6 +972,13 @@ fn arrange_face(
         .abs()
         .min((uv_bounds[1].y - uv_bounds[0].y).abs())
         * 5.0e-2;
+    let domains = surface.domains();
+    let stepped_chart = domains.iter().enumerate().any(|(axis, domain)| {
+        domain.period.is_some_and(|period| {
+            uv_bounds[1][axis] - uv_bounds[0][axis] > period + tolerance.parameter * 64.0
+        })
+    });
+    let chart_bounds = face_parameter_bounds(original_boundary, tolerance)?;
     let classify_orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
         let value = surface.evaluate(uv.x, uv.y)?;
         if let Some(owner) = shared_owner {
@@ -1029,14 +1036,23 @@ fn arrange_face(
         Ok(direct)
     };
     let orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
-        // Classify one complete periodic chart. The material is periodic,
-        // but its planar arrangement needs an exterior at the chart seams.
-        if has_coincident_support && surface.domains().iter().enumerate().any(|(axis, domain)| {
-            domain.period.is_some_and(|period| {
-                uv[axis] < uv_bounds[0][axis] || uv[axis] > uv_bounds[0][axis] + period
-            })
-        }) {
-            return Ok(None);
+        // Keep the source trim's periodic representative. Relocating seams
+        // around a cut can produce a stepped chart wider than one period;
+        // clipping it to a rectangle would discard a real boundary segment.
+        // Newly exposed material uses the default one-period chart only when
+        // none of its copies already belongs to the source trim.
+        if has_coincident_support {
+            let outside = domains.iter().enumerate().any(|(axis, domain)| {
+                domain.period.is_some_and(|period| {
+                    uv[axis] < uv_bounds[0][axis] || uv[axis] > uv_bounds[0][axis] + period
+                })
+            });
+            let in_source_chart = stepped_chart && point_in_trim(uv, original_boundary)?;
+            if !in_source_chart && (outside || (stepped_chart && point_in_periodic_trim(
+                uv, original_boundary, domains, chart_bounds, tolerance,
+            )?)) {
+                return Ok(None);
+            }
         }
         if surface
             .domains()

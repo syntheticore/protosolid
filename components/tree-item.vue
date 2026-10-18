@@ -321,11 +321,19 @@
             background: $dark1 * 1.5
             transition: none
 
+        .controls svg
+          flex: none
+          padding: 12px 4px
+          margin: -8px 0
+
         .controls .delete
         .controls .delete:hover
           color: $cancel !important
 
     .controls
+      display: flex
+      align-self: stretch
+      align-items: center
       border-left: 1px solid $dark1 * 1.4
       white-space: nowrap
       overflow: hidden

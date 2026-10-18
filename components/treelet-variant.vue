@@ -63,6 +63,7 @@
 
   .expand-toggle
     display: flex
+    align-self: stretch
     align-items: center
     margin: 0 5px 0 2px
     padding-right: 6px
@@ -84,7 +85,7 @@
     padding: 12px
 
   .variant-option
-    height: 24px
+    height: 21px
     color: $bright1
     background: transparent
     border: 0
@@ -96,6 +97,11 @@
       color: inherit
       background: transparent
       border: 0
+      padding-top: 0
+      padding-bottom: 0
+
+    :deep(.expander)
+      padding: 0
 
     &:hover
       color: white

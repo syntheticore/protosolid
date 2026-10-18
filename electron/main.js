@@ -118,7 +118,7 @@ const template = [
       {
         label: "Settings...",
         accelerator: "CmdOrCtrl+,",
-        click: openPreferencesWindow,
+        click: () => openPreferencesWindow(),
       },
       { type: 'separator' },
       // { role: 'services' },
@@ -162,6 +162,7 @@ const template = [
       },
       { type: 'separator' },
       {
+        id: 'save',
         label: "Save",
         accelerator: "CmdOrCtrl+S",
         click: async () => {
@@ -249,8 +250,9 @@ Menu.setApplicationMenu(menu)
 let mainWindow
 let preferencesWindow
 
-function openPreferencesWindow() {
+function openPreferencesWindow(section) {
   if(preferencesWindow && !preferencesWindow.isDestroyed()) {
+    if(section) preferencesWindow.webContents.send('show-preferences-section', section)
     if(preferencesWindow.isMinimized()) preferencesWindow.restore()
     preferencesWindow.show()
     preferencesWindow.focus()
@@ -276,7 +278,7 @@ function openPreferencesWindow() {
   preferencesWindow.setMenu(null)
 
   preferencesWindow.loadFile('app/index.html', {
-    query: { window: 'preferences' },
+    query: { window: 'preferences', ...(section && { section }) },
   })
 
   preferencesWindow.once('ready-to-show', () => preferencesWindow.show())
@@ -420,7 +422,11 @@ ipcMain.on('restart', function() {
   app.quit()
 });
 
-ipcMain.on('open-preferences', openPreferencesWindow)
+ipcMain.on('set-save-enabled', function(event, enabled) {
+  menu.getMenuItemById('save').enabled = enabled
+})
+
+ipcMain.on('open-preferences', (event, section) => openPreferencesWindow(section))
 
 ipcMain.on('close-preferences', function(event) {
   if(preferencesWindow && !preferencesWindow.isDestroyed()

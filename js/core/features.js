@@ -9,7 +9,7 @@ import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, rad } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
-import { KernelMismatchError, parseDocument } from './document-format.js'
+import { KernelMismatchError, checkedOutData, parseDocument } from './document-format.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame, faceGizmoFrame } from '../three/gizmos.js'
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
@@ -1497,6 +1497,7 @@ export class PlaceFeature extends Feature {
   async chooseFile() {
     const linkCheck = ++this.linkCheck
     const file = await loadFile('.cad', 'text')
+    file.data = checkedOutData(file.data)
     const sourceTree = this.parseSource(file.data)
     if(linkCheck != this.linkCheck) return
     this.filePath = file.path
@@ -1522,6 +1523,7 @@ export class PlaceFeature extends Feature {
 
     try {
       const file = await loadFile('.cad', 'text', this.filePath)
+      file.data = checkedOutData(file.data)
       if(linkCheck != this.linkCheck) return
       if(file.data == this.cachedData) return
       this.pendingTree = this.parseSource(file.data, this.variantOption)

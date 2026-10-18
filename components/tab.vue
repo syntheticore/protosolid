@@ -2,11 +2,19 @@
 
   li.tab(:class="{ active: document == activeDocument }")
 
-    span.title {{ document.filePath || 'Untitled Document' }} {{ document.hasChanges ? '*' : null }}
+    span.title {{ document.filePath || 'Untitled Document' }} {{ document.hasUnsavedChanges ? '*' : null }}
 
-    MenuButton.naked.left.natural.history-btn(title="History" icon="code-branch")
+    MenuButton.naked.left.natural.history-btn(icon="code-branch")
 
-      HistoryView
+      template(v-slot:header="")
+        template(v-if="branchStatus")
+          Icon.branch-icon(icon="code-branch")
+          | {{ branchStatus }}
+        template(v-else) History
+        button.format-settings(title="Document format settings" @click="openFormatSettings")
+          Icon(icon="sliders-h" fixed-width)
+
+      HistoryView(:document="document")
 
     button.close-btn(@click.stop="$emit('delete-document', document)")
       Icon(icon="times")
@@ -54,6 +62,30 @@
     width: 0
     transition: all 0.2s
 
+  .branch-icon
+    margin-right: 0.5rem
+
+  .format-settings
+    position: absolute
+    top: 50%
+    right: 2px
+    transform: translateY(-50%)
+    display: flex
+    align-items: center
+    justify-content: center
+    width: 24px
+    height: 24px
+    padding: 0
+    border: none
+    border-radius: 3px
+    background: none
+    color: $bright2
+    font-size: 12px
+
+    &:hover
+      color: white
+      background: rgba(white, 0.12)
+
   .close-btn
     background: none
     border: none
@@ -73,7 +105,23 @@
 
 <script setup>
 
+  import { openPreferences } from './../js/preferences.js'
+
   const props = defineProps(['document', 'active-document'])
   const emit = defineEmits(['delete-document'])
+
+  const bus = inject('bus')
+
+  function openFormatSettings() {
+    bus.emit('close-widgets')
+    openPreferences('files')
+  }
+
+  const branchStatus = computed(() => {
+    props.document.repositoryVersion
+    const repository = props.document.repository
+    if(!repository || repository.isEmpty) return null
+    return repository.currentBranch ? `On branch ${repository.currentBranch}` : 'Viewing an earlier version'
+  })
 
 </script>

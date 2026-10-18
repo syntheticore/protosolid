@@ -5,6 +5,7 @@ const emitter = createNanoEvents()
 const preferences = {
   preferredUnit: 'mm',
   modelingKernel: 'shapex',
+  documentFormat: 'plain',
   angleUnit: 'degrees',
   densityUnit: 'g/cm3',
   theme: 'system',
@@ -53,6 +54,18 @@ if(typeof window !== 'undefined') window.addEventListener('storage', event => {
   }
 })
 
-export { emitter, savePreferences, loadPreferences, applyPreferences }
+// Opens the settings window, optionally at a section such as 'files'
+function openPreferences(section) {
+  if(window.ipc) {
+    window.ipc.send('open-preferences', section)
+    return
+  }
+  const url = new URL(window.location.href)
+  url.searchParams.set('window', 'preferences')
+  if(section) url.searchParams.set('section', section)
+  window.open(url, 'protosolid-settings', 'popup,width=760,height=560')
+}
+
+export { emitter, savePreferences, loadPreferences, applyPreferences, openPreferences }
 
 export default preferences

@@ -21,8 +21,8 @@
 
         template(v-else-if="toast")
           div
-            span Rejected
-            span.warn &nbsp;{{ toast }}
+            span {{ toast.title }}
+            span.warn &nbsp;{{ toast.message }}
 
         template(v-else-if="document.selection.items.length")
           div
@@ -158,7 +158,7 @@
       })
       
       this.bus.on('toast', (msg) => {
-        this.toast = msg
+        this.toast = typeof msg == 'string' ? { title: 'Rejected', message: msg } : msg
         setTimeout(() => this.toast = null, 5000)
       })
     },

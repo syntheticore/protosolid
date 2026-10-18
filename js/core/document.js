@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { nextTick } from 'vue'
+import { nextTick, markRaw } from 'vue'
 
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
@@ -8,7 +8,10 @@ import { Selection } from '../selection.js'
 import { Component, SectionView } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
-import { KernelMismatchError, parseDocument } from './document-format.js'
+import { KernelMismatchError, parseContent, readDocumentFile } from './document-format.js'
+import { Repository } from './repository.js'
+import { describeConflict } from './merge-conflicts.js'
+import { showDialog } from '../dialogs.js'
 import { makeID, lastId, setLastId } from './id.js'
 import Expression from './expression.js'
 import preferences from '../preferences.js'
@@ -28,6 +31,11 @@ export default class Document extends Emitter {
     this.regenerationQueue = Promise.resolve()
     this.pendingRegenerations = 0
     this.filePath = null
+    // Version history when the document uses the versioned file format
+    this.repository = null
+    // Bumped on every repository change, as the repository itself is not reactive
+    this.repositoryVersion = 0
+    this.hasRepositoryChanges = false
     this.timeline = new Timeline()
     this.materials = []
     this.treeletsExpandedByDefault = true
@@ -95,6 +103,15 @@ export default class Document extends Emitter {
 
   get isRegenerating() {
     return this.pendingRegenerations > 0
+  }
+
+  get hasUnsavedChanges() {
+    return this.hasChanges || this.hasRepositoryChanges
+  }
+
+  // Documents that were never written to a file can always be saved
+  get canSave() {
+    return this.hasUnsavedChanges || !this.filePath
   }
 
   isTreeletExpanded(key, defaultValue = this.treeletsExpandedByDefault) {
@@ -628,8 +645,7 @@ export default class Document extends Emitter {
     }
   }
 
-  async save(as) {
-    await this.cancelFeature()
+  snapshot() {
     const dump = {
       kernel: window.kernel.modeling.id,
       lastId,
@@ -639,24 +655,189 @@ export default class Document extends Emitter {
         return storedView
       }),
     }
-    const json = Serialize.stringify(dump)
+    return JSON.parse(JSON.stringify(Serialize.serialize(dump)))
+  }
+
+  async save(as) {
+    if(!as && !this.canSave) return
+    await this.cancelFeature()
+    // Plain documents are upgraded on save, but history is only dropped by an explicit Save As
+    const versioned = preferences.documentFormat == 'versioned' || (!!this.repository && !as)
+    const repository = versioned && (this.repository?.clone() || new Repository())
     try {
-      this.filePath = await saveFile(json, 'cad', as ? null : this.filePath)
+      let data
+      if(versioned) {
+        // History-only changes already have their commits; saving just persists the repository.
+        if(this.hasChanges || !this.hasRepositoryChanges || repository.isEmpty) {
+          const details = await this.requestCommitDetails(repository)
+          if(!details) throw 'canceled'
+          if(details.branch) {
+            repository.createBranch(details.branch)
+            repository.checkout(details.branch)
+          }
+          repository.lastId = String(lastId)
+          repository.commit(this.snapshot(), details.message)
+        }
+        data = repository.stringify()
+      } else {
+        data = JSON.stringify(this.snapshot(), null, 2)
+      }
+      this.filePath = await saveFile(data, 'cad', as ? null : this.filePath)
+      this.repository = repository ? markRaw(repository) : null
+      this.repositoryVersion++
       this.hasChanges = false
-      await autoExportComponents(this.top())
+      this.hasRepositoryChanges = false
     } catch(error) {
       if(error != 'canceled') alert(error)
       throw error
     }
+
+    try {
+      await autoExportComponents(this.top())
+    } catch(error) {
+      console.error(error)
+      this.bus.emit('toast', {
+        title: 'Document saved',
+        message: `Auto-export failed: ${error.message || error}`,
+      })
+    }
+  }
+
+  async requestCommitDetails(repository) {
+    const detached = !repository.isEmpty && !repository.currentBranch
+    let branchName = 'branch'
+    for(let i = 2; repository.branches[branchName]; i++) branchName = `branch-${i}`
+    const result = await showDialog({
+      title: 'Save Version',
+      icon: 'code-branch',
+      message: detached ?
+        'You are viewing an earlier version. Saving it starts a new branch.' :
+        `Describe what changed in this version on branch '${repository.currentBranch}'.`,
+      fields: [
+        {
+          key: 'message',
+          value: repository.isEmpty ? 'Initial version' : '',
+          placeholder: 'Describe your changes',
+          required: true,
+        },
+        ...(detached ? [{ key: 'branch', label: 'New branch', value: branchName, required: true }] : []),
+      ],
+      actions: [{ label: 'Save', value: 'save', primary: true }],
+    })
+    return result && {
+      message: result.values.message.trim(),
+      branch: result.values.branch?.trim(),
+    }
+  }
+
+  // Persist repository changes that don't create a new version of the working copy
+  async writeRepository() {
+    this.repositoryVersion++
+    this.hasRepositoryChanges = true
+    if(!window.ipc || !this.filePath) return
+    await saveFile(this.repository.stringify(), 'cad', this.filePath)
+    this.hasRepositoryChanges = false
+  }
+
+  // Target is a branch name or a commit id
+  async checkoutVersion(target) {
+    if(this.hasChanges && !window.confirm('Discard unsaved changes and switch to another version?')) return
+    await this.cancelFeature()
+    const commitId = this.repository.branches[target] || target
+    const materials = []
+    let dump
+    try {
+      dump = parseContent(this.repository.read(commitId), { document: this, sketches: {}, materials })
+    } catch(error) {
+      console.error(error)
+      return alert(error instanceof KernelMismatchError ? error.message : 'This version could not be opened.')
+    }
+    this.repository.checkout(target)
+    await this.applyDump(dump, materials, 'Switching version', this.repository.commits[commitId].message)
+    await this.writeRepository()
+  }
+
+  async createBranch(name, commitId) {
+    this.repository.createBranch(name, commitId)
+    if(commitId == this.repository.headId) this.repository.checkout(name)
+    await this.writeRepository()
+    if(commitId != this.repository.headId) await this.checkoutVersion(name)
+  }
+
+  async deleteBranch(name) {
+    this.repository.deleteBranch(name)
+    await this.writeRepository()
+  }
+
+  async renameBranch(name, newName) {
+    this.repository.renameBranch(name, newName)
+    await this.writeRepository()
+  }
+
+  async mergeBranch(branch) {
+    const repository = this.repository
+    const current = repository.currentBranch
+    if(!current) return alert('Switch to a branch before merging.')
+    if(this.hasChanges) return alert('Save your changes before merging.')
+    await this.cancelFeature()
+
+    const resolvers = {
+      lastId: (base, ours, theirs) => bigIntMax(...[ours, theirs].map(id => BigInt(id.slice(0, -1)) )).toString() + 'n',
+      'timeline.marker': (base, ours) => ours,
+    }
+    let plan = repository.planMerge(branch, { resolvers })
+    if(plan.type == 'up-to-date') return alert(`'${current}' already contains all changes from '${branch}'.`)
+
+    let message
+    if(plan.type == 'merge') {
+      const result = await showDialog({
+        title: 'Merge Branch',
+        icon: 'compress-alt',
+        message: plan.conflicts.length ?
+          `Both branches changed the same values in ${plan.conflicts.length} place(s).\nChoose which branch wins these conflicts.` :
+          `Merge the changes from '${branch}' into '${current}'.`,
+        details: plan.conflicts.map(conflict => describeConflict(conflict, this.timeline, [current, branch]) ),
+        fields: [{ key: 'message', value: `Merge branch '${branch}' into ${current}`, required: true }],
+        actions: plan.conflicts.length ?
+          // Same order as the conflict values: merged branch left, current branch right
+          [
+            { label: `Keep '${branch}'`, value: 'theirs' },
+            { label: `Keep '${current}'`, value: 'ours', primary: true },
+          ] :
+          [{ label: 'Merge', value: 'ours', primary: true }],
+      })
+      if(!result) return
+      if(result.action == 'theirs') plan = repository.planMerge(branch, { strategy: 'theirs', resolvers })
+      message = result.values.message.trim()
+      // Show every merged feature
+      plan.content.timeline.marker = plan.content.timeline.features.length
+    }
+
+    const materials = []
+    let dump
+    try {
+      // Deserialization works in place, so keep plan content intact for the commit
+      const content = plan.type == 'merge' ? structuredClone(plan.content) : repository.read(plan.commitId)
+      dump = parseContent(content, { document: this, sketches: {}, materials })
+    } catch(error) {
+      console.error(error)
+      return alert(error instanceof KernelMismatchError ? error.message : 'The merged version could not be opened.')
+    }
+    repository.commitMerge(plan, message)
+    await this.applyDump(dump, materials, 'Merging', branch)
+    await this.writeRepository()
   }
 
   async load(path) {
     let file
     let dump
+    let repository
     const materials = []
     try {
       file = await loadFile('.cad', 'text', path)
-      dump = parseDocument(file.data, { document: this, sketches: {}, materials })
+      const contents = readDocumentFile(file.data)
+      repository = contents.repository
+      dump = parseContent(contents.content, { document: this, sketches: {}, materials })
     } catch(error) {
       if(error != 'canceled') {
         console.error(error)
@@ -664,18 +845,24 @@ export default class Document extends Emitter {
       }
       throw error
     }
+    this.filePath = file.path
+    this.repository = repository && markRaw(repository)
+    this.repositoryVersion++
+    this.hasRepositoryChanges = false
+    this.isFresh = false
+    this.treeletsExpandedByDefault = false
+    await this.applyDump(dump, materials, 'Opening document', file.path?.split(/[\\/]/).pop() || 'Document', true)
+  }
+
+  async applyDump(dump, materials, title, detail, resetCamera = false) {
     const calculationId = ++nextCalculationId
-    this.bus.emit('calculation', {
-      id: calculationId,
-      title: 'Opening document',
-      detail: file.path?.split(/[\\/]/).pop() || 'Document',
-    })
+    this.bus.emit('calculation', { id: calculationId, title, detail })
     await yieldToBrowser()
     try {
-      this.filePath = file.path
-      this.isFresh = false
-      this.treeletsExpandedByDefault = false
-      setLastId(bigIntMax(BigInt(dump.lastId || 0), lastId))
+      setLastId(bigIntMax(BigInt(dump.lastId || 0), BigInt(this.repository?.lastId || 0), lastId))
+      this.activateSimulation(null)
+      this.selection.clear()
+      this.hasChanges = false
       this.timeline = dump.timeline
       this.materials = materials
       await this.timeline.evaluateAsync((feature, index, total) => {
@@ -695,7 +882,7 @@ export default class Document extends Emitter {
       this.viewPreviewSnapshot = null
       const homeView = this.views.find(view => view.system && view.title == 'Home') ||
         this.views.find(view => view.position && view.target)
-      if(homeView) this.currentCameraView = cloneCameraView(homeView)
+      if(homeView && resetCamera) this.currentCameraView = cloneCameraView(homeView)
     } finally {
       this.bus.emit('calculation-finished', calculationId)
     }

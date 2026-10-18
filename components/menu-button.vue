@@ -15,7 +15,8 @@
 
         .wrapper
 
-          h1.header(v-if="title") {{ title }}
+          h1.header(v-if="title || $slots.header")
+            slot(name="header") {{ title }}
 
           slot
 
@@ -115,6 +116,7 @@
     right: -12px
 
   .header
+    position: relative
     text-align: center
     font-size: 14px
     font-weight: bold

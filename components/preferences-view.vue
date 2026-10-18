@@ -31,6 +31,18 @@
               small A restart is required after changing the modeling kernel
             ComboBox(v-model="preferences.modelingKernel" label="Geometry kernel" :options="[{ value: 'occ', label: 'OpenCascade' }, { value: 'shapex', label: 'Shapex' }]" @update:model-value="restartRequired = true")
 
+      section(v-else-if="activeSection === 'files'")
+        header
+          h1 Files
+          p Choose how documents are stored when saving.
+
+        .settings-group
+          label
+            span.setting-label
+              strong Document format
+              small Versioned documents keep every save as a version with a message, and support branching and merging. Existing history is only dropped by an explicit Save As.
+            ComboBox(v-model="preferences.documentFormat" label="Document format" :options="[{ value: 'plain', label: 'Unversioned' }, { value: 'versioned', label: 'Versioned' }]")
+
       section(v-else-if="activeSection === 'units'")
         header
           h1 Units
@@ -335,16 +347,21 @@
     data() {
       return {
         preferences,
-        activeSection: 'modeling',
+        activeSection: new URLSearchParams(window.location.search).get('section') || 'modeling',
         isHighDPI: window.devicePixelRatio > 1,
         restartRequired: false,
         sections: [
           { id: 'modeling', title: 'Modeling', icon: 'cube' },
+          { id: 'files', title: 'Files', icon: 'save' },
           { id: 'units', title: 'Units', icon: 'ruler' },
           { id: 'appearance', title: 'Appearance', icon: 'desktop' },
           { id: 'tolerances', title: 'Tolerances', icon: 'crosshairs' },
         ],
       }
+    },
+
+    mounted() {
+      if(window.ipc) window.ipc.on('show-preferences-section', (e, section) => this.activeSection = section )
     },
 
     watch: {

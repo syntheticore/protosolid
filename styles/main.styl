@@ -66,6 +66,12 @@ label
   &:hover
     background: white
 
+  // Standard size for dialogs
+  &.large
+    padding: 7px 10px
+    font-size: 13px
+    border-radius: 5px
+
 input, textarea, label, svg
   &:disabled
   &[disabled="true"]
@@ -154,11 +160,32 @@ input[type="color"]
   &:disabled
     color: $bright2
 
+  // Default action of a dialog or form
+  &.primary
+    animation: primary-pulse 1.6s ease-in-out infinite
+
+    &:disabled
+      animation: none
+
+  // Standard size for dialogs
+  &.large
+    min-width: 72px
+    padding: 6px 14px
+    font-size: 13px
+
   // svg
   //   filter: drop-shadow(0 -1px 0px rgba(0,0,0, 0.6))
 
   span
     margin-left: 7px
+
+// The default action's border pulses blue
+@keyframes primary-pulse
+  0%, 100%
+    border-color: $dark1 * 1.1
+    border-top-color: $dark1 * 1.5
+  50%
+    border-color: $highlight
 
 .bordered
   position: relative

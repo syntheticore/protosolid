@@ -26,7 +26,7 @@
             span Open...
 
         li
-          button(@click="$emit('save-document')")
+          button(:disabled="!canSave" @click="$emit('save-document')")
             Icon(icon="save" fixed-width)
             span Save
 
@@ -128,23 +128,21 @@
 
 
 <script>
+  import { openPreferences } from './../js/preferences.js'
+
   export default {
     name: 'AppMenu',
 
     inject: ['bus'],
 
+    props: {
+      canSave: Boolean,
+    },
+
     methods: {
       openSettings: function() {
         this.bus.emit('close-widgets')
-
-        if(window.ipc) {
-          window.ipc.send('open-preferences')
-          return
-        }
-
-        const url = new URL(window.location.href)
-        url.searchParams.set('window', 'preferences')
-        window.open(url, 'protosolid-settings', 'popup,width=760,height=560')
+        openPreferences()
       },
     },
   }

@@ -14,6 +14,7 @@
       :inert="documentBusy"
       @update:active-document="activateDocument"
       :maximized="maximized"
+      :can-save="activeDocument.canSave"
       @create-document="createDocument"
       @open-document="loadDocument"
       @save-document="saveDocument"
@@ -22,6 +23,8 @@
     )
 
     DocumentView(:document="activeDocument" :inert="documentBusy")
+
+    DialogView
 
 </template>
 
@@ -148,6 +151,10 @@
       window.ipc.on('saveFile', saveDocument)
       window.ipc.on('saveFileAs', saveDocumentAs)
       window.ipc.on('closeFile', () => closeDocument(activeDocument.value) )
+
+      watch(() => activeDocument.value?.canSave ?? false, canSave => {
+        window.ipc.send('set-save-enabled', canSave)
+      }, { immediate: true })
     }
 
     window.ipc.on('dark-mode', (e, darkMode) => {
@@ -276,7 +283,7 @@
   async function closeDocument(doc) {
     if(documentBusy.value) return
     const name = doc.filePath || 'Untitled Document'
-    if(doc.hasChanges &&
+    if(doc.hasUnsavedChanges &&
       !window.confirm(name + ' has unsaved changes. Close anyway?')
     ) return
     const index = documents.value.indexOf(doc)

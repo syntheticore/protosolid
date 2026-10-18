@@ -82,6 +82,7 @@
       width: 48px
       height: 48px
     h1
+      font-family: 'Comfortaa'
       font-size: 16px
       font-weight: bold
       color: $bright1

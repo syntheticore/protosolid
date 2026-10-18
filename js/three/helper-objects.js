@@ -96,7 +96,7 @@ export class AxisHelperObject extends Line2 {
 
 export class PointHelperObject extends ScreenPointObject {
   constructor(alcObject) {
-    super(16)
+    super(12)
 
     this.alcTypes = ['point']
     this.alcObject = alcObject

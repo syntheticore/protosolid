@@ -1,4 +1,4 @@
-import { access, cp, mkdir, readdir } from 'node:fs/promises'
+import { access, copyFile, cp, mkdir, readdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -16,3 +16,9 @@ for(const entry of await readdir(sourceDirectory)) {
     { recursive: true, force: true },
   )
 }
+
+// Used by the splash screen
+await copyFile(
+  path.join(root, 'electron', 'build', 'icons', '256x256.png'),
+  path.join(destinationDirectory, 'logo.png'),
+)

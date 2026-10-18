@@ -333,6 +333,8 @@ export interface Profile {
   revolveUpToFace(plane: Plane3, axis: Axis3, target: Compound, limit: Face, forward?: boolean): Compound
   revolveBetweenFaces(plane: Plane3, axis: Axis3, fromBody: Compound, from: Face, untilBody: Compound, until: Face, forward?: boolean): Compound
   sweep(plane: Plane3, railPlane: Plane3, rail: TrimmedCurve2): Compound
+  /** Sweep along a model edge, planar or spatial. */
+  sweepAlongEdge(plane: Plane3, rail: Edge): Compound
   loft(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections?: boolean): Compound
   loftWithAlignment(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections: boolean): Compound
 }

@@ -688,6 +688,12 @@ export function createShapex(bindings) {
         new Float64Array(railPlane._values()),
       )))
     }
+    sweepAlongEdge(plane, rail) {
+      instance(plane, Plane3, 'plane'); instance(rail, Edge, 'rail')
+      return nativeCall(() => new Compound(bindings.sweepAlongEdge(
+        profileDto(this), new Float64Array(plane._values()), rail._raw(),
+      )))
+    }
     loft(plane, sections, alignSections = true) {
       instance(plane, Plane3, 'plane')
       sections = [{ profile: this, plane }, ...array(sections, 'sections')]

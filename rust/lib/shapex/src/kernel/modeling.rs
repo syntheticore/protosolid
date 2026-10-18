@@ -291,6 +291,9 @@ impl EdgeHandle {
     pub fn curve(&self) -> &super::Curve3 {
         &self.curve
     }
+    pub fn range(&self) -> KernelResult<super::ParameterRange> {
+        Ok(self.state.topology().edge(self.edge)?.range())
+    }
     pub fn endpoints(&self) -> KernelResult<[Point3; 2]> {
         let topology = self.state.topology();
         let vertices = topology.edge(self.edge)?.vertices();

@@ -346,6 +346,7 @@ pub fn revolve_between_faces(
         .map_err(js_error)
 }
 
+/// Sweep along a sketch rail, given in its plane's coordinates.
 #[wasm_bindgen(js_name = sweep)]
 pub fn sweep(
     description: JsValue,
@@ -354,12 +355,30 @@ pub fn sweep(
     rail_plane_values: &[f64],
 ) -> Result<NativeCompound, JsValue> {
     let profile = profile(description)?;
+    let tolerance = profile.tolerance();
     let rail = from_js::<TrimmedCurveDto>(rail_description)?.build()?;
+    let curve = plane(rail_plane_values, tolerance)?
+        .lift_curve(rail.curve(), tolerance)
+        .map_err(js_error)?;
+    profile
+        .sweep(plane(plane_values, tolerance)?, &curve, rail.range())
+        .map(|inner| NativeCompound { inner })
+        .map_err(js_error)
+}
+
+/// Sweep along a model edge.
+#[wasm_bindgen(js_name = sweepAlongEdge)]
+pub fn sweep_along_edge(
+    description: JsValue,
+    plane_values: &[f64],
+    rail: &NativeEdge,
+) -> Result<NativeCompound, JsValue> {
+    let profile = profile(description)?;
     profile
         .sweep(
             plane(plane_values, profile.tolerance())?,
-            plane(rail_plane_values, profile.tolerance())?,
-            &rail,
+            rail.inner.curve(),
+            rail.inner.range().map_err(js_error)?,
         )
         .map(|inner| NativeCompound { inner })
         .map_err(js_error)

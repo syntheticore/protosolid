@@ -390,21 +390,16 @@ fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bounds> {
             .expanded(profile.0.x.abs().max(profile.1.x.abs()))
         }
         Surface3::Swept(s) => {
-            let rail = curve2(s.rail().curve(), s.rail().range())?;
+            // The section only turns about the rail, so it stays within its
+            // largest reach from the rail start around every rail point.
             let profile = curve2(s.profile().curve(), s.profile().range())?;
-            let rp = s.rail_plane();
             let pp = s.profile_plane();
-            let start = s.rail().curve().evaluate(s.rail().range().start)?.point;
-            let start = rp.origin() + rp.u() * start.x + rp.v() * start.y;
+            let start = s.rail().evaluate(s.rail_range().start)?.point;
             let radius = profile
                 .corners()
                 .map(|p| (pp.origin() + pp.u() * p.x + pp.v() * p.y - start).magnitude())
                 .fold(0.0, f64::max);
-            Bounds::points(
-                rail.corners()
-                    .map(|p| rp.origin() + rp.u() * p.x + rp.v() * p.y),
-            )
-            .expanded(radius)
+            curve3(s.rail(), s.rail_range())?.expanded(radius)
         }
     })
 }

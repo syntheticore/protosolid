@@ -2449,21 +2449,16 @@ export class SweepFeature extends SolidFeature {
         type: 'path',
         consumesSketch: true,
       },
-      bounds: {
-        title: 'Bounds',
-        type: 'bounds',
-      },
     })
 
     this.profile = null
     this.rail = null
-    this.bounds = [0.0, 1.0]
   }
 
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      const tool = references.profile.sweep(this.componentId, references.rail, this.bounds, this.id)
+      const tool = references.profile.sweep(this.componentId, references.rail, this.id)
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) { this.error = err || this.error }

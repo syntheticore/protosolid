@@ -284,8 +284,8 @@ pub(crate) fn transform_surface(
             Surface3::Swept(super::SweptSurface3::new(
                 plane(surface.profile_plane())?,
                 surface.profile().clone(),
-                plane(surface.rail_plane())?,
-                surface.rail().clone(),
+                transform_curve(surface.rail().clone(), transform, tolerance)?,
+                surface.rail_range(),
                 tolerance,
             )?)
         }

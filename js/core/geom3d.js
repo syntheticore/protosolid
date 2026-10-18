@@ -732,13 +732,10 @@ export class Profile {
     return seedOccTopology(compound, roles, 'loft', named.flat().map(source => source.source))
   }
 
-  sweep(componentId, rail, bounds, featureId) {
+  sweep(componentId, rail, featureId) {
     try {
       if(this.rings.length != 1) {
         throw { type: 'error', msg: 'Sweeps with holes are not supported' }
-      }
-      if(bounds[0] != 0.0 || bounds[1] != 1.0) {
-        throw { type: 'error', msg: 'Partial rail sweeps are not supported' }
       }
 
       // Rails are sketch curves or model edges. Edge ids are not stable
@@ -747,7 +744,6 @@ export class Profile {
       const railSource = isEdge ? 'rail' : rail.id.split('/')[0]
 
       if(window.kernel.modeling.id == 'shapex') {
-        if(isEdge) window.kernel.modeling.unsupported('sweeps along model edges')
         const geometry = window.kernel.modeling.sweep(this, rail)
         return new Compound(componentId, geometry).seedShapexTopology([this], featureId, [railSource])
       }
@@ -756,16 +752,22 @@ export class Profile {
       // returns a solid that can participate in the feature boolean.
       const named = []
       const profile = this.makeFace(named)
+      let edge = isEdge ? rail.geom() : new window.oc.oc.BRepBuilderAPI_MakeEdge_24(
+        window.oc.oc.GeomAPI.To3d(rail.geom(), new window.oc.oc.gp_Pln_1())
+      ).Edge()
+      if(!isEdge) edge = window.oc.oc.TopoDS.Edge_1(transformGeometry(edge, rail.sketch.workplane).Shape())
+      // Sweep away from whichever rail end the profile lies on
+      const normal = normalFromMatrix(this.sketch.workplane)
+      const origin = new THREE.Vector3().setFromMatrixPosition(this.sketch.workplane)
+      const offset = point => Math.abs(normal.dot(point.clone().sub(origin)))
+      const railPoints = rail.getPath()
+      // The polyline follows curve parameters, independent of edge orientation.
+      const startAtEnd = offset(railPoints.at(-1)) < offset(railPoints[0])
+      const isReversed = edge.Orientation_1() == window.oc.oc.TopAbs_Orientation.TopAbs_REVERSED
+      if(startAtEnd != isReversed) edge = window.oc.oc.TopoDS.Edge_1(edge.Reversed())
       const pathBuilder = new window.oc.oc.BRepBuilderAPI_MakeWire_1()
-      if(isEdge) {
-        pathBuilder.Add_1(rail.geom())
-      } else {
-        const curve = window.oc.oc.GeomAPI.To3d(rail.geom(), new window.oc.oc.gp_Pln_1())
-        pathBuilder.Add_1(new window.oc.oc.BRepBuilderAPI_MakeEdge_24(curve).Edge())
-      }
-      const path = isEdge ? pathBuilder.Wire() : window.oc.oc.TopoDS.Wire_1(
-        transformGeometry(pathBuilder.Wire(), rail.sketch.workplane).Shape()
-      )
+      pathBuilder.Add_1(edge)
+      const path = pathBuilder.Wire()
       const pipe = new window.oc.oc.BRepOffsetAPI_MakePipe_1(path, profile)
       pipe.Build(new window.oc.oc.Message_ProgressRange_1())
       if(!pipe.IsDone()) throw { type: 'error', msg: 'Sweep could not be built' }

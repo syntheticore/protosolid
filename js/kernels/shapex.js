@@ -303,10 +303,12 @@ export class ShapexBackend {
     ))
   }
 
+  // Rails are sketch curves or model edges
   sweep(profile, rail) {
-    return featureResult('sweep', () => this.profile(profile).sweep(
-      this.plane(profile.sketch.workplane), this.plane(rail.sketch.workplane), this.segment(rail),
-    ))
+    const plane = this.plane(profile.sketch.workplane)
+    return featureResult('sweep', () => rail.sketch ?
+      this.profile(profile).sweep(plane, this.plane(rail.sketch.workplane), this.segment(rail)) :
+      this.profile(profile).sweepAlongEdge(plane, shapexValue(rail.geom())))
   }
 
   extrudeUpToFace(profile, target, offset, endOffset = 0) {

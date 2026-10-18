@@ -620,30 +620,6 @@ impl Curve2 {
         }
     }
 
-    pub(crate) fn third_derivative(&self, parameter: f64) -> KernelResult<Vec2> {
-        match self {
-            Self::Line(_) => Ok(Vec2::new(0.0, 0.0)),
-            Self::Circle(_) => Ok(-self.evaluate(parameter)?.first_derivative),
-            Self::Nurbs(curve) => {
-                let value = curve.evaluate(parameter)?;
-                let parameter = parameter.clamp(curve.knots[curve.degree], curve.knots[curve.control_points.len()]);
-                let [weight, first, second, third] = homogeneous_curve_jet(
-                    curve.degree, &curve.knots, curve.control_points.len(), parameter,
-                    |index| {
-                        let point = curve.control_points[index];
-                        let weight = curve.weights[index];
-                        Vec3::new(point.x * weight, point.y * weight, weight)
-                    },
-                );
-                Ok((third.truncate()
-                    - value.point.to_vec() * third.z
-                    - value.first_derivative * (3.0 * second.z)
-                    - value.second_derivative * (3.0 * first.z)) / weight.z)
-            }
-            _ => Err(invalid("sweep rails must be lines, circles, or NURBS")),
-        }
-    }
-
     /// Split quadrature at guide knots: the exact intersection is smooth in
     /// space, but its guide can give it a piecewise-smooth parameter speed.
     pub(crate) fn integration_breakpoints(&self, range: ParameterRange) -> Vec<f64> {
@@ -1458,6 +1434,23 @@ impl Circle3 {
     }
 }
 
+/// Guide data fixing the parameterization of an intersection curve.
+struct IntersectionGauge {
+    guide: [f64; 4],
+    derivative: [f64; 4],
+    second: [f64; 4],
+    tangent: [f64; 4],
+    tangent_derivative: [f64; 4],
+}
+
+fn dot4(a: [f64; 4], b: [f64; 4]) -> f64 {
+    a.iter().zip(b).map(|(a, b)| a * b).sum()
+}
+
+fn sub4(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    std::array::from_fn(|index| a[index] - b[index])
+}
+
 /// A general regular intersection of two parametric surfaces.
 ///
 /// The dual parameter-space guides provide a stable global parameterization;
@@ -2244,16 +2237,9 @@ impl SurfaceIntersectionCurve {
         ]
     }
 
-    // Reuse the converged parameters for both spatial and parameter-space
-    // tangents, without cloning the intersection or running Newton again.
-    fn parameter_derivative(&self, parameter: f64, parameters: [f64; 4]) -> KernelResult<[f64; 4]> {
-        let parameter = parameter.clamp(
-            self.range.start.min(self.range.end),
-            self.range.start.max(self.range.end),
-        );
-        if let Some((_, Some(derivative), _)) = self.evaluations.get(parameter) {
-            return Ok(derivative);
-        }
+    /// The parameter gauge at a curve parameter: the guides' combined value
+    /// and derivatives, with the guide's unit tangent and its derivative.
+    fn gauge(&self, parameter: f64) -> KernelResult<IntersectionGauge> {
         let first_guide = self.first_pcurve.evaluate(parameter)?;
         let second_guide = self.second_pcurve.evaluate(parameter)?;
         let guide = [
@@ -2262,19 +2248,19 @@ impl SurfaceIntersectionCurve {
             second_guide.point.x,
             second_guide.point.y,
         ];
-        let guide_derivative = [
+        let derivative = [
             first_guide.first_derivative.x,
             first_guide.first_derivative.y,
             second_guide.first_derivative.x,
             second_guide.first_derivative.y,
         ];
-        let guide_second = [
+        let second = [
             first_guide.second_derivative.x,
             first_guide.second_derivative.y,
             second_guide.second_derivative.x,
             second_guide.second_derivative.y,
         ];
-        let speed = guide_derivative
+        let speed = derivative
             .iter()
             .map(|value| value * value)
             .sum::<f64>()
@@ -2285,43 +2271,94 @@ impl SurfaceIntersectionCurve {
                 "surface-intersection p-curve guide has a singular tangent",
             ));
         }
-        let gauge_tangent = guide_derivative.map(|value| value / speed);
-        let speed_derivative = guide_derivative
+        let tangent = derivative.map(|value| value / speed);
+        let speed_derivative = derivative
             .iter()
-            .zip(guide_second)
+            .zip(second)
             .map(|(first, second)| first * second)
             .sum::<f64>()
             / speed;
-        let gauge_tangent_derivative: [f64; 4] = std::array::from_fn(|index| {
-            guide_second[index] / speed - guide_derivative[index] * speed_derivative / speed.powi(2)
+        let tangent_derivative = std::array::from_fn(|index| {
+            second[index] / speed - derivative[index] * speed_derivative / speed.powi(2)
         });
+        Ok(IntersectionGauge {
+            guide,
+            derivative,
+            second,
+            tangent,
+            tangent_derivative,
+        })
+    }
+
+    // Reuse the converged parameters for both spatial and parameter-space
+    // tangents, without cloning the intersection or running Newton again.
+    fn parameter_derivative(&self, parameter: f64, parameters: [f64; 4]) -> KernelResult<[f64; 4]> {
+        let parameter = parameter.clamp(
+            self.range.start.min(self.range.end),
+            self.range.start.max(self.range.end),
+        );
+        if let Some((_, Some(derivative), _)) = self.evaluations.get(parameter) {
+            return Ok(derivative);
+        }
+        let gauge = self.gauge(parameter)?;
         let (_, first_du, first_dv) = self
             .first_surface
             .first_order(parameters[0], parameters[1])?;
         let (_, second_du, second_dv) = self
             .second_surface
             .first_order(parameters[2], parameters[3])?;
-        let gauge_rhs = gauge_tangent
-            .iter()
-            .zip(guide_derivative)
-            .map(|(tangent, derivative)| tangent * derivative)
-            .sum::<f64>()
-            - gauge_tangent_derivative
-                .iter()
-                .zip(parameters.iter().zip(guide))
-                .map(|(derivative, (value, guide))| derivative * (value - guide))
-                .sum::<f64>();
+        let gauge_rhs = dot4(gauge.tangent, gauge.derivative)
+            - dot4(gauge.tangent_derivative, sub4(parameters, gauge.guide));
         let matrix = [
             [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
             [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
             [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
-            gauge_tangent,
+            gauge.tangent,
         ];
         let derivative =
-            solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], guide_derivative)?;
+            solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, gauge_rhs], gauge.derivative)?;
         self.evaluations
             .insert(parameter, (parameters, Some(derivative), None));
         Ok(derivative)
+    }
+
+    /// Second parameter derivatives, from differentiating the coincidence of
+    /// both surfaces and the guide gauge once more. `bend` is the difference
+    /// of the surfaces' second-order terms along the tangent.
+    fn parameter_second_derivative(
+        &self,
+        parameter: f64,
+        parameters: [f64; 4],
+        derivative: [f64; 4],
+        tangents: [Vec3; 4],
+        bend: Vec3,
+    ) -> KernelResult<[f64; 4]> {
+        let low = self.range.start.min(self.range.end);
+        let high = self.range.start.max(self.range.end);
+        let parameter = parameter.clamp(low, high);
+        let gauge = self.gauge(parameter)?;
+        // The gauge tangent's curvature only weighs the small deviation of the
+        // converged parameters from the guide, so a difference suffices.
+        let step = 1.0e-6 * (high - low);
+        let before = (parameter - step).max(low);
+        let after = (parameter + step).min(high);
+        let early = self.gauge(before)?.tangent_derivative;
+        let late = self.gauge(after)?.tangent_derivative;
+        let tangent_second: [f64; 4] =
+            std::array::from_fn(|index| (late[index] - early[index]) / (after - before));
+        let gauge_rhs = dot4(gauge.tangent, gauge.second)
+            - 2.0 * dot4(gauge.tangent_derivative, sub4(derivative, gauge.derivative))
+            - dot4(tangent_second, sub4(parameters, gauge.guide));
+        let [first_du, first_dv, second_du, second_dv] = tangents;
+        let matrix = [
+            [first_du.x, first_dv.x, -second_du.x, -second_dv.x],
+            [first_du.y, first_dv.y, -second_du.y, -second_dv.y],
+            [first_du.z, first_dv.z, -second_du.z, -second_dv.z],
+            gauge.tangent,
+        ];
+        // At a tangential contact both surfaces share a normal along which their
+        // bending cannot agree; the least-squares value is the best estimate.
+        affine_least_squares_4(matrix, [bend.x, bend.y, bend.z, gauge_rhs], gauge.second)
     }
 
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
@@ -2506,9 +2543,21 @@ impl SurfaceIntersectionCurve {
         let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
         let derivative = self.parameter_derivative(parameter, parameters)?;
         let first_derivative = first.du * derivative[0] + first.dv * derivative[1];
-        let second_derivative = first.duu * derivative[0].powi(2)
-            + first.duv * (2.0 * derivative[0] * derivative[1])
-            + first.dvv * derivative[1].powi(2);
+        // Both surfaces bend the curve; the parameters' own acceleration makes
+        // up the difference between them.
+        let bend = |surface: &SurfaceEvaluation, du: f64, dv: f64| {
+            surface.duu * du.powi(2) + surface.duv * (2.0 * du * dv) + surface.dvv * dv.powi(2)
+        };
+        let first_bend = bend(&first, derivative[0], derivative[1]);
+        let second_bend = bend(&second, derivative[2], derivative[3]);
+        let acceleration = self.parameter_second_derivative(
+            parameter,
+            parameters,
+            derivative,
+            [first.du, first.dv, second.du, second.dv],
+            second_bend - first_bend,
+        )?;
+        let second_derivative = first_bend + first.du * acceleration[0] + first.dv * acceleration[1];
         Ok(CurveEvaluation {
             point: Point3::from_vec((first.point.to_vec() + second.point.to_vec()) * 0.5),
             first_derivative,
@@ -2639,14 +2688,15 @@ fn parameters_in_surface_domains(
 }
 
 
-/// Solve `matrix * value = right`, choosing the solution closest to
-/// `reference` when the system loses rank at a tangential intersection.
+/// Best least-squares solution of `matrix * value = right`, choosing the one
+/// closest to `reference` when the system loses rank at a tangential
+/// intersection. The system need not be consistent.
 ///
 /// The symmetric Jacobi decomposition computes the Moore-Penrose inverse of
 /// the normal matrix.  Unlike substituting the guide derivative when Gaussian
 /// elimination becomes singular, this preserves every independent exact
 /// surface and gauge constraint and remains well-defined at rank transitions.
-fn solve_affine_least_squares_4(
+fn affine_least_squares_4(
     matrix: [[f64; 4]; 4],
     right: [f64; 4],
     reference: [f64; 4],
@@ -2772,7 +2822,17 @@ fn solve_affine_least_squares_4(
             correction[row] += eigenvectors[row][eigenvector] * coefficient;
         }
     }
-    let solution = std::array::from_fn(|index| reference[index] + correction[index]);
+    Ok(std::array::from_fn(|index| reference[index] + correction[index]))
+}
+
+/// Solve `matrix * value = right` like `affine_least_squares_4`, but reject
+/// systems whose constraints cannot all hold.
+fn solve_affine_least_squares_4(
+    matrix: [[f64; 4]; 4],
+    right: [f64; 4],
+    reference: [f64; 4],
+) -> KernelResult<[f64; 4]> {
+    let solution = affine_least_squares_4(matrix, right, reference)?;
     let achieved = (0..4)
         .map(|row| {
             ((0..4)
@@ -2863,6 +2923,54 @@ impl Curve3 {
             Self::SurfaceIntersection(curve) => curve.evaluate(parameter),
             Self::SurfaceCurve(curve) => curve.evaluate(parameter),
         }
+    }
+
+    pub(crate) fn third_derivative(&self, parameter: f64) -> KernelResult<Vec3> {
+        match self {
+            Self::Line(_) => Ok(Vec3::new(0.0, 0.0, 0.0)),
+            Self::Circle(_) => Ok(-self.evaluate(parameter)?.first_derivative),
+            Self::Nurbs(curve) => {
+                let value = curve.evaluate(parameter)?;
+                let parameter = parameter.clamp(curve.knots[curve.degree], curve.knots[curve.control_points.len()]);
+                let [weight, first, second, third] = homogeneous_curve_jet(
+                    curve.degree, &curve.knots, curve.control_points.len(), parameter,
+                    |index| {
+                        let point = curve.control_points[index];
+                        let weight = curve.weights[index];
+                        Vec4::new(point.x * weight, point.y * weight, point.z * weight, weight)
+                    },
+                );
+                Ok((third.truncate()
+                    - value.point.to_vec() * third.w
+                    - value.first_derivative * (3.0 * second.w)
+                    - value.second_derivative * (3.0 * first.w)) / weight.w)
+            }
+            // Implicit curves have no closed-form jerk; difference their
+            // curvature within the certified domain
+            _ => {
+                let step = 1.0e-5 * parameter.abs().max(1.0);
+                let (mut before, mut after) = (parameter - step, parameter + step);
+                if let DomainBounds::Bounded(range) = self.domain().bounds {
+                    before = before.max(range.start.min(range.end));
+                    after = after.min(range.start.max(range.end));
+                }
+                let ahead = self.evaluate(after)?.second_derivative;
+                let behind = self.evaluate(before)?.second_derivative;
+                Ok((ahead - behind) / (after - before))
+            }
+        }
+    }
+
+    /// Parameters inside `range` where the curve's smoothness may drop.
+    pub(crate) fn integration_breakpoints(&self, range: ParameterRange) -> Vec<f64> {
+        let mut parameters = Vec::new();
+        self.collect_parameter_breaks(&mut parameters);
+        parameters.retain(|value| {
+            *value > range.start.min(range.end) && *value < range.start.max(range.end)
+        });
+        parameters.sort_by(f64::total_cmp);
+        parameters.dedup();
+        parameters
     }
 
     pub(crate) fn first_order(&self, parameter: f64) -> KernelResult<(Point3, Vec3)> {
@@ -3053,7 +3161,7 @@ impl Plane3 {
     }
 
     /// Lift an exact curve given in plane coordinates into space.
-    pub(crate) fn lift_curve(self, curve: &Curve2, tolerance: ModelTolerance) -> KernelResult<Curve3> {
+    pub fn lift_curve(self, curve: &Curve2, tolerance: ModelTolerance) -> KernelResult<Curve3> {
         Ok(match curve {
             Curve2::Line(line) => {
                 Line3::new(self.point_at(line.origin()), self.vector_at(line.direction()))?.into()

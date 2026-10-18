@@ -335,16 +335,23 @@ fn validate_no_self_intersection(
                 .collect::<Vec<_>>();
             let intersection =
                 curve_pair_intersection(&segments[first], &segments[second], tolerance)?;
-            if intersection.coincident
-                || intersection.hits.iter().any(|hit| {
-                    !adjacent
-                        || shared
-                            .iter()
-                            // The generic solver accepts roots within this
-                            // geometric band, including roots at tangencies.
-                            .all(|shared| shared.distance(hit.point) > tolerance.linear * 8.0)
-                })
-            {
+            let crossing = intersection.hits.iter().try_fold(false, |crossing, hit| -> KernelResult<bool> {
+                if crossing { return Ok(true); }
+                let first_range = segments[first].range();
+                let second_range = segments[second].range();
+                if !adjacent
+                    && [first_range.start, first_range.end].contains(&hit.first_parameter)
+                    && [second_range.start, second_range.end].contains(&hit.second_parameter) {
+                    // The solver's search band can accept two clamped ends
+                    // separated by a short intervening edge. Proximity of
+                    // those ends does not establish a crossing of the trims.
+                    let a = segments[first].curve().first_order(hit.first_parameter)?.0;
+                    let b = segments[second].curve().first_order(hit.second_parameter)?.0;
+                    if a.distance(b) > tolerance.linear { return Ok(false); }
+                }
+                Ok(!adjacent || shared.iter().all(|shared| shared.distance(hit.point) > tolerance.linear * 8.0))
+            })?;
+            if intersection.coincident || crossing {
                 return Err(invalid("wire must not self-intersect"));
             }
         }

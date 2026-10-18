@@ -94,9 +94,8 @@ pub(crate) fn adaptive_gauss_kronrod<const N: usize>(
     )
 }
 
-/// Resolve an interval that exhausts ordinary bisection at a known parameter
-/// break. The open rule evaluates each side separately without sampling the
-/// derivative discontinuity or relaxing the interval's error budget.
+/// Integrate each known smooth parameter span separately. A short span can
+/// otherwise fall between all quadrature nodes and escape the error estimate.
 pub(crate) fn adaptive_gauss_kronrod_partitioned<const N: usize>(
     start: f64,
     end: f64,
@@ -106,28 +105,64 @@ pub(crate) fn adaptive_gauss_kronrod_partitioned<const N: usize>(
     failure_message: &'static str,
     breakpoints: &[f64],
 ) -> KernelResult<[f64; N]> {
-    gauss_kronrod_interval(
-        &terms,
-        start,
-        end,
-        targets,
-        0,
-        maximum_depth,
-        failure_message,
-        breakpoints,
-    )
+    let mut parameters = vec![start, end];
+    parameters.extend(breakpoints.iter().copied().filter(|point| {
+        *point > start.min(end) && *point < start.max(end)
+    }));
+    parameters.sort_by(f64::total_cmp);
+    parameters.dedup();
+    if end < start { parameters.reverse(); }
+    let mut intervals = Vec::new();
+    for pair in parameters.windows(2) {
+        let (values, errors) = gauss_kronrod_estimate(&terms, pair[0], pair[1])?;
+        intervals.push((pair[0], pair[1], values, errors, 0));
+    }
+    loop {
+        let mut total = [0.0; N];
+        let mut errors = [0.0; N];
+        for (_, _, values, local_errors, _) in &intervals {
+            for index in 0..N {
+                total[index] += values[index];
+                errors[index] += local_errors[index];
+            }
+        }
+        if (0..N).all(|index| errors[index] <= targets[index]) {
+            return Ok(total);
+        }
+        // Refine the largest contributor to the remaining total error. Tiny
+        // knot spans need not meet an arbitrarily tiny fraction of the budget
+        // when the other spans have already converged much more accurately.
+        let score = |local_errors: &[f64; N]| {
+            (0..N).filter(|index| errors[*index] > targets[*index])
+                .map(|index| local_errors[index] / targets[index])
+                .fold(0.0_f64, f64::max)
+        };
+        let index = (0..intervals.len()).max_by(|a, b| {
+            score(&intervals[*a].3).total_cmp(&score(&intervals[*b].3))
+        }).unwrap();
+        let (start, end, _, local_errors, depth) = intervals.swap_remove(index);
+        if depth >= maximum_depth {
+            let worst = (0..N).max_by(|a, b| {
+                (local_errors[*a] / targets[*a]).total_cmp(&(local_errors[*b] / targets[*b]))
+            }).unwrap();
+            return Err(KernelError::new(DiagnosticKind::NumericalFailure, format!(
+                "{failure_message} (term {worst}, interval [{start}, {end}], estimated error {}, target {})",
+                errors[worst], targets[worst],
+            )));
+        }
+        let middle = (start + end) * 0.5;
+        for (start, end) in [(start, middle), (middle, end)] {
+            let (values, errors) = gauss_kronrod_estimate(&terms, start, end)?;
+            intervals.push((start, end, values, errors, depth + 1));
+        }
+    }
 }
 
-fn gauss_kronrod_interval<const N: usize, F>(
+fn gauss_kronrod_estimate<const N: usize, F>(
     terms: &F,
     start: f64,
     end: f64,
-    targets: [f64; N],
-    depth: u8,
-    maximum_depth: u8,
-    failure_message: &'static str,
-    breakpoints: &[f64],
-) -> KernelResult<[f64; N]>
+) -> KernelResult<([f64; N], [f64; N])>
 where
     F: Fn(f64) -> KernelResult<[f64; N]>,
 {
@@ -180,60 +215,7 @@ where
     kronrod = kronrod.map(|value| value * half_span);
     gauss = gauss.map(|value| value * half_span);
     let errors = std::array::from_fn::<_, N, _>(|index| (kronrod[index] - gauss[index]).abs());
-    if (0..N).all(|index| errors[index] <= targets[index]) {
-        return Ok(kronrod);
-    }
-    let breakpoint = (depth >= maximum_depth)
-        .then(|| {
-            breakpoints
-                .iter()
-                .copied()
-                .filter(|point| *point > start.min(end) && *point < start.max(end))
-                .min_by(|first, second| (first - center).abs().total_cmp(&(second - center).abs()))
-        })
-        .flatten();
-    if depth >= maximum_depth && breakpoint.is_none() {
-        let worst = (0..N)
-            .max_by(|first, second| {
-                (errors[*first] / targets[*first]).total_cmp(&(errors[*second] / targets[*second]))
-            })
-            .unwrap_or(0);
-        return Err(KernelError::new(
-            DiagnosticKind::NumericalFailure,
-            format!(
-                "{failure_message} (term {worst}, interval [{start}, {end}], estimated error {}, target {})",
-                errors[worst], targets[worst],
-            ),
-        ));
-    }
-    let middle = breakpoint.unwrap_or(center);
-    let fraction = (middle - start) / (end - start);
-    let child_depth = if breakpoint.is_some() {
-        depth
-    } else {
-        depth + 1
-    };
-    let first = gauss_kronrod_interval(
-        terms,
-        start,
-        middle,
-        targets.map(|target| target * fraction),
-        child_depth,
-        maximum_depth,
-        failure_message,
-        breakpoints,
-    )?;
-    let second = gauss_kronrod_interval(
-        terms,
-        middle,
-        end,
-        targets.map(|target| target * (1.0 - fraction)),
-        child_depth,
-        maximum_depth,
-        failure_message,
-        breakpoints,
-    )?;
-    Ok(std::array::from_fn(|index| first[index] + second[index]))
+    Ok((kronrod, errors))
 }
 
 #[allow(clippy::too_many_arguments)]

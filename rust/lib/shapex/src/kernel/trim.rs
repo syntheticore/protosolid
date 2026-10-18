@@ -174,7 +174,28 @@ pub(super) fn face_parameter_bounds<P>(
     let mut minimum = Point2::new(f64::INFINITY, f64::INFINITY);
     let mut maximum = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     for curve in boundary {
-        for (_, point) in sample_pcurve(curve, 16)? {
+        let samples = sample_pcurve(curve, 16)?;
+        let mut points = samples.iter().map(|sample| sample.1).collect::<Vec<_>>();
+        // A merged guide need not reach a chart extremum at a uniform sample.
+        // Tracing against an underestimated box terminates an intersection
+        // inside the face and leaves an open arrangement boundary.
+        for pair in samples.windows(2) {
+            let first = curve.pcurve.first_order(pair[0].0)?.1;
+            let second = curve.pcurve.first_order(pair[1].0)?.1;
+            for axis in 0..2 {
+                if first[axis] * second[axis] >= 0.0 { continue; }
+                let mut low = pair[0].0;
+                let mut high = pair[1].0;
+                for _ in 0..48 {
+                    let middle = (low + high) * 0.5;
+                    let derivative = curve.pcurve.first_order(middle)?.1[axis];
+                    if first[axis] * derivative > 0.0 { low = middle; }
+                    else { high = middle; }
+                }
+                points.push(curve.pcurve.first_order((low + high) * 0.5)?.0);
+            }
+        }
+        for point in points {
             minimum.x = minimum.x.min(point.x);
             minimum.y = minimum.y.min(point.y);
             maximum.x = maximum.x.max(point.x);
@@ -337,12 +358,15 @@ pub(super) fn point_in_periodic_trim<P>(
 }
 
 pub(super) fn sample_pcurve<P>(curve: &FaceCurve<P>, count: usize) -> KernelResult<Vec<(f64, Point2)>> {
-    (0..=count)
-        .map(|index| {
-            let parameter =
-                curve.range.start + curve.range.span() * index as f64 / count.max(1) as f64;
-            Ok((parameter, curve.pcurve.evaluate(parameter)?.point))
-        })
+    let mut parameters = (0..=count)
+        .map(|index| curve.range.start + curve.range.span() * index as f64 / count.max(1) as f64)
+        .collect::<Vec<_>>();
+    parameters.extend(curve.pcurve.integration_breakpoints(curve.range));
+    parameters.sort_by(f64::total_cmp);
+    parameters.dedup();
+    if curve.range.span() < 0.0 { parameters.reverse(); }
+    parameters.into_iter()
+        .map(|parameter| Ok((parameter, curve.pcurve.evaluate(parameter)?.point)))
         .collect()
 }
 

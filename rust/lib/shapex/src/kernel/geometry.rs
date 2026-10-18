@@ -962,6 +962,55 @@ pub struct Projection2 {
     pub distance: f64,
 }
 
+// Damped Gauss-Newton refinement shared by globally seeded offset projections
+// and projections that must stay near a caller's UV seed. Keep periodic lifts;
+// only nonperiodic bounded coordinates are clamped.
+fn refine_surface_projection(
+    point: Point3,
+    seed: Point2,
+    domains: [ParameterDomain; 2],
+    first_order: impl Fn(f64, f64) -> KernelResult<(Point3, Vec3, Vec3)>,
+    determinant_tolerance: impl Fn(f64, f64) -> f64,
+    converged: impl Fn(Vec2) -> bool,
+) -> KernelResult<Projection2> {
+    let constrain = |uv: Point2| Point2::from(std::array::from_fn::<_, 2, _>(|axis| {
+        if domains[axis].period.is_none() {
+            if let DomainBounds::Bounded(range) = domains[axis].bounds {
+                return uv[axis].clamp(range.start.min(range.end), range.start.max(range.end));
+            }
+        }
+        uv[axis]
+    }));
+    let mut uv = constrain(seed);
+    for _ in 0..48 {
+        let (projected, du, dv) = first_order(uv.x, uv.y)?;
+        let residual = projected - point;
+        let a = du.magnitude2();
+        let b = du.dot(dv);
+        let c = dv.magnitude2();
+        let determinant = a * c - b * b;
+        if determinant.abs() <= determinant_tolerance(a, c) { break; }
+        let first = -du.dot(residual);
+        let second = -dv.dot(residual);
+        let step = Vec2::new((first * c - second * b) / determinant, (second * a - first * b) / determinant);
+        let mut damping = 1.0;
+        let mut next = uv;
+        for _ in 0..24 {
+            let trial = constrain(uv + step * damping);
+            if first_order(trial.x, trial.y)?.0.distance2(point) < residual.magnitude2() {
+                next = trial;
+                break;
+            }
+            damping *= 0.5;
+        }
+        let movement = next - uv;
+        uv = next;
+        if converged(movement) { break; }
+    }
+    let projected = first_order(uv.x, uv.y)?.0;
+    Ok(Projection2 { parameters: (uv.x, uv.y), point: projected, distance: projected.distance(point) })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Line3 {
     origin: Point3,
@@ -1991,7 +2040,7 @@ fn join_intersection_guides(
     first: &Curve2, first_range: ParameterRange,
     second: &Curve2, second_range: ParameterRange,
     join: f64, offset: Vec2,
-) -> KernelResult<Option<NurbsCurve2>> {
+) -> KernelResult<Option<(NurbsCurve2, usize)>> {
     let spans = |curve: &Curve2, trim: ParameterRange| -> KernelResult<Option<(usize, Vec<(ParameterRange, Vec<Vec3>)>)>> {
         Ok(match curve {
             Curve2::Nurbs(curve) => Some((curve.degree, curve.bezier_spans()?)),
@@ -2008,10 +2057,12 @@ fn join_intersection_guides(
     let Some((second_degree, second_spans)) = spans(second, second_range)? else { return Ok(None); };
     let degree = first_degree.max(second_degree);
     let mut pieces = Vec::new();
-    for (source_degree, spans, source_range, target, shift) in [
+    let mut junction = 0;
+    for (side, (source_degree, spans, source_range, target, shift)) in [
         (first_degree, first_spans, first_range, ParameterRange::new(0.0, join)?, Vec2::new(0.0, 0.0)),
         (second_degree, second_spans, second_range, ParameterRange::new(join, 1.0)?, offset),
-    ] {
+    ].into_iter().enumerate() {
+        let mut source_pieces = Vec::new();
         for (span, controls) in spans {
             let start = span.start.max(source_range.start.min(source_range.end));
             let end = span.end.min(source_range.start.max(source_range.end));
@@ -2043,10 +2094,20 @@ fn join_intersection_guides(
                 point.y += shift.y * point.z;
             }
             let map = |t| target.start + (t - source_range.start) / source_range.span() * target.span();
-            pieces.push((map(start), map(end), controls));
+            let start = map(start);
+            let end = map(end);
+            if end > start { source_pieces.push((start, end, controls)); }
         }
+        source_pieces.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (Some(first), Some(last)) = (source_pieces.first(), source_pieces.last()) else {
+            return Ok(None);
+        };
+        // Both source trims must still reach their endpoints after mapping.
+        // Otherwise there is no complete branch to anchor at the splice.
+        if first.0 != target.start || last.1 != target.end { return Ok(None); }
+        if side == 1 { junction = pieces.len() * (degree + 1); }
+        pieces.extend(source_pieces);
     }
-    pieces.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut controls = Vec::new();
     let mut knots = Vec::new();
     for (start, _, points) in &pieces {
@@ -2054,10 +2115,11 @@ fn join_intersection_guides(
         controls.extend_from_slice(points);
     }
     knots.extend(vec![1.0; degree + 1]);
-    Ok(Some(NurbsCurve2::new(degree,
+    let guide = NurbsCurve2::new(degree,
         controls.iter().map(|p| Point2::new(p.x / p.z, p.y / p.z)).collect(),
         controls.iter().map(|p| p.z).collect(), knots,
-    )?))
+    )?;
+    Ok(Some((guide, junction)))
 }
 
 impl SurfaceIntersectionCurve {
@@ -2084,16 +2146,31 @@ impl SurfaceIntersectionCurve {
             || a.normalize().cross(b.normalize()).magnitude() > self.tolerance.angular * 8.0 {
             return Ok(None);
         }
-        let length = a.magnitude() * range.span().abs();
-        let other_length = b.magnitude() * other_range.span().abs();
+        // Endpoint speed is ill-conditioned at a tangential support contact.
+        // Use spatial traversal lengths to allocate the joined parameter range
+        // so an ordinary arc cannot be compressed into a microscopic interval.
+        let length = |curve: &Self, range: ParameterRange| -> KernelResult<f64> {
+            let points = (0..=16).map(|index| {
+                curve.first_order(range.start + range.span() * index as f64 / 16.0)
+                    .map(|value| value.0)
+            }).collect::<KernelResult<Vec<_>>>()?;
+            Ok(points.windows(2).map(|pair| pair[0].distance(pair[1])).sum())
+        };
+        let other_length = length(other, other_range)?;
+        let length = length(self, range)?;
+        if length.min(other_length) <= self.tolerance.linear_at_scale(end.point.to_vec().magnitude()) {
+            return Ok(None);
+        }
         let join = length / (length + other_length);
         let parameters = self.corrected_parameters(range.end)?;
         let other_parameters = other.corrected_parameters(other_range.start)?;
+        let first_parameters = self.corrected_parameters(range.start)?;
+        let last_parameters = other.corrected_parameters(other_range.end)?;
         let guides = [&self.first_pcurve, &self.second_pcurve];
         let other_guides = if swapped { [&other.second_pcurve, &other.first_pcurve] }
             else { [&other.first_pcurve, &other.second_pcurve] };
         let surfaces = [self.first_surface.as_ref(), self.second_surface.as_ref()];
-        let mut joined = Vec::new();
+        let mut joined = Vec::<Curve2>::new();
         for side in 0..2 {
             let other_side = if swapped { 1 - side } else { side };
             let offset = super::whole_periods(
@@ -2103,10 +2180,31 @@ impl SurfaceIntersectionCurve {
                     parameters[side * 2 + 1] - other_parameters[other_side * 2 + 1],
                 ),
             );
-            let Some(guide) = join_intersection_guides(
+            let Some((mut guide, junction)) = join_intersection_guides(
                 guides[side], range, other_guides[side], other_range, join, offset,
             )? else { return Ok(None); };
+            // Retain the corrected endpoints as exact guide anchors. Near a
+            // tangency, roundoff from restricting the rational spans can move
+            // a freshly corrected endpoint by much more than model tolerance.
+            let point = |values: [f64; 4], side: usize| Point2::new(values[side * 2], values[side * 2 + 1]);
+            let last = guide.control_points.len() - 1;
+            let mut anchor = |index: usize, neighbor: usize, point: Point2| {
+                let delta = point - guide.control_points[index];
+                guide.control_points[index] = point;
+                if guide.degree > 1 { guide.control_points[neighbor] += delta; }
+            };
+            anchor(0, 1, point(first_parameters, side));
+            anchor(last, last - 1, point(last_parameters, other_side) + offset);
+            anchor(junction - 1, junction - 2, point(parameters, side));
+            anchor(junction, junction + 1, point(parameters, side));
             joined.push(guide.into());
+        }
+        for parameter in [0.0, 1.0] {
+            let first = joined[0].evaluate(parameter)?.first_derivative;
+            let second = joined[1].evaluate(parameter)?.first_derivative;
+            if first.magnitude2() + second.magnitude2() <= self.tolerance.parameter.powi(2) {
+                return Ok(None);
+            }
         }
         Ok(Some(Self::new(
             *self.first_surface.clone(), *self.second_surface.clone(),
@@ -2599,8 +2697,15 @@ impl SurfaceIntersectionCurve {
         if !finite_point(point) {
             return Err(invalid("projection point must be finite"));
         }
-        let parameter = (0..=32)
+        let mut seeds = (0..=32)
             .map(|index| self.range.start + self.range.span() * index as f64 / 32.0)
+            .collect::<Vec<_>>();
+        self.first_pcurve.collect_parameter_breaks(&mut seeds);
+        self.second_pcurve.collect_parameter_breaks(&mut seeds);
+        seeds.retain(|parameter| self.range.contains(*parameter, self.tolerance));
+        seeds.sort_by(f64::total_cmp);
+        seeds.dedup();
+        let parameter = seeds.into_iter()
             .filter_map(|parameter| {
                 self.evaluate(parameter)
                     .ok()
@@ -4754,14 +4859,7 @@ impl OffsetSurface3 {
         } else {
             None
         };
-        let constrain = |axis: usize, value: f64| match domains[axis].bounds {
-            _ if domains[axis].period.is_some() => value,
-            DomainBounds::Bounded(range) => {
-                value.clamp(range.start.min(range.end), range.start.max(range.end))
-            }
-            _ => value,
-        };
-        let mut parameters = bounded
+        let parameters = bounded
             .into_iter()
             .flat_map(|[u_range, v_range]| {
                 (0..=8).flat_map(move |u_index| {
@@ -4787,47 +4885,12 @@ impl OffsetSurface3 {
                     "offset surface projection has no seed",
                 )
             })?;
-        for _ in 0..48 {
-            let value = self.evaluate(parameters.0, parameters.1)?;
-            let residual = value.point - point;
-            let first = residual.dot(value.du);
-            let second = residual.dot(value.dv);
-            let matrix = [
-                [
-                    value.du.magnitude2() + residual.dot(value.duu),
-                    value.du.dot(value.dv) + residual.dot(value.duv),
-                ],
-                [
-                    value.du.dot(value.dv) + residual.dot(value.duv),
-                    value.dv.magnitude2() + residual.dot(value.dvv),
-                ],
-            ];
-            let determinant = matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
-            if determinant.abs() <= f64::EPSILON * 256.0 {
-                break;
-            }
-            let delta_u = (-first * matrix[1][1] + second * matrix[0][1]) / determinant;
-            let delta_v = (-second * matrix[0][0] + first * matrix[1][0]) / determinant;
-            let next = (
-                constrain(0, parameters.0 + delta_u),
-                constrain(1, parameters.1 + delta_v),
-            );
-            if (next.0 - parameters.0)
-                .abs()
-                .max((next.1 - parameters.1).abs())
-                <= self.tolerance.parameter
-            {
-                parameters = next;
-                break;
-            }
-            parameters = next;
-        }
-        let projected = self.evaluate(parameters.0, parameters.1)?.point;
-        Ok(Projection2 {
-            parameters,
-            point: projected,
-            distance: projected.distance(point),
-        })
+        refine_surface_projection(
+            point, Point2::new(parameters.0, parameters.1), domains,
+            |u, v| self.first_order(u, v),
+            |_, _| f64::EPSILON * 256.0,
+            |step| step.x.abs().max(step.y.abs()) <= self.tolerance.parameter,
+        )
     }
 }
 
@@ -5685,6 +5748,17 @@ impl Surface3 {
             Self::Offset(surface) => surface.project(point),
             Self::RollingBall(surface) | Self::Ruled(surface) => surface.project(point),
         }
+    }
+
+    pub(crate) fn project_near(
+        &self, point: Point3, seed: Point2, tolerance: ModelTolerance,
+    ) -> KernelResult<Projection2> {
+        refine_surface_projection(
+            point, seed, self.domains(),
+            |u, v| self.first_order(u, v),
+            |a, c| f64::EPSILON * a.max(c).powi(2) * 256.0,
+            |step| step.magnitude() <= tolerance.parameter,
+        )
     }
 
     pub fn offset(&self, distance: f64, tolerance: ModelTolerance) -> KernelResult<Self> {

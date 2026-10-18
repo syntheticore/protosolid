@@ -336,6 +336,7 @@ impl Transaction<'_> {
         shared: Option<&BlendSpine>,
         propagated: Option<&(BlendSpine, [FaceId; 2])>,
         chamfer: Option<&ChamferSettings>,
+        interpolate_guides: bool,
     ) -> KernelResult<BlendSpine> {
         let tolerance = self.kernel.tolerance;
         let edge = self.working.edge(edge_id)?.clone();
@@ -521,6 +522,7 @@ impl Transaction<'_> {
                         radius,
                         tolerance,
                         true,
+                        interpolate_guides,
                     )?]
                 }
             }
@@ -852,6 +854,7 @@ impl Transaction<'_> {
                         None,
                         Some(&(spine.clone(), [faces[0], faces[1]])),
                         None,
+                        false,
                     );
                     if let Ok(candidate) = candidate {
                         let far_end = usize::from(candidate.edge.vertices[0] == vertex);
@@ -889,6 +892,7 @@ impl Transaction<'_> {
         size: f64,
         tolerance: ModelTolerance,
         cylindrical_chart: bool,
+        interpolate_guides: bool,
     ) -> KernelResult<SurfaceSurfaceCurve> {
         let mut boundary_parameters: [Vec<Point2>; 2] =
             [Vec::with_capacity(17), Vec::with_capacity(17)];
@@ -1037,13 +1041,10 @@ impl Transaction<'_> {
         while last_index < 16 + extension[1] && in_domains(last_index + 1) {
             last_index += 1;
         }
-        let support_range =
-            ParameterRange::new(first_index as f64 / 16.0, last_index as f64 / 16.0)?;
-        let mut parameters: [Vec<Point2>; 2] = [Vec::with_capacity(49), Vec::with_capacity(49)];
-        for index in first_index - i32::from(closed)..=last_index + i32::from(closed) {
+        let correct = |index| -> KernelResult<Option<[f64; 4]>> {
             let first = extrapolated(0, index);
             let second = extrapolated(1, index);
-            let corrected = if let Some((side, axis)) = angular_coordinate {
+            if let Some((side, axis)) = angular_coordinate {
                 let guide = [first.x, first.y, second.x, second.y];
                 let mut gauge = [0.0; 4];
                 gauge[side * 2 + axis] = 1.0;
@@ -1063,7 +1064,7 @@ impl Transaction<'_> {
                         }
                     })
                 };
-                let corrected = super::super::intersection::correct_surface_pair_with_gauge(
+                super::super::intersection::correct_surface_pair_with_gauge(
                     &offsets[0],
                     &offsets[1],
                     guide,
@@ -1071,31 +1072,54 @@ impl Transaction<'_> {
                     domains(0),
                     domains(1),
                     tolerance,
-                )?;
-                if corrected.is_none() && axis == 0 {
-                    // Some torus/cylinder intersections turn in the angular
-                    // coordinate. Rebuild the whole guide in the general
-                    // chart; mixing charts sample by sample creates folds.
-                    return self.local_offset_intersection(uses, offsets, size, tolerance, false);
-                }
-                corrected.ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::NumericalFailure,
-                        "fixed angular offset correction failed",
-                    )
-                })?
+                )
             } else {
                 super::super::intersection::correct_surface_pair_near(
                     &offsets[0],
                     &offsets[1],
                     [first.x, first.y, second.x, second.y],
                     tolerance,
-                )?
-            };
+                ).map(Some)
+            }
+        };
+        // A periodic guide needs its entire turn and padding. Only open-edge
+        // continuation may stop when a corrected branch ends.
+        let mut first_sample = if closed { first_index - 1 } else { 0 };
+        let mut last_sample = if closed { last_index + 1 } else { 16 };
+        let mut samples = Vec::new();
+        for index in first_sample..=last_sample {
+            let corrected = correct(index)?;
+            if corrected.is_none() && matches!(angular_coordinate, Some((_, 0))) {
+                return self.local_offset_intersection(uses, offsets, size, tolerance, false, interpolate_guides);
+            }
+            samples.push(corrected.ok_or_else(|| KernelError::new(
+                DiagnosticKind::NumericalFailure, "fixed angular offset correction failed",
+            ))?);
+        }
+        // Continue from the retained sector, stopping when this branch ends.
+        // A failed distant sample must not select another chart for the spine.
+        if !closed {
+            for index in (first_index..0).rev() {
+                let Ok(Some(sample)) = correct(index) else { break; };
+                samples.insert(0, sample);
+                first_sample = index;
+            }
+            for index in 17..=last_index {
+                let Ok(Some(sample)) = correct(index) else { break; };
+                samples.push(sample);
+                last_sample = index;
+            }
+        }
+        first_index = first_sample + i32::from(closed);
+        last_index = last_sample - i32::from(closed);
+        let support_range =
+            ParameterRange::new(first_index as f64 / 16.0, last_index as f64 / 16.0)?;
+        let mut parameters: [Vec<Point2>; 2] = [Vec::new(), Vec::new()];
+        for (index, corrected) in (first_sample..=last_sample).zip(samples) {
             // Correction normalizes periodic coordinates. Lift them back onto
             // the sampled branch before interpolating a continuous guide.
             for side in 0..2 {
-                let seed = if side == 0 { first } else { second };
+                let seed = extrapolated(side, index);
                 parameters[side].push(nearest_uv(
                     offsets[side].domains(),
                     Point2::new(corrected[side * 2], corrected[side * 2 + 1]),
@@ -1103,13 +1127,19 @@ impl Transaction<'_> {
                 ));
             }
         }
-        let guide = if closed {
-            super::super::intersection::periodic_nurbs_guide
-        } else {
-            super::super::intersection::smooth_nurbs_guide
+        let guide = |points: &[Point2]| -> KernelResult<Curve2> {
+            if closed {
+                return super::super::intersection::periodic_nurbs_guide(points, support_range).map(Into::into);
+            }
+            if !interpolate_guides {
+                return super::super::intersection::smooth_nurbs_guide(points, support_range).map(Into::into);
+            }
+            let parameters = (first_index..=last_index).map(|index| index as f64 / 16.0).collect::<Vec<_>>();
+            let guide = super::super::intersection::interpolating_nurbs_guide(points, &parameters)?;
+            super::super::intersection::smooth_interpolating_guide(&guide)
         };
-        let first_pcurve: Curve2 = guide(&parameters[0], support_range)?.into();
-        let second_pcurve: Curve2 = guide(&parameters[1], support_range)?.into();
+        let first_pcurve = guide(&parameters[0])?;
+        let second_pcurve = guide(&parameters[1])?;
         let implicit = SurfaceIntersectionCurve::new(
             offsets[0].clone(),
             offsets[1].clone(),

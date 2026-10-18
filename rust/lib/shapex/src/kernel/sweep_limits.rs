@@ -719,7 +719,7 @@ mod tests {
             })
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(rims.len(), 7); // The redundant subdivision of one closed junction is unified.
+        assert_eq!(rims.len(), 2); // Each closed junction is unified across its chart subdivisions.
         let rounded = joined.fillet(&rims, 2.0).unwrap();
         for opening in rounded
             .faces()

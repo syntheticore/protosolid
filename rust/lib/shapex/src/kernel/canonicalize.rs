@@ -10,7 +10,7 @@ use super::topology::Edge;
 use super::transaction::Transaction;
 use super::{
     whole_periods, CoedgeId, Curve2, Curve3, EdgeId, KernelResult, LoopKind, ModelTolerance,
-    ParameterRange, Surface3, VertexId,
+    ParameterRange, Surface3, SurfaceIntersectionCurve, VertexId,
 };
 
 /// A fully prepared join; discarded candidates leave topology untouched.
@@ -121,6 +121,25 @@ pub(super) fn same_domain_edge_range(
         return Ok(None);
     }
     Ok(Some(range))
+}
+
+/// Independent intersection charts need a splice; adjacent trims of one
+/// implicit curve must keep their shared parameterization.
+pub(super) fn intersection_curves_to_join<'a>(
+    first: &'a Edge,
+    second: &'a Edge,
+    vertex: VertexId,
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<(&'a SurfaceIntersectionCurve, &'a SurfaceIntersectionCurve)>> {
+    let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) = (&first.curve, &second.curve) else {
+        return Ok(None);
+    };
+    if first.curve == second.curve
+        && same_domain_edge_range(first, second, vertex, tolerance)?.is_some()
+    {
+        return Ok(None);
+    }
+    Ok(Some((a, b)))
 }
 
 impl Transaction<'_> {
@@ -303,9 +322,7 @@ impl Transaction<'_> {
                 })
             })
         };
-        if let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) =
-            (&first.curve, &second.curve)
-        {
+        if let Some((a, b)) = intersection_curves_to_join(first, second, vertex, self.kernel.tolerance)? {
             let prepend = first.vertices[0] == vertex;
             let other_range = if (second.vertices[0] == vertex) == prepend {
                 second.range.reversed()

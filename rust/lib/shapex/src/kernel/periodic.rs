@@ -2,13 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{Point2, Vec2};
 
-use super::canonicalize::same_domain_edge_range;
+use super::canonicalize::{intersection_curves_to_join, same_domain_edge_range};
 use super::transaction::Transaction;
 use super::history::{ChangeKind, DerivationRole};
 use super::trim::{face_boundary_curves, face_parameter_bounds, translate_pcurve};
 use super::wire::curve_pair_intersection;
 use super::{
-    Curve2, Curve3, EdgeId, FaceId, KernelResult, Line2, ParameterRange, TrimmedCurve2, VertexId,
+    Curve2, EdgeId, FaceId, KernelResult, Line2, ParameterRange, TrimmedCurve2, VertexId,
 };
 
 pub(super) enum SeamPlacement {
@@ -33,9 +33,7 @@ impl Transaction<'_> {
         {
             return Ok(false);
         }
-        if let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) =
-            (&first.curve, &second.curve)
-        {
+        if let Some((a, b)) = intersection_curves_to_join(first, second, vertex, self.kernel.tolerance)? {
             let prepend = first.vertices[0] == vertex;
             let other_range = if (second.vertices[0] == vertex) == prepend {
                 second.range.reversed()
@@ -322,6 +320,11 @@ impl Transaction<'_> {
         }
         let low = rings[0].3.min(rings[1].3);
         let high = rings[0].3.max(rings[1].3);
+        // A cut through a pinched corner would collapse the seam to one
+        // vertex instead of connecting the two boundary rings.
+        if rings[0].2.is_some() && rings[0].2 == rings[1].2 {
+            return Ok(false);
+        }
         // Publishing a chart cut may reanchor a closed edge, but must not
         // transfer an artificial subdivision to another open boundary.
         if matches!(placement, SeamPlacement::PreserveBoundaries)

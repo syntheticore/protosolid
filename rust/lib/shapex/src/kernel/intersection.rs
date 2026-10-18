@@ -914,11 +914,17 @@ fn plane_blend_contact(
         // is the retained contact rail; tracing near it creates spurious curves.
         let second_pcurve: Curve2 =
             Line2::new(Point2::new(0.0, side), crate::Vec2::unit_x())?.into();
-        let curve: Curve3 = if surface == base {
-            super::SurfaceCurve3::new(support.clone(), guide.clone(), range, tolerance)?.into()
-        } else {
-            super::SurfaceCurve3::new(surface.clone(), second_pcurve.clone(), range, tolerance)?.into()
-        };
+        // A planar contact rail retains its analytic curve under a normal
+        // offset: every point moves by the same plane-normal translation.
+        let mut curve = support.boundary_curve(guide.clone(), range, tolerance)?;
+        if surface != base {
+            let parameter = range.middle();
+            let translation = surface.evaluate(parameter, side)?.point
+                - base.evaluate(parameter, side)?.point;
+            curve = super::transform::transform_curve(
+                curve, super::RigidTransform3::from_translation(translation), tolerance,
+            )?;
+        }
         let first_pcurve = SurfaceProjectionPcurve2::new(
             curve.clone(),
             plane.into(),
@@ -2344,6 +2350,21 @@ fn trace_reaches_seed(
 ) -> KernelResult<bool> {
     let parameter_error = seed.iter().map(|v| v.abs()).fold(1.0_f64, f64::max)
         * f64::EPSILON * 4096.0;
+    let (first_point, first_du, first_dv) = first.first_order(seed[0], seed[1])?;
+    let (second_point, second_du, second_dv) = second.first_order(seed[2], seed[3])?;
+    let first_normal = first_du.cross(first_dv).normalize();
+    let second_normal = second_du.cross(second_dv).normalize();
+    // Compare roots in model units: UV speed can vanish at a contact corner.
+    // The corrector's residual gives only square-root positional accuracy
+    // when the two surface normals become parallel.
+    let tangency = first_normal.cross(second_normal).magnitude();
+    let scale = first_point.to_vec().magnitude().max(second_point.to_vec().magnitude()).max(1.0);
+    let roundoff = f64::EPSILON * scale * 2048.0;
+    let positional_error = if tangency <= (roundoff / scale).sqrt() * 8.0 {
+        (roundoff * scale).sqrt() * 8.0
+    } else {
+        roundoff / tangency
+    }.max(tolerance.linear_at_scale(scale) * 8.0);
     let allowed = parameter_error.max(tolerance.parameter * 64.0);
     for pair in trace.windows(2) {
         let delta: [f64; 4] = std::array::from_fn(|i| pair[1][i] - pair[0][i]);
@@ -2354,11 +2375,20 @@ fn trace_reaches_seed(
         // A large tracing step alone cannot justify a distant extrapolation.
         if fraction < -1.0 || fraction > 2.0 { continue; }
         let guide = std::array::from_fn(|i| pair[0][i] + delta[i] * fraction);
+        if parameter_distance(guide, seed) <= allowed { return Ok(true); }
         let nearest = std::array::from_fn(|i| pair[0][i] + delta[i] * fraction.clamp(0.0, 1.0));
         // A trim box can cut a short gap out of one support intersection.
         // Continue the local branch to a nearby seed beyond the sampled end;
         // requiring it to lie inside a segment retraces the overlapping branch.
-        if parameter_distance(guide, nearest) > neighborhood { continue; }
+        if parameter_distance(guide, nearest) > neighborhood
+            || parameter_distance(guide, seed) > neighborhood { continue; }
+        if parameters_in_ranges(guide, first_domains, second_domains, tolerance.parameter) {
+            let a = first.first_order(guide[0], guide[1])?.0;
+            let b = second.first_order(guide[2], guide[3])?.0;
+            if a.distance(first_point) <= positional_error && b.distance(second_point) <= positional_error {
+                return Ok(true);
+            }
+        }
         let mut gauge = [0.0; 4];
         gauge[axis] = 1.0;
         // Start on this trace and hold its monotone coordinate at the seed.
@@ -2368,7 +2398,12 @@ fn trace_reaches_seed(
             first, second, guide, gauge, first_domains, second_domains, tolerance,
         )?;
         if let Some(parameters) = corrected {
-            if parameter_distance(parameters, seed) <= allowed { return Ok(true); }
+            if parameter_distance(parameters, seed) <= allowed
+                || (parameter_distance(parameters, seed) <= neighborhood
+                    && first.first_order(parameters[0], parameters[1])?.0.distance(first_point) <= positional_error
+                    && second.first_order(parameters[2], parameters[3])?.0.distance(second_point) <= positional_error) {
+                return Ok(true);
+            }
         }
     }
     Ok(false)

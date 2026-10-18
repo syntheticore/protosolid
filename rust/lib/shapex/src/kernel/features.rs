@@ -696,19 +696,19 @@ fn offset_vertex(
             let pb = b.project(source_point, tolerance)?.parameter;
             if let Ok(hit) = a.intersect_curve_near(b, pa, pb, tolerance) {
                 if let Ok(point) = refine_offset_corner(
-                    topology, hit.point, &faces, &incident, edges, supports, tolerance,
+                    topology, vertex, hit.point, &faces, &incident, edges, supports, tolerance,
                 ) {
                     return Ok(point);
                 }
             }
         }
     }
-    refine_offset_corner(topology, source_point, &faces, &incident, edges, supports, tolerance)
+    refine_offset_corner(topology, vertex, source_point, &faces, &incident, edges, supports, tolerance)
 }
 
 #[derive(Clone, Copy)]
 enum CornerConstraint<'a> {
-    Surface(&'a Surface3),
+    Surface(&'a Surface3, Option<Point2>),
     Curve(&'a Curve3),
     Point(Point3),
 }
@@ -720,8 +720,11 @@ impl CornerConstraint<'_> {
         tolerance: super::ModelTolerance,
     ) -> KernelResult<(Point3, crate::Matrix3)> {
         Ok(match self {
-            Self::Surface(surface) => {
-                let projected = surface.project(point, tolerance)?;
+            Self::Surface(surface, seed) => {
+                let projected = match seed {
+                    Some(seed) => surface.project_near(point, seed, tolerance)?,
+                    None => surface.project(point, tolerance)?,
+                };
                 let normal = surface.normal(projected.parameters.0, projected.parameters.1)?;
                 (
                     projected.point,
@@ -757,6 +760,7 @@ impl CornerConstraint<'_> {
 // Tangent rails supply constraints that coincident surface normals cannot.
 fn refine_offset_corner(
     topology: &Topology,
+    vertex: VertexId,
     point: Point3,
     faces: &BTreeSet<FaceId>,
     incident: &[EdgeId],
@@ -766,8 +770,30 @@ fn refine_offset_corner(
 ) -> KernelResult<Point3> {
     let mut constraints = faces
         .iter()
-        .map(|face| CornerConstraint::Surface(&supports[face]))
-        .collect::<Vec<_>>();
+        .map(|face| {
+            let surface = &supports[face];
+            if !matches!(surface, Surface3::Offset(_) | Surface3::RollingBall(_) | Surface3::Ruled(_)) {
+                return Ok(CornerConstraint::Surface(surface, None));
+            }
+            // Extended guides can reach another projection minimum. Retain
+            // the corner's original face chart when refining its offset.
+            for loop_id in topology.face(*face)?.loops() {
+                for id in topology.loop_coedges(*loop_id)? {
+                    let vertices = topology.coedge_vertices(id)?;
+                    if vertices.contains(&vertex) {
+                        let coedge = topology.coedge(id)?;
+                        let parameter = if vertices[0] == vertex { coedge.range().start } else { coedge.range().end };
+                        let seed = coedge.pcurve().evaluate(parameter)?.point;
+                        return Ok(CornerConstraint::Surface(surface, Some(seed)));
+                    }
+                }
+            }
+            Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "offset corner has no incident coedge on its support face",
+            ))
+        })
+        .collect::<KernelResult<Vec<_>>>()?;
     for edge in incident {
         if matches!(edges[edge].curve, Curve3::SurfaceIntersection(_)) {
             continue;
@@ -1932,7 +1958,7 @@ fn collapsed_offset_vertex(
         }
         support_faces.extend(contacts);
     }
-    constraints.extend(support_faces.iter().map(|face| CornerConstraint::Surface(&supports[face])));
+    constraints.extend(support_faces.iter().map(|face| CornerConstraint::Surface(&supports[face], None)));
     // Surviving parameter seams still constrain the vertex after the blend
     // disappears. A nearest point on the new boundary alone can slide away
     // from a neighboring face's seam and leave its loop disconnected.
@@ -2142,6 +2168,7 @@ pub(super) fn support_patches(
                                 .collect::<Vec<_>>();
                             if let Ok(point) = refine_offset_corner(
                                 topology,
+                                vertex,
                                 source_point,
                                 &subset,
                                 &uses,
@@ -3128,7 +3155,7 @@ fn rounded_join_center(
     let [start, end] = edge.vertices().map(|vertex| {
         let faces = topology.vertex_edges(vertex)?.into_iter().map(|edge| topology.edge_faces(edge))
             .collect::<KernelResult<Vec<_>>>()?.into_iter().flatten().collect::<BTreeSet<_>>();
-        let constraints = faces.iter().map(|face| Ok(CornerConstraint::Surface(topology.face(*face)?.surface())))
+        let constraints = faces.iter().map(|face| Ok(CornerConstraint::Surface(topology.face(*face)?.surface(), None)))
             .collect::<KernelResult<Vec<_>>>()?;
         // Tangential intersections amplify a model-tolerance residual into a
         // visible trim gap. Refine the shared center before constructing joins.
@@ -3920,7 +3947,7 @@ pub(crate) fn dissolve_faces(source: &Compound, faces: &[FaceHandle]) -> KernelR
         collapsed.insert(id, CollapsedSupport::Curve(curve));
     }
     for (id, seed, neighbors) in corners {
-        let mut constraints = neighbors.iter().map(|face| CornerConstraint::Surface(&supports[face])).collect::<Vec<_>>();
+        let mut constraints = neighbors.iter().map(|face| CornerConstraint::Surface(&supports[face], None)).collect::<Vec<_>>();
         for edge in topology.face_edges(id)? {
             for neighbor in topology.edge_faces(edge)? {
                 if let Some(CollapsedSupport::Curve(curve)) = collapsed.get(&neighbor) {

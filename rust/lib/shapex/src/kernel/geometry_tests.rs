@@ -95,7 +95,7 @@ fn spliced_rational_guides_preserve_trims_lifts_and_extension() {
     let first_range = ParameterRange::new(0.8, 0.2).unwrap();
     let second_range = ParameterRange::new(5.0, 7.0).unwrap();
     let offset = Vec2::new(std::f64::consts::TAU, 0.0);
-    let joined = join_intersection_guides(&first, first_range, &second, second_range, 0.4, offset)
+    let (joined, _) = join_intersection_guides(&first, first_range, &second, second_range, 0.4, offset)
         .unwrap().unwrap();
     let extended = joined.extended(ParameterRange::new(-0.1, 1.1).unwrap()).unwrap();
     for i in 0..=32 {
@@ -109,6 +109,31 @@ fn spliced_rational_guides_preserve_trims_lifts_and_extension() {
         assert!(joined.evaluate(0.4 + fraction * 0.6).unwrap().point.distance(b) < 1e-12);
         assert!(extended.evaluate(0.4 + fraction * 0.6).unwrap().point.distance(b) < 1e-12);
     }
+}
+
+#[test]
+fn guide_splice_retains_junction_when_a_leading_span_collapses() {
+    let first: Curve2 = Line2::new(Point2::new(0.0, 0.0), Vec2::unit_x()).unwrap().into();
+    let tiny = 1e-18;
+    let second: Curve2 = NurbsCurve2::new(1,
+        vec![Point2::new(1.0, 0.0), Point2::new(1.0, tiny), Point2::new(1.0, 1.0)],
+        vec![1.0; 3], vec![0.0, 0.0, tiny, 1.0, 1.0]).unwrap().into();
+    let range = ParameterRange::new(0.0, 1.0).unwrap();
+    let (guide, junction) = join_intersection_guides(&first, range, &second, range, 0.5, Vec2::new(0.0, 0.0))
+        .unwrap().unwrap();
+    assert_eq!(guide.control_points().len(), 4);
+    assert_eq!(guide.control_points()[junction - 1], Point2::new(1.0, 0.0));
+    assert_eq!(guide.control_points()[junction], Point2::new(1.0, tiny));
+    for i in 0..=16 {
+        let fraction = i as f64 / 16.0;
+        let actual = guide.evaluate(0.5 + fraction * 0.5).unwrap().point;
+        let expected = second.evaluate(fraction).unwrap().point;
+        assert!(actual.distance(expected) < 1e-15);
+    }
+    // A trim extending outside the source guide cannot supply a complete half.
+    assert!(join_intersection_guides(&first, range, &second,
+        ParameterRange::new(-0.1, 1.0).unwrap(), 0.5, Vec2::new(0.0, 0.0))
+        .unwrap().is_none());
 }
 
 #[test]

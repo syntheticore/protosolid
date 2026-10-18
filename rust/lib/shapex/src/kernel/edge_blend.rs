@@ -257,11 +257,43 @@ impl Transaction<'_> {
 
     fn blend_network(
         &mut self,
+        selected: BTreeSet<EdgeId>,
+        radius: f64,
+        follow_tangent_edges: bool,
+        kind: EdgeBlendKind,
+        chamfer: Option<&ChamferSettings>,
+    ) -> KernelResult<()> {
+        if kind != EdgeBlendKind::Fillet {
+            return self.blend_network_with_guide(
+                selected, radius, follow_tangent_edges, kind, chamfer, false,
+            );
+        }
+        let checkpoint = self.checkpoint();
+        let result = self.blend_network_with_guide(
+            selected.clone(), radius, follow_tangent_edges, kind, chamfer, false,
+        );
+        match result {
+            Err(error) if error.diagnostics().iter()
+                .any(|diagnostic| diagnostic.kind == DiagnosticKind::NumericalFailure) => {
+                // A long approximating guide can move off its corrected branch
+                // between samples. Retry the network once with an interpolating guide.
+                self.restore(checkpoint);
+                self.blend_network_with_guide(
+                    selected, radius, follow_tangent_edges, kind, chamfer, true,
+                )
+            }
+            result => result,
+        }
+    }
+
+    fn blend_network_with_guide(
+        &mut self,
         mut selected: BTreeSet<EdgeId>,
         radius: f64,
         follow_tangent_edges: bool,
         kind: EdgeBlendKind,
         chamfer: Option<&ChamferSettings>,
+        interpolate_guides: bool,
     ) -> KernelResult<()> {
         let input_names = selected
             .iter()
@@ -280,7 +312,7 @@ impl Transaction<'_> {
             let value = self.working.edge(*edge)?;
             if value.vertices[0] == value.vertices[1] {
                 if let Ok(mut spine) =
-                    self.prepare_blend_spine(*edge, radius, kind, None, None, chamfer)
+                    self.prepare_blend_spine(*edge, radius, kind, None, None, chamfer, interpolate_guides)
                 {
                     if matches!(spine.center.curve, Curve3::SurfaceIntersection(_)) {
                         if !spine.local_guide {
@@ -343,6 +375,7 @@ impl Transaction<'_> {
                     shared,
                     propagated_offsets.get(&edge),
                     chamfer.as_ref(),
+                    interpolate_guides,
                 )?;
                 // Splitting a rim between the same supports must not change
                 // its generating offsets at each fragment's midpoint.
@@ -626,12 +659,13 @@ impl Transaction<'_> {
                         if self.normalize_blend_boundary(boundary, vertex, kind)? {
                             let (selected, settings) =
                                 self.rebind_blend_selection(&input_names, input_chamfer)?;
-                            return self.blend_network(
+                            return self.blend_network_with_guide(
                                 selected,
                                 radius,
                                 follow_tangent_edges,
                                 kind,
                                 settings.as_ref(),
+                                interpolate_guides,
                             );
                         }
                     }

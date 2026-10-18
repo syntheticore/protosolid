@@ -309,7 +309,7 @@ fn fillet_through_cut_rounded_cylinder_shell() {
     )
     .unwrap();
     let cut = body.difference(&tool).unwrap();
-    let edges = cut
+    let (edges, seams): (Vec<_>, Vec<_>) = cut
         .edges()
         .filter(|edge| {
             let points = edge.endpoints().unwrap();
@@ -318,6 +318,19 @@ fn fillet_through_cut_rounded_cylinder_shell() {
                 .all(|p| (p.x - 11.267128061979122).abs() < tol.linear)
                 && matches!(edge.curve(), Curve3::Line(_))
         })
+        .partition(|edge| edge.connected_faces().unwrap().len() == 2);
+    // Excluded chart edges must be two opposite uses on the same face.
+    let topology = cut.topology();
+    for seam in seams {
+        assert_eq!(seam.connected_faces().unwrap().len(), 1);
+        let (_, edge) = topology.edges().find(|(_, edge)| edge.name() == seam.persistent_id()).unwrap();
+        assert_eq!(edge.coedges().len(), 2);
+        let first = topology.coedge(edge.coedges()[0]).unwrap();
+        let second = topology.coedge(edge.coedges()[1]).unwrap();
+        assert_ne!(first.is_forward(), second.is_forward());
+        assert_eq!(topology.loop_(first.loop_id()).unwrap().face(), topology.loop_(second.loop_id()).unwrap().face());
+    }
+    let edges = edges.into_iter()
         .map(|edge| edge.persistent_id())
         .collect::<Vec<_>>();
     assert_eq!(edges.len(), 8);
@@ -6979,7 +6992,8 @@ fn shell_filleted_chamfered_slot_document_51() {
                 };
                 assert_eq!(shell.solids().len(), 1);
                 assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
-                shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+                shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                    .unwrap_or_else(|error| panic!("{join} {thickness} mm, {} openings: {error}", openings.len()));
             }
         }
     }

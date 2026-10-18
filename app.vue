@@ -46,7 +46,7 @@
     height: 38px
 
     .fullscreen &
-    .maximized[data-platform="win32"] &
+    [data-platform="win32"] .maximized &
     [data-platform="browser"] &
       height: 33px
 

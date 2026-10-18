@@ -21,6 +21,6 @@
     }
   },
   "devDependencies": {
-    "electron": "31.3.0"
+    "electron": "44.9.0"
   }
 }

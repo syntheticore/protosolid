@@ -67,7 +67,7 @@
       flex: 0 0 auto
 
   .fullscreen
-  .maximized[data-platform="win32"]
+  [data-platform="win32"] .maximized
   [data-platform="browser"]
 
     .tab-bar
@@ -78,8 +78,7 @@
       border-radius: 0
 
     .app-menu-btn
-      margin-left: 3px
-      margin-right: 4px
+      margin: 3px 4px 3px 3px
 
     .history-btn
       margin-right: 3px
@@ -87,6 +86,8 @@
   .app-menu-btn
     // color: #ff9f90
     color: $highlight * 1.2
+    margin-top: 5px
+    margin-bottom: 3px
 
     :deep(.button)
       border-radius: 4px

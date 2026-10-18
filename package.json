@@ -30,7 +30,7 @@
     "@fortawesome/vue-fontawesome": "^3.0.3",
     "@pinia/nuxt": "^0.5.2",
     "@salusoft89/planegcs": "^1.2.0",
-    "electron": "31.3.0",
+    "electron": "44.9.0",
     "electron-builder": "^24.13.3",
     "jszip": "^3.10.1",
     "nanoevents": "^9.0.0",

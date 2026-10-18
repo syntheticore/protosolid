@@ -4,8 +4,7 @@
 
     .empty(v-if="!graph")
       p This document has no version history yet.
-      p(v-if="preferences.documentFormat != 'versioned'") Switch the document format to Versioned under Settings › Files to record a version every time you save.
-      p(v-else) Save the document to record its first version.
+      p Save the document to record its first version.
 
     template(v-else)
 
@@ -203,7 +202,6 @@
 
 <script setup>
 
-  import preferences from './../js/preferences.js'
   import { requestText } from './../js/dialogs.js'
 
   const props = defineProps(['document'])

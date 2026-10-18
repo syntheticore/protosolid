@@ -2,9 +2,11 @@
 
   li.tab(:class="{ active: document == activeDocument }")
 
-    span.title {{ document.filePath || 'Untitled Document' }} {{ document.hasUnsavedChanges ? '*' : null }}
+    span.title(:title="document.filePath") {{ fileName }}
 
-    MenuButton.naked.left.natural.history-btn(icon="code-branch")
+    span.unsaved(v-if="document.hasUnsavedChanges") *
+
+    MenuButton.naked.natural.centered.history-btn(v-if="showHistory" icon="code-branch")
 
       template(v-slot:header="")
         template(v-if="branchStatus")
@@ -26,6 +28,8 @@
 
   .tab
     display: flex
+    flex: 0 1 auto
+    min-width: 0
     align-items: center
     border-left: 1px solid $dark1 * 1.2
     padding-left: 12px
@@ -45,6 +49,8 @@
     &.active
       color: $bright1
       background: $dark1 * 1.2
+      flex-shrink: 0
+      max-width: 40vw
 
       .close-btn
       .menu-button
@@ -54,6 +60,19 @@
       .menu-button
         width: 56px
         margin-left: 0.75rem
+
+  .title
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+
+  .unsaved
+    margin-left: 0.25em
+
+  .unsaved
+  .menu-button
+  .close-btn
+    flex-shrink: 0
 
   .menu-button
     margin-right: 0
@@ -105,7 +124,7 @@
 
 <script setup>
 
-  import { openPreferences } from './../js/preferences.js'
+  import preferences, { emitter as prefEmitter, openPreferences } from './../js/preferences.js'
 
   const props = defineProps(['document', 'active-document'])
   const emit = defineEmits(['delete-document'])
@@ -116,6 +135,17 @@
     bus.emit('close-widgets')
     openPreferences('files')
   }
+
+  const fileName = computed(() => props.document.filePath?.split(/[\\/]/).pop() || 'Untitled Document')
+
+  const versioningEnabled = ref(preferences.documentFormat == 'versioned')
+  const unbindPrefs = prefEmitter.on('updated', () => versioningEnabled.value = preferences.documentFormat == 'versioned' )
+  onUnmounted(unbindPrefs)
+
+  const showHistory = computed(() => {
+    props.document.repositoryVersion
+    return versioningEnabled.value || !!props.document.repository
+  })
 
   const branchStatus = computed(() => {
     props.document.repositoryVersion

@@ -97,14 +97,10 @@
   .tabs
     display: flex
     flex: 1 1 auto
+    min-width: 0
     white-space: nowrap
-    overflow: auto
-    -ms-overflow-style: none
-    scrollbar-width: none
+    overflow: hidden
     height: 100%
-
-    &::-webkit-scrollbar
-      display: none
 
   .grab-handle
     -webkit-app-region: drag

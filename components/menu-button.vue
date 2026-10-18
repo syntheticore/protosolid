@@ -58,6 +58,19 @@
         left: unset
         margin-left: 0
 
+    // Static position of the pop-up is centered below the button
+    &.centered
+      display: inline-flex
+      flex-direction: column
+      align-items: center
+
+      .pop-up
+        margin: 12px 0
+
+        &::before
+          right: unset
+          left: calc(50% - 7px)
+
     &.naked
 
       .button

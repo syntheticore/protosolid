@@ -347,14 +347,14 @@
     data() {
       return {
         preferences,
-        activeSection: new URLSearchParams(window.location.search).get('section') || 'modeling',
+        activeSection: new URLSearchParams(window.location.search).get('section') || 'appearance',
         isHighDPI: window.devicePixelRatio > 1,
         restartRequired: false,
         sections: [
-          { id: 'modeling', title: 'Modeling', icon: 'cube' },
-          { id: 'files', title: 'Files', icon: 'save' },
-          { id: 'units', title: 'Units', icon: 'ruler' },
           { id: 'appearance', title: 'Appearance', icon: 'desktop' },
+          { id: 'files', title: 'Files', icon: 'save' },
+          { id: 'modeling', title: 'Modeling', icon: 'cube' },
+          { id: 'units', title: 'Units', icon: 'ruler' },
           { id: 'tolerances', title: 'Tolerances', icon: 'crosshairs' },
         ],
       }

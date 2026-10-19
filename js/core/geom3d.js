@@ -2,39 +2,21 @@ import * as THREE from 'three'
 import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference, PointReference } from './references.js'
 import { makeID } from './id.js'
 import { markRaw } from 'vue'
-import Expression from './expression.js'
-import preferences from '../preferences.js'
 import { resolveCompoundSelection, restoreCompoundSelections, identifyTopology, topologyItems } from './topology.js'
 import { seedProfileTopology, trackTopology, trackOperations } from './topology-history.js'
 import { captureTopologySelection, namespaceTopology } from './topological-naming.js'
 import { normalFromMatrix, rotationFromNormal, EPSILON } from './utils.js'
+import { fail } from './errors.js'
 import {
   shapex as sx, modelTolerance, tessellationOptions, point2, threeVector,
   planeFromMatrix, axisFromMatrix, transformFromMatrix, consumeEntityIds, tessellateMesh,
 } from './shapex.js'
 
-const DEFAULT_TESSELLATION_TOLERANCE = 0.4
-const DEFAULT_ANGULAR_TESSELLATION_TOLERANCE = 0.2
-export function getViewportTessellationTolerance() {
-  try {
-    const tolerance = new Expression(preferences.tessellationTolerance).getBase()
-    return Number.isFinite(tolerance) && tolerance > 0 ? tolerance : DEFAULT_TESSELLATION_TOLERANCE
-  } catch (_) {
-    return DEFAULT_TESSELLATION_TOLERANCE
-  }
-}
-export function getViewportAngularTessellationTolerance() {
-  try {
-    const degrees = new Expression(preferences.tessellationAngularTolerance, [], 'angle').getBase()
-    const tolerance = THREE.MathUtils.degToRad(degrees)
-    return Number.isFinite(tolerance) && tolerance > 0 ? tolerance : DEFAULT_ANGULAR_TESSELLATION_TOLERANCE
-  } catch (_) {
-    return DEFAULT_ANGULAR_TESSELLATION_TOLERANCE
-  }
-}
 function extrusionRange(geometry, origin, direction) {
-  // Only the disposable prism extent comes from the mesh; Booleans retain the exact body.
-  const mesh = geometry.tessellate(tessellationOptions)
+  // Only the disposable prism extent comes from the mesh; Booleans retain the
+  // exact body. A fixed mesh keeps modeling independent of display settings.
+  const extentOptions = sx.TessellationOptions.new(0.1, 0.1, 24)
+  const mesh = geometry.tessellate(extentOptions)
   let minimum = Infinity, maximum = -Infinity
   for(const point of mesh.positions) {
     const distance = threeVector(point).sub(origin).dot(direction)
@@ -42,9 +24,9 @@ function extrusionRange(geometry, origin, direction) {
     maximum = Math.max(maximum, distance)
   }
   if(!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
-    throw { type: 'error', msg: 'Through all could not determine the body extent' }
+    fail('Through all could not determine the body extent')
   }
-  const padding = Math.max(tessellationOptions.chordTolerance * 4,
+  const padding = Math.max(extentOptions.chordTolerance * 4,
     modelTolerance.linear * 16, (maximum - minimum) * 0.01)
   return [minimum - padding, maximum + padding]
 }
@@ -52,7 +34,7 @@ function extrusionRange(geometry, origin, direction) {
 export class Wire {
   constructor(region, startPoint) {
     region = region.map(seg => seg.clone())
-    if(region.length == 0) throw 'Wires may not be empty'
+    if(region.length == 0) fail('Wires may not be empty')
     else if(region.length >= 2) {
       // Find starting point from element order
       let bounds = region[0].endpoints()
@@ -65,14 +47,14 @@ export class Wire {
           point = tcurve.endpoints()[0]
           tcurve.flip()
         } else {
-          if (!tcurve.endpoints()[0].almost(point)) throw "Wire segments must be connected"
+          if (!tcurve.endpoints()[0].almost(point)) fail("Wire segments must be connected")
           point = tcurve.endpoints()[1]
         }
       })
     }
     let firstPoint = region[0].endpoints()[0]
     let lastPoint = region.slice(-1)[0].endpoints()[1]
-    if (!firstPoint.almost(lastPoint)) throw "Wires must be closed"
+    if (!firstPoint.almost(lastPoint)) fail("Wires must be closed")
     this.segments = region
   }
   geom() { return this.cachedWire ||= sx.Wire2.new(this.segments.map(segment => segment.geom()), modelTolerance) }
@@ -146,10 +128,7 @@ export class Profile {
     return curve.id.split('/')[0]
   }
   extrude(componentId, height, featureId, offset = 0) {
-    if (!height) throw {
-      type: 'error',
-      msg: 'Extrusion has no volume'
-    }
+    if (!height) fail('Extrusion has no volume')
     const plane = planeFromMatrix(this.sketch.workplane)
     const geometry = this.geom().extrude(plane, plane.normal().scaled(height))
     const compound = new Compound(componentId, geometry)
@@ -159,12 +138,6 @@ export class Profile {
     return compound.transform(new THREE.Matrix4().makeTranslation(translation.x, translation.y, translation.z))
   }
   extrudeThroughAll(componentId, support, featureId, side = 'forward') {
-    const fail = msg => {
-      throw {
-        type: 'error',
-        msg
-      }
-    }
     if (!support?.geom || !support.solids().length) fail('Through all requires an existing body')
     const profileDirection = this.normal().normalize()
     const origin = new THREE.Vector3().setFromMatrixPosition(this.sketch.workplane)
@@ -182,7 +155,7 @@ export class Profile {
     return result
   }
   extrudeUpToFace(componentId, target, featureId, offset = 0, endOffset = 0) {
-    if(!target) throw { type: 'error', msg: 'Select a face to extrude up to' }
+    if(!target) fail('Select a face to extrude up to')
     const body = target.solid.geom().toCompound()
     try {
       const geometry = this.geom().extrudeUpToFace(
@@ -192,10 +165,7 @@ export class Profile {
     } finally { body.free() }
   }
   revolve(componentId, axis, angle, featureId, offset = 0) {
-    if (!angle) throw {
-      type: 'error',
-      msg: 'Revolution has no volume'
-    }
+    if (!angle) fail('Revolution has no volume')
     const geometry = this.geom().revolve(planeFromMatrix(this.sketch.workplane), axisFromMatrix(axis), angle)
     const compound = new Compound(componentId, geometry).seedProfileTopology([this], featureId)
     if (!offset) return compound
@@ -203,7 +173,7 @@ export class Profile {
     return compound.transform(turn)
   }
   revolveUpToFace(componentId, axis, target, featureId, forward = true) {
-    if(!target) throw { type: 'error', msg: 'Select a face to revolve up to' }
+    if(!target) fail('Select a face to revolve up to')
     const body = target.solid.geom().toCompound()
     try {
       const geometry = this.geom().revolveUpToFace(
@@ -213,7 +183,7 @@ export class Profile {
     } finally { body.free() }
   }
   revolveBetweenFaces(componentId, axis, from, until, featureId, forward = true) {
-    if(!from || !until) throw { type: 'error', msg: 'Select both limiting faces' }
+    if(!from || !until) fail('Select both limiting faces')
     const fromBody = from.solid.geom().toCompound()
     const untilBody = until.solid.geom().toCompound()
     try {
@@ -227,7 +197,7 @@ export class Profile {
   loft(componentId, others, untwist, featureId) {
     const profiles = [this, ...others]
     if(profiles.some(profile => profile.rings.length != 1)) {
-      throw { type: 'error', msg: 'Loft profiles with holes are not supported' }
+      fail('Loft profiles with holes are not supported')
     }
     // Rational loft sections explicitly approximate derived curves at model tolerance.
     const section = profile => profile.geom().approximateRational(modelTolerance).profile
@@ -239,7 +209,7 @@ export class Profile {
     return new Compound(componentId, geometry).seedProfileTopology(profiles, featureId)
   }
   sweep(componentId, rail, featureId) {
-    if(this.rings.length != 1) throw { type: 'error', msg: 'Sweeps with holes are not supported' }
+    if(this.rings.length != 1) fail('Sweeps with holes are not supported')
     const railSource = rail instanceof Edge ? 'rail' : rail.id.split('/')[0]
     const profile = this.geom(), plane = planeFromMatrix(this.sketch.workplane)
     const geometry = rail.sketch ?
@@ -334,15 +304,15 @@ export class Face {
     return threeVector(this.geom().centroid())
   }
   planarReference() {
-    if (!this.getPlane()) throw "Cannot provide plane from non-planar face"
+    if (!this.getPlane()) throw new Error("Cannot provide plane from non-planar face")
     return new PlanarReference(new FaceReference(this))
   }
   axialReference() {
-    if (!this.getAxis()) throw "Cannot provide axis from non-cylindrical face"
+    if (!this.getAxis()) throw new Error("Cannot provide axis from non-cylindrical face")
     return new AxialReference(new FaceReference(this))
   }
   pointReference() {
-    if (!this.getPoint()) throw "Cannot provide point from non-spherical face"
+    if (!this.getPoint()) throw new Error("Cannot provide point from non-spherical face")
     return new PointReference(new FaceReference(this))
   }
   faceReference() {
@@ -399,7 +369,7 @@ export class Edge {
     return 'Edge'
   }
   axialReference() {
-    if (!this.getAxis()) throw "Cannot provide axis from non-linear edge"
+    if (!this.getAxis()) throw new Error("Cannot provide axis from non-linear edge")
     return new AxialReference(this.edgeReference())
   }
   edgeReference() {
@@ -591,10 +561,7 @@ export class Compound extends Volumetric {
   }
 
   boolean(other, op) {
-    if (!other.geom) throw {
-      type: 'error',
-      msg: "Tool body has no volume"
-    }
+    if (!other.geom) fail("Tool body has no volume")
     if (op == 'create') {
       if (!this.geom) return this.cloneCached(other.geom(), other.solids())
       return this.merge([other])
@@ -627,12 +594,6 @@ export class Compound extends Volumetric {
     return new Compound(this.componentId, geometry).trackTopology([this], 'chamfer')
   }
   offsetFaces(faces, distance) {
-    const fail = msg => {
-      throw {
-        type: 'error',
-        msg
-      }
-    }
     if (!faces?.length) fail('Select one or more faces to offset')
     if (!Number.isFinite(distance)) fail('Offset distance must be finite')
     if (distance == 0) return this
@@ -654,14 +615,14 @@ export class Compound extends Volumetric {
   }
   removeShapes(shapes) {
     if (shapes.some(shape => !(shape instanceof Solid))) {
-      throw { type: 'error', msg: 'Only solids can be removed here' }
+      fail('Only solids can be removed here')
     }
     const geometry = this.geom().withoutSolids(shapes.map(shape => shape.geom()))
     return new Compound(this.componentId, geometry).trackTopology([this], 'remove-solids')
   }
   replaceShapes(shapes, replacements, algoName) {
     if (shapes.length != 1 || replacements.length != 1 || !(shapes[0] instanceof Face) || !(replacements[0] instanceof Face)) {
-      throw { type: 'error', msg: 'Select one face and one replacement face' }
+      fail('Select one face and one replacement face')
     }
     const geometry = this.geom().replaceFace(shapes[0].geom(), replacements[0].geom())
     return new Compound(this.componentId, geometry).trackTopology([this], algoName || 'replace-face')

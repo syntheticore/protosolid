@@ -16,9 +16,12 @@ const preferences = {
   zoomToCursor: true,
   cacheTesselation: true,
   centerOfMassTolerance: '0.01mm',
-  tessellationTolerance: '0.4mm',
-  tessellationAngularTolerance: '0.2rad',
+  tessellationTolerance: '0.1mm',
+  tessellationAngularTolerance: '0.1rad',
+  sketchTessellationTolerance: '0.01mm',
 }
+
+export const defaultPreferences = Object.freeze({ ...preferences })
 
 function savePreferences() {
   window.localStorage.setItem('preferences', JSON.stringify(preferences))
@@ -30,7 +33,11 @@ function loadPreferences() {
   try {
     const prefs = JSON.parse(window.localStorage.getItem('preferences')) || {}
     // The old value was only a placeholder and was never applied to viewport meshes.
-    if(prefs.tessellationTolerance === '0.0001mm') prefs.tessellationTolerance = '0.4mm'
+    if(prefs.tessellationTolerance === '0.0001mm') delete prefs.tessellationTolerance
+    // The OpenCascade defaults never applied to Shapex meshes. Saved copies of
+    // them take the Shapex defaults instead.
+    if(prefs.tessellationTolerance === '0.4mm') delete prefs.tessellationTolerance
+    if(prefs.tessellationAngularTolerance === '0.2rad') delete prefs.tessellationAngularTolerance
     applyPreferences(prefs)
   } catch(error) {
     console.warn('Could not load preferences', error)

@@ -3,9 +3,9 @@ import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { AxialReference, CurveReference, PointReference } from './references.js'
 import { EPSILON, arrayRange, rotationFromNormal } from './utils.js'
-import { shapex as sx, point2 } from './shapex.js'
+import { shapex as sx, point2, modelTolerance, sketchTessellationOptions } from './shapex.js'
+import { isModelingFailure } from './errors.js'
 
-const tolerance = () => sx.ModelTolerance.new(EPSILON / 10, 1e-12, 1e-10, 1e-12)
 const vector = point => new THREE.Vector3(point.x, point.y, 0)
 
 export class SketchElement {
@@ -41,9 +41,9 @@ export class SketchElement {
     return new THREE.Vector3(point.x, point.y, 0)
   }
 
-  unsample(point) { return this.geom().closestPoint(point2(point), tolerance()).parameter }
+  unsample(point) { return this.geom().closestPoint(point2(point), modelTolerance).parameter }
 
-  distanceTo(point) { return this.geom().closestPoint(point2(point), tolerance()).distance }
+  distanceTo(point) { return this.geom().closestPoint(point2(point), modelTolerance).distance }
 
   endpoints() {
     return [this.sample(0.0), this.sample(1.0)]
@@ -59,12 +59,12 @@ export class SketchElement {
     return this.handles().find(p => other.handles().some(op => p.almost(op) ) )
   }
 
-  length() { return this.geom ? this.geom().length(tolerance()) : 0 }
+  length() { return this.geom ? this.geom().length(modelTolerance) : 0 }
 
 
   tesselate() {
     if(!this.geom) return
-    return this.geom().tessellate(sx.TessellationOptions.new(0.01, 0.1, 24)).points.map(point => [point.x, point.y, 0])
+    return this.geom().tessellate(sketchTessellationOptions).points.map(point => [point.x, point.y, 0])
   }
 
   pathReference() {
@@ -79,7 +79,7 @@ export class SketchElement {
   intersect(others) {
     if(!this.geom) return []
     return others.filter(other => other != this && other.geom).flatMap(other =>
-      this.geom().intersections(other.geom(), tolerance()).filter(hit => hit.kind == 'point').map(hit => hit.point))
+      this.geom().intersections(other.geom(), modelTolerance).filter(hit => hit.kind == 'point').map(hit => hit.point))
   }
 
   splitIntersections(others) {
@@ -106,7 +106,7 @@ export class SketchElement {
     const cutters = others.filter(other => other != this)
     const cuts = parameters.filter(u => Math.abs(u - range.start) > EPSILON && Math.abs(u - range.end) > EPSILON)
     if(!cuts.length) return [this]
-    return curve.splitAt([cuts[0]], tolerance()).flatMap((piece, i) =>
+    return curve.splitAt([cuts[0]], modelTolerance).flatMap((piece, i) =>
       this.constructor.fromGeometry(piece, this.id + '/' + (i + 1)).split(cutters))
   }
 
@@ -329,30 +329,32 @@ export class Circle extends SketchElement {
 Serialize.register(Circle, 'Circle')
 
 
+// An arc starts at the Cartesian angle `start` and turns by the signed
+// `sweep`, matching Circle2's counter-clockwise parameter. The sign of the
+// sweep is the traversal direction.
 export class Arc extends SketchElement {
   typename() { return super.typename('Arc') }
 
-  constructor(center, radius, bounds, forward = true, geom) {
+  constructor(center, radius, start, sweep, geom) {
     super()
     this._center = center
     this.radius = radius
-    this.bounds = bounds
-    this.forward = forward
+    this.start = start
+    this.sweep = sweep
     this.update(geom)
   }
 
   static fromPoints(points) {
     try { return Arc.fromGeometry(sx.TrimmedCurve2.arcThrough(...points.map(point2))) }
     catch(error) {
-      if(error instanceof RangeError || error instanceof sx.ShapexError) return
+      if(isModelingFailure(error)) return
       throw error
     }
   }
 
   static fromGeometry(geom, id) {
-    const basis = geom.curve(), range = geom.range(), clockwise = range.span() < 0
-    const bounds = clockwise ? [-range.start, -range.end] : [-range.end, -range.start]
-    const arc = new Arc(vector(basis.center()), basis.radius(), bounds, clockwise, geom)
+    const basis = geom.curve(), range = geom.range()
+    const arc = new Arc(vector(basis.center()), basis.radius(), range.start, range.span(), geom)
     if(id) arc.id = id
     return arc
   }
@@ -377,17 +379,16 @@ export class Arc extends SketchElement {
     if(!Number.isFinite(radius) || radius <= EPSILON) return false
     if(handles.some(point => !point || ![point.x, point.y, point.z].every(Number.isFinite))) return false
     const center = handles[0]
-    const endpoints = this.forward ? handles.slice(1) : handles.slice(1).reverse()
-    const angles = endpoints.map(point => Math.atan2(center.y - point.y, point.x - center.x))
-    const span = ((angles[1] - angles[0]) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)
+    const [first, last] = handles.slice(1).map(point => Math.atan2(point.y - center.y, point.x - center.x))
+    // Keep the traversal direction; the solver only moves the endpoints.
+    const direction = Math.sign(this.sweep)
+    const span = THREE.MathUtils.euclideanModulo(direction * (last - first), Math.PI * 2)
     if(Math.min(span, Math.PI * 2 - span) * radius <= EPSILON) return false
-    const bounds = [angles[0], angles[0] + span]
-    const range = this.forward ? bounds : bounds.toReversed()
-    const geometry = sx.TrimmedCurve2.new(sx.Circle2.new(point2(center), radius), sx.ParameterRange.new(-range[0], -range[1]))
     this._center = center
     this.radius = radius
-    this.bounds = bounds
-    this.update(geometry)
+    this.start = first
+    this.sweep = direction * span
+    this.update()
     return true
   }
 
@@ -397,16 +398,16 @@ export class Arc extends SketchElement {
     this.clear()
     this._center = arc._center
     this.radius = arc.radius
-    this.bounds = arc.bounds
-    this.forward = arc.forward
+    this.start = arc.start
+    this.sweep = arc.sweep
     this.geom = arc.geom
     arc.geom = null
     return true
   }
 
   geometry() {
-    const bounds = this.forward ? this.bounds : this.bounds.toReversed()
-    return sx.TrimmedCurve2.new(sx.Circle2.new(point2(this._center), this.radius), sx.ParameterRange.new(-bounds[0], -bounds[1]))
+    return sx.TrimmedCurve2.new(sx.Circle2.new(point2(this._center), this.radius),
+      sx.ParameterRange.new(this.start, this.start + this.sweep))
   }
 
   isClosed() {
@@ -414,11 +415,15 @@ export class Arc extends SketchElement {
   }
 
 
-  flip() { this.forward = !this.forward; this.update(this.geom().reversed()) }
+  flip() {
+    this.start += this.sweep
+    this.sweep = -this.sweep
+    this.update()
+  }
 
 
   _clone() {
-    return new Arc(this._center, this.radius, this.bounds, this.forward)
+    return new Arc(this._center, this.radius, this.start, this.sweep)
   }
 
   dump() {
@@ -426,14 +431,14 @@ export class Arc extends SketchElement {
       id: this.id,
       _center: this._center,
       radius: this.radius,
-      bounds: this.bounds,
-      forward: this.forward,
+      start: this.start,
+      sweep: this.sweep,
       isReference: this.isReference,
     }
   }
 
   static undump(dump) {
-    const arc = new Arc(dump._center, dump.radius, dump.bounds, dump.forward)
+    const arc = new Arc(dump._center, dump.radius, dump.start, dump.sweep)
     arc.id = dump.id
     arc.isReference = dump.isReference || false
     return arc
@@ -449,19 +454,23 @@ export function supportsPointOnCurveConstraint(elem) {
 }
 
 
+// A clamped uniform B-spline through its control points. Split and trimmed
+// pieces keep the whole control polygon and restrict it to `trim`, a
+// parameter range whose direction is the traversal direction.
 export class Spline extends SketchElement {
   typename() { return super.typename('Spline') }
 
-  constructor(points, geom) {
+  constructor(points, trim = null, geom) {
     super()
     this.points = points
+    this.trim = trim
     this.update(geom)
   }
 
   static fromGeometry(geom, id) {
     const points = geom.curve().controlPoints().map(vector)
-    const spline = new Spline(points, geom)
-    spline.preserveGeometry = true
+    const range = geom.range()
+    const spline = new Spline(points, [range.start, range.end], geom)
     spline.id = id
     return spline
   }
@@ -478,7 +487,7 @@ export class Spline extends SketchElement {
   }
 
   endpoints() {
-    return this.preserveGeometry ? [this.sample(0), this.sample(1)] : [this.points[0], this.points.at(-1)]
+    return this.trim ? [this.sample(0), this.sample(1)] : [this.points[0], this.points.at(-1)]
   }
 
   snapPoints() {
@@ -494,6 +503,16 @@ export class Spline extends SketchElement {
     this.update()
   }
 
+  // Inserting or removing a control point changes the knot vector, so a
+  // previous trim no longer describes the same piece.
+  setControlPoints(points) {
+    this.trim = null
+    this.setHandles(points)
+  }
+
+  // Clamped uniform knots span [0, n - degree].
+  domain() { return [0, this.points.length - Math.min(5, this.points.length - 1)] }
+
   center() { return this.sample(0.5) }
 
   geometry() {
@@ -501,26 +520,27 @@ export class Spline extends SketchElement {
     const [values, multiplicities] = Spline.clampedKnots(this.points.length, degree)
     const knots = values.flatMap((value, i) => Array(multiplicities[i]).fill(value))
     const basis = sx.NurbsCurve2.new(degree, this.points.map(point2), this.points.map(() => 1), knots)
-    return sx.TrimmedCurve2.new(basis, sx.ParameterRange.new(knots[degree], knots[this.points.length]))
+    return sx.TrimmedCurve2.new(basis, sx.ParameterRange.new(...(this.trim || this.domain())))
   }
 
   flip() {
-    this.points.reverse()
-    this.update(this.preserveGeometry ? this.geom().reversed() : undefined)
+    this.trim = (this.trim || this.domain()).toReversed()
+    this.update()
   }
 
-  _clone() { return this.preserveGeometry ? Spline.fromGeometry(this.geom()) : new Spline([...this.points]) }
+  _clone() { return new Spline([...this.points], this.trim) }
 
   dump() {
     return {
       id: this.id,
       points: this.points,
+      trim: this.trim,
       isReference: this.isReference,
     }
   }
 
   static undump(dump) {
-    const line = new Spline(dump.points)
+    const line = new Spline(dump.points, dump.trim)
     line.id = dump.id
     line.isReference = dump.isReference || false
     return line
@@ -538,7 +558,7 @@ export class DerivedCurve extends SketchElement {
   handles() { return this.geom && !this.invalid ? this.endpoints() : [] }
   snapPoints() { return this.handles() }
   closestFrame(point) {
-    const curve = this.geom(), closest = curve.closestPoint(point2(point), tolerance())
+    const curve = this.geom(), closest = curve.closestPoint(point2(point), modelTolerance)
     const derivative = curve.evaluate(closest.parameter).firstDerivative
     return { point: vector(closest.point), tangent: vector(derivative).multiplyScalar(Math.sign(curve.range().span())).normalize() }
   }

@@ -57,7 +57,7 @@ function closestPointOnCurve(elem, point) {
       Math.atan2(endpoint.y - center.y, endpoint.x - center.x)
     )
     const candidateAngle = Math.atan2(projected.y - center.y, projected.x - center.x)
-    const direction = elem.forward ? -1.0 : 1.0
+    const direction = Math.sign(elem.sweep)
     const candidateSweep = positiveAngle(direction * (candidateAngle - angles[0]))
     const arcSweep = positiveAngle(direction * (angles[1] - angles[0]))
     if(candidateSweep <= arcSweep) return projected

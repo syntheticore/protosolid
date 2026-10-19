@@ -129,6 +129,16 @@
               @change="restartRequired = true"
             )
 
+          label
+            span.setting-label
+              strong Sketch tessellation
+              small Maximum deviation of drawn sketch curves
+            input.input.measurement(
+              type="text"
+              v-model="preferences.sketchTessellationTolerance"
+              @change="restartRequired = true"
+            )
+
       transition(name="fade")
         .restart(v-if="restartRequired")
           span Some settings changes require a restart.

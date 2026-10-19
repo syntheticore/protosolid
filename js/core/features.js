@@ -14,6 +14,7 @@ import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame,
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
 import { withTopologyNaming } from './topological-naming.js'
+import { fail, featureError } from './errors.js'
 import {
   alignJointWorld,
   baselineWorldTransform,
@@ -27,10 +28,6 @@ import {
   worldTransform,
 } from './assembly.js'
 
-
-function featureError(error) {
-  return error?.msg ? error : { type: 'error', msg: error.message || String(error) }
-}
 
 export class Feature {
   constructor(document, booleanOutput, title, settings) {
@@ -88,7 +85,9 @@ export class Feature {
     const component = tree.findChild(this.componentId)
     try {
       Object.entries(this.expressions).forEach(([key, expression]) => {
-        this[key] = new Expression(expression, component.getParameters(), this.settings[key].type).getBase()
+        const value = new Expression(expression, component.getParameters(), this.settings[key].type).getBase()
+        if(!Number.isFinite(value)) fail('Parameter expression must be finite')
+        this[key] = value
       })
     } catch(err) {
       this.error = { type: 'error', msg: 'Invalid parameter expression' }
@@ -113,9 +112,7 @@ export class Feature {
         for(const face of tree.findChild(id).compound.faces()) face.tesselate()
       }
     } catch(err) {
-      if(this.error?.type != 'error') {
-        this.error = { type: 'error', msg: err.msg || err.message || String(err) }
-      }
+      if(this.error?.type != 'error') this.error = featureError(err)
     }
   }
 
@@ -2093,9 +2090,7 @@ export class ExtrudeFeature extends SolidFeature {
       }
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) {
-      this.error = featureError(err)
-    }
+    } catch(err) { this.error = featureError(err) }
   }
 
   getGizmo() {
@@ -2218,9 +2213,7 @@ export class RevolveFeature extends SolidFeature {
       }
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) {
-      this.error = featureError(err)
-    }
+    } catch(err) { this.error = featureError(err) }
   }
 
   getGizmo() {

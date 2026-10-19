@@ -21,8 +21,8 @@ import {
   Edge,
   Profile,
   Solid,
-  getViewportTessellationTolerance,
 } from './core/geom3d.js'
+import { getViewportTessellationTolerance } from './core/shapex.js'
 import { PlaneHelper, PointHelper } from './core/helpers.js'
 
 import {
@@ -1530,8 +1530,7 @@ export class SplineTool extends SketchTool {
 
     this.shiftConstraintIndices(spline, index, 1)
     points.splice(index, 0, point)
-    spline.preserveGeometry = false
-    spline.setHandles(points)
+    spline.setControlPoints(points)
     this.sketch.elements.forEach(element => element.fullyConstrained = false)
     this.viewport.elementChanged()
   }
@@ -1557,8 +1556,7 @@ export class SplineTool extends SketchTool {
     )
     this.shiftConstraintIndices(spline, handle.index + 1, -1)
     points.splice(handle.index, 1)
-    spline.preserveGeometry = false
-    spline.setHandles(points)
+    spline.setControlPoints(points)
     this.sketch.elements.forEach(element => element.fullyConstrained = false)
     this.viewport.activeHandle = null
     this.viewport.hoveredHandle = null

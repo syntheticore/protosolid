@@ -40,11 +40,8 @@
                 ]
               },
               "radius": 10,
-              "bounds": [
-                0,
-                1.5707963267948966
-              ],
-              "forward": true,
+              "start": 0,
+              "sweep": -1.5707963267948966,
               "isReference": false
             },
             {

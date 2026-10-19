@@ -197,8 +197,9 @@ export default class SketchPlane extends THREE.Object3D {
       points: element.points,
       center: element._center,
       radius: element.radius,
-      bounds: element.bounds,
-      forward: element.forward,
+      start: element.start,
+      sweep: element.sweep,
+      trim: element.trim,
     })))
   }
 

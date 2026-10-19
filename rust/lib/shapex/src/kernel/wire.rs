@@ -32,10 +32,7 @@ impl TrimmedCurve2 {
         if !closed_period && start == end {
             // A spline or a retained surface p-curve can describe a closed
             // loop without a periodic basis. Distinguish it from a collapse.
-            let closed_curve = if matches!(
-                curve,
-                Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_)
-            ) {
+            let closed_curve = if curve.is_general() || matches!(curve, Curve2::Nurbs(_)) {
                 let mut distinct = false;
                 for fraction in [0.25, 0.5, 0.75] {
                     distinct |=
@@ -376,8 +373,10 @@ fn validate_segment_is_simple(
     segment: &TrimmedCurve2,
     tolerance: ModelTolerance,
 ) -> KernelResult<()> {
-    if matches!(segment.curve(),Curve2::Offset(_)|Curve2::Projected(_)) {
-        if !segment.self_intersections(tolerance)?.is_empty() { return Err(invalid("wire must not self-intersect")); }
+    if segment.curve().is_derived() {
+        if !segment.self_intersections(tolerance)?.is_empty() {
+            return Err(invalid("wire must not self-intersect"));
+        }
         return Ok(());
     }
     let Curve2::Nurbs(curve) = segment.curve() else {
@@ -537,7 +536,8 @@ pub(crate) fn curve_loop_contains_point(
                 .iter()
                 .map(|control| control.x)
                 .fold(f64::NEG_INFINITY, f64::max)),
-            Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => (0..=32)
+            // General curves are bounded by sampling.
+            _ => (0..=32)
                 .map(|index| {
                     let parameter =
                         segment.range().start + segment.range().span() * index as f64 / 32.0;
@@ -624,7 +624,8 @@ pub(crate) fn curve_loop_contains_point(
                     }
                 }
             }
-            Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => {
+            // NURBS and general curves classify through the intersection kernel.
+            _ => {
                 let boundary_ray = TrimmedCurve2::line(
                     Point2::new(point.x - tolerance.linear * 2.0, point.y),
                     Point2::new(point.x + tolerance.linear * 2.0, point.y),
@@ -688,11 +689,10 @@ pub(crate) fn curve_pair_intersection(
     second: &TrimmedCurve2,
     tolerance: ModelTolerance,
 ) -> KernelResult<CurvePairIntersection> {
+    if first.curve().is_general() || second.curve().is_general() {
+        return general_parametric_pair(first, second, tolerance);
+    }
     match (first.curve(), second.curve()) {
-        (Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_), _)
-        | (_, Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_)) => {
-            general_parametric_pair(first, second, tolerance)
-        }
         (Curve2::Line(_), Curve2::Line(_)) => line_line_intersection(first, second, tolerance),
         (Curve2::Line(_), Curve2::Circle(_)) => line_circle_intersection(first, second, tolerance),
         (Curve2::Circle(_), Curve2::Line(_)) => {
@@ -713,6 +713,7 @@ pub(crate) fn curve_pair_intersection(
             }
             Ok(intersection)
         }
+        _ => unreachable!("general curves are intersected above"),
     }
 }
 
@@ -1088,9 +1089,7 @@ fn certified_nurbs_pair(
                     .map(|((x, y), w)| x + y - circle.radius().powi(2) * w)
                     .collect()
             }
-            Curve2::Nurbs(_) => unreachable!(),
-            Curve2::SurfaceIntersection(_) => unreachable!(),
-            Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => unreachable!(),
+            _ => unreachable!("implicit roots pair a NURBS curve with a line or circle"),
         };
         isolate_bernstein_roots(&coefficients, span, 0, tolerance.parameter, &mut parameters);
     }
@@ -1116,9 +1115,7 @@ fn certified_nurbs_pair(
                     circle.center() + Vec2::new(value.cos(), value.sin()) * circle.radius(),
                 )
             }
-            Curve2::Nurbs(_) => unreachable!(),
-            Curve2::SurfaceIntersection(_) => unreachable!(),
-            Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => unreachable!(),
+            _ => unreachable!("implicit roots pair a NURBS curve with a line or circle"),
         };
         let in_other = match other.curve() {
             Curve2::Circle(_) => {
@@ -1297,9 +1294,7 @@ fn refine_implicit_root(
                     2.0 * delta.dot(evaluation.first_derivative),
                 )
             }
-            Curve2::Nurbs(_) => unreachable!(),
-            Curve2::SurfaceIntersection(_) => unreachable!(),
-            Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => unreachable!(),
+            _ => unreachable!("implicit roots pair a NURBS curve with a line or circle"),
         };
         if derivative.abs() <= f64::EPSILON {
             break;

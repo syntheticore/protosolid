@@ -523,6 +523,18 @@ pub enum Curve2 {
 }
 
 impl Curve2 {
+    /// Curves defined pointwise from another curve and bounded by their trim.
+    pub(crate) fn is_derived(&self) -> bool {
+        matches!(self, Self::Offset(_) | Self::Projected(_))
+    }
+
+    /// Curves without a closed form. Queries on them use the generic
+    /// parametric algorithms rather than analytic or Bézier ones.
+    pub(crate) fn is_general(&self) -> bool {
+        self.is_derived()
+            || matches!(self, Self::SurfaceIntersection(_) | Self::SurfaceProjection(_))
+    }
+
     /// A short human-readable name of the curve type, for diagnostics.
     pub(crate) fn kind_name(&self) -> &'static str {
         match self {

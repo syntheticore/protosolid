@@ -84,7 +84,7 @@ test('trimmed sketch splines retain their boundary through cloning and reversal'
 })
 
 test('saved clockwise arcs and solved counter-clockwise arcs preserve traversal', () => {
-  const clockwise = new Arc(vector(0, 0), 2, [0, Math.PI / 2])
+  const clockwise = Arc.undump({ id: 'arc', _center: vector(0, 0), radius: 2, start: 0, sweep: -Math.PI / 2 })
   near(clockwise.sample(0), vector(2, 0))
   near(clockwise.sample(1), vector(0, -2))
   const counter = Arc.fromPoints([vector(2, 0), vector(Math.sqrt(2), Math.sqrt(2)), vector(0, 2)])

@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { Line, Circle, Arc, Spline, OffsetCurve } from './geom2d.js'
 import { EPSILON, cross2d } from './utils.js'
-import { shapex as sx } from './shapex.js'
+import { shapex as sx, modelTolerance } from './shapex.js'
+import { fail } from './errors.js'
 
 export const supportsOffset = curve =>
   curve instanceof Line || curve instanceof Circle || curve instanceof Arc || curve instanceof Spline
@@ -34,7 +35,7 @@ export function profileOffsetGroups(profile, elements) {
   return profile.rings.map((ring, ringIndex) => {
     const entries = ring.segments.map(segment => {
       const curve = elements.find(curve => segment.id == curve.id || segment.id.startsWith(curve.id + '/'))
-      if(!supportsOffset(curve)) throw new Error('This profile contains unsupported offset geometry')
+      if(!supportsOffset(curve)) fail('This profile contains unsupported offset geometry')
       if(curve instanceof Circle && segment.isClosed()) return { curve, start: 0, end: 1 }
       const parameter = point => {
         const range = curve.geom().range()
@@ -77,22 +78,22 @@ export function nearestOffsetFrame(groups, position) {
   let nearest
   groups.forEach((entries, group) => entries.forEach((entry, index) => {
     const curve = geometry(entry), range = curve.range()
-    const closest = curve.closestPoint(sx.Point2.new(position.x, position.y))
+    const closest = curve.closestPoint(sx.Point2.new(position.x, position.y), modelTolerance)
     if(!nearest || closest.distance < nearest.distance) {
       const parameter = (closest.parameter - range.start) / range.span()
       nearest = { ...offsetFrame(entry, parameter), group, index, parameter, distance: closest.distance }
     }
   }))
-  if(!nearest) throw new Error('Could not locate the offset on this profile')
+  if(!nearest) fail('Could not locate the offset on this profile')
   return nearest
 }
 
 export function buildOffsetCurves(groups, distance) {
-  if(!Number.isFinite(distance) || Math.abs(distance) <= EPSILON) throw new Error('Offset must be nonzero')
+  if(!Number.isFinite(distance) || Math.abs(distance) <= EPSILON) fail('Offset must be nonzero')
   const paths = groups.map(entries => {
     const curves = entries.map(geometry)
     const closed = entries.closed ?? entries[0].curve.sample(entries[0].start).almost(entries.at(-1).curve.sample(entries.at(-1).end))
-    const path = sx.Path2.new(curves, closed)
+    const path = sx.Path2.new(curves, closed, modelTolerance)
     const joins = curves.slice(0, closed ? curves.length : -1).map((curve, index) =>
       curve.curve() instanceof sx.Line2 && curves[(index + 1) % curves.length].curve() instanceof sx.Line2 ? 'miter' : 'round')
     const result = path.offset(distance, { join: joins, miterLimit: Infinity })
@@ -101,7 +102,7 @@ export function buildOffsetCurves(groups, distance) {
   })
   for(let i = 0; i < paths.length; i++) for(const other of paths.slice(0, i)) {
     for(const curve of paths[i].segments()) for(const boundary of other.segments()) {
-      if(curve.intersections(boundary).length) throw new Error('Offset boundaries intersect')
+      if(curve.intersections(boundary, modelTolerance).length) fail('Offset boundaries intersect')
     }
   }
   return paths.flatMap(path => path.segments().map(curve => new OffsetCurve(curve)))

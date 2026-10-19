@@ -14,6 +14,7 @@ import Expression from './expression.js'
 import { solveDrag, validGeometry } from './sketch-drag.js'
 import { solveSystem } from './sketch-solver.js'
 import { shapex as sx, transformFromMatrix, planeFromMatrix } from './shapex.js'
+import { isModelingFailure } from './errors.js'
 
 function sameCurve(left, right) {
   if(left === right) return true
@@ -1147,7 +1148,7 @@ export class Projection {
     try {
       return this.projectGeometry(tree)
     } catch(error) {
-      if(!(error instanceof sx.ShapexError || error instanceof RangeError)) throw error
+      if(!isModelingFailure(error)) throw error
       return this.invalidate('This geometry cannot be projected onto the sketch plane')
     }
   }
@@ -1512,18 +1513,20 @@ export class ProfileOffsetConstraint extends Dimension {
     try {
       curves = buildOffsetCurves(this.sourceGroups(), this.side * this.distance)
     } catch(error) {
+      if(!isModelingFailure(error)) throw error
       if(preserveTopology) return false
       accepted = false
       if(this.validDistance !== undefined) {
         this.distance = this.validDistance
         this.expression = this.validExpression
       }
-      window.bus?.emit('toast', error.message || 'Offset could not be created')
+      window.bus?.emit('toast', error.message)
       try {
         // A rejected value keeps the last valid offset, regenerated against
         // the current source. Never leave stale geometry after a source edit.
         curves = buildOffsetCurves(this.sourceGroups(), this.side * this.distance)
-      } catch {
+      } catch(error) {
+        if(!isModelingFailure(error)) throw error
         this.outputs().forEach(curve => curve.invalid = true)
         return false
       }

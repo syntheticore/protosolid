@@ -267,16 +267,16 @@ impl super::Plane3 {
         curve: &TrimmedCurve2,
         tolerance: ModelTolerance,
     ) -> KernelResult<super::Curve3> {
-        match curve.curve() {
-            Curve2::Offset(_) | Curve2::Projected(_) => Ok(super::SurfaceCurve3::new(
-                super::Surface3::Plane(self),
-                curve.curve().clone(),
-                curve.range(),
-                tolerance,
-            )?
-            .into()),
-            _ => self.lift_curve(curve.curve(), tolerance),
+        if !curve.curve().is_derived() {
+            return self.lift_curve(curve.curve(), tolerance);
         }
+        Ok(super::SurfaceCurve3::new(
+            super::Surface3::Plane(self),
+            curve.curve().clone(),
+            curve.range(),
+            tolerance,
+        )?
+        .into())
     }
     /// Express a coplanar curve in this plane's chart. This does not project
     /// off-plane geometry, and requires a geometric coplanarity certificate.

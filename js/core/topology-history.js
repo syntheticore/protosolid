@@ -33,6 +33,27 @@ export function seedProfileTopology(compound, profiles, owner, extraSources = []
   return compound
 }
 
+// Document naming policy per operation; native construction roles only
+// describe geometry. `role` names an output cell, and `continues` decides
+// whether a cell the kernel resolves a source to keeps that source's
+// identity. Resolved cells that do not continue it are generated from it.
+const defaultPolicy = operation => ({ role: () => operation, continues: () => true })
+
+const shellLabels = { 'shell-source': 'source-skin', 'shell-offset': 'offset-skin', 'shell-rim': 'opening-rim' }
+const namingPolicies = {
+  shell(operation, history) {
+    const labels = face => history.constructionRoles[face.kernelId]
+      .filter(role => role.kind in shellLabels).map(role => shellLabels[role.kind]).sort()
+    const sourceSkin = face => labels(face).includes('source-skin')
+    return {
+      role: item => item.topologyKind == 'face' && labels(item).length ? `${operation}/${labels(item).join('+')}` : operation,
+      // The offset skin resolves to the same source face, but only the
+      // source skin continues it.
+      continues: item => item.topologyKind == 'face' ? sourceSkin(item) : item.connectedFaces().some(sourceSkin),
+    }
+  },
+}
+
 export function trackTopology(out, parents, operation, bodyParents = parents) {
   return trackOperations(out, parents, [{ compound: out, operation, bodyParents }])
 }
@@ -45,16 +66,9 @@ export function trackOperations(out, parents, operations) {
   const correspondence = operations.flatMap(({ compound, operation, branch, bodyParents = parents }) => {
     const solidIds = new Set(compound.solids().map(solid => solid.kernelId))
     const cells = outputs.filter(item => solidIds.has((item.topologyKind == 'body' ? item : item.solid).kernelId))
-    cells.forEach(item => roles.set(item, { name: operation, branch }))
     const history = compound.geom().topologyHistory()
-    // Document naming policy belongs here; native shell roles describe geometry.
-    const shellLabels = { 'shell-source': 'source-skin', 'shell-offset': 'offset-skin', 'shell-rim': 'opening-rim' }
-    const shellRole = face => history.constructionRoles[face.kernelId].filter(role => role.kind in shellLabels)
-    const sourceSkin = face => shellRole(face).some(role => role.kind == 'shell-source')
-    for(const item of cells) if(operation == 'shell' && item.topologyKind == 'face') {
-      const labels = shellRole(item).map(role => shellLabels[role.kind]).sort()
-      if(labels.length) roles.set(item, { name: `${operation}/${labels.join('+')}`, branch })
-    }
+    const policy = (namingPolicies[operation] || defaultPolicy)(operation, history)
+    cells.forEach(item => roles.set(item, { name: policy.role(item), branch }))
     const changes = new Map(history.changes.map(change => [change.source, change]))
     const origins = new Map(history.origins.map(origin => [origin.id, origin]))
     const generatedFrom = (id, source, visited = new Set()) => {
@@ -67,13 +81,11 @@ export function trackOperations(out, parents, operations) {
     for(const source of inputs.filter(item => item.topologyKind != 'body')) {
       const resolution = compound.geom().resolve(source.geom())
       const entityIds = consumeEntityIds(resolution.entities)
-      const descendants = cells.filter(item => item.topologyKind == source.topologyKind && entityIds.includes(item.kernelId) &&
-        (operation != 'shell' || (item.topologyKind == 'face' ? sourceSkin(item) :
-          item.connectedFaces().some(sourceSkin))))
+      const resolved = cells.filter(item => item.topologyKind == source.topologyKind && entityIds.includes(item.kernelId))
+      const descendants = resolved.filter(policy.continues)
       records.push({ source, relation: 'modified', outputs: descendants })
       records.push({ source, relation: 'generated', outputs: cells.filter(item =>
-        !descendants.includes(item) && (generatedFrom(item.kernelId, source.kernelId) ||
-          (operation == 'shell' && item.topologyKind == source.topologyKind && entityIds.includes(item.kernelId)))) })
+        !descendants.includes(item) && (resolved.includes(item) || generatedFrom(item.kernelId, source.kernelId))) })
       if(resolution.kind == 'preserved') for(const item of descendants) {
         item.tessId = source.tessId
         item.cachedTesselation = source.cachedTesselation

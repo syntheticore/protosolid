@@ -40,11 +40,8 @@
                 ]
               },
               "radius": 10,
-              "bounds": [
-                0,
-                3.141592653589793
-              ],
-              "forward": true,
+              "start": 0,
+              "sweep": -3.141592653589793,
               "isReference": false
             },
             {
@@ -59,11 +56,8 @@
                 ]
               },
               "radius": 10,
-              "bounds": [
-                3.141592653589793,
-                6.283185307179586
-              ],
-              "forward": true,
+              "start": -3.141592653589793,
+              "sweep": -3.141592653589793,
               "isReference": false
             }
           ],
@@ -210,11 +204,8 @@
                 ]
               },
               "radius": 3,
-              "bounds": [
-                0,
-                3.141592653589793
-              ],
-              "forward": true,
+              "start": 0,
+              "sweep": -3.141592653589793,
               "isReference": false
             },
             {
@@ -229,11 +220,8 @@
                 ]
               },
               "radius": 3,
-              "bounds": [
-                3.141592653589793,
-                6.283185307179586
-              ],
-              "forward": true,
+              "start": -3.141592653589793,
+              "sweep": -3.141592653589793,
               "isReference": false
             }
           ],

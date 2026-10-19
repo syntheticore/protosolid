@@ -5,10 +5,10 @@ import { Timeline } from './timeline.js'
 import { saveFile, loadFile } from '../utils.js'
 import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature } from './features.js'
 import { Selection } from '../selection.js'
-import { Component, SectionView } from './component.js'
+import { SectionView } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
-import { KernelMismatchError, parseContent, readDocumentFile } from './document-format.js'
+import { readDocumentFile } from './document-format.js'
 import { Repository } from './repository.js'
 import { describeConflict } from './merge-conflicts.js'
 import { showDialog } from '../dialogs.js'
@@ -647,7 +647,6 @@ export default class Document extends Emitter {
 
   snapshot() {
     const dump = {
-      kernel: window.kernel.modeling.id,
       lastId,
       timeline: this.timeline,
       views: this.views.map(view => {
@@ -747,10 +746,10 @@ export default class Document extends Emitter {
     const materials = []
     let dump
     try {
-      dump = parseContent(this.repository.read(commitId), { document: this, sketches: {}, materials })
+      dump = Serialize.deserialize(this.repository.read(commitId), { document: this, sketches: {}, materials })
     } catch(error) {
       console.error(error)
-      return alert(error instanceof KernelMismatchError ? error.message : 'This version could not be opened.')
+      return alert('This version could not be opened.')
     }
     this.repository.checkout(target)
     await this.applyDump(dump, materials, 'Switching version', this.repository.commits[commitId].message)
@@ -818,10 +817,10 @@ export default class Document extends Emitter {
     try {
       // Deserialization works in place, so keep plan content intact for the commit
       const content = plan.type == 'merge' ? structuredClone(plan.content) : repository.read(plan.commitId)
-      dump = parseContent(content, { document: this, sketches: {}, materials })
+      dump = Serialize.deserialize(content, { document: this, sketches: {}, materials })
     } catch(error) {
       console.error(error)
-      return alert(error instanceof KernelMismatchError ? error.message : 'The merged version could not be opened.')
+      return alert('The merged version could not be opened.')
     }
     repository.commitMerge(plan, message)
     await this.applyDump(dump, materials, 'Merging', branch)
@@ -837,11 +836,11 @@ export default class Document extends Emitter {
       file = await loadFile('.cad', 'text', path)
       const contents = readDocumentFile(file.data)
       repository = contents.repository
-      dump = parseContent(contents.content, { document: this, sketches: {}, materials })
+      dump = Serialize.deserialize(contents.content, { document: this, sketches: {}, materials })
     } catch(error) {
       if(error != 'canceled') {
         console.error(error)
-        alert(error instanceof KernelMismatchError ? error.message : 'The document could not be opened.')
+        alert('The document could not be opened.')
       }
       throw error
     }

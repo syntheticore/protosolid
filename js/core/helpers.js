@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { makeID } from './id.js'
+import { shapex as sx, point3 } from './shapex.js'
 import { PlanarReference, HelperReference, AxialReference, PointReference } from './references.js'
-import { ocPntFromVec } from './utils.js'
 
 
 export class ConstructionHelper {
@@ -49,10 +49,9 @@ export class AxisHelper extends ConstructionHelper {
   }
 
   geom() {
-    return new window.oc.oc.GC_MakeSegment_1(
-      ocPntFromVec(new THREE.Vector3(0,0,0).applyMatrix4(this.transform)),
-      ocPntFromVec(new THREE.Vector3(0,0,20).applyMatrix4(this.transform))
-    ).Value().get()
+    const start = new THREE.Vector3().applyMatrix4(this.transform)
+    const end = new THREE.Vector3(0, 0, 20).applyMatrix4(this.transform)
+    return sx.TrimmedCurve3.new(sx.Line3.through(point3(start), point3(end)), sx.ParameterRange.new(0, 1))
   }
 }
 

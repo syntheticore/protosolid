@@ -1,29 +1,12 @@
 import * as THREE from 'three'
-
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { AxialReference, CurveReference, PointReference } from './references.js'
-import {
-  EPSILON,
-  arrayRange,
-  cross2d,
-  rotationFromNormal,
-  arrayFromOcVec,
-  ocPnt2dFromVec,
-  ocCirc2dFromVec,
-  vecFromOc,
-  ocCatch,
-} from './utils.js'
+import { EPSILON, arrayRange, rotationFromNormal } from './utils.js'
+import { shapex as sx, point2 } from './shapex.js'
 
-
-function ocTry(callback) {
-  try {
-    return callback()
-  } catch(error) {
-    if(typeof error !== 'number') throw error
-  }
-}
-
+const tolerance = () => sx.ModelTolerance.new(EPSILON / 10, 1e-12, 1e-10, 1e-12)
+const vector = point => new THREE.Vector3(point.x, point.y, 0)
 
 export class SketchElement {
   constructor() {
@@ -34,10 +17,7 @@ export class SketchElement {
 
   typename(base) { return base + (this.projection ? ' Projection' : '') }
 
-  clear() {
-    if(this.geom) this.geom().get().Delete()
-    this.geom = null
-  }
+  clear() { this.geom = null }
 
   update(geom) {
     this.clear()
@@ -56,28 +36,14 @@ export class SketchElement {
 
   sample(u) {
     if(!this.geom) return
-    const geom = this.geom().get()
-    const start = geom.FirstParameter()
-    const range = geom.LastParameter() - start
-    const p = geom.Value(start + u * range)
-    return vecFromOc(p)
+    const curve = this.geom(), range = curve.range()
+    const point = curve.curve().evaluate(range.start + u * range.span()).point
+    return new THREE.Vector3(point.x, point.y, 0)
   }
 
-  unsample(p) {
-    if(p instanceof THREE.Vector3) p = ocPnt2dFromVec(p)
-    try {
-      const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, this.geom())
-      if(projection.NbPoints()) return projection.LowerDistanceParameter()
-    } catch(error) {
-      if(typeof error !== 'number') throw error
-    }
-  }
+  unsample(point) { return this.geom().closestPoint(point2(point), tolerance()).parameter }
 
-  distanceTo(p) {
-    if(p instanceof THREE.Vector3) p = ocPnt2dFromVec(p)
-    const projection = new window.oc.oc.Geom2dAPI_ProjectPointOnCurve_2(p, this.geom())
-    return projection.NbPoints() ? projection.LowerDistance() : Infinity
-  }
+  distanceTo(point) { return this.geom().closestPoint(point2(point), tolerance()).distance }
 
   endpoints() {
     return [this.sample(0.0), this.sample(1.0)]
@@ -93,17 +59,12 @@ export class SketchElement {
     return this.handles().find(p => other.handles().some(op => p.almost(op) ) )
   }
 
-  length() {
-    if(!this.geom) return 0.0
-    const adaptor = new window.oc.oc.Geom2dAdaptor_Curve_2(this.geom())
-    return window.oc.oc.CPnts_AbscissaPoint.Length_2(adaptor)
-  }
+  length() { return this.geom ? this.geom().length(tolerance()) : 0 }
 
-  tesselationSteps() { return 120 }
 
   tesselate() {
     if(!this.geom) return
-    return tesselateCurveFixed(this.geom().get(), this.tesselationSteps())
+    return this.geom().tessellate(sx.TessellationOptions.new(0.01, 0.1, 24)).points.map(point => [point.x, point.y, 0])
   }
 
   pathReference() {
@@ -117,67 +78,36 @@ export class SketchElement {
 
   intersect(others) {
     if(!this.geom) return []
-    const geom = this.geom()
-    return others.flatMap(other => {
-      if(!other.geom || other == this) return []
-      const isect = new window.oc.oc.Geom2dAPI_InterCurveCurve_2(geom, other.geom(), EPSILON / 10.0)// 1.0e-6)
-      return arrayRange(1, isect.NbPoints()).map(i => isect.Point(i) )
-    })
+    return others.filter(other => other != this && other.geom).flatMap(other =>
+      this.geom().intersections(other.geom(), tolerance()).filter(hit => hit.kind == 'point').map(hit => hit.point))
   }
 
   splitIntersections(others) {
-    const intersections = this.intersect(others)
-    // Endpoint-on-curve constraints define topology even when OC's
-    // intersection routine drops the contact near its tolerance boundary.
-    const endpointContacts = others.flatMap(other => {
-      if(!other.geom || other == this) return []
-      return other.endpoints().filter(point => this.distanceTo(point).almost(0.0) )
-    })
-    return [...intersections, ...endpointContacts]
+    return [...this.intersect(others), ...others.filter(other => other != this && other.geom)
+      .flatMap(other => other.endpoints().filter(point => this.distanceTo(point) <= EPSILON))]
   }
 
   split(others) {
-    const geom = this.geom()
-    const start = geom.get().FirstParameter()
-    const end = geom.get().LastParameter()
-    const isCircle = (this.constructor == Circle)
-    // Recursive pieces are trimmed views of this curve. Do not intersect
-    // them with their unsplit parent: overlapping spline geometry can make
-    // OC report hundreds of spurious points and recurse indefinitely.
-    const cutters = others.filter(other => other != this)
-
-    if(isCircle) {
-      const period = end - start
-      const intersections = this.splitIntersections(cutters)
-        .map(p => this.unsample(p) )
-        // A circle is periodic, so its start and end parameters describe the
-        // same point. Keep intersections at that seam and normalize them to
-        // the start instead of discarding them.
-        .map(u => start + (((u - start) % period) + period) % period )
-        .map(u => u.almost(start) || (end - u).almost(0.0) ? start : u )
-        .reduce((unique, u) => {
-          if(!unique.some(other => other.almost(u) )) unique.push(u)
-          return unique
-        }, [])
-        .sort((a, b) => a - b)
-      if(!intersections.length) return [this]
-      if(intersections.length < 2) return [this]
-      const params = [...intersections, intersections[0]]
-      const curves = ocCatch(() => params.slice(0, -1).map((param, i) =>
-        new window.oc.oc.Geom2d_TrimmedCurve(geom, param, params[i + 1], true, true)
-      ))
-      return curves.map((curve, i) => Arc.fromGeometry(curve, this.id + '/' + i) )
-
-    } else {
-      const [p, u] = this
-        .splitIntersections(cutters)
-        .map(p => [p, this.unsample(p)] )
-        .find(([_p, u]) => !start.almost(u) && !end.almost(u) ) || []
-      if(!p) return [this]
-      const left = new window.oc.oc.Geom2d_TrimmedCurve(geom, start, u, true, true)
-      const right = new window.oc.oc.Geom2d_TrimmedCurve(geom, u, end, true, true)
-      return [...this.constructor.fromGeometry(left, this.id + '/1').split(cutters), ...this.constructor.fromGeometry(right, this.id + '/2').split(cutters)]
+    if(!this.geom) return [this]
+    const curve = this.geom(), range = curve.range()
+    const parameters = this.splitIntersections(others).map(point => this.unsample(point))
+    if(this instanceof Circle) {
+      const period = Math.abs(range.span()), direction = Math.sign(range.span())
+      const progress = parameters.map(u => ((direction * (u - range.start) % period) + period) % period)
+        .map(u => u <= EPSILON || period - u <= EPSILON ? 0 : u)
+        .sort((a, b) => a - b).filter((u, i, values) => !i || Math.abs(u - values[i - 1]) > EPSILON)
+      if(progress.length < 2) return [this]
+      return progress.map((u, i) => {
+        const end = i + 1 < progress.length ? progress[i + 1] : progress[0] + period
+        const piece = sx.TrimmedCurve2.new(curve.curve(), sx.ParameterRange.new(range.start + direction * u, range.start + direction * end))
+        return Arc.fromGeometry(piece, this.id + '/' + i)
+      })
     }
+    const cutters = others.filter(other => other != this)
+    const cuts = parameters.filter(u => Math.abs(u - range.start) > EPSILON && Math.abs(u - range.end) > EPSILON)
+    if(!cuts.length) return [this]
+    return curve.splitAt([cuts[0]], tolerance()).flatMap((piece, i) =>
+      this.constructor.fromGeometry(piece, this.id + '/' + (i + 1)).split(cutters))
   }
 
   constraints() {
@@ -192,16 +122,6 @@ export class SketchElement {
     return clone
   }
 
-  // toThree(material) {
-  //   const positions = this.tesselate().flat()
-  //   const geometry = new LineGeometry()
-  //   geometry.setPositions(positions)
-  //   // geometry.setColors(positions.map((pos, i) => i / positions.length ))
-  //   geometry.setColors(Array(positions.length).fill(1))
-  //   const line = new Line2(geometry, material)
-  //   line.computeLineDistances()
-  //   return line
-  // }
 }
 
 
@@ -256,7 +176,7 @@ export class Line extends SketchElement {
   }
 
   static fromGeometry(geom, id) {
-    const line = new Line(vecFromOc(geom.StartPoint()), vecFromOc(geom.EndPoint()), new window.oc.oc.Handle_Geom2d_Curve_2(geom))
+    const line = new Line(vector(geom.start()), vector(geom.end()), geom)
     line.id = id
     return line
   }
@@ -285,9 +205,8 @@ export class Line extends SketchElement {
   }
 
   geometry() {
-    const [p1, p2] = this.points
-    if(p1.almost(p2)) return
-    return new window.oc.oc.Handle_Geom2d_Curve_2(new window.oc.oc.GCE2d_MakeSegment_1(ocPnt2dFromVec(p1), ocPnt2dFromVec(p2)).Value().get())
+    const [start, end] = this.points
+    return start.almost(end) ? null : sx.TrimmedCurve2.line(point2(start), point2(end))
   }
 
   flip() {
@@ -295,15 +214,6 @@ export class Line extends SketchElement {
     this.update()
   }
 
-  tesselationSteps() { return 2 }
-
-  // tesselate() {
-  //   return this.points.map(p => p.toArray() )
-  // }
-
-  // length() {
-  //   return this.points[0].distanceTo(this.points[1])
-  // }
 
   direction() {
     return this.points[1].clone().sub(this.points[0])
@@ -351,8 +261,8 @@ export class Circle extends SketchElement {
   }
 
   static fromGeometry(geom, id) {
-    const basis = geom.BasisCurve().get()
-    const circle = new Circle(vecFromOc(basis.Location()), basis.Radius(), new window.oc.oc.Handle_Geom2d_Curve_2(geom))
+    const basis = geom.curve()
+    const circle = new Circle(vector(basis.center()), basis.radius(), geom)
     circle.id = id
     return circle
   }
@@ -374,19 +284,14 @@ export class Circle extends SketchElement {
   }
 
   geometry() {
-    const center = ocPnt2dFromVec(this._center)
-    const v = new window.oc.oc.gp_Dir2d_4(1.0, 0.0)
-    const axis = new window.oc.oc.gp_Ax2d_2(center, v)
-    return new window.oc.oc.Handle_Geom2d_Curve_2(new window.oc.oc.Geom2d_Circle_2(axis, this.radius, false))
+    if(this.radius <= EPSILON) return null
+    return sx.TrimmedCurve2.circle(point2(this._center), this.radius).reversed()
   }
 
   isClosed() {
     return true
   }
 
-  // length() {
-  //   return this.radius * 2.0 * Math.PI
-  // }
 
   area() {
     return Math.PI * Math.pow(this.radius, 2.0)
@@ -427,54 +332,31 @@ Serialize.register(Circle, 'Circle')
 export class Arc extends SketchElement {
   typename() { return super.typename('Arc') }
 
-  constructor(center, radius, bounds, forward=true, geom) {
+  constructor(center, radius, bounds, forward = true, geom) {
     super()
     this._center = center
     this.radius = radius
     this.bounds = bounds
     this.forward = forward
     this.update(geom)
-    // Imported and three-point arcs can use a rotated or counter-clockwise
-    // circle axis. Store bounds on the canonical circle used by geometry(),
-    // cloning and serialization, while preserving the logical traversal.
-    if(geom) this.setSolvedHandles(this.handles(), this.radius)
   }
 
   static fromPoints(points) {
-    const trimmed = ocTry(() => {
-      const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_4(
-        ocPnt2dFromVec(points[0]),
-        ocPnt2dFromVec(points[1]),
-        ocPnt2dFromVec(points[2]),
-      )
-      return arc.IsDone() ? arc.Value().get() : undefined
-    })
-    if(!trimmed) return
-    // const basis = new window.oc.oc.Geom2dAdaptor_Curve_2(trimmed.BasisCurve())
-    // const circle = basis.Circle()
-    const circle = trimmed.BasisCurve().get()
-    const center = vecFromOc(circle.Location())
-    const radius = circle.Radius()
-    const bounds = [trimmed.FirstParameter(), trimmed.LastParameter()]
-    return new Arc(center, radius, bounds, true, new window.oc.oc.Handle_Geom2d_Curve_2(trimmed))
+    try { return Arc.fromGeometry(sx.TrimmedCurve2.arcThrough(...points.map(point2))) }
+    catch(error) {
+      if(error instanceof RangeError || error instanceof sx.ShapexError) return
+      throw error
+    }
   }
 
   static fromGeometry(geom, id) {
-    const basis = geom.BasisCurve().get()
-    const arc = new Arc(
-      vecFromOc(basis.Location()),
-      basis.Radius(),
-      [geom.FirstParameter(), geom.LastParameter()],
-      true,
-      new window.oc.oc.Handle_Geom2d_Curve_2(geom)
-    )
-    arc.id = id
+    const basis = geom.curve(), range = geom.range(), clockwise = range.span() < 0
+    const bounds = clockwise ? [-range.start, -range.end] : [-range.end, -range.start]
+    const arc = new Arc(vector(basis.center()), basis.radius(), bounds, clockwise, geom)
+    if(id) arc.id = id
     return arc
   }
 
-  sample(u) {
-    return super.sample(this.forward ? u : 1.0 - u)
-  }
 
   center() { return this._center.clone() }
 
@@ -491,37 +373,21 @@ export class Arc extends SketchElement {
   }
 
   setSolvedHandles(handles, radius) {
-    // The three-point constructor used while drawing can create an arc in
-    // either direction. Preserve that direction when the solver writes the
-    // center and endpoints back; otherwise forcing `Sense` to true chooses
-    // the opposite side for counter-clockwise arcs.
-    const startRadius = this.sample(0.0).sub(this._center)
-    const nextRadius = this.sample(1.0e-4).sub(this._center)
-    const clockwise = cross2d(startRadius, nextRadius) < 0.0
-
-    const center = handles[0]
     radius = Math.abs(radius)
     if(!Number.isFinite(radius) || radius <= EPSILON) return false
     if(handles.some(point => !point || ![point.x, point.y, point.z].every(Number.isFinite))) return false
-
-    // Keep the stored curve on the canonical clockwise circle used by
-    // geometry(), cloning and serialization. Counter-clockwise arcs use the
-    // same curve with reversed endpoints and logical sampling direction.
-    const endpoints = clockwise ? handles.slice(1) : handles.slice(1).reverse()
-    const solved = ocTry(() => {
-      const circ = ocCirc2dFromVec(center, radius)
-      const arc = new window.oc.oc.GCE2d_MakeArcOfCircle_3(circ, ocPnt2dFromVec(endpoints[0]), ocPnt2dFromVec(endpoints[1]), true)
-      if(!arc.IsDone()) return
-      const trimmed = arc.Value().get()
-      return { trimmed, circle: trimmed.BasisCurve().get() }
-    })
-    if(!solved) return false
-
+    const center = handles[0]
+    const endpoints = this.forward ? handles.slice(1) : handles.slice(1).reverse()
+    const angles = endpoints.map(point => Math.atan2(center.y - point.y, point.x - center.x))
+    const span = ((angles[1] - angles[0]) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)
+    if(Math.min(span, Math.PI * 2 - span) * radius <= EPSILON) return false
+    const bounds = [angles[0], angles[0] + span]
+    const range = this.forward ? bounds : bounds.toReversed()
+    const geometry = sx.TrimmedCurve2.new(sx.Circle2.new(point2(center), radius), sx.ParameterRange.new(-range[0], -range[1]))
     this._center = center
-    this.radius = solved.circle.Radius()
-    this.bounds = [solved.trimmed.FirstParameter(), solved.trimmed.LastParameter()]
-    this.forward = clockwise
-    this.update(new window.oc.oc.Handle_Geom2d_Curve_2(solved.trimmed))
+    this.radius = radius
+    this.bounds = bounds
+    this.update(geometry)
     return true
   }
 
@@ -539,29 +405,17 @@ export class Arc extends SketchElement {
   }
 
   geometry() {
-    const circ = ocCirc2dFromVec(this._center, this.radius)
-    return new window.oc.oc.Handle_Geom2d_Curve_2(new window.oc.oc.GCE2d_MakeArcOfCircle_1(circ, this.bounds[0], this.bounds[1], true).Value().get())
+    const bounds = this.forward ? this.bounds : this.bounds.toReversed()
+    return sx.TrimmedCurve2.new(sx.Circle2.new(point2(this._center), this.radius), sx.ParameterRange.new(-bounds[0], -bounds[1]))
   }
 
   isClosed() {
     return false
   }
 
-  update(geom) {
-    super.update(geom)
-    geom = this.geom().get()
-    this.bounds = [geom.FirstParameter(), geom.LastParameter()]
-  }
 
-  flip() {
-    this.forward = !this.forward
-  }
+  flip() { this.forward = !this.forward; this.update(this.geom().reversed()) }
 
-  tesselate() {
-    const tess = super.tesselate()
-    if(tess && !this.forward) tess.reverse()
-    return tess
-  }
 
   _clone() {
     return new Arc(this._center, this.radius, this.bounds, this.forward)
@@ -591,7 +445,7 @@ Serialize.register(Arc, 'Arc')
 // Keep snapping and solver point-on-curve support on the same boundary.
 export function supportsPointOnCurveConstraint(elem) {
   return elem instanceof Line || elem instanceof Circle || elem instanceof Arc || elem instanceof Spline ||
-    (elem instanceof OffsetCurve && !!elem.geom && !elem.invalid)
+    (elem instanceof DerivedCurve && !!elem.geom && !elem.invalid)
 }
 
 
@@ -605,12 +459,8 @@ export class Spline extends SketchElement {
   }
 
   static fromGeometry(geom, id) {
-    const spline = new Spline(
-      [vecFromOc(geom.StartPoint()), vecFromOc(geom.EndPoint())],
-      new window.oc.oc.Handle_Geom2d_Curve_2(geom),
-    )
-    // Split/profile splines retain an exact trimmed OC curve. Rebuilding one
-    // from the two stored boundary points would turn it into a straight line.
+    const points = geom.curve().controlPoints().map(vector)
+    const spline = new Spline(points, geom)
     spline.preserveGeometry = true
     spline.id = id
     return spline
@@ -628,7 +478,7 @@ export class Spline extends SketchElement {
   }
 
   endpoints() {
-    return [this.points[0], this.points.slice(-1)[0]]
+    return this.preserveGeometry ? [this.sample(0), this.sample(1)] : [this.points[0], this.points.at(-1)]
   }
 
   snapPoints() {
@@ -647,48 +497,19 @@ export class Spline extends SketchElement {
   center() { return this.sample(0.5) }
 
   geometry() {
-    const n = this.points.length
-    if(n < 2) throw "Splines need at least two control vertices"
-
-    const degree = Math.min(5, n - 1)
-    const [knots, multiplicities] = Spline.clampedKnots(n, degree)
-
-    const points = new window.oc.oc.TColgp_Array1OfPnt2d_2(1, this.points.length)
-    this.points.forEach((p, i) => points.SetValue(i + 1, ocPnt2dFromVec(p)) )
-
-    const knts = new window.oc.oc.TColStd_Array1OfReal_2(1, knots.length)
-    knots.forEach((knot, i) => knts.SetValue(i + 1, knot) )
-
-    const mults = new window.oc.oc.TColStd_Array1OfInteger_2(1, multiplicities.length)
-    multiplicities.forEach((mult, i) => mults.SetValue(i + 1, mult) )
-
-    const spline = new window.oc.oc.Geom2d_BSplineCurve_1(points, knts, mults, degree, false)
-
-    return new window.oc.oc.Handle_Geom2d_Curve_2(spline)
+    const degree = Math.min(5, this.points.length - 1)
+    const [values, multiplicities] = Spline.clampedKnots(this.points.length, degree)
+    const knots = values.flatMap((value, i) => Array(multiplicities[i]).fill(value))
+    const basis = sx.NurbsCurve2.new(degree, this.points.map(point2), this.points.map(() => 1), knots)
+    return sx.TrimmedCurve2.new(basis, sx.ParameterRange.new(knots[degree], knots[this.points.length]))
   }
 
   flip() {
     this.points.reverse()
-    if(this.preserveGeometry) {
-      this.geom().get().Reverse()
-      return
-    }
-    this.update()
+    this.update(this.preserveGeometry ? this.geom().reversed() : undefined)
   }
 
-  _clone() {
-    if(this.preserveGeometry) {
-      const geom = this.geom().get()
-      return Spline.fromGeometry(new window.oc.oc.Geom2d_TrimmedCurve(
-        this.geom(),
-        geom.FirstParameter(),
-        geom.LastParameter(),
-        true,
-        true,
-      ))
-    }
-    return new Spline([...this.points])
-  }
+  _clone() { return this.preserveGeometry ? Spline.fromGeometry(this.geom()) : new Spline([...this.points]) }
 
   dump() {
     return {
@@ -708,93 +529,45 @@ export class Spline extends SketchElement {
 
 Serialize.register(Spline, 'Spline')
 
-// Exact, derived geometry owned by a sketch offset constraint. It has no
-// independent control points: edits go through its source curves or value pill.
-export class OffsetCurve extends SketchElement {
-  constructor(geom) {
-    super()
-    if(geom) this.update(new window.oc.oc.Handle_Geom2d_Curve_2(geom))
-  }
+// Exact derived geometry regenerated by an offset constraint or projection.
+// Its source owns edits; the curve has no independent control points.
+export class DerivedCurve extends SketchElement {
+  constructor(geom) { super(); if(geom) this.update(geom) }
 
-  typename() { return 'Offset Curve' }
+  typename() { return super.typename('Curve') }
   handles() { return this.geom && !this.invalid ? this.endpoints() : [] }
   snapPoints() { return this.handles() }
   closestFrame(point) {
-    const geom = this.geom().get()
-    const projected = this.unsample(point)
-    const parameters = [geom.FirstParameter(), geom.LastParameter(), projected].filter(Number.isFinite)
-    const parameter = parameters.minMaxBy(Math.min, value => vecFromOc(geom.Value(value)).distanceToSquared(point))
-    return {
-      point: vecFromOc(geom.Value(parameter)),
-      tangent: vecFromOc(geom.DN(parameter, 1)).normalize(),
-    }
+    const curve = this.geom(), closest = curve.closestPoint(point2(point), tolerance())
+    const derivative = curve.evaluate(closest.parameter).firstDerivative
+    return { point: vector(closest.point), tangent: vector(derivative).multiplyScalar(Math.sign(curve.range().span())).normalize() }
   }
   center() { return this.sample(0.5) }
   isClosed() { return !this.invalid && !!this.geom && this.endpoints()[0].almost(this.endpoints()[1]) }
   length() { return this.invalid ? 0 : super.length() }
-  sample(u) { return super.sample(this.forward === false ? 1 - u : u) }
-  tesselate() {
-    const vertices = this.invalid ? undefined : super.tesselate()
-    return this.forward === false ? vertices?.reverse() : vertices
-  }
+
+
   geometry() { return null }
 
-  to3d(plane) {
-    const oc = window.oc.oc
-    const convert = handle => {
-      const curve = handle.get()
-      if(curve instanceof oc.Geom2d_OffsetCurve) {
-        return new oc.Handle_Geom_Curve_2(new oc.Geom_OffsetCurve(
-          convert(curve.BasisCurve()), curve.Offset(), new oc.gp_Dir_4(0, 0, 1), false,
-        ))
-      }
-      if(curve instanceof oc.Geom2d_TrimmedCurve) {
-        return new oc.Handle_Geom_Curve_2(new oc.Geom_TrimmedCurve(
-          convert(curve.BasisCurve()), curve.FirstParameter(), curve.LastParameter(), true, true,
-        ))
-      }
-      return oc.GeomAPI.To3d(handle, plane)
-    }
-    return convert(this.geom())
-  }
 
-  // Like Arc, orient the logical edge without reversing an OC offset basis:
-  // reversing its derivative can also change the side of the offset.
-  flip() { this.forward = this.forward === false }
+  // Reverse traversal without mutating the shared immutable basis.
+  flip() { this.update(this.geom().reversed()) }
 
-  _clone() {
-    // Wire construction reverses its copies. A trimmed view would share the
-    // offset's basis and could reverse the live sketch curve along with it.
-    const curve = new OffsetCurve(this.geom().get().Copy().get())
-    curve.forward = this.forward
-    return curve
-  }
+  _clone() { return new this.constructor(this.geom()) }
 
   static fromGeometry(geom, id) {
-    const curve = new OffsetCurve(geom)
+    const curve = new this(geom)
     curve.id = id || curve.id
     return curve
   }
 
-  dump() { return { id: this.id, isReference: this.isReference, forward: this.forward } }
+  dump() { return { id: this.id, isReference: this.isReference } }
 
   static undump(dump) {
-    return Object.assign(new OffsetCurve(), dump)
+    return Object.assign(new this(), dump)
   }
 }
-Serialize.register(OffsetCurve, 'OffsetCurve')
-
-
-function tesselateCurveFixed(geom, steps) {
-  return ocTry(() => {
-    const start = geom.FirstParameter()
-    const range = geom.LastParameter() - start
-    if(!Number.isFinite(start) || !Number.isFinite(range)) return
-
-    const vertices = arrayRange(0, steps - 1).map(i => {
-      const u = start + i / (steps - 1) * range
-      return arrayFromOcVec(geom.Value(u))
-    })
-    return vertices.every(vertex => vertex.every(Number.isFinite)) ? vertices : undefined
-  })
+export class OffsetCurve extends DerivedCurve {
+  typename() { return 'Offset Curve' }
 }
+Serialize.register(OffsetCurve, 'OffsetCurve')

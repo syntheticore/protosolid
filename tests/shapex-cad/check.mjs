@@ -4,6 +4,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { delimiter, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { initialize, loadDocument } from './runtime.mjs'
+import { tessellateMesh } from '../../js/core/shapex.js'
 import { ShellFeature } from '../../js/core/features.js'
 
 // Rebuild from the current Rust source before loading the WASM package.
@@ -55,7 +56,7 @@ function checkDocument(file, source) {
         assert.ok(Math.abs(halves[0].volume() + halves[1].volume() - volume) < volume * 1e-6,
           `${file}: ${feature.title} section must preserve total volume`)
         for(const half of halves) {
-          for(const cutFace of half.faces()) window.kernel.modeling.mesh(cutFace.geom())
+          for(const cutFace of half.faces()) tessellateMesh(cutFace.geom())
         }
       }
     }
@@ -79,7 +80,7 @@ function checkDocument(file, source) {
       assert.equal(shell.solids().length, 1, `${file}: follow-up shell must produce one solid`)
       assert.ok(shell.volume() > 0 && shell.volume() < source.volume(),
         `${file}: follow-up shell must retain a positive wall volume`)
-      for(const face of shell.faces()) window.kernel.modeling.mesh(face.geom())
+      for(const face of shell.faces()) tessellateMesh(face.geom())
     }
     for(const thickness of [1, 2]) verifyShell(compound.shell([], -thickness), compound)
     const opening = compound.faces().find(face => {

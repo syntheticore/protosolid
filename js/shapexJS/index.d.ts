@@ -1,4 +1,12 @@
-export class ShapexError extends Error {}
+export interface Diagnostic {
+  readonly kind: string
+  readonly message: string
+  readonly operation: string | null
+  readonly entities: readonly string[]
+  readonly requiredTolerance: number | null
+  readonly achievedError: number | null
+}
+export class ShapexError extends Error { readonly diagnostics: readonly Diagnostic[] }
 
 export class Point2 {
   constructor(x?: number, y?: number)
@@ -80,6 +88,55 @@ export class ParameterRange {
   contains(parameter: number, tolerance: ModelTolerance): boolean
 }
 
+export class ParameterDomain {
+  constructor(bounds?: ParameterRange | null, period?: number | null)
+  readonly bounds: ParameterRange | null
+  readonly period: number | null
+  contains(parameter: number, tolerance?: ModelTolerance): boolean
+  normalize(parameter: number): number
+  nearest(parameter: number, reference: number): number
+}
+
+export class RigidTransform2 {
+  constructor(angle?: number, translation?: Vec2)
+  static new(angle: number, translation: Vec2): RigidTransform2
+  static identity(): RigidTransform2
+  angle(): number
+  translation(): Vec2
+  transformPoint(point: Point2): Point2
+  transformVector(vector: Vec2): Vec2
+  inverse(): RigidTransform2
+  then(next: RigidTransform2): RigidTransform2
+}
+
+export interface CurveEvaluation2 {
+  readonly point: Point2
+  readonly firstDerivative: Vec2
+  readonly secondDerivative: Vec2
+}
+export interface CurveProjection2 { readonly parameter: number; readonly point: Point2; readonly distance: number }
+export type PointClassification = 'inside' | 'outside' | 'boundary'
+export type CurveIntersection2 =
+  | { readonly kind: 'point'; readonly point: Point2; readonly firstParameter: number; readonly secondParameter: number; readonly contact: 'crossing' | 'tangent' }
+  | { readonly kind: 'overlap'; readonly first: ParameterRange; readonly second: ParameterRange }
+export interface Polyline2 { readonly parameters: readonly number[]; readonly points: readonly Point2[] }
+export type JoinStyle = 'round' | 'miter' | 'bevel'
+export interface OffsetOptions {
+  /** One style for the path, or one per corner in traversal order. */
+  join?: JoinStyle | readonly JoinStyle[]
+  /** Infinity disables the miter cap. */
+  miterLimit?: number
+}
+
+export abstract class Curve2 {
+  domain(): ParameterDomain
+  evaluate(parameter: number): CurveEvaluation2
+  closestPoint(point: Point2, tolerance?: ModelTolerance): CurveProjection2
+  trimmed(range: ParameterRange): TrimmedCurve2
+  transformed(transform: RigidTransform2, tolerance?: ModelTolerance): Curve2
+  offset(distance: number): Curve2
+}
+
 export class Axis3 {
   constructor(origin: Point3, direction: Vec3)
   static new(origin: Point3, direction: Vec3): Axis3
@@ -101,6 +158,12 @@ export class Plane3 {
   u(): Vec3
   v(): Vec3
   normal(): Vec3
+  pointAt(point: Point2): Point3
+  vectorAt(vector: Vec2): Vec3
+  coordinates(point: Point3): Point2
+  liftCurve(curve: TrimmedCurve2, tolerance?: ModelTolerance): TrimmedCurve3
+  expressCurve(curve: TrimmedCurve3, tolerance?: ModelTolerance): TrimmedCurve2
+  projectCurve(curve: TrimmedCurve3, tolerance?: ModelTolerance): { readonly kind: 'point'; readonly point: Point2 } | { readonly kind: 'curve'; readonly curve: TrimmedCurve2 }
 }
 
 export class Frame3 {
@@ -127,14 +190,14 @@ export class RigidTransform3 {
   then(next: RigidTransform3): RigidTransform3
 }
 
-export class Line2 {
+export class Line2 extends Curve2 {
   constructor(origin: Point2, direction: Vec2)
   static new(origin: Point2, direction: Vec2): Line2
   origin(): Point2
   direction(): Vec2
 }
 
-export class Circle2 {
+export class Circle2 extends Curve2 {
   constructor(center: Point2, radius: number)
   static new(center: Point2, radius: number): Circle2
   center(): Point2
@@ -160,7 +223,7 @@ export class Circle3 {
   normal(): Vec3
 }
 
-export class NurbsCurve2 {
+export class NurbsCurve2 extends Curve2 {
   constructor(degree: number, controlPoints: Iterable<Point2>, weights: Iterable<number>, knots: Iterable<number>)
   static new(degree: number, controlPoints: Iterable<Point2>, weights: Iterable<number>, knots: Iterable<number>): NurbsCurve2
   degree(): number
@@ -170,14 +233,54 @@ export class NurbsCurve2 {
 }
 
 export class TrimmedCurve2 {
-  constructor(curve: Line2 | Circle2 | NurbsCurve2, range: ParameterRange)
-  static new(curve: Line2 | Circle2 | NurbsCurve2, range: ParameterRange): TrimmedCurve2
+  constructor(curve: Curve2, range: ParameterRange)
+  static new(curve: Curve2, range: ParameterRange): TrimmedCurve2
   static line(start: Point2, end: Point2): TrimmedCurve2
   static circle(center: Point2, radius: number): TrimmedCurve2
   static arcThrough(start: Point2, interior: Point2, end: Point2): TrimmedCurve2
-  curve(): Line2 | Circle2 | NurbsCurve2
+  curve(): Curve2
   range(): ParameterRange
   reversed(): TrimmedCurve2
+  trimmed(range: ParameterRange): TrimmedCurve2
+  start(): Point2
+  end(): Point2
+  evaluate(parameter: number): CurveEvaluation2
+  closestPoint(point: Point2, tolerance?: ModelTolerance): CurveProjection2
+  length(tolerance?: ModelTolerance): number
+  intersections(other: TrimmedCurve2, tolerance?: ModelTolerance): readonly CurveIntersection2[]
+  selfIntersections(tolerance?: ModelTolerance): readonly CurveIntersection2[]
+  splitAt(parameters: Iterable<number>, tolerance?: ModelTolerance): TrimmedCurve2[]
+  offset(distance: number): TrimmedCurve2
+  transformed(transform: RigidTransform2, tolerance?: ModelTolerance): TrimmedCurve2
+  approximateNurbs(tolerance?: ModelTolerance): { readonly curve: TrimmedCurve2; readonly estimatedError: number }
+  tessellate(options?: TessellationOptions): Polyline2
+  lifted(plane: Plane3, tolerance?: ModelTolerance): TrimmedCurve3
+}
+
+export interface TrimmedCurve3 {
+  range(): ParameterRange
+  trimmed(range: ParameterRange): TrimmedCurve3
+  reversed(): TrimmedCurve3
+  evaluate(parameter: number): { readonly point: Point3; readonly firstDerivative: Vec3; readonly secondDerivative: Vec3 }
+  closestPoint(point: Point3, tolerance?: ModelTolerance): { readonly parameter: number; readonly point: Point3; readonly distance: number }
+  transformed(transform: RigidTransform3, tolerance?: ModelTolerance): TrimmedCurve3
+  projectedOnto(plane: Plane3, tolerance?: ModelTolerance): { readonly kind: 'point'; readonly point: Point2 } | { readonly kind: 'curve'; readonly curve: TrimmedCurve2 }
+  expressedIn(plane: Plane3, tolerance?: ModelTolerance): TrimmedCurve2
+}
+export interface TrimmedCurve3Constructor {
+  new(curve: Line3 | Circle3, range: ParameterRange): TrimmedCurve3
+  new: (curve: Line3 | Circle3, range: ParameterRange) => TrimmedCurve3
+}
+export interface Path2 {
+  segments(): readonly TrimmedCurve2[]
+  isClosed(): boolean
+  reversed(): Path2
+  validateSimple(): void
+  offset(distance: number, options?: OffsetOptions): { readonly path: Path2; readonly sources: readonly (number | null)[] }
+}
+export interface Path2Constructor {
+  new(segments: Iterable<TrimmedCurve2>, closed?: boolean, tolerance?: ModelTolerance): Path2
+  new: (segments: Iterable<TrimmedCurve2>, closed?: boolean, tolerance?: ModelTolerance) => Path2
 }
 
 export class Wire2 {
@@ -189,6 +292,7 @@ export class Wire2 {
   area(): number
   isCounterClockwise(): boolean
   reversed(): Wire2
+  classifyPoint(point: Point2): PointClassification
 }
 
 export class TessellationOptions {
@@ -243,7 +347,8 @@ export interface Face extends NativeValue {
 export interface Edge extends NativeValue {
   id(): string
   endpoints(): Point3[]
-  curve(): Line3 | Circle3 | { kind: string }
+  curve(): Line3 | Circle3 | TrimmedCurve3
+  trimmedCurve(): TrimmedCurve3
   connectedFaces(): Face[]
   tessellate(options?: TessellationOptions): Polyline
 }
@@ -327,6 +432,9 @@ export interface Profile {
   holes(): readonly Wire2[]
   area(): number
   tolerance(): ModelTolerance
+  approximateRational(tolerance?: ModelTolerance): { readonly profile: Profile; readonly estimatedError: number }
+  classifyPoint(point: Point2): PointClassification
+  offset(distance: number): Profile[]
   extrude(plane: Plane3, vector: Vec3): Compound
   revolve(plane: Plane3, axis: Axis3, angle: number): Compound
   extrudeUpToFace(plane: Plane3, target: Compound, limit: Face, offset?: number, endOffset?: number): Compound
@@ -345,6 +453,7 @@ export interface ProfileConstructor {
 }
 
 export interface Shapex {
+  ShapexError: typeof ShapexError
   Point2: typeof Point2
   Vec2: typeof Vec2
   Point3: typeof Point3
@@ -354,16 +463,21 @@ export interface Shapex {
   Quaternion: typeof Quaternion
   ModelTolerance: typeof ModelTolerance
   ParameterRange: typeof ParameterRange
+  ParameterDomain: typeof ParameterDomain
   Axis3: typeof Axis3
   Frame3: typeof Frame3
   Plane3: typeof Plane3
   RigidTransform3: typeof RigidTransform3
+  RigidTransform2: typeof RigidTransform2
+  Curve2: typeof Curve2
   Line2: typeof Line2
   Circle2: typeof Circle2
   NurbsCurve2: typeof NurbsCurve2
   Line3: typeof Line3
   Circle3: typeof Circle3
   TrimmedCurve2: typeof TrimmedCurve2
+  TrimmedCurve3: TrimmedCurve3Constructor
+  Path2: Path2Constructor
   Wire2: typeof Wire2
   Profile: ProfileConstructor
   TessellationOptions: typeof TessellationOptions

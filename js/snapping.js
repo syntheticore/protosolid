@@ -1,6 +1,6 @@
 import * as THREE from 'three'
-import { Line, Circle, Arc, Spline, OffsetCurve, supportsPointOnCurveConstraint } from './core/geom2d.js'
-import { cross2d, vecFromOc } from './core/utils.js'
+import { Line, Circle, Arc, Spline, DerivedCurve, supportsPointOnCurveConstraint } from './core/geom2d.js'
+import { cross2d } from './core/utils.js'
 import { CoincidentConstraint, ConcentricConstraint, FixConstraint, HorVertConstraint, ProfileOffsetConstraint } from './core/sketch.js'
 
 const snapDistance = 14 // px
@@ -22,11 +22,12 @@ function snapTargetCurves(target) {
 }
 
 function closestPointOnCurve(elem, point) {
-  if(elem instanceof OffsetCurve) return elem.closestFrame(point).point
+  if(elem instanceof DerivedCurve) return elem.closestFrame(point).point
   if(elem instanceof Spline) {
     const parameter = elem.unsample(point)
     if(parameter === undefined) return
-    return vecFromOc(elem.geom().get().Value(parameter))
+    const closest = elem.geom().evaluate(parameter).point
+    return new THREE.Vector3(closest.x, closest.y, 0)
   }
 
   if(elem instanceof Line) {
@@ -75,7 +76,7 @@ function curveGuideIntersections(elem, guide) {
   // Curve snapping is exact for splines, but guide/spline intersections
   // require a separate unbounded-line projection. Leave guide snapping out
   // rather than falling through to the circle-specific center/radius path.
-  if(elem instanceof Spline || elem instanceof OffsetCurve) return []
+  if(elem instanceof Spline || elem instanceof DerivedCurve) return []
 
   if(elem instanceof Line) {
     const [start, end] = elem.endpoints()
@@ -191,7 +192,7 @@ export default class Snapper {
     )
     const isFixedPoint = item => {
       const curve = item.curve()
-      if(curve == sketch.origin() || curve.projection || curve instanceof OffsetCurve) return true
+      if(curve == sketch.origin() || curve.projection || curve instanceof DerivedCurve) return true
       return sketch.constraints.some(constraint => constraint instanceof FixConstraint &&
         constraint.items.some(fixed => fixed.curve() == curve &&
           (fixed.index === undefined || fixed.index == item.index)
@@ -285,7 +286,7 @@ export default class Snapper {
     if(blockedPointDist < Infinity) return
 
     // An intersection near the pointer must be near both participating
-    // curves. Reject the rest before invoking OpenCascade's substantially
+    // curves. Reject the rest before invoking the substantially
     // more expensive curve/curve intersection routine.
     const nearbyCurves = elements
       .filter(supportsPointOnCurveConstraint)
@@ -302,8 +303,8 @@ export default class Snapper {
     let intersectionTarget
     nearbyCurves.forEach((target, index, curves) =>
       curves.slice(index + 1).forEach(otherTarget => {
-        target.elem.intersect([otherTarget.elem]).forEach(ocPoint => {
-          const point = vecFromOc(ocPoint)
+        target.elem.intersect([otherTarget.elem]).forEach(intersection => {
+          const point = new THREE.Vector3(intersection.x, intersection.y, 0)
           if(!canReach(point)) return
           const dist = this.viewport.renderer.toScreen(point.clone().applyMatrix4(this.planeTransform)).distanceTo(coords)
           if(dist < snapDistance && (!intersectionTarget || dist < intersectionTarget.distance)) {

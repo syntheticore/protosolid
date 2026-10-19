@@ -55,7 +55,7 @@ impl Transaction<'_> {
                 (index != 0).then(|| forwards[index - 1]),
                 vertices[index],
                 plane.point_at(segment.end()?),
-                plane.lift_curve(segment.curve(), self.kernel.tolerance)?,
+                plane.lift_trimmed_curve(segment, self.kernel.tolerance)?,
                 segment.range(),
                 segment.curve().clone(),
                 segment.curve().clone(),
@@ -74,7 +74,7 @@ impl Transaction<'_> {
         let lamina = self.mef(
             forwards[0],
             reverses[reverses.len() - 1],
-            plane.lift_curve(closing.curve(), self.kernel.tolerance)?,
+            plane.lift_trimmed_curve(closing, self.kernel.tolerance)?,
             closing.range().reversed(),
             plane.into(),
             FaceOrientation::Reversed,
@@ -566,7 +566,7 @@ impl Transaction<'_> {
                 }),
                 vertices[index],
                 plane.point_at(segment.end()?),
-                plane.lift_curve(segment.curve(), self.kernel.tolerance)?,
+                plane.lift_trimmed_curve(segment, self.kernel.tolerance)?,
                 segment.range(),
                 segment.curve().clone(),
                 segment.curve().clone(),
@@ -585,7 +585,7 @@ impl Transaction<'_> {
         let disk = self.mef(
             reverses[reverses.len() - 1],
             forwards[0],
-            plane.lift_curve(closing.curve(), self.kernel.tolerance)?,
+            plane.lift_trimmed_curve(closing, self.kernel.tolerance)?,
             closing.range(),
             plane.into(),
             orientation,
@@ -811,7 +811,18 @@ fn extrusion_surface(
             )?
             .into()
         }
-        Curve3::SurfaceIntersection(_) | Curve3::SurfaceCurve(_) => {
+        Curve3::SurfaceCurve(curve) => {
+            let Surface3::Plane(plane)=curve.surface() else {
+                return Err(unsupported("a translational profile must retain its plane"));
+            };
+            Surface3::Swept(super::SweptSurface3::new(
+                *plane,
+                TrimmedCurve2::new(curve.pcurve().clone(),curve.range())?,
+                Line3::new(plane.origin(),vector)?.into(),
+                ParameterRange::new(0.0,1.0)?,tolerance,
+            )?)
+        }
+        Curve3::SurfaceIntersection(_) => {
             return Err(unsupported(
                 "an implicit surface-intersection curve has no exact translational sweep representation",
             ));

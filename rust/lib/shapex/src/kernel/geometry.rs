@@ -516,6 +516,8 @@ pub enum Curve2 {
     Line(Line2),
     Circle(Circle2),
     Nurbs(NurbsCurve2),
+    Offset(super::OffsetCurve2),
+    Projected(super::ProjectedCurve2),
     SurfaceIntersection(SurfaceIntersectionPcurve2),
     SurfaceProjection(SurfaceProjectionPcurve2),
 }
@@ -527,6 +529,8 @@ impl Curve2 {
             Self::Line(_) => "line",
             Self::Circle(_) => "circle",
             Self::Nurbs(_) => "NURBS",
+            Self::Offset(_) => "offset",
+            Self::Projected(_) => "projected",
             Self::SurfaceIntersection(_) => "surface intersection",
             Self::SurfaceProjection(_) => "surface projection",
         }
@@ -636,6 +640,8 @@ impl Curve2 {
     fn collect_parameter_breaks(&self, parameters: &mut Vec<f64>) {
         match self {
             Self::Nurbs(curve) => parameters.extend_from_slice(curve.knots()),
+            Self::Offset(curve) => curve.base().collect_parameter_breaks(parameters),
+            Self::Projected(curve) => curve.curve().collect_parameter_breaks(parameters),
             Self::SurfaceIntersection(curve) => {
                 curve
                     .curve
@@ -693,6 +699,8 @@ impl Curve2 {
             Self::Line(_) => ParameterDomain::unbounded(),
             Self::Circle(_) => ParameterDomain::ANGLE,
             Self::Nurbs(curve) => curve.domain(),
+            Self::Offset(curve) => curve.base().domain(),
+            Self::Projected(curve) => ParameterDomain { bounds: DomainBounds::Bounded(curve.range()),period:None },
             Self::SurfaceIntersection(curve) => ParameterDomain {
                 bounds: DomainBounds::Bounded(curve.curve.range()),
                 period: None,
@@ -706,6 +714,8 @@ impl Curve2 {
             Self::Line(line) => line.evaluate(parameter),
             Self::Circle(circle) => circle.evaluate(parameter),
             Self::Nurbs(curve) => curve.evaluate(parameter),
+            Self::Offset(curve) => curve.evaluate(parameter),
+            Self::Projected(curve) => curve.evaluate(parameter),
             Self::SurfaceIntersection(curve) => curve.evaluate(parameter),
             Self::SurfaceProjection(curve) => curve.evaluate(parameter),
         }
@@ -781,6 +791,11 @@ impl Curve2 {
                             )?[0])
                     }
                 })
+            }
+            Self::Offset(_) | Self::Projected(_) => {
+                Ok(super::integration::adaptive_gauss_kronrod_partitioned(range.start, range.end,
+                    |u| { let (p,d) = self.first_order(u)?; Ok([0.5*(p.x*d.y-p.y*d.x)]) },
+                    [tolerance],24,"offset area integration did not converge",&self.integration_breakpoints(range))?[0])
             }
             Self::SurfaceIntersection(_) | Self::SurfaceProjection(_) => {
                 let integrand = |parameter: f64| -> KernelResult<f64> {
@@ -3260,7 +3275,7 @@ impl Plane3 {
     }
 
     /// Plane coordinates of the orthogonal projection of `point`.
-    pub(crate) fn coordinates(self, point: Point3) -> KernelResult<Point2> {
+    pub fn coordinates(self, point: Point3) -> KernelResult<Point2> {
         let (u, v) = self.project(point)?.parameters;
         Ok(Point2::new(u, v))
     }
@@ -3296,6 +3311,13 @@ impl Plane3 {
                     "an implicit p-curve can only be lifted onto its retained plane",
                 ))
             }
+            Curve2::Offset(_) | Curve2::Projected(_) => SurfaceCurve3::new(
+                Surface3::Plane(self), curve.clone(),
+                match curve.domain().bounds {
+                    DomainBounds::Bounded(range) => range,
+                    _ => return Err(super::unsupported("lifting an unbounded offset requires a trim")),
+                }, tolerance,
+            )?.into(),
         })
     }
 

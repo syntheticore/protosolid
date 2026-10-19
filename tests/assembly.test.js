@@ -142,24 +142,13 @@ test('coplanar alignment removes normal offset while preserving planar position'
 })
 
 test('spherical faces expose their center as a point reference', () => {
-  const previousWindow = globalThis.window
-  globalThis.window = {
-    oc: { oc: {
-      BRepAdaptor_Surface_2: class {
-        Sphere() {
-          return { Location: () => ({ X: () => 3, Y: () => 4, Z: () => 5 }) }
-        }
-      },
-    } },
+  const geometry = {
+    id: () => 'sphere',
+    surface: () => ({ kind: 'sphere', center: { toArray: () => [3, 4, 5] } }),
   }
-  try {
-    const face = new Face({ compound: { componentId: 'component', topologySelection: () => ({ identity: 'face' }) }, id: 'solid' }, {})
-    const center = new THREE.Vector3().setFromMatrixPosition(face.pointReference().getItem())
-    assert.deepEqual(center.toArray(), [3, 4, 5])
-  } finally {
-    if(previousWindow === undefined) delete globalThis.window
-    else globalThis.window = previousWindow
-  }
+  const face = new Face({ compound: { componentId: 'component', topologySelection: () => ({ identity: 'face' }) }, id: 'solid' }, geometry)
+  const center = new THREE.Vector3().setFromMatrixPosition(face.pointReference().getItem())
+  assert.deepEqual(center.toArray(), [3, 4, 5])
 })
 
 test('fixed joints reject manipulation', () => {

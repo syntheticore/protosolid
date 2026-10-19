@@ -33,6 +33,7 @@ mod modeling;
 mod naming;
 mod physical;
 mod periodic;
+mod planar;
 mod polygon;
 #[cfg(test)]
 mod polyhedron;
@@ -94,6 +95,12 @@ pub use topology::{
 pub use transform::RigidTransform3;
 pub use validation::ValidationReport;
 pub use wire::{TrimmedCurve2, Wire2};
+pub use planar::{CurveProjection2, CurveIntersection2, CurveContact, PointClassification, Polyline2, OffsetCurve2};
+pub use planar::{Path2, PathOffset2, OffsetOptions, JoinStyle};
+pub use planar::{ProjectedCurve2, PlaneCurveProjection};
+pub use planar::CurveApproximation2;
+pub use planar::ProfileApproximation;
+pub use planar::RigidTransform2;
 
 /// Owns one BREP state. Results of modeling operations each own a kernel.
 #[derive(Debug)]

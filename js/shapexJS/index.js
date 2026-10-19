@@ -5,6 +5,29 @@ const DEFAULT_TOLERANCE = Object.freeze({
   parameter: 1.0e-12,
 })
 const WIRE_PROPERTIES = new WeakMap()
+const CURVE_MODULES = new WeakMap()
+const NATIVE_CURVES = new WeakMap()
+const VALUE_MODULES = new WeakMap()
+
+function curveModule(value) {
+  const bindings = VALUE_MODULES.get(value) || CURVE_MODULES.get(value.constructor)
+  if(!bindings) throw new ShapexError('Curve queries require values from an initialized ShapexJS instance')
+  return bindings
+}
+
+function curveEvaluation(values, Point = Point2, Vector = Vec2, dimensions = 2) {
+  values = Array.from(values)
+  return Object.freeze({
+    point: new Point(...values.slice(0, dimensions)),
+    firstDerivative: new Vector(...values.slice(dimensions, dimensions * 2)),
+    secondDerivative: new Vector(...values.slice(dimensions * 2, dimensions * 3)),
+  })
+}
+
+function nativeCurve(value) {
+  if(!NATIVE_CURVES.has(value)) NATIVE_CURVES.set(value, nativeCall(() => new (curveModule(value).NativeCurve2)(value._dto())))
+  return NATIVE_CURVES.get(value)
+}
 
 function finite(value, name) {
   if(typeof value != 'number' || !Number.isFinite(value)) {
@@ -16,11 +39,6 @@ function finite(value, name) {
 function positive(value, name) {
   finite(value, name)
   if(value <= 0) throw new RangeError(`${name} must be greater than zero`)
-  return value
-}
-
-function integer(value, name) {
-  if(!Number.isInteger(value) || value < 0) throw new RangeError(`${name} must be a non-negative integer`)
   return value
 }
 
@@ -50,7 +68,7 @@ function nativeCall(callback) {
     return callback()
   } catch(error) {
     if(error instanceof ShapexError) throw error
-    throw new ShapexError(error?.message || String(error), { cause: error })
+    throw new ShapexError(error?.message || String(error), { cause: error, diagnostics: error?.diagnostics })
   }
 }
 
@@ -67,6 +85,7 @@ export class ShapexError extends Error {
   constructor(message, options) {
     super(message, options)
     this.name = 'ShapexError'
+    this.diagnostics = Object.freeze(options?.diagnostics || [])
   }
 }
 
@@ -254,6 +273,20 @@ export class Plane3 {
   u() { return this._u }
   v() { return this._v }
   normal() { return this._u.cross(this._v).normalized() }
+  pointAt(point) {
+    const vector = this.vectorAt(point)
+    return new Point3(this._origin.x + vector.x, this._origin.y + vector.y, this._origin.z + vector.z)
+  }
+  vectorAt(vector) { return new Vec3(this._u.x * vector.x + this._v.x * vector.y, this._u.y * vector.x + this._v.y * vector.y, this._u.z * vector.x + this._v.z * vector.y) }
+  coordinates(point) {
+    const delta = new Vec3(point.x - this._origin.x, point.y - this._origin.y, point.z - this._origin.z)
+    const uu = this._u.dot(this._u), vv = this._v.dot(this._v), uv = this._u.dot(this._v), determinant = uu * vv - uv * uv
+    return new Point2((delta.dot(this._u) * vv - delta.dot(this._v) * uv) / determinant,
+      (delta.dot(this._v) * uu - delta.dot(this._u) * uv) / determinant)
+  }
+  liftCurve(curve, tolerance = ModelTolerance.default()) { return curve.lifted(this, tolerance) }
+  expressCurve(curve, tolerance = ModelTolerance.default()) { return curve.expressedIn(this, tolerance) }
+  projectCurve(curve, tolerance = ModelTolerance.default()) { return curve.projectedOnto(this, tolerance) }
   _values() { return [...this._origin.toArray(), ...this._u.toArray(), ...this._v.toArray()] }
 }
 
@@ -362,8 +395,52 @@ export class RigidTransform3 {
   }
 }
 
-export class Line2 {
+export class ParameterDomain {
+  constructor(bounds = null, period = null) { this.bounds = bounds; this.period = period; Object.freeze(this) }
+  contains(parameter, tolerance = ModelTolerance.default()) {
+    return Number.isFinite(parameter) && (this.period != null || !this.bounds || this.bounds.contains(parameter, tolerance))
+  }
+  normalize(parameter) {
+    if(this.period == null) return parameter
+    const start = this.bounds?.start || 0
+    return start + ((parameter - start) % this.period + this.period) % this.period
+  }
+  nearest(parameter, reference) { return this.period == null ? parameter : parameter + Math.round((reference - parameter) / this.period) * this.period }
+}
+
+export class RigidTransform2 {
+  constructor(angle = 0, translation = new Vec2(0, 0)) {
+    this._angle = finite(angle, 'angle'); this._translation = instance(translation, Vec2, 'translation'); Object.freeze(this)
+  }
+  static new(angle, translation) { return new this(angle, translation) }
+  static identity() { return new this() }
+  angle() { return this._angle }
+  translation() { return this._translation }
+  transformVector(vector) {
+    const c = Math.cos(this._angle), s = Math.sin(this._angle)
+    return new Vec2(c * vector.x - s * vector.y, s * vector.x + c * vector.y)
+  }
+  transformPoint(point) { const v = this.transformVector(point); return new Point2(v.x + this._translation.x, v.y + this._translation.y) }
+  inverse() { const inverse = new RigidTransform2(-this._angle); const v = inverse.transformVector(this._translation); return new RigidTransform2(-this._angle, new Vec2(-v.x, -v.y)) }
+  then(next) { const v = next.transformVector(this._translation); return new RigidTransform2(this._angle + next._angle, new Vec2(v.x + next._translation.x, v.y + next._translation.y)) }
+}
+
+export class Curve2 {
+  evaluate(parameter) { return curveEvaluation(nativeCall(() => curveModule(this).evaluateCurve2(this._dto(), parameter))) }
+  closestPoint(point, tolerance = ModelTolerance.default()) {
+    const [parameter, x, y, distance] = nativeCall(() => curveModule(this).projectCurve2(this._dto(), point.x, point.y, tolerance.toArray()))
+    return Object.freeze({ parameter, point: new Point2(x, y), distance })
+  }
+  trimmed(range) { return new (curveModule(this)._curveConstructor)(this, range) }
+  transformed(transform, tolerance = ModelTolerance.default()) {
+    return this.trimmed(this.domain().bounds || new ParameterRange(0, 1)).transformed(transform, tolerance).curve()
+  }
+  offset(distance) { return this.trimmed(this.domain().bounds || new ParameterRange(0, 1)).offset(distance).curve() }
+}
+
+export class Line2 extends Curve2 {
   constructor(origin, direction) {
+    super()
     this._origin = instance(origin, Point2, 'origin')
     this._direction = instance(direction, Vec2, 'direction')
     if(this._direction.magnitude() == 0) throw new RangeError('line direction must be nonzero')
@@ -372,11 +449,14 @@ export class Line2 {
   static new(origin, direction) { return new this(origin, direction) }
   origin() { return this._origin }
   direction() { return this._direction }
+  domain() { return new ParameterDomain() }
+  evaluate(parameter) { return curveEvaluation(nativeCall(() => curveModule(this).evaluateCurve2(this._dto(), parameter))) }
   _dto() { return { kind: 'line', origin: this._origin.toArray(), direction: this._direction.toArray() } }
 }
 
-export class Circle2 {
+export class Circle2 extends Curve2 {
   constructor(center, radius) {
+    super()
     this._center = instance(center, Point2, 'center')
     this._radius = positive(radius, 'radius')
     Object.freeze(this)
@@ -384,6 +464,8 @@ export class Circle2 {
   static new(center, radius) { return new this(center, radius) }
   center() { return this._center }
   radius() { return this._radius }
+  domain() { return new ParameterDomain(new ParameterRange(0, Math.PI * 2), Math.PI * 2) }
+  evaluate(parameter) { return curveEvaluation(nativeCall(() => curveModule(this).evaluateCurve2(this._dto(), parameter))) }
   _dto() { return { kind: 'circle', center: this._center.toArray(), radius: this._radius } }
 }
 
@@ -401,6 +483,7 @@ export class Line3 {
   }
   origin() { return this._origin }
   direction() { return this._direction }
+  _dto() { return { kind: 'line', origin: this._origin.toArray(), direction: this._direction.toArray() } }
 }
 
 export class Circle3 {
@@ -434,10 +517,12 @@ export class Circle3 {
   xRadius() { return this._xRadius }
   yRadius() { return this._yRadius }
   normal() { return this._xRadius.cross(this._yRadius).normalized() }
+  _dto() { return { kind: 'circle', center: this._center.toArray(), x_radius: this._xRadius.toArray(), y_radius: this._yRadius.toArray() } }
 }
 
-export class NurbsCurve2 {
+export class NurbsCurve2 extends Curve2 {
   constructor(degree, controlPoints, weights, knots) {
+    super()
     if(!Number.isInteger(degree) || degree < 1) throw new RangeError('degree must be a positive integer')
     controlPoints = array(controlPoints, 'controlPoints')
     controlPoints.forEach((point, index) => instance(point, Point2, `controlPoints[${index}]`))
@@ -455,6 +540,8 @@ export class NurbsCurve2 {
   controlPoints() { return this._controlPoints }
   weights() { return this._weights }
   knots() { return this._knots }
+  domain() { return new ParameterDomain(new ParameterRange(this._knots[this._degree], this._knots[this._controlPoints.length])) }
+  evaluate(parameter) { return curveEvaluation(nativeCall(() => curveModule(this).evaluateCurve2(this._dto(), parameter))) }
   _dto() {
     return {
       kind: 'nurbs', degree: this._degree,
@@ -464,9 +551,18 @@ export class NurbsCurve2 {
   }
 }
 
+// An exact derived curve whose representation is owned by the native library.
+// Consumers use the same evaluation API without inspecting transport details.
+class NativeCurve2Value extends Curve2 {
+  constructor(native, bindings) { super(); this._native = native; this.kind = native.descriptor().curve.kind; VALUE_MODULES.set(this, bindings); Object.freeze(this) }
+  evaluate(parameter) { return curveEvaluation(nativeCall(() => this._native.evaluate(parameter))) }
+  domain() { const domain = this._native.domain(); return new ParameterDomain(domain.bounds ? new ParameterRange(...domain.bounds) : null, domain.period) }
+  _dto() { return { kind: 'retained', key: this._native.descriptor().curve.key } }
+}
+
 export class TrimmedCurve2 {
   constructor(curve, range) {
-    this._curve = oneOf(curve, [Line2, Circle2, NurbsCurve2], 'curve')
+    this._curve = oneOf(curve, [Line2, Circle2, NurbsCurve2, Curve2], 'curve')
     this._range = instance(range, ParameterRange, 'range')
     Object.freeze(this)
   }
@@ -501,7 +597,50 @@ export class TrimmedCurve2 {
   }
   curve() { return this._curve }
   range() { return this._range }
-  reversed() { return new TrimmedCurve2(this._curve, this._range.reversed()) }
+  trimmed(range) {
+    if(!this._range.contains(range.start, ModelTolerance.default()) || !this._range.contains(range.end, ModelTolerance.default())) throw new RangeError('new trim lies outside the current trim')
+    return new this.constructor(this._curve, range)
+  }
+  reversed() { return new this.constructor(this._curve, this._range.reversed()) }
+  start() { return this.evaluate(this._range.start).point }
+  end() { return this.evaluate(this._range.end).point }
+  evaluate(parameter) {
+    if(!this._range.contains(parameter, ModelTolerance.default())) throw new RangeError('parameter lies outside the trimmed curve')
+    return curveEvaluation(nativeCall(() => nativeCurve(this).evaluate(parameter)))
+  }
+  closestPoint(point, tolerance = ModelTolerance.default()) {
+    const [parameter, x, y, distance] = nativeCall(() => nativeCurve(this).closestPoint(point.x, point.y, tolerance.toArray()))
+    return Object.freeze({ parameter, point: new Point2(x, y), distance })
+  }
+  length(tolerance = ModelTolerance.default()) { return nativeCall(() => nativeCurve(this).length(tolerance.toArray())) }
+  intersections(other, tolerance = ModelTolerance.default()) {
+    return nativeCall(() => nativeCurve(this).intersections(nativeCurve(other), tolerance.toArray())).map(hit => hit.kind == 'point'
+      ? Object.freeze({ ...hit, point: new Point2(...hit.point) })
+      : Object.freeze({ kind: 'overlap', first: new ParameterRange(...hit.first), second: new ParameterRange(...hit.second) }))
+  }
+  splitAt(parameters, tolerance = ModelTolerance.default()) {
+    return Array.from(nativeCall(() => nativeCurve(this).splitAt(Float64Array.from(parameters), tolerance.toArray())), value => this.constructor._fromNative(value))
+  }
+  offset(distance) { return this.constructor._fromNative(nativeCall(() => nativeCurve(this).offset(distance))) }
+  transformed(transform, tolerance = ModelTolerance.default()) {
+    return this.constructor._fromNative(nativeCall(() => nativeCurve(this).transformed(transform.angle(), transform.translation().x, transform.translation().y, tolerance.toArray())))
+  }
+  approximateNurbs(tolerance = ModelTolerance.default()) {
+    const result = nativeCall(() => nativeCurve(this).approximateNurbs(tolerance.toArray()))
+    return Object.freeze({ curve: this.constructor._fromNative(result.curve), estimatedError: result.estimatedError })
+  }
+  selfIntersections(tolerance = ModelTolerance.default()) {
+    return nativeCall(() => nativeCurve(this).selfIntersections(tolerance.toArray())).map(hit => hit.kind == 'point'
+      ? Object.freeze({ ...hit, point: new Point2(...hit.point) })
+      : Object.freeze({ kind: 'overlap', first: new ParameterRange(...hit.first), second: new ParameterRange(...hit.second) }))
+  }
+  tessellate(options = TessellationOptions.default()) {
+    const result = nativeCall(() => nativeCurve(this).tessellate(options.chordTolerance, options.angularTolerance, options.maximumDepth))
+    return Object.freeze({ parameters: Object.freeze(result.parameters), points: Object.freeze(result.points.map(point => new Point2(...point))) })
+  }
+  lifted(plane, tolerance = ModelTolerance.default()) {
+    return curveModule(this)._wrapCurve3(nativeCall(() => nativeCurve(this).lift(plane._values(), tolerance.toArray())))
+  }
   _dto() { return { curve: this._curve._dto(), range: { start: this._range.start, end: this._range.end } } }
 }
 
@@ -531,6 +670,7 @@ export class Wire2 {
   signedArea() { return this._properties()[0] }
   area() { return this._properties()[1] }
   isCounterClockwise() { return Boolean(this._properties()[2]) }
+  classifyPoint(point) { return nativeCall(() => curveModule(this).classifyWire2(this._dto(), point.x, point.y)) }
   reversed() { return new this.constructor(this._segments.toReversed().map(segment => segment.reversed()), this._tolerance) }
   _dto() { return { segments: this._segments.map(segment => segment._dto()), tolerance: this._tolerance } }
 }
@@ -621,6 +761,95 @@ export function createShapex(bindings) {
     return options == null ? TessellationOptions.default() : instance(options, TessellationOptions, 'options')
   }
 
+  const curveTransport = { ...bindings, _wrapCurve3: raw => new TrimmedCurve3(raw) }
+  function bindCurve(Type) {
+    class Bound extends Type {}
+    CURVE_MODULES.set(Bound, curveTransport)
+    return Bound
+  }
+  const BoundLine2 = bindCurve(Line2)
+  const BoundCircle2 = bindCurve(Circle2)
+  class BoundNurbsCurve2 extends NurbsCurve2 {
+    constructor(...values) { super(...values); nativeCall(() => bindings.validateCurve2(this._dto())) }
+  }
+  CURVE_MODULES.set(BoundNurbsCurve2, curveTransport)
+  class BoundTrimmedCurve2 extends TrimmedCurve2 {
+    constructor(curve, range, raw) {
+      if(curve instanceof Line2 && !CURVE_MODULES.has(curve.constructor)) curve = new BoundLine2(curve.origin(), curve.direction())
+      if(curve instanceof Circle2 && !CURVE_MODULES.has(curve.constructor)) curve = new BoundCircle2(curve.center(), curve.radius())
+      if(curve instanceof NurbsCurve2 && !CURVE_MODULES.has(curve.constructor)) curve = new BoundNurbsCurve2(curve.degree(), curve.controlPoints(), curve.weights(), curve.knots())
+      super(curve, range)
+      NATIVE_CURVES.set(this, raw || nativeCall(() => new bindings.NativeCurve2(this._dto())))
+    }
+    static arcThrough(start, interior, end) {
+      return this._fromNative(nativeCall(() => bindings.NativeCurve2.arcThrough(start.x, start.y, interior.x, interior.y, end.x, end.y)))
+    }
+    static _fromNative(raw) {
+      const { curve, range } = raw.descriptor()
+      const basis = curve.kind == 'line' ? new BoundLine2(new Point2(...curve.origin), new Vec2(...curve.direction))
+        : curve.kind == 'circle' ? new BoundCircle2(new Point2(...curve.center), curve.radius)
+        : curve.kind == 'nurbs' ? new BoundNurbsCurve2(curve.degree, curve.control_points.map(p => new Point2(...p)), curve.weights, curve.knots)
+        : new NativeCurve2Value(raw, curveTransport)
+      const result = new this(basis, new ParameterRange(range.start, range.end), raw)
+      return result
+    }
+  }
+  CURVE_MODULES.set(BoundTrimmedCurve2, curveTransport)
+  curveTransport._curveConstructor = BoundTrimmedCurve2
+
+  class TrimmedCurve3 {
+    constructor(curve, range) {
+      this._native = range ? nativeCall(() => new bindings.NativeCurve3(curve._dto(), range.start, range.end)) : curve
+      Object.freeze(this)
+    }
+    static new(curve, range) { return new this(curve, range) }
+    range() { return new ParameterRange(...this._native.range()) }
+    trimmed(range) { return new TrimmedCurve3(nativeCall(() => this._native.trimmed(range.start, range.end))) }
+    reversed() { return this.trimmed(this.range().reversed()) }
+    evaluate(parameter) {
+      if(!this.range().contains(parameter, ModelTolerance.default())) throw new RangeError('parameter lies outside the trimmed curve')
+      return curveEvaluation(nativeCall(() => this._native.evaluate(parameter)), Point3, Vec3, 3)
+    }
+    closestPoint(point, tolerance = ModelTolerance.default()) {
+      const [parameter, x, y, z, distance] = nativeCall(() => this._native.closestPoint(point.x, point.y, point.z, tolerance.toArray()))
+      return Object.freeze({ parameter, point: new Point3(x, y, z), distance })
+    }
+    transformed(transform, tolerance = ModelTolerance.default()) {
+      return new TrimmedCurve3(nativeCall(() => this._native.transformed(transform._values(), tolerance.toArray())))
+    }
+    projectedOnto(plane, tolerance = ModelTolerance.default()) {
+      const result = nativeCall(() => this._native.project(plane._values(), tolerance.toArray()))
+      return Object.freeze(result.kind == 'point' ? { kind: 'point', point: new Point2(...result.point) }
+        : { kind: 'curve', curve: BoundTrimmedCurve2._fromNative(result.curve) })
+    }
+    expressedIn(plane, tolerance = ModelTolerance.default()) {
+      return BoundTrimmedCurve2._fromNative(nativeCall(() => this._native.expressedIn(plane._values(), tolerance.toArray())))
+    }
+  }
+
+  class Path2 {
+    constructor(segments, closed = false, tolerance = ModelTolerance.default()) {
+      this._segments = Object.freeze(Array.from(segments))
+      this._closed = closed
+      this._tolerance = tolerance
+      nativeCall(() => bindings.validatePath2({ segments: this._segments.map(curve => curve._dto()), tolerance }, closed))
+      Object.freeze(this)
+    }
+    static new(...values) { return new this(...values) }
+    segments() { return this._segments }
+    isClosed() { return this._closed }
+    reversed() { return new Path2(this._segments.toReversed().map(curve => curve.reversed()), this._closed, this._tolerance) }
+    validateSimple() {
+      nativeCall(() => bindings.validateSimplePath2({ segments: this._segments.map(curve => curve._dto()), tolerance: this._tolerance }, this._closed))
+    }
+    offset(distance, { join = 'round', miterLimit = 4 } = {}) {
+      const result = nativeCall(() => bindings.offsetPath2({ segments: this._segments.map(curve => curve._dto()), tolerance: this._tolerance },
+        this._closed, distance, join, miterLimit))
+      return Object.freeze({ path: new Path2(Array.from(result.curves, raw => BoundTrimmedCurve2._fromNative(raw)), this._closed, this._tolerance),
+        sources: Object.freeze(result.sources) })
+    }
+  }
+
   class BoundWire2 extends Wire2 {
     constructor(segments, tolerance) {
       super(segments, tolerance)
@@ -628,6 +857,7 @@ export function createShapex(bindings) {
       WIRE_PROPERTIES.set(this, values)
     }
   }
+  CURVE_MODULES.set(BoundWire2, curveTransport)
 
   class Profile {
     constructor(outer, holes = [], tolerance = ModelTolerance.default()) {
@@ -644,6 +874,24 @@ export function createShapex(bindings) {
     holes() { return this._holes }
     area() { return this._area }
     tolerance() { return this._tolerance }
+    approximateRational(tolerance = this._tolerance) {
+      let estimatedError = 0
+      const wires = [this._outer, ...this._holes].map(wire => new BoundWire2(wire.segments().map(segment => {
+        const basis = segment.curve()
+        if(basis instanceof Line2 || basis instanceof Circle2 || basis instanceof NurbsCurve2) return segment
+        const result = segment.approximateNurbs(tolerance)
+        estimatedError = Math.max(estimatedError, result.estimatedError)
+        return result.curve
+      }), this._tolerance))
+      return Object.freeze({ profile: new Profile(wires[0], wires.slice(1), this._tolerance), estimatedError })
+    }
+    classifyPoint(point) { return nativeCall(() => bindings.classifyProfile2(profileDto(this), point.x, point.y)) }
+    offset(distance) {
+      return Array.from(nativeCall(() => bindings.offsetProfile2(profileDto(this), distance)), wires => {
+        const boundaries = Array.from(wires, curves => new BoundWire2(Array.from(curves, raw => BoundTrimmedCurve2._fromNative(raw)), this._tolerance))
+        return new Profile(boundaries[0], boundaries.slice(1), this._tolerance)
+      })
+    }
     extrude(plane, vector) {
       instance(plane, Plane3, 'plane'); instance(vector, Vec3, 'vector')
       return nativeCall(() => new Compound(bindings.extrude(
@@ -763,8 +1011,9 @@ export function createShapex(bindings) {
         new Vec3(...values.slice(3, 6)),
         new Vec3(...values.slice(6, 9)),
       )
-      return { kind }
+      return this.trimmedCurve()
     }
+    trimmedCurve() { return new TrimmedCurve3(nativeCall(() => this._raw().trimmedCurve())) }
     connectedFaces() {
       const raw = nativeCall(() => this._raw().connectedFaces())
       try { return Array.from({ length: raw.length }, (_, index) => new Face(raw.get(index))) }
@@ -961,9 +1210,11 @@ export function createShapex(bindings) {
   }
 
   return Object.freeze({
+    ShapexError,
     Point2, Vec2, Point3, Vec3, Vector3: Vec3, Matrix3, Quaternion,
-    ModelTolerance, ParameterRange, Axis3, Frame3, Plane3, RigidTransform3,
-    Line2, Circle2, NurbsCurve2, Line3, Circle3, TrimmedCurve2, Wire2: BoundWire2, Profile,
+    ModelTolerance, ParameterRange, ParameterDomain, Axis3, Frame3, Plane3, RigidTransform2, RigidTransform3,
+    Line2: BoundLine2, Circle2: BoundCircle2, NurbsCurve2: BoundNurbsCurve2, Line3, Circle3,
+    Curve2, TrimmedCurve2: BoundTrimmedCurve2, TrimmedCurve3, Path2, Wire2: BoundWire2, Profile,
     TessellationOptions, FilletOptions, TriangleMesh, Polyline,
     BooleanKind,
     Face, Edge, Vertex, Solid, Compound, Resolution,

@@ -18,7 +18,19 @@ use shapex::{
 };
 use wasm_bindgen::prelude::*;
 
-fn js_error(error: impl std::fmt::Display) -> JsValue {
+mod planar;
+use planar::NativeCurve3;
+
+fn js_error(error: impl std::fmt::Display + 'static) -> JsValue {
+    if let Some(error) = (&error as &dyn std::any::Any).downcast_ref::<shapex::kernel::KernelError>() {
+        let diagnostics = error.diagnostics().iter().map(|d| serde_json::json!({
+            "kind": format!("{:?}", d.kind), "message": d.message,
+            "operation": d.operation, "requiredTolerance": d.required_tolerance,
+            "achievedError": d.achieved_error,
+            "entities": d.entities.iter().map(|id| id_string(*id)).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>();
+        return JSON::parse(&serde_json::json!({ "message": error.to_string(), "diagnostics": diagnostics }).to_string()).unwrap();
+    }
     JsValue::from_str(&error.to_string())
 }
 
@@ -69,6 +81,8 @@ struct RangeDto {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 enum CurveDto {
+    Retained { key: u32 },
+    Offset { base: Box<CurveDto>, distance: f64 },
     Line {
         origin: [f64; 2],
         direction: [f64; 2],
@@ -88,6 +102,8 @@ enum CurveDto {
 impl CurveDto {
     fn build(self) -> Result<Curve2, JsValue> {
         match self {
+            Self::Retained { key } => planar::retained_curve(key),
+            Self::Offset { base, distance } => shapex::kernel::OffsetCurve2::new(base.build()?, distance).map(Into::into).map_err(js_error),
             Self::Line { origin, direction } => Line2::new(
                 Point2::new(origin[0], origin[1]),
                 Vec2::new(direction[0], direction[1]),
@@ -614,6 +630,11 @@ impl NativeEdge {
             Curve3::SurfaceCurve(_) => "surface-curve",
         }
         .to_owned()
+    }
+
+    #[wasm_bindgen(js_name = trimmedCurve)]
+    pub fn trimmed_curve(&self) -> Result<NativeCurve3, JsValue> {
+        Ok(NativeCurve3 { inner: self.inner.curve().clone(), range: self.inner.range().map_err(js_error)? })
     }
 
     #[wasm_bindgen(js_name = curveData)]

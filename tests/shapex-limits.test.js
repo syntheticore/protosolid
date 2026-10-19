@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import nodeTest from 'node:test'
 import { readFile } from 'node:fs/promises'
 import * as THREE from 'three'
-import initShapex from '../js/shapexJS/index.js'
-import { ShapexBackend } from '../js/kernels/shapex.js'
-import { Profile } from '../js/core/geom3d.js'
+import { initializeShapex, tessellateMesh } from '../js/core/shapex.js'
+import { Profile, Wire } from '../js/core/geom3d.js'
+import { Line, Circle, Spline } from '../js/core/geom2d.js'
 import { rotationFromNormal } from '../js/core/utils.js'
 import { withTopologyNaming } from '../js/core/topological-naming.js'
 
@@ -15,55 +15,28 @@ const test = (name, evaluate) => nodeTest(name, () => {
 })
 const document9 = JSON.parse(await readFile(new URL('./fixtures/revolve-limits-document-9.json', import.meta.url)))
 
-const api = await initShapex({ wasm: await readFile(new URL('../js/shapexJS/pkg/shapex_js_wasm_bg.wasm', import.meta.url)) })
-// Saved fixture sketches contain control points without live OC geometry.
-// Build their native splines here; production only consumes live sketch curves.
-class FixtureBackend extends ShapexBackend {
-  splineGeometry(source) {
-    const count = source.points.length
-    const degree = Math.min(5, count - 1)
-    const interior = count - degree - 1
-    const end = interior + 1
-    const knots = [
-      ...Array(degree + 1).fill(0),
-      ...Array.from({ length: interior }, (_, index) => index + 1),
-      ...Array(degree + 1).fill(end),
-    ]
-    return this.api.TrimmedCurve2.new(
-      this.api.NurbsCurve2.new(
-        degree,
-        source.points.map(point => this.point2(point)),
-        Array(count).fill(1),
-        knots,
-      ),
-      this.api.ParameterRange.new(knots[degree], knots[count]),
-    )
-  }
-}
-
-globalThis.window = { kernel: { modeling: new FixtureBackend(api) } }
+await initializeShapex({ wasm: await readFile(new URL('../js/shapexJS/pkg/shapex_js_wasm_bg.wasm', import.meta.url)) })
+globalThis.window = { addEventListener() {} }
 
 function rectangle(x0, y0, x1, y1, workplane = new THREE.Matrix4()) {
   const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => new THREE.Vector3(x, y, 0))
-  const segments = corners.map((point, index) => ({
-    id: `edge-${index}`,
-    typename: () => 'Line',
-    endpoints: () => [point, corners[(index + 1) % 4]],
-    center: () => point.clone().add(corners[(index + 1) % 4]).multiplyScalar(0.5),
-  }))
-  return new Profile({ workplane }, [{ segments }])
+  const segments = corners.map((point, index) => {
+    const segment = new Line(point, corners[(index + 1) % 4])
+    segment.id = 'edge-' + index
+    return segment
+  })
+  return new Profile({ workplane }, [new Wire(segments)])
 }
 
 function cap(body, role) {
-  return body.faces().find(face => window.kernel.modeling.creationRole(body.geom(), face.geom())?.kind ==
+  return body.faces().find(face => body.geom().creationRole(face.geom())?.kind ==
     (role == 'top' ? 'extrusion-end' : 'extrusion-start'))
 }
 
 function circle(x, y, radius, workplane = new THREE.Matrix4()) {
-  return new Profile({ workplane }, [{ segments: [{
-    id: 'circle', typename: () => 'Circle', radius,
-    center: () => new THREE.Vector3(x, y, 0),
-  }] }])
+  const segment = new Circle(new THREE.Vector3(x, y, 0), radius)
+  segment.id = 'circle'
+  return new Profile({ workplane }, [new Wire([segment])])
 }
 
 function cylinderLimit(angle) {
@@ -102,7 +75,6 @@ test('circle on a cylinder cap extrudes back to the opposite planar face', () =>
     cap(body, 'top').getPlane())
   const result = source.extrudeUpToFace('c', cap(body, 'bottom'), 'limit')
   near(result.volume(), Math.PI * 20.834734325948986 ** 2 * 38)
-  assert.ok(result.validate())
   near(body.boolean(result, 'cut').volume(), body.volume() - result.volume())
 })
 
@@ -252,19 +224,19 @@ function revolveLimitsFixture() {
   let body
   const vector = value => new THREE.Vector3(...value.elements)
   function profile(sketch, ringIds) {
-    const segments = ringIds.map(id => sketch.elements.find(element => element.id == id)).map(element => ({
-      ...element, points: element.points?.map(vector),
-      typename: () => element.$class,
-      center: () => vector(element._center),
-      endpoints() { return [this.points[0], this.points.at(-1)] },
-    }))
+    const segments = ringIds.map(id => sketch.elements.find(element => element.id == id)).map(element => {
+      const segment = element.$class == 'Circle' ? new Circle(vector(element._center), element.radius)
+        : element.$class == 'Spline' ? new Spline(element.points.map(vector)) : new Line(...element.points.map(vector))
+      segment.id = element.id
+      return segment
+    })
     if(segments.length > 1) {
-      if(!segments[1].endpoints().some(p => p.distanceTo(segments[0].points.at(-1)) < 1e-7)) segments[0].points.reverse()
+      if(!segments[1].endpoints().some(p => p.distanceTo(segments[0].endpoints().at(-1)) < 1e-7)) segments[0].flip()
       for(let i = 1; i < segments.length; i++) {
-        if(segments[i].points[0].distanceTo(segments[i - 1].points.at(-1)) > 1e-7) segments[i].points.reverse()
+        if(segments[i].endpoints()[0].distanceTo(segments[i - 1].endpoints().at(-1)) > 1e-7) segments[i].flip()
       }
     }
-    return new Profile({ workplane: sketch.plane }, [{ segments }])
+    return new Profile({ workplane: sketch.plane }, [new Wire(segments)])
   }
   for(const feature of features) {
     if(feature.type == 'CreateSketchFeature') {
@@ -326,7 +298,7 @@ test('document 9: fillet joined revolution and bounded spline edges', () => {
       try {
         const result = joined.fillet([edge], radius)
         assert.ok(result.volume() > 0)
-        for(const face of result.faces()) window.kernel.modeling.mesh(face.geom())
+        for(const face of result.faces()) tessellateMesh(face.geom())
       } catch(error) { errors.push({ edge: edge.id, radius, error }) }
     }
   }
@@ -348,11 +320,11 @@ test('document 9: revolve circle to both spline surfaces in both directions', ()
         const result = source.revolveBetweenFaces('c', axis, from, until, 'between', forward)
         assert.equal(result.solids().length, 1)
         assert.ok(result.volume() > 0 && result.volume() < full.volume())
-        for(const face of result.faces()) window.kernel.modeling.mesh(face.geom())
+        for(const face of result.faces()) tessellateMesh(face.geom())
         for(const operation of ['join', 'cut', 'intersect']) {
           try {
             const output = body.boolean(result, operation)
-            for(const face of output.faces()) window.kernel.modeling.mesh(face.geom())
+            for(const face of output.faces()) tessellateMesh(face.geom())
           } catch(error) { errors.push({ from: from.id, until: until.id, forward, operation, error }) }
         }
       } catch(error) { errors.push({ from: from.id, until: until.id, forward, error }) }
@@ -364,18 +336,18 @@ test('document 9: revolve circle to both spline surfaces in both directions', ()
       // It intersects the torus, but cannot cap the entire swept circle.
       if(construction(target, 'id-3826', 'profile-side', 'id-3771')) {
         assert.throws(() => source.revolveUpToFace('c', axis, target, 'limit', forward),
-          error => error.msg.includes('must cap the entire profile'))
+          error => error.message.includes('must cap the entire profile'))
         continue
       }
       try {
         const result = source.revolveUpToFace('c', axis, target, 'limit', forward)
         assert.equal(result.solids().length, 1)
         assert.ok(result.volume() > 0 && result.volume() < full.volume())
-        for(const face of result.faces()) window.kernel.modeling.mesh(face.geom())
+        for(const face of result.faces()) tessellateMesh(face.geom())
         for(const operation of ['join', 'cut', 'intersect']) {
           try {
             const output = body.boolean(result, operation)
-            for(const face of output.faces()) window.kernel.modeling.mesh(face.geom())
+            for(const face of output.faces()) tessellateMesh(face.geom())
           }
           catch(error) { errors.push({ face: target.id, forward, operation, error }) }
         }

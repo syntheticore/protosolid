@@ -1,8 +1,5 @@
 import fs from 'node:fs'
-import { createRequire } from 'node:module'
-import { fileURLToPath } from 'node:url'
-import initShapex from '../js/shapexJS/index.js'
-import { ShapexBackend } from '../js/kernels/shapex.js'
+import { initializeShapex } from '../js/core/shapex.js'
 import Serialize from '../js/core/serialize.js'
 import { lastId, setLastId } from '../js/core/id.js'
 
@@ -22,17 +19,11 @@ try {
 }
 
 async function profileScene(scenePath) {
-  // The legacy OpenCascade sketch adapter still needs its Node globals.
-  globalThis.require = createRequire(import.meta.url)
-  globalThis.__dirname = fileURLToPath(new URL('../assets/oc/', import.meta.url))
   globalThis.window = { addEventListener() {}, localStorage: { getItem() { return null } } }
   const { default: Document } = await import('../js/core/document.js')
-  const { default: initOC } = await import('../assets/oc/oc.js')
   const { Sketch } = await import('../js/core/sketch.js')
   Sketch.prototype.solve = function() {}
-  window.oc = { oc: await initOC({ wasmBinary: fs.readFileSync(new URL('../assets/oc/oc.wasm', import.meta.url)) }) }
-  const api = await initShapex({ wasm: fs.readFileSync(new URL('../js/shapexJS/pkg/shapex_js_wasm_bg.wasm', import.meta.url)) })
-  window.kernel = { modeling: new ShapexBackend(api) }
+  await initializeShapex({ wasm: fs.readFileSync(new URL('../js/shapexJS/pkg/shapex_js_wasm_bg.wasm', import.meta.url)) })
 
   const doc = new Document()
   const dump = Serialize.parse(fs.readFileSync(scenePath, 'utf8'), { document: doc, sketches: {} })

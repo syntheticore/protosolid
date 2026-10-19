@@ -67,6 +67,10 @@
 <script setup>
 
   import { provide } from 'vue'
+  import { init_planegcs_module } from '@salusoft89/planegcs'
+  import sketchSolverWasm from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url'
+  import { initializeShapex } from './js/core/shapex.js'
+  import { initializeSketchSolver } from './js/core/sketch-solver.js'
 
   import {
     default as preferences,
@@ -77,7 +81,6 @@
   import Document from './js/core/document.js'
   import Emitter from './js/emitter.js'
   import { ManipulationTool } from './js/tools.js'
-  // const wasmP = import('../../rust/pkg/wasm-index.js')
 
   loadPreferences()
   const isPreferencesWindow = new URLSearchParams(window.location.search).get('window') === 'preferences'
@@ -87,11 +90,10 @@
   document.body.setAttribute('data-platform', window.platform || 'browser')
 
   if(!isPreferencesWindow) {
-    const kernel = await useKernel()
-    window.kernel = kernel
-    // Temporary compatibility name for 2D sketch geometry and PlaneGCS. New 3D
-    // code must use window.kernel.modeling rather than this alias.
-    window.oc = kernel
+    await Promise.all([
+      initializeShapex(),
+      init_planegcs_module({ locateFile: () => sketchSolverWasm }).then(initializeSketchSolver),
+    ])
   }
 
   const bus = new Emitter()

@@ -24,6 +24,10 @@ pub use kernel::{
     Frame3, Line2, MassProperties, Plane3, Polyline, Profile, ProfileBoundary, Resolution,
     RevolvedSurface3, Solid, SplitKeep, SweptSurface3, Tessellate, TessellationOptions,
     TriangleMesh, TrimmedCurve2, VertexHandle, Wire2,
+    CurveProjection2, CurveIntersection2, CurveContact, PointClassification, Polyline2,
+    OffsetCurve2, ProjectedCurve2, PlaneCurveProjection, Path2, PathOffset2,
+    OffsetOptions, JoinStyle, CurveApproximation2, RigidTransform2,
+    ProfileApproximation,
 };
 pub use kernel::{Kernel, KernelError, KernelResult, ModelTolerance};
 #[cfg(not(feature = "legacy"))]

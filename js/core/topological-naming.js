@@ -1,6 +1,6 @@
 import { makeID } from './id.js'
 
-// This module owns document identities. Kernel adapters supply correspondence
+// This module owns document identities. Shapex supplies correspondence
 // and incidence, never array positions or geometric proximity.
 let activeFeature = null
 

@@ -3,15 +3,17 @@ import { nextTick, toRaw } from 'vue'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
-import { Line, Circle, Arc, Spline, OffsetCurve, SketchElement, SketchPoint, supportsPointOnCurveConstraint } from './geom2d.js'
+import { Line, Circle, Arc, Spline, DerivedCurve, SketchElement, SketchPoint, supportsPointOnCurveConstraint } from './geom2d.js'
 import { buildOffsetCurves, nearestOffsetFrame } from './sketch-offset.js'
 import { Wire, Profile, Edge } from './geom3d.js'
 import { AxisHelper, PointHelper } from './helpers.js'
-import { EPSILON, cross2d, ocAx3FromMatrix, ocPlnFromMatrix, ocPntFromVec, transformGeometry } from './utils.js'
-import { Reference, CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
+import { EPSILON, cross2d } from './utils.js'
+import { CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
 import { relativeComponentTransform } from './assembly.js'
 import Expression from './expression.js'
 import { solveDrag, validGeometry } from './sketch-drag.js'
+import { solveSystem } from './sketch-solver.js'
+import { shapex as sx, transformFromMatrix, planeFromMatrix } from './shapex.js'
 
 function sameCurve(left, right) {
   if(left === right) return true
@@ -540,7 +542,7 @@ export class Sketch {
 
   solve(tree, draggedHandle, options={}) {
     if(draggedHandle && !options.transaction) {
-      const snapshot = this.elements.filter(elem => !(elem instanceof OffsetCurve)).map(elem => ({
+      const snapshot = this.elements.filter(elem => !(elem instanceof DerivedCurve)).map(elem => ({
         elem, handles: elem.handles().map(point => point.clone()), radius: elem.radius,
       }))
       const restore = () => {
@@ -565,10 +567,10 @@ export class Sketch {
     const { applyResults=true, offsetIteration=0 } = options
     let id = 1
     const idMap = {}
-    const solverElements = this.elements.filter(elem => !(elem instanceof OffsetCurve))
+    const solverElements = this.elements.filter(elem => !(elem instanceof DerivedCurve))
 
     // Convert entire sketch to GCS format
-    const projections = this.projections.map(p => p.update(tree) ).filter(Boolean)
+    const projections = this.projections.map(p => p.update(tree) ).filter(elem => elem && !(elem instanceof DerivedCurve))
     const primitives = solverElements.concat(projections).flatMap(elem => {
       let primitives
 
@@ -600,10 +602,7 @@ export class Sketch {
           type: 'arc',
           c_id: center.id,
           radius: elem.radius,
-          // A three-point OpenCascade arc can choose either direction for
-          // its local circle axis. PlaneGCS uses Cartesian counter-clockwise
-          // angles, so derive them from the actual endpoints rather than OC's
-          // axis-relative curve parameters.
+          // PlaneGCS uses Cartesian counter-clockwise endpoint angles.
           start_angle: angles[0],
           end_angle: angles[1],
           start_id: start.id,
@@ -674,12 +673,12 @@ export class Sketch {
 
     const offsets = this.constraints.filter(constraint => constraint instanceof ProfileOffsetConstraint)
     const hasOffsetReferences = this.constraints.some(constraint => !(constraint instanceof ProfileOffsetConstraint) &&
-      constraint.items.some(item => item.curve() instanceof OffsetCurve))
+      constraint.items.some(item => item.curve() instanceof DerivedCurve))
     if(applyResults && hasOffsetReferences && offsets.some(constraint =>
       !constraint.rebuild({ preserveTopology: !!draggedHandle }))) return false
     // Generated edges are read-only solver references. Their endpoints are
     // fixed points; curve contacts below use the exact curve's local tangent.
-    this.elements.filter(elem => elem instanceof OffsetCurve).forEach(curve => {
+    this.elements.filter(elem => elem instanceof DerivedCurve).forEach(curve => {
       const points = curve.handles().map(point => ({
         id: `${id++}`, type: 'point', x: point.x, y: point.y, fixed: true,
       }))
@@ -709,7 +708,7 @@ export class Sketch {
     const pointOnCurveConstraint = (constraintId, pointRef, curve, curvePrim, temporary) => {
       const pointPrim = pointPrimitive(pointRef)
       if(!pointPrim) throw new Error('Unsupported point-on-curve constraint point')
-      if(curve instanceof OffsetCurve) {
+      if(curve instanceof DerivedCurve) {
         const point = pointRef.curve().handles()[pointRef.index]
         const frame = curve.closestFrame(point)
         const a = { id: `${id++}`, type: 'point', x: frame.point.x, y: frame.point.y, fixed: true }
@@ -789,7 +788,7 @@ export class Sketch {
       })
 
     const constraints = [...arcRules, ...projectionRadiusRules].concat(this.constraints.flatMap(c => {
-      if(c.items.some(item => item.curve() instanceof OffsetCurve && !item.curve().handles().length)) return []
+      if(c.items.some(item => item.curve() instanceof DerivedCurve && !item.curve().handles().length)) return []
       if(c instanceof ProfileOffsetConstraint) {
         return [] // Exact offsets are regenerated after their sources solve.
       } else if(c instanceof HorVertConstraint) {
@@ -1022,8 +1021,8 @@ export class Sketch {
       idMap[elem.id].map(primitive => primitive.id)
     )
     const solution = draggedHandle ?
-      solveDrag(primitives, constraints, dragTargets, system => window.oc.solveSystem(system)) :
-      window.oc.solveSystem([...primitives, ...constraints], parameterGroups)
+      solveDrag(primitives, constraints, dragTargets, solveSystem) :
+      solveSystem([...primitives, ...constraints], parameterGroups)
     if(solution.conflicting || solution.failed) {
       if(!draggedHandle && applyResults) window.bus.emit('toast', solution.conflicting ? 'Sketch was over-constrained' : 'Could not solve sketch')
       return false
@@ -1083,7 +1082,7 @@ export class Sketch {
     const endpointMoved = this.constraints.some(constraint => !(constraint instanceof ProfileOffsetConstraint) &&
       constraint.items.some(item => {
         const curve = item.curve()
-        if(!(curve instanceof OffsetCurve) || item.index === undefined || !curve.handles().length) return false
+        if(!(curve instanceof DerivedCurve) || item.index === undefined || !curve.handles().length) return false
         const previous = idMap[curve.id]?.[item.index]
         const point = curve.handles()[item.index]
         return previous && (point.x - previous.x) ** 2 + (point.y - previous.y) ** 2 > toleranceSquared
@@ -1148,8 +1147,7 @@ export class Projection {
     try {
       return this.projectGeometry(tree)
     } catch(error) {
-      // OpenCascade throws numeric exception pointers for degenerate projections.
-      if(typeof error !== 'number') throw error
+      if(!(error instanceof sx.ShapexError || error instanceof RangeError)) throw error
       return this.invalidate('This geometry cannot be projected onto the sketch plane')
     }
   }
@@ -1166,58 +1164,23 @@ export class Projection {
     const relative = this.relativeTransform(tree)
 
     if(isElementPoint || item instanceof PointHelper) {
-      let point = isElementPoint ?
-        item.handles()[this.itemRef.index].clone().applyMatrix4(item.sketch.workplane) :
-        new THREE.Vector3().setFromMatrixPosition(item.getPoint())
+      const point = isElementPoint ? item.handles()[this.itemRef.index].clone().applyMatrix4(item.sketch.workplane)
+        : new THREE.Vector3().setFromMatrixPosition(item.getPoint())
       point.applyMatrix4(relative).applyMatrix4(this.sketch.workplane.clone().invert())
       point.z = 0
-      const suffix = isElementPoint ? `/${this.itemRef.index}` : ''
-      const elem = new ProjectedPoint(point, this.id + suffix + '/projected')
-      return this.updateOutput(elem)
+      return this.updateOutput(new ProjectedPoint(point, this.id + (isElementPoint ? '/' + this.itemRef.index : '') + '/projected'))
     }
 
-    let curve
-    if(item instanceof Edge) {
-      if(item.solid.compound.isShapex) {
-        curve = window.kernel.modeling.edgeProjectionCurve(item.geom(), relative)
-        if(!curve) return this.invalidate('This edge cannot be projected yet')
-      } else {
-        const shape = transformGeometry(item.geom(), relative).Shape()
-        curve = new window.oc.oc.BRepAdaptor_Curve_2(window.oc.oc.TopoDS.Edge_1(shape))
-      }
-
-    } else if(item instanceof AxisHelper) {
-      const axis = relative.clone().multiply(item.transform)
-      const geom = new window.oc.oc.GC_MakeSegment_1(
-        ocPntFromVec(new THREE.Vector3().applyMatrix4(axis)),
-        ocPntFromVec(new THREE.Vector3(0, 0, 20).applyMatrix4(axis)),
-      ).Value().get()
-      const handle = new window.oc.oc.Handle_Geom_Curve_2(geom)
-      curve = new window.oc.oc.GeomAdaptor_Curve_2(handle)
-    }
-
-    const ax = ocAx3FromMatrix(this.sketch.workplane)
-    const project = new window.oc.oc.ProjLib_ProjectOnPlane_2(ax)
-    project.Load(curve.ShallowCopy(), EPSILON, true) // ShallowCopy upcasts BRepAdaptor_Curve -> Adaptor3d_Curve
-
-    const type = project.GetType()
-    const types = window.oc.oc.GeomAbs_CurveType
-    if(type !== types.GeomAbs_Line && type !== types.GeomAbs_Circle) {
-      return this.invalidate('This projection is not supported. Only points, lines, circles and circular arcs are supported')
-    }
-
-    const projected = project.GetResult().get()
-    // GetResult exposes the untrimmed basis curve; retain the source edge's bounds.
-    const [u1, u2] = [project.FirstParameter(), project.LastParameter()]
-
-    const plane = ocPlnFromMatrix(this.sketch.workplane)
-    const curve2d = window.oc.oc.GeomAPI.To2d(projected.Curve(), plane)
-    const trimmed = new window.oc.oc.Geom2d_TrimmedCurve(curve2d, u1, u2, true, true)
-
-    const constructor = type === types.GeomAbs_Line ? Line :
-      Math.abs(u2 - u1 - Math.PI * 2) <= EPSILON ? Circle : Arc
-    const elem = constructor.fromGeometry(trimmed, this.id + '/projected')
-    return this.updateOutput(elem)
+    const geometry = item instanceof Edge ? item.geom().trimmedCurve() : item.geom()
+    const transformed = geometry.transformed(transformFromMatrix(relative))
+    const result = transformed.projectedOnto(planeFromMatrix(this.sketch.workplane))
+    const id = this.id + '/projected'
+    if(result.kind == 'point') return this.updateOutput(new ProjectedPoint(new THREE.Vector3(result.point.x, result.point.y, 0), id))
+    const curve = result.curve, basis = curve.curve()
+    const Type = basis instanceof sx.Line2 ? Line : basis instanceof sx.Circle2 ?
+      Math.abs(Math.abs(curve.range().span()) - Math.PI * 2) <= EPSILON ? Circle : Arc :
+      DerivedCurve
+    return this.updateOutput(Type.fromGeometry(curve, id))
   }
 
   updateOutput(elem) {
@@ -1574,7 +1537,6 @@ export class ProfileOffsetConstraint extends Dimension {
       const existing = previous[index]
       if(existing) {
         existing.update(curve.geom())
-        existing.forward = curve.forward
         existing.invalid = false
         existing.fullyConstrained = this.items.slice(0, this.sourceCount).every(item => item.curve().fullyConstrained)
         curve.geom = null // Transfer ownership without deleting the new curve.

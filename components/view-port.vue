@@ -377,7 +377,7 @@
 
       exportPreview: function() {
         const config = this.document.activeExportConfig
-        if(!config || config.format == 'STEP') return null
+        if(!config) return null
         return {
           config,
           componentId: this.document.activeExportComponentId,

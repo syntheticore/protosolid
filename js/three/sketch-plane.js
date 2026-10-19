@@ -204,20 +204,18 @@ export default class SketchPlane extends THREE.Object3D {
 
   sampleSketch(elements) {
     const points = elements.flatMap(element => {
-      if(!element.sample || !element.geom) {
+      if(!element.tesselate || !element.geom) {
         return (element.handles?.() || []).map(point => point.clone())
       }
 
       // Curves are sampled only when their geometry changes. These samples
       // establish one continuous footprint for the whole sketch.
-      const count = Math.min(16, Math.max(2, Math.ceil(element.tesselationSteps() / 8)))
-      try {
-        return Array.from({ length: count }, (_unused, index) =>
-          element.sample(count == 1 ? 0 : index / (count - 1))
-        ).filter(Boolean)
-      } catch(_error) {
-        return (element.handles?.() || []).map(point => point.clone())
-      }
+      const vertices = element.tesselate()
+      const count = Math.min(16, vertices.length)
+      return Array.from({ length: count }, (_unused, index) => {
+        const point = vertices[Math.round(index * (vertices.length - 1) / (count - 1))]
+        return new THREE.Vector2(point[0], point[1])
+      })
     }).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
 
     return points

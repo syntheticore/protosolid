@@ -3,7 +3,7 @@ import * as THREE from 'three'
 
 import { saveFile } from '../utils.js'
 import { relativeComponentTransform } from './assembly.js'
-import { exploreShape, transformGeometry, vecFromOc } from './utils.js'
+import { tessellateMesh } from './shapex.js'
 
 
 // STL
@@ -78,35 +78,7 @@ function componentTriangleMeshes(component, maxDistance, maxAngle) {
 }
 
 function geometryTriangles(geometry, transform, maxDistance, maxAngle) {
-  if(window.kernel?.modeling?.id == 'shapex') {
-    return shapexGeometryTriangles(geometry, transform, maxDistance, maxAngle)
-  }
-
-  const triangles = []
-
-  // Export from an unmeshed geometry copy so these settings do not replace
-  // the triangulation cached for viewport rendering.
-  const copy = new window.oc.oc.BRepBuilderAPI_Copy_2(geometry, true, false)
-  const shape = copy.Shape()
-  const mesher = new window.oc.oc.BRepMesh_IncrementalMesh_2(
-    shape,
-    maxDistance,
-    false,
-    maxAngle,
-    false,
-  )
-  exploreShape(shape, 'face', face => {
-    appendFaceTriangles(face, transform, triangles)
-    face.delete()
-  })
-  mesher.delete()
-  shape.delete()
-  copy.delete()
-  return triangles
-}
-
-function shapexGeometryTriangles(geometry, transform, maxDistance, maxAngle) {
-  const mesh = window.kernel.modeling.mesh(geometry, {
+  const mesh = tessellateMesh(geometry, {
     chordTolerance: maxDistance,
     angularTolerance: maxAngle,
   })
@@ -122,44 +94,6 @@ function shapexGeometryTriangles(geometry, transform, maxDistance, maxAngle) {
   return triangles
 }
 
-function appendFaceTriangles(face, componentTransform, triangles) {
-  const location = new window.oc.oc.TopLoc_Location_1()
-  const triangulation = window.oc.oc.BRep_Tool
-    .Triangulation(face, location, 0)
-    .get()
-  if(!triangulation) {
-    location.delete()
-    return
-  }
-
-  const locationTransform = location.Transformation()
-  const transform = componentTransform.clone()
-    .multiply(matrixFromOcTransform(locationTransform))
-  const reversed = face.Orientation_1() ==
-    window.oc.oc.TopAbs_Orientation.TopAbs_REVERSED
-  const vertexOrder = reversed ? [1, 3, 2] : [1, 2, 3]
-  for(let i = 1; i <= triangulation.NbTriangles(); i++) {
-    const triangle = triangulation.Triangle(i)
-    triangles.push(vertexOrder.map(vertexIndex => {
-      const point = triangulation.Node(triangle.Value(vertexIndex))
-      const vertex = vecFromOc(point).applyMatrix4(transform)
-      point.delete()
-      return vertex
-    }))
-    triangle.delete()
-  }
-  locationTransform.delete()
-  location.delete()
-}
-
-function matrixFromOcTransform(transform) {
-  return new THREE.Matrix4().set(
-    transform.Value(1, 1), transform.Value(1, 2), transform.Value(1, 3), transform.Value(1, 4),
-    transform.Value(2, 1), transform.Value(2, 2), transform.Value(2, 3), transform.Value(2, 4),
-    transform.Value(3, 1), transform.Value(3, 2), transform.Value(3, 3), transform.Value(3, 4),
-    0, 0, 0, 1,
-  )
-}
 
 function writeVector(view, offset, vector) {
   view.setFloat32(offset, vector.x, true)
@@ -176,7 +110,6 @@ export async function exportConfigured(component, config) {
   const exporter = {
     STL: exportStl,
     '3MF': export3mf,
-    STEP: exportStep,
   }[config.format]
   if(!exporter) throw new Error(`Unsupported export format: ${config.format}`)
   return await exporter(component, config.path, config)
@@ -293,67 +226,4 @@ function escapeXml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;')
-}
-
-
-// STEP
-let stepExportId = 0
-
-export async function exportStep(component, path) {
-  const title = component.creator.title
-  const occurrences = component.getChildren()
-    .filter(occurrence => occurrence.compound.geom)
-  if(!occurrences.length) throw new Error(`Cannot export empty component "${title}"`)
-
-  const oc = window.oc.oc
-  const writer = new oc.STEPControl_Writer_1()
-  const compound = new oc.TopoDS_Compound()
-  const builder = new oc.BRep_Builder()
-  const tempPath = `/protosolid-export-${++stepExportId}.step`
-
-  try {
-    builder.MakeCompound(compound)
-    occurrences.forEach(occurrence => {
-      const transform = relativeComponentTransform(occurrence, component)
-      const transformer = transformGeometry(occurrence.compound.geom(), transform)
-      try {
-        const shape = transformer.Shape()
-        try {
-          builder.Add(compound, shape)
-        } finally {
-          shape.delete()
-        }
-      } finally {
-        transformer.delete()
-      }
-    })
-
-    const progress = new oc.Message_ProgressRange_1()
-    let transferStatus
-    try {
-      transferStatus = writer.Transfer(
-        compound,
-        oc.STEPControl_StepModelType.STEPControl_AsIs,
-        true,
-        progress,
-      )
-    } finally {
-      progress.delete()
-    }
-    if(transferStatus !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
-      throw new Error(`OpenCascade could not translate "${title}" to STEP`)
-    }
-
-    const writeStatus = writer.Write(tempPath)
-    if(writeStatus !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
-      throw new Error(`OpenCascade could not write STEP for "${title}"`)
-    }
-    const bytes = oc.FS.readFile(tempPath, { encoding: 'binary' })
-    return await saveFile(bytes, 'step', path, title)
-  } finally {
-    try { oc.FS.unlink(tempPath) } catch(_) {}
-    builder.delete()
-    compound.delete()
-    writer.delete()
-  }
 }

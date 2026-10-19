@@ -19,19 +19,7 @@
           span {{ section.title }}
 
     main.settings-content(:class="{ 'has-restart': restartRequired }")
-      section(v-if="activeSection === 'modeling'")
-        header
-          h1 Modeling
-          p Choose the geometry engine used to build and modify solid bodies.
-
-        .settings-group
-          label
-            span.setting-label
-              strong Geometry kernel
-              small A restart is required after changing the modeling kernel
-            ComboBox(v-model="preferences.modelingKernel" label="Geometry kernel" :options="[{ value: 'occ', label: 'OpenCascade' }, { value: 'shapex', label: 'Shapex' }]" @update:model-value="restartRequired = true")
-
-      section(v-else-if="activeSection === 'files'")
+      section(v-if="activeSection === 'files'")
         header
           h1 Files
           p Choose how documents are stored when saving.
@@ -353,7 +341,6 @@
         sections: [
           { id: 'appearance', title: 'Appearance', icon: 'desktop' },
           { id: 'files', title: 'Files', icon: 'save' },
-          { id: 'modeling', title: 'Modeling', icon: 'cube' },
           { id: 'units', title: 'Units', icon: 'ruler' },
           { id: 'tolerances', title: 'Tolerances', icon: 'crosshairs' },
         ],

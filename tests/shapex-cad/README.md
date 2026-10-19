@@ -61,7 +61,7 @@ loft face counts. It continues after a failed document to report the whole suite
 It does not build or launch the application.
 
 `runtime.mjs` uses the production serializer, timeline, feature classes, reference
-resolution, repair, and viewport face tessellation. OpenCascade supplies the
-existing 2D sketch utilities and PlaneGCS solver; all 3D operations use Shapex.
+resolution, and viewport face tessellation. Shapex supplies sketch geometry and
+solid modeling; PlaneGCS solves sketch constraints.
 
 The fixtures use persistent topology selections and producer manifests.

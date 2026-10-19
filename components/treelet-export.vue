@@ -38,14 +38,14 @@
         h3 Export Settings
 
         label
-          ComboBox(v-model="config.format" label="Format" :options="['STL', '3MF', 'STEP'].map(format => ({ value: format, label: format }))")
+          ComboBox(v-model="config.format" label="Format" :options="['STL', '3MF'].map(format => ({ value: format, label: format }))")
           span Format
 
-        label(v-if="config.format != 'STEP'")
+        label
           input.input(type="number" v-model="config.maxDistance" min="0.0" step="0.01" max="10.0")
           span Max Deviation
 
-        label(v-if="config.format != 'STEP'")
+        label
           input.input(type="number" v-model="config.maxAngle" min="0.0" step="0.1" max="360.0")
           span Max Angular Deviation
 

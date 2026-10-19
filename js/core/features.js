@@ -9,7 +9,7 @@ import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, rad, rotationFromNormal } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
-import { KernelMismatchError, checkedOutData, parseDocument } from './document-format.js'
+import { checkedOutData, parseDocument } from './document-format.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame, faceGizmoFrame } from '../three/gizmos.js'
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
@@ -27,6 +27,10 @@ import {
   worldTransform,
 } from './assembly.js'
 
+
+function featureError(error) {
+  return error?.msg ? error : { type: 'error', msg: error.message || String(error) }
+}
 
 export class Feature {
   constructor(document, booleanOutput, title, settings) {
@@ -103,8 +107,6 @@ export class Feature {
     this.updateFeature(tree, references)
 
     try {
-      const comp = tree.findChild(this.componentId)
-      comp.compound = comp.compound.repair()
       // Prepare every face before the timeline publishes the feature result.
       // A display failure rejects the feature just like a modeling failure.
       for(const id of this.modifiedComponents()) {
@@ -361,19 +363,17 @@ export class SolidFeature extends Feature {
     }
 
     component.compound = original.subset(visible)
-    if(original.isShapex) {
-      // The scoped compound has its own native topology handles. Rebind local
-      // selections before operations that require the current body revision.
-      const scopedSolids = component.compound.solids()
-      for(const key of ['faces', 'edges', 'face', 'tools']) {
-        if(!scopedReferences[key]) continue
-        const items = [scopedReferences[key]].flat().map(item => {
-          if(inputComponentId(item) != this.componentId) return item
-          const solid = scopedSolids.find(solid => solid.id == (item.solid || item).id)
-          return item.solid ? solid[key == 'edges' ? 'edges' : 'faces']().find(shape => shape.id == item.id) : solid
-        })
-        scopedReferences[key] = this.settings[key].multi ? items : items[0]
-      }
+    // The scoped compound has its own native topology handles. Rebind local
+    // selections before operations that require the current body revision.
+    const scopedSolids = component.compound.solids()
+    for(const key of ['faces', 'edges', 'face', 'tools']) {
+      if(!scopedReferences[key]) continue
+      const items = [scopedReferences[key]].flat().map(item => {
+        if(inputComponentId(item) != this.componentId) return item
+        const solid = scopedSolids.find(solid => solid.id == (item.solid || item).id)
+        return item.solid ? solid[key == 'edges' ? 'edges' : 'faces']().find(shape => shape.id == item.id) : solid
+      })
+      scopedReferences[key] = this.settings[key].multi ? items : items[0]
     }
     super.updateGeometry(tree, scopedReferences)
     component.compound = component.compound.subset([...component.compound.solids(), ...hidden]).cloneCached()
@@ -536,7 +536,7 @@ export class PatternFeature extends SolidFeature {
       )
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
   gridTransforms() {
@@ -1183,7 +1183,7 @@ export class ConvertBodyToComponentFeature extends Feature {
       const remaining = parent.compound.removeShapes([references.body])
       parent.compound = remaining.solids().length ? remaining : new Compound(parent.id)
       parent.children.push(component)
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
   dump() {
@@ -1719,8 +1719,7 @@ export class PlaceFeature extends Feature {
       this.pendingTree = null
       this.activationError = {
         type: 'error',
-        msg: error instanceof KernelMismatchError ? error.message :
-          'The imported document could not be read. Choose a replacement file or cancel.',
+        msg: 'The imported document could not be read. Choose a replacement file or cancel.',
       }
     }
   }
@@ -1789,7 +1788,7 @@ export class PlaceFeature extends Feature {
       const { componentIds } = this.createImportedComponents(target, true)
       this.importJoints(tree, componentIds)
     } catch(error) {
-      this.error = error || { type: 'error', msg: 'The imported geometry could not be generated' }
+      this.error = featureError(error)
     }
   }
 
@@ -2095,7 +2094,7 @@ export class ExtrudeFeature extends SolidFeature {
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) {
-      this.error = err?.msg ? err : { type: 'error', msg: 'Extrusion could not be created' }
+      this.error = featureError(err)
     }
   }
 
@@ -2220,7 +2219,7 @@ export class RevolveFeature extends SolidFeature {
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) {
-      this.error = err?.msg ? err : { type: 'error', msg: 'Revolution could not be created' }
+      this.error = featureError(err)
     }
   }
 
@@ -2314,7 +2313,7 @@ export class LoftFeature extends SolidFeature {
       )
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 }
 
@@ -2353,7 +2352,7 @@ export class SplitFeature extends SolidFeature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.split(references.plane, this.keep)
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 }
 
@@ -2393,7 +2392,7 @@ export class DraftFeature extends SolidFeature {
         references.ref_plane,
         rad(this.angle),
       )
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
   updateGizmos() {
@@ -2461,7 +2460,7 @@ export class SweepFeature extends SolidFeature {
       const tool = references.profile.sweep(this.componentId, references.rail, this.id)
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 }
 
@@ -2510,7 +2509,7 @@ export class FilletFeature extends SolidFeature {
         this.radius,
         this.propagation === 'tangent',
       )
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
   getGizmo() {
@@ -2604,7 +2603,7 @@ export class ChamferFeature extends SolidFeature {
         flipSides: this.flipSides,
         followTangentEdges: this.propagation === 'tangent',
       })
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
   getGizmo() {
@@ -2612,7 +2611,7 @@ export class ChamferFeature extends SolidFeature {
     if(!edge) return {}
     const faces = edge.connectedFaces().sort((a, b) => a.id.localeCompare(b.id))
     if(this.chamferType != 'equal' && this.flipSides) faces.reverse()
-    const points = edge.solid.compound.isShapex ? edge.tesselate().map(point => point.toArray()) : edge.tesselate()
+    const points = edge.tesselate().map(point => point.toArray())
     const { center, directions: [first, second] } = edgeGizmoFrame(points, faces.map(face => face.tesselate()))
     const distance = (key, direction) => ({
       type: 'length', center, direction, value: this[key],
@@ -2702,22 +2701,19 @@ export class ShellFeature extends SolidFeature {
 
     try {
       comp.compound = comp.compound.shell(references.faces, thickness, this.joinType)
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
   getGizmo() {
     const tree = this.document.top(this.document.timeline.features.indexOf(this))
     const compound = tree.findChild(this.componentId).compound
     const openings = this.inputItems('faces')
-    const retained = face => !openings.some(opening => compound.isShapex ?
-      opening.kernelId == face.kernelId : opening.geom().IsSame(face.geom()))
+    const retained = face => !openings.some(opening => opening.kernelId == face.kernelId)
     const visible = compound.solids().filter(solid => this.isSolidVisible(tree, solid))
     const face = openings.filter(face => visible.some(solid => solid.id == face.solid.id)).at(-1)?.connectedFaces().find(retained) ||
       visible.flatMap(solid => solid.faces()).find(retained)
     if(!face) return
     const { center, direction } = faceGizmoFrame(face.tesselate(), face.center())
-    // Shapex tessellation already follows the face's outward orientation.
-    if(!compound.isShapex && face.geom().Orientation_1() == window.oc.oc.TopAbs_Orientation.TopAbs_REVERSED) direction.negate()
     return {
       distance: {
         center, direction, distance: this.thickness, side: this.side,
@@ -2765,7 +2761,7 @@ export class OffsetFeature extends SolidFeature {
     const distance = this.distance * (this.side ? 1 : -1)
     try {
       comp.compound = comp.compound.offsetFaces(references.faces, distance)
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
   static undump(dump, context) {
@@ -2796,7 +2792,7 @@ export class DissolveFeature extends SolidFeature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.dissolveFaces(references.faces)
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 }
 
@@ -2849,7 +2845,7 @@ export class BooleanFeature extends SolidFeature {
         comp.compound = comp.compound.merge(localTools.map(input => input.compound))
       }
       this.previewBody = tool
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
 }
@@ -2875,7 +2871,7 @@ export class RemoveSolidsFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.removeShapes(references.solids)
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 }
 
@@ -2922,7 +2918,7 @@ export class MoveFeature extends SolidFeature {
         -this.moveCenter.x, -this.moveCenter.y, -this.moveCenter.z,
       ))
       comp.compound = comp.compound.moveFaces(references.faces, transform)
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 
   updateGizmos() {
@@ -2993,7 +2989,7 @@ export class ReplaceFeature extends SolidFeature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.replaceShapes([references.face], [references.replacement])
-    } catch(err) { this.error = err || this.error }
+    } catch(err) { this.error = featureError(err) }
   }
 }
 

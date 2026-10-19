@@ -358,23 +358,22 @@ function lineIntersection(left, right) {
 }
 
 function arcExtensionPoints(circle, constraintPos) {
-  const geom = circle.geom().get()
-  const start = geom.FirstParameter()
-  const end = geom.LastParameter()
-  const basis = geom.BasisCurve()
-  const u = new Circle(circle.center(), circle.radius, basis).unsample(constraintPos)
+  const curve = circle.geom(), range = curve.range()
+  const start = range.start, end = range.end, direction = Math.sign(range.span())
+  const basis = curve.curve()
+  const u = Math.atan2(constraintPos.y - circle.center().y, constraintPos.x - circle.center().x)
   const period = Math.PI * 2
-  const progress = THREE.MathUtils.euclideanModulo(u - start, period)
-  const span = end - start
+  const progress = THREE.MathUtils.euclideanModulo(direction * (u - start), period)
+  const span = Math.abs(range.span())
   if(progress <= span) return []
 
   // Compare gaps around the circle, including across the parameter seam.
   const fromEnd = progress - span
   const fromStart = period - progress
-  const extensionStart = fromStart < fromEnd ? start - fromStart : end
-  const extensionEnd = fromStart < fromEnd ? start : end + fromEnd
+  const extensionStart = fromStart < fromEnd ? start - direction * fromStart : end
+  const extensionEnd = fromStart < fromEnd ? start : end + direction * fromEnd
   return Array.from({ length: ARC_EXTENSION_STEPS + 1 }, (_value, index) => {
-    const point = basis.get().Value(extensionStart + (extensionEnd - extensionStart) * index / ARC_EXTENSION_STEPS)
-    return [point.X(), point.Y(), circle.center().z]
+    const point = basis.evaluate(extensionStart + (extensionEnd - extensionStart) * index / ARC_EXTENSION_STEPS).point
+    return [point.x, point.y, circle.center().z]
   })
 }

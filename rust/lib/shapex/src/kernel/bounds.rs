@@ -58,7 +58,7 @@ fn unavailable() -> KernelError {
     )
 }
 
-fn curve2(curve: &Curve2, range: ParameterRange) -> KernelResult<Bounds> {
+pub(crate) fn curve2(curve: &Curve2, range: ParameterRange) -> KernelResult<Bounds> {
     let lift = |p: crate::Point2| Point3::new(p.x, p.y, 0.0);
     Ok(match curve {
         Curve2::Line(_) => Bounds::points([
@@ -67,6 +67,8 @@ fn curve2(curve: &Curve2, range: ParameterRange) -> KernelResult<Bounds> {
         ]),
         Curve2::Circle(c) => Bounds::points([lift(c.center())]).expanded(c.radius()),
         Curve2::Nurbs(c) => Bounds::points(c.control_points().iter().copied().map(lift)),
+        Curve2::Offset(c) => curve2(c.base(), range)?.expanded(c.distance().abs()),
+        Curve2::Projected(c) => parameter_bounds(&Surface3::Plane(c.plane()), curve3(c.curve(),range)?)?,
         // Derive parameters from the retained spatial curve, never its guide.
         Curve2::SurfaceIntersection(c) => {
             parameter_bounds(c.surface(), curve3(&c.spatial_curve(), range)?)?

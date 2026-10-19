@@ -1672,6 +1672,7 @@ export class CircleTool extends SketchTool {
     super.mouseDown(vec, coords)
     if(this.center) {
       this.mouseMove(vec)
+      if(!this.curve.geom) return
       const radiusPoint = this.constrained(vec)
       this.addLockedDimension('diameter', [this.curve],
         this.center.clone().lerp(radiusPoint, 1.5))
@@ -1679,12 +1680,9 @@ export class CircleTool extends SketchTool {
       this.curve = null
     } else {
       this.center = vec
-      // this.curve = this.sketch.add_circle(vec.toArray(), 1)
-      // this.curve = this.sketch.add_circle(vec, 1)
-      this.curve = new Circle(vec, 1.0)
+      this.curve = new Circle(vec, 0)
       this.sketch.add(this.curve)
       this.constrainPoint(this.curve, 0)
-      // this.curve.sketch = this.sketch
     }
     this.resetInput()
     this.viewport.elementChanged()
@@ -1693,8 +1691,7 @@ export class CircleTool extends SketchTool {
   mouseMove(vec) {
     this.pointer = vec
     if(!this.center) return
-    // this.curve.setHandles([this.center.toArray(), vec.toArray()], false)
-    this.curve.setHandles([this.center, this.constrained(vec)], false)
+    this.curve.setHandles([this.center, this.constrained(vec)])
     this.viewport.elementChanged()
   }
 

@@ -240,6 +240,10 @@ fn parameter_on_segment(
         Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => {
             return Ok(None);
         }
+        Curve2::Offset(_) | Curve2::Projected(_) => {
+            let projection = segment.closest_point(point, tolerance)?;
+            return Ok((projection.distance <= tolerance.linear).then_some(projection.parameter));
+        }
     };
     let low = segment.range().start.min(segment.range().end) - tolerance.parameter;
     let high = segment.range().start.max(segment.range().end) + tolerance.parameter;
@@ -338,7 +342,7 @@ fn profile_contains(profile: &Profile, point: crate::Point2) -> KernelResult<boo
     )
 }
 
-fn profiles_from_fragments(
+pub(crate) fn profiles_from_fragments(
     mut fragments: Vec<TrimmedCurve2>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<Profile>> {

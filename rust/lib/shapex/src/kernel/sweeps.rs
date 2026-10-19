@@ -19,7 +19,7 @@ pub(super) fn cap(profile: &Profile, plane: Plane3, reversed: bool) -> KernelRes
             .map(|segment| {
                 Ok(BrepPatchSegment {
                     provenance: Default::default(),
-                    curve: plane.lift_curve(segment.curve(), profile.tolerance())?,
+                    curve: plane.lift_trimmed_curve(segment, profile.tolerance())?,
                     pcurve: segment.curve().clone(),
                     range: segment.range(),
                 })
@@ -132,7 +132,8 @@ fn radial_profile(
                     )?,
                     segment.range(),
                 )?,
-                _ => return Err(unsupported("unsupported revolution profile curve")),
+                _ => Plane3::new(frame.origin(),frame.x(),frame.z(),tolerance)?
+                    .express_curve(&plane.lift_trimmed_curve(segment,tolerance)?,segment.range(),tolerance)?,
             };
             // Exact conservative radial bound for every supported curve family.
             let minimum = match mapped.curve() {
@@ -154,7 +155,7 @@ fn radial_profile(
                     .iter()
                     .map(|p| p.x)
                     .fold(f64::INFINITY, f64::min),
-                _ => unreachable!(),
+                _ => super::bounds::curve2(mapped.curve(),mapped.range())?.0.x,
             };
             if minimum < -tolerance.linear {
                 return Err(invalid("revolution profile crosses the axis"));
@@ -247,7 +248,7 @@ pub(super) fn revolve(
                         index,
                         BrepPatchSegment {
                             provenance: Default::default(),
-                            curve: section_plane(a)?.lift_curve(segment.curve(), tolerance)?,
+                            curve: section_plane(a)?.lift_trimmed_curve(segment, tolerance)?,
                             pcurve: Line2::new(Point2::new(a, 0.0), Vec2::unit_y())?.into(),
                             range: range(start, end)?,
                         },

@@ -4,7 +4,6 @@ const emitter = createNanoEvents()
 
 const preferences = {
   preferredUnit: 'mm',
-  modelingKernel: 'shapex',
   documentFormat: 'plain',
   angleUnit: 'degrees',
   densityUnit: 'g/cm3',

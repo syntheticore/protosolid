@@ -117,6 +117,8 @@ pub(super) fn translate_pcurve(
     tolerance: ModelTolerance,
 ) -> KernelResult<Curve2> {
     match pcurve {
+        Curve2::Projected(_) => Err(super::unsupported("translating a projected curve requires a planar transform")),
+        Curve2::Offset(curve) => Ok(super::OffsetCurve2::new(translate_pcurve(curve.base(), offset, tolerance)?, curve.distance())?.into()),
         Curve2::Line(line) => {
             Ok(super::Line2::new(line.origin() + offset, line.direction())?.into())
         }

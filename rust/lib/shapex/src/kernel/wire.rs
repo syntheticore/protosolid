@@ -34,7 +34,7 @@ impl TrimmedCurve2 {
             // loop without a periodic basis. Distinguish it from a collapse.
             let closed_curve = if matches!(
                 curve,
-                Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)
+                Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_)
             ) {
                 let mut distinct = false;
                 for fraction in [0.25, 0.5, 0.75] {
@@ -376,6 +376,10 @@ fn validate_segment_is_simple(
     segment: &TrimmedCurve2,
     tolerance: ModelTolerance,
 ) -> KernelResult<()> {
+    if matches!(segment.curve(),Curve2::Offset(_)|Curve2::Projected(_)) {
+        if !segment.self_intersections(tolerance)?.is_empty() { return Err(invalid("wire must not self-intersect")); }
+        return Ok(());
+    }
     let Curve2::Nurbs(curve) = segment.curve() else {
         return Ok(());
     };
@@ -386,42 +390,7 @@ fn validate_segment_is_simple(
     // non-adjacent pair then proves that the complete segment is simple too.
     // The subdivision changes representation only and never approximates the
     // curve.
-    let mut pending = trimmed_bezier_spans(curve, segment.range())?
-        .into_iter()
-        .map(|(range, controls)| (range, controls, 0_u8))
-        .collect::<Vec<_>>();
-    let mut pieces = Vec::new();
-    while let Some((range, controls, depth)) = pending.pop() {
-        if bezier_controls_projection_monotone(&controls, tolerance.linear) {
-            pieces.push((range, controls));
-            continue;
-        }
-        if depth >= 32 || range.span().abs() <= tolerance.parameter * 16.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::NumericalFailure,
-                "could not certify NURBS segment simplicity at the model tolerance",
-            ));
-        }
-        let (left, right) = split_values(&controls);
-        let middle = (range.start + range.end) * 0.5;
-        pending.push((
-            ParameterRange {
-                start: middle,
-                end: range.end,
-            },
-            right,
-            depth + 1,
-        ));
-        pending.push((
-            ParameterRange {
-                start: range.start,
-                end: middle,
-            },
-            left,
-            depth + 1,
-        ));
-    }
-    pieces.sort_by(|first, second| first.0.start.total_cmp(&second.0.start));
+    let pieces = simple_nurbs_pieces(curve, segment.range(), tolerance)?;
     let bounds = pieces
         .iter()
         .map(|(_, controls)| homogeneous_bounds(controls))
@@ -458,6 +427,46 @@ fn validate_segment_is_simple(
         }
     }
     Ok(())
+}
+
+pub(crate) fn simple_nurbs_pieces(curve: &super::NurbsCurve2, range: ParameterRange, tolerance: ModelTolerance) -> KernelResult<Vec<(ParameterRange, Vec<Vec3>)>> {
+    let mut pending = trimmed_bezier_spans(curve, range)?
+        .into_iter()
+        .map(|(range, controls)| (range, controls, 0_u8))
+        .collect::<Vec<_>>();
+    let mut pieces = Vec::new();
+    while let Some((range, controls, depth)) = pending.pop() {
+        if bezier_controls_projection_monotone(&controls, tolerance.linear) {
+            pieces.push((range, controls));
+            continue;
+        }
+        if depth >= 32 || range.span().abs() <= tolerance.parameter * 16.0 {
+            return Err(KernelError::new(
+                DiagnosticKind::NumericalFailure,
+                "could not certify NURBS segment simplicity at the model tolerance",
+            ));
+        }
+        let (left, right) = split_values(&controls);
+        let middle = (range.start + range.end) * 0.5;
+        pending.push((
+            ParameterRange {
+                start: middle,
+                end: range.end,
+            },
+            right,
+            depth + 1,
+        ));
+        pending.push((
+            ParameterRange {
+                start: range.start,
+                end: middle,
+            },
+            left,
+            depth + 1,
+        ));
+    }
+    pieces.sort_by(|first, second| first.0.start.total_cmp(&second.0.start));
+    Ok(pieces)
 }
 
 fn bezier_controls_projection_monotone(controls: &[Vec3], tolerance: f64) -> bool {
@@ -528,7 +537,7 @@ pub(crate) fn curve_loop_contains_point(
                 .iter()
                 .map(|control| control.x)
                 .fold(f64::NEG_INFINITY, f64::max)),
-            Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => (0..=32)
+            Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => (0..=32)
                 .map(|index| {
                     let parameter =
                         segment.range().start + segment.range().span() * index as f64 / 32.0;
@@ -615,7 +624,7 @@ pub(crate) fn curve_loop_contains_point(
                     }
                 }
             }
-            Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) => {
+            Curve2::Nurbs(_) | Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => {
                 let boundary_ray = TrimmedCurve2::line(
                     Point2::new(point.x - tolerance.linear * 2.0, point.y),
                     Point2::new(point.x + tolerance.linear * 2.0, point.y),
@@ -680,8 +689,8 @@ pub(crate) fn curve_pair_intersection(
     tolerance: ModelTolerance,
 ) -> KernelResult<CurvePairIntersection> {
     match (first.curve(), second.curve()) {
-        (Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_), _)
-        | (_, Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)) => {
+        (Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_), _)
+        | (_, Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_)) => {
             general_parametric_pair(first, second, tolerance)
         }
         (Curve2::Line(_), Curve2::Line(_)) => line_line_intersection(first, second, tolerance),
@@ -804,7 +813,11 @@ fn general_parametric_pair(
             // Include the implicit evaluator's roundoff budget and the final
             // Newton residual. At a quadratic tangency the remaining root
             // distance is twice the residual divided by the intersection angle.
-            let uncertainty = (evaluation_error
+            // Implicit support correction also has model-unit uncertainty.
+            // At a near-tangent shared endpoint its root position is uncertain
+            // by that distance divided by the intersection angle; treating
+            // every point in this band as a new root creates false crossings.
+            let uncertainty = (evaluation_error + tolerance.linear
                 + first_point.distance(second_point) * 2.0) / sine;
             if let Some((a, b, _)) = shared_endpoints.iter().find(|(_, _, point)| {
                 point.distance(first_point) <= uncertainty
@@ -1077,7 +1090,7 @@ fn certified_nurbs_pair(
             }
             Curve2::Nurbs(_) => unreachable!(),
             Curve2::SurfaceIntersection(_) => unreachable!(),
-            Curve2::SurfaceProjection(_) => unreachable!(),
+            Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => unreachable!(),
         };
         isolate_bernstein_roots(&coefficients, span, 0, tolerance.parameter, &mut parameters);
     }
@@ -1105,7 +1118,7 @@ fn certified_nurbs_pair(
             }
             Curve2::Nurbs(_) => unreachable!(),
             Curve2::SurfaceIntersection(_) => unreachable!(),
-            Curve2::SurfaceProjection(_) => unreachable!(),
+            Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => unreachable!(),
         };
         let in_other = match other.curve() {
             Curve2::Circle(_) => {
@@ -1286,7 +1299,7 @@ fn refine_implicit_root(
             }
             Curve2::Nurbs(_) => unreachable!(),
             Curve2::SurfaceIntersection(_) => unreachable!(),
-            Curve2::SurfaceProjection(_) => unreachable!(),
+            Curve2::SurfaceProjection(_) | Curve2::Offset(_) | Curve2::Projected(_) => unreachable!(),
         };
         if derivative.abs() <= f64::EPSILON {
             break;

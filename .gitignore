@@ -29,11 +29,6 @@ pkg
 wasm-pack.log
 debug.log
 
-# OCC
-assets/oc/*.js
-assets/oc/*.ts
-assets/oc/*.wasm
-
 electron/app
 
 # Generated Electron icon assets; retain the master artwork and instructions

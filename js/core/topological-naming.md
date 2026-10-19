@@ -2,7 +2,7 @@
 
 `js/core/topological-naming.js` owns document identities and selection recipes.
 `js/core/topology.js` supplies shared incidence and reference resolution.
-`js/core/occ-topology.js` and `js/core/shapex-topology.js` translate their kernel's
+`js/core/topology-history.js` translates Shapex
 history into that model. The shared layer has no kernel types or geometric proximity matching.
 
 ## Construction and history
@@ -19,7 +19,7 @@ start and end edges have explicit roles too, allowing periodic revolution seams
 to remain distinct even when they share the same face. Loft, pipe, and limited
 extrusion/revolution generators supply their own correspondence.
 
-Adapters normalize later operation history into records of this form:
+The history module normalizes later operation history into records of this form:
 
 ```js
 { source, relation: 'modified' | 'generated' | 'contributed', outputs: [...] }
@@ -131,14 +131,12 @@ empty. Transient display IDs are not a persistence mechanism for symmetric resul
 Viewport object IDs and tessellation IDs are not persisted reference identities;
 unresolved split families may have temporary distinct viewport IDs.
 
-## Backend contract and file format
+## Shapex history and file format
 
-Another kernel adapter must expose faces, edges, bodies, named incidence, primitive
-roles, logical operand roles, semantic branch roles where available, and exact
-operation correspondence. Runtime kernel handles can supply that
-correspondence, but the document manifest and selection binding remain shared.
+Shapex supplies geometry and operation correspondence; the document manifest
+and selection binding belong to the application.
 The application uses `Compound.topologySelection`, `resolveTopology`,
-`restoreTopologySelections`, and `namespaceTopology` to access the adapter.
+`restoreTopologySelections`, and `namespaceTopology` for persistent selections.
 
 Shapex publishes input-profile correspondence with construction patches before welding,
 and exposes face, edge and body history through its WASM bindings. Native IDs are
@@ -153,17 +151,11 @@ source history. The application maps input segment indices to sketch IDs and
 maps native shell roles to document naming roles. Feature IDs, selection recipes,
 timeline behavior and reference policies remain outside the kernel.
 
-The new format contains feature manifests and selection descriptors. It has no
-reader for legacy `solidId` / `topoId` references and no migration during
-regeneration. Existing files require a separate converter.
+Documents contain feature manifests and selection descriptors.
 
-Run `npm test` for the shared naming, OCC, Shapex, timeline, reference, assembly, and
+Run `npm test` for the shared naming, Shapex, timeline, reference, assembly, and
 simulation checks. Transition coverage includes branch disappearance and return,
 initially empty split sides, conflicting unnamed branches, consumed and retained
 boolean tools, independent copies, merges, and save/reload with a missing branch.
-The OCC fixture requires the generated `assets/oc/oc.js` and
-`assets/oc/oc.wasm`, which are ignored by Git. Build the kernel first with
-`npm run build-oc` (`npm run build-oc-win` on Windows). The tests load that kernel
-without building or launching the application.
-The same reference contract runs against both adapters. Shapex tests also require
-the generated WASM package from `npm run build-shapex`.
+Shapex checks require the generated WASM package from `npm run build-shapex`.
+They do not build or launch the application.

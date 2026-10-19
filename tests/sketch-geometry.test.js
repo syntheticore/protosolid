@@ -107,6 +107,28 @@ test('derived sketch offsets clone independently and preserve their signed side'
   near(offset.sample(0), vector(0, 2))
 })
 
+test('rectangles joined by a bridge line each form one profile', () => {
+  // The outer face walk retraces the bridge, so it is not a simple wire.
+  const sketch = new Sketch()
+  const line = (x0, y0, x1, y1) => {
+    const curve = new Line(vector(x0, y0), vector(x1, y1))
+    sketch.add(curve)
+    return curve
+  }
+  const rectangle = (x0, y0, x1, y1) => [line(x0, y0, x1, y0), line(x1, y0, x1, y1), line(x1, y1, x0, y1), line(x0, y1, x0, y0)]
+  // One rectangle below the bridge line on the right, one above it on the left.
+  rectangle(20, -10, 30, 0)
+  const bridge = line(20, 0, 10, 0)
+  rectangle(0, 0, 10, 10)
+  const profiles = sketch.profiles(null, false)
+  assert.equal(profiles.length, 2)
+  for(const profile of profiles) {
+    assert.equal(profile.rings.length, 1)
+    assert.ok(profile.rings[0].segments.every(segment => segment.id != bridge.id))
+    assert.ok(Math.abs(profile.geom().area() - 100) < 1e-9)
+  }
+})
+
 test('hovering near a spline produces a curve snap', () => {
   const spline = new Spline([vector(0, 0), vector(2, 3), vector(4, 3), vector(6, 0)])
   const snapper = new Snapper({ renderer: { toScreen: point => new THREE.Vector2(point.x, point.y) } }, () => {})

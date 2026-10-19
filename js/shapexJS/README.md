@@ -89,6 +89,9 @@ segment index for each retained segment; generated joins have a `null` source.
 `miterLimit: Infinity` explicitly retains uncapped miters. Offsets reject collapsed
 or reversed trims. A path can still cross itself: `validateSimple()` explicitly
 requires no self-intersections, overlaps, or contacts beyond adjacent endpoints.
+Closed paths also answer `signedArea()` (positive counter-clockwise) and
+`classifyPoint(point)` from the exact curves without requiring simplicity, so a
+boundary walk that retraces a bridge between loops still has an orientation.
 `Wire2` remains a validated simple closed boundary. `Profile.offset(distance)`
 operates on filled regions: positive distances expand, negative distances erode;
 results can contain several profiles or be empty. `classifyPoint` on wires and

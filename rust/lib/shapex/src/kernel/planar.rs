@@ -1,6 +1,6 @@
 //! Standalone planar curve queries. Parameters always belong to the basis curve;
 //! a trim supplies orientation and bounds, without changing that parameterization.
-use super::wire::{curve_pair_intersection, wire_contains_point};
+use super::wire::{curve_loop_contains_point, curve_pair_intersection};
 use super::{
     invalid, Curve2, Curve2Evaluation, DiagnosticKind, KernelError, KernelResult, ModelTolerance,
     ParameterRange, Profile, TessellationOptions, TrimmedCurve2, Wire2,
@@ -965,17 +965,27 @@ impl Wire2 {
         point: Point2,
         tolerance: ModelTolerance,
     ) -> KernelResult<PointClassification> {
-        for segment in self.segments() {
-            if segment.closest_point(point, tolerance)?.distance <= tolerance.linear {
-                return Ok(PointClassification::Boundary);
-            }
-        }
-        Ok(if wire_contains_point(self, point, tolerance)? {
-            PointClassification::Inside
-        } else {
-            PointClassification::Outside
-        })
+        classify_loop_point(self.segments(), point, tolerance)
     }
+}
+
+/// Points within tolerance of a segment lie on the boundary; others are
+/// inside when the loop winds around them.
+fn classify_loop_point(
+    segments: &[TrimmedCurve2],
+    point: Point2,
+    tolerance: ModelTolerance,
+) -> KernelResult<PointClassification> {
+    for segment in segments {
+        if segment.closest_point(point, tolerance)?.distance <= tolerance.linear {
+            return Ok(PointClassification::Boundary);
+        }
+    }
+    Ok(if curve_loop_contains_point(segments, point, tolerance)? {
+        PointClassification::Inside
+    } else {
+        PointClassification::Outside
+    })
 }
 
 impl Profile {
@@ -1065,6 +1075,35 @@ impl Path2 {
     }
     pub fn is_closed(&self) -> bool {
         self.closed
+    }
+    /// Oriented area enclosed by a closed path, positive when it runs
+    /// counter-clockwise. Unlike a wire, the path need not be simple. A
+    /// segment traversed in both directions, such as a bridge between two
+    /// loops, contributes nothing, so the sign remains the orientation of a
+    /// boundary walk that only retraces edges. For a path that crosses itself
+    /// the result is the winding-weighted area.
+    pub fn signed_area(&self, tolerance: ModelTolerance) -> KernelResult<f64> {
+        tolerance.validate()?;
+        if !self.closed {
+            return Err(invalid("only a closed path encloses an area"));
+        }
+        self.segments
+            .iter()
+            .map(|segment| segment.signed_area(tolerance))
+            .sum()
+    }
+    /// Classify a point by the winding number of a closed path, without
+    /// requiring the path to be simple. Retraced segments cancel.
+    pub fn classify_point(
+        &self,
+        point: Point2,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<PointClassification> {
+        tolerance.validate()?;
+        if !self.closed {
+            return Err(invalid("only a closed path classifies points"));
+        }
+        classify_loop_point(&self.segments, point, tolerance)
     }
     /// Require a simple path: no self-intersections, overlaps, or contacts
     /// except the shared endpoint of consecutive segments.

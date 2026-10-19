@@ -276,6 +276,8 @@ export interface Path2 {
   isClosed(): boolean
   reversed(): Path2
   validateSimple(): void
+  signedArea(): number
+  classifyPoint(point: Point2): PointClassification
   offset(distance: number, options?: OffsetOptions): { readonly path: Path2; readonly sources: readonly (number | null)[] }
 }
 export interface Path2Constructor {

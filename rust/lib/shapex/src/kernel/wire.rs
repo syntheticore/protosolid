@@ -128,7 +128,7 @@ impl TrimmedCurve2 {
         }
     }
 
-    fn signed_area(&self, tolerance: ModelTolerance) -> KernelResult<f64> {
+    pub(crate) fn signed_area(&self, tolerance: ModelTolerance) -> KernelResult<f64> {
         self.curve
             .signed_area_contribution(self.range, tolerance.parameter)
     }

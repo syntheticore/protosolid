@@ -310,14 +310,8 @@ pub fn classify_profile(value: JsValue, x: f64, y: f64) -> Result<String, JsValu
         .map_err(js_error)
 }
 
-#[wasm_bindgen(js_name=offsetPath2)]
-pub fn offset_path(
-    value: JsValue,
-    closed: bool,
-    distance: f64,
-    join: JsValue,
-    miter: f64,
-) -> Result<JsValue, JsValue> {
+/// Build a path from its transport form, with the tolerance it was created with.
+fn path(value: JsValue, closed: bool) -> Result<(Path2, shapex::kernel::ModelTolerance), JsValue> {
     let dto = from_js::<WireDto>(value)?;
     let tol = dto.tolerance.into();
     let path = Path2::new(
@@ -329,6 +323,18 @@ pub fn offset_path(
         tol,
     )
     .map_err(js_error)?;
+    Ok((path, tol))
+}
+
+#[wasm_bindgen(js_name=offsetPath2)]
+pub fn offset_path(
+    value: JsValue,
+    closed: bool,
+    distance: f64,
+    join: JsValue,
+    miter: f64,
+) -> Result<JsValue, JsValue> {
+    let (path, tol) = path(value, closed)?;
     let result = path
         .offset(distance, options(join, miter)?, tol)
         .map_err(js_error)?;
@@ -348,34 +354,27 @@ pub fn offset_path(
 
 #[wasm_bindgen(js_name=validatePath2)]
 pub fn validate_path(value: JsValue, closed: bool) -> Result<(), JsValue> {
-    let dto = from_js::<WireDto>(value)?;
-    let tol = dto.tolerance.into();
-    Path2::new(
-        dto.segments
-            .into_iter()
-            .map(TrimmedCurveDto::build)
-            .collect::<Result<Vec<_>, _>>()?,
-        closed,
-        tol,
-    )
-    .map(|_| ())
-    .map_err(js_error)
+    path(value, closed).map(|_| ())
 }
 
 #[wasm_bindgen(js_name=validateSimplePath2)]
 pub fn validate_simple_path(value: JsValue, closed: bool) -> Result<(), JsValue> {
-    let dto = from_js::<WireDto>(value)?;
-    let tolerance = dto.tolerance.into();
-    Path2::new(
-        dto.segments
-            .into_iter()
-            .map(TrimmedCurveDto::build)
-            .collect::<Result<Vec<_>, _>>()?,
-        closed,
-        tolerance,
-    )
-    .and_then(|path| path.validate_simple(tolerance))
-    .map_err(js_error)
+    let (path, tol) = path(value, closed)?;
+    path.validate_simple(tol).map_err(js_error)
+}
+
+#[wasm_bindgen(js_name=pathSignedArea2)]
+pub fn path_signed_area(value: JsValue) -> Result<f64, JsValue> {
+    let (path, tol) = path(value, true)?;
+    path.signed_area(tol).map_err(js_error)
+}
+
+#[wasm_bindgen(js_name=classifyPath2)]
+pub fn classify_path(value: JsValue, x: f64, y: f64) -> Result<String, JsValue> {
+    let (path, tol) = path(value, true)?;
+    path.classify_point(Point2::new(x, y), tol)
+        .map(classify)
+        .map_err(js_error)
 }
 #[wasm_bindgen(js_name=offsetProfile2)]
 pub fn offset_profile(value: JsValue, distance: f64) -> Result<Array, JsValue> {

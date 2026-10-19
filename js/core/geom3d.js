@@ -57,14 +57,20 @@ export class Wire {
     if (!firstPoint.almost(lastPoint)) fail("Wires must be closed")
     this.segments = region
   }
+  // Validated boundary for profiles. Building it rejects loops that are not simple.
   geom() { return this.cachedWire ||= sx.Wire2.new(this.segments.map(segment => segment.geom()), modelTolerance) }
-  isClockwise() { return !this.geom().isCounterClockwise() }
+  // Sketch loops are face walks of the split sketch graph. A walk can retrace a
+  // bridge between two loops, so orientation and containment use the exact
+  // curves as a path, which need not be simple.
+  path() { return this.cachedPath ||= sx.Path2.new(this.segments.map(segment => segment.geom()), true, modelTolerance) }
+  isClockwise() { return this.path().signedArea() < 0 }
   reverse() {
     this.segments.reverse()
     this.segments.forEach(curve => curve.flip())
     this.cachedWire = null
+    this.cachedPath = null
   }
-  containsPoint(point) { return this.geom().classifyPoint(point2(point)) == "inside" }
+  containsPoint(point) { return this.path().classifyPoint(point2(point)) == 'inside' }
   encloses(other) {
     // Adjacent sketch regions share split edges, but neither is a hole in the
     // other. Testing their shared endpoints makes them look enclosed because

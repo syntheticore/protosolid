@@ -832,19 +832,19 @@ export function createShapex(bindings) {
       this._segments = Object.freeze(Array.from(segments))
       this._closed = closed
       this._tolerance = tolerance
-      nativeCall(() => bindings.validatePath2({ segments: this._segments.map(curve => curve._dto()), tolerance }, closed))
+      nativeCall(() => bindings.validatePath2(this._dto(), closed))
       Object.freeze(this)
     }
+    _dto() { return { segments: this._segments.map(curve => curve._dto()), tolerance: this._tolerance } }
     static new(...values) { return new this(...values) }
     segments() { return this._segments }
     isClosed() { return this._closed }
     reversed() { return new Path2(this._segments.toReversed().map(curve => curve.reversed()), this._closed, this._tolerance) }
-    validateSimple() {
-      nativeCall(() => bindings.validateSimplePath2({ segments: this._segments.map(curve => curve._dto()), tolerance: this._tolerance }, this._closed))
-    }
+    validateSimple() { nativeCall(() => bindings.validateSimplePath2(this._dto(), this._closed)) }
+    signedArea() { return nativeCall(() => bindings.pathSignedArea2(this._dto())) }
+    classifyPoint(point) { return nativeCall(() => bindings.classifyPath2(this._dto(), point.x, point.y)) }
     offset(distance, { join = 'round', miterLimit = 4 } = {}) {
-      const result = nativeCall(() => bindings.offsetPath2({ segments: this._segments.map(curve => curve._dto()), tolerance: this._tolerance },
-        this._closed, distance, join, miterLimit))
+      const result = nativeCall(() => bindings.offsetPath2(this._dto(), this._closed, distance, join, miterLimit))
       return Object.freeze({ path: new Path2(Array.from(result.curves, raw => BoundTrimmedCurve2._fromNative(raw)), this._closed, this._tolerance),
         sources: Object.freeze(result.sources) })
     }

@@ -110,7 +110,11 @@ on opposite axial sides of its cylindrical wall's center. A constraint identifie
 the supporting face by its construction anchors and records a frame axis and
 side; it stores neither coordinates nor an output index. The producer reevaluates
 the constraint on reconstruction, before later operations propagate the selection.
-Each supporting face must resolve uniquely. Two cylindrical supports can also
+Each supporting face must resolve uniquely. When a cut splits a support, a
+branch can still serve if a minimal set of its named incidence paths
+distinguishes it from its siblings; the constraint records those paths with
+its anchors. Mirror-symmetric siblings that incidence cannot separate are not
+supports. Two cylindrical supports can also
 define a transverse direction to distinguish periodic rim segments; that direction
 rotates with the supports.
 Missing or conflicting evidence fails resolution even when only one candidate

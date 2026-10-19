@@ -167,6 +167,26 @@ function incidenceContexts(neighbors) {
   }
 }
 
+// Name a face that can frame oriented side constraints. Its anchors suffice
+// when unique; split siblings also need their distinguishing incidence paths.
+// Mirror-symmetric siblings that incidence cannot separate are not supports.
+export function supportName(item, candidates, neighbors) {
+  const siblings = candidates.filter(candidate =>
+    item.topology.anchors.every(name => candidate.topology.names.includes(name)))
+  if(siblings.length == 1) return item.topology.anchors
+  const contextFor = incidenceContexts(neighbors)
+  const distinguishes = branch => siblings.filter(sibling =>
+    branch.every(path => contextFor(sibling).has(path))).length == 1
+  const branch = incidencePaths(item, neighbors).filter(path =>
+    siblings.some(sibling => !contextFor(sibling).has(path)))
+  if(!distinguishes(branch)) return null
+  for(let i = branch.length - 1; i >= 0; i--) {
+    const [path] = branch.splice(i, 1)
+    if(!distinguishes(branch)) branch.splice(i, 0, path)
+  }
+  return { anchors: item.topology.anchors, branch }
+}
+
 export function topologySelection(item, neighbors, policy = 'single') {
   if(!item.topology) throw new Error('This entity has no construction identity')
   return {

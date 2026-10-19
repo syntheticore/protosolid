@@ -1,4 +1,4 @@
-import { nameTopology, propagateTopology, initializeTopologyOrigins, resolveTopology, restoreTopologySelections } from './topological-naming.js'
+import { nameTopology, propagateTopology, initializeTopologyOrigins, resolveTopology, restoreTopologySelections, supportName } from './topological-naming.js'
 import * as THREE from 'three'
 import { EPSILON } from './utils.js'
 
@@ -50,17 +50,17 @@ export function topologySides(item) {
   }
   for(const face of faces.slice().sort((a, b) =>
     JSON.stringify(a.topology.anchors).localeCompare(JSON.stringify(b.topology.anchors)))) {
-    // A frame must itself have a unique named support in this producer.
-    if(supportFaces.filter(candidate => face.topology.anchors.every(name =>
-      candidate.topology.names.includes(name))).length != 1) continue
     const plane = face.getPlane()
     const frame = plane || face.getAxis()
     if(!frame) continue
+    // A frame must itself have a unique named support in this producer.
+    const support = topologySupport(face, supportFaces)
+    if(!support) continue
     const center = face.center()
-    if(!plane) axes.push({ face, center, direction: new THREE.Vector3().setFromMatrixColumn(frame, 2).normalize() })
+    if(!plane) axes.push({ support, center, direction: new THREE.Vector3().setFromMatrixColumn(frame, 2).normalize() })
     for(const axis of plane ? [2, 0, 1] : [2]) {
       const direction = new THREE.Vector3().setFromMatrixColumn(frame, axis).normalize()
-      recordSide(center, direction, { support: face.topology.anchors, frame: plane ? 'plane' : 'axis', axis })
+      recordSide(center, direction, { support, frame: plane ? 'plane' : 'axis', axis })
     }
   }
   // Two cylindrical supports also define an oriented transverse direction.
@@ -70,11 +70,18 @@ export function topologySides(item) {
     const direction = new THREE.Vector3().crossVectors(first.direction, second.direction)
     if(direction.length() <= EPSILON) continue
     recordSide(first.center.clone().add(second.center).multiplyScalar(0.5), direction.normalize(), {
-      support: first.face.topology.anchors, crossSupport: second.face.topology.anchors, frame: 'axes',
+      support: first.support, crossSupport: second.support, frame: 'axes',
     })
   }
   item.cachedTopologySides = constraints.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
   return item.cachedTopologySides
+}
+
+function topologySupport(face, supportFaces) {
+  if(face.cachedTopologySupport === undefined) {
+    face.cachedTopologySupport = supportName(face, supportFaces, topologyNeighbors)
+  }
+  return face.cachedTopologySupport
 }
 
 export function identifyTopology(compound) {

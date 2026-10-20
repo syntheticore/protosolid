@@ -277,10 +277,45 @@ pub(super) fn face_boundary_curves(
 
 /// Chords of each boundary p-curve, in boundary order. Implicit p-curves solve
 /// a projection per evaluation, so repeated point queries reuse these.
-pub(super) type TrimSamples = Vec<Vec<(f64, Point2)>>;
+#[derive(Clone)]
+pub(super) struct TrimSamples {
+    curves: Vec<Vec<(f64, Point2)>>,
+    /// Only complete contours can be skipped by enclosure: an open collection
+    /// of imprinted curves can still cross a ray from outside its bounds.
+    loops: Vec<(std::ops::Range<usize>, Option<super::bounds::Bounds>)>,
+}
+
+impl std::ops::Deref for TrimSamples {
+    type Target = [Vec<(f64, Point2)>];
+
+    fn deref(&self) -> &Self::Target { &self.curves }
+}
 
 pub(super) fn trim_samples<P>(boundary: &[FaceCurve<P>]) -> KernelResult<TrimSamples> {
-    boundary.iter().map(|curve| sample_pcurve(curve, 32)).collect()
+    let curves = boundary.iter().map(|curve| sample_pcurve(curve, 32))
+        .collect::<KernelResult<Vec<_>>>()?;
+    let mut loops = Vec::new();
+    let mut start = 0;
+    let mut bounds: Option<super::bounds::Bounds> = None;
+    let mut bounded = true;
+    for (index, curve) in boundary.iter().enumerate() {
+        if bounded {
+            if let Ok(next) = super::bounds::curve2(&curve.pcurve, curve.range) {
+                bounds = Some(bounds.map_or(next, |current| current.union(next)));
+            } else {
+                bounded = false;
+                bounds = None;
+            }
+        }
+        if curve.loop_end {
+            loops.push((start..index + 1, bounds));
+            start = index + 1;
+            bounds = None;
+            bounded = true;
+        }
+    }
+    if start < boundary.len() { loops.push((start..boundary.len(), None)); }
+    Ok(TrimSamples { curves, loops })
 }
 
 pub(super) fn point_in_trim<P>(point: Point2, boundary: &[FaceCurve<P>]) -> KernelResult<bool> {
@@ -293,77 +328,81 @@ pub(super) fn point_in_sampled_trim<P>(
     samples: &TrimSamples,
 ) -> KernelResult<bool> {
     let mut crossings = 0_u32;
-    for (curve, samples) in boundary.iter().zip(samples) {
-        for pair in samples.windows(2) {
-            let mut first = pair[0].1;
-            let mut second = pair[1].1;
-            // Adjacent exact p-curves can round their common endpoint to
-            // opposite sides of the ray. Give that endpoint one half-open
-            // crossing decision, particularly at a tangent line/arc junction.
-            for endpoint in [&mut first, &mut second] {
-                if (endpoint.y - point.y).abs() <= 1.0e-12 {
-                    endpoint.y = point.y;
-                }
-            }
-            if point_segment_distance(point, first, second) <= 1.0e-10 {
-                return Ok(true);
-            }
-            if (first.y > point.y) != (second.y > point.y) {
-                // The chords only bracket a ray crossing. Classifying against
-                // their x coordinate can exclude an exact intersection lying
-                // on a curved trim, leaving its neighboring face open.
-                let mut low = pair[0].0;
-                let mut high = pair[1].0;
-                let mut crossing = first;
-                for _ in 0..48 {
-                    if first.y == point.y {
-                        crossing = first;
-                        break;
-                    }
-                    if second.y == point.y {
-                        crossing = second;
-                        break;
-                    }
-                    let middle = (low + high) * 0.5;
-                    crossing = curve.pcurve.evaluate(middle)?.point;
-                    if (crossing.y - point.y).abs() <= 1.0e-12 {
-                        break;
-                    }
-                    if (crossing.y > point.y) == (first.y > point.y) {
-                        low = middle;
-                    } else {
-                        high = middle;
+    let query = super::bounds::Bounds(
+        Point3::new(point.x, point.y, 0.0), Point3::new(point.x, point.y, 0.0),
+    );
+    for (range, bounds) in &samples.loops {
+        if bounds.is_some_and(|bounds| bounds.separated(query, 1e-9)) { continue; }
+        for (curve, samples) in boundary[range.clone()].iter().zip(&samples.curves[range.clone()]) {
+            for pair in samples.windows(2) {
+                let mut first = pair[0].1;
+                let mut second = pair[1].1;
+                // Adjacent exact p-curves can round their common endpoint to
+                // opposite sides of the ray. Give that endpoint one half-open
+                // crossing decision, particularly at a tangent line/arc junction.
+                for endpoint in [&mut first, &mut second] {
+                    if (endpoint.y - point.y).abs() <= 1.0e-12 {
+                        endpoint.y = point.y;
                     }
                 }
-                let x = crossing.x;
-                if (x - point.x).abs() <= 1.0e-9 {
+                if point_segment_distance(point, first, second) <= 1.0e-10 {
                     return Ok(true);
                 }
-                if x > point.x {
-                    crossings += 1;
+                if (first.y > point.y) != (second.y > point.y) {
+                    // The chords only bracket a ray crossing. Classifying against
+                    // their x coordinate can exclude an exact intersection lying
+                    // on a curved trim, leaving its neighboring face open.
+                    let mut low = pair[0].0;
+                    let mut high = pair[1].0;
+                    let mut crossing = first;
+                    for _ in 0..48 {
+                        if first.y == point.y {
+                            crossing = first;
+                            break;
+                        }
+                        if second.y == point.y {
+                            crossing = second;
+                            break;
+                        }
+                        let middle = (low + high) * 0.5;
+                        crossing = curve.pcurve.evaluate(middle)?.point;
+                        if (crossing.y - point.y).abs() <= 1.0e-12 {
+                            break;
+                        }
+                        if (crossing.y > point.y) == (first.y > point.y) {
+                            low = middle;
+                        } else {
+                            high = middle;
+                        }
+                    }
+                    let x = crossing.x;
+                    if (x - point.x).abs() <= 1.0e-9 {
+                        return Ok(true);
+                    }
+                    if x > point.x {
+                        crossings += 1;
+                    }
                 }
             }
         }
-    }
-    // Close the UV contour at shared vertices too. Independently corrected
-    // coedges can round to opposite sides of a ray at their common endpoint;
-    // omitting that tiny chart bridge changes the crossing parity everywhere
-    // to its left. At a pole the same bridge spans the angular chart gap.
-    let mut loop_start = 0;
-    let closed_count = boundary.iter().rposition(|curve| curve.loop_end).map_or(0, |last| last + 1);
-    for (index, curve) in boundary[..closed_count].iter().enumerate() {
-        let next = if curve.loop_end { loop_start } else { index + 1 };
-        let mut first = samples[index].last().unwrap().1;
-        let mut second = samples[next][0].1;
-        for endpoint in [&mut first, &mut second] {
-            if (endpoint.y - point.y).abs() <= 1e-12 { endpoint.y = point.y; }
+        // Close the UV contour at shared vertices too. Independently corrected
+        // coedges can round to opposite sides of a ray at their common endpoint;
+        // omitting that tiny chart bridge changes the crossing parity everywhere
+        // to its left. At a pole the same bridge spans the angular chart gap.
+        if !boundary[range.end - 1].loop_end { continue; }
+        for index in range.clone() {
+            let next = if index + 1 == range.end { range.start } else { index + 1 };
+            let mut first = samples[index].last().unwrap().1;
+            let mut second = samples[next][0].1;
+            for endpoint in [&mut first, &mut second] {
+                if (endpoint.y - point.y).abs() <= 1e-12 { endpoint.y = point.y; }
+            }
+            if (first.y > point.y) != (second.y > point.y) {
+                let x = first.x + (second.x - first.x) * (point.y - first.y) / (second.y - first.y);
+                if (x - point.x).abs() <= 1e-9 { return Ok(true); }
+                if x > point.x { crossings += 1; }
+            }
         }
-        if (first.y > point.y) != (second.y > point.y) {
-            let x = first.x + (second.x - first.x) * (point.y - first.y) / (second.y - first.y);
-            if (x - point.x).abs() <= 1e-9 { return Ok(true); }
-            if x > point.x { crossings += 1; }
-        }
-        if curve.loop_end { loop_start = index + 1; }
     }
     Ok(crossings % 2 == 1)
 }
@@ -507,7 +546,19 @@ pub(super) fn trim_to_faces<P, Q>(
     second_boundary: &[FaceCurve<Q>],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
-    let ranges = partition_to_faces(curve, first, first_boundary, second, second_boundary, tolerance)?;
+    trim_to_faces_sampled(curve, first, first_boundary, second, second_boundary, None, tolerance)
+}
+
+pub(super) fn trim_to_faces_sampled<P, Q>(
+    curve: &Curve3,
+    first: &Curve2,
+    first_boundary: &[FaceCurve<P>],
+    second: &Curve2,
+    second_boundary: &[FaceCurve<Q>],
+    samples: Option<[&TrimSamples; 2]>,
+    tolerance: ModelTolerance,
+) -> KernelResult<Vec<ParameterRange>> {
+    let ranges = partition_to_faces_sampled(curve, first, first_boundary, second, second_boundary, samples, tolerance)?;
     let mut merged = Vec::<ParameterRange>::new();
     for range in ranges {
         if let Some(previous) = merged.last_mut() {
@@ -529,6 +580,18 @@ pub(super) fn partition_to_faces<P, Q>(
     first_boundary: &[FaceCurve<P>],
     second: &Curve2,
     second_boundary: &[FaceCurve<Q>],
+    tolerance: ModelTolerance,
+) -> KernelResult<Vec<ParameterRange>> {
+    partition_to_faces_sampled(curve, first, first_boundary, second, second_boundary, None, tolerance)
+}
+
+fn partition_to_faces_sampled<P, Q>(
+    curve: &Curve3,
+    first: &Curve2,
+    first_boundary: &[FaceCurve<P>],
+    second: &Curve2,
+    second_boundary: &[FaceCurve<Q>],
+    samples: Option<[&TrimSamples; 2]>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
     fn finite_domain<P>(curve: &Curve2, boundary: &[FaceCurve<P>], tolerance: ModelTolerance) -> KernelResult<ParameterRange> {
@@ -610,8 +673,10 @@ pub(super) fn partition_to_faces<P, Q>(
         if end - start <= tolerance.parameter * 16.0 { return Ok(Vec::new()); }
         ParameterRange::new(start, end)?
     } else { domain };
-    let first_boundary_samples = trim_samples(first_boundary)?;
-    let second_boundary_samples = trim_samples(second_boundary)?;
+    let (first_boundary_samples, second_boundary_samples) = match samples {
+        Some([first, second]) => (Cow::Borrowed(first), Cow::Borrowed(second)),
+        None => (Cow::Owned(trim_samples(first_boundary)?), Cow::Owned(trim_samples(second_boundary)?)),
+    };
     let inside = |parameter: f64| -> KernelResult<bool> {
         Ok(
             point_in_sampled_trim(first.evaluate(parameter)?.point, first_boundary, &first_boundary_samples)?
@@ -639,14 +704,14 @@ pub(super) fn partition_to_faces<P, Q>(
     let first_samples = sample_pcurve(&first_curve, 32)?;
     let second_samples = sample_pcurve(&second_curve, 32)?;
     let mut parameters = vec![domain.start, domain.end];
-    for (boundary, samples) in first_boundary.iter().zip(&first_boundary_samples) {
+    for (boundary, samples) in first_boundary.iter().zip(first_boundary_samples.iter()) {
         parameters.extend(
             curve_intersections_sampled(&first_curve, boundary, Some([&first_samples, samples]), tolerance)?
                 .into_iter()
                 .map(|hit| hit.0),
         );
     }
-    for (boundary, samples) in second_boundary.iter().zip(&second_boundary_samples) {
+    for (boundary, samples) in second_boundary.iter().zip(second_boundary_samples.iter()) {
         parameters.extend(
             curve_intersections_sampled(&second_curve, boundary, Some([&second_samples, samples]), tolerance)?
                 .into_iter()
@@ -923,6 +988,24 @@ mod tests {
     use super::*;
     use super::super::{Compound, NurbsCurve2, Plane3, Profile, TrimmedCurve2, Wire2};
     use crate::Vec3;
+
+    #[test]
+    fn open_trim_curves_keep_crossings_outside_their_bounds() {
+        let tolerance = ModelTolerance::default();
+        let curve: Curve2 = super::super::Line2::new(Point2::new(0.0, -1.0), Vec2::unit_y()).unwrap().into();
+        let boundary = vec![FaceCurve {
+            provenance: (),
+            curve: Plane3::xy().lift_curve(&curve, tolerance).unwrap(),
+            pcurve: curve,
+            range: ParameterRange::new(0.0, 2.0).unwrap(),
+            loop_end: false,
+            loop_kind: LoopKind::Outer,
+            parameter_seam: false,
+        }];
+        let samples = trim_samples(&boundary).unwrap();
+        assert!(point_in_sampled_trim(Point2::new(-2.0, 0.0), &boundary, &samples).unwrap());
+        assert!(!point_in_sampled_trim(Point2::new(2.0, 0.0), &boundary, &samples).unwrap());
+    }
 
     #[test]
     fn closed_trim_chart_gaps_preserve_ray_crossing_parity() {

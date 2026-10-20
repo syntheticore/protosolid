@@ -2273,6 +2273,71 @@ fn curved_extrusion_cuts_a_prismatic_body() {
 }
 
 #[test]
+fn boolean_preserves_narrow_lenses_and_crescents_away_from_the_origin() {
+    let tolerance = ModelTolerance::default();
+    let separation: f64 = 0.002;
+    let overlap = 2.0 * (separation * 0.5).acos()
+        - separation * 0.5 * (4.0 - separation * separation).sqrt();
+    let expected = (std::f64::consts::PI - overlap) * 2.0;
+    for origin in [0.0, 10_000.0] {
+        let cylinder = |x| {
+            Profile::new(
+                Wire2::new([TrimmedCurve2::circle(Point2::new(x, origin), 1.0).unwrap()], tolerance).unwrap(),
+                [], tolerance,
+            ).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * 2.0).unwrap()
+        };
+        let first = cylinder(origin);
+        let second = cylinder(origin + separation);
+        for result in [first.difference(&second), second.difference(&first)] {
+            let result = result.unwrap_or_else(|error| panic!("crescent at {origin}: {error}"));
+            assert_eq!(result.solids().len(), 1);
+            assert!((result.volume() - expected).abs() < 1e-6,
+                "crescent at {origin}: {} versus {expected}", result.volume());
+        }
+        let separation: f64 = 1.999;
+        let overlap = 2.0 * (separation * 0.5).acos()
+            - separation * 0.5 * (4.0 - separation * separation).sqrt();
+        let lens = first.intersection(&cylinder(origin + separation))
+            .unwrap_or_else(|error| panic!("lens at {origin}: {error}"));
+        assert_eq!(lens.solids().len(), 1);
+        assert!((lens.volume() - overlap * 2.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn profile_hole_bounds_preserve_touching_overlap_and_nesting_checks() {
+    let tolerance = ModelTolerance::default();
+    let outer = Wire2::polygon([
+        Point2::new(-10.0, -10.0), Point2::new(10.0, -10.0),
+        Point2::new(10.0, 10.0), Point2::new(-10.0, 10.0),
+    ], tolerance).unwrap();
+    let circle = |x, radius| Wire2::new([
+        TrimmedCurve2::circle(Point2::new(x, 0.0), radius).unwrap(),
+    ], tolerance).unwrap();
+    for (x, radius) in [(3.0, 2.0), (4.0, 2.0), (0.0, 1.0)] {
+        assert!(Profile::new(outer.clone(), [circle(0.0, 2.0), circle(x, radius)], tolerance).is_err());
+    }
+    assert!(Profile::new(outer, [circle(0.0, 2.0), circle(5.0, 1.0)], tolerance).is_ok());
+}
+
+#[test]
+fn boolean_repeated_bores_preserve_volume_and_topology() {
+    let tolerance = ModelTolerance::default();
+    let mut body = owned_cuboid(Point3::origin(), Point3::new(52.0, 6.0, 3.0));
+    for index in 0..12 {
+        let tool = Profile::new(
+            Wire2::new([TrimmedCurve2::circle(Point2::new(3.0 + index as f64 * 4.0, 3.0), 0.6).unwrap()], tolerance).unwrap(),
+            [], tolerance,
+        ).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * 3.0).unwrap();
+        body = body.difference(&tool).unwrap_or_else(|error| panic!("bore {index}: {error}"));
+        let expected = 52.0 * 6.0 * 3.0 - (index + 1) as f64 * std::f64::consts::PI * 0.36 * 3.0;
+        assert!((body.volume() - expected).abs() < 1e-5);
+        assert_eq!(body.solids().len(), 1);
+        assert_eq!(body.faces().count(), 7 + index);
+    }
+}
+
+#[test]
 fn overlapping_cylinders_have_analytic_boolean_results() {
     let tolerance = ModelTolerance::default();
     let cylinder = |center: Point2, radius: f64| {

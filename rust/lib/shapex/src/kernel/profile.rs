@@ -56,8 +56,20 @@ impl Profile {
                 ));
             }
         }
+        // Publication reconstructs profiles with every existing pocket. Bounds
+        // prove both non-intersection and non-containment for disjoint holes,
+        // avoiding repeated implicit-curve solves as cuts accumulate.
+        let hole_bounds = holes.iter().map(|wire| super::bounds::wire2(wire).ok())
+            .collect::<Vec<_>>();
         for first in 0..holes.len() {
-            for second in holes.iter().skip(first + 1) {
+            for (second_index, second) in holes.iter().enumerate().skip(first + 1) {
+                if let (Some(a), Some(b)) = (hole_bounds[first], hole_bounds[second_index]) {
+                    let scale = [a.0, a.1, b.0, b.1].into_iter()
+                        .map(|point| point.to_vec().magnitude()).fold(1.0_f64, f64::max);
+                    if a.separated(b, tolerance.linear_at_scale(scale) * 16.0) {
+                        continue;
+                    }
+                }
                 if wires_intersect(&holes[first], second, tolerance)?
                     || wire_contains_point(second, holes[first].segments()[0].start()?, tolerance)?
                     || wire_contains_point(&holes[first], second.segments()[0].start()?, tolerance)?

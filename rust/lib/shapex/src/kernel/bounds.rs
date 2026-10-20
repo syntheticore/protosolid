@@ -78,6 +78,15 @@ pub(crate) fn curve2(curve: &Curve2, range: ParameterRange) -> KernelResult<Boun
     })
 }
 
+pub(super) fn wire2(wire: &super::Wire2) -> KernelResult<Bounds> {
+    let mut bounds: Option<Bounds> = None;
+    for segment in wire.segments() {
+        let next = curve2(segment.curve(), segment.range())?;
+        bounds = Some(bounds.map_or(next, |current| current.union(next)));
+    }
+    bounds.ok_or_else(unavailable)
+}
+
 fn parameter_bounds(s: &Surface3, bounds: Bounds) -> KernelResult<Bounds> {
     match s {
         Surface3::Cylinder(c) => {
@@ -131,7 +140,7 @@ fn parameter_bounds(s: &Surface3, bounds: Bounds) -> KernelResult<Bounds> {
     }
 }
 
-fn curve3(curve: &Curve3, range: ParameterRange) -> KernelResult<Bounds> {
+pub(super) fn curve3(curve: &Curve3, range: ParameterRange) -> KernelResult<Bounds> {
     Ok(match curve {
         Curve3::Line(_) => Bounds::points([
             curve.evaluate(range.start)?.point,

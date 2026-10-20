@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::prelude::*;
@@ -6,10 +6,11 @@ use cgmath::prelude::*;
 use crate::{Point2, Point3, Vec2};
 
 use super::brep_classification::{BrepClassifier, PointClassification};
+use super::bounds::Bounds;
 use super::trim::{align_pcurve_to_face_chart, coincident_supports,
     face_boundary_curves, face_parameter_bounds, intersection_chart_copies,
     point_in_sampled_trim, point_in_sampled_periodic_trim, sample_pcurve,
-    translate_pcurve, trim_samples, trim_to_faces, curve_intersections_sampled, TrimSamples};
+    translate_pcurve, trim_samples, trim_to_faces_sampled, curve_intersections_sampled, TrimSamples};
 use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::polygon::point_in_polygon;
 use super::{
@@ -133,6 +134,9 @@ struct Arrangement<'a> {
     /// Parameter bounds of each original trim. Implicit p-curves make these
     /// costly, and every face pair and coincident overlay needs them.
     original_bounds: BTreeMap<FaceKey, [ParameterRange; 2]>,
+    /// Certified spatial enclosures survive recharting and are reused by every
+    /// face-pair query, including faces with implicit intersection edges.
+    spatial_bounds: BTreeMap<FaceKey, Option<Bounds>>,
     /// The trim plus every curve imprinted on the face.
     imprinted: BTreeMap<FaceKey, Vec<FaceCurve>>,
     supports: RefCell<BTreeMap<(FaceKey, FaceKey), bool>>,
@@ -151,8 +155,11 @@ impl<'a> Arrangement<'a> {
             .fold(1.0_f64, f64::max);
         let faces = operands.map(|operand| operand.faces().cloned().collect::<Vec<_>>());
         let mut curves = BTreeMap::new();
+        let mut spatial_bounds = BTreeMap::new();
         for operand in 0..2 {
             for (index, face) in faces[operand].iter().enumerate() {
+                spatial_bounds.insert((operand, index),
+                    super::bounds::face(operands[operand].topology(), face.topology_id()).ok());
                 curves.insert(
                     (operand, index),
                     boundary_curves(operands[operand], face.topology_id())?,
@@ -168,6 +175,8 @@ impl<'a> Arrangement<'a> {
                     &faces[1 - operand],
                     &source,
                     1 - operand,
+                    spatial_bounds[&(operand, index)],
+                    &spatial_bounds,
                     tolerance,
                 )?;
             }
@@ -184,6 +193,7 @@ impl<'a> Arrangement<'a> {
                 * 8.0,
             original: curves.clone(),
             original_bounds,
+            spatial_bounds,
             imprinted: curves,
             supports: RefCell::default(),
         })
@@ -197,8 +207,11 @@ impl<'a> Arrangement<'a> {
         (0..self.faces[operand].len()).map(move |index| (operand, index))
     }
 
-    /// Whether two faces lie on one support, computed once per ordered pair.
+    /// Whether two faces lie on one support, computed once per unordered pair.
     fn same_support(&self, first: FaceKey, second: FaceKey) -> KernelResult<bool> {
+        // Coincidence is symmetric; same-operand support grouping and opposite
+        // operand attribution must reuse the same expensive certification.
+        let (first, second) = if first <= second { (first, second) } else { (second, first) };
         if let Some(value) = self.supports.borrow().get(&(first, second)) {
             return Ok(*value);
         }
@@ -218,17 +231,17 @@ impl<'a> Arrangement<'a> {
         let original = &self.original;
         let original_bounds = &self.original_bounds;
         let imprinted = &mut self.imprinted;
+        let samples = original.keys().map(|key| (*key, OnceCell::<KernelResult<TrimSamples>>::new()))
+            .collect::<BTreeMap<_, _>>();
         for (first_index, first_face) in faces[0].iter().enumerate() {
             for (second_index, second_face) in faces[1].iter().enumerate() {
                 let first_boundary = &original[&(0, first_index)];
                 let second_boundary = &original[&(1, second_index)];
-                if face_bounds_separated(
-                    first_face.surface(),
-                    first_boundary,
-                    second_face.surface(),
-                    second_boundary,
+                if bounds_separated(
+                    self.spatial_bounds[&(0, first_index)],
+                    self.spatial_bounds[&(1, second_index)],
                     tolerance,
-                )? {
+                ) {
                     continue;
                 }
                 let first_bounds = original_bounds[&(0, first_index)];
@@ -278,12 +291,17 @@ impl<'a> Arrangement<'a> {
                     )?;
                     for first_pcurve in &first_copies {
                         for second_pcurve in &second_copies {
-                            let trimmed = trim_to_faces(
+                            let first_samples = samples[&(0, first_index)]
+                                .get_or_init(|| trim_samples(first_boundary)).as_ref().map_err(Clone::clone)?;
+                            let second_samples = samples[&(1, second_index)]
+                                .get_or_init(|| trim_samples(second_boundary)).as_ref().map_err(Clone::clone)?;
+                            let trimmed = trim_to_faces_sampled(
                                 &intersection.curve,
                                 first_pcurve,
                                 first_boundary,
                                 second_pcurve,
                                 second_boundary,
+                                Some([first_samples, second_samples]),
                                 tolerance,
                             )?;
                             for range in trimmed {
@@ -620,102 +638,19 @@ pub(super) fn patch_complexity_key(patch: &BrepPatch) -> (u8, u8) {
     (boundary_complexity, surface_complexity)
 }
 
-fn face_bounds_separated(
-    first_surface: &Surface3,
-    first: &[FaceCurve],
-    second_surface: &Surface3,
-    second: &[FaceCurve],
+fn bounds_separated(
+    first: Option<Bounds>,
+    second: Option<Bounds>,
     tolerance: ModelTolerance,
-) -> KernelResult<bool> {
-    let bounds = |surface: &Surface3, curves: &[FaceCurve]| -> KernelResult<Option<[Point3; 2]>> {
-        // Boundary samples do not enclose a curved face's interior. Use a
-        // support enclosure, or decline the shortcut when none is certified.
-        if let Surface3::Torus(torus) = surface {
-            let radius = torus.major_radius() + torus.minor_radius();
-            let extent = crate::Vec3::new(radius, radius, radius);
-            return Ok(Some([torus.center() - extent, torus.center() + extent]));
-        }
-        if let Surface3::Sphere(sphere) = surface {
-            let r = sphere.radius();
-            let extent = crate::Vec3::new(r, r, r);
-            return Ok(Some([sphere.center() - extent, sphere.center() + extent]));
-        }
-        if !matches!(surface, Surface3::Plane(_) | Surface3::Cylinder(_)) {
-            return Ok(None);
-        }
-        let mut minimum = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-        let mut maximum = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
-        let mut include = |point: Point3| {
-            for axis in 0..3 {
-                minimum[axis] = minimum[axis].min(point[axis]);
-                maximum[axis] = maximum[axis].max(point[axis]);
-            }
-        };
-        for curve in curves {
-            match &curve.curve {
-                Curve3::Line(_) => {
-                    include(curve.curve.evaluate(curve.range.start)?.point);
-                    include(curve.curve.evaluate(curve.range.end)?.point);
-                }
-                Curve3::Circle(circle) => {
-                    let x = circle.x_radius();
-                    let y = circle.y_radius();
-                    let extent = crate::Vec3::new(x.x.hypot(y.x), x.y.hypot(y.y), x.z.hypot(y.z));
-                    include(circle.center() - extent);
-                    include(circle.center() + extent);
-                }
-                Curve3::Nurbs(curve) => {
-                    for point in curve.control_points() {
-                        include(*point);
-                    }
-                }
-                _ => return Ok(None),
-            }
-        }
-        if let Surface3::Cylinder(cylinder) = surface {
-            let axis = cylinder.axis().normalize();
-            let mut low = f64::INFINITY;
-            let mut high = f64::NEG_INFINITY;
-            for mask in 0..8 {
-                let point = Point3::new(
-                    if mask & 1 == 0 { minimum.x } else { maximum.x },
-                    if mask & 2 == 0 { minimum.y } else { maximum.y },
-                    if mask & 4 == 0 { minimum.z } else { maximum.z },
-                );
-                let height = (point - cylinder.origin()).dot(axis);
-                low = low.min(height);
-                high = high.max(height);
-            }
-            let start = cylinder.origin() + axis * low;
-            let end = cylinder.origin() + axis * high;
-            let x = cylinder.x_radius();
-            let y = cylinder.y_radius();
-            for coordinate in 0..3 {
-                let radius = x[coordinate].hypot(y[coordinate]);
-                minimum[coordinate] = start[coordinate].min(end[coordinate]) - radius;
-                maximum[coordinate] = start[coordinate].max(end[coordinate]) + radius;
-            }
-        }
-        Ok(Some([minimum, maximum]))
+) -> bool {
+    let (Some(first), Some(second)) = (first, second) else {
+        return false;
     };
-    let (Some(first), Some(second)) = (
-        bounds(first_surface, first)?,
-        bounds(second_surface, second)?,
-    ) else {
-        return Ok(false);
-    };
-    let scale = first
-        .iter()
-        .chain(&second)
+    let scale = [first.0, first.1, second.0, second.1]
+        .into_iter()
         .map(|point| point.to_vec().magnitude())
         .fold(1.0_f64, f64::max);
-    let linear = tolerance.linear_at_scale(scale) * 16.0;
-    Ok(first[1].x < second[0].x - linear
-        || second[1].x < first[0].x - linear
-        || first[1].y < second[0].y - linear
-        || second[1].y < first[0].y - linear
-        || first[1].z < second[0].z - linear
-        || second[1].z < first[0].z - linear)
+    first.separated(second, tolerance.linear_at_scale(scale) * 16.0)
 }
 
 fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec<FaceCurve>> {
@@ -735,6 +670,8 @@ fn rechart_periodic_band(
     opposite: &[super::FaceHandle],
     sources: &BTreeMap<(usize, usize), Vec<FaceCurve>>,
     operand: usize,
+    bounds3: Option<Bounds>,
+    spatial_bounds: &BTreeMap<FaceKey, Option<Bounds>>,
     tolerance: ModelTolerance,
 ) -> KernelResult<()> {
     if !matches!(surface, Surface3::Cylinder(_)) || boundary.len() != 4
@@ -752,7 +689,7 @@ fn rechart_periodic_band(
     let mut occupied = Vec::new();
     for (index, face) in opposite.iter().enumerate() {
         let other = &sources[&(operand, index)];
-        if face_bounds_separated(surface, boundary, face.surface(), other, tolerance)? { continue; }
+        if bounds_separated(bounds3, spatial_bounds[&(operand, index)], tolerance) { continue; }
         let intersections = surface.intersect_surface_in_bounds(face.surface(), bounds,
             face_parameter_bounds(other, tolerance)?, tolerance)?;
         let IntersectionSet::Isolated(intersections) = intersections else { continue; };
@@ -1067,7 +1004,9 @@ pub(super) fn arrange_surface_regions(
     orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
 ) -> KernelResult<Vec<BrepPatch>> {
     arrange_regions(surface, curves, classification_offset, uv_probe_limit, tolerance,
-        [tolerance.linear * 16.0, classification_offset * 0.25], None, orientation_at)
+        // Probe clearance is not a geometric equality tolerance. Distinct arcs
+        // bounding a thin lens can share endpoints and parallel mid-tangents.
+        tolerance.linear * 16.0, None, orientation_at)
 }
 
 pub(super) fn arrange_section_regions(
@@ -1082,7 +1021,7 @@ pub(super) fn arrange_section_regions(
     orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
 ) -> KernelResult<Vec<BrepPatch>> {
     arrange_regions(surface, curves, classification_offset, uv_probe_limit, tolerance,
-        [tolerance.linear * 2.0; 2], Some((plane, keep, orientation)), orientation_at)
+        tolerance.linear * 2.0, Some((plane, keep, orientation)), orientation_at)
 }
 
 fn arrange_regions(
@@ -1091,7 +1030,7 @@ fn arrange_regions(
     classification_offset: f64,
     uv_probe_limit: f64,
     tolerance: ModelTolerance,
-    duplicate_distance: [f64; 2],
+    duplicate_distance: f64,
     section: Option<(super::Plane3, super::SplitKeep, FaceOrientation)>,
     orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
 ) -> KernelResult<Vec<BrepPatch>> {
@@ -1099,10 +1038,16 @@ fn arrange_regions(
         .iter()
         .map(|curve| vec![curve.range.start, curve.range.end])
         .collect::<Vec<_>>();
-    // Each curve meets every other one. Sample implicit p-curves only once.
+    // Reuse each curve's samples and certified enclosure across pair queries.
     let samples = trim_samples(curves)?;
+    let spatial_bounds = curves.iter()
+        .map(|curve| super::bounds::curve3(&curve.curve, curve.range).ok())
+        .collect::<Vec<_>>();
     for first in 0..curves.len() {
         for second in first + 1..curves.len() {
+            if bounds_separated(spatial_bounds[first], spatial_bounds[second], tolerance) {
+                continue;
+            }
             for (first_parameter, second_parameter) in curve_intersections_sampled(
                 &curves[first], &curves[second], Some([&samples[first], &samples[second]]), tolerance,
             )? {
@@ -1249,11 +1194,17 @@ fn arrange_regions(
             continue;
         }
         let mut probe = classification_offset;
-        for curve in curves {
+        for (curve, bounds) in curves.iter().zip(&spatial_bounds) {
             // A curve cannot limit the clearance of probes beside itself.
             // Numerical projection onto an implicit trim can otherwise turn
             // its solver residual into an artificial micrometer-sized gap.
             if curve.curve == piece.curve { continue; }
+            // Only curves within four probe lengths can reduce clearance.
+            // Unknown enclosures still use the exact projection below.
+            if bounds.is_some_and(|bounds| bounds.expanded(probe * 4.0)
+                .separated(Bounds(surface_value.point, surface_value.point), tolerance.linear * 16.0)) {
+                continue;
+            }
             let Ok(projection) =
                 curve
                     .curve
@@ -1331,7 +1282,7 @@ fn arrange_regions(
                             .curve
                             .domain()
                             .nearest(projection.parameter, candidate.range.middle());
-                        projection.distance <= duplicate_distance[0]
+                        projection.distance <= duplicate_distance
                             && candidate.range.contains(parameter, tolerance)
                     });
                 let candidate_middle = candidate
@@ -1342,7 +1293,7 @@ fn arrange_regions(
                     .evaluate(piece.range.start + piece.range.span() * 0.5);
                 let sampled_match = match (candidate_middle, piece_middle) {
                     (Ok(first), Ok(second)) => {
-                        first.point.distance(second.point) <= duplicate_distance[1]
+                        first.point.distance(second.point) <= duplicate_distance
                             && first
                                 .first_derivative
                                 .normalize()
@@ -1352,7 +1303,7 @@ fn arrange_regions(
                     }
                     _ => false,
                 };
-                same_nodes && (projected_match || sampled_match)
+                projected_match || sampled_match
             });
             if let Some(index) = duplicate {
                 let candidate = &mut unique[index];
@@ -2019,9 +1970,9 @@ fn patch_uses_face(
         (&boundary, &boundary_samples, bounds, &original, &original_samples, original_bounds),
         (&original, &original_samples, original_bounds, &boundary, &boundary_samples, bounds),
     ] {
-        for (curve, curve_samples) in a.iter().zip(a_samples).filter(|(curve, _)| !curve.parameter_seam) {
+        for (curve, curve_samples) in a.iter().zip(a_samples.iter()).filter(|(curve, _)| !curve.parameter_seam) {
             let mut parameters = vec![curve.range.start, curve.range.end];
-            for (other, other_samples) in b.iter().zip(b_samples) {
+            for (other, other_samples) in b.iter().zip(b_samples.iter()) {
                 parameters.extend(
                     curve_intersections_sampled(curve, other, Some([curve_samples, other_samples]), tolerance)?
                         .into_iter()

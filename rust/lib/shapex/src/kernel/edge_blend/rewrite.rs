@@ -787,7 +787,19 @@ impl Transaction<'_> {
                 self.history
                     .derived(blend_use_name, [edge_name], kind.role(BlendRole::EndBlendUse));
             }
-            blend_cycles.push((blend_loop, blend_uses));
+            // The first contact rail borders the patch at blend fraction zero;
+            // its interior lies in the positive blend direction. Its directed
+            // tangent therefore determines winding in the affine support chart,
+            // independently of the curved boundaries trimming the two ends.
+            let contact = self.working.coedge(blend_uses[0])?;
+            let tangent = patch.blend_parameterization.center_direction * contact.range.span();
+            let inward = patch.blend_parameterization.blend_direction;
+            let orientation = if tangent.x * inward.y - tangent.y * inward.x >= 0.0 {
+                FaceOrientation::Forward
+            } else {
+                FaceOrientation::Reversed
+            };
+            blend_cycles.push((blend_loop, blend_uses, orientation));
         }
         Ok(())
     }
@@ -831,7 +843,7 @@ impl Transaction<'_> {
                 let blend_loop = self.working.coedge(blend_use)?.loop_id;
                 let cycle = blend_cycles
                     .iter()
-                    .find_map(|(loop_id, uses)| (*loop_id == blend_loop).then_some(uses))
+                    .find_map(|(loop_id, uses, _)| (*loop_id == blend_loop).then_some(uses))
                     .ok_or_else(|| {
                         KernelError::new(
                             DiagnosticKind::TopologyInvariant,
@@ -1002,21 +1014,12 @@ impl Transaction<'_> {
     }
 
     /// Order the boundary uses of every new rolling, cap and junction face
-    /// into closed loops and orient each face by its loop's winding.
+    /// into closed loops. Rolling faces retain their construction winding;
+    /// caps and junctions determine theirs from their complete boundaries.
     fn close_blend_loops(&mut self, rewrite: &mut BlendRewrite) -> KernelResult<()> {
         let tolerance = self.kernel.tolerance;
         let mut blend_cycles = std::mem::take(&mut rewrite.blend_cycles);
         for (key, uses) in std::mem::take(&mut rewrite.cap_uses) {
-            blend_cycles.push((rewrite.cap_loops[&key], uses));
-        }
-        for (loop_id, uses) in blend_cycles {
-            self.close_loop_from_coedges(loop_id, &uses)
-                .map_err(|error| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        format!("rolling-patch boundary cycle failed: {error}"),
-                    )
-                })?;
             let area = uses.iter().try_fold(0.0, |sum, use_id| {
                 let use_value = self.working.coedge(*use_id)?;
                 Ok::<_, KernelError>(
@@ -1025,15 +1028,23 @@ impl Transaction<'_> {
                         .signed_area_contribution(use_value.range, tolerance.parameter)?,
                 )
             })?;
+            let orientation = if area >= 0.0 {
+                FaceOrientation::Forward
+            } else {
+                FaceOrientation::Reversed
+            };
+            blend_cycles.push((rewrite.cap_loops[&key], uses, orientation));
+        }
+        for (loop_id, uses, orientation) in blend_cycles {
+            self.close_loop_from_coedges(loop_id, &uses)
+                .map_err(|error| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        format!("rolling-patch boundary cycle failed: {error}"),
+                    )
+                })?;
             let face = self.working.loop_(loop_id)?.face;
-            self.orient_face(
-                face,
-                if area >= 0.0 {
-                    FaceOrientation::Forward
-                } else {
-                    FaceOrientation::Reversed
-                },
-            )?;
+            self.orient_face(face, orientation)?;
         }
         for (vertex, uses) in &rewrite.junction_uses {
             if uses.len() != 3 {

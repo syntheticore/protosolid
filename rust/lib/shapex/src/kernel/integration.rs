@@ -105,6 +105,16 @@ pub(crate) fn adaptive_gauss_kronrod_partitioned<const N: usize>(
     failure_message: &'static str,
     breakpoints: &[f64],
 ) -> KernelResult<[f64; N]> {
+    adaptive_partitioned(start, end, |a, b| gauss_kronrod_estimate(&terms, a, b),
+        targets, maximum_depth, failure_message, breakpoints)
+}
+
+pub(crate) fn adaptive_partitioned<const N: usize>(
+    start: f64, end: f64,
+    estimate: impl Fn(f64, f64) -> KernelResult<([f64; N], [f64; N])>,
+    targets: [f64; N], maximum_depth: u8, failure_message: &'static str,
+    breakpoints: &[f64],
+) -> KernelResult<[f64; N]> {
     let mut parameters = vec![start, end];
     parameters.extend(breakpoints.iter().copied().filter(|point| {
         *point > start.min(end) && *point < start.max(end)
@@ -114,7 +124,7 @@ pub(crate) fn adaptive_gauss_kronrod_partitioned<const N: usize>(
     if end < start { parameters.reverse(); }
     let mut intervals = Vec::new();
     for pair in parameters.windows(2) {
-        let (values, errors) = gauss_kronrod_estimate(&terms, pair[0], pair[1])?;
+        let (values, errors) = estimate(pair[0], pair[1])?;
         intervals.push((pair[0], pair[1], values, errors, 0));
     }
     loop {
@@ -152,7 +162,7 @@ pub(crate) fn adaptive_gauss_kronrod_partitioned<const N: usize>(
         }
         let middle = (start + end) * 0.5;
         for (start, end) in [(start, middle), (middle, end)] {
-            let (values, errors) = gauss_kronrod_estimate(&terms, start, end)?;
+            let (values, errors) = estimate(start, end)?;
             intervals.push((start, end, values, errors, depth + 1));
         }
     }

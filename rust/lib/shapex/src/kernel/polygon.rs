@@ -12,7 +12,7 @@ where
 {
     let direction = end - start;
     let length2 = direction.magnitude2();
-    if length2 <= f64::EPSILON {
+    if length2 == 0.0 {
         return point.distance(start);
     }
     let parameter = (point - start).dot(direction) / length2;
@@ -40,40 +40,6 @@ pub(crate) fn point_in_polygon(point: Point2, polygon: &[Point2]) -> bool {
         .count()
         % 2
         == 1
-}
-
-/// Whether two closed segments meet, allowing `tolerance` in their parameters.
-pub(crate) fn segments_intersect(
-    a: Point2,
-    b: Point2,
-    c: Point2,
-    d: Point2,
-    tolerance: f64,
-) -> bool {
-    let cross = |first: crate::Vec2, second: crate::Vec2| first.x * second.y - first.y * second.x;
-    let ab = b - a;
-    let cd = d - c;
-    let denominator = cross(ab, cd);
-    if denominator.abs() <= tolerance * tolerance {
-        let collinear = cross(c - a, ab).abs() <= tolerance * ab.magnitude().max(1.0)
-            && cross(d - a, ab).abs() <= tolerance * ab.magnitude().max(1.0);
-        if !collinear {
-            return false;
-        }
-        let use_x = ab.x.abs() >= ab.y.abs();
-        let projection = |point: Point2| if use_x { point.x } else { point.y };
-        let first = [projection(a), projection(b)];
-        let second = [projection(c), projection(d)];
-        return first[0].min(first[1]) <= second[0].max(second[1]) + tolerance
-            && second[0].min(second[1]) <= first[0].max(first[1]) + tolerance;
-    }
-    let ac = c - a;
-    let first = cross(ac, cd) / denominator;
-    let second = cross(ac, ab) / denominator;
-    -tolerance <= first
-        && first <= 1.0 + tolerance
-        && -tolerance <= second
-        && second <= 1.0 + tolerance
 }
 
 /// The undirected key of an edge between two vertex indices.

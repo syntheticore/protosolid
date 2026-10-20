@@ -175,7 +175,7 @@ fn validate_planar_face_regions(
             linear: tolerance.parameter.max(tolerance.linear / minimum_metric),
             ..tolerance
         };
-        let result = (|| -> KernelResult<()> {
+        let validate = |analytic_circles: bool| -> KernelResult<()> {
             let mut outer = None;
             let mut holes = Vec::new();
             for loop_id in face.loops() {
@@ -184,6 +184,16 @@ fn validate_planar_face_regions(
                     .into_iter()
                     .map(|id| {
                         let coedge = topology.coedge(id)?;
+                        let edge = topology.edge(coedge.edge())?;
+                        if analytic_circles && matches!(edge.curve(), super::Curve3::Circle(_)) {
+                            // Validate circular trims analytically even
+                            // when sewing retained a reparameterized
+                            // projection as the coedge's exact p-curve.
+                            if let super::PlaneCurveProjection::Curve(curve) =
+                                plane.project_curve(edge.curve(), coedge.range(), tolerance)? {
+                                return Ok(curve);
+                            }
+                        }
                         super::TrimmedCurve2::new(coedge.pcurve().clone(), coedge.range())
                     })
                     .collect::<KernelResult<Vec<_>>>()?;
@@ -201,7 +211,10 @@ fn validate_planar_face_regions(
             })?;
             super::Profile::new(outer, holes, uv_tolerance)?;
             Ok(())
-        })();
+        };
+        // Analytic circle images are costly to validate, so only fall back to
+        // them when the retained p-curves fail.
+        let result = validate(false).or_else(|_| validate(true));
         if let Err(error) = result {
             for diagnostic in error.diagnostics() {
                 report.error(
@@ -1089,18 +1102,27 @@ fn validate_face_loops(
         let Some(first) = loop_value.first else {
             continue;
         };
-        let (principal_area, lifted_area) = loop_areas(topology, tolerance, face, first, report);
+        let mut attempt = ValidationReport::default();
+        let (mut principal_area, mut lifted_area, uncertainty) =
+            loop_areas(topology, tolerance, face, first, &mut attempt, false);
         let orientation = face.orientation.sign();
-        let correct = |area: f64| match loop_value.kind {
-            LoopKind::Outer => area * orientation > tolerance.parameter.powi(2),
-            LoopKind::Inner => area * orientation < -tolerance.parameter.powi(2),
+        let correct = |area: f64, uncertainty: f64| match loop_value.kind {
+            LoopKind::Outer => area * orientation > tolerance.parameter.powi(2) + uncertainty,
+            LoopKind::Inner => area * orientation < -tolerance.parameter.powi(2) - uncertainty,
         };
         // Existing canonical primitive builders may retain a valid loop wholly
         // inside the principal chart. Boolean and shell rebuilds can instead
         // retain equivalent seam endpoints in adjacent chart copies. Accept the
         // principal representation when it already has the required winding;
         // otherwise use its continuous periodic lift.
-        if !(correct(principal_area) || correct(lifted_area)) {
+        // Cancellation can leave a small area with the expected sign but an
+        // uncertainty larger than the area itself. Refine those loops too.
+        if !attempt.is_valid() || !(correct(principal_area, uncertainty) || correct(lifted_area, uncertainty)) {
+            attempt = ValidationReport::default();
+            (principal_area, lifted_area, _) = loop_areas(topology, tolerance, face, first, &mut attempt, true);
+        }
+        report.diagnostics.extend(attempt.diagnostics);
+        if !(correct(principal_area, 0.0) || correct(lifted_area, 0.0)) {
             report.error(
                 Diagnostic::new(
                     DiagnosticKind::GeometryInvariant,
@@ -1121,7 +1143,8 @@ fn loop_areas(
     face: &Face,
     first: CoedgeId,
     report: &mut ValidationReport,
-) -> (f64, f64) {
+    precise: bool,
+) -> (f64, f64, f64) {
     let domains = face.surface.domains();
     // A whole-period jump between consecutive uses, within parameter tolerance.
     let seam_jump = |value: f64, axis: usize| {
@@ -1135,6 +1158,7 @@ fn loop_areas(
     let mut current = first;
     let mut lifted_area = 0.0;
     let mut principal_area = 0.0;
+    let mut uncertainty = 0.0;
     let mut previous_end = None;
     loop {
         let Ok(coedge) = topology.coedge(current) else {
@@ -1149,16 +1173,18 @@ fn loop_areas(
             }
             _ => crate::Vec2::new(0.0, 0.0),
         };
-        match coedge
-            .pcurve
-            .signed_area_contribution(coedge.range, tolerance.parameter)
-        {
-            Ok(mut area) => {
+        let area = coedge.pcurve.area_contribution_estimate(coedge.range, tolerance.parameter, precise);
+        match area {
+            Ok((mut area, error)) => {
+                uncertainty += error + f64::EPSILON * 8.0 * area.abs();
                 principal_area += area;
                 if let (Ok(start), Ok(end)) = (&start, &end) {
                     area += 0.5
                         * (chart_shift.x * (end.point.y - start.point.y)
                             - chart_shift.y * (end.point.x - start.point.x));
+                    uncertainty += f64::EPSILON * 8.0 * (
+                        chart_shift.x.abs() * (end.point.y.abs() + start.point.y.abs())
+                        + chart_shift.y.abs() * (end.point.x.abs() + start.point.x.abs()));
                 }
                 lifted_area += area;
             }
@@ -1184,6 +1210,8 @@ fn loop_areas(
                         // a zero-length 3D edge.
                         Some(bridge_start) => {
                             let bridge = 0.5 * (end.x * bridge_start.y - bridge_start.x * end.y);
+                            uncertainty += f64::EPSILON * 8.0
+                                * (end.x.abs() * bridge_start.y.abs() + bridge_start.x.abs() * end.y.abs());
                             lifted_area += bridge;
                             principal_area += bridge;
                         }
@@ -1203,7 +1231,7 @@ fn loop_areas(
             break;
         }
     }
-    (principal_area, lifted_area)
+    (principal_area, lifted_area, uncertainty)
 }
 
 /// When the parameter interval from `end` to `start` collapses to one point
@@ -1236,4 +1264,77 @@ fn collapsed_bridge(
 
 fn scale_from_point(point: crate::Point3) -> f64 {
     point.to_vec().magnitude().max(1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::{Curve2, FaceOrientation, Kernel, NurbsCurve2, ParameterRange};
+    use crate::{Point3, Vec3};
+
+    // Reuse a primitive's topology to exercise loop validation in isolation;
+    // these tests deliberately replace its cap's p-curves and winding.
+    fn cap_loop(curves: Vec<Curve2>) -> (Topology, Face) {
+        let mut kernel = Kernel::new(ModelTolerance::default()).unwrap();
+        let mut operation = kernel.begin_operation();
+        operation.cylinder(Point3::origin(), Vec3::unit_x(), Vec3::unit_y(), Vec3::unit_z()).unwrap();
+        operation.commit().unwrap();
+        let mut topology = kernel.topology().clone();
+        let mut face = topology.faces().find(|(_, face)| matches!(face.surface(), super::super::Surface3::Plane(_)))
+            .unwrap().1.clone();
+        face.orientation = FaceOrientation::Forward;
+        let loop_id = face.loops[0];
+        let template = topology.coedge(topology.loop_(loop_id).unwrap().first.unwrap()).unwrap().clone();
+        let ids = curves.into_iter().map(|pcurve| {
+            let mut coedge = template.clone();
+            coedge.pcurve = pcurve;
+            coedge.range = ParameterRange::new(0.0, 1.0).unwrap();
+            topology.coedges.insert(coedge)
+        }).collect::<Vec<_>>();
+        for (index, id) in ids.iter().enumerate() {
+            let coedge = topology.coedges.get_mut(*id).unwrap();
+            coedge.previous = ids[(index + ids.len() - 1) % ids.len()];
+            coedge.next = ids[(index + 1) % ids.len()];
+        }
+        let loop_ = topology.loops.get_mut(loop_id).unwrap();
+        loop_.first = Some(ids[0]);
+        loop_.kind = LoopKind::Outer;
+        (topology, face)
+    }
+
+    #[test]
+    fn thin_rational_loop_refines_an_incorrect_cheap_winding() {
+        let curve = |points, weight| NurbsCurve2::new(2, points, vec![1.0, weight, 1.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap().into();
+        let (topology, mut face) = cap_loop(vec![
+            curve(vec![Point2::new(100.0, 100.0), Point2::new(100.2, 100.000001), Point2::new(101.0, 100.0)], 0.1),
+            curve(vec![Point2::new(101.0, 100.0), Point2::new(100.8, 99.999999), Point2::new(100.0, 100.0)], 2.0),
+        ]);
+        let tolerance = ModelTolerance::default();
+        let first = topology.loop_(face.loops[0]).unwrap().first.unwrap();
+        let mut report = ValidationReport::default();
+        let (cheap, _, uncertainty) = loop_areas(&topology, tolerance, &face, first, &mut report, false);
+        let (precise, _, _) = loop_areas(&topology, tolerance, &face, first, &mut report, true);
+        assert!(report.is_valid());
+        assert!(cheap > 0.0 && cheap < uncertainty && precise < 0.0,
+            "cheap {cheap}, uncertainty {uncertainty}, precise {precise}");
+        validate_face_loops(&topology, tolerance, &face, &mut report);
+        assert_eq!(report.diagnostics().len(), 1);
+        assert!(report.diagnostics()[0].message.contains("winding inconsistent"));
+        face.orientation = FaceOrientation::Reversed;
+        let mut report = ValidationReport::default();
+        validate_face_loops(&topology, tolerance, &face, &mut report);
+        assert!(report.is_valid(), "{:?}", report.diagnostics());
+    }
+
+    #[test]
+    fn precise_retry_reports_a_chart_gap_only_once() {
+        let (topology, face) = cap_loop(vec![
+            super::super::Line2::new(Point2::origin(), crate::Vec2::unit_x()).unwrap().into(),
+        ]);
+        let mut report = ValidationReport::default();
+        validate_face_loops(&topology, ModelTolerance::default(), &face, &mut report);
+        assert_eq!(report.diagnostics().iter().filter(|diagnostic|
+            diagnostic.message.contains("consecutive p-curves are not continuous")).count(), 1);
+    }
 }

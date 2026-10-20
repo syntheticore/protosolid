@@ -3825,28 +3825,7 @@ pub(crate) fn shell(
 }
 
 pub(crate) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> KernelResult<Compound> {
-    if source.solids().len() == 0 {
-        return source.unchanged();
-    }
-    // The cutter occupies the half-space along the plane normal.
-    let cutter = half_space_cutter(source, plane)?;
-    let cut = |kind| {
-        super::boolean::boolean_brep_with(
-            source,
-            &cutter,
-            kind,
-            super::boolean::CoincidentFaces::PreserveFirst,
-        )
-    };
-    match keep {
-        SplitKeep::Left => cut(super::BooleanKind::Difference),
-        SplitKeep::Right => cut(super::BooleanKind::Intersection),
-        SplitKeep::Both => {
-            let left = cut(super::BooleanKind::Difference)?;
-            let right = cut(super::BooleanKind::Intersection)?;
-            left.combined(&[right])
-        }
-    }
+    super::section::split(source, plane, keep)
 }
 
 pub(crate) fn dissolve_faces(source: &Compound, faces: &[FaceHandle]) -> KernelResult<Compound> {
@@ -4483,40 +4462,6 @@ impl Profile {
             .collect::<Vec<_>>();
         super::sweeps::loft(&sections, align_sections)
     }
-}
-
-/// A finite half-space proxy enclosing the operand, with margin beyond its
-/// conservative geometric enclosure. Only the plane itself can intersect the body.
-fn half_space_cutter(source: &Compound, plane: Plane3) -> KernelResult<Compound> {
-    let tolerance = source.tolerance();
-    let bounds = super::bounds::compound(source)?;
-    let mut minimum = crate::Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-    let mut maximum = -minimum;
-    let plane = Plane3::from_origin_normal(plane.origin(), plane.normal())?;
-    for point in bounds.corners() {
-        let delta = point - plane.origin();
-        let local = crate::Vec3::new(
-            delta.dot(plane.u()),
-            delta.dot(plane.v()),
-            delta.dot(plane.normal()),
-        );
-        for axis in 0..3 {
-            minimum[axis] = minimum[axis].min(local[axis]);
-            maximum[axis] = maximum[axis].max(local[axis]);
-        }
-    }
-    let margin = (maximum - minimum).magnitude().max(1.0) + tolerance.linear * 64.0;
-    let wire = Wire2::polygon(
-        [
-            Point2::new(minimum.x - margin, minimum.y - margin),
-            Point2::new(maximum.x + margin, minimum.y - margin),
-            Point2::new(maximum.x + margin, maximum.y + margin),
-            Point2::new(minimum.x - margin, maximum.y + margin),
-        ],
-        tolerance,
-    )?;
-    Profile::new(wire, [], tolerance)?
-        .extrude(plane, plane.normal() * (maximum.z.max(0.0) + margin))
 }
 
 pub(crate) fn draft(

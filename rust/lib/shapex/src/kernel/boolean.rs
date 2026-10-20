@@ -6,9 +6,10 @@ use cgmath::prelude::*;
 use crate::{Point2, Point3, Vec2};
 
 use super::brep_classification::{BrepClassifier, PointClassification};
-use super::trim::{align_pcurve_to_face_chart, coincident_supports, curve_intersections,
+use super::trim::{align_pcurve_to_face_chart, coincident_supports,
     face_boundary_curves, face_parameter_bounds, intersection_chart_copies,
-    point_in_trim, point_in_periodic_trim, sample_pcurve, translate_pcurve, trim_to_faces};
+    point_in_sampled_trim, point_in_sampled_periodic_trim, sample_pcurve,
+    translate_pcurve, trim_samples, trim_to_faces, curve_intersections_sampled, TrimSamples};
 use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::polygon::point_in_polygon;
 use super::{
@@ -64,17 +65,6 @@ fn occupied(kind: BooleanKind, first: bool, second: bool) -> bool {
     }
 }
 
-/// How faces of both operands lying on one support are arranged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CoincidentFaces {
-    /// Merge them into one set of material regions.
-    Merge,
-    /// Keep every first-operand face boundary. Sectioning by a half-space
-    /// needs the boundary between an existing face and a coplanar cut cap,
-    /// even when both have the same support and orientation.
-    PreserveFirst,
-}
-
 /// Feature-neutral regularized Boolean evaluation over two arbitrary BREP
 /// boundaries.  Every retained face keeps its original analytical support;
 /// newly introduced edges retain both intersected surfaces through an implicit
@@ -84,40 +74,13 @@ pub(crate) fn boolean_brep(
     second: &Compound,
     kind: BooleanKind,
 ) -> KernelResult<Compound> {
-    boolean_brep_with(first, second, kind, CoincidentFaces::Merge)
-}
-
-pub(crate) fn boolean_brep_with(
-    first: &Compound,
-    second: &Compound,
-    kind: BooleanKind,
-    coincident: CoincidentFaces,
-) -> KernelResult<Compound> {
     let tolerance = first.tolerance();
-    let mut arrangement = Arrangement::new([first, second], kind, coincident)?;
+    let mut arrangement = Arrangement::new([first, second], kind)?;
     arrangement.imprint_intersections()?;
     arrangement.overlay_coincident_boundaries()?;
     let mut patches = arrangement.face_patches()?;
-    if coincident == CoincidentFaces::PreserveFirst {
-        for patch in &mut patches {
-            let Surface3::Plane(plane) = &patch.surface else {
-                continue;
-            };
-            for segment in patch.loops.iter_mut().flat_map(|loop_| &mut loop_.segments) {
-                if let Curve3::Line(_) = &segment.curve {
-                    segment.pcurve = plane
-                        .flatten_curve(&segment.curve, tolerance)?
-                        .expect("a line has an exact plane image");
-                }
-            }
-        }
-    }
     super::sew::conform_brep_interfaces(&mut patches, tolerance)?;
-    // Section regions partition each shared support exactly once. Boundary-only
-    // containment would mistake a cap for a duplicate of its surrounding face.
-    if coincident == CoincidentFaces::Merge {
-        deduplicate_patches(&mut patches, tolerance)?;
-    }
+    deduplicate_patches(&mut patches, tolerance)?;
     // Let the Euler weld choose the simplest exact representation when more
     // than two supports meet on one edge (for example a planar line tangent to
     // a NURBS extrusion).  This is geometry canonicalization, independent of
@@ -150,11 +113,9 @@ enum Support {
     /// No face of the other operand lies on this support.
     Own,
     /// Faces of both operands lie on this support. With an `owner`, each of
-    /// that operand's trims is one chart cell; with `exclude_first`, regions
-    /// covered by first-operand faces are left to those faces.
+    /// that operand's trims is one chart cell.
     Shared {
         owner: Option<usize>,
-        exclude_first: bool,
     },
 }
 
@@ -164,12 +125,14 @@ struct Arrangement<'a> {
     operands: [&'a Compound; 2],
     faces: [Vec<FaceHandle>; 2],
     kind: BooleanKind,
-    coincident: CoincidentFaces,
     tolerance: ModelTolerance,
     /// Probe distance used to classify the material side of a region.
     classification_offset: f64,
     /// Each face's own trim, recharted against the other operand.
     original: BTreeMap<FaceKey, Vec<FaceCurve>>,
+    /// Parameter bounds of each original trim. Implicit p-curves make these
+    /// costly, and every face pair and coincident overlay needs them.
+    original_bounds: BTreeMap<FaceKey, [ParameterRange; 2]>,
     /// The trim plus every curve imprinted on the face.
     imprinted: BTreeMap<FaceKey, Vec<FaceCurve>>,
     supports: RefCell<BTreeMap<(FaceKey, FaceKey), bool>>,
@@ -179,7 +142,6 @@ impl<'a> Arrangement<'a> {
     fn new(
         operands: [&'a Compound; 2],
         kind: BooleanKind,
-        coincident: CoincidentFaces,
     ) -> KernelResult<Self> {
         let tolerance = operands[0].tolerance();
         let scale = operands
@@ -210,15 +172,18 @@ impl<'a> Arrangement<'a> {
                 )?;
             }
         }
+        let original_bounds = curves.iter()
+            .map(|(key, boundary)| Ok((*key, face_parameter_bounds(boundary, tolerance)?)))
+            .collect::<KernelResult<_>>()?;
         Ok(Self {
             operands,
             faces,
             kind,
-            coincident,
             tolerance,
             classification_offset: (tolerance.linear_at_scale(scale) * 32.0).max(scale * 5.0e-4)
                 * 8.0,
             original: curves.clone(),
+            original_bounds,
             imprinted: curves,
             supports: RefCell::default(),
         })
@@ -251,6 +216,7 @@ impl<'a> Arrangement<'a> {
         let tolerance = self.tolerance;
         let faces = &self.faces;
         let original = &self.original;
+        let original_bounds = &self.original_bounds;
         let imprinted = &mut self.imprinted;
         for (first_index, first_face) in faces[0].iter().enumerate() {
             for (second_index, second_face) in faces[1].iter().enumerate() {
@@ -265,8 +231,8 @@ impl<'a> Arrangement<'a> {
                 )? {
                     continue;
                 }
-                let first_bounds = face_parameter_bounds(first_boundary, tolerance)?;
-                let second_bounds = face_parameter_bounds(second_boundary, tolerance)?;
+                let first_bounds = original_bounds[&(0, first_index)];
+                let second_bounds = original_bounds[&(1, second_index)];
                 let IntersectionSet::Isolated(intersections) = first_face
                     .surface()
                     .intersect_surface_in_bounds(
@@ -388,7 +354,7 @@ impl<'a> Arrangement<'a> {
                     let target_boundary = &self.original[&target_key];
                     // A union can enlarge a partial source face. Overlay in one
                     // complete chart, rather than clipping to the source trim.
-                    let mut chart = face_parameter_bounds(target_boundary, tolerance)?;
+                    let mut chart = self.original_bounds[&target_key];
                     for (axis, domain) in target.domains().iter().enumerate() {
                         if let Some(period) = domain.period {
                             chart[axis].end = chart[axis].start + period;
@@ -470,7 +436,6 @@ impl<'a> Arrangement<'a> {
     /// each attributed to the source faces whose trims it occupies.
     fn face_patches(&self) -> KernelResult<Vec<BrepPatch>> {
         let tolerance = self.tolerance;
-        let preserve_first = self.coincident == CoincidentFaces::PreserveFirst;
         let first_classifier = BrepClassifier::for_compound(self.operands[0])?;
         let second_classifier = BrepClassifier::for_compound(self.operands[1])?;
         let classifiers = [&first_classifier, &second_classifier];
@@ -500,7 +465,7 @@ impl<'a> Arrangement<'a> {
                                 continue;
                             }
                             let candidate_boundary = &self.original[&candidate_key];
-                            let bounds = face_parameter_bounds(candidate_boundary, tolerance)?;
+                            let bounds = self.original_bounds[&candidate_key];
                             for axis in 0..2 {
                                 chart_bounds[side][0][axis] =
                                     chart_bounds[side][0][axis].min(bounds[axis].start);
@@ -526,8 +491,8 @@ impl<'a> Arrangement<'a> {
                             })
                         })
                     };
-                    let canonical = usize::from(!preserve_first && !full_band(0) && full_band(1));
-                    if singular && !preserve_first {
+                    let canonical = usize::from(!full_band(0) && full_band(1));
+                    if singular {
                         shared_owner = Some(canonical);
                     } else if operand != canonical {
                         continue;
@@ -575,34 +540,9 @@ impl<'a> Arrangement<'a> {
                         }
                     }
                 }
-                let exclude_first = preserve_first && has_coincident_support;
-                let mut arranged = Vec::new();
-                if exclude_first {
-                    // A coincident half-space retains each existing face
-                    // boundary. Arrange the remaining cut cap separately.
-                    for first_key in self.keys(0) {
-                        if !self.same_support(key, first_key)? {
-                            continue;
-                        }
-                        let boundary = &self.original[&first_key];
-                        for patch in self.arrange_face(
-                            classifiers,
-                            first_key,
-                            boundary,
-                            boundary,
-                            Support::Shared {
-                                owner: None,
-                                exclude_first: false,
-                            },
-                        )? {
-                            arranged.push((first_key, patch));
-                        }
-                    }
-                }
                 let support = if has_coincident_support {
                     Support::Shared {
                         owner: shared_owner,
-                        exclude_first,
                     }
                 } else {
                     Support::Own
@@ -612,10 +552,7 @@ impl<'a> Arrangement<'a> {
                 } else {
                     &self.imprinted[&key]
                 };
-                for patch in self.arrange_face(classifiers, key, &original, curves, support)? {
-                    arranged.push((key, patch));
-                }
-                for (patch_key, mut patch) in arranged {
+                for mut patch in self.arrange_face(classifiers, key, &original, curves, support)? {
                     if has_coincident_support {
                         // A shared-support arrangement can contain several
                         // disjoint source faces. Attribute only the trimmed
@@ -624,7 +561,7 @@ impl<'a> Arrangement<'a> {
                             let parent = self.operands[parent_operand];
                             for candidate_key in self.keys(parent_operand) {
                                 let candidate = self.face(candidate_key);
-                                if self.same_support(patch_key, candidate_key)?
+                                if self.same_support(key, candidate_key)?
                                     && patch_uses_face(&patch, parent, candidate, tolerance)?
                                 {
                                     patch.sources.push(candidate.persistent_id());
@@ -661,7 +598,7 @@ fn curve_complexity(curve: &Curve3) -> u8 {
     }
 }
 
-fn patch_complexity_key(patch: &BrepPatch) -> (u8, u8) {
+pub(super) fn patch_complexity_key(patch: &BrepPatch) -> (u8, u8) {
     let boundary_complexity = patch
         .loops
         .iter()
@@ -946,12 +883,9 @@ fn arrange_face(
         .topology()
         .face(face.topology_id())?
         .orientation();
-    let (has_coincident_support, shared_owner, exclude_existing_faces) = match support {
-        Support::Own => (false, None, false),
-        Support::Shared {
-            owner,
-            exclude_first,
-        } => (true, owner, exclude_first),
+    let (has_coincident_support, shared_owner) = match support {
+        Support::Own => (false, None),
+        Support::Shared { owner } => (true, owner),
     };
     let kind = self.kind;
     let classification_offset = self.classification_offset;
@@ -979,6 +913,7 @@ fn arrange_face(
         })
     });
     let chart_bounds = face_parameter_bounds(original_boundary, tolerance)?;
+    let original_samples = trim_samples(original_boundary)?;
     let classify_orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
         let value = surface.evaluate(uv.x, uv.y)?;
         if let Some(owner) = shared_owner {
@@ -986,14 +921,11 @@ fn arrange_face(
             // meridians and periodic cuts instead of collapsing an entire
             // closed support into a singular one-face boundary. The other
             // operand contributes only regions outside the owner's trims.
-            if !point_in_trim(uv, original_boundary)?
+            if !point_in_sampled_trim(uv, original_boundary, &original_samples)?
                 || (operand != owner && classifiers[owner].covers_on_support(surface, value.point)?)
             {
                 return Ok(None);
             }
-        }
-        if exclude_existing_faces && classifiers[0].covers_on_support(surface, value.point)? {
-            return Ok(None);
         }
         let parameter_normal = value.normal()?;
         if has_coincident_support {
@@ -1047,9 +979,10 @@ fn arrange_face(
                     uv[axis] < uv_bounds[0][axis] || uv[axis] > uv_bounds[0][axis] + period
                 })
             });
-            let in_source_chart = stepped_chart && point_in_trim(uv, original_boundary)?;
-            if !in_source_chart && (outside || (stepped_chart && point_in_periodic_trim(
-                uv, original_boundary, domains, chart_bounds, tolerance,
+            let in_source_chart = stepped_chart
+                && point_in_sampled_trim(uv, original_boundary, &original_samples)?;
+            if !in_source_chart && (outside || (stepped_chart && point_in_sampled_periodic_trim(
+                uv, original_boundary, &original_samples, domains, chart_bounds, tolerance,
             )?)) {
                 return Ok(None);
             }
@@ -1062,13 +995,13 @@ fn arrange_face(
         {
             return Ok(None);
         }
-        if !has_coincident_support && !point_in_trim(uv, original_boundary)? {
+        if !has_coincident_support && !point_in_sampled_trim(uv, original_boundary, &original_samples)? {
             return Ok(None);
         }
         classify_orientation_at(uv)
     };
 
-    if !exclude_existing_faces && curves.len() == original_boundary.len() {
+    if curves.len() == original_boundary.len() {
         // A periodic face can retain a same-face parameter seam in its loop.
         // That seam is not a material boundary, and its first listed use need
         // not have a meaningful "inside" side in the wrapped UV chart. Search
@@ -1133,15 +1066,46 @@ pub(super) fn arrange_surface_regions(
     tolerance: ModelTolerance,
     orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
 ) -> KernelResult<Vec<BrepPatch>> {
+    arrange_regions(surface, curves, classification_offset, uv_probe_limit, tolerance,
+        [tolerance.linear * 16.0, classification_offset * 0.25], None, orientation_at)
+}
+
+pub(super) fn arrange_section_regions(
+    surface: &Surface3,
+    curves: &[FaceCurve],
+    classification_offset: f64,
+    uv_probe_limit: f64,
+    tolerance: ModelTolerance,
+    plane: super::Plane3,
+    keep: super::SplitKeep,
+    orientation: FaceOrientation,
+    orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
+) -> KernelResult<Vec<BrepPatch>> {
+    arrange_regions(surface, curves, classification_offset, uv_probe_limit, tolerance,
+        [tolerance.linear * 2.0; 2], Some((plane, keep, orientation)), orientation_at)
+}
+
+fn arrange_regions(
+    surface: &Surface3,
+    curves: &[FaceCurve],
+    classification_offset: f64,
+    uv_probe_limit: f64,
+    tolerance: ModelTolerance,
+    duplicate_distance: [f64; 2],
+    section: Option<(super::Plane3, super::SplitKeep, FaceOrientation)>,
+    orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
+) -> KernelResult<Vec<BrepPatch>> {
     let mut split_parameters = curves
         .iter()
         .map(|curve| vec![curve.range.start, curve.range.end])
         .collect::<Vec<_>>();
+    // Each curve meets every other one. Sample implicit p-curves only once.
+    let samples = trim_samples(curves)?;
     for first in 0..curves.len() {
         for second in first + 1..curves.len() {
-            for (first_parameter, second_parameter) in
-                curve_intersections(&curves[first], &curves[second], tolerance)?
-            {
+            for (first_parameter, second_parameter) in curve_intersections_sampled(
+                &curves[first], &curves[second], Some([&samples[first], &samples[second]]), tolerance,
+            )? {
                 split_parameters[first].push(first_parameter);
                 split_parameters[second].push(second_parameter);
             }
@@ -1191,7 +1155,8 @@ pub(super) fn arrange_surface_regions(
             let end = curve.curve.evaluate(range.end)?.point;
             let start_uv = curve.pcurve.evaluate(range.start)?.point;
             let end_uv = curve.pcurve.evaluate(range.end)?.point;
-            if start.distance(end) <= tolerance.linear * 8.0
+            let collapse_distance = tolerance.linear * if section.is_some() { 1.0 } else { 8.0 };
+            if start.distance(end) <= collapse_distance
                 && range.span().abs() < curve.curve.domain().period.unwrap_or(f64::INFINITY) * 0.5
             {
                 // Bounded intersection guides can describe complete closed
@@ -1203,7 +1168,7 @@ pub(super) fn arrange_surface_regions(
                         .curve
                         .evaluate(range.start + range.span() * fraction)?
                         .point;
-                    if start.distance(point) > tolerance.linear * 8.0 {
+                    if start.distance(point) > collapse_distance {
                         collapsed = false;
                         break;
                     }
@@ -1232,6 +1197,31 @@ pub(super) fn arrange_surface_regions(
     for piece in &pieces {
         let parameter = piece.range.start + piece.range.span() * 0.5;
         let (mut uv, tangent) = piece.pcurve.first_order(parameter)?;
+        if let Some((plane, keep, orientation)) = section {
+            let side = if keep == super::SplitKeep::Left { 1.0 } else { -1.0 };
+            let signed = |point: Point3| (point - plane.origin()).dot(plane.normal()) * side;
+            let (point, derivative) = piece.curve.first_order(parameter)?;
+            let slot = if orientation == FaceOrientation::Forward { 0 } else { 1 };
+            if !piece.provenance.edges.is_empty() {
+                let distance = signed(point);
+                let retain = if distance.abs() > tolerance.linear { distance < 0.0 } else {
+                    let tangent = tangent * piece.range.span().signum() * orientation.sign();
+                    let inward = Vec2::new(-tangent.y, tangent.x).normalize();
+                    let (_, du, dv) = surface.first_order(uv.x, uv.y)?;
+                    let step = (tolerance.linear * 128.0 / (du * inward.x + dv * inward.y).magnitude()).min(uv_probe_limit);
+                    let probe = uv + inward * step;
+                    signed(surface.first_order(probe.x, probe.y)?.0) < 0.0
+                };
+                if retain { selected[slot].push(piece.clone()); }
+            } else if orientation_at(uv)?.is_some() {
+                let outward = surface.normal(uv.x, uv.y)? * orientation.sign();
+                let direction = outward.cross(plane.normal() * side);
+                selected[slot].push(if derivative.dot(direction) * piece.range.span().signum() >= 0.0 {
+                    piece.clone()
+                } else { piece.reversed() });
+            }
+            continue;
+        }
         if matches!(piece.curve, Curve3::SurfaceIntersection(_))
             && !(matches!(surface, Surface3::RollingBall(_)) && surface.domains()[0].period.is_none()
                 && matches!(piece.pcurve, Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)))
@@ -1341,7 +1331,7 @@ pub(super) fn arrange_surface_regions(
                             .curve
                             .domain()
                             .nearest(projection.parameter, candidate.range.middle());
-                        projection.distance <= tolerance.linear * 16.0
+                        projection.distance <= duplicate_distance[0]
                             && candidate.range.contains(parameter, tolerance)
                     });
                 let candidate_middle = candidate
@@ -1352,7 +1342,7 @@ pub(super) fn arrange_surface_regions(
                     .evaluate(piece.range.start + piece.range.span() * 0.5);
                 let sampled_match = match (candidate_middle, piece_middle) {
                     (Ok(first), Ok(second)) => {
-                        first.point.distance(second.point) <= classification_offset * 0.25
+                        first.point.distance(second.point) <= duplicate_distance[1]
                             && first
                                 .first_derivative
                                 .normalize()
@@ -1385,8 +1375,8 @@ pub(super) fn arrange_surface_regions(
                 unique.push(piece);
             }
         }
-        add_periodic_seams(&mut unique, &pieces, surface, tolerance)?;
-        let loops = connect_loops(unique, tolerance, surface, orientation)?;
+        if section.is_none() { add_periodic_seams(&mut unique, &pieces, surface, tolerance)?; }
+        let loops = connect_loops(&unique, tolerance, surface, orientation)?;
         if loops.is_empty() {
             continue;
         }
@@ -1394,11 +1384,24 @@ pub(super) fn arrange_surface_regions(
         let mut loops = loops
             .into_iter()
             .map(|loop_| {
-                let area = loop_.iter().try_fold(0.0, |sum, piece| {
+                let area_tolerance = if section.is_some() {
+                    let polygon = loop_polyline(&loop_)?;
+                    let low = polygon.iter().fold(Point2::new(f64::INFINITY, f64::INFINITY), |a, b| Point2::new(a.x.min(b.x), a.y.min(b.y)));
+                    let high = polygon.iter().fold(Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |a, b| Point2::new(a.x.max(b.x), a.y.max(b.y)));
+                    tolerance.parameter.max((high.x - low.x) * (high.y - low.y) * 1e-7)
+                } else { tolerance.parameter };
+                let area = loop_.iter().enumerate().try_fold(0.0, |sum, (index, piece)| {
+                    // A pole closes in space while its incident meridians
+                    // retain different angular coordinates. Include that UV
+                    // bridge when deciding winding; it has no spatial edge.
+                    let next = loop_[(index + 1) % loop_.len()].start_uv;
+                    let bridge = (piece.end_uv.x * next.y - piece.end_uv.y * next.x) * 0.5;
                     Ok::<_, KernelError>(
-                        sum + piece
-                            .pcurve
-                            .signed_area_contribution(piece.range, tolerance.parameter)?,
+                        sum + bridge + if section.is_some() {
+                            piece.pcurve.precise_area_contribution(piece.range, area_tolerance)?
+                        } else {
+                            piece.pcurve.signed_area_contribution(piece.range, tolerance.parameter)?
+                        },
                     )
                 })?;
                 Ok::<_, KernelError>((loop_, area))
@@ -1417,13 +1420,16 @@ pub(super) fn arrange_surface_regions(
             // outside it, while a boundary sample can lie on a shared chart
             // seam and mistake an adjacent region for an enclosing one.
             let sample = polygon_interior_point(&polygon)?;
-            let depth = classified
-                .iter()
-                .filter(|(_, enclosing, enclosing_area, _, _)| {
+            let outer = if section.is_some() {
+                // Plane clipping already orients every retained boundary
+                // from the source face and the cut normal. A coarse polygon
+                // nesting test can reverse a resolved thin crescent.
+                area.signum() == orientation_sign
+            } else {
+                classified.iter().filter(|(_, enclosing, enclosing_area, _, _)| {
                     enclosing_area.abs() > area.abs() && point_in_polygon(sample, enclosing)
-                })
-                .count();
-            let outer = depth % 2 == 0;
+                }).count() % 2 == 0
+            };
             let desired_sign = orientation_sign * if outer { 1.0 } else { -1.0 };
             if area.signum() != desired_sign.signum() {
                 loop_.reverse();
@@ -1652,7 +1658,7 @@ fn periodic_chart_offset(
     Some(offset)
 }
 
-fn unchanged_face_patch(
+pub(super) fn unchanged_face_patch(
     surface: &Surface3,
     boundary: &[FaceCurve],
     source_orientation: FaceOrientation,
@@ -1707,7 +1713,7 @@ fn unchanged_face_patch(
 }
 
 fn connect_loops(
-    pieces: Vec<DirectedPiece>,
+    pieces: &[DirectedPiece],
     tolerance: ModelTolerance,
     surface: &Surface3,
     orientation: FaceOrientation,
@@ -2003,18 +2009,21 @@ fn patch_uses_face(
         }
     }
     let original_bounds = face_parameter_bounds(&original, tolerance)?;
-    let inside = |point: Point2, curves: &[FaceCurve], bounds: [ParameterRange; 2]| {
-        point_in_trim(nearest_uv(domains, point, box_center(bounds)), curves)
+    // Every probe and curve pair reuses these chords of both trims.
+    let boundary_samples = trim_samples(&boundary)?;
+    let original_samples = trim_samples(&original)?;
+    let inside = |point: Point2, curves: &[FaceCurve], samples: &TrimSamples, bounds: [ParameterRange; 2]| {
+        point_in_sampled_trim(nearest_uv(domains, point, box_center(bounds)), curves, samples)
     };
-    for (a, ab, b, bb) in [
-        (&boundary, bounds, &original, original_bounds),
-        (&original, original_bounds, &boundary, bounds),
+    for (a, a_samples, ab, b, b_samples, bb) in [
+        (&boundary, &boundary_samples, bounds, &original, &original_samples, original_bounds),
+        (&original, &original_samples, original_bounds, &boundary, &boundary_samples, bounds),
     ] {
-        for curve in a.iter().filter(|curve| !curve.parameter_seam) {
+        for (curve, curve_samples) in a.iter().zip(a_samples).filter(|(curve, _)| !curve.parameter_seam) {
             let mut parameters = vec![curve.range.start, curve.range.end];
-            for other in b {
+            for (other, other_samples) in b.iter().zip(b_samples) {
                 parameters.extend(
-                    curve_intersections(curve, other, tolerance)?
+                    curve_intersections_sampled(curve, other, Some([curve_samples, other_samples]), tolerance)?
                         .into_iter()
                         .map(|(parameter, _)| parameter),
                 );
@@ -2038,7 +2047,7 @@ fn patch_uses_face(
                     tolerance.linear_at_scale(value.point.to_vec().magnitude()) * 8.0 / scale;
                 for sign in [-1.0, 1.0] {
                     let probe = point + normal * step * sign;
-                    if inside(probe, a, ab)? && inside(probe, b, bb)? {
+                    if inside(probe, a, a_samples, ab)? && inside(probe, b, b_samples, bb)? {
                         return Ok(true);
                     }
                 }
@@ -2067,12 +2076,14 @@ fn patch_contains_patch(
             parameter_seam: false,
         })
         .collect::<Vec<_>>();
+    let samples = trim_samples(&boundary)?;
     for point in candidate_edges.iter().flatten() {
         let projection = container.surface.project(*point, tolerance)?;
         if projection.distance > tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0
-            || !point_in_trim(
+            || !point_in_sampled_trim(
                 Point2::new(projection.parameters.0, projection.parameters.1),
                 &boundary,
+                &samples,
             )?
         {
             return Ok(false);
@@ -2081,7 +2092,7 @@ fn patch_contains_patch(
     Ok(true)
 }
 
-fn patch_components(
+pub(super) fn patch_components(
     patches: Vec<BrepPatch>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<Vec<BrepPatch>>> {

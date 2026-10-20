@@ -748,10 +748,23 @@ impl Curve2 {
         range: ParameterRange,
         tolerance: f64,
     ) -> KernelResult<f64> {
+        self.area_contribution_estimate(range, tolerance, false).map(|value| value.0)
+    }
+
+    pub(crate) fn precise_area_contribution(&self, range: ParameterRange, tolerance: f64) -> KernelResult<f64> {
+        self.area_contribution_estimate(range, tolerance, true).map(|value| value.0)
+    }
+
+    /// Area and the numerical budget used to compute it. Validation can accept
+    /// a cheap winding only when the whole loop clears the accumulated budget.
+    pub(super) fn area_contribution_estimate(&self, range: ParameterRange, tolerance: f64, precise: bool) -> KernelResult<(f64, f64)> {
+        let roundoff = if precise { f64::EPSILON } else { f64::EPSILON.sqrt() };
         match self {
             Self::Line(line) => {
                 let cross = line.origin.x * line.direction.y - line.origin.y * line.direction.x;
-                Ok(0.5 * cross * range.span())
+                let error = f64::EPSILON * 8.0 * range.span().abs()
+                    * (line.origin.x.abs() * line.direction.y.abs() + line.origin.y.abs() * line.direction.x.abs());
+                Ok((0.5 * cross * range.span(), error))
             }
             Self::Circle(circle) => {
                 let start = range.start;
@@ -759,7 +772,11 @@ impl Curve2 {
                 let integral = circle.center.x * circle.radius * (end.sin() - start.sin())
                     + circle.center.y * circle.radius * (start.cos() - end.cos())
                     + circle.radius * circle.radius * range.span();
-                Ok(0.5 * integral)
+                let error = f64::EPSILON * 8.0 * (
+                    circle.center.x.abs() * circle.radius * (end.sin().abs() + start.sin().abs())
+                    + circle.center.y.abs() * circle.radius * (start.cos().abs() + end.cos().abs())
+                    + circle.radius * circle.radius * range.span().abs());
+                Ok((0.5 * integral, error))
             }
             Self::Nurbs(curve) => {
                 let integrand = |parameter: f64| -> KernelResult<f64> {
@@ -772,7 +789,7 @@ impl Curve2 {
                     .map(|point| point.x.abs().max(point.y.abs()))
                     .fold(1.0_f64, f64::max);
                 let absolute_tolerance =
-                    tolerance.max(f64::EPSILON.sqrt() * coordinate_scale.powi(2) * 64.0);
+                    tolerance.max(roundoff * coordinate_scale.powi(2) * 64.0);
                 let mut breaks = curve
                     .knots()
                     .iter()
@@ -788,9 +805,9 @@ impl Curve2 {
                     breaks.reverse();
                 }
                 let interval_tolerance = absolute_tolerance / breaks.len().max(2) as f64;
-                breaks.windows(2).try_fold(0.0, |sum, interval| {
+                let area = breaks.windows(2).try_fold(0.0, |sum, interval| {
                     if (interval[1] - interval[0]).abs() <= f64::EPSILON * 64.0 {
-                        Ok(sum)
+                        Ok::<_, KernelError>(sum)
                     } else {
                         Ok(sum
                             + super::integration::adaptive_simpson(
@@ -802,12 +819,13 @@ impl Curve2 {
                                 "adaptive p-curve area integration did not converge",
                             )?[0])
                     }
-                })
+                })?;
+                Ok((area, absolute_tolerance))
             }
             Self::Offset(_) | Self::Projected(_) => {
-                Ok(super::integration::adaptive_gauss_kronrod_partitioned(range.start, range.end,
+                Ok((super::integration::adaptive_gauss_kronrod_partitioned(range.start, range.end,
                     |u| { let (p,d) = self.first_order(u)?; Ok([0.5*(p.x*d.y-p.y*d.x)]) },
-                    [tolerance],24,"offset area integration did not converge",&self.integration_breakpoints(range))?[0])
+                    [tolerance],24,"offset area integration did not converge",&self.integration_breakpoints(range))?[0], tolerance))
             }
             Self::SurfaceIntersection(_) | Self::SurfaceProjection(_) => {
                 let integrand = |parameter: f64| -> KernelResult<f64> {
@@ -823,17 +841,22 @@ impl Curve2 {
                     .map(|value| value.0.x.abs().max(value.0.y.abs()))
                     .fold(1.0_f64, f64::max);
                 let absolute_tolerance =
-                    tolerance.max(f64::EPSILON.sqrt() * coordinate_scale.powi(2) * 64.0);
-                let exact = super::integration::adaptive_gauss_kronrod(
+                    tolerance.max(roundoff * coordinate_scale.powi(2) * 64.0);
+                let integrate = |breaks: &[f64]| super::integration::adaptive_gauss_kronrod_partitioned(
                     range.start,
                     range.end,
                     |parameter| Ok([integrand(parameter)?]),
                     [absolute_tolerance],
                     16,
                     "adaptive exact p-curve area integration did not converge",
-                )
-                .map(|value| value[0]);
-                exact.or_else(|error| {
+                    breaks,
+                ).map(|value| value[0]);
+                let exact = if precise { integrate(&self.integration_breakpoints(range)) } else {
+                    super::integration::adaptive_gauss_kronrod(range.start, range.end,
+                        |parameter| Ok([integrand(parameter)?]), [absolute_tolerance], 16,
+                        "adaptive exact p-curve area integration did not converge").map(|value| value[0])
+                };
+                exact.map(|area| (area, absolute_tolerance)).or_else(|error| {
                     // Signed area is used only to establish loop winding. At a
                     // tangential trim endpoint the exact inverse derivative can
                     // be singular even though the retained branch guide has an
@@ -858,7 +881,9 @@ impl Curve2 {
                         area += 0.5 * (previous.x * next.y - previous.y * next.x);
                         previous = next;
                     }
-                    Ok(area)
+                    // The guide fallback has no quadrature error estimate.
+                    // It cannot certify a cheap winding; retry precisely.
+                    Ok((area, f64::INFINITY))
                 })
             }
         }
@@ -2486,6 +2511,34 @@ impl SurfaceIntersectionCurve {
         affine_least_squares_4(matrix, [bend.x, bend.y, bend.z, gauge_rhs], gauge.second)
     }
 
+    fn support_residual(&self, parameters: [f64; 4], first: Point3, second: Point3) -> Vec3 {
+        let residual = first - second;
+        let (plane, torus, u, v, sign) = match (self.first_surface.as_ref(), self.second_surface.as_ref()) {
+            (Surface3::Plane(plane), Surface3::Torus(torus)) => (*plane, *torus, parameters[2], parameters[3], -1.0),
+            (Surface3::Torus(torus), Surface3::Plane(plane)) => (*plane, *torus, parameters[0], parameters[1], 1.0),
+            _ => return residual,
+        };
+        let normal = plane.normal();
+        let q = normal.dot(torus.x_major().normalize() * u.cos() + torus.y_major().normalize() * u.sin());
+        let axial = normal.dot(torus.normal()) * torus.minor_radius();
+        let offset = normal.dot(torus.center() - plane.origin());
+        // Evaluate sin(v) near either extremum without subtracting nearly
+        // equal world coordinates. The small normal residual controls the
+        // much larger transverse displacement of a nearly tangent section.
+        let distance = if v.sin() >= 0.0 {
+            let delta = v - std::f64::consts::FRAC_PI_2;
+            (offset + axial) + torus.major_radius() * q
+                - 2.0 * axial * (delta * 0.5).sin().powi(2)
+                - torus.minor_radius() * q * delta.sin()
+        } else {
+            let delta = v + std::f64::consts::FRAC_PI_2;
+            (offset - axial) + torus.major_radius() * q
+                + 2.0 * axial * (delta * 0.5).sin().powi(2)
+                + torus.minor_radius() * q * delta.sin()
+        };
+        residual + normal * (sign * distance - residual.dot(normal))
+    }
+
     fn corrected_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
         if !self.range.contains(parameter, self.tolerance) {
             return Err(invalid(
@@ -2526,6 +2579,10 @@ impl SurfaceIntersectionCurve {
         }
         let tangent = tangent.map(|value| value / tangent_norm);
         let mut parameters = guide;
+        let plane_normal = match (self.first_surface.as_ref(), self.second_surface.as_ref()) {
+            (Surface3::Plane(plane), Surface3::Torus(_)) | (Surface3::Torus(_), Surface3::Plane(plane)) => Some(plane.normal()),
+            _ => None,
+        };
         // Newton needs no second derivatives; evaluating them on rolling
         // surfaces would repeatedly finite-difference the same contact curves.
         for _ in 0..24 {
@@ -2535,7 +2592,7 @@ impl SurfaceIntersectionCurve {
             let (second_point, second_du, second_dv) = self
                 .second_surface
                 .first_order(parameters[2], parameters[3])?;
-            let residual = first_point - second_point;
+            let residual = self.support_residual(parameters, first_point, second_point);
             let gauge = parameters
                 .iter()
                 .zip(guide)
@@ -2561,7 +2618,12 @@ impl SurfaceIntersectionCurve {
                 .fold(1.0_f64, f64::max);
             let linear_target = f64::EPSILON * coordinate_scale * 2048.0;
             let parameter_target = f64::EPSILON * parameter_scale * 2048.0;
-            if residual.magnitude() <= linear_target && gauge.abs() <= parameter_target {
+            let sine = first_du.cross(first_dv).normalize()
+                .cross(second_du.cross(second_dv).normalize()).magnitude().max(self.tolerance.angular);
+            let normal_target = (self.tolerance.linear_at_scale(coordinate_scale) * sine / 32.0)
+                .max(f64::EPSILON * self.tolerance.linear);
+            if residual.magnitude() <= linear_target && gauge.abs() <= parameter_target
+                && plane_normal.is_none_or(|normal| residual.dot(normal).abs() <= normal_target) {
                 self.evaluations.insert(parameter, (parameters, None, None));
                 return Ok(parameters);
             }
@@ -2577,7 +2639,9 @@ impl SurfaceIntersectionCurve {
                 break;
             };
             let mut accepted = false;
-            let previous = residual.magnitude2() + gauge * gauge;
+            let merit = |residual: Vec3, gauge: f64| residual.magnitude2() + gauge * gauge
+                + plane_normal.map_or(0.0, |normal| (residual.dot(normal) / sine).powi(2));
+            let previous = merit(residual, gauge);
             let mut damping = 1.0;
             for _ in 0..12 {
                 let mut candidate =
@@ -2612,14 +2676,14 @@ impl SurfaceIntersectionCurve {
                     let (second_point, _, _) = self
                         .second_surface
                         .first_order(candidate[2], candidate[3])?;
-                    let residual = first_point - second_point;
+                    let residual = self.support_residual(candidate, first_point, second_point);
                     let gauge = candidate
                         .iter()
                         .zip(guide)
                         .zip(tangent)
                         .map(|((value, guide), tangent)| (value - guide) * tangent)
                         .sum::<f64>();
-                    if residual.magnitude2() + gauge * gauge < previous {
+                    if merit(residual, gauge) < previous {
                         parameters = candidate;
                         accepted = true;
                         break;
@@ -2652,7 +2716,8 @@ impl SurfaceIntersectionCurve {
         Err(KernelError::new(
             DiagnosticKind::NumericalFailure,
             format!(
-                "surface-intersection corrector did not converge at parameter {parameter} (guide residual {}, corrected residual {})",
+                "surface-intersection corrector did not converge on {} / {} at parameter {parameter} (guide residual {}, corrected residual {})",
+                self.first_surface.kind_name(), self.second_surface.kind_name(),
                 self.first_surface
                     .evaluate(guide[0], guide[1])?
                     .point
@@ -5528,6 +5593,13 @@ impl Surface3 {
         range: ParameterRange,
         tolerance: ModelTolerance,
     ) -> KernelResult<Curve3> {
+        if let Curve2::SurfaceIntersection(intersection) = &pcurve {
+            if intersection.surface() == self {
+                // Keep the defining support pair visible to overlap detection.
+                // Wrapping this exact image would hide coincident intersections.
+                return Ok(intersection.spatial_curve());
+            }
+        }
         // A projected latitude circle is still an exact circle after a torus
         // offset. Preserve its periodic support so a seam endpoint can move past
         // its old trim when the neighboring face is offset.

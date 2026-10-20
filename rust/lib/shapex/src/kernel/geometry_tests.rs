@@ -2,6 +2,35 @@ use super::*;
 use super::super::{IntersectionKind, IntersectionSet};
 
 #[test]
+fn boundary_intersection_retains_identity_only_on_its_parameter_chart() {
+    let tolerance = ModelTolerance::default();
+    let first: Surface3 = Plane3::xy().into();
+    let second: Surface3 = Plane3::new(Point3::origin(), Vec3::unit_x() * 2.0,
+        Vec3::unit_z() * 3.0, tolerance).unwrap().into();
+    let range = ParameterRange::new(0.0, 1.0).unwrap();
+    let intersection = SurfaceIntersectionCurve::new(first.clone(), second.clone(),
+        Line2::new(Point2::origin(), Vec2::unit_x()).unwrap().into(),
+        Line2::new(Point2::origin(), Vec2::unit_x() * 0.5).unwrap().into(),
+        range, tolerance, 0.0).unwrap();
+    let exact = intersection.exact_pcurves();
+    for trim in [ParameterRange::new(0.2, 0.8).unwrap(), ParameterRange::new(0.8, 0.2).unwrap()] {
+        for (surface, pcurve) in [(&first, &exact[0]), (&second, &exact[1])] {
+            let boundary = surface.boundary_curve(pcurve.clone(), trim, tolerance).unwrap();
+            assert!(matches!(boundary, Curve3::SurfaceIntersection(_)));
+            for parameter in [trim.start, trim.middle(), trim.end] {
+                assert!(boundary.evaluate(parameter).unwrap().point
+                    .distance(intersection.evaluate(parameter).unwrap().point) < 1e-12);
+            }
+        }
+    }
+    // The other support belongs to the same intersection, but its UV basis
+    // differs. Its image of the first p-curve must retain that different curve.
+    let remapped = second.boundary_curve(exact[0].clone(), range, tolerance).unwrap();
+    assert!(matches!(remapped, Curve3::SurfaceCurve(_)));
+    assert!(remapped.evaluate(0.5).unwrap().point.distance(Point3::new(1.0, 0.0, 0.0)) < 1e-12);
+}
+
+#[test]
 fn spline_support_coincidence_uses_rational_polynomials_across_knots_and_degrees() {
     let tolerance = ModelTolerance::default();
     let surface = NurbsSurface3::new((2, 1), vec![

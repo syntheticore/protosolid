@@ -398,10 +398,31 @@ pub(super) fn integrate_face<const TERMS: usize>(
     while let Surface3::Offset(offset) = support {
         support = offset.base();
     }
-    let primitive_axis = usize::from(matches!(
-        support,
-        Surface3::RollingBall(_) | Surface3::Ruled(_)
-    ));
+    let mut low = Point2::new(f64::INFINITY, f64::INFINITY);
+    let mut high = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for loop_id in face.loops() {
+        for coedge_id in topology.loop_coedges(*loop_id)? {
+            let edge = topology.coedge(coedge_id)?;
+            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let uv = edge.pcurve().evaluate(edge.range().start + edge.range().span() * fraction)?.point;
+                for axis in 0..2 {
+                    low[axis] = low[axis].min(uv[axis]);
+                    high[axis] = high[axis].max(uv[axis]);
+                }
+            }
+        }
+    }
+    let center = low.midpoint(high);
+    let (_, du, dv) = face.surface().first_order(center.x, center.y)?;
+    let lengths = [(high.x - low.x) * du.magnitude(), (high.y - low.y) * dv.magnitude()];
+    let thin = match support {
+        Surface3::Plane(_) => true,
+        Surface3::Cylinder(_) | Surface3::Cone(_) | Surface3::Torus(_) =>
+            lengths[0].min(lengths[1]) < lengths[0].max(lengths[1]) * 0.1,
+        _ => false,
+    };
+    let primitive_axis = if matches!(support, Surface3::RollingBall(_) | Surface3::Ruled(_)) { 1 }
+        else if thin { usize::from(lengths[1] < lengths[0]) } else { 0 };
     let primitive_domain = face.surface().domains()[primitive_axis];
     let domain_origin = match primitive_domain.bounds {
         DomainBounds::Bounded(range) => range.start,
@@ -409,23 +430,10 @@ pub(super) fn integrate_face<const TERMS: usize>(
         DomainBounds::UpperBounded(end) => end,
         DomainBounds::Unbounded => 0.0,
     };
-    let primitive_origin = if primitive_domain.contains(0.0, tolerance.parameter) {
-        0.0
-    } else {
-        face.loops()
-            .first()
-            .and_then(|loop_id| topology.loop_coedges(*loop_id).ok())
-            .and_then(|coedges| coedges.first().copied())
-            .and_then(|coedge_id| topology.coedge(coedge_id).ok())
-            .and_then(|coedge| {
-                coedge
-                    .pcurve()
-                    .evaluate(coedge.range().start)
-                    .ok()
-                    .map(|value| value.point[primitive_axis])
-            })
-            .unwrap_or(domain_origin)
-    };
+    let primitive_origin = if thin && primitive_domain.contains(center[primitive_axis], tolerance.parameter) {
+        center[primitive_axis]
+    } else if primitive_domain.contains(0.0, tolerance.parameter) { 0.0 }
+    else { domain_origin };
     for loop_id in face.loops() {
         // Lift every periodic p-curve loop into one continuous UV chart.
         // Topology may legitimately store both uses of a seam in the same
@@ -477,7 +485,11 @@ pub(super) fn integrate_face<const TERMS: usize>(
             previous_end = Some(raw_end + chart_shift);
             let mut breakpoints = coedge.pcurve().integration_breakpoints(range);
             breakpoints.extend(coedge.pcurve().support_integration_breakpoints(range)?);
-            let outer = adaptive_gauss_kronrod_partitioned(
+            let outer = if matches!(face.surface(), Surface3::Plane(_))
+                && matches!(coedge.pcurve(), Curve2::SurfaceIntersection(_)) {
+                integrate_planar_contour(coedge.pcurve(), range, chart_shift, primitive_axis,
+                    primitive_origin, orientation, targets, &breakpoints, &surface_terms)
+            } else { adaptive_gauss_kronrod_partitioned(
                 range.start,
                 range.end,
                 |parameter| {
@@ -519,15 +531,20 @@ pub(super) fn integrate_face<const TERMS: usize>(
                     Ok(inner.map(|value| value * weight * orientation))
                 },
                 targets,
-                14,
+                20,
                 "exact BREP boundary integration did not converge",
                 &breakpoints,
-            )
+            ) }
             .map_err(|error| {
+                let support = if let Curve2::SurfaceIntersection(pcurve) = coedge.pcurve() {
+                    if let Curve3::SurfaceIntersection(curve) = pcurve.spatial_curve() {
+                        format!(" on {} / {}", curve.first_surface().kind_name(), curve.second_surface().kind_name())
+                    } else { String::new() }
+                } else { String::new() };
                 KernelError::new(
                     DiagnosticKind::NumericalFailure,
                     format!(
-                        "{error} (face support {}, boundary p-curve {}, parameter range [{}, {}])",
+                        "{error} (face support {}, boundary p-curve {}{support}, parameter range [{}, {}])",
                         face.surface().kind_name(),
                         coedge.pcurve().kind_name(),
                         range.start,
@@ -541,6 +558,78 @@ pub(super) fn integrate_face<const TERMS: usize>(
         }
     }
     Ok(totals)
+}
+
+/// Contour quadrature in UV rather than in an implicit curve's inverse gauge.
+/// Three-point Gauss integrates the planar mass-property polynomials exactly
+/// along each chord. Richardson refinement controls only the contour error;
+/// the modeled boundary remains the exact support intersection.
+fn integrate_planar_contour<const N: usize>(curve: &Curve2, range: super::ParameterRange,
+    shift: Vec2, axis: usize, origin: f64, orientation: f64, targets: [f64; N],
+    breaks: &[f64], terms: &impl Fn(f64, f64) -> KernelResult<[f64; N]>) -> KernelResult<[f64; N]> {
+    const RULE: [(f64, f64); 3] = [(0.1127016653792583, 5.0 / 18.0),
+        (0.5, 8.0 / 18.0), (0.8872983346207417, 5.0 / 18.0)];
+    let chord = |a: Point2, b: Point2| -> KernelResult<[f64; N]> {
+        let mut result = [0.0; N];
+        let delta = b - a;
+        let direction = if axis == 0 { delta.y } else { -delta.x } * orientation;
+        for (s, outer_weight) in RULE {
+            let point = a + delta * s + shift;
+            let span = point[axis] - origin;
+            for (t, inner_weight) in RULE {
+                let parameter = origin + span * t;
+                let values = if axis == 0 { terms(parameter, point.y)? } else { terms(point.x, parameter)? };
+                for index in 0..N {
+                    result[index] += values[index] * span * inner_weight * outer_weight * direction;
+                }
+            }
+        }
+        Ok(result)
+    };
+    super::integration::adaptive_partitioned(range.start, range.end, |a, b| {
+        let points = (0..=4).map(|i| curve.first_order(a + (b - a) * i as f64 / 4.0).map(|value| value.0))
+            .collect::<KernelResult<Vec<_>>>()?;
+        let coarse = chord(points[0], points[4])?;
+        let two_a = chord(points[0], points[2])?;
+        let two_b = chord(points[2], points[4])?;
+        let mut four = [0.0; N];
+        for pair in points.windows(2) {
+            let values = chord(pair[0], pair[1])?;
+            for index in 0..N { four[index] += values[index]; }
+        }
+        let two: [f64; N] = std::array::from_fn(|i| two_a[i] + two_b[i]);
+        let values = std::array::from_fn(|i| four[i] + (four[i] - two[i]) / 3.0);
+        let errors = std::array::from_fn(|i| (values[i] - (two[i] + (two[i] - coarse[i]) / 3.0)).abs());
+        Ok((values, errors))
+    }, targets, 24, "planar contour integration did not converge", breaks)
+}
+
+#[cfg(test)]
+mod contour_tests {
+    use super::*;
+
+    #[test]
+    fn planar_contour_moments_preserve_translation_axis_and_traversal() {
+        let radius: f64 = 2.5;
+        let circle: Curve2 = super::super::Circle2::new(Point2::new(7.0, -3.0), radius).unwrap().into();
+        let shift = Vec2::new(17.0, -11.0);
+        let center = Point2::new(24.0, -14.0);
+        let area = std::f64::consts::PI * radius.powi(2);
+        let expected = [area, area * center.x, area * center.y,
+            area * (center.x.powi(2) + radius.powi(2) / 4.0),
+            area * (center.y.powi(2) + radius.powi(2) / 4.0), area * center.x * center.y];
+        for axis in [0, 1] {
+            for sign in [-1.0, 1.0] {
+                let range = super::super::ParameterRange::new(0.0, sign * std::f64::consts::TAU).unwrap();
+                let actual = integrate_planar_contour(&circle, range, shift, axis, center[axis], 1.0,
+                    [1e-6; 6], &[], &|u, v| Ok([1.0, u, v, u * u, v * v, u * v])).unwrap();
+                for index in 0..6 {
+                    assert!((actual[index] - expected[index] * sign).abs() < 1e-6,
+                        "axis {axis}, traversal {sign}, term {index}: {} != {}", actual[index], expected[index] * sign);
+                }
+            }
+        }
+    }
 }
 
 pub(crate) fn face_surface_properties(
@@ -598,13 +687,66 @@ fn brep_shell_properties(
     scale: f64,
 ) -> KernelResult<MassProperties> {
     const TERMS: usize = 11;
+    let mut low = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut high = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for face in topology.shell(shell_id)?.faces() {
+        for edge in topology.face_edges(*face)? {
+            let edge = topology.edge(edge)?;
+            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let point = edge.curve().evaluate(edge.range().start + edge.range().span() * fraction)?.point;
+                for axis in 0..3 {
+                    low[axis] = low[axis].min(point[axis]);
+                    high[axis] = high[axis].max(point[axis]);
+                }
+            }
+        }
+    }
+    let smallest_span = (0..3).map(|axis| high[axis] - low[axis]).fold(f64::INFINITY, f64::min);
+    let center = low.midpoint(high);
+    let mut reference = center;
+    let mut preferred_plane = (1.0, 0.0);
+    for face in topology.shell(shell_id)?.faces() {
+        let face = topology.face(*face)?;
+        let Surface3::Plane(plane) = face.surface() else { continue; };
+        let mut area = 0.0;
+        let mut condition = 1.0_f64;
+        for loop_id in face.loops() {
+            let mut polygon = Vec::new();
+            for coedge in topology.loop_coedges(*loop_id)? {
+                let coedge = topology.coedge(coedge)?;
+                if let Curve3::SurfaceIntersection(curve) = topology.edge(coedge.edge())?.curve() {
+                    for parameter in [coedge.range().start, coedge.range().middle(), coedge.range().end] {
+                        condition = condition.max(curve.positional_uncertainty(parameter)? / tolerance.linear);
+                    }
+                }
+                for index in 0..8 {
+                    polygon.push(coedge.pcurve().first_order(coedge.range().start + coedge.range().span() * index as f64 / 8.0)?.0);
+                }
+            }
+            for index in 0..polygon.len() {
+                let (a, b) = (polygon[index], polygon[(index + 1) % polygon.len()]);
+                area += (a.x * b.y - a.y * b.x) * 0.5;
+            }
+        }
+        let area = area.abs() * plane.u().cross(plane.v()).magnitude();
+        if condition > preferred_plane.0 || (condition == preferred_plane.0 && area > preferred_plane.1) {
+            preferred_plane = (condition, area);
+            reference = plane.project(center)?.point;
+        }
+    }
+    // The reference is arbitrary in the divergence theorem. Placing it on
+    // the most ill-conditioned plane removes its volume flux. Prefer the
+    // largest plane otherwise, to reduce ordinary cancellation too.
+    // Thin cuts need an integration budget proportional to their thickness;
+    // a whole-model volume allowance can exceed the entire retained cap.
+    let aspect = if smallest_span > tolerance.linear { (smallest_span / scale).min(1.0) } else { 1.0 };
     let dimensional_target = |power: i32| {
         (tolerance.linear * scale.powi(power - 1))
-            .max(f64::EPSILON.sqrt() * scale.powi(power) * 64.0)
+            .max(f64::EPSILON.sqrt() * scale.powi(power) * 64.0) * aspect
     };
     let targets = [
-        dimensional_target(2),
-        dimensional_target(3),
+        dimensional_target(2) / aspect,
+        dimensional_target(3).min(tolerance.linear * scale.powi(2) * 0.1),
         dimensional_target(4),
         dimensional_target(4),
         dimensional_target(4),
@@ -624,6 +766,7 @@ fn brep_shell_properties(
         };
         let surface_terms = |u: f64, v: f64| -> KernelResult<[f64; TERMS]> {
             let (point, du, dv) = face.surface().first_order(u, v)?;
+            let point = Point3::from_vec(point - reference);
             let parametric_normal = du.cross(dv);
             let jacobian = parametric_normal.magnitude();
             if jacobian <= f64::EPSILON * scale.powi(2) {
@@ -635,7 +778,9 @@ fn brep_shell_properties(
             let normal = parametric_normal * orientation;
             Ok([
                 jacobian,
-                point.to_vec().dot(normal) / 3.0,
+                if let Surface3::Plane(plane) = face.surface() {
+                    (plane.origin() - reference).dot(normal) / 3.0
+                } else { point.to_vec().dot(normal) / 3.0 },
                 point.x.powi(2) * normal.x / 2.0,
                 point.y.powi(2) * normal.y / 2.0,
                 point.z.powi(2) * normal.z / 2.0,
@@ -699,7 +844,7 @@ fn brep_shell_properties(
         volume: signed_volume.abs(),
         signed_volume,
         surface_area: totals[0],
-        centroid,
+        centroid: centroid + reference.to_vec(),
         inertia,
     })
 }

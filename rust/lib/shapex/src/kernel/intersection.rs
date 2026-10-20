@@ -839,6 +839,18 @@ impl Surface3 {
         }
     }
 
+    pub(crate) fn intersect_section_plane(&self, plane: Plane3,
+        domains: [super::ParameterRange; 2], plane_domains: [super::ParameterRange; 2],
+        tolerance: ModelTolerance) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+        match self {
+            Self::Sphere(sphere) => Ok(swap_surface_curves(plane_sphere(plane, *sphere, tolerance)?)),
+            Self::Cylinder(cylinder) => Ok(swap_surface_curves(plane_cylinder_impl(plane, *cylinder, tolerance, true)?)),
+            Self::Torus(torus) if plane.normal().cross(torus.normal()).magnitude() < 0.01 =>
+                Ok(swap_surface_curves(section_plane_torus(plane, *torus, domains, tolerance)?)),
+            _ => self.intersect_bounded(&Self::Plane(plane), domains, plane_domains, tolerance, true),
+        }
+    }
+
     /// Intersect two supports over finite parameter boxes supplied by their
     /// trimmed BREP faces.  This is the general Boolean/feature entry point for
     /// primitives with globally unbounded parameters and for procedural blend
@@ -851,6 +863,12 @@ impl Surface3 {
         second_domains: [super::ParameterRange; 2],
         tolerance: ModelTolerance,
     ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+        self.intersect_bounded(other, first_domains, second_domains, tolerance, false)
+    }
+
+    fn intersect_bounded(&self, other: &Self, first_domains: [super::ParameterRange; 2],
+        second_domains: [super::ParameterRange; 2], tolerance: ModelTolerance,
+        interpolate_guides: bool) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
         match self.intersect_support(other, tolerance) {
             Ok(result) => Ok(result),
             Err(error)
@@ -865,6 +883,7 @@ impl Surface3 {
                     first_domains,
                     second_domains,
                     tolerance,
+                    interpolate_guides,
                 )
             }
             Err(error) => Err(error),
@@ -1005,7 +1024,7 @@ fn plane_cone(
             .collect::<KernelResult<Vec<_>>>()?;
         return Ok(IntersectionSet::Isolated(curves));
     }
-    if plane.normal().dot(cone.axis().normalize()).abs() < 1.0 - tolerance.angular {
+    if plane.normal().cross(cone.axis().normalize()).magnitude() > tolerance.angular {
         return Err(unsupported(
             "oblique plane/cone intersection requires bounded tracing",
         ));
@@ -1278,6 +1297,172 @@ fn cylinder_torus(
     Ok(IntersectionSet::Isolated(curves))
 }
 
+fn plane_sphere(
+    plane: Plane3,
+    sphere: super::Sphere3,
+    tolerance: ModelTolerance,
+) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let normal = plane.normal();
+    let height = (plane.origin() - sphere.center()).dot(normal);
+    let radius2 = (sphere.radius() - height.abs()) * (sphere.radius() + height.abs());
+    // A tangent point has no separating curve or cap area.
+    if radius2 <= tolerance.linear.powi(2) { return Ok(IntersectionSet::Empty); }
+    let axis = sphere.z_radius().normalize();
+    let mut curves = Vec::new();
+    if normal.dot(axis).abs() <= tolerance.angular && height.abs() <= tolerance.linear {
+        let radial = axis.cross(normal).normalize();
+        for radial in [radial, -radial] {
+            let circle: Curve3 = Circle3::new(sphere.center(), radial * sphere.radius(),
+                sphere.z_radius(), tolerance)?.into();
+            let range = super::ParameterRange::new(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2)?;
+            let angle = radial.dot(sphere.y_radius()).atan2(radial.dot(sphere.x_radius()));
+            curves.push(SurfaceSurfaceCurve { first_pcurve: plane.parameterized_curve_image(&circle, range, tolerance)?,
+                second_pcurve: Line2::new(Point2::new(angle, 0.0), crate::Vec2::unit_y())?.into(),
+                curve: circle, achieved_error: height.abs() });
+        }
+    } else {
+        let center = sphere.center() + normal * height;
+        let radius = radius2.sqrt();
+        let circle: Curve3 = Circle3::new(center, plane.u().normalize() * radius,
+            normal.cross(plane.u()).normalize() * radius, tolerance)?.into();
+        let range = super::ParameterRange::new(0.0, std::f64::consts::TAU)?;
+        let mut points = (0..=64).map(|index| {
+            let point = circle.evaluate(range.end * index as f64 / 64.0)?.point;
+            let projection = Surface3::Sphere(sphere).project(point, tolerance)?;
+            Ok(Point2::new(projection.parameters.0, projection.parameters.1))
+        }).collect::<KernelResult<Vec<_>>>()?;
+        unwrap_periodic_points(&mut points, Surface3::Sphere(sphere).domains());
+        let guide = smooth_nurbs_guide(&points, range)?.into();
+        let pcurve = SurfaceProjectionPcurve2::new(circle.clone(), sphere.into(), guide, range, tolerance)?.into();
+        curves.push(SurfaceSurfaceCurve { first_pcurve: plane.parameterized_curve_image(&circle, range, tolerance)?,
+            second_pcurve: pcurve, curve: circle, achieved_error: 0.0 });
+    }
+    Ok(IntersectionSet::Isolated(curves))
+}
+
+/// Solve the torus plane equation analytically for its minor angle. The
+/// discriminant determines every branch interval, including arbitrarily thin
+/// sections that a grid of numerical tracing seeds can miss.
+fn section_plane_torus(plane: Plane3, torus: super::Torus3, domains: [super::ParameterRange; 2], tolerance: ModelTolerance)
+    -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    match plane_torus(plane, torus, tolerance) {
+        Ok(result) => return Ok(result),
+        Err(error) if error.diagnostics().iter().all(|d| d.kind == DiagnosticKind::UnsupportedGeometry) => {},
+        Err(error) => return Err(error),
+    }
+    let n = plane.normal();
+    let a = n.dot(torus.x_major().normalize());
+    let b = n.dot(torus.y_major().normalize());
+    let c = n.dot(torus.normal());
+    let h = a.hypot(b);
+    let d = n.dot(torus.center() - plane.origin());
+    let major = torus.major_radius();
+    let minor = torus.minor_radius();
+    let quadratic = (major - minor) * (major + minor);
+    let reach = minor * (d * d + quadratic * c * c).sqrt();
+    let large = (-major * d - reach.copysign(major * d)) / quadratic;
+    let small = (d - minor * c) * (d + minor * c) / (quadratic * large);
+    let low = large.min(small);
+    let high = large.max(small);
+    if low > h || high < -h { return Ok(IntersectionSet::Empty); }
+    let phase = b.atan2(a);
+    let tau = std::f64::consts::TAU;
+    let mut cuts = vec![0.0, tau];
+    for q in [low, high] {
+        if q.abs() < h {
+            let angle = (q / h).acos();
+            cuts.extend([(phase - angle).rem_euclid(tau), (phase + angle).rem_euclid(tau)]);
+        }
+    }
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() <= tolerance.parameter);
+    let mut intervals = cuts.windows(2).filter_map(|pair| {
+        let u = (pair[0] + pair[1]) * 0.5;
+        let q = a * u.cos() + b * u.sin();
+        (q >= low && q <= high).then_some((pair[0], pair[1]))
+    }).collect::<Vec<_>>();
+    if intervals.len() > 1 && intervals[0].0 == 0.0 && intervals.last().unwrap().1 == tau {
+        let first = intervals.remove(0);
+        intervals.last_mut().unwrap().1 = first.1 + tau;
+    }
+    let mut curves = Vec::new();
+    for (start, end) in intervals {
+        let full = end - start >= tau - tolerance.parameter;
+        let branches: &[f64] = if full { &[-1.0, 1.0] } else { &[1.0] };
+        for sign in branches {
+            const COUNT: usize = 64;
+            let mut angles = (0..=COUNT).map(|index| tau * index as f64 / COUNT as f64).collect::<Vec<_>>();
+            for v in [domains[1].start, domains[1].end] {
+                let q = -(minor * c * v.sin() + d) / (major + minor * v.cos());
+                if q.abs() > h { continue; }
+                let angle = (q / h).acos();
+                for u in [phase - angle, phase + angle] {
+                    let u = (u - start).rem_euclid(tau) + start;
+                    if u > end { continue; }
+                    if full { angles.push(u - start); }
+                    else {
+                        let angle = (((start + end) * 0.5 - u) / ((end - start) * 0.5)).clamp(-1.0, 1.0).acos();
+                        angles.extend([angle, tau - angle]);
+                    }
+                }
+            }
+            angles.sort_by(f64::total_cmp);
+            angles.dedup_by(|a, b| (*a - *b).abs() <= tolerance.parameter);
+            let mut torus_points = Vec::new();
+            let mut plane_points = Vec::new();
+            let mut achieved_error = 0.0_f64;
+            for angle in angles {
+                let u = if full { start + angle } else {
+                    (start + end) * 0.5 - (end - start) * 0.5 * angle.cos()
+                };
+                let q = a * u.cos() + b * u.sin();
+                let discriminant = if !full && [0.0, std::f64::consts::PI, tau].contains(&angle) { 0.0 }
+                    else { (quadratic * (q - low) * (high - q)).max(0.0) };
+                let branch = if full { *sign } else if angle <= std::f64::consts::PI { 1.0 } else { -1.0 };
+                let v = c.atan2(q) + branch * discriminant.sqrt().atan2(-(major * q + d));
+                let point = Surface3::Torus(torus).evaluate(u, v)?.point;
+                let projected = plane.project(point)?;
+                achieved_error = achieved_error.max(projected.distance);
+                torus_points.push(Point2::new(u, v));
+                plane_points.push(Point2::new(projected.parameters.0, projected.parameters.1));
+            }
+            unwrap_periodic_points(&mut torus_points, Surface3::Torus(torus).domains());
+            let range = super::ParameterRange::new(0.0, 1.0)?;
+            let implicit = SurfaceIntersectionCurve::new(plane.into(), torus.into(),
+                closed_interpolating_guide(&plane_points)?.into(),
+                closed_interpolating_guide(&torus_points)?.into(), range, tolerance, achieved_error)?;
+            let [first_pcurve, second_pcurve] = implicit.exact_pcurves();
+            curves.push(SurfaceSurfaceCurve { curve: implicit.into(), first_pcurve, second_pcurve, achieved_error });
+        }
+    }
+    Ok(if curves.is_empty() { IntersectionSet::Empty } else { IntersectionSet::Isolated(curves) })
+}
+
+/// Periodic Hermite guide with the same tangent at both seam representatives.
+fn closed_interpolating_guide(points: &[Point2]) -> KernelResult<NurbsCurve2> {
+    let count = points.len() - 1;
+    let winding = points[count] - points[0];
+    let slope = |index: usize| (points[index + 1] - points[index]) * count as f64;
+    let tangent = |index: usize| {
+        let before = if index == 0 || index == count { (points[0] - (points[count - 1] - winding)) * count as f64 }
+            else { slope(index - 1) };
+        let after = if index == count { slope(0) } else { slope(index) };
+        crate::Vec2::new(
+            if before.x * after.x > 0.0 { 2.0 * before.x * after.x / (before.x + after.x) } else { 0.0 },
+            if before.y * after.y > 0.0 { 2.0 * before.y * after.y / (before.y + after.y) } else { 0.0 })
+    };
+    let mut controls = vec![points[0]];
+    let mut knots = vec![0.0; 4];
+    for index in 0..count {
+        controls.extend([points[index] + tangent(index) / (3.0 * count as f64),
+            points[index + 1] - tangent(index + 1) / (3.0 * count as f64), points[index + 1]]);
+        if index + 1 < count { knots.extend([(index + 1) as f64 / count as f64; 3]); }
+    }
+    knots.extend([1.0; 4]);
+    let weights = vec![1.0; controls.len()];
+    NurbsCurve2::new(3, controls, weights, knots)
+}
+
 fn plane_torus(
     plane: Plane3,
     torus: super::Torus3,
@@ -1360,7 +1545,7 @@ pub(crate) fn parallel_plane_torus_section(
     tolerance: ModelTolerance,
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let torus_normal = torus.normal();
-    if plane.normal().dot(torus_normal).abs() < 1.0 - tolerance.angular {
+    if plane.normal().cross(torus_normal).magnitude() > tolerance.angular {
         return Err(unsupported(
             "oblique plane/torus intersection requires bounded general surface tracing",
         ));
@@ -1470,6 +1655,11 @@ fn plane_cylinder(
     cylinder: super::Cylinder3,
     tolerance: ModelTolerance,
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    plane_cylinder_impl(plane, cylinder, tolerance, false)
+}
+
+fn plane_cylinder_impl(plane: Plane3, cylinder: super::Cylinder3,
+    tolerance: ModelTolerance, rational_section: bool) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let axis = cylinder.axis().normalize();
     let alignment = plane.normal().dot(axis).abs();
     if alignment <= tolerance.angular {
@@ -1525,39 +1715,61 @@ fn plane_cylinder(
         }
         return Ok(IntersectionSet::Isolated(curves));
     }
-    if alignment < 1.0 - tolerance.angular {
+    if plane.normal().cross(axis).magnitude() > tolerance.angular {
         let denominator = plane.normal().dot(cylinder.axis());
-        let range = super::ParameterRange::new(0.0, std::f64::consts::TAU)?;
-        let mut plane_points = Vec::new();
+        if !rational_section {
+            let range = super::ParameterRange::new(0.0, std::f64::consts::TAU)?;
+            let mut plane_points = Vec::new();
+            let mut cylinder_points = Vec::new();
+            let mut achieved_error = 0.0_f64;
+            for index in 0..=32 {
+                let u = std::f64::consts::TAU * index as f64 / 32.0;
+                let radial = cylinder.x_radius() * u.cos() + cylinder.y_radius() * u.sin();
+                let v = -plane.normal().dot(cylinder.origin() + radial - plane.origin()) / denominator;
+                let point = cylinder.evaluate(u, v)?.point;
+                let projected = plane.project(point)?;
+                achieved_error = achieved_error.max(projected.distance);
+                plane_points.push(Point2::new(projected.parameters.0, projected.parameters.1));
+                cylinder_points.push(Point2::new(u, v));
+            }
+            let implicit = SurfaceIntersectionCurve::new(plane.into(), cylinder.into(),
+                smooth_nurbs_guide(&plane_points, range)?.into(),
+                smooth_nurbs_guide(&cylinder_points, range)?.into(), range, tolerance, achieved_error)?;
+            let [first_pcurve, second_pcurve] = implicit.exact_pcurves();
+            return Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
+                curve: implicit.into(), first_pcurve, second_pcurve, achieved_error,
+            }]));
+        }
+        let center = cylinder.origin() + cylinder.axis()
+            * plane.normal().dot(plane.origin() - cylinder.origin()) / denominator;
+        let project = |radial: Vec3| radial - cylinder.axis() * plane.normal().dot(radial) / denominator;
+        let x = project(cylinder.x_radius());
+        let y = project(cylinder.y_radius());
+        // An affine image of the exact rational circle is the section ellipse.
+        // This avoids ill-conditioned four-parameter correction near a cap.
+        let controls = [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (-1.0, 1.0),
+            (-1.0, 0.0), (-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (1.0, 0.0)]
+            .map(|(a, b)| center + x * a + y * b).to_vec();
+        let weight = std::f64::consts::FRAC_1_SQRT_2;
+        let curve: Curve3 = super::NurbsCurve3::new(2, controls,
+            vec![1.0, weight, 1.0, weight, 1.0, weight, 1.0, weight, 1.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0])?.into();
+        let range = super::ParameterRange::new(0.0, 4.0)?;
         let mut cylinder_points = Vec::new();
         let mut achieved_error = 0.0_f64;
         for index in 0..=32 {
-            let u = std::f64::consts::TAU * index as f64 / 32.0;
-            let radial = cylinder.x_radius() * u.cos() + cylinder.y_radius() * u.sin();
-            let v = -plane
-                .normal()
-                .dot(cylinder.origin() + radial - plane.origin())
-                / denominator;
-            let point = cylinder.evaluate(u, v)?.point;
-            let projected = plane.project(point)?;
+            let point = curve.evaluate(range.end * index as f64 / 32.0)?.point;
+            let projected = Surface3::Cylinder(cylinder).project(point, tolerance)?;
             achieved_error = achieved_error.max(projected.distance);
-            plane_points.push(Point2::new(projected.parameters.0, projected.parameters.1));
-            cylinder_points.push(Point2::new(u, v));
+            cylinder_points.push(Point2::new(projected.parameters.0, projected.parameters.1));
         }
-        let plane_guide: Curve2 = smooth_nurbs_guide(&plane_points, range)?.into();
+        unwrap_periodic_points(&mut cylinder_points, Surface3::Cylinder(cylinder).domains());
         let cylinder_guide: Curve2 = smooth_nurbs_guide(&cylinder_points, range)?.into();
-        let implicit = SurfaceIntersectionCurve::new(
-            Surface3::Plane(plane),
-            Surface3::Cylinder(cylinder),
-            plane_guide.clone(),
-            cylinder_guide.clone(),
-            range,
-            tolerance,
-            achieved_error,
-        )?;
-        let [first_pcurve, second_pcurve] = implicit.exact_pcurves();
+        let second_pcurve = SurfaceProjectionPcurve2::new(curve.clone(), cylinder.into(),
+            cylinder_guide, range, tolerance)?.into();
+        let first_pcurve = plane.parameterized_curve_image(&curve, range, tolerance)?;
         return Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
-            curve: implicit.clone().into(),
+            curve,
             first_pcurve,
             second_pcurve,
             achieved_error,
@@ -1608,7 +1820,7 @@ fn trace_regular_surface_intersections(
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let first_domains = bounded_surface_domains(first)?;
     let second_domains = bounded_surface_domains(second)?;
-    trace_surface_intersections_in_domains(first, second, first_domains, second_domains, tolerance)
+    trace_surface_intersections_in_domains(first, second, first_domains, second_domains, tolerance, false)
 }
 
 fn trace_surface_intersections_in_domains(
@@ -1617,6 +1829,7 @@ fn trace_surface_intersections_in_domains(
     first_domains: [super::ParameterRange; 2],
     second_domains: [super::ParameterRange; 2],
     tolerance: ModelTolerance,
+    interpolate_guides: bool,
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let parameter_scale = first_domains
         .iter()
@@ -1787,6 +2000,7 @@ fn trace_surface_intersections_in_domains(
             first_domains,
             second_domains,
             tolerance,
+            interpolate_guides,
         )?;
         let forward = trace_surface_intersection_direction(
             first,
@@ -1797,6 +2011,7 @@ fn trace_surface_intersections_in_domains(
             first_domains,
             second_domains,
             tolerance,
+            interpolate_guides,
         )?;
         let mut parameters = backward.into_iter().rev().collect::<Vec<_>>();
         if parameters
@@ -1945,6 +2160,27 @@ fn trace_surface_intersections_in_domains(
                 extent = extent.max(origin.distance(second.evaluate(value[2], value[3])?.point));
             }
             if extent > linear {
+                if interpolate_guides {
+                    // A corrector can stall next to a contact pole and emit
+                    // several samples of one model-space point. Microscopic
+                    // guide spans there make the parameter gauge singular.
+                    let point = |value: [f64; 4]| first.first_order(value[0], value[1]).map(|value| value.0);
+                    let end = *parameters.last().unwrap();
+                    let mut compact = vec![parameters[0]];
+                    let mut previous = point(parameters[0])?;
+                    for value in &parameters[1..parameters.len() - 1] {
+                        let next = point(*value)?;
+                        if next.distance(previous) > linear * 8.0 {
+                            compact.push(*value);
+                            previous = next;
+                        }
+                    }
+                    if compact.len() > 1 && previous.distance(point(end)?) <= linear * 8.0 {
+                        compact.pop();
+                    }
+                    compact.push(end);
+                    parameters = compact;
+                }
                 traced.push(parameters);
             }
         }
@@ -1964,10 +2200,27 @@ fn trace_surface_intersections_in_domains(
             unwrap_periodic_points(&mut first_points, first.domains());
             unwrap_periodic_points(&mut second_points, second.domains());
             let range = super::ParameterRange::new(0.0, 1.0)?;
+            let torus_plane = matches!((first, second), (Surface3::Plane(_), Surface3::Torus(_)) | (Surface3::Torus(_), Surface3::Plane(_)));
+            let mut guide_parameters = vec![0.0];
+            if torus_plane || interpolate_guides {
+                for index in 1..first_points.len() {
+                    let length = (first_points[index] - first_points[index - 1]).magnitude2()
+                        + (second_points[index] - second_points[index - 1]).magnitude2();
+                    guide_parameters.push(guide_parameters.last().unwrap() + length.sqrt());
+                }
+                let length = *guide_parameters.last().unwrap();
+                for parameter in &mut guide_parameters { *parameter /= length; }
+            }
             let guide = |points: &[Point2]| {
-                if nested_intersection {
+                if nested_intersection && !interpolate_guides {
                     let parameters = (0..points.len()).map(|index| index as f64 / (points.len() - 1) as f64).collect::<Vec<_>>();
                     interpolating_nurbs_guide(points, &parameters)
+                } else if torus_plane || interpolate_guides {
+                    let linear = interpolating_nurbs_guide(points, &guide_parameters)?;
+                    match smooth_interpolating_guide(&linear)? {
+                        Curve2::Nurbs(curve) => Ok(curve),
+                        _ => unreachable!(),
+                    }
                 } else { smooth_nurbs_guide(points, range) }
             };
             let first_pcurve = guide(&first_points)?;
@@ -2418,6 +2671,7 @@ fn trace_surface_intersection_direction(
     first_domains: [super::ParameterRange; 2],
     second_domains: [super::ParameterRange; 2],
     tolerance: ModelTolerance,
+    adaptive: bool,
 ) -> KernelResult<Vec<[f64; 4]>> {
     let mut result = Vec::new();
     let mut current = seed;
@@ -2458,6 +2712,13 @@ fn trace_surface_intersection_direction(
         // the predictor. Keep corrections local so the guide does not skip
         // that turn and acquire a nearly singular parameterization.
         let mut local_step = step;
+        if adaptive || matches!((first, second), (Surface3::Plane(_), Surface3::Torus(_)) | (Surface3::Torus(_), Surface3::Plane(_))) {
+            for (index, range) in first_domains.iter().chain(&second_domains).enumerate() {
+                if tangent[index].abs() > tolerance.parameter {
+                    local_step = local_step.min(range.span().abs() / (48.0 * tangent[index].abs()));
+                }
+            }
+        }
         let mut next = None;
         for _ in 0..16 {
             let predicted =
@@ -2472,6 +2733,10 @@ fn trace_surface_intersection_direction(
                 tolerance,
             )?;
             match corrected {
+                None if adaptive => { local_step *= 0.5; }
+                Some(value) if adaptive && parameter_distance(value, predicted) > local_step * 0.1 => {
+                    local_step *= 0.5;
+                }
                 Some(value) if parameter_distance(value, current) > local_step * 2.0 => {
                     local_step *= 0.5;
                 }
@@ -2564,7 +2829,7 @@ fn trace_surface_intersection_direction(
         {
             break;
         }
-        if result.len() > 12 && parameter_distance(next, seed) <= step * 0.75 {
+        if result.len() > 12 && parameter_distance(next, seed) <= local_step * 0.75 {
             break;
         }
         current = next;

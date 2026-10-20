@@ -3853,7 +3853,8 @@ fn section_of_shelled_chamfered_cylinder() {
         ).unwrap();
         let below = body.split(section, SplitKeep::Left).unwrap();
         let above = body.split(section, SplitKeep::Right).unwrap();
-        assert!((below.volume() + above.volume() - volume).abs() < volume * 1e-8);
+        assert!((below.volume() + above.volume() - volume).abs() < volume * 1e-8,
+            "height {height}: {} + {} != {volume}", below.volume(), above.volume());
         if height == 28.0 {
             assert_eq!(below.solids().len(), 1);
             assert_eq!(above.solids().len(), 1);

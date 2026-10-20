@@ -39,6 +39,7 @@ mod polygon;
 mod polyhedron;
 mod primitives;
 mod profile;
+mod section;
 mod sew;
 mod sweep;
 mod sweep_limits;

@@ -323,6 +323,29 @@ impl super::Plane3 {
             PlaneCurveProjection::Point(_) => Err(invalid("coplanar curve collapsed to a point")),
         }
     }
+    /// Orthogonal image retaining the spatial curve's parameter, including
+    /// circles whose axes differ from the plane's coordinate frame.
+    pub(crate) fn parameterized_curve_image(
+        self,
+        curve: &super::Curve3,
+        range: ParameterRange,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Curve2> {
+        if let Some(image) = self.flatten_curve(curve, tolerance)? {
+            return Ok(image);
+        }
+        if let super::Curve3::SurfaceIntersection(intersection) = curve {
+            let exact = intersection.exact_pcurves();
+            if intersection.first_surface() == &super::Surface3::Plane(self) {
+                return Ok(exact[0].clone());
+            }
+            if intersection.second_surface() == &super::Surface3::Plane(self) {
+                return Ok(exact[1].clone());
+            }
+        }
+        Ok(Curve2::Projected(ProjectedCurve2 { curve: Box::new(curve.clone()), plane: self, range }))
+    }
+
     pub fn project_curve(
         self,
         curve: &super::Curve3,
@@ -544,6 +567,22 @@ impl TrimmedCurve2 {
                         ..
                     } = &hit
                     {
+                        let middle = (first_parameter + second_parameter) * 0.5;
+                        let speed = [*first_parameter, middle, *second_parameter].into_iter()
+                            .map(|parameter| self.curve().first_order(parameter).map(|value| value.1.magnitude()))
+                            .collect::<KernelResult<Vec<_>>>()?.into_iter().fold(0.0_f64, f64::max);
+                        // A curve meets its own diagonal everywhere. The
+                        // intersection search band must not turn neighboring
+                        // parameters of that local arc into a self-crossing.
+                        if (first_parameter - second_parameter).abs() * speed <= tolerance.linear * 8.0 {
+                            continue;
+                        }
+                        if [pieces[i].range().start, pieces[i].range().end].contains(first_parameter)
+                            && [pieces[j].range().start, pieces[j].range().end].contains(second_parameter)
+                            && self.curve().first_order(*first_parameter)?.0
+                                .distance(self.curve().first_order(*second_parameter)?.0) > tolerance.linear {
+                            continue;
+                        }
                         if i == j + 1
                             && point.distance(pieces[i].start()?) <= tolerance.linear * 8.0
                         {

@@ -2,7 +2,7 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Vec2, Vec3};
 
-use super::polygon::{on_segment, segments_intersect};
+use super::polygon::on_segment;
 use super::{
     invalid, Circle2, Curve2, DiagnosticKind, KernelError, KernelResult, Line2, ModelTolerance,
     ParameterRange,
@@ -349,7 +349,7 @@ fn validate_no_self_intersection(
                 Ok(!adjacent || shared.iter().all(|shared| shared.distance(hit.point) > tolerance.linear * 8.0))
             })?;
             if intersection.coincident || crossing {
-                return Err(invalid("wire must not self-intersect"));
+                return Err(invalid(format!("wire must not self-intersect (edges {first} and {second})")));
             }
         }
     }
@@ -475,7 +475,7 @@ fn bezier_controls_projection_monotone(controls: &[Vec3], tolerance: f64) -> boo
         .collect::<Vec<_>>();
     let direction = points.last().unwrap() - points[0];
     let length = direction.magnitude();
-    if length <= tolerance {
+    if length == 0.0 {
         return false;
     }
     let unit = direction / length;
@@ -858,19 +858,27 @@ fn line_line_intersection(
     let b = first.end()?;
     let c = second.start()?;
     let d = second.end()?;
-    if !segments_intersect(a, b, c, d, tolerance.linear) {
-        return Ok(CurvePairIntersection::default());
-    }
     let cross = |left: Vec2, right: Vec2| left.x * right.y - left.y * right.x;
-    let denominator = cross(b - a, d - c);
-    if denominator.abs() <= tolerance.linear.powi(2) {
-        let direction = b - a;
-        let length = direction.magnitude();
-        let unit = direction / length;
+    let direction = b - a;
+    let other = d - c;
+    let length = direction.magnitude();
+    let other_length = other.magnitude();
+    let unit = direction / length;
+    let other_unit = other / other_length;
+    let denominator = cross(unit, other_unit);
+    if denominator.abs() <= tolerance.angular {
+        // Cross products of short segment vectors have squared-length units;
+        // an absolute linear threshold can call distant short lines collinear.
+        if cross(c - a, unit).abs() > tolerance.linear {
+            return Ok(CurvePairIntersection::default());
+        }
         let c_distance = (c - a).dot(unit);
         let d_distance = (d - a).dot(unit);
         let low = 0.0_f64.max(c_distance.min(d_distance));
         let high = length.min(c_distance.max(d_distance));
+        if high < low - tolerance.linear {
+            return Ok(CurvePairIntersection::default());
+        }
         if high - low <= tolerance.linear {
             let point = a + unit * ((low + high) * 0.5);
             return Ok(CurvePairIntersection {
@@ -889,8 +897,14 @@ fn line_line_intersection(
             ..Default::default()
         });
     }
-    let parameter = cross(c - a, d - c) / denominator;
-    let second_parameter = cross(c - a, b - a) / denominator;
+    let distance = cross(c - a, other_unit) / denominator;
+    let second_distance = cross(c - a, unit) / denominator;
+    if distance < -tolerance.linear || distance > length + tolerance.linear
+        || second_distance < -tolerance.linear || second_distance > other_length + tolerance.linear {
+        return Ok(CurvePairIntersection::default());
+    }
+    let parameter = distance / length;
+    let second_parameter = second_distance / other_length;
     Ok(CurvePairIntersection {
         hits: vec![CurvePairHit {
             point: a + (b - a) * parameter,
@@ -1527,4 +1541,42 @@ fn bounds_separated(
 
 fn bounds_size(bounds: (f64, f64, f64, f64)) -> f64 {
     (bounds.1 - bounds.0).hypot(bounds.3 - bounds.2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn section_cap_with_a_short_rational_span_is_simple() {
+        let curve = super::super::NurbsCurve2::new(2,
+            vec![Point2::new(1.0, 0.0), Point2::new(1.0, 1.0), Point2::new(0.0, 1.0),
+                Point2::new(-1.0, 1.0), Point2::new(-1.0, 0.0)],
+            vec![1.0, 0.5_f64.sqrt(), 1.0, 0.5_f64.sqrt(), 1.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0]).unwrap();
+        let arc = TrimmedCurve2::new(curve, ParameterRange::new(0.0, 1.0 + 1e-9).unwrap()).unwrap();
+        let chord = TrimmedCurve2::line(arc.end().unwrap(), arc.start().unwrap()).unwrap();
+        let cap = Wire2::new([arc, chord], ModelTolerance::default()).unwrap();
+        assert!(cap.signed_area() > 0.0);
+    }
+
+    #[test]
+    fn short_parallel_cap_edges_do_not_intersect() {
+        let t = ModelTolerance::default();
+        let cap = Wire2::polygon([Point2::new(0.0, 0.0), Point2::new(0.014, 0.0),
+            Point2::new(0.014, 2e-7), Point2::new(0.0, 2e-7)], t).unwrap();
+        assert!((cap.signed_area() - 2.8e-9).abs() < 1e-18);
+    }
+
+    #[test]
+    fn derived_cap_edge_does_not_intersect_its_own_parameter_diagonal() {
+        use super::super::{Line3, NurbsCurve2, Plane3, SurfaceProjectionPcurve2};
+        let parameters = [0.0, 0.244201553, 0.2442015554, 0.6, 1.0];
+        let guide = NurbsCurve2::new(1, parameters.map(|u| Point2::new(u * 172.0, 0.0)).to_vec(),
+            vec![1.0; 5], vec![0.0, 0.0, parameters[1], parameters[2], 0.6, 1.0, 1.0]).unwrap();
+        let range = ParameterRange::new(0.0, 1.0).unwrap();
+        let curve = SurfaceProjectionPcurve2::new(Line3::new(crate::Point3::origin(), Vec3::unit_x() * 172.0).unwrap().into(),
+            Plane3::xy().into(), guide.into(), range, ModelTolerance::default()).unwrap();
+        assert!(TrimmedCurve2::new(curve, range).unwrap().self_intersections(ModelTolerance::default()).unwrap().is_empty());
+    }
 }

@@ -1,4 +1,5 @@
-//! Conservative enclosures for sizing finite construction tools. No sampling.
+//! Conservative enclosures that prove separation and size construction tools.
+//! An unsupported curve or surface is an error, never a sampled guess.
 use cgmath::prelude::*;
 
 use super::{
@@ -217,28 +218,9 @@ fn intersection(
             curve.evaluate(range.start)?.point,
             curve.evaluate(range.end)?.point,
         ])),
-        (Surface3::Cone(cone), Surface3::Plane(plane))
-        | (Surface3::Plane(plane), Surface3::Cone(cone)) => {
-            let normal = plane.normal().normalize();
-            let radial = normal.dot(cone.x_radius()).hypot(normal.dot(cone.y_radius()));
-            if normal.dot(cone.axis()).abs() > radial {
-                return cone_intersection(first, second).or_else(|_| cone_intersection(second, first));
-            }
-            // A hyperbolic or parabolic section has no interior maximum of
-            // |height| on a finite continuous branch. Its trimmed endpoints
-            // therefore bound the axial extent, even though its supports have
-            // an unbounded intersection. Include all azimuths at those heights.
-            let height = [range.start, range.end].into_iter().try_fold(0.0_f64, |height, t| {
-                let axial = (curve.evaluate(t)?.point - cone.apex()).dot(cone.axis())
-                    / cone.axis().magnitude2();
-                Ok::<_, KernelError>(height.max(axial.abs()))
-            })?;
-            Ok(Bounds::points([
-                cone.apex() - cone.axis() * height,
-                cone.apex() + cone.axis() * height,
-            ]).expanded(height * cone.x_radius().magnitude().max(cone.y_radius().magnitude())))
-        }
-        _ => cone_intersection(first, second).or_else(|_| cone_intersection(second, first)),
+        _ => trimmed_plane_cone(first, second, curve, range)
+            .or_else(|_| cone_intersection(first, second))
+            .or_else(|_| cone_intersection(second, first)),
     }
 }
 
@@ -249,6 +231,56 @@ fn offset_base(mut surface: &Surface3) -> (&Surface3, f64) {
         surface = offset.base();
     }
     (surface, distance)
+}
+
+fn trimmed_plane_cone(
+    first: &Surface3,
+    second: &Surface3,
+    curve: &Curve3,
+    range: ParameterRange,
+) -> KernelResult<Bounds> {
+    let (first, first_offset) = offset_base(first);
+    let (second, second_offset) = offset_base(second);
+    let (cone, offset, plane) = match (first, second) {
+        (Surface3::Cone(cone), Surface3::Plane(plane)) => (cone, first_offset, plane),
+        (Surface3::Plane(plane), Surface3::Cone(cone)) => (cone, second_offset, plane),
+        _ => return Err(unavailable()),
+    };
+    let normal = plane.normal().normalize();
+    let radial = normal.dot(cone.x_radius()).hypot(normal.dot(cone.y_radius()));
+    if normal.dot(cone.axis()).abs() > radial {
+        // An elliptic section is bounded by the complete support intersection.
+        return Err(unavailable());
+    }
+    // A constant normal offset of a circular cone translates its apex along
+    // the axis by d / sin(half_angle). Nested offsets can reverse its normal,
+    // so bound the total translation by the sum of their absolute distances.
+    // An offset plane remains parallel and does not change the section type.
+    let axis_length = cone.axis().magnitude();
+    let radius = cone.x_radius().magnitude().min(cone.y_radius().magnitude());
+    let apex_shift = offset * axis_length.hypot(radius) / (radius * axis_length);
+    let mut low = -apex_shift;
+    let mut high = apex_shift;
+    let mut height = 0.0_f64;
+    for parameter in [range.start, range.end] {
+        let axial = (curve.evaluate(parameter)?.point - cone.apex()).dot(cone.axis())
+            / cone.axis().magnitude2();
+        low = low.min(axial);
+        high = high.max(axial);
+        height = height.max(axial.abs());
+    }
+    // On a continuous hyperbolic or parabolic branch, |height| from the true
+    // apex is bounded by the endpoints. Thus axial positions lie between the
+    // endpoints and the translated apex; the radial bound allows its shift.
+    let axial = Bounds::points([
+        cone.apex() + cone.axis() * low,
+        cone.apex() + cone.axis() * high,
+    ]);
+    let x = cone.x_radius();
+    let y = cone.y_radius();
+    let extent = Vec3::new(x.x.hypot(y.x), x.y.hypot(y.y), x.z.hypot(y.z))
+        * (height + apex_shift);
+    Ok(Bounds(axial.0 - extent, axial.1 + extent))
 }
 
 fn cone_intersection(cone_support: &Surface3, other: &Surface3) -> KernelResult<Bounds> {
@@ -439,4 +471,73 @@ pub(crate) fn compound(source: &Compound) -> KernelResult<Bounds> {
         return Err(unavailable());
     }
     Ok(result.expanded(source.tolerance().linear * 64.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::{Cone3, ModelTolerance, NurbsCurve3, OffsetSurface3, Plane3};
+
+    #[test]
+    fn plane_offset_cone_bounds_enclose_trimmed_hyperbolas() {
+        let tolerance = ModelTolerance::default();
+        // Radius, offsets, base sheet, section sheet, plane x, arc parameter.
+        // The narrow cone's inward offset turns back toward its translated apex:
+        // its interior is much higher than either endpoint in the original frame.
+        for (radius, offsets, base_sheet, section_sheet, x, a) in [
+            (1.0, vec![], 1.0, 1.0, 1.0, 0.8),
+            (1.0, vec![1.0], 1.0, 1.0, 1.0, 0.8),
+            (1.0, vec![1.0], -1.0, -1.0, 1.0, 0.8),
+            (1.0, vec![0.5, 0.25], 1.0, 1.0, 1.0, 0.8),
+            (0.01, vec![-1.0], 1.0, -1.0, 0.001, (989.0_f64 / 991.0).sqrt()),
+        ] {
+            let mut support: Surface3 = Cone3::new(
+                Point3::origin(), Vec3::unit_z(),
+                Vec3::unit_x() * radius, Vec3::unit_y() * radius, tolerance,
+            ).unwrap().into();
+            let distance: f64 = offsets.iter().sum();
+            for offset in offsets {
+                support = OffsetSurface3::new(support, offset, tolerance).unwrap().into();
+            }
+            // A circular cone's normal offset translates its apex along the axis.
+            let apex = -base_sheet * distance * 1.0_f64.hypot(radius) / radius;
+            let height = section_sheet * x / radius;
+            let end_weight = 1.0 - a * a;
+            let middle_weight = 1.0 + a * a;
+            let end_height = apex + height * middle_weight / end_weight;
+            // Exact rational quadratic for x = constant,
+            // (z - apex)^2 = (x^2 + y^2) / radius^2.
+            let curve: Curve3 = NurbsCurve3::new(2, vec![
+                Point3::new(x, -2.0 * x * a / end_weight, end_height),
+                Point3::new(x, 0.0, apex + height * end_weight / middle_weight),
+                Point3::new(x, 2.0 * x * a / end_weight, end_height),
+            ], vec![end_weight, middle_weight, end_weight],
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap().into();
+            let plane: Surface3 = Plane3::new(Point3::new(x, 0.0, 0.0),
+                Vec3::unit_y(), Vec3::unit_z(), tolerance).unwrap().into();
+            let offset_plane: Surface3 = OffsetSurface3::new(
+                Plane3::new(Point3::new(x - 0.1, 0.0, 0.0),
+                    Vec3::unit_y(), Vec3::unit_z(), tolerance).unwrap().into(),
+                0.1, tolerance,
+            ).unwrap().into();
+            for range in [
+                ParameterRange::new(0.0, 1.0).unwrap(),
+                ParameterRange::new(1.0, 0.0).unwrap(),
+                ParameterRange::new(0.15, 0.7).unwrap(),
+            ] {
+                for (first, second) in [(&support, &plane), (&plane, &support),
+                    (&support, &offset_plane), (&offset_plane, &support)] {
+                    let bounds = intersection(first, second, &curve, range).unwrap();
+                    for step in 0..=256 {
+                        let point = curve.evaluate(range.start + range.span() * step as f64 / 256.0)
+                            .unwrap().point;
+                        assert!((0..3).all(|axis|
+                            point[axis] >= bounds.0[axis] - tolerance.linear
+                                && point[axis] <= bounds.1[axis] + tolerance.linear),
+                            "radius {radius}, offset {distance}, point {point:?}");
+                    }
+                }
+            }
+        }
+    }
 }

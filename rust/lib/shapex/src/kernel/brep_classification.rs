@@ -3,7 +3,8 @@ use std::cell::OnceCell;
 use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec3};
-use super::trim::{face_boundary_curves, face_parameter_bounds, point_in_periodic_trim, coincident_supports, FaceCurve};
+use super::trim::{face_boundary_curves, face_parameter_bounds, point_in_sampled_periodic_trim,
+    trim_samples, coincident_supports, FaceCurve, TrimSamples};
 use super::bounds::Bounds;
 use super::{box_center, nearest_uv, Compound, Curve3, FaceId, FaceOrientation, IntersectionKind,
     IntersectionSet, KernelResult, Line3, ModelTolerance, ParameterRange, ShellId, Surface3, Topology};
@@ -13,9 +14,11 @@ pub(super) enum PointClassification { Inside, Outside, Boundary }
 
 struct ClassificationFace {
     id: FaceId,
-    bounds: Bounds,
+    /// Absent without a certified enclosure. Such a face is never culled.
+    bounds: Option<Bounds>,
     parameters: [ParameterRange; 2],
     boundary: Vec<FaceCurve<super::CoedgeId>>,
+    samples: OnceCell<KernelResult<TrimSamples>>,
 }
 
 struct ClassificationRegion {
@@ -64,9 +67,11 @@ impl<'a> BrepClassifier<'a> {
                     let boundary = face_boundary_curves(topology, *id, tolerance)?;
                     faces.push(ClassificationFace {
                         id: *id,
-                        bounds: super::bounds::face(topology, *id)?.expanded(tolerance.linear),
+                        bounds: super::bounds::face(topology, *id).ok()
+                            .map(|bounds| bounds.expanded(tolerance.linear)),
                         parameters: face_parameter_bounds(&boundary, tolerance)?,
                         boundary,
+                        samples: OnceCell::new(),
                     });
                 }
             }
@@ -133,7 +138,9 @@ impl<'a> BrepClassifier<'a> {
             Point2::new(parameters.0, parameters.1),
             box_center(face.parameters),
         );
-        point_in_periodic_trim(uv, &face.boundary, surface.domains(), face.parameters, self.tolerance)
+        let samples = face.samples.get_or_init(|| trim_samples(&face.boundary))
+            .as_ref().map_err(Clone::clone)?;
+        point_in_sampled_periodic_trim(uv, &face.boundary, samples, surface.domains(), face.parameters, self.tolerance)
     }
 
     pub(super) fn contains(&self, point: Point3) -> KernelResult<bool> {
@@ -162,8 +169,10 @@ impl<'a> BrepClassifier<'a> {
 
 
     fn region_contains(&self, region: &ClassificationRegion, faces: &[ClassificationFace], point: Point3) -> KernelResult<PointClassification> {
-        let bounds = faces.iter().map(|face| face.bounds).reduce(Bounds::union).unwrap();
-        if (0..3).any(|axis| point[axis] < bounds.0[axis] || point[axis] > bounds.1[axis]) {
+        let bounds = faces.iter().map(|face| face.bounds)
+            .reduce(|first, second| Some(first?.union(second?))).flatten();
+        if bounds.is_some_and(|bounds|
+            (0..3).any(|axis| point[axis] < bounds.0[axis] || point[axis] > bounds.1[axis])) {
             return Ok(PointClassification::Outside);
         }
         let directions = [
@@ -189,7 +198,7 @@ impl<'a> BrepClassifier<'a> {
         let ray: Curve3 = Line3::new(point, direction)?.into();
         let mut crossings = Vec::new();
         for face in faces {
-            if !ray_meets_bounds(face.bounds, point, direction) {
+            if face.bounds.is_some_and(|bounds| !ray_meets_bounds(bounds, point, direction)) {
                 continue;
             }
             let surface = self.topology.face(face.id)?.surface();
@@ -234,7 +243,8 @@ impl<'a> BrepClassifier<'a> {
     ) -> KernelResult<PointClassification> {
         let linear = self.tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0));
         let mut minimum = BoundaryMinimum { point, distance: f64::INFINITY, normal: Vec3::zero() };
-        let mut ordered = faces.iter().map(|face| (bounds_distance(face.bounds, point), face))
+        let mut ordered = faces.iter()
+            .map(|face| (face.bounds.map_or(0.0, |bounds| bounds_distance(bounds, point)), face))
             .collect::<Vec<_>>();
         ordered.sort_by(|first, second| first.0.total_cmp(&second.0));
         for (lower, face) in ordered {

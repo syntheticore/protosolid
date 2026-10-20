@@ -381,6 +381,11 @@ fn local_spline_jets_match_full_derivative_curves() {
                 .map(|i| (i as f64 * 0.1).powi(2))
                 .collect(),
         );
+        // Repeated unclamped knots can leave a zero-width final active span.
+        check_jet(
+            degree,
+            (0..degree * 3 + 8).map(|i| (i / 2) as f64 * 0.1).collect(),
+        );
     }
 }
 
@@ -413,6 +418,13 @@ fn check_jet(degree: usize, knots: Vec<f64>) {
             accessed += 1;
             controls[i]
         });
+        let basis = SplineBasisJet::<4>::new(degree, &knots, count, t);
+        let mut from_basis = [Vec4::zero(); 4];
+        for (index, coefficients) in basis.values().iter().enumerate() {
+            for (value, coefficient) in from_basis.iter_mut().zip(coefficients) {
+                *value += controls[basis.first + index] * *coefficient;
+            }
+        }
         assert_eq!(
             accessed,
             degree + 1,
@@ -434,6 +446,12 @@ fn check_jet(degree: usize, knots: Vec<f64>) {
             assert!(
                 (actual - expected).magnitude() <= expected.magnitude().max(1.0) * 1e-11,
                 "degree {degree}, parameter {t}: {actual:?} != {expected:?}"
+            );
+        }
+        for (actual, expected) in from_basis.into_iter().zip(expected) {
+            assert!(
+                (actual - expected).magnitude() <= expected.magnitude().max(1.0) * 1e-11,
+                "basis degree {degree}, parameter {t}: {actual:?} != {expected:?}"
             );
         }
         let actual2 = homogeneous_curve_jet::<_, 4>(degree, &knots, count, t, |i| {
@@ -534,7 +552,7 @@ fn evaluate_derivative_vec4(
 
 #[test]
 fn local_surface_jet_matches_full_rational_derivative_nets() {
-    for degrees in [(1, 1), (3, 2), (2, 3), (17, 2), (2, 17)] {
+    for degrees in [(1, 1), (1, 3), (3, 1), (3, 2), (2, 3), (3, 3), (17, 2), (2, 17)] {
         let knots = |degree| {
             let mut values = vec![0.0; degree + 1];
             values.extend([0.3, 0.3, 0.7]);

@@ -1378,6 +1378,76 @@ fn find_span(degree: usize, knots: &[f64], control_count: usize, parameter: f64)
     middle
 }
 
+/// Scalar coefficients shared by every row of a surface's active control net.
+struct SplineBasisJet<const N: usize> {
+    first: usize,
+    count: usize,
+    stack: [[f64; N]; 16],
+    spill: Vec<[f64; N]>,
+}
+
+impl<const N: usize> SplineBasisJet<N> {
+    fn new(degree: usize, knots: &[f64], control_count: usize, parameter: f64) -> Self {
+        let span = find_span(degree, knots, control_count, parameter);
+        let count = degree + 1;
+        let mut basis = Self {
+            first: span - degree,
+            count,
+            stack: [[0.0; N]; 16],
+            spill: Vec::new(),
+        };
+        let values = if count <= basis.stack.len() {
+            &mut basis.stack[..count]
+        } else {
+            basis.spill.resize(count, [0.0; N]);
+            basis.spill.as_mut_slice()
+        };
+        let knots = &knots[basis.first..basis.first + 2 * degree + 2];
+        for order in 0..N.min(degree + 1) {
+            let current_degree = degree - order;
+            values[current_degree][order] = 1.0;
+            // Transpose de Boor interpolation on the derivative control net.
+            // This preserves its choice of side at repeated endpoint knots.
+            for level in (1..=current_degree).rev() {
+                for j in level..=current_degree {
+                    let denominator = knots[j + degree + 1 - level] - knots[j + order];
+                    let value = values[j][order];
+                    if denominator == 0.0 {
+                        values[j - 1][order] += value;
+                        values[j][order] = 0.0;
+                    } else {
+                        let alpha = (parameter - knots[j + order]) / denominator;
+                        values[j - 1][order] += value * (1.0 - alpha);
+                        values[j][order] = value * alpha;
+                    }
+                }
+            }
+            // Map derivative-control coefficients back to the original controls.
+            for derivative in (1..=order).rev() {
+                for j in (0..=degree - derivative).rev() {
+                    let denominator = knots[j + degree + 1] - knots[j + derivative];
+                    let value = if denominator == 0.0 {
+                        0.0
+                    } else {
+                        values[j][order] * ((degree - derivative + 1) as f64 / denominator)
+                    };
+                    values[j][order] = -value;
+                    values[j + 1][order] += value;
+                }
+            }
+        }
+        basis
+    }
+
+    fn values(&self) -> &[[f64; N]] {
+        if self.count <= self.stack.len() {
+            &self.stack[..self.count]
+        } else {
+            &self.spill
+        }
+    }
+}
+
 /// Evaluate a homogeneous curve and its derivatives on the active
 /// knot span. Only degree + 1 controls can contribute at a parameter; building
 /// whole derivative curves here makes every sample linear in model size.
@@ -3964,42 +4034,38 @@ impl NurbsSurface3 {
     }
 
     fn homogeneous_jet<const N: usize>(&self, u: f64, v: f64) -> [[Vec4; N]; N] {
-        let first = find_span(self.degrees.1, &self.knots.1, self.control_points.len(), v)
-            - self.degrees.1;
-        let count = self.degrees.1 + 1;
-        let mut stack = [[Vec4::zero(); N]; 16];
-        let mut spill = Vec::new();
-        let rows = if count <= stack.len() {
-            &mut stack[..count]
-        } else {
-            spill.resize(count, [Vec4::zero(); N]);
-            spill.as_mut_slice()
-        };
-        // Each active row supplies all U derivatives once, shared by the
-        // subsequent V evaluations. Small degrees need no heap allocation.
-        for (index, jet) in rows.iter_mut().enumerate() {
-            let row = first + index;
-            *jet = homogeneous_curve_jet(
-                self.degrees.0,
-                &self.knots.0,
-                self.control_points[row].len(),
-                u,
-                |column| {
-                    let point = self.control_points[row][column];
-                    let weight = self.weights[row][column];
-                    Vec4::new(point.x * weight, point.y * weight, point.z * weight, weight)
-                },
-            );
+        let u_basis = SplineBasisJet::<N>::new(
+            self.degrees.0,
+            &self.knots.0,
+            self.control_points[0].len(),
+            u,
+        );
+        let v_basis = SplineBasisJet::<N>::new(
+            self.degrees.1,
+            &self.knots.1,
+            self.control_points.len(),
+            v,
+        );
+        let mut jet = [[Vec4::zero(); N]; N];
+        for (row, v_coefficients) in v_basis.values().iter().enumerate() {
+            let row = v_basis.first + row;
+            let mut along_u = [Vec4::zero(); N];
+            for (column, u_coefficients) in u_basis.values().iter().enumerate() {
+                let column = u_basis.first + column;
+                let point = self.control_points[row][column];
+                let weight = self.weights[row][column];
+                let point = Vec4::new(point.x * weight, point.y * weight, point.z * weight, weight);
+                for (value, coefficient) in along_u.iter_mut().zip(u_coefficients) {
+                    *value += point * *coefficient;
+                }
+            }
+            for (derivatives, value) in jet.iter_mut().zip(along_u) {
+                for (derivative, coefficient) in derivatives.iter_mut().zip(v_coefficients) {
+                    *derivative += value * *coefficient;
+                }
+            }
         }
-        std::array::from_fn(|order| {
-            homogeneous_curve_jet(
-                self.degrees.1,
-                &self.knots.1,
-                self.control_points.len(),
-                v,
-                |row| rows[row - first][order],
-            )
-        })
+        jet
     }
     fn evaluation_jet<const N: usize>(&self, u: f64, v: f64) -> KernelResult<[[Vec4; N]; N]> {
         let domains = self.domains();

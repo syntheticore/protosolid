@@ -108,6 +108,7 @@ pub use planar::RigidTransform2;
 pub struct Kernel {
     tolerance: ModelTolerance,
     topology: Topology,
+    tessellation_cache: std::sync::Mutex<tessellation::TessellationCache>,
 }
 
 impl Kernel {
@@ -116,6 +117,7 @@ impl Kernel {
         Ok(Self {
             tolerance,
             topology: Topology::new(),
+            tessellation_cache: Default::default(),
         })
     }
 

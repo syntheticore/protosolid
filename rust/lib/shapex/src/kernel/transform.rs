@@ -173,6 +173,7 @@ impl Kernel {
         }
         super::validation::validate(&working, self.tolerance).into_result()?;
         self.topology = working;
+        *self.tessellation_cache.get_mut().unwrap() = Default::default();
         Ok(history)
     }
 }

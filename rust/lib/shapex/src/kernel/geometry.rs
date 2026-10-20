@@ -3963,30 +3963,45 @@ impl NurbsSurface3 {
         Ok(patches)
     }
 
-    fn homogeneous_jet(&self, u: f64, v: f64) -> [[Vec4; 3]; 3] {
+    fn homogeneous_jet<const N: usize>(&self, u: f64, v: f64) -> [[Vec4; N]; N] {
+        let first = find_span(self.degrees.1, &self.knots.1, self.control_points.len(), v)
+            - self.degrees.1;
+        let count = self.degrees.1 + 1;
+        let mut stack = [[Vec4::zero(); N]; 16];
+        let mut spill = Vec::new();
+        let rows = if count <= stack.len() {
+            &mut stack[..count]
+        } else {
+            spill.resize(count, [Vec4::zero(); N]);
+            spill.as_mut_slice()
+        };
+        // Each active row supplies all U derivatives once, shared by the
+        // subsequent V evaluations. Small degrees need no heap allocation.
+        for (index, jet) in rows.iter_mut().enumerate() {
+            let row = first + index;
+            *jet = homogeneous_curve_jet(
+                self.degrees.0,
+                &self.knots.0,
+                self.control_points[row].len(),
+                u,
+                |column| {
+                    let point = self.control_points[row][column];
+                    let weight = self.weights[row][column];
+                    Vec4::new(point.x * weight, point.y * weight, point.z * weight, weight)
+                },
+            );
+        }
         std::array::from_fn(|order| {
             homogeneous_curve_jet(
                 self.degrees.1,
                 &self.knots.1,
                 self.control_points.len(),
                 v,
-                |row| {
-                    homogeneous_curve_jet::<_, 3>(
-                        self.degrees.0,
-                        &self.knots.0,
-                        self.control_points[row].len(),
-                        u,
-                        |column| {
-                            let point = self.control_points[row][column];
-                            let weight = self.weights[row][column];
-                            Vec4::new(point.x * weight, point.y * weight, point.z * weight, weight)
-                        },
-                    )[order]
-                },
+                |row| rows[row - first][order],
             )
         })
     }
-    fn evaluate(&self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {
+    fn evaluation_jet<const N: usize>(&self, u: f64, v: f64) -> KernelResult<[[Vec4; N]; N]> {
         let domains = self.domains();
         let in_domain = |domain: ParameterDomain, value: f64| match domain.bounds {
             super::DomainBounds::Bounded(range) => {
@@ -4013,10 +4028,7 @@ impl NurbsSurface3 {
                 "NURBS surface parameters lie outside its natural domain",
             ));
         };
-        // A tensor-product NURBS only depends on the active controls in each
-        // direction. Reuse the curve evaluator instead of constructing whole
-        // derivative control nets for every surface sample.
-        let jet = self.homogeneous_jet(u, v);
+        let jet = self.homogeneous_jet::<N>(u, v);
         if !jet.iter().flatten().all(|value| {
             value.x.is_finite() && value.y.is_finite() && value.z.is_finite() && value.w.is_finite()
         }) {
@@ -4025,16 +4037,31 @@ impl NurbsSurface3 {
                 "NURBS surface evaluation produced a non-finite value",
             ));
         }
-        let [value, dv, dvv] = jet[0];
-        let [du, duv, _] = jet[1];
-        let duu = jet[2][0];
-        if value.w == 0.0 {
+        if jet[0][0].w == 0.0 {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
                 "NURBS surface has zero homogeneous weight",
             ));
         }
 
+        Ok(jet)
+    }
+
+    fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
+        let [[value, dv], [du, _]] = self.evaluation_jet::<2>(u, v)?;
+        let point = value.truncate() / value.w;
+        Ok((
+            Point3::from_vec(point),
+            (du.truncate() - point * du.w) / value.w,
+            (dv.truncate() - point * dv.w) / value.w,
+        ))
+    }
+
+    fn evaluate(&self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {
+        let jet = self.evaluation_jet::<3>(u, v)?;
+        let [value, dv, dvv] = jet[0];
+        let [du, duv, _] = jet[1];
+        let duu = jet[2][0];
         let point = value.truncate() / value.w;
         let rational_du = (du.truncate() - point * du.w) / value.w;
         let rational_dv = (dv.truncate() - point * dv.w) / value.w;
@@ -5760,6 +5787,7 @@ impl Surface3 {
 
     pub(crate) fn first_order(&self, u: f64, v: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
         match self {
+            Self::Nurbs(surface) => surface.first_order(u, v),
             Self::Swept(surface) => surface.first_order(u, v),
             Self::Offset(surface) => surface.first_order(u, v),
             Self::RollingBall(surface) | Self::Ruled(surface) => surface.first_order(u, v),

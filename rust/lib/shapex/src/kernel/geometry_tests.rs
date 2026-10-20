@@ -534,7 +534,7 @@ fn evaluate_derivative_vec4(
 
 #[test]
 fn local_surface_jet_matches_full_rational_derivative_nets() {
-    for degrees in [(1, 1), (3, 2), (2, 3), (17, 2)] {
+    for degrees in [(1, 1), (3, 2), (2, 3), (17, 2), (2, 17)] {
         let knots = |degree| {
             let mut values = vec![0.0; degree + 1];
             values.extend([0.3, 0.3, 0.7]);
@@ -575,7 +575,12 @@ fn local_surface_jet_matches_full_rational_derivative_nets() {
         let rows = surface.homogeneous_rows();
         for u in [0.0, 0.1, 0.3 - 1e-9, 0.3, 0.3 + 1e-9, 0.7, 1.0] {
             for v in [0.0, 0.1, 0.3 - 1e-9, 0.3, 0.3 + 1e-9, 0.7, 1.0] {
-                let jet = surface.homogeneous_jet(u, v);
+                let jet = surface.homogeneous_jet::<3>(u, v);
+                let evaluation = surface.evaluate(u, v).unwrap();
+                let (point, du, dv) = Surface3::from(surface.clone()).first_order(u, v).unwrap();
+                assert!(point.distance(evaluation.point) < 1e-10);
+                assert!((du - evaluation.du).magnitude() < 1e-10);
+                assert!((dv - evaluation.dv).magnitude() < 1e-10);
                 for u_order in 0..3 {
                     let along_u = rows
                         .iter()

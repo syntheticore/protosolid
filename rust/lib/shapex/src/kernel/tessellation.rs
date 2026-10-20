@@ -59,6 +59,24 @@ pub(crate) struct EdgePolyline {
     points: Vec<Point3>,
 }
 
+/// Retain boundary samples across face calls on the same BREP state. Only
+/// the most recent error policy is retained, bounding storage by its edges.
+#[derive(Debug, Default)]
+pub(super) struct TessellationCache {
+    options: Option<TessellationOptions>,
+    edges: BTreeMap<EdgeId, EdgePolyline>,
+}
+
+impl TessellationCache {
+    fn edges(&mut self, options: TessellationOptions) -> &mut BTreeMap<EdgeId, EdgePolyline> {
+        if self.options != Some(options) {
+            self.edges.clear();
+            self.options = Some(options);
+        }
+        &mut self.edges
+    }
+}
+
 /// A geometry value that can produce a display approximation under an explicit
 /// error policy. Faces, edges, solids, and compounds all implement this trait.
 pub trait Tessellate {
@@ -230,10 +248,11 @@ impl Kernel {
         options: TessellationOptions,
     ) -> KernelResult<TriangleMesh> {
         options.validate_against(self.tolerance())?;
-        let mut cache = BTreeMap::new();
+        let mut cache = self.tessellation_cache.lock().unwrap();
+        let edges = cache.edges(options);
         let mut mesh = TriangleMesh::default();
         for shell in self.topology().body(body)?.shells() {
-            mesh.append(self.tessellate_shell_cached(*shell, options, &mut cache)?);
+            mesh.append(self.tessellate_shell_cached(*shell, options, edges)?);
         }
         Ok(mesh)
     }
@@ -244,7 +263,8 @@ impl Kernel {
         options: TessellationOptions,
     ) -> KernelResult<TriangleMesh> {
         options.validate_against(self.tolerance())?;
-        self.tessellate_shell_cached(shell, options, &mut BTreeMap::new())
+        let mut cache = self.tessellation_cache.lock().unwrap();
+        self.tessellate_shell_cached(shell, options, cache.edges(options))
     }
 
     pub fn tessellate_face(
@@ -253,7 +273,8 @@ impl Kernel {
         options: TessellationOptions,
     ) -> KernelResult<TriangleMesh> {
         options.validate_against(self.tolerance())?;
-        self.tessellate_face_cached(face, options, &mut BTreeMap::new())
+        let mut cache = self.tessellation_cache.lock().unwrap();
+        self.tessellate_face_cached(face, options, cache.edges(options))
     }
 
     fn tessellate_shell_cached(
@@ -1719,6 +1740,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn face_sampling_cache_tracks_options_and_published_geometry() {
+        let tolerance = ModelTolerance::default();
+        let mut kernel = Kernel::new(tolerance).unwrap();
+        let mut transaction = kernel.begin_operation();
+        let body = transaction.cylinder(
+            Point3::origin(), Vec3::unit_x(), Vec3::unit_y(), Vec3::unit_z() * 2.0,
+        ).unwrap();
+        transaction.commit().unwrap();
+        let face = kernel.topology.faces().find(|(_, face)| {
+            matches!(face.surface(), super::super::Surface3::Plane(_))
+        }).unwrap().0;
+        let coarse = TessellationOptions::new(0.1, 0.2, 24).unwrap();
+        let fine = TessellationOptions::new(0.01, 0.05, 24).unwrap();
+        let first = kernel.tessellate_face(face, coarse).unwrap();
+        let sampled_edges = kernel.tessellation_cache.lock().unwrap().edges.len();
+        assert!(sampled_edges > 0);
+        let repeated = kernel.tessellate_face(face, coarse).unwrap();
+        assert_eq!(first.positions, repeated.positions);
+        assert_eq!(first.triangles, repeated.triangles);
+        assert_eq!(kernel.tessellation_cache.lock().unwrap().edges.len(), sampled_edges);
+
+        let refined = kernel.tessellate_face(face, fine).unwrap();
+        let fresh = Kernel {
+            tolerance, topology: kernel.topology.clone(), tessellation_cache: Default::default(),
+        }.tessellate_face(face, fine).unwrap();
+        assert!(refined.triangles.len() > first.triangles.len());
+        assert_eq!(refined.positions, fresh.positions);
+        assert_eq!(refined.triangles, fresh.triangles);
+        assert_eq!(kernel.tessellation_cache.lock().unwrap().options, Some(fine));
+
+        let translation = Vec3::new(7.0, -3.0, 2.0);
+        kernel.transform_body(body, super::super::RigidTransform3::new(
+            crate::Matrix3::identity(), translation, tolerance,
+        ).unwrap()).unwrap();
+        assert!(kernel.tessellation_cache.lock().unwrap().edges.is_empty());
+        let moved = kernel.tessellate_face(face, fine).unwrap();
+        assert_eq!(moved.triangles, refined.triangles);
+        for (before, after) in refined.positions.iter().zip(&moved.positions) {
+            assert!((*after - *before - translation).magnitude() < 1e-10);
+        }
+
+        let mut transaction = kernel.begin_operation();
+        transaction.cylinder(
+            Point3::new(20.0, 0.0, 0.0), Vec3::unit_x(), Vec3::unit_y(), Vec3::unit_z(),
+        ).unwrap();
+        transaction.commit().unwrap();
+        assert!(kernel.tessellation_cache.lock().unwrap().edges.is_empty());
+        let published = kernel.tessellate_face(face, fine).unwrap();
+        assert_eq!(published.positions, moved.positions);
+    }
+
+    #[test]
     fn periodic_hole_mesh_is_independent_of_its_parameter_sheet() {
         use super::super::{Plane3, Profile, TrimmedCurve2, Wire2};
         let tolerance = ModelTolerance::default();
@@ -1746,7 +1819,7 @@ mod tests {
                 Vec3::unit_x() * 30.0,
             ).unwrap();
         let cut = body.difference(&cutter).unwrap();
-        let kernel = Kernel { tolerance, topology: cut.topology().clone() };
+        let kernel = Kernel { tolerance, topology: cut.topology().clone(), tessellation_cache: Default::default() };
         let (face_id, face) = kernel.topology.faces().find(|(_, face)| {
             face.surface().domains()[0].period.is_some()
                 && face.loops().iter().any(|id| kernel.topology.loop_(*id).unwrap().kind() == super::super::LoopKind::Inner)
@@ -1759,7 +1832,7 @@ mod tests {
         let expected = area(&kernel.tessellate_face(face_id, options).unwrap());
         let period = face.surface().domains()[0].period.unwrap();
         for turns in [-2.0, -1.0, 1.0, 2.0] {
-            let mut shifted = Kernel { tolerance, topology: kernel.topology.clone() };
+            let mut shifted = Kernel { tolerance, topology: kernel.topology.clone(), tessellation_cache: Default::default() };
             for loop_id in face.loops() {
                 if kernel.topology.loop_(*loop_id).unwrap().kind() != super::super::LoopKind::Inner {
                     continue;

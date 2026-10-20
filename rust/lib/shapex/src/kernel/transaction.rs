@@ -559,6 +559,7 @@ impl<'kernel> Transaction<'kernel> {
         self.history
             .complete_retained(&self.kernel.topology, &self.working);
         self.kernel.topology = self.working;
+        *self.kernel.tessellation_cache.get_mut().unwrap() = Default::default();
         Ok(CommittedOperation {
             operation: self.namespace,
             bodies: self.touched_bodies,

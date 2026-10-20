@@ -1,0 +1,1 @@
+process.env.PROTOSOLID_TEST_EXHAUSTIVE = '1'

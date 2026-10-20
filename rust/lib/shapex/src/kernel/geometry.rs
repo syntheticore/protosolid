@@ -2653,15 +2653,14 @@ impl SurfaceIntersectionCurve {
             (Surface3::Plane(plane), Surface3::Torus(_)) | (Surface3::Torus(_), Surface3::Plane(plane)) => Some(plane.normal()),
             _ => None,
         };
+        let mut first_evaluation = self.first_surface.first_order(parameters[0], parameters[1])?;
+        let mut second_evaluation = self.second_surface.first_order(parameters[2], parameters[3])?;
         // Newton needs no second derivatives; evaluating them on rolling
         // surfaces would repeatedly finite-difference the same contact curves.
+        // An accepted trial already supplies both differentials for the next step.
         for _ in 0..24 {
-            let (first_point, first_du, first_dv) = self
-                .first_surface
-                .first_order(parameters[0], parameters[1])?;
-            let (second_point, second_du, second_dv) = self
-                .second_surface
-                .first_order(parameters[2], parameters[3])?;
+            let (first_point, first_du, first_dv) = first_evaluation;
+            let (second_point, second_du, second_dv) = second_evaluation;
             let residual = self.support_residual(parameters, first_point, second_point);
             let gauge = parameters
                 .iter()
@@ -2741,12 +2740,12 @@ impl SurfaceIntersectionCurve {
                             }
                         }
                     }
-                    let (first_point, _, _) =
+                    let candidate_first =
                         self.first_surface.first_order(candidate[0], candidate[1])?;
-                    let (second_point, _, _) = self
+                    let candidate_second = self
                         .second_surface
                         .first_order(candidate[2], candidate[3])?;
-                    let residual = self.support_residual(candidate, first_point, second_point);
+                    let residual = self.support_residual(candidate, candidate_first.0, candidate_second.0);
                     let gauge = candidate
                         .iter()
                         .zip(guide)
@@ -2755,6 +2754,8 @@ impl SurfaceIntersectionCurve {
                         .sum::<f64>();
                     if merit(residual, gauge) < previous {
                         parameters = candidate;
+                        first_evaluation = candidate_first;
+                        second_evaluation = candidate_second;
                         accepted = true;
                         break;
                     }
@@ -2765,12 +2766,8 @@ impl SurfaceIntersectionCurve {
                 break;
             }
         }
-        let (first_point, _, _) = self
-            .first_surface
-            .first_order(parameters[0], parameters[1])?;
-        let (second_point, _, _) = self
-            .second_surface
-            .first_order(parameters[2], parameters[3])?;
+        let (first_point, _, _) = first_evaluation;
+        let (second_point, _, _) = second_evaluation;
         let scale = first_point
             .to_vec()
             .magnitude()

@@ -53,6 +53,7 @@
               :ref="element => setPickerElement(picker.key, element)"
               :class="{ active: activePicker == picker.key, filled: simulation[picker.key].length, first: picker.key == configuration.pickers[0].key }"
               @click="pick(picker.key)"
+              @contextmenu.prevent.stop="clearPick(picker.key)"
             )
 
           label(v-for="input in configuration.inputs" :key="input.key")
@@ -560,6 +561,13 @@
         const pickerIndex = this.configuration.pickers.findIndex(picker => picker.key == key)
         const nextPicker = this.configuration.pickers[pickerIndex + 1]
         if(nextPicker && !this.simulation[nextPicker.key].length) this.pick(nextPicker.key)
+      },
+
+      clearPick(key) {
+        this.simulation[key] = []
+        this.document.hasChanges = true
+        this.updatePaths()
+        this.solve()
       },
 
       activatePicker(key) {

@@ -265,6 +265,7 @@ function openPreferencesWindow(section) {
     height: 560,
     minWidth: 680,
     minHeight: 480,
+    resizable: false,
     title: 'Settings',
     backgroundColor: '#1c2127',
     show: false,

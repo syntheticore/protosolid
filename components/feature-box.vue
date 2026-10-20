@@ -25,6 +25,7 @@
             :ref="key"
             :class="{ active: activePicker == key, filled: activeFeature[key] }"
             @click="pick(key)"
+            @contextmenu.prevent.stop="clearPick(key)"
           )
 
           NumberInput(
@@ -491,6 +492,11 @@
           return Promise.resolve(false)
         }
         return this.pickerSession.start(key)
+      },
+
+      clearPick: function(key) {
+        this.activeFeature[key] = null
+        this.update()
       },
 
       selectPickedItem: function(key, item) {

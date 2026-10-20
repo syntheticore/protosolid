@@ -20,7 +20,7 @@ Cross-platform parametric CAD. Built with Rust & Electron + Nuxt
 
   ### Build as a standalone application
   ```sh
-  npm run pack-electron
+  npm run pack
   ```
 
 ## Tests
@@ -38,6 +38,13 @@ Cross-platform parametric CAD. Built with Rust & Electron + Nuxt
 
   Tests use the existing Shapex WASM package. After changing the Rust kernel,
   rebuild it with `npm run build-shapex` before running the JavaScript tests.
+
+  Shapex is a separate Rust library in `rust/lib/shapex`. Run its native tests
+  from the repository root with:
+
+  ```sh
+  cargo test --manifest-path rust/lib/shapex/Cargo.toml --release
+  ```
 
 ## License
 

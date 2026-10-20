@@ -1,77 +1,148 @@
-//! Shapex is an invariant-preserving boundary-representation CAD kernel for Rust.
+//! The invariant-preserving BREP kernel.
 //!
-//! The core crate owns exact geometry, manifold topology, Euler operators,
-//! persistent entity identity, transitive operation provenance, tessellation,
-//! mass properties, and physical-volume certification. It contains no
-//! UI, document model, JavaScript, WebAssembly, or platform binding code.
+//! Shapex is independent from document models, user interfaces,
+//! serialization transports, and platform bindings. Every topology change is
+//! made inside a [`transaction::Transaction`] and becomes visible only after
+//! complete topological and physical validation.
 //!
-//! Finished bodies enter a [`Kernel`] only through a transaction that passes both
-//! topological and geometric publication checks. Algorithms that are not yet
-//! certified return a structured [`KernelError`] instead of publishing a best-effort
-//! or physically invalid result.
+//! Operations build topology in one of two ways. Global operations (Booleans,
+//! offsets, sweeps, lofts, face edits) produce exact trimmed face patches that
+//! `sew` assembles into shells. Primitive construction and local edits (blends,
+//! seam relocation, canonicalization) use the Euler operators of `euler` and
+//! the low-level edits of `transaction`.
 
 #![forbid(unsafe_code)]
-#![cfg_attr(not(feature = "legacy"), doc = include_str!("../README.md"))]
+#![doc = include_str!("../README.md")]
 
-pub mod kernel;
-#[cfg(not(feature = "legacy"))]
+mod arena;
+mod boolean;
+mod brep_classification;
+mod bounds;
+mod canonicalize;
+mod domain;
+mod edge_blend;
+mod error;
+mod euler;
+mod extrude;
+mod features;
+mod geometry;
+mod history;
+mod identity;
+mod integration;
+mod intersection;
+mod linalg;
+mod mass_properties;
 mod math;
-
-#[cfg(not(feature = "legacy"))]
-pub use kernel::{
-    BlendRole, ChamferMode, Circle2, Compound, CreationRole, Curve2, DerivationRole,
-    EdgeHandle, FaceHandle, FilletOptions,
-    Frame3, Line2, MassProperties, Plane3, Polyline, Profile, ProfileBoundary, Resolution,
-    RevolvedSurface3, Solid, SplitKeep, SweptSurface3, Tessellate, TessellationOptions,
-    TriangleMesh, TrimmedCurve2, VertexHandle, Wire2,
-    CurveProjection2, CurveIntersection2, CurveContact, PointClassification, Polyline2,
-    OffsetCurve2, ProjectedCurve2, PlaneCurveProjection, Path2, PathOffset2,
-    OffsetOptions, JoinStyle, CurveApproximation2, RigidTransform2,
-    ProfileApproximation,
-};
-pub use kernel::{Kernel, KernelError, KernelResult, ModelTolerance};
-#[cfg(not(feature = "legacy"))]
-pub use math::*;
-
-// The pre-v2 API is isolated behind an explicit compatibility feature while
-// downstream application code migrates. It is not part of the standalone kernel.
-#[cfg(feature = "legacy")]
-mod base;
-#[cfg(feature = "legacy")]
-mod curve;
-#[cfg(feature = "legacy")]
-mod internal;
-#[cfg(feature = "legacy")]
-mod mesh;
-#[cfg(feature = "legacy")]
-mod solid;
-#[cfg(feature = "legacy")]
-mod surface;
-#[cfg(feature = "legacy")]
+mod modeling;
+mod naming;
+mod physical;
+mod periodic;
+mod planar;
+mod polygon;
+#[cfg(test)]
+mod polyhedron;
+mod primitives;
+mod profile;
+mod section;
+mod sew;
+mod sweep;
+mod sweep_limits;
+mod sweeps;
+mod tessellation;
+mod tolerance;
+mod topology;
+mod transaction;
+mod trim;
 mod transform;
-#[cfg(feature = "legacy")]
+mod validation;
 mod wire;
 
-#[cfg(feature = "legacy")]
-pub use base::*;
-#[cfg(feature = "legacy")]
-pub use curve::*;
-#[cfg(feature = "legacy")]
-pub use mesh::*;
-#[cfg(feature = "legacy")]
-pub use solid::*;
-#[cfg(feature = "legacy")]
-pub use surface::*;
-#[cfg(feature = "legacy")]
-pub use transform::*;
-#[cfg(feature = "legacy")]
-pub use wire::*;
+#[cfg(test)]
+mod tests;
 
-#[cfg(feature = "legacy")]
-#[doc(hidden)]
-pub mod geom2d;
-#[cfg(feature = "legacy")]
-pub mod io;
-#[cfg(feature = "legacy")]
-#[doc(hidden)]
-pub mod test_data;
+pub use math::*;
+pub use arena::Handle;
+pub use boolean::BooleanKind;
+pub use domain::{DomainBounds, ParameterDomain, ParameterRange};
+pub(crate) use domain::{box_center, nearest_uv, whole_periods};
+pub use error::{Diagnostic, DiagnosticKind, KernelError, KernelResult};
+pub(crate) use error::{geometry_error, invalid, topology_error, unsupported};
+pub use sweep::SweptSurface3;
+pub use geometry::{
+    Axis3, Circle2, Circle3, Cone3, Curve2, Curve2Evaluation, Curve3, CurveEvaluation, Cylinder3,
+    EdgeBlendSurface3, Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3,
+    OffsetSurface3, Plane3, Projection1, Projection2, RevolvedSurface3, RollingBallSurface3,
+    Sphere3, Surface3,
+    SurfaceCurvature, SurfaceCurve3, SurfaceEvaluation, SurfaceIntersectionCurve,
+    SurfaceProjectionPcurve2, Torus3,
+};
+pub use history::{
+    BlendRole, ChangeKind, CreationRole, DerivationRole, OperationHistory, Origin,
+    ProfileBoundary, SurfaceChart,
+};
+pub use intersection::{
+    CurveCurveHit, CurveSurfaceHit, IntersectionKind, IntersectionSet, SurfaceSurfaceCurve,
+};
+pub use mass_properties::{MassProperties, SurfaceProperties};
+pub use modeling::{
+    ChamferMode, Compound, EdgeHandle, FaceHandle, FilletOptions, Resolution, ResolvableEntity,
+    Solid, SplitKeep, VertexHandle,
+};
+pub use naming::PersistentId;
+#[cfg(test)]
+pub(crate) use polyhedron::PolyhedralMesh;
+pub use profile::Profile;
+pub use tessellation::{Polyline, Tessellate, TessellationOptions, TriangleMesh};
+pub use tolerance::ModelTolerance;
+pub use topology::{
+    Body, BodyId, Coedge, CoedgeId, Edge, EdgeId, EntityId, Face, FaceId, FaceOrientation, Loop,
+    LoopId, LoopKind, Shell, ShellId, ShellKind, Topology, Vertex, VertexId,
+};
+pub use transform::RigidTransform3;
+pub use validation::ValidationReport;
+pub use wire::{TrimmedCurve2, Wire2};
+pub use planar::{CurveProjection2, CurveIntersection2, CurveContact, PointClassification, Polyline2, OffsetCurve2};
+pub use planar::{Path2, PathOffset2, OffsetOptions, JoinStyle};
+pub use planar::{ProjectedCurve2, PlaneCurveProjection};
+pub use planar::CurveApproximation2;
+pub use planar::ProfileApproximation;
+pub use planar::RigidTransform2;
+
+/// Owns one BREP state. Results of modeling operations each own a kernel.
+#[derive(Debug)]
+pub struct Kernel {
+    tolerance: ModelTolerance,
+    topology: Topology,
+    tessellation_cache: std::sync::Mutex<tessellation::TessellationCache>,
+}
+
+impl Kernel {
+    pub fn new(tolerance: ModelTolerance) -> KernelResult<Self> {
+        tolerance.validate()?;
+        Ok(Self {
+            tolerance,
+            topology: Topology::new(),
+            tessellation_cache: Default::default(),
+        })
+    }
+
+    pub fn tolerance(&self) -> ModelTolerance {
+        self.tolerance
+    }
+
+    pub fn topology(&self) -> &Topology {
+        &self.topology
+    }
+
+    /// Re-run the complete publication invariant suite.
+    pub fn validate(&self) -> ValidationReport {
+        validation::validate(&self.topology, self.tolerance)
+    }
+
+    /// Begin an isolated transaction with an automatically generated operation
+    /// identity. Dropping it rolls back; finishing validates and atomically
+    /// publishes it.
+    pub(crate) fn begin_operation(&mut self) -> transaction::Transaction<'_> {
+        transaction::Transaction::new(self, identity::fresh_uuid())
+    }
+}

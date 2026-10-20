@@ -3,10 +3,6 @@
 Shapex is a full BREP cad kernel with fully analytical/implicit/nurbs surfaces and watertight topology guarantees. Its safe API returns a solid only after topology, trimming geometry, manifoldness, and physical volume have been
 validated. It's pleasant to use directly in any rust application, but also make it easy to use in parametrical cad applications, which need to deal with the topological naming problem and re-identify faces and edges across operations. Geometry is always represented using the simplest possible mathematical form. For instance, a cylindrical surface can be described as a surface of revolution, instead of using NURBS. Neighboring surfaces of the same type get unified automatically if possible. (Two planar surfaces of the same orientation for instance)
 
-The old implementation is available only through
-the isolated `legacy` compatibility feature while callers migrate.
-
-
 ```rust
 use shapex::{
     ModelTolerance, Plane3, Point2, Profile, TessellationOptions, TrimmedCurve2,
@@ -68,3 +64,10 @@ validation of the bodies it produced.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the invariants, ownership model,
 certification boundary, and current supported geometry.
+
+The crate's modules live directly in `src/`, and its public types are exported
+from `shapex`. Run its native tests from this directory with:
+
+```sh
+cargo test --release
+```

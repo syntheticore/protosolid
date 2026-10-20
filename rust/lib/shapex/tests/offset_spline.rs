@@ -1,5 +1,4 @@
-use shapex::kernel::*;
-use shapex::Point2;
+use shapex::*;
 
 // Two adjacent Hermite spans from an offset spline. The intersection solver
 // reports their shared endpoint within its root tolerance, not exactly on it.

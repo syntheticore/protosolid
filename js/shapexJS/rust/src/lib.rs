@@ -7,11 +7,9 @@
 use js_sys::{Float64Array, Uint32Array, JSON};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use shapex::kernel::{
+use shapex::{
     Axis3, BooleanKind, Circle2, Curve2, Curve3, Line2, NurbsCurve2, Origin, ParameterRange,
     RigidTransform3, Surface3, SurfaceChart,
-};
-use shapex::{
     ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
     ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, Solid, SplitKeep,
     TessellationOptions, TriangleMesh, TrimmedCurve2, Vec2, Vec3, VertexHandle, Wire2,
@@ -22,7 +20,7 @@ mod planar;
 use planar::NativeCurve3;
 
 fn js_error(error: impl std::fmt::Display + 'static) -> JsValue {
-    if let Some(error) = (&error as &dyn std::any::Any).downcast_ref::<shapex::kernel::KernelError>() {
+    if let Some(error) = (&error as &dyn std::any::Any).downcast_ref::<shapex::KernelError>() {
         let diagnostics = error.diagnostics().iter().map(|d| serde_json::json!({
             "kind": format!("{:?}", d.kind), "message": d.message,
             "operation": d.operation, "requiredTolerance": d.required_tolerance,
@@ -34,7 +32,7 @@ fn js_error(error: impl std::fmt::Display + 'static) -> JsValue {
     JsValue::from_str(&error.to_string())
 }
 
-fn id_string(id: shapex::kernel::PersistentId) -> String {
+fn id_string(id: shapex::PersistentId) -> String {
     format!("{}:{:016x}", id.namespace, id.local)
 }
 
@@ -103,7 +101,7 @@ impl CurveDto {
     fn build(self) -> Result<Curve2, JsValue> {
         match self {
             Self::Retained { key } => planar::retained_curve(key),
-            Self::Offset { base, distance } => shapex::kernel::OffsetCurve2::new(base.build()?, distance).map(Into::into).map_err(js_error),
+            Self::Offset { base, distance } => shapex::OffsetCurve2::new(base.build()?, distance).map(Into::into).map_err(js_error),
             Self::Line { origin, direction } => Line2::new(
                 Point2::new(origin[0], origin[1]),
                 Vec2::new(direction[0], direction[1]),
@@ -499,8 +497,8 @@ impl NativeFace {
     #[wasm_bindgen(getter)]
     pub fn orientation(&self) -> String {
         match self.inner.orientation() {
-            shapex::kernel::FaceOrientation::Forward => "forward",
-            shapex::kernel::FaceOrientation::Reversed => "reversed",
+            shapex::FaceOrientation::Forward => "forward",
+            shapex::FaceOrientation::Reversed => "reversed",
         }.to_owned()
     }
 

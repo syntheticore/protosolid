@@ -16,7 +16,7 @@ export const test = (name, evaluate) => nodeTest(name, () => {
 const document9 = JSON.parse(await readFile(new URL('../fixtures/revolve-limits-document-9.json', import.meta.url)))
 await initializeShapex({ wasm: await readFile(new URL('../../js/shapexJS/pkg/shapex_js_wasm_bg.wasm', import.meta.url)) })
 
-// This raw legacy fixture is replayed from its sketch generators. Tests select
+// This saved fixture is replayed from its sketch generators. Tests select
 // their authored construction roles, rather than the former display names.
 export function construction(item, owner, role, source) {
   return item.topology.anchors.some(anchor => {

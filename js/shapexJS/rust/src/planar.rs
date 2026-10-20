@@ -1,7 +1,7 @@
 //! Private transport. Public naming, values and ownership live in ShapexJS.
 use super::*;
 use js_sys::{Array, Object, Reflect};
-use shapex::kernel::{
+use shapex::{
     CurveContact, CurveIntersection2, JoinStyle, OffsetOptions, Path2, PlaneCurveProjection,
     PointClassification,
 };
@@ -145,7 +145,7 @@ impl NativeCurve2 {
     pub fn domain(&self) -> JsValue {
         let domain = self.inner.curve().domain();
         let bounds = match domain.bounds {
-            shapex::kernel::DomainBounds::Bounded(range) => Some([range.start, range.end]),
+            shapex::DomainBounds::Bounded(range) => Some([range.start, range.end]),
             _ => None,
         };
         json(serde_json::json!({"bounds":bounds,"period":domain.period}))
@@ -190,7 +190,7 @@ impl NativeCurve2 {
     pub fn transformed(&self, angle: f64, x: f64, y: f64, tol: &[f64]) -> Result<Self, JsValue> {
         self.inner
             .transformed(
-                shapex::kernel::RigidTransform2::new(angle, Vec2::new(x, y)).map_err(js_error)?,
+                shapex::RigidTransform2::new(angle, Vec2::new(x, y)).map_err(js_error)?,
                 tolerance(tol)?,
             )
             .map(Self::wrap)
@@ -311,7 +311,7 @@ pub fn classify_profile(value: JsValue, x: f64, y: f64) -> Result<String, JsValu
 }
 
 /// Build a path from its transport form, with the tolerance it was created with.
-fn path(value: JsValue, closed: bool) -> Result<(Path2, shapex::kernel::ModelTolerance), JsValue> {
+fn path(value: JsValue, closed: bool) -> Result<(Path2, shapex::ModelTolerance), JsValue> {
     let dto = from_js::<WireDto>(value)?;
     let tol = dto.tolerance.into();
     let path = Path2::new(
@@ -425,13 +425,13 @@ impl NativeCurve3 {
         let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
         let inner: Curve3 = match from_js::<Curve3Dto>(value)? {
             Curve3Dto::Line { origin, direction } => {
-                shapex::kernel::Line3::new(p(origin), v(direction)).map(Into::into)
+                shapex::Line3::new(p(origin), v(direction)).map(Into::into)
             }
             Curve3Dto::Circle {
                 center,
                 x_radius,
                 y_radius,
-            } => shapex::kernel::Circle3::new(
+            } => shapex::Circle3::new(
                 p(center),
                 v(x_radius),
                 v(y_radius),
@@ -443,7 +443,7 @@ impl NativeCurve3 {
                 control_points,
                 weights,
                 knots,
-            } => shapex::kernel::NurbsCurve3::new(
+            } => shapex::NurbsCurve3::new(
                 degree,
                 control_points.into_iter().map(p).collect(),
                 weights,

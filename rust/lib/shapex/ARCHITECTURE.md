@@ -233,10 +233,3 @@ only to established source/output pairs. They are conservative about representat
 changes and never turn a tolerance-sized edit into a permanently unchanged revision.
 Semantic creation roles identify extrusion caps and the profile segment behind
 each swept face without requiring caller-supplied kernel names.
-
-## Legacy code
-
-The pre-v2 curve, surface, and solid modules remain temporarily available while
-their sound mathematical portions are migrated. New modeling algorithms target
-`kernel` topology only. Once feature parity is reached, legacy topology and its
-`Rc<RefCell<_>>` graph will be removed rather than maintained as a second kernel.

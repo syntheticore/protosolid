@@ -516,6 +516,8 @@ export class Spline extends SketchElement {
   center() { return this.sample(0.5) }
 
   geometry() {
+    // The first drawing click has only coincident preview control points.
+    if(this.points.every(point => point.almost(this.points[0]))) return null
     const degree = Math.min(5, this.points.length - 1)
     const [values, multiplicities] = Spline.clampedKnots(this.points.length, degree)
     const knots = values.flatMap((value, i) => Array(multiplicities[i]).fill(value))

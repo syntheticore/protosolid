@@ -13,5 +13,5 @@
 </style>
 
 <script setup>
-  import logoUrl from '../electron/build/icon-source.png'
+  import logoUrl from '../electron/build/icon-source.svg'
 </script>

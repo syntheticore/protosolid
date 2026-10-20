@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    Drawn on a 16 x 16 pixel grid of 64 units: horizontal and vertical edges land on
+    whole pixels at every multiple of 16 px. Strokes are 3 pixels, the counter 4 x 4.
+  -->
+  <defs>
+    <linearGradient id="top" gradientUnits="userSpaceOnUse" x1="384" y1="256" x2="800" y2="64">
+      <stop offset="0" stop-color="#005ffb"/>
+      <stop offset="0.3" stop-color="#0873fb"/>
+      <stop offset="1" stop-color="#1c99fc"/>
+    </linearGradient>
+    <linearGradient id="stem" gradientUnits="userSpaceOnUse" x1="192" y1="0" x2="384" y2="0">
+      <stop offset="0" stop-color="#0048e5"/>
+      <stop offset="0.5" stop-color="#0057f4"/>
+      <stop offset="1" stop-color="#0161fa"/>
+    </linearGradient>
+    <linearGradient id="right" gradientUnits="userSpaceOnUse" x1="640" y1="0" x2="832" y2="0">
+      <stop offset="0" stop-color="#004ce8"/>
+      <stop offset="0.25" stop-color="#005cf9"/>
+      <stop offset="1" stop-color="#0468fa"/>
+    </linearGradient>
+    <linearGradient id="foldTL" gradientUnits="userSpaceOnUse" x1="320" y1="192" x2="235" y2="277">
+      <stop offset="0" stop-color="#00082a" stop-opacity="0.95"/>
+      <stop offset="0.1" stop-color="#00082a" stop-opacity="0.75"/>
+      <stop offset="0.3" stop-color="#00082a" stop-opacity="0.45"/>
+      <stop offset="0.6" stop-color="#00082a" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#00082a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="foldBR" gradientUnits="userSpaceOnUse" x1="704" y1="576" x2="619" y2="661">
+      <stop offset="0" stop-color="#00082a" stop-opacity="0.9"/>
+      <stop offset="0.1" stop-color="#00082a" stop-opacity="0.75"/>
+      <stop offset="0.3" stop-color="#00082a" stop-opacity="0.45"/>
+      <stop offset="0.6" stop-color="#00082a" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#00082a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="tuck" gradientUnits="userSpaceOnUse" x1="384" y1="0" x2="512" y2="0">
+      <stop offset="0" stop-color="#00082a" stop-opacity="0.6"/>
+      <stop offset="0.4" stop-color="#00082a" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#00082a" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Silhouette underlay hides anti-aliasing seams between the folded strips -->
+  <path fill="#0055f0" fill-rule="evenodd" d="M203 181 L309 75 Q320 64 336 64 L688 64 Q704 64 715 75 L821 181 Q832 192 832 208 L832 560 Q832 576 821 587 L715 693 Q704 704 688 704 L384 704 L384 928 Q384 960 352 960 L224 960 Q192 960 192 928 L192 208 Q192 192 203 181 Z M384 256 L384 512 L640 512 L640 256 Z"/>
+
+  <!-- Stem -->
+  <path fill="url(#stem)" d="M256 128 L384 256 L384 928 Q384 960 352 960 L224 960 Q192 960 192 928 L192 208 Q192 192 203 181 Z"/>
+  <path fill="url(#foldTL)" d="M256 128 L384 256 L384 928 Q384 960 352 960 L224 960 Q192 960 192 928 L192 208 Q192 192 203 181 Z"/>
+
+  <!-- Bottom strip, tucked under the stem and the right strip -->
+  <path fill="#0057f6" d="M384 512 L640 512 L768 640 L715 693 Q704 704 688 704 L384 704 Z"/>
+  <path fill="url(#tuck)" d="M384 512 L640 512 L768 640 L715 693 Q704 704 688 704 L384 704 Z"/>
+  <path fill="url(#foldBR)" d="M384 512 L640 512 L768 640 L715 693 Q704 704 688 704 L384 704 Z"/>
+
+  <!-- Right strip -->
+  <path fill="url(#right)" d="M640 256 L832 256 L832 560 Q832 576 821 587 L768 640 L640 512 Z"/>
+
+  <!-- Top strip -->
+  <path fill="url(#top)" d="M256 128 L309 75 Q320 64 336 64 L688 64 Q704 64 715 75 L821 181 Q832 192 832 208 L832 256 L384 256 Z"/>
+</svg>

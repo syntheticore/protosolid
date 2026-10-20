@@ -33,7 +33,7 @@ electron/app
 
 # Generated Electron icon assets; retain the master artwork and instructions
 /electron/build/*
-!/electron/build/icon-source.png
+!/electron/build/icon-source.svg
 !/electron/build/README.md
 
 docs

@@ -887,7 +887,7 @@
           try { e.currentTarget.setPointerCapture(e.pointerId) } catch(_) {}
         }
         const [vec, coords] = this.snap(e)
-        if(vec) this.activeTool.mouseDown(vec, coords, e)
+        if(vec || this.activeTool.probesSurface) this.activeTool.mouseDown(vec, coords, e)
       },
 
       setOrbiting: function(pressed) {
@@ -1012,7 +1012,7 @@
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         this.pointerCoords = coords
-        if(this.pickingPath && vec) this.pickingPath.target = vec
+        if(this.pickingPath) this.pickingPath.target = coords
         if(vec || this.activeTool.probesSurface) this.activeTool.mouseMove(vec, coords)
         // At close zoom, background rays can miss the projection plane.
         // Clear hover even when there is no world position for the tool.
@@ -1119,7 +1119,7 @@
         // Picker centers are window coordinates; the drawpad uses viewport coordinates.
         const rect = this.$refs.drawpad.getBoundingClientRect()
         const origin = { x: path.origin.x - rect.left, y: path.origin.y - rect.top }
-        path.targetPos = this.renderer.toScreen(path.target)
+        path.targetPos = path.target.isVector2 ? path.target : this.renderer.toScreen(path.target)
         path.data = this.buildPath(origin, path.targetPos)
       },
 

@@ -79,7 +79,7 @@ class Tool {
   mouseUp(vec, coords) {
     const lastCoords = this.lastCoords
     this.lastCoords = null
-    if(!vec || !lastCoords ||
+    if((!vec && !this.probesSurface) || !lastCoords ||
       coords.distanceTo(lastCoords) > dragThreshold) return this.viewport.renderer.render()
     this.click(vec, coords)
     // window.gc && window.gc()
@@ -584,6 +584,7 @@ export class ManipulationTool extends HighlightTool {
     this.localSpace = true
     this.preferPointObjects = true
     this.visibleEdgesOnly = !this.viewport.document.activeSketch
+    this.probesSurface = this.visibleEdgesOnly
     this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'face', 'edge', 'plane'])
   }
 
@@ -1096,6 +1097,7 @@ class PickTool extends HighlightTool {
     super(component, viewport, selectors)
     this.callback = callback
     this.localSpace = false
+    this.probesSurface = true
     this.chooseAmongItems = false
   }
 

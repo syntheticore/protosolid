@@ -2354,6 +2354,7 @@ Serialize.register(SplitFeature, 'SplitFeature')
 
 export class DraftFeature extends SolidFeature {
   static icon = 'draft'
+  static modifiedFaceInputs = ['faces']
   constructor(document) {
     super(document, true, 'Draft', {
       ref_plane: {
@@ -2725,6 +2726,7 @@ Serialize.register(ShellFeature, 'ShellFeature')
 
 export class OffsetFeature extends SolidFeature {
   static icon = 'offset-faces'
+  static modifiedFaceInputs = ['faces']
   constructor(doc) {
     super(doc, false, 'Offset', {
       faces: {
@@ -2873,6 +2875,7 @@ Serialize.register(RemoveSolidsFeature, 'RemoveSolidsFeature')
 
 export class MoveFeature extends SolidFeature {
   static icon = 'arrows-alt'
+  static modifiedFaceInputs = ['faces']
   constructor(doc) {
     super(doc, false, 'Move', {
       faces: {
@@ -2962,6 +2965,7 @@ Serialize.register(MoveFeature, 'MoveFeature')
 
 export class ReplaceFeature extends SolidFeature {
   static icon = 'exchange-alt'
+  static modifiedFaceInputs = ['face']
   constructor(doc) {
     super(doc, false, 'Replace', {
       face: {

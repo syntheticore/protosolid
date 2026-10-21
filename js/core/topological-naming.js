@@ -10,7 +10,9 @@ const ancestry = sources => unique(sources.flatMap(source =>
 
 export function topologyIncludesFeature(topology, feature) {
   return topology.origin.feature?.id == feature.id ||
-    [topology.identity, ...topology.ancestors].some(name => name.startsWith(`${feature.id}/topology/`))
+    [topology.identity, ...topology.ancestors].some(name => name.startsWith(`${feature.id}/topology/`)) ||
+    (feature.constructor.modifiedFaceInputs || []).some(key => feature[key] &&
+      [feature[key]()].flat().some(ref => topology.names.includes(ref.selection.identity)))
 }
 
 export function withTopologyNaming(feature, evaluate) {

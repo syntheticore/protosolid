@@ -8,6 +8,11 @@ const unique = values => [...new Set(values)].sort()
 const ancestry = sources => unique(sources.flatMap(source =>
   [source.topology.identity, ...source.topology.ancestors]))
 
+export function topologyIncludesFeature(topology, feature) {
+  return topology.origin.feature?.id == feature.id ||
+    [topology.identity, ...topology.ancestors].some(name => name.startsWith(`${feature.id}/topology/`))
+}
+
 export function withTopologyNaming(feature, evaluate) {
   const previous = activeFeature
   activeFeature = feature

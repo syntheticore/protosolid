@@ -110,6 +110,15 @@
       )
 
       //- Floating UI widgets
+      Transition(name="hide-selector")
+        SelectionFeatureWidget(
+          v-if="isReady && selectionWidgetItem"
+          :document="document"
+          :item="selectionWidgetItem"
+          :renderer="renderer"
+          :coords="pointerCoords"
+        )
+
       TransitionGroup(name="hide-selector")
         SelectorWidget(
           v-for="(widget, i) in widgets"
@@ -398,6 +407,12 @@
           return `${item?.id || ''}:${component?.id || ''}`
         })
         return `${feature?.id || ''}|${creatingFeature?.id || ''}|${sketch?.id || ''}|${panel || ''}|${items.join(',')}`
+      },
+
+      selectionWidgetItem: function() {
+        if(this.widgets.length || !(this.activeTool instanceof ManipulationTool) || this.document.activeSketch) return null
+        const item = this.document.selection.items.at(-1)
+        return item instanceof Face || item instanceof Edge ? item : null
       },
 
       hasDrawingInput: function() {
@@ -787,7 +802,9 @@
       click: function(e) {
         if(e.shiftKey || e.altKey || this.document.activeSketch) return
         if(this.activeTool instanceof ManipulationTool) {
-          this.activeTool.canvasClick(this.getMouseCoords(e), e)
+          const coords = this.getMouseCoords(e)
+          this.pointerCoords = coords
+          this.activeTool.canvasClick(coords, e)
         }
       },
 

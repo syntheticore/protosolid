@@ -585,7 +585,7 @@ export class ManipulationTool extends HighlightTool {
     this.preferPointObjects = true
     this.visibleEdgesOnly = !this.viewport.document.activeSketch
     this.probesSurface = this.visibleEdgesOnly
-    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'face', 'edge', 'plane'])
+    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'point', 'face', 'edge', 'plane'])
   }
 
   acceptsInput(item) {
@@ -604,7 +604,7 @@ export class ManipulationTool extends HighlightTool {
   }
 
   shouldPickImmediately(items) {
-    return items[0] instanceof Face || items[0] instanceof Edge
+    return items.every(item => item instanceof Face || item instanceof Edge)
   }
 
   click(vec, coords) {

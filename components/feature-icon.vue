@@ -135,6 +135,8 @@
 
 <script>
 
+  import { topologyIncludesFeature } from '../js/core/topological-naming.js'
+
   export default {
     name: 'FeatureIcon',
 
@@ -170,12 +172,13 @@
 
       featureStyle() {
         const error = this.feature.error
-        const isCreatedByFeature = item => item?.topology?.origin.feature?.id == this.feature.id &&
-          (item.typename() == 'Face' || item.typename() == 'Edge')
+        const isRelatedToFeature = item => item?.topology &&
+          (item.typename() == 'Face' || item.typename() == 'Edge') &&
+          topologyIncludesFeature(item.topology, this.feature)
         const style = {
           active: this.isActive,
           selected: this.document.selection.has(this.feature),
-          highlighted: isCreatedByFeature(this.highlight) || this.document.selection.items.some(isCreatedByFeature),
+          highlighted: isRelatedToFeature(this.highlight) || this.document.selection.items.some(isRelatedToFeature),
           dimmed: this.isDimmed,
           dragTarget: this.isDragTarget,
           targetLeft: this.targetLeft,

@@ -15,9 +15,10 @@
   const pickerSelection = inject('picker-selection')
   const renderNeeded = inject('render-needed')
 
-  const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value ||
-    props.face.topology && [highlight.value, props.document.activeFeature || props.document.creatingFeature]
-      .some(feature => feature instanceof Feature && topologyIncludesFeature(props.face.topology, feature)))
+  const highlightedFeature = computed(() => props.face.topology &&
+    [highlight.value, props.document.activeFeature || props.document.creatingFeature]
+      .find(feature => feature instanceof Feature && topologyIncludesFeature(props.face.topology, feature)))
+  const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value || !!highlightedFeature.value)
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.face) ||
     pickerSelection.value.get(props.component.id)?.has(props.face.id))
 
@@ -62,8 +63,9 @@
 
   renderNeeded.value = true
 
-  watch(highlighted, () => {
+  watch(() => [highlighted.value, highlightedFeature.value?.operation], () => {
     faceMesh.alcHovered = highlighted.value
+    faceMesh.alcCutHovered = highlightedFeature.value?.operation == 'cut'
     renderNeeded.value = true
   }, { immediate: true })
 

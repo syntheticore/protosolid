@@ -299,6 +299,9 @@ class Materials {
       depthWrite: false,
     })
 
+    this.visibleCutHighlightLine = this.visibleHighlightLine.clone()
+    this.visibleCutHighlightLine.color.copy(this.previewSubtractSurface.color)
+
     this.invisibleSurface = new THREE.MeshBasicMaterial({
       side: THREE.DoubleSide,
       transparent: true,

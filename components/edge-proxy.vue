@@ -19,12 +19,13 @@
   const selected = computed(() => props.document.selection.has(props.edge) ||
     pickerSelection.value.get(props.component.id)?.has(props.edge.id))
   const directlyHighlighted = computed(() => toRaw(props.edge) == toRaw(highlight.value))
+  const highlightedFeature = computed(() =>
+    [highlight.value, props.document.activeFeature || props.document.creatingFeature].find(feature =>
+      feature instanceof Feature && props.edge.connectedFaces()
+        .some(face => face.topology && topologyIncludesFeature(face.topology, feature))))
   const highlighted = computed(() => {
     const hovered = toRaw(highlight.value)
-    return directlyHighlighted.value ||
-      [hovered, props.document.activeFeature || props.document.creatingFeature].some(feature =>
-        feature instanceof Feature && props.edge.connectedFaces()
-          .some(face => face.topology && topologyIncludesFeature(face.topology, feature))) ||
+    return directlyHighlighted.value || !!highlightedFeature.value ||
       hovered instanceof Face &&
       toRaw(props.edge.solid) == toRaw(hovered.solid) &&
       props.edge.connectedFaces().some(face => toRaw(face) == hovered)
@@ -50,7 +51,7 @@
   window.alcRenderer.add(edgeMesh, props.parentActive)
   renderNeeded.value = true
 
-  watch(() => [props.edge, highlighted.value, directlyHighlighted.value, selected.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
+  watch(() => [props.edge, highlighted.value, highlightedFeature.value?.operation, directlyHighlighted.value, selected.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
     edgeMesh.visible = props.displayMode != 'exportPreview' && props.colorMode != 'interference'
     edgeMesh.material = getMaterial()
     hiddenMesh.visible = props.displayMode == 'hiddenLines'
@@ -59,6 +60,7 @@
 
   function getMaterial() {
     if(props.displayMode == 'exportPreview' || props.colorMode == 'interference') return materials.invisibleLine
+    if(highlightedFeature.value?.operation == 'cut' && !directlyHighlighted.value) return materials.visibleCutHighlightLine
     return highlighted.value ?
       !directlyHighlighted.value || props.displayMode == 'hiddenLines' ? materials.visibleHighlightLine : materials.highlightLine
       :

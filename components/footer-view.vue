@@ -36,7 +36,7 @@
           div(v-for="prop in description.properties")
             span {{ prop.title }}
             span(v-if="!prop.warn")
-              | {{ prop.unit ? prop.value.toFixed(2) : prop.value }} {{ prop.unit }}
+              | {{ prop.approximate ? '≈ ' : '' }}{{ prop.unit ? prop.value.toFixed(2) : prop.value }} {{ prop.unit }}
             span.warn(v-else) {{ prop.value }}
 
 </template>
@@ -124,10 +124,13 @@
 <script>
 
   import pluralize from 'pluralize'
+  import { shapex as sx } from '../js/core/shapex.js'
 
   function groupBy(xs, key) {
     return xs.reduce(function(rv, x) {
-      (rv[x[key]()] = rv[x[key]()] || []).push(x)
+      const name = key(x)
+      rv[name] ||= []
+      rv[name].push(x)
       return rv
     }, {})
   }
@@ -167,9 +170,10 @@
       description: function() {
         const selection = [...this.document.selection.items]
         const uniqueNames = selection.map(item => item.typename() ).filter((value, index, self) => self.indexOf(value) === index )
-        const groups = groupBy(selection, 'typename')
+        const groups = groupBy(selection, this.selectionType)
         const numGroups = Object.keys(groups).length
         const propsPerItem = selection.map(item => this.produceProperties(item) ).filter(Boolean)
+        const topologySelection = uniqueNames.every(type => type == 'Face' || type == 'Edge')
         return {
           title: Object.keys(groups).map(typename => {
             const group = groups[typename]
@@ -177,15 +181,18 @@
           }).join(' + '),
 
           properties: propsPerItem.reduce((acc, propSet) => {
+            if(topologySelection) Object.keys(propSet).forEach(key => {
+              if(!acc[key]) acc[key] = { ...propSet[key], value: 0 }
+            })
             Object.keys(acc).forEach(key => {
               const prop = acc[key]
               const otherProp = propSet[key]
               if(!otherProp) {
-                delete acc[key]
+                if(!topologySelection) delete acc[key]
               } else if(typeof prop.value == 'number' && typeof otherProp.value == 'number') {
                 prop.value += otherProp.value
+                prop.approximate ||= otherProp.approximate
               }
-              prop.title = key
             })
             return acc
           }),
@@ -196,6 +203,30 @@
     },
 
     methods: {
+      selectionType: function(item) {
+        if(item.typename() == 'Face') {
+          const names = {
+            plane: 'Planar',
+            cylinder: 'Cylindrical',
+            sphere: 'Spherical',
+            cone: 'Conical',
+            torus: 'Toroidal',
+            revolved: 'Revolved',
+            swept: 'Swept',
+            nurbs: 'Spline',
+            offset: 'Offset',
+            'rolling-ball': 'Fillet',
+            ruled: 'Ruled',
+          }
+          return `${names[item.geom().surface().kind] || 'Curved'} Face`
+        }
+        if(item.typename() != 'Edge') return item.typename()
+        const curve = item.geom().curve()
+        if(curve instanceof sx.Line3) return 'Straight Edge'
+        if(curve instanceof sx.Circle3) return 'Circular Edge'
+        return 'Curved Edge'
+      },
+
       produceProperties: function(item) {
         const type = item.typename().split(' ')[0]
         if(type == 'Solid') {
@@ -241,6 +272,30 @@
               value: item.getArea() / 100.0,
             },
           }
+        } else if(type == 'Face') {
+          return {
+            Area: {
+              title: 'Surface Area',
+              unit: 'cm²',
+              value: item.area() / 100.0,
+            },
+          }
+        } else if(type == 'Edge') {
+          const curve = item.geom().curve()
+          const circular = curve instanceof sx.Circle3
+          const properties = {
+            Length: {
+              title: 'Length',
+              unit: 'mm',
+              value: item.length(),
+              approximate: !(curve instanceof sx.Line3 || circular),
+            },
+          }
+          if(circular && this.document.selection.items.length == 1) {
+            properties.Radius = { title: 'Radius', unit: 'mm', value: curve.radius() }
+            properties.Diameter = { title: 'Diameter', unit: 'mm', value: curve.radius() * 2 }
+          }
+          return properties
         } else if(type == 'Line' || type == 'Spline') {
           return {
             Length: {

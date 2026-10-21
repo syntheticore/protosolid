@@ -374,6 +374,19 @@ export class Edge {
   typename() {
     return 'Edge'
   }
+  length() {
+    const curve = this.geom().curve()
+    if(curve instanceof sx.Line3) {
+      const [start, end] = this.vertices()
+      return start.distanceTo(end)
+    }
+    if(curve instanceof sx.Circle3) {
+      return curve.radius() * Math.abs(this.geom().trimmedCurve().range().span())
+    }
+    const points = this.tesselate()
+    return points.reduce((length, point, index) =>
+      index ? length + point.distanceTo(points[index - 1]) : length, 0)
+  }
   axialReference() {
     if (!this.getAxis()) throw new Error("Cannot provide axis from non-linear edge")
     return new AxialReference(this.edgeReference())

@@ -20,7 +20,7 @@
     pickerSelection.value.get(props.component.id)?.has(props.edge.id))
   const directlyHighlighted = computed(() => toRaw(props.edge) == toRaw(highlight.value))
   const highlightedFeature = computed(() =>
-    [highlight.value, props.document.activeFeature || props.document.creatingFeature].find(feature =>
+    [highlight.value, props.document.activeFeature || props.document.creatingFeature, ...props.document.selection.items].find(feature =>
       feature instanceof Feature && props.edge.connectedFaces()
         .some(face => face.topology && topologyIncludesFeature(face.topology, feature))))
   const highlighted = computed(() => {

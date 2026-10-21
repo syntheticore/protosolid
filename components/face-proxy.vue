@@ -55,7 +55,12 @@
 
   renderNeeded.value = true
 
-  watch(() => [props.face, highlighted.value, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
+  watch(highlighted, () => {
+    faceMesh.alcHovered = highlighted.value
+    renderNeeded.value = true
+  }, { immediate: true })
+
+  watch(() => [props.face, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
     updateAnalysisGeometry()
     faceMesh.visible = props.displayMode != 'exportPreview'
     faceMesh.alcPathTracingMaterial = getSurfaceMaterial()
@@ -205,7 +210,7 @@
       return props.parentActive ? materials.interferenceSurface : materials.ghostSurface
     }
     const diagnostic = props.colorMode.startsWith('diagnostic:')
-    return highlighted.value || (props.parentSelected && !diagnostic) ?
+    return props.parentSelected && !diagnostic ?
       materials.highlightSurface
       :
       props.displayMode == 'wireframe' ?

@@ -11,6 +11,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import materials from './materials.js'
 import DualCamera from './three/dual-camera.js'
 import PathTracingViewport from './three/path-tracing-viewport.js'
+import HoverGlow from './three/hover-glow.js'
 import SketchPlane from './three/sketch-plane.js'
 import DimensionControls from './three/dimension-controls.js'
 import ShadowCatcher from './three/shadow-catcher.js'
@@ -122,6 +123,7 @@ export default class Renderer {
     const setPixelRatio = () => {
       const pixelRatio = this.getPixelRatio()
       this.renderer.setPixelRatio(pixelRatio)
+      this.hoverGlow?.resize()
       // Line2 raycasting accepts an additional screen-space width that is
       // independent of the rendered material linewidth. Keep it in CSS-pixel
       // terms so edge and sketch-curve picking feels the same on HiDPI screens.
@@ -423,6 +425,14 @@ export default class Renderer {
     if(!pathTraced) {
       this.pathTracingViewport.stop()
       this.renderer.render(this.scene, this.activeCamera)
+      let hovered = false
+      this.scene.traverseVisible(object => {
+        if(object.alcHovered) hovered = true
+      })
+      if(hovered) {
+        this.hoverGlow ||= new HoverGlow(this.renderer, this.scene)
+        this.hoverGlow.render(this.activeCamera)
+      }
     }
     this.emitter.emit('render')
   }
@@ -681,6 +691,7 @@ export default class Renderer {
     const width = parent.offsetWidth
     const height = parent.offsetHeight
     this.renderer.setSize(width, height)
+    this.hoverGlow?.resize()
 
     // Update camera projection
     const aspect = width / height
@@ -701,6 +712,7 @@ export default class Renderer {
   }
 
   dispose() {
+    this.hoverGlow?.dispose()
     this.pathTracingViewport.dispose()
     this.viewControls.dispose()
     this.gizmos.forEach(gizmo => gizmo.dispose() )

@@ -194,6 +194,8 @@ export default class Renderer {
     })
 
     this.viewControls.addEventListener('end', () => {
+      // OrbitControls also emits 'end' for clicks that never started a camera gesture.
+      if(!this.viewInteracting) return
       // this.isOrbiting = false
       this.viewInteracting = false
       this.updateGizmoEnabled()
@@ -625,9 +627,18 @@ export default class Renderer {
     )
   }
 
-  objectsAtScreen(coords, types, includeInactive) {
+  objectsAtScreen(coords, types, includeInactive, visibleEdgesOnly = false) {
     if(types && !Array.isArray(types)) types = [types]
-    const intersects = this.hitTest(coords, includeInactive)
+    let intersects = this.hitTest(coords, includeInactive)
+    if(visibleEdgesOnly) intersects = intersects.filter(hit => {
+      if(!hit.object.alcTypes?.includes('edge')) return true
+      // Test at the edge, so the pick margin still works beside sloping faces.
+      const point = hit.pointOnLine
+      this.dualCamera.setRaycaster(this.raycaster, point.clone().project(this.activeCamera))
+      const distance = this.raycaster.ray.origin.distanceTo(point) - Math.max(1, point.length()) * 1e-6
+      return !this.raycaster.intersectObjects(includeInactive ? this.scene.children : this.traceables.children, true)
+        .some(hit => hit.object.visible && hit.object.alcTypes?.includes('face') && hit.distance < distance)
+    })
     const objects = Array.from(new Set(intersects.map(obj => obj.object )))
     return objects.filter(obj => !types || types.some(t =>
       obj.alcTypes && obj.alcTypes.some(ot => ot == t )

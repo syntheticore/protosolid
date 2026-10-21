@@ -4,14 +4,23 @@
 
   import { toRaw } from 'vue'
   import * as THREE from 'three'
+  import { Face } from '../js/core/geom3d.js'
   import materials from '../js/materials.js'
   import HiddenLine from '../js/three/hidden-line.js'
 
-  const props = defineProps(['component', 'edge', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
+  const props = defineProps(['document', 'component', 'edge', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
   const renderNeeded = inject('render-needed')
+  const selected = computed(() => props.document.selection.has(props.edge))
+  const directlyHighlighted = computed(() => toRaw(props.edge) == toRaw(highlight.value))
+  const highlighted = computed(() => {
+    const hovered = toRaw(highlight.value)
+    return directlyHighlighted.value || hovered instanceof Face &&
+      toRaw(props.edge.solid) == toRaw(hovered.solid) &&
+      props.edge.connectedFaces().some(face => toRaw(face) == hovered)
+  })
 
   const edgeMesh = window.alcRenderer.convertLine(props.edge.tesselate(), getMaterial())
   edgeMesh.alcTypes = ['edge', 'path', props.edge.getAxis() && 'axis'].filter(Boolean)
@@ -33,7 +42,7 @@
   window.alcRenderer.add(edgeMesh, props.parentActive)
   renderNeeded.value = true
 
-  watch(() => [props.edge, highlight.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
+  watch(() => [props.edge, highlighted.value, directlyHighlighted.value, selected.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
     edgeMesh.visible = props.displayMode != 'exportPreview' && props.colorMode != 'interference'
     edgeMesh.material = getMaterial()
     hiddenMesh.visible = props.displayMode == 'hiddenLines'
@@ -42,8 +51,10 @@
 
   function getMaterial() {
     if(props.displayMode == 'exportPreview' || props.colorMode == 'interference') return materials.invisibleLine
-    return toRaw(props.edge) == toRaw(highlight.value) ?
-      props.displayMode == 'hiddenLines' ? materials.visibleHighlightLine : materials.highlightLine
+    return highlighted.value ?
+      !directlyHighlighted.value || props.displayMode == 'hiddenLines' ? materials.visibleHighlightLine : materials.highlightLine
+      :
+      selected.value ? materials.selectionLine
       :
       ['shaded', 'pathTraced'].includes(props.displayMode) ?
         materials.invisibleLine

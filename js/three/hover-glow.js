@@ -125,11 +125,11 @@ export default class HoverGlow {
 
     this.quad.material = this.blurMaterial
     this.blurMaterial.uniforms.source.value = this.mask.texture
-    this.blurMaterial.uniforms.direction.value.set(2 / this.blurX.width, 0)
+    this.blurMaterial.uniforms.direction.value.set(1.5 / this.blurX.width, 0)
     renderer.setRenderTarget(this.blurX)
     this.quad.render(renderer)
     this.blurMaterial.uniforms.source.value = this.blurX.texture
-    this.blurMaterial.uniforms.direction.value.set(0, 2 / this.blurY.height)
+    this.blurMaterial.uniforms.direction.value.set(0, 1.5 / this.blurY.height)
     renderer.setRenderTarget(this.blurY)
     this.quad.render(renderer)
 

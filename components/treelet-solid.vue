@@ -6,7 +6,7 @@
     :class="{ hidden: isHidden }"
   )
 
-    .box(:class="{ highlighted: solid.id == (highlight && highlight.id), selected: document.selection.hasId(solid.id) }")
+    .box(:class="{ highlighted: solid.id == (highlight && (highlight.solid || highlight).id), selected: document.selection.hasId(solid.id) }")
 
       TreeItemHeader(
         :model-value="component.itemTitle(solid.id, `Solid ${index + 1}`)"

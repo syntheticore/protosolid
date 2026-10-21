@@ -13,6 +13,7 @@
   const renderNeeded = inject('render-needed')
 
   const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value )
+  const selected = computed(() => props.parentSelected || props.document.selection.has(props.face))
 
   const tessellation = props.face.tesselate()
   const faceMesh = window.alcRenderer.convertMesh(tessellation, getMaterial())
@@ -60,7 +61,7 @@
     renderNeeded.value = true
   }, { immediate: true })
 
-  watch(() => [props.face, props.parentActive, props.parentSelected, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
+  watch(() => [props.face, props.parentActive, selected.value, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
     updateAnalysisGeometry()
     faceMesh.visible = props.displayMode != 'exportPreview'
     faceMesh.alcPathTracingMaterial = getSurfaceMaterial()
@@ -210,7 +211,7 @@
       return props.parentActive ? materials.interferenceSurface : materials.ghostSurface
     }
     const diagnostic = props.colorMode.startsWith('diagnostic:')
-    return props.parentSelected && !diagnostic ?
+    return selected.value && !diagnostic ?
       materials.highlightSurface
       :
       props.displayMode == 'wireframe' ?

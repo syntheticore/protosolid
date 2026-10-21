@@ -18,6 +18,7 @@
     v-if="parentActive || projectInactive || ['wireframe', 'hiddenLines'].includes(displayMode)"
     v-for="edge in solid.edges().filter(edge => edge.isSemantic())"
     :key="edge.tessId"
+    :document="document"
     :edge="edge"
     :component="component"
     :display-mode="displayMode"

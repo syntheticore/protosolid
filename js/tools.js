@@ -19,6 +19,7 @@ import {
 
 import {
   Edge,
+  Face,
   Profile,
   Solid,
 } from './core/geom3d.js'
@@ -56,19 +57,6 @@ import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffse
 
 const dragThreshold = 2
 const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
-const immediateSelectionVolumeRatio = 8
-
-function boundingBoxVolume(solid) {
-  const bounds = new THREE.Box3()
-  solid.faces().forEach(face => {
-    const mesh = face.mesh?.()
-    if(mesh) bounds.expandByObject(mesh)
-  })
-  if(bounds.isEmpty()) return
-  const size = bounds.getSize(new THREE.Vector3())
-  return size.x * size.y * size.z
-}
-
 
 class Tool {
   static icon = 'bullseye'
@@ -557,7 +545,7 @@ class HighlightTool extends Tool {
   getObject(coords, any) {
     return new Promise(resolve => {
       let items = this.viewport.renderer
-        .objectsAtScreen(coords, this.realSelectors, this.includeInactive)
+        .objectsAtScreen(coords, this.realSelectors, this.includeInactive, this.visibleEdgesOnly)
         .flatMap(obj => {
           if(!obj.alcTypes.some(type => type == 'face')) return obj.alcObject
           const mapped = []
@@ -595,7 +583,8 @@ export class ManipulationTool extends HighlightTool {
     super(component, viewport, [])
     this.localSpace = true
     this.preferPointObjects = true
-    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'solid', 'plane'])
+    this.visibleEdgesOnly = !this.viewport.document.activeSketch
+    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'face', 'edge', 'plane'])
   }
 
   acceptsInput(item) {
@@ -606,25 +595,56 @@ export class ManipulationTool extends HighlightTool {
     return !(item instanceof PointHelper)
   }
 
-  shouldPickImmediately(items) {
-    // Items retain raycast order, so the first solid has the nearest hit.
-    const [closest, ...others] = items
-    if(!(closest instanceof Solid) || others.some(item => !(item instanceof Solid))) return false
-
-    const closestVolume = boundingBoxVolume(closest)
-    if(!Number.isFinite(closestVolume) || closestVolume <= EPSILON) return false
-    return others.every(item => {
-      const volume = boundingBoxVolume(item)
-      return Number.isFinite(volume) && volume >= closestVolume * immediateSelectionVolumeRatio
-    })
+  orderItems(items) {
+    const closest = items[0]
+    if(this.viewport.document.activeSketch || !(closest instanceof Face || closest instanceof Edge)) return items
+    const edge = items.find(item => item instanceof Edge)
+    return edge ? [edge, ...items.filter(item => item != edge)] : items
   }
 
-  async click(vec, coords) {
-    const curve = await this.getObject(coords)
-    if(curve) {
-      this.viewport.document.selection.handle(curve, this.viewport.bus.isCtrlPressed)
+  shouldPickImmediately(items) {
+    return items[0] instanceof Face || items[0] instanceof Edge
+  }
+
+  click(vec, coords) {
+    if(!this.viewport.document.activeSketch) {
+      this.selectionClickPending = true
+      return
+    }
+    return this.selectAt(coords, this.viewport.bus.isCtrlPressed)
+  }
+
+  canvasClick(coords, event) {
+    if(!this.selectionClickPending) return
+    this.selectionClickPending = false
+    this.doubleClickPending = event.detail == 2
+    if(event.detail != 1) return
+    // Native click counts distinguish a double click without delaying face
+    // selection. Keep the original selection for Ctrl-double-click toggling.
+    this.selectionBeforeClick = [...this.viewport.document.selection.items]
+    return this.selectAt(coords, event.ctrlKey || event.metaKey)
+  }
+
+  async doubleClick(coords, event) {
+    if(!this.doubleClickPending) return
+    this.doubleClickPending = false
+    const item = await this.getObject(coords, true)
+    if(!(item instanceof Face || item instanceof Edge)) return
+    const selection = this.viewport.document.selection
+    const additive = event.ctrlKey || event.metaKey
+    if(additive) {
+      selection.clear()
+      this.selectionBeforeClick.forEach(selected => selection.add(selected))
+    }
+    selection.handle(item.solid, additive)
+  }
+
+  async selectAt(coords, additive) {
+    const item = await this.getObject(coords)
+    if(item) {
+      this.viewport.document.selection.handle(item, additive)
     } else {
-      if(this.viewport.bus.isCtrlPressed) return this.viewport.renderer.render()
+      if(additive) return this.viewport.renderer.render()
       this.viewport.document.selection.clear()
     }
   }
@@ -632,12 +652,10 @@ export class ManipulationTool extends HighlightTool {
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
     this.pointerDown = true
-    // const sel = this.viewport.document.selection.items[0]
-    // A drag must start from the front-most hit immediately. Opening the
-    // overlap picker here leaves mouseDown pending and prevents mouseMove
-    // from ever receiving a solid to manipulate. Click selection opens the
-    // picker once from click() after mouseUp instead.
-    const object = await this.getObject(coords, true)
+    this.selectionClickPending = false
+    this.doubleClickPending = false
+    const picked = await this.getObject(coords, true)
+    const object = picked instanceof Face || picked instanceof Edge ? picked.solid : picked
     if(!this.pointerDown) return
     if(object instanceof Solid) {
       this.object = object
@@ -741,6 +759,8 @@ export class ManipulationTool extends HighlightTool {
   cancelPointer() {
     super.cancelPointer()
     this.pointerDown = false
+    this.selectionClickPending = false
+    this.doubleClickPending = false
     this.snapToPoints = false
     this.cursor = 'auto'
     delete this.object

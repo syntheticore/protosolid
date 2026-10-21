@@ -9,6 +9,7 @@
     //- GL Viewport
     canvas(
       ref="canvas"
+      @click="click"
       @dblclick="doubleClick"
       @pointerup="mouseUp"
       @pointerdown="mouseDown"
@@ -237,7 +238,7 @@
   import Renderer from './../js/renderer.js'
   import { SketchElement } from './../js/core/geom2d.js'
   import { Dimension, CoincidentConstraint } from './../js/core/sketch.js'
-  import { Solid, Face } from './../js/core/geom3d.js'
+  import { Solid, Face, Edge } from './../js/core/geom3d.js'
   import { setWorldTransform, solveAssembly, worldTransform } from './../js/core/assembly.js'
   import { TransformGizmo } from './../js/three/gizmos.js'
   import SimulationFlow from '../js/three/simulation-flow.js'
@@ -783,12 +784,29 @@
         return new THREE.Vector2(e.clientX - rect.left, e.clientY - rect.top)
       },
 
+      click: function(e) {
+        if(e.shiftKey || e.altKey || this.document.activeSketch) return
+        if(this.activeTool instanceof ManipulationTool) {
+          this.activeTool.canvasClick(this.getMouseCoords(e), e)
+        }
+      },
+
       doubleClick: function(e) {
-        this.renderer.setPivot(this.getMouseCoords(e))
+        const coords = this.getMouseCoords(e)
+        if(e.shiftKey || e.altKey) {
+          this.commitCameraPreview()
+          this.renderer.setPivot(coords)
+        } else if(this.activeTool instanceof ManipulationTool && !this.document.activeSketch) {
+          this.activeTool.doubleClick(coords, e)
+        }
       },
 
       mouseUp: function(e) {
         if(this.renderer.isGizmoDragging()) return
+        if(e.altKey) {
+          this.pointerCancel()
+          return
+        }
         if(this.isPanning) {
           this.isPanning = false
           this.activeHandle = null
@@ -805,7 +823,10 @@
         this.updateRegions(false, draggedHandle)
       },
 
-      pointerCancel: function() {
+      pointerCancel: function(e) {
+        // Capture is released after pointerup, before the native click. The
+        // completed gesture must remain available for click-count handling.
+        if(e?.type == 'lostpointercapture' && !this.activeTool?.lastCoords) return
         const draggedHandle = this.activeHandle
         this.activeTool?.cancelPointer?.()
         this.isPanning = false
@@ -1009,7 +1030,7 @@
             [...this.document.selection.items].forEach(item => {
               const type = item.typename()
               const isAssemblyJoint = (this.document.top().assemblyJoints || []).includes(item)
-              if(type != 'Solid' && type != 'Component' && !isAssemblyJoint) {
+              if(type != 'Solid' && type != 'Component' && type != 'Face' && type != 'Edge' && !isAssemblyJoint) {
                 this.deleteElement(item)
               }
             })
@@ -1181,7 +1202,7 @@
 
       zoomToFit: function(objects=[], preview=false, view=null) {
         const solidFaces = objects.filter(sel => sel instanceof Solid ).flatMap(solid => solid.faces() )
-        const rest = objects.filter(sel => sel instanceof Face || sel instanceof SketchElement )
+        const rest = objects.filter(sel => sel instanceof Face || sel instanceof Edge || sel instanceof SketchElement )
         const meshes = solidFaces.concat(rest).map(obj => obj.mesh && obj.mesh() ).filter(Boolean)
         this.renderer.zoomToFit(meshes.length && meshes, !preview, view)
       },

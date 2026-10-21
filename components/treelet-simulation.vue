@@ -575,7 +575,10 @@
         this.document.activeSimulationPicker = true
         this.updatePicker = () => {
           const { pickerPos, color } = this.getPickerInfo(key)
-          this.bus.emit('pick', 'face', pickerPos, color)
+          const tree = this.document.top()
+          const references = this.simulation[key].map(reference => reference.clone())
+            .filter(reference => !reference.update(tree))
+          this.bus.emit('pick', 'face', pickerPos, color, undefined, references)
         }
         this.updatePicker()
       },

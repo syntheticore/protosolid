@@ -544,7 +544,8 @@
         this.bus.jointPickerActive = type == 'joint'
         this.updatePicker = () => {
           const { pickerPos, color } = this.getPickerInfo(key)
-          this.bus.emit('pick', type, pickerPos, color, item => this.activeFeature.acceptsInput(item))
+          const { references } = this.activeFeature.resolveInputReferences(key)
+          this.bus.emit('pick', type, pickerPos, color, item => this.activeFeature.acceptsInput(item), references)
         }
         this.updatePicker()
       },

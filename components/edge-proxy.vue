@@ -14,13 +14,17 @@
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
+  const pickerSelection = inject('picker-selection')
   const renderNeeded = inject('render-needed')
-  const selected = computed(() => props.document.selection.has(props.edge))
+  const selected = computed(() => props.document.selection.has(props.edge) ||
+    pickerSelection.value.get(props.component.id)?.has(props.edge.id))
   const directlyHighlighted = computed(() => toRaw(props.edge) == toRaw(highlight.value))
   const highlighted = computed(() => {
     const hovered = toRaw(highlight.value)
-    return directlyHighlighted.value || hovered instanceof Feature &&
-      props.edge.connectedFaces().some(face => face.topology && topologyIncludesFeature(face.topology, hovered)) ||
+    return directlyHighlighted.value ||
+      [hovered, props.document.activeFeature || props.document.creatingFeature].some(feature =>
+        feature instanceof Feature && props.edge.connectedFaces()
+          .some(face => face.topology && topologyIncludesFeature(face.topology, feature))) ||
       hovered instanceof Face &&
       toRaw(props.edge.solid) == toRaw(hovered.solid) &&
       props.edge.connectedFaces().some(face => toRaw(face) == hovered)

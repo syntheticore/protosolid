@@ -241,13 +241,14 @@
 <script>
 
   import * as THREE from 'three'
-  import { markRaw } from 'vue'
+  import { computed, markRaw } from 'vue'
 
   import Snapper from './../js/snapping.js'
   import Renderer from './../js/renderer.js'
   import { SketchElement } from './../js/core/geom2d.js'
   import { Dimension, CoincidentConstraint } from './../js/core/sketch.js'
   import { Solid, Face, Edge } from './../js/core/geom3d.js'
+  import { Reference } from './../js/core/references.js'
   import { setWorldTransform, solveAssembly, worldTransform } from './../js/core/assembly.js'
   import { TransformGizmo } from './../js/three/gizmos.js'
   import SimulationFlow from '../js/three/simulation-flow.js'
@@ -283,6 +284,19 @@
 
     inject: ['bus', 'frame'],
 
+    provide() {
+      const pickerSelection = computed(() => {
+        const selection = new Map()
+        for(let ref of this.pickerReferences) {
+          while(ref.item instanceof Reference) ref = ref.item
+          if(!selection.has(ref.componentId)) selection.set(ref.componentId, new Set())
+          for(const item of ref.getItems()) selection.get(ref.componentId).add(item.id)
+        }
+        return selection
+      })
+      return { 'picker-selection': pickerSelection }
+    },
+
     props: {
       document: Object,
       activeTool: Object,
@@ -300,6 +314,7 @@
         snapAnchor: null,
         paths: [],
         pickingPath: null,
+        pickerReferences: [],
         guides: [],
         widgets: [],
         isOrbiting: false,
@@ -465,7 +480,7 @@
       })
 
       // Events
-      this.bus.on('pick', (type, pickerCoords, color, acceptsInput) => {
+      this.bus.on('pick', (type, pickerCoords, color, acceptsInput, references) => {
         this.handlePick(pickerCoords, color, {
           profile: ProfilePickTool,
           curve: CurvePickTool,
@@ -479,7 +494,7 @@
           point: PointPickTool,
           componentRef: ComponentPickTool,
           joint: JointPickTool,
-        }[type], acceptsInput)
+        }[type], acceptsInput, references)
       })
 
       this.bus.on('joint-picked', this.jointPicked)
@@ -1074,10 +1089,11 @@
         return [this.snapper.snap(vec, coords, this.activeTool.snapToGuides, this.activeTool.snapToPoints, this.activeTool.localSpace ), coords]
       },
 
-      handlePick: function(pickerCoords, color, Tool, acceptsInput) {
+      handlePick: function(pickerCoords, color, Tool, acceptsInput, references = []) {
         if(this.activeTool) this.activeTool.dispose()
         this.resetProxyInteraction()
         this.pickingPath = { target: null, color, origin: pickerCoords }
+        this.pickerReferences = references
         this.renderer.setGizmosHidden(true)
         const tool = new Tool(this.document.activeComponent, this, (item) => {
           this.bus.emit('picked', item)
@@ -1154,6 +1170,7 @@
         if(this.activeTool) this.activeTool.dispose()
         this.resetProxyInteraction()
         this.pickingPath = null
+        this.pickerReferences = []
         this.renderer.setGizmosHidden(false)
         this.snapper.reset()
         if(!Tool) return

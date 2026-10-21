@@ -12,12 +12,14 @@
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
+  const pickerSelection = inject('picker-selection')
   const renderNeeded = inject('render-needed')
 
   const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value ||
-    highlight.value instanceof Feature && props.face.topology &&
-    topologyIncludesFeature(props.face.topology, highlight.value))
-  const selected = computed(() => props.parentSelected || props.document.selection.has(props.face))
+    props.face.topology && [highlight.value, props.document.activeFeature || props.document.creatingFeature]
+      .some(feature => feature instanceof Feature && topologyIncludesFeature(props.face.topology, feature)))
+  const selected = computed(() => props.parentSelected || props.document.selection.has(props.face) ||
+    pickerSelection.value.get(props.component.id)?.has(props.face.id))
 
   const tessellation = props.face.tesselate()
   const faceMesh = window.alcRenderer.convertMesh(tessellation, getMaterial())

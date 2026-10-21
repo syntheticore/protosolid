@@ -5,6 +5,8 @@
   import { toRaw } from 'vue'
   import * as THREE from 'three'
   import { Face } from '../js/core/geom3d.js'
+  import { Feature } from '../js/core/features.js'
+  import { topologyIncludesFeature } from '../js/core/topological-naming.js'
   import materials from '../js/materials.js'
   import HiddenLine from '../js/three/hidden-line.js'
 
@@ -17,7 +19,9 @@
   const directlyHighlighted = computed(() => toRaw(props.edge) == toRaw(highlight.value))
   const highlighted = computed(() => {
     const hovered = toRaw(highlight.value)
-    return directlyHighlighted.value || hovered instanceof Face &&
+    return directlyHighlighted.value || hovered instanceof Feature &&
+      props.edge.connectedFaces().some(face => face.topology && topologyIncludesFeature(face.topology, hovered)) ||
+      hovered instanceof Face &&
       toRaw(props.edge.solid) == toRaw(hovered.solid) &&
       props.edge.connectedFaces().some(face => toRaw(face) == hovered)
   })

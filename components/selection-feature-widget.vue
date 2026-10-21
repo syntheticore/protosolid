@@ -23,6 +23,8 @@
           :aria-label="feature.title"
           :disabled="document.isRegenerating || feature.constructor.editable === false"
           @click="document.activateFeature(feature)"
+          @mouseenter="highlight = feature"
+          @mouseleave="clearHighlight"
         )
           Icon(:icon="feature.constructor.icon" fixed-width)
 </template>
@@ -45,12 +47,13 @@
 </style>
 
 <script setup>
-  import { computed, inject, shallowRef, toRaw, watch } from 'vue'
+  import { computed, inject, onBeforeUnmount, shallowRef, toRaw, watch } from 'vue'
   import { worldTransform } from '../js/core/assembly.js'
   import { topologyIncludesFeature } from '../js/core/topological-naming.js'
 
   const props = defineProps(['document', 'item', 'renderer', 'coords'])
   const frame = inject('frame')
+  const highlight = inject('highlight')
   const anchor = shallowRef()
 
   watch(() => props.item, item => {
@@ -70,4 +73,10 @@
   const features = computed(() => props.document.timeline.features.filter(feature =>
     topologyIncludesFeature(props.item.topology, feature)
   ).toReversed())
+
+  function clearHighlight() {
+    if(features.value.some(feature => toRaw(feature) === toRaw(highlight.value))) highlight.value = null
+  }
+
+  onBeforeUnmount(clearHighlight)
 </script>

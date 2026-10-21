@@ -12,6 +12,8 @@
     @drop.prevent="drop"
     @click="handleClick"
     @dblclick="openFeature()"
+    @mouseenter="highlight = feature"
+    @mouseleave="clearHighlight"
   )
 
     Icon(:icon="feature.constructor.icon" fixed-width :class="{ future: isFuture }")
@@ -135,6 +137,7 @@
 
 <script>
 
+  import { toRaw } from 'vue'
   import { topologyIncludesFeature } from '../js/core/topological-naming.js'
 
   export default {
@@ -178,7 +181,7 @@
         const style = {
           active: this.isActive,
           selected: this.document.selection.has(this.feature),
-          highlighted: isRelatedToFeature(this.highlight) || this.document.selection.items.some(isRelatedToFeature),
+          highlighted: toRaw(this.highlight) === toRaw(this.feature) || !!isRelatedToFeature(this.highlight),
           dimmed: this.isDimmed,
           dragTarget: this.isDragTarget,
           targetLeft: this.targetLeft,
@@ -188,9 +191,15 @@
       },
     },
 
-    mounted() {},
+    beforeUnmount() {
+      this.clearHighlight()
+    },
 
     methods: {
+      clearHighlight() {
+        if(toRaw(this.highlight) === toRaw(this.feature)) this.highlight = null
+      },
+
       handleClick() {
         if(this.bus.featurePickerActive) {
           if(this.feature === this.document.activeFeature) return

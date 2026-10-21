@@ -5,6 +5,8 @@
   import * as THREE from 'three'
   import { TessellateModifier } from 'three/examples/jsm/modifiers/TessellateModifier.js'
   import materials from '../js/materials.js'
+  import { Feature } from '../js/core/features.js'
+  import { topologyIncludesFeature } from '../js/core/topological-naming.js'
 
   const props = defineProps(['document', 'component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
@@ -12,7 +14,9 @@
   const highlight = inject('highlight')
   const renderNeeded = inject('render-needed')
 
-  const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value )
+  const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value ||
+    highlight.value instanceof Feature && props.face.topology &&
+    topologyIncludesFeature(props.face.topology, highlight.value))
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.face))
 
   const tessellation = props.face.tesselate()

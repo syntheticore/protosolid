@@ -361,10 +361,11 @@
         this.updateSketchSectionSide()
       },
 
-      activeView: function(view) {
-        if(!view) return
+      cameraView: function({ document, view }, previous) {
+        const cameraView = document !== previous.document ? document.currentCameraView : view
+        if(!cameraView) return
         this.$nextTick(() => {
-          if(this.activeView === view) this.applyView(view)
+          if(this.document === document && this.activeView === view) this.applyView(cameraView)
         })
       },
 
@@ -391,6 +392,10 @@
     },
 
     computed: {
+      cameraView: function() {
+        return { document: this.document, view: this.activeView }
+      },
+
       activeComponentTransform: function() {
         return this.document.activeSketch ? worldTransform(this.document.activeComponent) : null
       },

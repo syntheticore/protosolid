@@ -377,7 +377,7 @@
             oldDocument.activeView = oldDocument.activeView || oldDocument.dirtyView
           }
           if(!document.activeView) {
-            document.activeView = document.views[3]
+            document.activeView = document.dirtyView || document.currentCameraView
           }
           this.highlight = null
         },

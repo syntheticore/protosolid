@@ -164,7 +164,8 @@ export class PatternInputReference extends Reference {
       return error
     }
 
-    const feature = this.document.timeline.features.find(feature => feature.id == this.featureId)
+    const timeline = this.document.pendingTimeline || this.document.timeline
+    const feature = timeline.features.find(feature => feature.id == this.featureId)
     if(!feature) return { type: 'error', msg: 'Pattern input feature was lost' }
 
     // Additive features expose their tool body. For modifying features, use

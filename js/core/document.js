@@ -37,6 +37,7 @@ export default class Document extends Emitter {
     this.repositoryVersion = 0
     this.hasRepositoryChanges = false
     this.timeline = new Timeline()
+    this.pendingTimeline = null
     this.materials = []
     this.treeletsExpandedByDefault = true
     this.treeletExpansion = new Map()
@@ -102,7 +103,7 @@ export default class Document extends Emitter {
   }
 
   get isRegenerating() {
-    return this.pendingRegenerations > 0
+    return this.pendingRegenerations > 0 || !!this.pendingTimeline
   }
 
   get hasUnsavedChanges() {
@@ -660,6 +661,8 @@ export default class Document extends Emitter {
   async save(as) {
     if(!as && !this.canSave) return
     await this.cancelFeature()
+    // Native save commands can arrive while an incoming version is calculating.
+    if(this.pendingTimeline) return
     // Plain documents are upgraded on save, but history is only dropped by an explicit Save As
     const versioned = preferences.documentFormat == 'versioned' || (!!this.repository && !as)
     const repository = versioned && (this.repository?.clone() || new Repository())
@@ -855,16 +858,15 @@ export default class Document extends Emitter {
 
   async applyDump(dump, materials, title, detail, resetCamera = false) {
     const calculationId = ++nextCalculationId
+    // Keep the displayed timeline intact until the incoming version is complete.
+    this.pendingTimeline = dump.timeline
     this.bus.emit('calculation', { id: calculationId, title, detail })
-    await yieldToBrowser()
     try {
+      await yieldToBrowser()
       setLastId(bigIntMax(BigInt(dump.lastId || 0), BigInt(this.repository?.lastId || 0), lastId))
       this.activateSimulation(null)
       this.selection.clear()
-      this.hasChanges = false
-      this.timeline = dump.timeline
-      this.materials = materials
-      await this.timeline.evaluateAsync((feature, index, total) => {
+      await this.pendingTimeline.evaluateAsync((feature, index, total) => {
         this.bus.emit('calculation', {
           id: calculationId,
           title: 'Calculating',
@@ -873,6 +875,9 @@ export default class Document extends Emitter {
           total,
         })
       })
+      this.timeline = this.pendingTimeline
+      this.materials = materials
+      this.hasChanges = false
       this.activeComponent = this.top()
       if(Array.isArray(dump.views)) this.views = dump.views
       this.activeView = null
@@ -883,6 +888,7 @@ export default class Document extends Emitter {
         this.views.find(view => view.position && view.target)
       if(homeView && resetCamera) this.currentCameraView = cloneCameraView(homeView)
     } finally {
+      this.pendingTimeline = null
       this.bus.emit('calculation-finished', calculationId)
     }
   }

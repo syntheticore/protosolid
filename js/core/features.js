@@ -487,9 +487,10 @@ export class PatternFeature extends SolidFeature {
   acceptsInput() { return true }
 
   updateFeature(tree, references) {
-    const ownIndex = this.document.timeline.features.indexOf(this)
+    const timeline = this.document.pendingTimeline || this.document.timeline
+    const ownIndex = timeline.features.indexOf(this)
     const hasFutureInput = this.inputs().some(input => input.featureId &&
-      this.document.timeline.features.findIndex(feature => feature.id == input.featureId) >= ownIndex
+      timeline.features.findIndex(feature => feature.id == input.featureId) >= ownIndex
     )
     if(hasFutureInput) {
       this.error = { type: 'error', msg: 'Pattern inputs must precede the pattern feature' }

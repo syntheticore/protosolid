@@ -28,6 +28,9 @@ import {
   worldTransform,
 } from './assembly.js'
 
+// Enable to eagerly tessellate each feature and report tessellation failures as feature errors.
+const validateFeatureTessellation = false
+
 
 export class Feature {
   constructor(document, booleanOutput, title, settings) {
@@ -104,6 +107,8 @@ export class Feature {
 
   updateGeometry(tree, references) {
     this.updateFeature(tree, references)
+
+    if(!validateFeatureTessellation) return
 
     try {
       // Prepare every face before the timeline publishes the feature result.

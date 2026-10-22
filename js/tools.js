@@ -9,6 +9,7 @@ import { markRaw, toRaw } from 'vue'
 // } from './utils.js'
 
 import {
+  SketchElement,
   Line,
   Circle,
   Arc,
@@ -630,6 +631,10 @@ export class ManipulationTool extends HighlightTool {
     if(!this.doubleClickPending) return
     this.doubleClickPending = false
     const item = await this.getObject(coords, true)
+    if(item instanceof SketchElement) {
+      this.viewport.document.activateSketch(item.sketch)
+      return
+    }
     if(!(item instanceof Face || item instanceof Edge)) return
     const selection = this.viewport.document.selection
     const additive = event.ctrlKey || event.metaKey

@@ -22,6 +22,7 @@ import {
   TorusGeometry,
   Vector3
 } from 'three';
+import { snapTranslation, translationSnapStep } from './gizmo-snapping.js';
 
 const _raycaster = new Raycaster();
 
@@ -111,6 +112,7 @@ class TransformControls extends Object3D {
     defineProperty( 'axis', null );
     defineProperty( 'mode', 'translate' );
     defineProperty( 'translationSnap', null );
+    this.adaptiveTranslationSnap = false;
     defineProperty( 'translationSnapOrigin', null );
     defineProperty( 'rotationSnap', null );
     defineProperty( 'scaleSnap', null );
@@ -283,6 +285,12 @@ class TransformControls extends Object3D {
 
         this.object.matrixWorld.decompose( this.worldPositionStart, this.worldQuaternionStart, this._worldScaleStart );
 
+        if ( this.mode === 'translate' && this.adaptiveTranslationSnap ) {
+
+          this.translationSnap = translationSnapStep( this.camera, this.worldPositionStart, this.domElement.clientHeight );
+
+        }
+
         this.pointStart.copy( planeIntersect.point ).sub( this.worldPositionStart );
 
       }
@@ -366,19 +374,19 @@ class TransformControls extends Object3D {
 
           if ( axis.search( 'X' ) !== - 1 ) {
 
-            object.position.x = Math.round( object.position.x / this.translationSnap ) * this.translationSnap;
+            object.position.x = snapTranslation( object.position.x, this.translationSnap );
 
           }
 
           if ( axis.search( 'Y' ) !== - 1 ) {
 
-            object.position.y = Math.round( object.position.y / this.translationSnap ) * this.translationSnap;
+            object.position.y = snapTranslation( object.position.y, this.translationSnap );
 
           }
 
           if ( axis.search( 'Z' ) !== - 1 ) {
 
-            object.position.z = Math.round( object.position.z / this.translationSnap ) * this.translationSnap;
+            object.position.z = snapTranslation( object.position.z, this.translationSnap );
 
           }
 
@@ -410,19 +418,19 @@ class TransformControls extends Object3D {
 
           if ( axis.search( 'X' ) !== - 1 ) {
 
-            object.position.x = Math.round( object.position.x / this.translationSnap ) * this.translationSnap;
+            object.position.x = snapTranslation( object.position.x, this.translationSnap );
 
           }
 
           if ( axis.search( 'Y' ) !== - 1 ) {
 
-            object.position.y = Math.round( object.position.y / this.translationSnap ) * this.translationSnap;
+            object.position.y = snapTranslation( object.position.y, this.translationSnap );
 
           }
 
           if ( axis.search( 'Z' ) !== - 1 ) {
 
-            object.position.z = Math.round( object.position.z / this.translationSnap ) * this.translationSnap;
+            object.position.z = snapTranslation( object.position.z, this.translationSnap );
 
           }
 
@@ -636,12 +644,6 @@ class TransformControls extends Object3D {
   setMode( mode ) {
 
     this.mode = mode;
-
-  }
-
-  setTranslationSnap( translationSnap ) {
-
-    this.translationSnap = translationSnap;
 
   }
 

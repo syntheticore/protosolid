@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-// import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { TransformControls } from './transform-controls.js'
 
 export default class ArrowControls extends TransformControls {
@@ -8,10 +7,8 @@ export default class ArrowControls extends TransformControls {
     this.startPosition = startPosition
 
     this.space = 'world'
-    this.translationSnap = 1.0
+    this.adaptiveTranslationSnap = true
     this.translationSnapOrigin = startPosition.clone()
-    // this.rotationSnap = THREE.MathUtils.degToRad(10)
-    // this.setMode('rotate')
 
     // Keep size constant
     const canvas = window.alcRenderer.canvas
@@ -33,21 +30,14 @@ export default class ArrowControls extends TransformControls {
     mesh2.material.color.set('white')
 
     // Dispatch value events with change vector
-    let vec = new THREE.Vector3()
-    let lastVec = vec.clone()
-    let rot = new THREE.Vector3()
-    let lastRot = rot.clone()
+    const vec = new THREE.Vector3()
+    const lastVec = vec.clone()
     this.addEventListener('objectChange', () => {
       vec.copy(this.dummy.position).sub(startPosition)
-      rot.fromArray(this.dummy.rotation.toArray()).sub(new THREE.Vector3().fromArray(startRotation.toArray()))
       // Only dispatch when actual snapped value changed
       if(!vec.equals(lastVec)) this.dispatchEvent({ type: 'translation', value: vec });
-      if(!rot.equals(lastRot)) this.dispatchEvent({ type: 'rotation', value: rot });
       lastVec.copy(vec)
-      lastRot.copy(rot)
     })
-
-    // this.addEventListener('change', () => {console.log('change')})
   }
 
   dispose() {

@@ -21,7 +21,6 @@
         props.document.markChanged()
         renderNeeded.value = true
       })
-      gizmo.translationControl.setTranslationSnap(0.1)
       gizmo.rotationControl.showZ = false
       gizmo.addEventListener('dragging-changed', event => {
         if(!event.value) syncTransform()

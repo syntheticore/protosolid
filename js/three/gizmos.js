@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import ArrowControls from './arrow-controls.js'
 import { TransformControls } from './transform-controls.js'
 import { rotationFromNormal } from '../core/utils.js'
+import { snapTranslation } from './gizmo-snapping.js'
 
 
 export class TransformGizmo extends THREE.Object3D {
@@ -46,7 +47,7 @@ export class TransformGizmo extends THREE.Object3D {
       })
     })
 
-    this.translationControl.setTranslationSnap(1)
+    this.translationControl.adaptiveTranslationSnap = true
     this.rotationControl.setRotationSnap(THREE.MathUtils.degToRad(5))
     this.setTransform(transform)
     this.enabled = true
@@ -102,12 +103,12 @@ export class CanvasPositionGizmo extends TransformControls {
     this.setPosition(x, y)
     this.setSpace('local')
     this.showZ = false
-    this.setTranslationSnap(0.1)
+    this.adaptiveTranslationSnap = true
     this.setSize(1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight))
     this.attach(this.dummy)
 
     this.addEventListener('objectChange', () => {
-      onChange(Number(this.dummy.position.x.toFixed(1)), Number(this.dummy.position.y.toFixed(1)))
+      onChange(Number(this.dummy.position.x.toPrecision(15)), Number(this.dummy.position.y.toPrecision(15)))
     })
   }
 
@@ -139,7 +140,7 @@ export class LengthGizmo extends ArrowControls {
     this.set(startValue, startSide)
 
     this.addEventListener('translation', (e) => {
-      const value = Math.round(e.value.length() / this.translationSnap) * this.translationSnap
+      const value = snapTranslation(e.value.length(), this.translationSnap)
       cb(value, e.value.dot(direction) > 0)
     })
 

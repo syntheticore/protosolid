@@ -21,13 +21,13 @@
             @click.stop="remove"
           )
 
-      .content.form(v-if="expanded")
+      .content.form(v-if="expanded" @input="document.markChanged()")
 
         fieldset.preset
 
           label
 
-            ComboBox(v-model="component.creator.material" label="Material" :options="document.materials.map(material => ({ value: material, label: material.title }))")
+            ComboBox(v-model="component.creator.material" @update:model-value="document.markChanged()" label="Material" :options="document.materials.map(material => ({ value: material, label: material.title }))")
 
             IconButton.clone(icon="plus" @click="cloneMaterial")
 
@@ -141,10 +141,12 @@
       cloneMaterial: function() {
         this.component.creator.material = this.material.clone()
         this.document.materials.push(this.component.creator.material)
+        this.document.markChanged()
       },
 
       remove: function() {
         this.component.creator.material = null
+        this.document.markChanged()
       },
     },
   }

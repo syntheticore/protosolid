@@ -550,6 +550,7 @@
 
       addCog: function() {
         this.document.activeComponent.creator.cog = true
+        this.document.markChanged()
       },
 
       addParameter: function() {
@@ -579,12 +580,14 @@
         const section = new SectionView()
         this.document.activeComponent.creator.sectionViews.push(section)
         this.document.activateInteractivePanel(`section:${this.document.activeComponent.id}:${section.id}`)
+        this.document.markChanged()
       },
 
       addCanvas: function() {
         const canvas = new Canvas()
         this.document.activeComponent.creator.canvases.push(canvas)
         this.document.activateInteractivePanel(`canvas:${this.document.activeComponent.id}:${canvas.id}`)
+        this.document.markChanged()
       },
 
       addExportConfig: function() {
@@ -598,11 +601,13 @@
         }
         this.document.activeComponent.creator.exportConfigs.push(config)
         this.document.activateExport(config, this.document.activeComponent)
+        this.document.markChanged()
       },
 
       addMaterial: function() {
         this.document.materials[0] ||= new Aluminum()
         this.document.activeComponent.creator.material = this.document.materials[0]
+        this.document.markChanged()
         this.bus.emit('material-changed')
       },
 
@@ -611,7 +616,7 @@
         simulation.activateFirstPicker = true
         this.document.activeComponent.creator.simulations.push(simulation)
         this.document.activateSimulation(simulation)
-        this.document.hasChanges = true
+        this.document.markChanged()
       },
 
       addStaticLoad: function() {
@@ -619,7 +624,7 @@
         simulation.activateFirstPicker = true
         this.document.activeComponent.creator.simulations.push(simulation)
         this.document.activateSimulation(simulation)
-        this.document.hasChanges = true
+        this.document.markChanged()
       },
 
       addFluidFlow: function() {
@@ -627,7 +632,7 @@
         simulation.activateFirstPicker = true
         this.document.activeComponent.creator.simulations.push(simulation)
         this.document.activateSimulation(simulation)
-        this.document.hasChanges = true
+        this.document.markChanged()
       },
 
       toggleReference: function() {

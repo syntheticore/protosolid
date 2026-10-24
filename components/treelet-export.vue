@@ -31,14 +31,14 @@
           @click.stop="remove"
         )
 
-    .content.form(v-if="expanded")
+    .content.form(v-if="expanded" @input="document.markChanged()")
 
       fieldset
 
         h3 Export Settings
 
         label
-          ComboBox(v-model="config.format" label="Format" :options="['STL', '3MF'].map(format => ({ value: format, label: format }))")
+          ComboBox(v-model="config.format" @update:model-value="document.markChanged()" label="Format" :options="['STL', '3MF'].map(format => ({ value: format, label: format }))")
           span Format
 
         label
@@ -149,6 +149,7 @@
         if(!path) return
         this.path = path
         this.config.path = path
+        this.document.markChanged()
       },
 
       exportFile: async function() {
@@ -159,9 +160,10 @@
 
         this.config.path = this.path
         const path = await exportConfigured(this.component, this.config)
-        if(path) {
+        if(path && path != this.config.path) {
           this.path = path
           this.config.path = path
+          this.document.markChanged()
         }
       },
 
@@ -169,6 +171,7 @@
         if(this.expanded) this.document.activateExport(null)
         this.component.creator.exportConfigs =
           this.component.creator.exportConfigs.filter(conf => conf !== this.config )
+        this.document.markChanged()
       },
     },
   }

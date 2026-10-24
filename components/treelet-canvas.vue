@@ -34,7 +34,7 @@
             @click.stop="remove"
           )
 
-      .content.form(v-if="expanded")
+      .content.form(v-if="expanded" @input="document.markChanged()")
 
         img(v-if="canvas.data" :src="canvas.data")
 
@@ -46,7 +46,7 @@
             span.source-path(:title="canvas.src") {{ canvas.src || 'Image Source' }}
 
           label
-            ComboBox.canvas-fields(v-model="canvas.plane" label="Plane" :options="[{ value: 'top', label: 'Top' }, { value: 'front', label: 'Front' }, { value: 'side', label: 'Side' }]")
+            ComboBox.canvas-fields(v-model="canvas.plane" @update:model-value="document.markChanged()" label="Plane" :options="[{ value: 'top', label: 'Top' }, { value: 'front', label: 'Front' }, { value: 'side', label: 'Side' }]")
             span Plane
 
           label
@@ -54,7 +54,7 @@
             span Scale
 
           label
-            input.canvas-fields(type="range" v-model.number="canvas.transparency" min="0" step="0.01" max="1" @input="document.markChanged()")
+            input.canvas-fields(type="range" v-model.number="canvas.transparency" min="0" step="0.01" max="1")
             span Transparency
 
           label
@@ -130,6 +130,7 @@
 
   function toggleVisibility() {
     props.canvas.hidden = !props.canvas.hidden
+    props.document.markChanged()
   }
 
   async function chooseFile() {
@@ -139,6 +140,7 @@
     props.canvas.data = data
     props.canvas.width = width
     props.canvas.height = height
+    props.document.markChanged()
 
     props.canvas.texture = new THREE.TextureLoader().load(data, () => bus.emit('render-needed'))
     props.canvas.texture.colorSpace = THREE.SRGBColorSpace
@@ -148,6 +150,7 @@
   function remove() {
     if(expanded.value) props.document.activateInteractivePanel(null)
     props.component.creator.canvases = props.component.creator.canvases.filter(conf => conf !== props.canvas )
+    props.document.markChanged()
   }
 
 </script>

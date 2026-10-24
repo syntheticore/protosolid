@@ -195,6 +195,8 @@ export default class Document extends Emitter {
     if(!(feature instanceof PoseFeature)) this.top().resetPose()
     feature.captureVisibility()
     this.timeline.insertFeature(feature, false)
+    // Features created through a feature box only count once confirmed
+    if(feature !== this.creatingFeature) this.markChanged()
     await this.regenerate()
   }
 
@@ -202,6 +204,7 @@ export default class Document extends Emitter {
     const creatingIndex = this.timeline.features.indexOf(this.creatingFeature)
     if(creatingIndex >= 0 && creatingIndex < i) i--
     await this.cancelFeature(false)
+    this.markChanged()
     return this.regenerate(i)
   }
 
@@ -216,6 +219,7 @@ export default class Document extends Emitter {
 
   reorder(feature, other, after) {
     this.timeline.reorder(feature, other, after)
+    this.markChanged()
     return this.regenerate()
   }
 

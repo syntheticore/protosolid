@@ -47,6 +47,7 @@
   function toggleVisibility() {
     const itemId = props.component.sourceItemId(props.plane.id)
     props.component.creator.itemsHidden[itemId] = !isHidden.value
+    props.document.markChanged()
   }
 
 </script>

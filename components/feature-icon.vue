@@ -220,6 +220,7 @@
       },
 
       deleteFeature() {
+        this.document.markChanged()
         this.document.removeFeature(this.feature)
       },
 

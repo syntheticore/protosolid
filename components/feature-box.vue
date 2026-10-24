@@ -681,6 +681,7 @@
         }
         if(!this.showHeader) this.activeFeature.confirm()
         this.activeFeature.commit?.()
+        this.document.markChanged()
         this.close()
       },
 
@@ -692,7 +693,11 @@
       deactivateFeature() {
         this.cancelPick()
         // Always consider sketches as modified
-        if(this.isSketchFeature) this.document.timeline.invalidateFeature(this.activeFeature)
+        if(this.isSketchFeature) {
+          this.document.timeline.invalidateFeature(this.activeFeature)
+          const sketch = this.activeFeature.sketch
+          if(sketch.historySnapshot() != sketch.history.states[0]) this.document.markChanged()
+        }
         // Restore feature state on cancel
         if(
           this.status !== 'confirmed' &&

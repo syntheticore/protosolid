@@ -33,7 +33,7 @@
             @click.stop="deleteSection"
           )
 
-      .content.form(v-if="expanded")
+      .content.form(v-if="expanded" @input="document.markChanged()")
 
         fieldset
 
@@ -109,12 +109,14 @@
 
   function toggleVisibility() {
     props.section.hidden = !props.section.hidden
+    props.document.markChanged()
   }
 
   function deleteSection() {
     if(expanded.value) props.document.activateInteractivePanel(null)
     const creator = props.component.creator
     creator.sectionViews = creator.sectionViews.filter(section => section != props.section )
+    props.document.markChanged()
   }
 
 </script>

@@ -1388,6 +1388,17 @@ fn arrange_regions(
             }
             classified.push((loop_, polygon, area, outer, sample));
         }
+        // A hole bounds only its innermost enclosing outer loop. Nested
+        // regions (for example concentric annuli) would otherwise reuse it.
+        let parents = classified.iter().map(|(_, _, hole_area, is_outer, sample)| {
+            if *is_outer { return None; }
+            classified.iter().enumerate()
+                .filter(|(_, (_, polygon, area, outer, _))| {
+                    *outer && area.abs() > hole_area.abs() && point_in_polygon(*sample, polygon)
+                })
+                .min_by(|(_, first), (_, second)| first.2.abs().total_cmp(&second.2.abs()))
+                .map(|(index, _)| index)
+        }).collect::<Vec<_>>();
         for outer_index in classified
             .iter()
             .enumerate()
@@ -1395,18 +1406,12 @@ fn arrange_regions(
             .map(|(index, _)| index)
         {
             let outer = &classified[outer_index].0;
-            let outer_polygon = &classified[outer_index].1;
             let mut patch_loops = vec![BrepPatchLoop {
                 kind: LoopKind::Outer,
                 segments: patch_segments(outer),
             }];
-            for (hole, _, hole_area, is_outer, sample) in &classified {
-                if *is_outer {
-                    continue;
-                }
-                if classified[outer_index].2.abs() > hole_area.abs()
-                    && point_in_polygon(*sample, outer_polygon)
-                {
+            for ((hole, ..), parent) in classified.iter().zip(&parents) {
+                if *parent == Some(outer_index) {
                     patch_loops.push(BrepPatchLoop {
                         kind: LoopKind::Inner,
                         segments: patch_segments(hole),

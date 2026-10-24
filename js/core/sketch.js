@@ -441,7 +441,7 @@ export class Sketch {
       // Only leave the outermost inner wires
       profile = profile.concat(cutouts.filter(cutout =>
         !cutouts.some(other =>
-          cutout[0] !== other[0] && other.encloses(cutout)
+          cutout !== other && other.encloses(cutout)
         )
       ))
       return new Profile(this, profile)

@@ -2445,7 +2445,7 @@ export class DraftFeature extends SolidFeature {
   static icon = 'draft'
   static modifiedFaceInputs = ['faces']
   constructor(document) {
-    super(document, true, 'Draft', {
+    super(document, false, 'Draft', {
       ref_plane: {
         title: 'Reference',
         type: 'plane',
@@ -2598,10 +2598,18 @@ export class FilletFeature extends SolidFeature {
   getGizmo() {
     const edge = this.inputItems('edges').at(-1)
     if(!edge) return
+    const points = edge.tesselate().map(point => point.toArray())
+    const { center, directions } = edgeGizmoFrame(points, edge.connectedFaces().map(face => face.tesselate()))
+    // Either face measures the radius; the more vertical one is easier to drag.
+    const component = this.document.top().findChild(this.componentOccurrenceId) ||
+      this.document.top().findChild(this.componentId)
+    const transform = worldTransform(component)
+    const verticality = direction => Math.abs(direction.clone().transformDirection(transform).y)
+    const direction = directions.reduce((best, other) => verticality(other) > verticality(best) ? other : best)
     return {
       distance: {
-        center: edge.center(),
-        direction: new THREE.Vector3(0,1,0),
+        center,
+        direction,
         distance: this.radius,
         side: true,
         cb: (dist, _side) => {

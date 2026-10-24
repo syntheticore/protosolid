@@ -27,9 +27,10 @@ export function closeDialog(result) {
 }
 
 // Resolves with the entered text or null when canceled
-export async function requestText({ title, message, label, value = '', placeholder = '', confirm = 'OK' }) {
+export async function requestText({ title, icon, message, label, value = '', placeholder = '', confirm = 'OK' }) {
   const result = await showDialog({
     title,
+    icon,
     message,
     fields: [{ key: 'text', label, value, placeholder, required: true }],
     actions: [{ label: confirm, value: 'ok', primary: true }],

@@ -22,3 +22,8 @@ await copyFile(
   path.join(root, 'electron', 'build', 'icons', '256x256.png'),
   path.join(destinationDirectory, 'logo.png'),
 )
+await mkdir(path.join(destinationDirectory, 'fonts'), { recursive: true })
+await copyFile(
+  path.join(root, 'node_modules', '@fontsource', 'comfortaa', 'files', 'comfortaa-latin-400-normal.woff2'),
+  path.join(destinationDirectory, 'fonts', 'comfortaa.woff2'),
+)

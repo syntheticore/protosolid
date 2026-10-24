@@ -295,8 +295,9 @@
   async function createBranch(commitId) {
     const name = await requestText({
       title: 'New Branch',
+      icon: 'code-branch',
       message: 'Start a new branch from this version.',
-      label: 'Branch name',
+      placeholder: 'Branch name',
       confirm: 'Create Branch',
     })
     if(name) run(() => props.document.createBranch(name, commitId) )
@@ -305,7 +306,8 @@
   async function renameBranch(name) {
     const newName = await requestText({
       title: 'Rename Branch',
-      label: 'Branch name',
+      icon: 'code-branch',
+      placeholder: 'Branch name',
       value: name,
       confirm: 'Rename',
     })

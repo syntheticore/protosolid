@@ -60,7 +60,7 @@
     // Concentric with the 5px button corners: button radius + padding + 1px border
     border-radius: 5px + dialogPadding + 1px
     color: $bright2
-    font-size: 12px
+    font-size: 13px
     box-shadow: 0 0 0 1px $dark2 * 0.5, 0 8px 32px rgba(black, 0.25)
 
   h1
@@ -68,16 +68,16 @@
     align-items: center
     gap: 8px
     color: $bright1
-    font-size: 17px
-    font-weight: bold
+    font-size: 16px
+    font-weight: 600
     margin-bottom: 12px
 
     svg
       color: $bright2
 
   p
-    line-height: 1.5
-    margin-bottom: 10px
+    line-height: 1.45
+    margin-bottom: 12px
     white-space: pre-line
 
   .details

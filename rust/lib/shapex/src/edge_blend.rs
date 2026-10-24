@@ -769,8 +769,6 @@ fn closed_blend_chart(
     edge: &Edge,
     tolerance: ModelTolerance,
 ) -> KernelResult<SurfaceSurfaceCurve> {
-    let Curve3::SurfaceIntersection(curve) = &center.curve else { unreachable!() };
-    let range = curve.range();
     let source = edge.curve.evaluate(edge.range.start)?;
     let seam = center.curve.project(source.point, tolerance)?.parameter;
     let tangent = center.curve.evaluate(seam)?.first_derivative;
@@ -779,16 +777,64 @@ fn closed_blend_chart(
     } else {
         -1.0
     };
+    turn_blend_chart(center, seam, direction, ParameterRange::new(-1.0, 2.0)?, tolerance)
+}
+
+/// The center of an open edge whose closed, bounded section chart is cut
+/// inside the edge, recharted over one turn that starts in the edge's gap.
+/// Otherwise the edge's seeds would select the complementary arc.
+fn open_blend_chart(
+    center: &SurfaceSurfaceCurve,
+    edge: &Edge,
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<SurfaceSurfaceCurve>> {
+    let Curve3::SurfaceIntersection(curve) = &center.curve else { return Ok(None) };
+    let range = curve.range();
+    let first = center.curve.evaluate(range.start)?;
+    let last = center.curve.evaluate(range.end)?;
+    if first.point.distance(last.point)
+        > tolerance.linear_at_scale(first.point.to_vec().magnitude().max(1.0))
+    {
+        return Ok(None);
+    }
+    let project = |parameter: f64| -> KernelResult<f64> {
+        let point = edge.curve.evaluate(parameter)?.point;
+        Ok(center.curve.project(point, tolerance)?.parameter)
+    };
+    let start = project(edge.range.start)?;
+    let end = project(edge.range.end)?;
+    let middle = project((edge.range.start + edge.range.end) * 0.5)?;
+    if (middle - start) * (middle - end) <= 0.0 {
+        return Ok(None);
+    }
+    // The arc runs through the chart cut, so the gap lies between the endpoints.
+    turn_blend_chart(center, (start + end) * 0.5, 1.0, ParameterRange::new(0.0, 1.0)?, tolerance)
+        .map(Some)
+}
+
+/// Rebuild a closed section's guides with one unit of parameter per turn,
+/// starting at `seam` and repeating the turn over `support_range`.
+fn turn_blend_chart(
+    center: &SurfaceSurfaceCurve,
+    seam: f64,
+    direction: f64,
+    support_range: ParameterRange,
+    tolerance: ModelTolerance,
+) -> KernelResult<SurfaceSurfaceCurve> {
+    let Curve3::SurfaceIntersection(curve) = &center.curve else { unreachable!() };
+    let range = curve.range();
     let exact = curve.exact_pcurves();
     let mut points = [Vec::new(), Vec::new()];
-    for index in -33..=65 {
+    // One sample beyond either end supports the uniform cubic guide.
+    let samples = (support_range.start * 32.0).round() as i32 - 1
+        ..=(support_range.end * 32.0).round() as i32 + 1;
+    for index in samples {
         let fraction = (seam - range.start) / range.span() + direction * index as f64 / 32.0;
         let parameter = range.start + range.span() * fraction.rem_euclid(1.0);
         for side in 0..2 {
             points[side].push(exact[side].evaluate(parameter)?.point);
         }
     }
-    let support_range = ParameterRange::new(-1.0, 2.0)?;
     let surfaces = [curve.first_surface(), curve.second_surface()];
     for side in 0..2 {
         super::intersection::unwrap_periodic_points(&mut points[side], surfaces[side].domains());

@@ -544,6 +544,11 @@ impl Transaction<'_> {
                     "blend could not select the local offset intersection branch",
                 )
             })?;
+        if shared.is_none() && !local_guide && edge.vertices[0] != edge.vertices[1] {
+            if let Some(chart) = open_blend_chart(&center, &edge, tolerance)? {
+                center = chart;
+            }
+        }
 
         let middle_parameter = center.curve.project(midpoint, tolerance)?.parameter;
         let endpoint_seeds = edge

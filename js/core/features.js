@@ -118,7 +118,7 @@ export class Feature {
         for(const face of tree.findChild(id).compound.faces()) face.tesselate()
       }
     } catch(err) {
-      if(this.error?.type != 'error') this.error = featureError(err)
+      if(this.error?.type != 'error') this.error = featureError(err, 'Geometry could not be displayed')
     }
   }
 
@@ -540,7 +540,7 @@ export class PatternFeature extends SolidFeature {
       )
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Pattern could not be created') }
   }
 
   gridTransforms() {
@@ -1187,7 +1187,7 @@ export class ConvertBodyToComponentFeature extends Feature {
       const remaining = parent.compound.removeShapes([references.body])
       parent.compound = remaining.solids().length ? remaining : new Compound(parent.id)
       parent.children.push(component)
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Body could not be converted to a component') }
   }
 
   dump() {
@@ -1815,7 +1815,7 @@ export class PlaceFeature extends Feature {
       const { componentIds } = this.createImportedComponents(target, true)
       this.importJoints(tree, componentIds)
     } catch(error) {
-      this.error = featureError(error)
+      this.error = featureError(error, 'The imported geometry could not be generated')
     }
   }
 
@@ -2179,7 +2179,7 @@ export class ExtrudeFeature extends SolidFeature {
       }
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Extrusion could not be created') }
   }
 
   getGizmo() {
@@ -2302,7 +2302,7 @@ export class RevolveFeature extends SolidFeature {
       }
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Revolution could not be created') }
   }
 
   getGizmo() {
@@ -2395,7 +2395,7 @@ export class LoftFeature extends SolidFeature {
       )
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Loft could not be built') }
   }
 }
 
@@ -2434,7 +2434,7 @@ export class SplitFeature extends SolidFeature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.split(references.plane, this.keep)
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Split could not be performed') }
   }
 }
 
@@ -2475,7 +2475,7 @@ export class DraftFeature extends SolidFeature {
         references.ref_plane,
         rad(this.angle),
       )
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Draft could not be built') }
   }
 
   updateGizmos() {
@@ -2543,7 +2543,7 @@ export class SweepFeature extends SolidFeature {
       const tool = references.profile.sweep(this.componentId, references.rail, this.id)
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Sweep could not be built') }
   }
 }
 
@@ -2592,7 +2592,7 @@ export class FilletFeature extends SolidFeature {
         this.radius,
         this.propagation === 'tangent',
       )
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Fillet could not be built') }
   }
 
   getGizmo() {
@@ -2686,7 +2686,7 @@ export class ChamferFeature extends SolidFeature {
         flipSides: this.flipSides,
         followTangentEdges: this.propagation === 'tangent',
       })
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Chamfer could not be built') }
   }
 
   getGizmo() {
@@ -2784,7 +2784,7 @@ export class ShellFeature extends SolidFeature {
 
     try {
       comp.compound = comp.compound.shell(references.faces, thickness, this.joinType)
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Shell could not be built') }
   }
 
   getGizmo() {
@@ -2845,7 +2845,7 @@ export class OffsetFeature extends SolidFeature {
     const distance = this.distance * (this.side ? 1 : -1)
     try {
       comp.compound = comp.compound.offsetFaces(references.faces, distance)
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Faces could not be offset') }
   }
 
   static undump(dump, context) {
@@ -2876,7 +2876,7 @@ export class DissolveFeature extends SolidFeature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.dissolveFaces(references.faces)
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Faces could not be dissolved') }
   }
 }
 
@@ -2929,7 +2929,7 @@ export class BooleanFeature extends SolidFeature {
         comp.compound = comp.compound.merge(localTools.map(input => input.compound))
       }
       this.previewBody = tool
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Boolean operation could not be performed') }
   }
 
 }
@@ -2955,7 +2955,7 @@ export class RemoveSolidsFeature extends Feature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.removeShapes(references.solids)
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Solids could not be removed') }
   }
 }
 
@@ -3018,7 +3018,7 @@ export class MoveFeature extends SolidFeature {
         -this.moveCenter.x, -this.moveCenter.y, -this.moveCenter.z,
       ))
       comp.compound = comp.compound.moveFaces(references.faces, transform)
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Faces could not be moved') }
   }
 
   updateGizmos() {
@@ -3094,7 +3094,7 @@ export class ReplaceFeature extends SolidFeature {
     const comp = tree.findChild(this.componentId)
     try {
       comp.compound = comp.compound.replaceShapes([references.face], [references.replacement])
-    } catch(err) { this.error = featureError(err) }
+    } catch(err) { this.error = featureError(err, 'Face could not be replaced') }
   }
 }
 

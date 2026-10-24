@@ -14,6 +14,7 @@ const preferences = {
   blurredOverlays: true,
   timelineFeatureVisibility: 'all',
   previewOnHover: true,
+  debugMode: false,
   zoomToCursor: true,
   cacheTesselation: true,
   centerOfMassTolerance: '0.01mm',

@@ -109,6 +109,12 @@
               small Choose which features remain visible in the timeline
             ComboBox.wide(v-model="preferences.timelineFeatureVisibility" label="Timeline features" :options="[{ value: 'active-component', label: 'Active component and children only' }, { value: 'all', label: 'All features (dim unrelated)' }]")
 
+          label
+            span.setting-label
+              strong Debug mode
+              small Show detailed internal error messages when features fail
+            input.input(type="checkbox" v-model="preferences.debugMode")
+
       section(v-else)
         header
           h1 Tolerances

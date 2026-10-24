@@ -172,15 +172,19 @@ function makeCircularDimension(controls, renderer, circle, constraint, isDiamete
     const width = renderer.renderer.domElement.width / renderer.getPixelRatio()
     view.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
     if(view.equals(lastView) && width === lastWidth) return
+    const label = position.clone().applyMatrix4(transform).project(camera)
+    const elbows = [-1, 1].map(direction => {
+      raycaster.setFromCamera(new THREE.Vector2(label.x + direction * 2 * LEADER_LENGTH_PX / width, label.y), camera)
+      return raycaster.ray.intersectPlane(plane, new THREE.Vector3())?.applyMatrix4(inverse)
+    })
+    // Seen edge-on, or before the camera is set up, the screen offsets miss
+    // the sketch plane. Lay out once they meet it again.
+    if(elbows.some(elbow => !elbow)) return
     lastView.copy(view)
     lastWidth = width
-    const label = position.clone().applyMatrix4(transform).project(camera)
     const projectedCenter = center.clone().applyMatrix4(transform).project(camera)
     const labelOutside = position.distanceTo(center) > circle.radius
-    const elbowAt = direction => {
-      raycaster.setFromCamera(new THREE.Vector2(label.x + direction * 2 * LEADER_LENGTH_PX / width, label.y), camera)
-      return raycaster.ray.intersectPlane(plane, new THREE.Vector3()).applyMatrix4(inverse)
-    }
+    const elbowAt = direction => elbows[direction > 0 ? 1 : 0]
     const outwardSide = label.x > projectedCenter.x ? 1 : -1
     const stepLength = elbowAt(outwardSide).distanceTo(position)
     const towardCenter = labelOutside || position.distanceTo(center) + stepLength > circle.radius

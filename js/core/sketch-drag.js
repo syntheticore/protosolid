@@ -108,7 +108,8 @@ export function satisfiesConstraints(primitives, constraints) {
       case 'equal_radius_cc': return near(byId.get(c.c1_id).radius, byId.get(c.c2_id).radius)
       case 'equal_radius_ca': return near(byId.get(c.c1_id).radius, byId.get(c.a2_id).radius)
       case 'equal_radius_aa': return near(byId.get(c.a1_id).radius, byId.get(c.a2_id).radius)
-      case 'difference': return near(byId.get(c.param1.o_id)[c.param1.prop] - byId.get(c.param2.o_id)[c.param2.prop], c.difference)
+      // PlaneGCS subtracts the first parameter from the second.
+      case 'difference': return near(byId.get(c.param2.o_id)[c.param2.prop] - byId.get(c.param1.o_id)[c.param1.prop], c.difference)
       case 'tangent_lc':
       case 'tangent_la': {
         const circle = byId.get(c.c_id || c.a_id)

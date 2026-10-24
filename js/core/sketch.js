@@ -999,7 +999,7 @@ export class Sketch {
           return [
             // Coincident centers provide the implicit concentric constraint.
             ...(centersCoincident ? [] : [{ id: `${id++}`, type: 'p2p_coincident', p1_id: leftCenter.id, p2_id: rightCenter.id, temporary: c.temporary }]),
-            { id: `${id++}`, type: 'difference', param1: { o_id: left.id, prop: 'radius' }, param2: { o_id: right.id, prop: 'radius' }, difference: c.radiusDifferenceSign * c.distance, temporary: c.temporary },
+            { id: `${id++}`, type: 'difference', param1: { o_id: right.id, prop: 'radius' }, param2: { o_id: left.id, prop: 'radius' }, difference: c.radiusDifferenceSign * c.distance, temporary: c.temporary },
           ]
 
         } else if(c.isPointDistance()) {

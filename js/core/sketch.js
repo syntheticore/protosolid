@@ -761,6 +761,28 @@ export class Sketch {
         { id: `${id++}`, type: 'tangent_la', l_id: tangentPrim.id, a_id: targetPrim.id, temporary }
     }
 
+    // Arcs joined at an endpoint are tangent where both centers lie on the
+    // contact's radius; like the radial rule above, this stays independent
+    // of the coincidence.
+    const tangentRoundCurves = (first, second, temporary) => {
+      const [firstPrim, secondPrim] = [first, second].map(curve => idMap[curve.id].at(-1))
+      const contact = first instanceof Arc && second instanceof Arc && [1, 2].flatMap(i => [1, 2].map(j => [i, j]))
+        .find(([i, j]) => this.coincidentPointsConnected(first, i, second, j))
+      if(contact) {
+        const radial = {
+          id: `${id++}`, type: 'line', p1_id: firstPrim.c_id,
+          p2_id: pointPrimitive({ curve: () => first, index: contact[0] }).id,
+        }
+        primitives.push(radial)
+        return { id: `${id++}`, type: 'point_on_line_pl', p_id: secondPrim.c_id, l_id: radial.id, temporary }
+      }
+      if(first instanceof Arc && second instanceof Arc) {
+        return { id: `${id++}`, type: 'tangent_aa', a1_id: firstPrim.id, a2_id: secondPrim.id, temporary }
+      }
+      const [circle, arc] = first instanceof Circle ? [firstPrim, secondPrim] : [secondPrim, firstPrim]
+      return { id: `${id++}`, type: 'tangent_ca', c_id: circle.id, a_id: arc.id, temporary }
+    }
+
     // An arc has independently stored center, endpoint, angle, and radius
     // parameters in PlaneGCS. Arc rules are the internal equations that keep
     // those parameters describing one coherent piece of geometry.
@@ -918,7 +940,7 @@ export class Sketch {
           return tangentToRoundCurve(splineCurve,
             [endpoint.index == 0 ? 0 : splineCurve.points.length - 1], tangentPrim, target, c.temporary)
         }
-        if(!line) throw new Error('Unsupported Tangent constraint geometry')
+        if(!line) return tangentRoundCurves(...c.items.map(item => item.curve()), c.temporary)
         return tangentToRoundCurve(line.curve(), [0, 1], linePrim, curve.curve(), c.temporary)
 
       } else if(c instanceof CoincidentConstraint) {

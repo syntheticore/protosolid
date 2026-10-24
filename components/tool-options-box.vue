@@ -49,6 +49,7 @@
               :min="setting.min"
               :max="setting.max"
               :step="setting.step || 1"
+              :focus-on-mount="setting.focus"
               @update:value="setSetting(key, $event)"
             )
 

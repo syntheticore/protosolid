@@ -51,7 +51,7 @@ import {
   worldTransform,
 } from './core/assembly.js'
 import { EPSILON } from './core/utils.js'
-import { lineFillet } from './core/sketch-fillet.js'
+import { supportsFillet, curveFillet, trimToFillet } from './core/sketch-fillet.js'
 import { pasteSketchSelection } from './sketch-clipboard.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
 import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffsetFrame, buildOffsetCurves } from './core/sketch-offset.js'
@@ -927,7 +927,7 @@ export class SketchFilletTool extends HighlightTool {
     this.items = []
     this.fillets = []
     this.settings = {
-      radius: { title: 'Radius', type: 'number', min: EPSILON * 2, step: 1 },
+      radius: { title: 'Radius', type: 'number', min: EPSILON * 2, step: 1, focus: true },
     }
   }
 
@@ -937,80 +937,80 @@ export class SketchFilletTool extends HighlightTool {
 
   acceptsInput(item) {
     const curve = item instanceof ElemRef ? item.curve() : item
-    return curve instanceof Line && curve.sketch == this.sketch && !curve.projection
+    // The hovered handle can still belong to a curve the last fillet replaced.
+    return supportsFillet(curve) && curve != this.arc && this.sketch.elements.includes(curve) && !curve.projection
   }
 
-  cornerLines(item) {
+  cornerCurves(item) {
     if(!(item instanceof ElemRef)) return this.items.length ? [this.items[0], item] : null
-    const line = item.curve()
-    const point = line.points[item.index]
-    const neighbors = this.sketch.elements.filter(other => other instanceof Line && other != line &&
-      !other.projection && other.isReference == line.isReference && other.points.some(end => end.almost(point)))
-    return neighbors.length == 1 ? [line, neighbors[0]] : null
+    const curve = item.curve()
+    const point = curve.handles()[item.index]
+    if(!curve.endpoints().some(end => end.almost(point))) return null
+    const neighbors = this.sketch.elements.filter(other => supportsFillet(other) && other != curve && other != this.arc &&
+      !other.projection && other.isReference == curve.isReference && other.endpoints().some(end => end.almost(point)))
+    return neighbors.length == 1 ? [curve, neighbors[0]] : null
   }
 
   setOption(key, value) {
     if(key != 'radius') return
     this.radius = value
-    if(this.previewLines) this.updatePreview(this.previewLines)
+    if(this.previewCurves) this.updatePreview(this.previewCurves)
   }
 
   async mouseMove(vec, coords) {
     const item = await this.getObject(coords, true)
     if(this.disposed) return
     this.viewport.$emit('update:highlight', item)
-    const lines = item && this.cornerLines(item)
-    if(lines) this.updatePreview(lines)
+    const curves = item && this.cornerCurves(item)
+    if(curves) this.updatePreview(curves)
     else this.clearPreview()
   }
 
   async click(vec, coords) {
     const item = await this.getObject(coords)
     if(!item || this.disposed) return
-    const lines = this.cornerLines(item)
-    if(!lines) {
+    const curves = this.cornerCurves(item)
+    if(!curves) {
       this.clearPreview()
       this.items = [item instanceof ElemRef ? item.curve() : item]
       this.viewport.renderer.render()
       return
     }
-    if(!this.updatePreview(lines)) {
+    if(!this.updatePreview(curves)) {
       this.viewport.bus.emit('toast', this.previewError)
       return
     }
     const arc = this.arc
-    const { indices, points } = this.fillet
+    const { ends, parameters, points } = this.fillet
     this.fillets.push({ arc, position: this.dimensionPosition() })
     this.arc = null
-    lines.forEach((line, i) => {
-      const handles = line.points.map(point => point.clone())
-      handles[indices[i]] = points[i]
-      const replacement = new Line(...handles)
-      replacement.isReference = line.isReference
-      this.sketch.replaceElement(line, [replacement])
-      this.sketch.addConstraint(new CoincidentConstraint(new ElemRef(replacement, indices[i]), new ElemRef(arc, i + 1)))
-      this.sketch.addConstraint(new TangentConstraint(replacement, arc))
-      this.viewport.document.selection.delete(line)
+    curves.forEach((curve, i) => {
+      const { curve: replacement, index } = trimToFillet(curve, ends[i], parameters[i], points[i])
+      replacement.isReference = curve.isReference
+      this.sketch.replaceElement(curve, [replacement])
+      this.sketch.addConstraint(new CoincidentConstraint(new ElemRef(replacement, index), new ElemRef(arc, i + 1)))
+      this.sketch.addConstraint(new TangentConstraint(
+        replacement instanceof Spline ? new ElemRef(replacement, index) : replacement, arc))
+      this.viewport.document.selection.delete(curve)
     })
     this.items = []
-    this.previewLines = null
+    this.previewCurves = null
     this.viewport.$emit('update:highlight', null)
     this.viewport.updateRegions(true)
     this.viewport.renderer.render()
   }
 
-  updatePreview(lines) {
+  updatePreview(curves) {
     if(this.arc && this.previewRadius == this.radius &&
-      this.previewLines.every((line, i) => line == lines[i])) return true
+      this.previewCurves.every((curve, i) => curve == curves[i])) return true
     this.clearPreview()
-    this.previewLines = lines
+    this.previewCurves = curves
     try {
-      if(lines[0] == lines[1]) throw new Error('Select a different line for the fillet')
-      if(lines[0].isReference != lines[1].isReference) throw new Error('Both lines must have the same construction status')
-      this.fillet = lineFillet(...lines, this.radius)
-      this.arc = Arc.fromPoints([this.fillet.points[0], this.fillet.middle, this.fillet.points[1]])
-      if(!this.arc) throw new Error('This corner could not be filleted')
-      this.arc.isReference = lines[0].isReference
+      if(curves[0] == curves[1]) throw new Error('Select a different curve for the fillet')
+      if(curves[0].isReference != curves[1].isReference) throw new Error('Both curves must have the same construction status')
+      this.fillet = curveFillet(...curves, this.radius)
+      this.arc = new Arc(this.fillet.center, this.radius, this.fillet.start, this.fillet.sweep)
+      this.arc.isReference = curves[0].isReference
       this.sketch.add(this.arc)
       this.previewRadius = this.radius
       this.previewError = null
@@ -1030,7 +1030,7 @@ export class SketchFilletTool extends HighlightTool {
   clearPreview() {
     if(this.arc) this.arc.remove()
     this.arc = null
-    this.previewLines = null
+    this.previewCurves = null
     this.viewport.renderer.render()
   }
 
@@ -2316,12 +2316,11 @@ export class TangentConstraintTool extends ConstraintTool {
   }
 
   canConstrain(items) {
+    const round = item => item instanceof Circle || item instanceof Arc
     return (items.filter(item => item instanceof Line).length == 1 &&
-      items.filter(item => item instanceof Circle || item instanceof Arc || item instanceof Spline).length == 1) ||
-      (items.filter(item => item instanceof Circle).length == 2) ||
-      (items.filter(item => item instanceof Circle || item instanceof Arc || item instanceof Spline).length == 2 &&
-        items.some(item => item instanceof Spline) &&
-        items.some(item => item instanceof Circle || item instanceof Arc))
+      items.filter(item => round(item) || item instanceof Spline).length == 1) ||
+      items.every(round) ||
+      (items.some(item => item instanceof Spline) && items.some(round))
   }
 }
 

@@ -84,9 +84,14 @@
   const frame = inject('frame')
 
   const constraintIcons = shallowReactive(new Map())
-  const constraintIconLayout = computed(() => layoutConstraintIcons(
-    [...constraintIcons].map(([id, proxies]) => [id, proxies.value])
-  ))
+  // A removed constraint stays registered until its proxy unmounts, while
+  // the curves it referenced may already be cleared.
+  const constraintIconLayout = computed(() => {
+    const ids = new Set(props.sketch.constraints.map(constraint => constraint.id))
+    return layoutConstraintIcons([...constraintIcons]
+      .filter(([id]) => ids.has(id))
+      .map(([id, proxies]) => [id, proxies.value]))
+  })
   provide('constraint-icons', constraintIcons)
   provide('constraint-icon-layout', constraintIconLayout)
 

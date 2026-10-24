@@ -106,8 +106,10 @@ export function satisfiesConstraints(primitives, constraints) {
         const circle = byId.get(c.c_id || c.a_id)
         return near(lineDistance(circle.c_id, c.l_id), circle.radius)
       }
-      case 'tangent_cc': {
-        const a = byId.get(c.c1_id), b = byId.get(c.c2_id)
+      case 'tangent_cc':
+      case 'tangent_ca':
+      case 'tangent_aa': {
+        const a = byId.get(c.c1_id || c.c_id || c.a1_id), b = byId.get(c.c2_id || c.a_id || c.a2_id)
         const d = distance(a.c_id, b.c_id)
         return near(d, a.radius + b.radius) || near(d, Math.abs(a.radius - b.radius))
       }

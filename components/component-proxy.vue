@@ -24,7 +24,7 @@
   template(v-for="sketch in component.sketches")
 
     SketchProxy(
-      v-if="!component.creator.itemsHidden[sketch.id]"
+      v-if="!component.creator.itemsHidden[sketch.id] || sketch == highlight"
       :key="sketch.id"
       :document="document"
       :component="component"

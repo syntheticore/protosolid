@@ -26,7 +26,7 @@ export class StaticSimulation {
     this.forceX = 0
     this.forceY = -100
     this.forceZ = 0
-    this.quality = 3
+    this.quality = 2
     this.result = null
     this.revision = 0
     this.deformationFactor = 1

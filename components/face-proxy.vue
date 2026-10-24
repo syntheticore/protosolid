@@ -112,7 +112,7 @@
       if(analysisResult != simulation.result) {
         analysisGeometry?.dispose()
         const quality = simulation.quality - 1
-        const edgeLength = simulation.result.step * (3 - quality * 0.5)
+        const edgeLength = simulation.result.step * (2 - quality * 0.35)
         const angularTolerance = 1.75 - quality * 0.175
         const tessellation = props.face.tesselateAt(edgeLength * 0.25, angularTolerance)
         const baseGeometry = window.alcRenderer.convertBufferGeometry(tessellation)

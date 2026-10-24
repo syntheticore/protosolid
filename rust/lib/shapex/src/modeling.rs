@@ -627,7 +627,7 @@ impl Compound {
             &history,
             &current_names,
             operation,
-        ));
+        )?);
         let lineage = Arc::new(Lineage::compose(
             parents.iter().map(|parent| Arc::clone(&parent.lineage)),
             &history,
@@ -1815,16 +1815,18 @@ fn compose_revisions(
     history: &OperationHistory,
     current: &BTreeSet<PersistentId>,
     operation: uuid::Uuid,
-) -> BTreeMap<PersistentId, uuid::Uuid> {
-    let inherited = parents
-        .iter()
-        .flat_map(|parent| {
-            parent
-                .revisions
-                .iter()
-                .map(|(name, revision)| (*name, *revision))
-        })
-        .collect::<BTreeMap<_, _>>();
+) -> KernelResult<BTreeMap<PersistentId, uuid::Uuid>> {
+    // A solid split off with `to_compound` shares its source compound's
+    // revisions, including stale ones of sibling solids. Inherit only names a
+    // parent owns, so an untouched sibling cannot revert a modified revision
+    // when per-solid results are combined.
+    let mut inherited = BTreeMap::new();
+    for parent in parents {
+        let bodies = parent.solids.iter().map(|solid| solid.body).collect::<Vec<_>>();
+        for name in body_entities(&parent.state, &bodies)?.into_keys() {
+            inherited.insert(name, parent.revisions[&name]);
+        }
+    }
     let mut revisions = current
         .iter()
         .map(|name| (*name, inherited.get(name).copied().unwrap_or(operation)))
@@ -1855,7 +1857,7 @@ fn compose_revisions(
             }
         }
     }
-    revisions
+    Ok(revisions)
 }
 
 fn certify_bodies(

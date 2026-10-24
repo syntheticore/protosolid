@@ -222,6 +222,7 @@
         opacity: 0
         pointer-events: none
         text-align: right
+        text-shadow: 0 0 2px rgba(0,0,0, 0.8)
         transition: opacity 0.15s
         white-space: nowrap
 

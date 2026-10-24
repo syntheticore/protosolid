@@ -20,6 +20,8 @@
 
     Icon.outdated(v-if="feature.newerData" icon="exclamation-circle")
 
+    .merge-status(v-if="mergeStatus" :class="mergeStatus" :title="mergeStatus")
+
     nav.actions.bordered(@dblclick.stop)
 
       button(
@@ -91,6 +93,22 @@
 
     &.warning > svg
       color: $warn !important
+
+    > .merge-status
+      position: absolute
+      top: 7px
+      left: 7px
+      width: 6px
+      height: 6px
+      border-radius: 50%
+      pointer-events: none
+
+      &.added
+        background: $green
+      &.modified
+        background: $warn
+      &.removed
+        background: $cancel
 
     > .outdated
       position: absolute
@@ -189,6 +207,11 @@
         if(error) title += ': ' + error.msg
         if(this.feature.newerData) title += ' (the referenced file has changed)'
         return title
+      },
+
+      // Change by the active merge, compared to the current branch
+      mergeStatus() {
+        return this.document.activeMerge?.changes.find(change => change.id == this.feature.id )?.status
       },
 
       featureStyle() {

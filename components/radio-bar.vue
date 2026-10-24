@@ -17,7 +17,8 @@
       @mouseenter="$emit('hover', key)"
     )
 
-      Icon(:icon="item.icon" fixed-width)
+      Icon(v-if="item.icon" :icon="item.icon" fixed-width)
+      span.label(v-else) {{ item.label }}
 
     .hot-key(v-if="hotKey") {{ hotKey }}
 
@@ -56,6 +57,12 @@
       background: $highlight
       border-color: lighten($highlight, 0%)
       color: white
+
+  .label
+    display: block
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
 
   .hot-key
     position: absolute

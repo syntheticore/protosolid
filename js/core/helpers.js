@@ -13,6 +13,11 @@ export class ConstructionHelper {
   center() {
     return new THREE.Vector3().setFromMatrixPosition(this.transform)
   }
+
+  // The origin, axes and planes every component starts with
+  isStandard() {
+    return this.id.startsWith(`${this.componentId}/`)
+  }
 }
 
 export class PlaneHelper extends ConstructionHelper {

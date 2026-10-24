@@ -14,7 +14,14 @@
       v-model:highlight="highlight"
     )
 
+    transition(name="pop")
+      MergePanel(
+        v-if="document.activeMerge"
+        :document="document"
+      )
+
     ToolBox(
+      v-if="!document.activeMerge"
       :document="document"
       :active-tool="activeTool"
     )
@@ -123,7 +130,7 @@
             input(type="checkbox" v-model="sketchSection")
             span Section
 
-      .pose(:class="{ hidden: !document.top().hasPoseChange() }")
+      .pose(:class="{ hidden: !document.top().hasPoseChange() || document.activeMerge }")
 
         h1 POSE
 
@@ -154,6 +161,7 @@
     min-width: 770px
 
   .tool-box
+  .merge-panel
     position: absolute
     margin-top: 12px
     z-index: 2
@@ -285,6 +293,16 @@
     position: absolute
     bottom: 12px
     max-width: calc(100% - 24px)
+
+  // Fades in like dialogs, popping up from slightly below
+  .pop-enter-active
+  .pop-leave-active
+    transition: opacity 0.15s, transform 0.15s ease-out
+
+  .pop-enter-from
+  .pop-leave-to
+    opacity: 0
+    transform: translateY(10px)
 
 </style>
 
@@ -472,7 +490,7 @@
           return
         }
 
-        if(keyCode == 46 || keyCode == 8) { // Del / Backspace
+        if((keyCode == 46 || keyCode == 8) && !this.document.activeMerge) { // Del / Backspace
           // Delete Selection
           if(!this.document.selection.items.length) return;
           [...this.document.selection.items].forEach(item => {

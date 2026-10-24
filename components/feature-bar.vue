@@ -8,19 +8,26 @@
 
     nav.controls
 
-      button(@click="rewindMarker", :disabled="atStart")
+      button(@click="rewindMarker", :disabled="atStart || isMerging")
         Icon(icon="angle-double-left")
 
-      button(@click="stepMarker(-1)", :disabled="atStart")
+      button(@click="stepMarker(-1)", :disabled="atStart || isMerging")
         Icon(icon="angle-left")
 
-      button(@click="stepMarker(1)", :disabled="atEnd")
+      button(@click="stepMarker(1)", :disabled="atEnd || isMerging")
         Icon(icon="angle-right")
 
-      button(@click="forwardMarker", :disabled="atEnd")
+      button(@click="forwardMarker", :disabled="atEnd || isMerging")
         Icon(icon="angle-double-right")
 
-    ul.features(ref="features", @scroll="onScroll", :style="{'--tip': tip + 'px'}")
+    ul.features(
+      ref="features"
+      :style="{'--tip': tip + 'px'}"
+      @scroll="onScroll"
+      @click.capture="blockWhileMerging"
+      @dblclick.capture="blockWhileMerging"
+      @dragstart.capture="blockWhileMerging"
+    )
 
       li.past(
         v-for="feature in past",
@@ -51,7 +58,8 @@
 
       .marker(
         ref="marker"
-        :draggable="true"
+        :class="{ disabled: isMerging }"
+        :draggable="!isMerging"
         @dragstart="dragstart"
       )
         Icon(icon="circle")
@@ -186,6 +194,9 @@
     &:active
       cursor: grabbing
 
+    &.disabled
+      opacity: 0.3
+
     svg
       width: 6px
       padding: 12px 7px
@@ -241,6 +252,11 @@
         return this.preferences.timelineFeatureVisibility === 'all'
       },
 
+      // The merge preview always shows every feature
+      isMerging() {
+        return !!this.document.activeMerge
+      },
+
       atStart: function() {
         return this.document.timeline.marker == 0
       },
@@ -290,6 +306,13 @@
     },
 
     methods: {
+      // Features can still be hovered to highlight them, but not changed
+      blockWhileMerging(e) {
+        if(!this.isMerging) return
+        e.preventDefault()
+        e.stopPropagation()
+      },
+
       isActive(feature) {
         return this.document.activeFeature && (feature == this.document.activeFeature)
       },

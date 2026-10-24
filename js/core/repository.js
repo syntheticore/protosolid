@@ -175,7 +175,8 @@ export class Repository {
 
   // Three-way merge of the given branch into HEAD.
   // Returns { type: 'up-to-date' | 'fast-forward' | 'merge', content, conflicts }.
-  planMerge(branch, { strategy = 'ours', resolvers = {} } = {}) {
+  // Resolutions pick 'ours' or 'theirs' per conflict key, unresolved conflicts keep ours.
+  planMerge(branch, { resolutions = {}, resolvers = {} } = {}) {
     const ours = this.headId
     const theirs = this.branches[branch]
     if(!theirs) throw new MergeError(`Unknown branch '${branch}'.`)
@@ -184,7 +185,7 @@ export class Repository {
 
     const base = this.mergeBase(ours, theirs)
     const conflicts = []
-    const merger = new TreeMerger(this, strategy, resolvers, conflicts)
+    const merger = new TreeMerger(this, resolutions, resolvers, conflicts)
     const root = id => id && ({ $obj: this.commits[id].root })
     const merged = merger.merge(root(base), root(ours), root(theirs), [])
     return { type: 'merge', theirs, content: this.materialize(merged), conflicts }
@@ -264,9 +265,9 @@ export class Repository {
 
 
 class TreeMerger {
-  constructor(repository, strategy, resolvers, conflicts) {
+  constructor(repository, resolutions, resolvers, conflicts) {
     this.repository = repository
-    this.strategy = strategy
+    this.resolutions = resolutions
     this.resolvers = resolvers
     this.conflicts = conflicts
   }
@@ -375,8 +376,9 @@ class TreeMerger {
   // Shown values are what each branch has at that path, undefined when deleted.
   conflict(path, ours, theirs, shown = [ours, theirs]) {
     const [oursValue, theirsValue] = shown.map(node => this.repository.materialize(node) )
-    this.conflicts.push({ path, ours: oursValue, theirs: theirsValue })
-    return this.strategy == 'theirs' ? theirs : ours
+    const key = pathKey(path)
+    this.conflicts.push({ key, path, ours: oursValue, theirs: theirsValue })
+    return this.resolutions[key] == 'theirs' ? theirs : ours
   }
 }
 

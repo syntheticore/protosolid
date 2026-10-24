@@ -2,7 +2,7 @@
 
   .view-port(
     :style="{ cursor: (activeTool && activeTool.cursor) || 'auto' }"
-    :class="{ orbiting: isOrbiting }"
+    :class="{ orbiting: isOrbiting, merging: !!document.activeMerge }"
     @contextmenu.prevent
   )
 
@@ -137,11 +137,30 @@
     position: relative
     overflow: hidden
 
+  // Registered, so the gradient colors can transition
+  @property --viewport-inner
+    syntax: '<color>'
+    inherits: false
+    initial-value: #333333
+
+  @property --viewport-outer
+    syntax: '<color>'
+    inherits: false
+    initial-value: #1c2127
+
   canvas
     display: block
     // Keep the active tool cursor when OrbitControls writes an inline cursor.
     cursor: inherit !important
-    background: radial-gradient(farthest-corner at 50% 150%, #333333, #1c2127)
+    --viewport-inner: #333333
+    --viewport-outer: #1c2127
+    background: radial-gradient(farthest-corner at 50% 150%, var(--viewport-inner), var(--viewport-outer))
+    transition: --viewport-inner 0.4s, --viewport-outer 0.4s
+
+    // Tinted while previewing a merge
+    .merging &
+      --viewport-inner: #1d2729
+      --viewport-outer: #0f1517
 
   .drawpad
   .floaters
@@ -431,7 +450,7 @@
       },
 
       selectionWidgetItem: function() {
-        if(this.widgets.length || !(this.activeTool instanceof ManipulationTool) || this.document.activeSketch) return null
+        if(this.widgets.length || !(this.activeTool instanceof ManipulationTool) || this.document.activeSketch || this.document.activeMerge) return null
         const item = this.document.selection.items.at(-1)
         return item instanceof Face || item instanceof Edge ? item : null
       },

@@ -10,7 +10,7 @@ import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
 import { readDocumentFile } from './document-format.js'
 import { Repository } from './repository.js'
-import { describeConflict } from './merge-conflicts.js'
+import { MergeSession } from './merge-session.js'
 import { showDialog } from '../dialogs.js'
 import { makeID, lastId, setLastId } from './id.js'
 import Expression from './expression.js'
@@ -36,6 +36,8 @@ export default class Document extends Emitter {
     // Bumped on every repository change, as the repository itself is not reactive
     this.repositoryVersion = 0
     this.hasRepositoryChanges = false
+    // Merge preview, see MergeSession
+    this.activeMerge = null
     this.timeline = new Timeline()
     this.pendingTimeline = null
     this.materials = []
@@ -112,7 +114,7 @@ export default class Document extends Emitter {
 
   // Documents that were never written to a file can always be saved
   get canSave() {
-    return this.hasUnsavedChanges || !this.filePath
+    return (this.hasUnsavedChanges || !this.filePath) && !this.activeMerge
   }
 
   isTreeletExpanded(key, defaultValue = this.treeletsExpandedByDefault) {
@@ -191,7 +193,7 @@ export default class Document extends Emitter {
   }
 
   keepPose() {
-    if(!this.top().hasPoseChange()) return
+    if(!this.top().hasPoseChange() || this.activeMerge) return
     const feature = new PoseFeature(this)
     // The cache entry before this feature must retain the old design pose.
     this.top().resetPose()
@@ -420,6 +422,8 @@ export default class Document extends Emitter {
   }
 
   async activateFeature(feature, doReset, resetMarker) {
+    // The merge preview is not editable
+    if(feature && this.activeMerge) return
     if(feature) {
       this.activateInteractivePanel(null)
 
@@ -685,7 +689,7 @@ export default class Document extends Emitter {
   }
 
   async save(as) {
-    if(!as && !this.canSave) return
+    if(this.activeMerge || (!as && !this.canSave)) return
     await this.cancelFeature()
     // Native save commands can arrive while an incoming version is calculating.
     if(this.pendingTimeline) return
@@ -716,7 +720,9 @@ export default class Document extends Emitter {
       this.hasChanges = false
       this.hasRepositoryChanges = false
     } catch(error) {
-      if(error != 'canceled') alert(error)
+      // Canceling the commit dialog or the file chooser simply leaves the document unsaved
+      if(error == 'canceled') return
+      alert(error)
       throw error
     }
 
@@ -772,14 +778,8 @@ export default class Document extends Emitter {
     if(this.hasChanges && !window.confirm('Discard unsaved changes and switch to another version?')) return
     await this.cancelFeature()
     const commitId = this.repository.branches[target] || target
-    const materials = []
-    let dump
-    try {
-      dump = Serialize.deserialize(this.repository.read(commitId), { document: this, sketches: {}, materials })
-    } catch(error) {
-      console.error(error)
-      return alert('This version could not be opened.')
-    }
+    const { dump, materials } = this.readVersion(this.repository.read(commitId))
+    if(!dump) return
     this.repository.checkout(target)
     await this.applyDump(dump, materials, 'Switching version', this.repository.commits[commitId].message)
     await this.writeRepository()
@@ -802,58 +802,36 @@ export default class Document extends Emitter {
     await this.writeRepository()
   }
 
+  // Merging opens a preview session, see MergeSession
   async mergeBranch(branch) {
-    const repository = this.repository
-    const current = repository.currentBranch
+    const current = this.repository.currentBranch
     if(!current) return alert('Switch to a branch before merging.')
     if(this.hasChanges) return alert('Save your changes before merging.')
+    const merge = new MergeSession(this, branch)
+    if(merge.plan.type == 'up-to-date') return alert(`'${current}' already contains all changes from '${branch}'.`)
     await this.cancelFeature()
+    this.activeMerge = merge
+    await this.activeMerge.start()
+  }
 
-    const resolvers = {
-      lastId: (base, ours, theirs) => bigIntMax(...[ours, theirs].map(id => BigInt(id.slice(0, -1)) )).toString() + 'n',
-      'timeline.marker': (base, ours) => ours,
-    }
-    let plan = repository.planMerge(branch, { resolvers })
-    if(plan.type == 'up-to-date') return alert(`'${current}' already contains all changes from '${branch}'.`)
+  showVersion({ timeline, materials, activeComponent }) {
+    this.selection.clear()
+    this.timeline = timeline
+    this.materials = materials
+    this.activeComponent = activeComponent || this.top()
+    this.hasChanges = false
+  }
 
-    let message
-    if(plan.type == 'merge') {
-      const result = await showDialog({
-        title: 'Merge Branch',
-        icon: 'compress-alt',
-        message: plan.conflicts.length ?
-          `Both branches changed the same values in ${plan.conflicts.length} place(s).\nChoose which branch wins these conflicts.` :
-          `Merge the changes from '${branch}' into '${current}'.`,
-        details: plan.conflicts.map(conflict => describeConflict(conflict, this.timeline, [current, branch]) ),
-        fields: [{ key: 'message', value: `Merge branch '${branch}' into ${current}`, required: true }],
-        actions: plan.conflicts.length ?
-          // Same order as the conflict values: merged branch left, current branch right
-          [
-            { label: `Keep '${branch}'`, value: 'theirs' },
-            { label: `Keep '${current}'`, value: 'ours', primary: true },
-          ] :
-          [{ label: 'Merge', value: 'ours', primary: true }],
-      })
-      if(!result) return
-      if(result.action == 'theirs') plan = repository.planMerge(branch, { strategy: 'theirs', resolvers })
-      message = result.values.message.trim()
-      // Show every merged feature
-      plan.content.timeline.marker = plan.content.timeline.features.length
-    }
-
+  // Returns { dump, materials }, or an empty object when the content could not be read
+  readVersion(content) {
     const materials = []
-    let dump
     try {
-      // Deserialization works in place, so keep plan content intact for the commit
-      const content = plan.type == 'merge' ? structuredClone(plan.content) : repository.read(plan.commitId)
-      dump = Serialize.deserialize(content, { document: this, sketches: {}, materials })
+      return { dump: Serialize.deserialize(content, { document: this, sketches: {}, materials }), materials }
     } catch(error) {
       console.error(error)
-      return alert('The merged version could not be opened.')
+      alert('This version could not be opened.')
+      return {}
     }
-    repository.commitMerge(plan, message)
-    await this.applyDump(dump, materials, 'Merging', branch)
-    await this.writeRepository()
   }
 
   async load(path) {
@@ -884,8 +862,26 @@ export default class Document extends Emitter {
   }
 
   async applyDump(dump, materials, title, detail, resetCamera = false) {
+    await this.calculateDump(dump, title, detail, () => {
+      this.timeline = dump.timeline
+      this.materials = materials
+      this.hasChanges = false
+      this.activeComponent = this.top()
+      if(Array.isArray(dump.views)) this.views = dump.views
+      this.activeView = null
+      this.previewView = null
+      this.dirtyView = null
+      this.viewPreviewSnapshot = null
+      const homeView = this.views.find(view => view.system && view.title == 'Home') ||
+        this.views.find(view => view.position && view.target)
+      if(homeView && resetCamera) this.currentCameraView = cloneCameraView(homeView)
+    })
+  }
+
+  // Evaluates the timeline of a deserialized version while reporting progress.
+  // The displayed timeline stays intact until apply swaps in the incoming one.
+  async calculateDump(dump, title, detail, apply) {
     const calculationId = ++nextCalculationId
-    // Keep the displayed timeline intact until the incoming version is complete.
     this.pendingTimeline = dump.timeline
     this.bus.emit('calculation', { id: calculationId, title, detail })
     try {
@@ -902,18 +898,7 @@ export default class Document extends Emitter {
           total,
         })
       })
-      this.timeline = this.pendingTimeline
-      this.materials = materials
-      this.hasChanges = false
-      this.activeComponent = this.top()
-      if(Array.isArray(dump.views)) this.views = dump.views
-      this.activeView = null
-      this.previewView = null
-      this.dirtyView = null
-      this.viewPreviewSnapshot = null
-      const homeView = this.views.find(view => view.system && view.title == 'Home') ||
-        this.views.find(view => view.position && view.target)
-      if(homeView && resetCamera) this.currentCameraView = cloneCameraView(homeView)
+      apply?.()
     } finally {
       this.pendingTimeline = null
       this.bus.emit('calculation-finished', calculationId)

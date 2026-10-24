@@ -1,6 +1,6 @@
 <template lang="pug">
 
-  ul.tree-view(@scroll="bus.emit('tree-layout')")
+  ul.tree-view(:class="{ merging: !!document.activeMerge }" @scroll="bus.emit('tree-layout')")
 
     TreeItem(
       ref="tree"
@@ -46,6 +46,18 @@
 
   .tree-item
     margin-left: -7px
+
+  // A merge preview is not editable, only visibility can be toggled
+  .merging
+    :deep(*)
+      pointer-events: none
+
+    :deep(.eye)
+    :deep(.expander)
+      pointer-events: auto
+
+    :deep(.controls)
+      display: none
 
 </style>
 

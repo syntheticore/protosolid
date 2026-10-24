@@ -4,15 +4,14 @@ import { reactive } from 'vue'
 // in-app dialog rendered by DialogView.
 export const dialogState = reactive({ current: null })
 
-// Details are { icon, text } rows. Resolves with { action, values } or null when canceled
-export function showDialog({ title, icon, message, details = [], fields = [], actions }) {
+// Resolves with { action, values } or null when canceled
+export function showDialog({ title, icon, message, fields = [], actions }) {
   if(dialogState.current) closeDialog(null)
   return new Promise(resolve => {
     dialogState.current = {
       title,
       icon,
       message,
-      details,
       fields: fields.map(field => ({ value: '', ...field })),
       actions: actions || [{ label: 'OK', value: 'ok', primary: true }],
       resolve,

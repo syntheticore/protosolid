@@ -33,12 +33,12 @@
               @click.stop
             )
 
-          Icon.delete-btn(v-if="!view.system" icon="trash" @click.stop="deleteView(i)")
+          Icon.delete-btn(v-if="!view.system && !document.activeMerge" icon="trash" @click.stop="deleteView(i)")
 
       transition(name="fade" mode="out-in")
 
         .controls(
-          v-show="!!document.dirtyView"
+          v-show="!!document.dirtyView && !document.activeMerge"
           ref="controls"
           :class="{ saveCamera: saveCamera && settingsOpen }"
           :style="settingsOpen ? { height: `${settingsHeight - (saveCamera ? 0 : camSettingsHeight)}px` } : null"
@@ -377,6 +377,8 @@
   function clickView(view, i, event) {
     const selectedView = modifiedView(view, i, event)
     if(props.document.activeView == selectedView) {
+      // Views are saved with the document, so they stay unchanged while merging
+      if(props.document.activeMerge) return
       view.editing = true
       setTimeout(() => {
         input.value[i].select()

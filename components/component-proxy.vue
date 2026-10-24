@@ -51,7 +51,7 @@
   template(v-for="helper in component.helpers")
 
     HelperProxy(
-      v-if="!component.isItemHidden(helper.id) && (component.id === document.activeComponent?.id || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper))"
+      v-if="!component.isItemHidden(helper.id) && !(document.activeMerge && helper.isStandard()) && (component.id === document.activeComponent?.id || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper))"
       :key="helper.id"
       :document="document"
       :component="component"

@@ -12,11 +12,6 @@
 
         p(v-if="dialog.message") {{ dialog.message }}
 
-        ul.details(v-if="dialog.details.length")
-          li(v-for="detail in dialog.details")
-            Icon(v-if="detail.icon" :icon="detail.icon" fixed-width)
-            span {{ detail.text }}
-
         label(v-for="(field, i) in dialog.fields")
           span(v-if="field.label") {{ field.label }}
           input.input.large(
@@ -54,7 +49,7 @@
     transition: opacity 0.15s
 
   .dialog
-    width: 440px
+    width: 360px
     max-width: calc(100vw - 32px)
     padding: dialogPadding
     // Concentric with the 5px button corners: button radius + padding + 1px border
@@ -62,6 +57,7 @@
     color: $bright2
     font-size: 13px
     box-shadow: 0 0 0 1px $dark2 * 0.5, 0 8px 32px rgba(black, 0.25)
+    transition: transform 0.15s ease-out
 
   h1
     display: flex
@@ -79,23 +75,6 @@
     line-height: 1.45
     margin-bottom: 12px
     white-space: pre-line
-
-  .details
-    max-height: 120px
-    overflow: auto
-    margin-bottom: 10px
-    padding: 6px 8px
-    border-radius: 3px
-    background: rgba(black, 0.2)
-
-    li
-      display: flex
-      align-items: center
-      gap: 6px
-      line-height: 1.8
-
-      svg
-        flex: 0 0 auto
 
   label
     display: flex
@@ -116,6 +95,10 @@
   .fade-enter-from
   .fade-leave-to
     opacity: 0
+
+    // Pops up from slightly below
+    .dialog
+      transform: translateY(10px)
 
 </style>
 

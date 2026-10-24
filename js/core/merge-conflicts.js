@@ -3,42 +3,71 @@ import Expression from './expression.js'
 import preferences from '../preferences.js'
 
 // Turns a merge conflict from Repository.planMerge into a readable row such as
-// { icon: 'chamfer', text: 'Chamfer 16: Distance = 1mm (other) | 3mm (master)' }.
-// Branches are the names of the current and the merged branch.
-export function describeConflict(conflict, timeline, branches) {
+// { featureId: 'id-16', label: 'Distance', ours: '3mm', theirs: '1mm' }.
+// Conflicts outside of features have no featureId, but an icon and a self-contained label.
+// Conflicts of features are listed under the change of their feature instead.
+export function describeConflict(conflict, timeline) {
   const { path, ours, theirs } = conflict
-  const [section, list, item, ...rest] = path
+  const featureId = conflictFeatureId(path)
 
-  if(section == 'timeline' && list == 'features' && item?.id) {
-    const feature = timeline.features.find(feature => feature.id == item.id )
-    const dump = ours || theirs
-    const featureClass = feature?.constructor || Serialize.classes[dump?.$class]
-    const name = `${feature?.title || humanize(dump?.$class?.replace(/Feature$/, '') || 'Feature')} ${shortId(item.id)}`
-    const icon = featureClass?.icon || 'cube'
-    if(!rest.length) {
-      return { icon, text: `${name}: ${pair([ours === undefined ? 'deleted' : 'modified', theirs === undefined ? 'deleted' : 'modified'], branches)}` }
+  if(featureId) {
+    const [, , , group, key, ...deeper] = path
+    const feature = timeline.features.find(feature => feature.id == featureId )
+    if(!group) {
+      return { featureId, label: 'Whole feature', ours: ours === undefined ? 'deleted' : 'modified', theirs: theirs === undefined ? 'deleted' : 'modified' }
     }
-    const [group, key, ...deeper] = rest
     const setting = (group == 'values' || group == 'expressions') && feature?.settings?.[key]
     if(setting) {
       const label = setting.title + (group == 'expressions' ? ' expression' : '')
-      const format = value => group == 'expressions' ? formatValue(value) : formatSetting(setting, value)
-      const values = deeper.length ? ['modified', 'modified'] : [format(ours), format(theirs)]
-      return { icon, text: `${name}: ${label} = ${pair(values, branches)}` }
+      const format = value => deeper.length ? 'modified' : group == 'expressions' ? formatValue(value) : formatSetting(setting, value)
+      return { featureId, label, ours: format(ours), theirs: format(theirs) }
     }
-    return { icon, text: `${name}: ${describePath(rest)} = ${pair([formatValue(ours), formatValue(theirs)], branches)}` }
+    return { featureId, label: describePath(path.slice(3)), ours: formatValue(ours), theirs: formatValue(theirs) }
   }
 
   if(path.at(-1) == '$order') {
-    return { icon: 'sort', text: `${describePath(path.slice(0, -1))}: order changed in both branches` }
+    return { icon: 'sort', label: `${describePath(path.slice(0, -1))}: order`, ours: 'reordered', theirs: 'reordered' }
   }
 
-  return { icon: 'pen', text: `${describePath(path)} = ${pair([formatValue(ours), formatValue(theirs)], branches)}` }
+  return { icon: 'pen', label: describePath(path), ours: formatValue(ours), theirs: formatValue(theirs) }
 }
 
-// Merged branch left, current branch right, like the dialog's buttons
-function pair(values, branches) {
-  return values.map((value, i) => `${value} (${branches[i]})` ).reverse().join(' | ')
+// Features the merge adds, modifies or removes compared to the current version,
+// in timeline order. Features with conflicts are always listed, their status is
+// null when the chosen resolutions leave them unchanged.
+// Returns rows like { id, status: 'added', icon: 'extrude', name: 'Extrude 12' }.
+export function describeFeatureChanges(before, after, conflicts) {
+  const conflicted = new Map()
+  conflicts.forEach(({ path, ours, theirs }) => {
+    const id = conflictFeatureId(path)
+    if(id && !conflicted.get(id)) conflicted.set(id, path.length == 3 ? ours || theirs : undefined)
+  })
+  const beforeFeatures = new Map(before.timeline.features.map(dump => [dump.id, dump] ))
+  const afterIds = new Set(after.timeline.features.map(dump => dump.id ))
+  const changes = after.timeline.features.flatMap(dump => {
+    const previous = beforeFeatures.get(dump.id)
+    const same = previous && JSON.stringify(previous) == JSON.stringify(dump)
+    if(same && !conflicted.has(dump.id)) return []
+    return [{ id: dump.id, status: !previous ? 'added' : same ? null : 'modified', ...describeFeature(dump.id, dump) }]
+  })
+  before.timeline.features
+    .filter(dump => !afterIds.has(dump.id) )
+    .forEach(dump => changes.push({ id: dump.id, status: 'removed', ...describeFeature(dump.id, dump) }) )
+  // Deleted on one side and modified on the other, while the deletion wins
+  conflicted.forEach((dump, id) => {
+    if(!afterIds.has(id) && !beforeFeatures.has(id)) changes.push({ id, status: null, ...describeFeature(id, dump) })
+  })
+  return changes
+}
+
+function conflictFeatureId(path) {
+  const [section, list, item] = path
+  return section == 'timeline' && list == 'features' && item?.id
+}
+
+function describeFeature(id, dump) {
+  const title = dump.title || humanize(dump.$class.replace(/Feature$/, ''))
+  return { icon: Serialize.classes[dump.$class]?.icon || 'cube', name: `${title} ${shortId(id)}` }
 }
 
 function formatSetting(setting, value) {

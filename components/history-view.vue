@@ -54,7 +54,7 @@
 
             .date {{ formatDate(row.date) }}
 
-            .actions
+            .actions(v-if="!document.activeMerge")
 
               button(
                 v-if="row.id != graph.headId"
@@ -203,49 +203,24 @@
 <script setup>
 
   import { requestText } from './../js/dialogs.js'
+  import { layoutHistory, laneColor } from './../js/history-graph.js'
 
   const props = defineProps(['document'])
+  const bus = inject('bus')
 
   const rowHeight = 32
   const laneWidth = 16
-  const colors = ['#ffbb40', '#ee3367', '#4b8ee3', '#15c115', '#a052f7', '#ea6a43']
 
   const getX = lane => 14 + lane * laneWidth
   const getY = index => rowHeight / 2 + index * rowHeight
-  const getColor = lane => colors[lane % colors.length]
+  const getColor = laneColor
 
-  // Assign every commit a lane, git log --graph style
   const graph = computed(() => {
     props.document.repositoryVersion
     const repository = props.document.repository
     if(!repository || repository.isEmpty) return null
 
-    const tips = {}
-    Object.entries(repository.branches).forEach(([name, id]) => (tips[id] ||= []).push(name) )
-
-    const lanes = []
-    const claimLane = id => {
-      let lane = lanes.indexOf(null)
-      if(lane < 0) lane = lanes.length
-      lanes[lane] = id
-      return lane
-    }
-    const pending = []
-    const rows = repository.log().map((commit, index) => {
-      let lane = lanes.indexOf(commit.id)
-      if(lane < 0) lane = claimLane(commit.id)
-      // Lines of other children waiting for this commit end here
-      lanes.forEach((id, i) => { if(id == commit.id && i != lane) lanes[i] = null })
-      lanes[lane] = null
-      commit.parents.forEach((parent, i) => {
-        // The first parent continues in this lane, merged parents join or open another one
-        let travel = i == 0 ? lane : lanes.indexOf(parent)
-        if(travel < 0) travel = claimLane(parent)
-        lanes[travel] = parent
-        pending.push({ child: commit.id, parent, lane: travel })
-      })
-      return { ...commit, index, lane, branches: tips[commit.id] || [] }
-    })
+    const { rows, edges: pending } = layoutHistory(repository)
 
     const byId = new Map(rows.map(row => [row.id, row]))
     const edges = pending.map(({ child, parent, lane }) => {
@@ -288,7 +263,7 @@
   }
 
   function checkout(target) {
-    if(target == props.document.repository.currentBranch) return
+    if(target == props.document.repository.currentBranch || props.document.activeMerge) return
     run(() => props.document.checkoutVersion(target) )
   }
 
@@ -304,6 +279,7 @@
   }
 
   async function renameBranch(name) {
+    if(props.document.activeMerge) return
     const newName = await requestText({
       title: 'Rename Branch',
       icon: 'code-branch',
@@ -320,6 +296,8 @@
   }
 
   function merge(name) {
+    // The merge preview needs the viewport
+    bus.emit('close-widgets')
     run(() => props.document.mergeBranch(name) )
   }
 

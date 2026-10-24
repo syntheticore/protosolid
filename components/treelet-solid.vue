@@ -6,7 +6,7 @@
     :class="{ hidden: isHidden }"
   )
 
-    .box(:class="{ highlighted: solid.id == (highlight && (highlight.solid || highlight).id), selected: document.selection.hasId(solid.id) }")
+    .box(:class="{ highlighted: solid.id == (highlight && (highlight.solid || highlight).id) || isDescendantSelected, selected: document.selection.hasId(solid.id) }")
 
       TreeItemHeader(
         :model-value="component.itemTitle(solid.id, `Solid ${index + 1}`)"
@@ -52,6 +52,10 @@
   const highlight = inject('highlight')
 
   const isHidden = computed(() => props.component.isItemHidden(props.solid.id) )
+
+  const isDescendantSelected = computed(() =>
+    props.document.selection.items.some(item => item.solid?.id == props.solid.id)
+  )
 
   function toggleVisibility() {
     props.component.creator.itemsHidden[props.component.sourceItemId(props.solid.id)] = !isHidden.value

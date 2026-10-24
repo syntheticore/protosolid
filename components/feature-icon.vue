@@ -181,7 +181,9 @@
         const style = {
           active: this.isActive,
           selected: this.document.selection.has(this.feature),
-          highlighted: toRaw(this.highlight) === toRaw(this.feature) || !!isRelatedToFeature(this.highlight),
+          highlighted: toRaw(this.highlight) === toRaw(this.feature) ||
+            !!isRelatedToFeature(this.highlight) ||
+            (!!this.feature.sketch && this.highlight?.id == this.feature.sketch.id),
           dimmed: this.isDimmed,
           dragTarget: this.isDragTarget,
           targetLeft: this.targetLeft,

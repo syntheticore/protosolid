@@ -15,7 +15,7 @@
         fixed-width
       )
 
-      .box(:class="{ active: component.id === document.activeComponent?.id, selected: document.selection.has(component) }")
+      .box(:class="{ active: component.id === document.activeComponent?.id, selected: document.selection.has(component), 'descendant-highlighted': isDescendantHighlighted }")
 
         TreeItemHeader(
           :model-value="component.creator.title"
@@ -283,6 +283,9 @@
       .blurry &
         backdrop-filter: blur(16px)
 
+      &.descendant-highlighted
+        background: $dark2 * 1.35
+
       &.active
         border-color: $highlight * 1.2
         box-shadow: 0 0 0px 1px $highlight * 1.2
@@ -390,7 +393,7 @@
   export default {
     name: 'TreeItem',
 
-    inject: ['bus'],
+    inject: ['bus', 'highlight'],
 
     props: {
       isTop: Boolean,
@@ -447,6 +450,12 @@
 
       isVisible: function() {
         return !this.component.creator.hidden && !this.parentHidden
+      },
+
+      isDescendantHighlighted: function() {
+        return [this.highlight, ...this.document.selection.items].some(item =>
+          item && (item.solid || item).component?.hasAncestor(this.component)
+        )
       },
     },
 

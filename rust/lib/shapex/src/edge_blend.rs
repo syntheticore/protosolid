@@ -59,6 +59,9 @@ struct BlendEndpoint {
     terminating_face: FaceId,
     // Shared terminating seam and the parent contact that moves its endpoint.
     tangent_termination: Option<(EdgeId, usize)>,
+    // Seam to a second, non-tangent terminating face that the end boundary
+    // crosses on its way to the second contact.
+    crossing: Option<(EdgeId, FaceId)>,
     adjacent_uses: [CoedgeId; 2],
     contact_parameters: [f64; 2],
     contact_points: [Point3; 2],
@@ -158,8 +161,11 @@ type TerminationGaps = BTreeMap<(PersistentId, VertexId), (CoedgeId, CoedgeId, b
 #[derive(Default)]
 struct BlendRewrite {
     termination_gaps: TerminationGaps,
+    /// The gaps on the second support of end boundaries crossing a seam.
+    crossing_gaps: TerminationGaps,
     /// Contact vertex of each blended vertex on a face, per selected edge
-    /// where the vertex does not join a junction.
+    /// where the vertex does not join a junction. An end boundary crossing a
+    /// terminating seam has its crossing keyed by the second support and seam.
     contact_vertices: BTreeMap<(VertexId, FaceId, Option<EdgeId>), VertexId>,
     /// Boundary edges consumed entirely by a contact, with their kept vertex.
     collapsed_edges: BTreeMap<EdgeId, VertexId>,
@@ -189,6 +195,9 @@ struct BlendPatch {
     contact_points: [[Point3; 2]; 2],
     contact_boundaries: [BlendBoundary; 2],
     end_boundaries: [BlendBoundary; 2],
+    /// Where an end boundary crosses its terminating seam, and its part from
+    /// there to the second contact. `end_boundaries` then ends at the crossing.
+    crossings: [Option<(Point3, BlendBoundary)>; 2],
     blend_surface: Surface3,
     blend_parameterization: BlendSurfaceParameterization,
 }

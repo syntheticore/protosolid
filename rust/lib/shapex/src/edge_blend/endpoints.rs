@@ -64,6 +64,7 @@ impl Transaction<'_> {
             old_vertex: vertex,
             terminating_face,
             tangent_termination: None,
+            crossing: None,
             adjacent_uses: uses,
             contact_parameters: [parameter; 2],
             contact_points: points,
@@ -326,8 +327,11 @@ impl Transaction<'_> {
         }
         // At a partial chamfer end, the two terminating supports meet
         // tangentially. The new boundary can lie entirely on one support,
-        // with its other contact extending their shared seam.
+        // with its other contact extending their shared seam. Supports that
+        // meet at an angle each carry the part of the boundary from the
+        // contact on their own adjacent edge to where it crosses the seam.
         let mut tangent_termination = None;
+        let mut crossing = None;
         if terminating_faces.len() == 2 {
             let seam = self
                 .working
@@ -351,45 +355,65 @@ impl Transaction<'_> {
                 normals.push(self.working.face(*face)?.oriented_normal_near(point, tolerance)?);
             }
             if normals[0].dot(normals[1]) < 1.0 - tolerance.angular * 8.0 {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "blend endpoint requires tangent terminating supports",
-                ));
-            }
-            let allowed = tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 8.0;
-            for face in &terminating_faces {
-                let surface = &self.working.face(*face)?.surface;
-                if contact_points.iter().any(|point| {
-                    surface
-                        .project(*point, tolerance)
-                        .map_or(true, |projection| projection.distance > allowed)
-                }) {
-                    continue;
-                }
+                let mut faces = [terminating_faces[0]; 2];
                 for parent in 0..2 {
                     let adjacent = self.working.coedge(adjacent_uses[parent])?.edge;
-                    if self.working.edge_faces(adjacent)?.contains(face) {
-                        continue;
-                    }
-                    if self
-                        .working
-                        .edge(seam)?
-                        .curve
-                        .project(contact_points[parent], tolerance)?
-                        .distance
-                        > allowed
-                    {
-                        continue;
-                    }
-                    terminating_face = *face;
-                    tangent_termination = Some((seam, parent));
+                    let adjacent_faces = self.working.edge_faces(adjacent)?;
+                    faces[parent] = terminating_faces
+                        .iter()
+                        .copied()
+                        .find(|face| adjacent_faces.contains(face))
+                        .ok_or_else(|| {
+                            KernelError::new(
+                                DiagnosticKind::TopologyInvariant,
+                                "blend rail does not bound a terminating support",
+                            )
+                        })?;
                 }
-            }
-            if tangent_termination.is_none() {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "blend endpoint crosses both terminating supports",
-                ));
+                if faces[0] == faces[1] {
+                    return Err(KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "blend rails end on the same non-tangent terminating support",
+                    ));
+                }
+                terminating_face = faces[0];
+                crossing = Some((seam, faces[1]));
+            } else {
+                let allowed = tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 8.0;
+                for face in &terminating_faces {
+                    let surface = &self.working.face(*face)?.surface;
+                    if contact_points.iter().any(|point| {
+                        surface
+                            .project(*point, tolerance)
+                            .map_or(true, |projection| projection.distance > allowed)
+                    }) {
+                        continue;
+                    }
+                    for parent in 0..2 {
+                        let adjacent = self.working.coedge(adjacent_uses[parent])?.edge;
+                        if self.working.edge_faces(adjacent)?.contains(face) {
+                            continue;
+                        }
+                        if self
+                            .working
+                            .edge(seam)?
+                            .curve
+                            .project(contact_points[parent], tolerance)?
+                            .distance
+                            > allowed
+                        {
+                            continue;
+                        }
+                        terminating_face = *face;
+                        tangent_termination = Some((seam, parent));
+                    }
+                }
+                if tangent_termination.is_none() {
+                    return Err(KernelError::new(
+                        DiagnosticKind::UnsupportedGeometry,
+                        "blend endpoint crosses both terminating supports",
+                    ));
+                }
             }
         }
         if spine.concave && allow_adjacent_extension.iter().all(|extension| *extension) {
@@ -402,12 +426,115 @@ impl Transaction<'_> {
             old_vertex,
             terminating_face,
             tangent_termination,
+            crossing,
             adjacent_uses,
             contact_parameters,
             contact_points,
             allow_adjacent_extension,
             cap: None,
         })
+    }
+
+    /// The chart point of a terminating face at a blended vertex, from that
+    /// face's use of an edge through the vertex.
+    pub(super) fn terminating_chart_reference(
+        &self,
+        edge: EdgeId,
+        face: FaceId,
+        vertex: VertexId,
+    ) -> KernelResult<Point2> {
+        let (id, coedge) = self
+            .working
+            .edge(edge)?
+            .coedges
+            .iter()
+            .filter_map(|id| self.working.coedge(*id).ok().map(|coedge| (*id, coedge)))
+            .find(|(_, coedge)| {
+                self.working
+                    .loop_(coedge.loop_id)
+                    .is_ok_and(|loop_| loop_.face == face)
+            })
+            .ok_or_else(|| {
+                KernelError::new(
+                    DiagnosticKind::TopologyInvariant,
+                    "blend endpoint lost its terminating chart",
+                )
+            })?;
+        let traversal = self.working.coedge_vertices(id)?;
+        Ok(coedge
+            .pcurve
+            .evaluate(if traversal[0] == vertex {
+                coedge.range.start
+            } else {
+                coedge.range.end
+            })?
+            .point)
+    }
+
+    /// Split the end boundary `blend_pcurve` where it crosses the seam between
+    /// two non-tangent terminating supports. Returns its part on the first
+    /// support, the crossing point and its part on the second support.
+    pub(super) fn prepare_crossing_end(
+        &self,
+        blend_surface: &Surface3,
+        blend_pcurve: &Curve2,
+        endpoint: &BlendEndpoint,
+        contact_points: [Point3; 2],
+    ) -> KernelResult<(BlendBoundary, Point3, BlendBoundary)> {
+        let tolerance = self.kernel.tolerance;
+        let (seam, second_face) = endpoint.crossing.ok_or_else(|| {
+            KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "blend end boundary has no terminating seam to cross",
+            )
+        })?;
+        let seam_edge = self.working.edge(seam)?;
+        let [start, middle, end] = [0.0, 0.5, 1.0]
+            .map(|parameter| blend_pcurve.evaluate(parameter).map(|value| value.point));
+        let (start, middle, end) = (start?, middle?, end?);
+        let seed = seam_edge
+            .curve
+            .project(blend_surface.evaluate(middle.x, middle.y)?.point, tolerance)?
+            .parameter;
+        let hit = seam_edge
+            .curve
+            .intersect_surface_near(blend_surface, seed, (middle.x, middle.y), tolerance)?;
+        let uv = nearest_uv(
+            blend_surface.domains(),
+            Point2::new(hit.surface_parameters.0, hit.surface_parameters.1),
+            middle,
+        );
+        let fraction = (uv - start).dot(end - start) / (end - start).magnitude2();
+        if !seam_edge.range.contains(hit.curve_parameter, tolerance)
+            || fraction <= 0.0
+            || fraction >= 1.0
+        {
+            return Err(KernelError::new(
+                DiagnosticKind::UnsupportedGeometry,
+                "blend end boundary does not cross its terminating seam between its contacts",
+            ));
+        }
+        let first_edge = self.working.coedge(endpoint.adjacent_uses[0])?.edge;
+        let second_edge = self.working.coedge(endpoint.adjacent_uses[1])?.edge;
+        let first = self.prepare_end_boundary(
+            blend_surface,
+            self.working.face(endpoint.terminating_face)?.surface.clone(),
+            Line2::new(start, uv - start)?.into(),
+            [contact_points[0], hit.point],
+            self.terminating_chart_reference(
+                first_edge,
+                endpoint.terminating_face,
+                endpoint.old_vertex,
+            )?,
+        )?;
+        let second = self.prepare_end_boundary(
+            blend_surface,
+            self.working.face(second_face)?.surface.clone(),
+            Line2::new(uv, end - uv)?.into(),
+            [hit.point, contact_points[1]],
+            self.terminating_chart_reference(second_edge, second_face, endpoint.old_vertex)?,
+        )?;
+        Ok((first, hit.point, second))
     }
 
     fn implicit_end_boundary(

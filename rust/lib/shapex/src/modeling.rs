@@ -1280,6 +1280,20 @@ impl Compound {
             if let Some(diagnostic) = mixed_trihedral {
                 return self.blend_setback_network(edges, size, &diagnostic.entities, kind, chamfer);
             }
+            let crossing_corner = error.diagnostics().iter().find(|diagnostic| {
+                diagnostic.operation.as_deref() == Some("blend.crossing-corner-sequence")
+                    && diagnostic.entities.iter().all(|name| selected.contains(name))
+            });
+            if let Some(diagnostic) = crossing_corner {
+                return self.blend_crossing_corner(
+                    edges,
+                    size,
+                    follow_tangent_edges,
+                    &diagnostic.entities,
+                    kind,
+                    chamfer,
+                );
+            }
             return Err(error);
         }
         let committed = transaction.finish()?;
@@ -1298,14 +1312,58 @@ impl Compound {
         // enter the already-rounded corner. This is internal continuation, not user-facing
         // selection propagation: the original sharp-edge selection remains exactly `edges`.
         let concave = concave_edges.iter().copied().collect::<BTreeSet<_>>();
-        let mut result = self.clone();
         // Concave rails create the setback; the convex network then consumes
         // its smooth continuations. This ordering is independent of selection
         // order and applies to any number of mixed corners.
-        for concavity in [true, false] {
-            let stage_edges = edges.iter()
+        let stages = [true, false].map(|concavity| {
+            edges.iter()
                 .filter(|edge| concave.contains(&edge.persistent_id()) == concavity)
-                .collect::<Vec<_>>();
+                .collect::<Vec<_>>()
+        });
+        self.blend_stages(&stages, size, true, kind, chamfer)
+    }
+
+    fn blend_crossing_corner(
+        &self,
+        edges: &[EdgeHandle],
+        size: f64,
+        follow_tangent_edges: bool,
+        corner_edges: &[PersistentId],
+        kind: super::edge_blend::EdgeBlendKind,
+        chamfer: Option<&ChamferSettings>,
+    ) -> KernelResult<Self> {
+        // The second blend ends on the surface of the first. Its rails reach
+        // the first blend's end boundary only when the first blend is the
+        // wider one there, so try either edge last.
+        let mut first_error = None;
+        for last in corner_edges {
+            let stages = [false, true].map(|is_last| {
+                edges.iter()
+                    .filter(|edge| (edge.persistent_id() == *last) == is_last)
+                    .collect::<Vec<_>>()
+            });
+            match self.blend_stages(&stages, size, follow_tangent_edges, kind, chamfer) {
+                Ok(result) => return Ok(result),
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        Err(first_error.expect("a crossing corner names two edges"))
+    }
+
+    /// Blend each group of `edges` in turn, reidentifying later groups and
+    /// their chamfer reference faces after each preceding blend.
+    fn blend_stages(
+        &self,
+        stages: &[Vec<&EdgeHandle>],
+        size: f64,
+        follow_tangent_edges: bool,
+        kind: super::edge_blend::EdgeBlendKind,
+        chamfer: Option<&ChamferSettings>,
+    ) -> KernelResult<Self> {
+        let mut result = self.clone();
+        for stage_edges in stages {
             let resolved = stage_edges.iter()
                 .map(|edge| match result.resolve(*edge) {
                     Resolution::Preserved(edge)
@@ -1316,7 +1374,7 @@ impl Compound {
                     }
                     _ => Err(KernelError::new(
                         DiagnosticKind::UnsupportedGeometry,
-                        "setback blend could not reidentify an incident edge after the preceding blend",
+                        "staged blend could not reidentify an incident edge after the preceding blend",
                     )),
                 })
                 .collect::<KernelResult<Vec<_>>>()?;
@@ -1329,12 +1387,12 @@ impl Compound {
                         _ => Vec::new(),
                     };
                     let reference = edge.connected_faces()?.into_iter().find(|face| faces.contains(face))
-                        .ok_or_else(|| KernelError::new(DiagnosticKind::TopologyInvariant, "setback chamfer lost its reference face"))?;
+                        .ok_or_else(|| KernelError::new(DiagnosticKind::TopologyInvariant, "staged chamfer lost its reference face"))?;
                     Ok((edge.persistent_id(), reference.persistent_id()))
                 }).collect::<KernelResult<_>>()?;
                 Ok::<_, KernelError>(ChamferSettings { mode: settings.mode, reference_faces })
             }).transpose()?;
-            result = result.blend_edges(&resolved, size, true, kind, settings.as_ref())?;
+            result = result.blend_edges(&resolved, size, follow_tangent_edges, kind, settings.as_ref())?;
         }
         Ok(result)
     }

@@ -576,6 +576,7 @@ impl Transaction<'_> {
             })?;
 
         let unit = ParameterRange::new(0.0, 1.0)?;
+        let mut crossings = [None, None];
         let end_boundaries = (0..2)
             .map(|endpoint_index| {
                 let blend_pcurve = blend_parameterization.end_pcurve(
@@ -583,6 +584,16 @@ impl Transaction<'_> {
                     contact_parameters[endpoint_index][1],
                 )?;
                 match &ends[endpoint_index] {
+                    BlendPatchEnd::Boundary(endpoint) if endpoint.crossing.is_some() => {
+                        let (first, point, second) = self.prepare_crossing_end(
+                            &blend_surface,
+                            &blend_pcurve,
+                            endpoint,
+                            contact_points[endpoint_index],
+                        )?;
+                        crossings[endpoint_index] = Some((point, second));
+                        Ok(first)
+                    }
                     BlendPatchEnd::Boundary(endpoint) => {
                         let terminating_surface = match endpoint.cap {
                             Some((_, plane)) => Surface3::from(plane),
@@ -592,44 +603,21 @@ impl Transaction<'_> {
                                 .surface
                                 .clone(),
                         };
-                        let adjacent_edge = match endpoint.tangent_termination {
-                            Some((seam, 0)) => seam,
-                            _ => self.working.coedge(endpoint.adjacent_uses[0])?.edge,
-                        };
-                        let (terminating_id, terminating_use) = self
-                            .working
-                            .edge(adjacent_edge)?
-                            .coedges
-                            .iter()
-                            .filter_map(|id| {
-                                self.working.coedge(*id).ok().map(|coedge| (*id, coedge))
-                            })
-                            .find(|(_, coedge)| {
-                                self.working
-                                    .loop_(coedge.loop_id)
-                                    .is_ok_and(|loop_| loop_.face == endpoint.terminating_face)
-                            })
-                            .ok_or_else(|| {
-                                KernelError::new(
-                                    DiagnosticKind::TopologyInvariant,
-                                    "blend endpoint lost its terminating chart",
-                                )
-                            })?;
-                        let traversal = self.working.coedge_vertices(terminating_id)?;
                         let reference = if endpoint.cap.is_some() {
                             let uv = terminating_surface
                                 .project(contact_points[endpoint_index][0], tolerance)?
                                 .parameters;
                             Point2::new(uv.0, uv.1)
                         } else {
-                            terminating_use
-                                .pcurve
-                                .evaluate(if traversal[0] == endpoint.old_vertex {
-                                    terminating_use.range.start
-                                } else {
-                                    terminating_use.range.end
-                                })?
-                                .point
+                            let adjacent_edge = match endpoint.tangent_termination {
+                                Some((seam, 0)) => seam,
+                                _ => self.working.coedge(endpoint.adjacent_uses[0])?.edge,
+                            };
+                            self.terminating_chart_reference(
+                                adjacent_edge,
+                                endpoint.terminating_face,
+                                endpoint.old_vertex,
+                            )?
                         };
                         self.prepare_end_boundary(
                             &blend_surface,
@@ -750,6 +738,7 @@ impl Transaction<'_> {
             contact_points,
             contact_boundaries,
             end_boundaries,
+            crossings,
             blend_surface,
             blend_parameterization,
         })

@@ -26,8 +26,10 @@ impl Transaction<'_> {
                 }
             }
         }
+        let (termination_gaps, crossing_gaps) = self.termination_gaps(patches)?;
         let mut rewrite = BlendRewrite {
-            termination_gaps: self.termination_gaps(patches)?,
+            termination_gaps,
+            crossing_gaps,
             ..Default::default()
         };
         self.create_contact_vertices(&mut rewrite, patches, junctions, kind)?;
@@ -57,62 +59,101 @@ impl Transaction<'_> {
     }
 
     /// Capture every external loop gap before any endpoint changes.
-    fn termination_gaps(&self, patches: &[BlendPatch]) -> KernelResult<TerminationGaps> {
+    fn termination_gaps(
+        &self,
+        patches: &[BlendPatch],
+    ) -> KernelResult<(TerminationGaps, TerminationGaps)> {
         let mut termination_gaps = BTreeMap::new();
+        let mut crossing_gaps = BTreeMap::new();
         for patch in patches {
             for endpoint_index in 0..2 {
                 let BlendPatchEnd::Boundary(endpoint) = &patch.ends[endpoint_index] else {
                     continue;
                 };
-                let mut uses = Vec::with_capacity(2);
-                for (parent, adjacent) in endpoint.adjacent_uses.into_iter().enumerate() {
-                    let adjacent_edge = match endpoint.tangent_termination {
+                let edge = |parent: usize| -> KernelResult<EdgeId> {
+                    Ok(match endpoint.tangent_termination {
                         Some((seam, index)) if index == parent => seam,
-                        _ => self.working.coedge(adjacent)?.edge,
-                    };
-                    let terminating_use = self
-                        .working
-                        .edge(adjacent_edge)?
-                        .coedges
-                        .iter()
-                        .copied()
-                        .find(|coedge| {
-                            self.working
-                                .coedge(*coedge)
-                                .and_then(|value| self.working.loop_(value.loop_id))
-                                .map(|loop_value| loop_value.face == endpoint.terminating_face)
-                                .unwrap_or(false)
-                        })
-                        .ok_or_else(|| {
-                            KernelError::new(
-                                DiagnosticKind::TopologyInvariant,
-                                "blend boundary rail has no terminating-face use",
-                            )
-                        })?;
-                    uses.push(terminating_use);
-                }
-                let first = self.working.coedge_vertices(uses[0])?;
-                let second = self.working.coedge_vertices(uses[1])?;
-                let gap = if first[1] == endpoint.old_vertex && second[0] == endpoint.old_vertex {
-                    (uses[0], uses[1], true)
-                } else if second[1] == endpoint.old_vertex && first[0] == endpoint.old_vertex {
-                    (uses[1], uses[0], false)
-                } else {
-                    return Err(KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "blend terminating-face uses do not form one vertex gap",
-                    ));
+                        _ => self.working.coedge(endpoint.adjacent_uses[parent])?.edge,
+                    })
                 };
-                if self.working.coedge(gap.0)?.next != gap.1 {
-                    return Err(KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "blend terminating-face gap is not consecutive",
-                    ));
+                let edges = [edge(0)?, edge(1)?];
+                let key = (patch.spine.edge.name, endpoint.old_vertex);
+                if let Some((seam, second_face)) = endpoint.crossing {
+                    // The end boundary runs through the first support up to the
+                    // seam, and through the second from the seam onwards.
+                    termination_gaps.insert(
+                        key,
+                        self.termination_gap(
+                            [edges[0], seam],
+                            endpoint.terminating_face,
+                            endpoint.old_vertex,
+                        )?,
+                    );
+                    crossing_gaps.insert(
+                        key,
+                        self.termination_gap([seam, edges[1]], second_face, endpoint.old_vertex)?,
+                    );
+                } else {
+                    termination_gaps.insert(
+                        key,
+                        self.termination_gap(edges, endpoint.terminating_face, endpoint.old_vertex)?,
+                    );
                 }
-                termination_gaps.insert((patch.spine.edge.name, endpoint.old_vertex), gap);
             }
         }
-        Ok(termination_gaps)
+        Ok((termination_gaps, crossing_gaps))
+    }
+
+    /// The consecutive uses of `edges` in `face` around `vertex`, and whether
+    /// the use of the first edge precedes the gap.
+    fn termination_gap(
+        &self,
+        edges: [EdgeId; 2],
+        face: FaceId,
+        vertex: VertexId,
+    ) -> KernelResult<(CoedgeId, CoedgeId, bool)> {
+        let mut uses = Vec::with_capacity(2);
+        for edge in edges {
+            let terminating_use = self
+                .working
+                .edge(edge)?
+                .coedges
+                .iter()
+                .copied()
+                .find(|coedge| {
+                    self.working
+                        .coedge(*coedge)
+                        .and_then(|value| self.working.loop_(value.loop_id))
+                        .map(|loop_value| loop_value.face == face)
+                        .unwrap_or(false)
+                })
+                .ok_or_else(|| {
+                    KernelError::new(
+                        DiagnosticKind::TopologyInvariant,
+                        "blend boundary rail has no terminating-face use",
+                    )
+                })?;
+            uses.push(terminating_use);
+        }
+        let first = self.working.coedge_vertices(uses[0])?;
+        let second = self.working.coedge_vertices(uses[1])?;
+        let gap = if first[1] == vertex && second[0] == vertex {
+            (uses[0], uses[1], true)
+        } else if second[1] == vertex && first[0] == vertex {
+            (uses[1], uses[0], false)
+        } else {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "blend terminating-face uses do not form one vertex gap",
+            ));
+        };
+        if self.working.coedge(gap.0)?.next != gap.1 {
+            return Err(KernelError::new(
+                DiagnosticKind::TopologyInvariant,
+                "blend terminating-face gap is not consecutive",
+            ));
+        }
+        Ok(gap)
     }
 
     /// Create the vertex at each contact of a blend with its parent faces,
@@ -173,6 +214,26 @@ impl Transaction<'_> {
                     );
                     contact_vertices.insert(key, vertex);
                 }
+                if let (
+                    BlendPatchEnd::Boundary(BlendEndpoint {
+                        crossing: Some((seam, second_face)),
+                        ..
+                    }),
+                    Some((point, _)),
+                ) = (&patch.ends[endpoint_index], &patch.crossings[endpoint_index])
+                {
+                    let name = self.names.next_derived(kind.role(BlendRole::ContactVertex))?;
+                    let vertex = self.make_vertex(name, *point);
+                    self.history.derived(
+                        name,
+                        [
+                            self.working.vertex(old_vertex)?.name,
+                            self.working.edge(*seam)?.name,
+                        ],
+                        kind.role(BlendRole::ContactVertex),
+                    );
+                    contact_vertices.insert((old_vertex, *second_face, Some(*seam)), vertex);
+                }
             }
         }
         Ok(())
@@ -202,6 +263,16 @@ impl Transaction<'_> {
                         endpoint.old_vertex,
                         vertex,
                         endpoint.contact_points[parent],
+                    )?;
+                }
+                if let (Some((seam, second_face)), Some((point, _))) =
+                    (endpoint.crossing, &patch.crossings[endpoint_index])
+                {
+                    self.retarget_edge_endpoint(
+                        seam,
+                        endpoint.old_vertex,
+                        contact_vertices[&(endpoint.old_vertex, second_face, Some(seam))],
+                        *point,
                     )?;
                 }
                 for parent_index in 0..2 {
@@ -433,6 +504,7 @@ impl Transaction<'_> {
         let tolerance = self.kernel.tolerance;
         let BlendRewrite {
             termination_gaps,
+            crossing_gaps,
             contact_vertices,
             junction_loops,
             junction_uses,
@@ -640,11 +712,31 @@ impl Transaction<'_> {
                     contact_vertices
                         [&Self::contact_vertex_key(patch, endpoint_index, 1, junctions)],
                 ];
-                let edge_name = self.names.next_derived(kind.role(BlendRole::EndEdge))?;
-                let other_use_name = self.names.next_derived(kind.role(BlendRole::EndOtherUse))?;
-                let blend_use_name = self.names.next_derived(kind.role(BlendRole::EndBlendUse))?;
-                let edge =
-                    self.make_edge(edge_name, vertices, boundary.curve.clone(), boundary.range)?;
+                if let (
+                    BlendPatchEnd::Boundary(BlendEndpoint {
+                        old_vertex,
+                        crossing: Some((seam, second_face)),
+                        ..
+                    }),
+                    Some((_, second)),
+                ) = (&patch.ends[endpoint_index], &patch.crossings[endpoint_index])
+                {
+                    // Split the end boundary at the vertex on the crossed seam.
+                    let crossing = contact_vertices[&(*old_vertex, *second_face, Some(*seam))];
+                    let key = (selected_name, *old_vertex);
+                    for (vertices, boundary, gap) in [
+                        ([vertices[0], crossing], boundary, termination_gaps[&key]),
+                        ([crossing, vertices[1]], second, crossing_gaps[&key]),
+                    ] {
+                        let other_loop = self.working.coedge(gap.0)?.loop_id;
+                        let (other_use, blend_use) = self.make_end_edge(
+                            kind, selected_name, vertices, boundary, other_loop, gap.2, blend_loop,
+                        )?;
+                        self.insert_loop_coedge(gap.0, gap.1, other_use)?;
+                        blend_uses.push(blend_use);
+                    }
+                    continue;
+                }
                 let (other_loop, other_forward) = match &patch.ends[endpoint_index] {
                     BlendPatchEnd::Boundary(endpoint) => {
                         let gap = termination_gaps[&(selected_name, endpoint.old_vertex)];
@@ -659,30 +751,8 @@ impl Transaction<'_> {
                     }
                     BlendPatchEnd::Junction(vertex) => (junction_loops[vertex], true),
                 };
-                let other_use = self.make_coedge(
-                    other_use_name,
-                    edge,
-                    other_loop,
-                    other_forward,
-                    boundary.parent_pcurve.clone(),
-                    if other_forward {
-                        boundary.range
-                    } else {
-                        boundary.range.reversed()
-                    },
-                )?;
-                let blend_forward = !other_forward;
-                let blend_use = self.make_coedge(
-                    blend_use_name,
-                    edge,
-                    blend_loop,
-                    blend_forward,
-                    boundary.blend_pcurve.clone(),
-                    if blend_forward {
-                        boundary.range
-                    } else {
-                        boundary.range.reversed()
-                    },
+                let (other_use, blend_use) = self.make_end_edge(
+                    kind, selected_name, vertices, boundary, other_loop, other_forward, blend_loop,
                 )?;
                 match &patch.ends[endpoint_index] {
                     BlendPatchEnd::Boundary(endpoint) => {
@@ -780,12 +850,6 @@ impl Transaction<'_> {
                     }
                 }
                 blend_uses.push(blend_use);
-                self.history
-                    .derived(edge_name, [selected_name], kind.role(BlendRole::EndEdge));
-                self.history
-                    .derived(other_use_name, [edge_name], kind.role(BlendRole::EndOtherUse));
-                self.history
-                    .derived(blend_use_name, [edge_name], kind.role(BlendRole::EndBlendUse));
             }
             // The first contact rail borders the patch at blend fraction zero;
             // its interior lies in the positive blend direction. Its directed
@@ -802,6 +866,55 @@ impl Transaction<'_> {
             blend_cycles.push((blend_loop, blend_uses, orientation));
         }
         Ok(())
+    }
+
+    /// Create an end edge of a rolling patch with its uses on `other_loop`
+    /// and on the patch's own loop, and return those two uses.
+    #[allow(clippy::too_many_arguments)]
+    fn make_end_edge(
+        &mut self,
+        kind: EdgeBlendKind,
+        selected_name: PersistentId,
+        vertices: [VertexId; 2],
+        boundary: &BlendBoundary,
+        other_loop: LoopId,
+        other_forward: bool,
+        blend_loop: LoopId,
+    ) -> KernelResult<(CoedgeId, CoedgeId)> {
+        let edge_name = self.names.next_derived(kind.role(BlendRole::EndEdge))?;
+        let other_use_name = self.names.next_derived(kind.role(BlendRole::EndOtherUse))?;
+        let blend_use_name = self.names.next_derived(kind.role(BlendRole::EndBlendUse))?;
+        let edge = self.make_edge(edge_name, vertices, boundary.curve.clone(), boundary.range)?;
+        let oriented = |forward: bool| {
+            if forward {
+                boundary.range
+            } else {
+                boundary.range.reversed()
+            }
+        };
+        let other_use = self.make_coedge(
+            other_use_name,
+            edge,
+            other_loop,
+            other_forward,
+            boundary.parent_pcurve.clone(),
+            oriented(other_forward),
+        )?;
+        let blend_use = self.make_coedge(
+            blend_use_name,
+            edge,
+            blend_loop,
+            !other_forward,
+            boundary.blend_pcurve.clone(),
+            oriented(!other_forward),
+        )?;
+        self.history
+            .derived(edge_name, [selected_name], kind.role(BlendRole::EndEdge));
+        self.history
+            .derived(other_use_name, [edge_name], kind.role(BlendRole::EndOtherUse));
+        self.history
+            .derived(blend_use_name, [edge_name], kind.role(BlendRole::EndBlendUse));
+        Ok((other_use, blend_use))
     }
 
     /// Check that every smooth transition joins two rolling patches, and
@@ -1102,7 +1215,8 @@ impl Transaction<'_> {
             for end in &patch.ends {
                 if let BlendPatchEnd::Boundary(endpoint) = end {
                     modified_faces.insert(endpoint.terminating_face);
-                    if let Some((seam, _)) = endpoint.tangent_termination {
+                    let seam = endpoint.tangent_termination.map(|(seam, _)| seam);
+                    if let Some(seam) = seam.or(endpoint.crossing.map(|(seam, _)| seam)) {
                         modified_faces.extend(self.working.edge_faces(seam)?);
                     }
                 }

@@ -126,6 +126,27 @@ impl Transaction<'_> {
             }
             return Ok(junction(BlendJunctionKind::Trihedral, None));
         }
+        if selected_degree == 2 && incident.len() == 4 {
+            let pair = incident
+                .iter()
+                .copied()
+                .filter(|edge| selected.contains(edge))
+                .collect::<Vec<_>>();
+            let faces = [self.working.edge_faces(pair[0])?, self.working.edge_faces(pair[1])?];
+            if !faces[0].iter().any(|face| faces[1].contains(face)) {
+                // Opposite edges of a four-face corner do not blend each other's
+                // supports. Each blend can end on the other one in sequence.
+                let mut diagnostic = Diagnostic::new(
+                    DiagnosticKind::UnsupportedGeometry,
+                    "blends crossing a four-face corner must be built in sequence",
+                )
+                .with_operation("blend.crossing-corner-sequence");
+                for edge in pair {
+                    diagnostic = diagnostic.with_entity(self.working.edge(edge)?.name);
+                }
+                return Err(KernelError::from_diagnostic(diagnostic));
+            }
+        }
         Err(KernelError::new(
             DiagnosticKind::UnsupportedGeometry,
             "selected blend edges do not define a supported local corner transition",

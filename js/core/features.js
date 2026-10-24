@@ -2889,6 +2889,20 @@ export class MoveFeature extends SolidFeature {
         type: 'face',
         multi: true,
       },
+      transformSpace: {
+        title: 'Gizmo Space',
+        type: 'select',
+        options: {
+          world: {
+            title: 'World',
+            icon: 'globe',
+          },
+          component: {
+            title: 'Component',
+            icon: 'cube',
+          },
+        },
+      },
       x: { title: 'Translate X', type: 'length', allowNegative: true },
       y: { title: 'Translate Y', type: 'length', allowNegative: true },
       z: { title: 'Translate Z', type: 'length', allowNegative: true },
@@ -2899,6 +2913,7 @@ export class MoveFeature extends SolidFeature {
 
     this.faces = null
     this.x = this.y = this.z = this.rx = this.ry = this.rz = 0
+    this.transformSpace = 'component'
     this.moveCenter = new THREE.Vector3()
   }
 
@@ -2931,8 +2946,12 @@ export class MoveFeature extends SolidFeature {
     const component = this.document.top().findChild(this.componentOccurrenceId) ||
       this.document.top().findChild(this.componentId)
     const frame = worldTransform(component).multiply(this.moveFrame())
+    const space = this.transformSpace == 'world' ? 'world' : 'local'
     if(this.moveGizmo) {
-      if(!this.moveGizmo().dragging) this.moveGizmo().setTransform(frame)
+      if(!this.moveGizmo().dragging) {
+        this.moveGizmo().setTransform(frame)
+        this.moveGizmo().setSpace(space)
+      }
       return
     }
     const gizmo = markRaw(new TransformGizmo(frame, desiredWorld => {
@@ -2950,7 +2969,7 @@ export class MoveFeature extends SolidFeature {
       }
       this.document.timeline.invalidateFeature(this)
       this.document.regenerate()
-    }))
+    }, space))
     this.moveGizmo = () => gizmo
     window.alcRenderer.addGizmo(gizmo)
   }

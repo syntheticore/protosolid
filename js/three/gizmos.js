@@ -20,8 +20,8 @@ export class TransformGizmo extends THREE.Object3D {
     this.controls = [this.translationControl, this.rotationControl]
 
     const size = 1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight)
+    this.setSpace(space)
     this.controls.forEach(control => {
-      control.setSpace(space)
       control.setSize(size)
       control.attach(this.dummy)
       this.add(control)
@@ -66,6 +66,10 @@ export class TransformGizmo extends THREE.Object3D {
 
   get axis() {
     return this.controls?.find(control => control.axis)?.axis || null
+  }
+
+  setSpace(space) {
+    this.controls.forEach(control => control.setSpace(space))
   }
 
   get dragging() {

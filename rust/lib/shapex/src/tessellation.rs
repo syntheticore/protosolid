@@ -1085,15 +1085,22 @@ fn adaptive_isoparametric_samples(
             let mut split = false;
             for fixed in fixed_parameters {
                 let (first_u, first_v) = parameters(first, *fixed);
-                let (middle_u, middle_v) = parameters(middle, *fixed);
                 let (last_u, last_v) = parameters(last, *fixed);
                 let (first_point, first_normal) = surface_point_normal(surface, first_u, first_v)?;
-                let (middle_point, _) = surface_point_normal(surface, middle_u, middle_v)?;
                 let (last_point, last_normal) = surface_point_normal(surface, last_u, last_v)?;
-                let chord_middle =
-                    Point3::from_vec((first_point.to_vec() + last_point.to_vec()) * 0.5);
-                if middle_point.distance(chord_middle) > options.chord_tolerance
-                    || first_normal.angle(last_normal).0 > options.angular_tolerance
+                // Interior refinement keeps these boundary segments fixed, so
+                // they must pass its quarter-point error policy. A midpoint
+                // test alone accepts S-shaped deviations and leaves refinement
+                // splitting ever thinner slivers against an inexact boundary.
+                let (chord_error, angular_error) = surface_edge_error(
+                    surface,
+                    FaceOrientation::Forward,
+                    (0, 1),
+                    &[Point2::new(first_u, first_v), Point2::new(last_u, last_v)],
+                    &[first_point, last_point],
+                )?;
+                if chord_error > options.chord_tolerance
+                    || angular_error.max(first_normal.angle(last_normal).0) > options.angular_tolerance
                 {
                     split = true;
                     break;

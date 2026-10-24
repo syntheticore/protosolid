@@ -872,6 +872,47 @@ fn refine_support_corner(
     ))
 }
 
+/// The parameter of a closed, nonperiodic `curve` at which to restart it when
+/// the open source trim between its new `vertices` would cross the curve's
+/// chart seam: the middle of the complementary arc.
+fn crossed_seam(
+    source: &super::Edge,
+    curve: &Curve3,
+    range: ParameterRange,
+    vertices: &BTreeMap<VertexId, Point3>,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<Option<f64>> {
+    let start = curve.evaluate(range.start)?.point;
+    let linear = tolerance.linear_at_scale(start.to_vec().magnitude());
+    // A trim ending at the seam itself needs no restart; trimming chooses the
+    // matching end of the chart there.
+    if curve == source.curve()
+        || start.distance(curve.evaluate(range.end)?.point) > linear
+        || source.vertices().iter().any(|vertex| vertices[vertex].distance(start) <= linear * 8.0)
+    {
+        return Ok(None);
+    }
+    let [first, second] = source.vertices().map(|vertex| curve.project(vertices[&vertex], tolerance));
+    let (first, second) = (first?.parameter, second?.parameter);
+    let (low, high) = (first.min(second), first.max(second));
+    if high - low <= tolerance.parameter {
+        return Ok(None);
+    }
+    // The source edge's middle identifies which of the two arcs it became:
+    // the one whose own middle lies nearer around the closed curve. Moving
+    // supports can carry it just outside a short arc, and tangents are
+    // unreliable where a trim ends at a singular crossing.
+    let middle = source.curve().evaluate((source.range().start + source.range().end) * 0.5)?.point;
+    let middle = curve.project(middle, tolerance)?.parameter;
+    let period = range.span().abs();
+    let distance = |parameter: f64| {
+        let offset = (middle - parameter).rem_euclid(period);
+        offset.min(period - offset)
+    };
+    let inner = (low + high) * 0.5;
+    Ok((distance(inner + period * 0.5) < distance(inner)).then_some(inner))
+}
+
 fn retarget_offset_intersection_endpoints(
     topology: &Topology,
     edge_id: EdgeId,
@@ -896,8 +937,12 @@ fn retarget_offset_intersection_endpoints(
     let seam = if closed {
         Some(edge.curve.project(vertices[&source.vertices()[0]], tolerance)?.parameter)
     } else {
-        None
+        crossed_seam(source, &edge.curve, curve_range, vertices, tolerance)?
     };
+    // An open trim of a closed section (for example a tilted plane through a
+    // cylinder) may run across the curve's bounded chart seam. Its guide then
+    // restarts in the middle of the complementary arc.
+    let rotated = !closed && seam.is_some();
     let mut first_points = Vec::new();
     let mut second_points = Vec::new();
     for index in 0..=32 {
@@ -912,7 +957,7 @@ fn retarget_offset_intersection_endpoints(
         first_points.push(exact[0].evaluate(parameter)?.point);
         second_points.push(exact[1].evaluate(parameter)?.point);
     }
-    if closed {
+    if closed || rotated {
         super::intersection::unwrap_periodic_points(
             &mut first_points,
             intersection.first_surface().domains(),
@@ -939,11 +984,13 @@ fn retarget_offset_intersection_endpoints(
     let projections = [first?, second?];
     let collapsed =
         (projections[0].parameter - projections[1].parameter).abs() <= tolerance.parameter;
-    let mut changed = false;
+    let mut changed = rotated;
     for (side, vertex) in source.vertices().into_iter().enumerate() {
         let point = vertices[&vertex];
         let projection = projections[side];
-        if !closed && projection.distance <= tolerance.linear {
+        // A rotated guide has no samples at the trim ends; the trim projects
+        // its vertices onto the exact section instead.
+        if rotated || !closed && projection.distance <= tolerance.linear {
             continue;
         }
         // Projection can send both new vertices to the same old endpoint.
@@ -977,7 +1024,7 @@ fn retarget_offset_intersection_endpoints(
         (points[1] - points[0]).dot(points[2] - points[1]) < 0.0
             || (points[32] - points[31]).dot(points[31] - points[30]) < 0.0
     });
-    if !closed && (collapsed || folded) {
+    if !closed && !rotated && (collapsed || folded) {
         // Moving just an endpoint can fold the old guide back along the same
         // intersection. Continue the entire retained branch between its new,
         // topologically ordered vertices.
@@ -3991,17 +4038,55 @@ pub(crate) fn move_faces(
             }
         }
     }
+    // Blends along a moved face must continue to meet it. Others, including
+    // moved blends, keep their exact source support so that their unchanged
+    // boundaries are retained.
+    let mut reaching = BTreeSet::new();
+    for face in faces {
+        for edge in topology.face_edges(face.topology_id())? {
+            reaching.extend(topology.edge_faces(edge)?);
+        }
+    }
+    for face in faces {
+        reaching.remove(&face.topology_id());
+    }
     for face in source.faces() {
         let id = face.topology_id();
         let original_bounds = face_parameter_bounds(topology, id, tolerance)?;
         let mut surface = extended_support(face.surface(), original_bounds, displacement, tolerance)?;
+        if let Surface3::RollingBall(blend) | Surface3::Ruled(blend) = &surface {
+            // Extend only a spine that is too short: an edited support also
+            // rebuilds the blend's boundaries with its unchanged neighbors.
+            // A spine continues only while its supports still admit the blend
+            // section; beyond that, its source range is all that exists.
+            let padding = offset_parameter_padding(&surface, original_bounds, displacement, tolerance)?[0];
+            let (spine, trim) = (blend.center_range(), original_bounds[0]);
+            let short = spine.start.min(spine.end) > trim.start.min(trim.end) - padding
+                || spine.start.max(spine.end) < trim.start.max(trim.end) + padding;
+            if reaching.contains(&id) && short {
+                if let Some(extended) = [1.0, 0.5, 0.25].into_iter()
+                    .find_map(|scale| blend.extended(padding * scale).ok())
+                {
+                    surface = extended.into();
+                }
+            }
+        }
         if selected.contains(&face.persistent_id()) {
             surface = super::transform::transform_surface(surface, transform, tolerance)?;
         }
-        bounds.insert(
-            id,
-            expanded_offset_bounds(&surface, original_bounds, displacement, tolerance)?,
-        );
+        let mut face_bounds = expanded_offset_bounds(&surface, original_bounds, displacement, tolerance)?;
+        if matches!(surface, Surface3::RollingBall(_)) {
+            // A rolling-ball section spans less than half a turn between its
+            // rails. Padding it by its displacement on a long move would wrap
+            // the circle, so iso-curves across it would no longer be simple;
+            // half a section on either side keeps less than a full turn.
+            let section = original_bounds[1];
+            face_bounds[1] = ParameterRange::new(
+                face_bounds[1].start.max(section.start.min(section.end) - 0.5),
+                face_bounds[1].end.min(section.start.max(section.end) + 0.5),
+            )?;
+        }
+        bounds.insert(id, face_bounds);
         supports.insert(id, surface);
     }
     let contacts = move_blend_contacts(source)?;
@@ -4350,18 +4435,29 @@ fn adjust_move_blends(
                         ))
                     })
                     .collect::<KernelResult<Vec<_>>>()?;
-                let Some(solution) = solve_blend_contacts(&equations, false, tolerance) else {
-                    continue;
+                let motion = solve_blend_contacts(&equations, false, tolerance)
+                    .map(|solution| RigidTransform3::new(
+                        crate::Matrix3::identity(),
+                        crate::Vec3::new(solution[0], solution[1], solution[2]),
+                        tolerance,
+                    ))
+                    .transpose()?;
+                let motion = match motion {
+                    Some(motion) if fits(motion)? => Some(motion),
+                    _ => None,
                 };
-                let motion = RigidTransform3::new(
-                    crate::Matrix3::identity(),
-                    crate::Vec3::new(solution[0], solution[1], solution[2]),
-                    tolerance,
-                )?;
-                if !fits(motion)? {
+                if let Some(motion) = motion {
+                    super::transform::transform_surface(original.clone(), motion, tolerance)?
+                } else if let Surface3::RollingBall(blend) = original {
+                    // No rigid motion keeps both contacts. Roll the same ball
+                    // between the edited supports instead.
+                    let Some(surface) = rolled_blend(topology, *id, blend, &rails, supports, tolerance)? else {
+                        continue;
+                    };
+                    surface
+                } else {
                     continue;
                 }
-                super::transform::transform_surface(original.clone(), motion, tolerance)?
             };
             resolved = Some((*id, surface));
             break;
@@ -4374,6 +4470,94 @@ fn adjust_move_blends(
         changed.insert(id);
     }
     Ok(changed)
+}
+
+/// Roll `blend`'s ball between the edited supports of its two contact faces.
+/// The radius and the side of each support on which the ball rolls persist;
+/// the spine is traced from the old contacts across the face and a margin.
+/// Returns `None` when the edited supports no longer admit that ball.
+fn rolled_blend(
+    topology: &Topology,
+    id: FaceId,
+    blend: &super::RollingBallSurface3,
+    rails: &[(FaceId, Point3, crate::Vec3)],
+    supports: &BTreeMap<FaceId, Surface3>,
+    tolerance: super::ModelTolerance,
+) -> KernelResult<Option<Surface3>> {
+    let mut contacts = rails.iter().map(|(other, _, _)| *other).collect::<BTreeSet<_>>()
+        .into_iter().collect::<Vec<_>>();
+    if contacts.len() != 2 {
+        return Ok(None);
+    }
+    let old = [blend.first_surface(), blend.second_surface()];
+    let point = |face: FaceId| rails.iter().find(|(other, _, _)| *other == face).unwrap().1;
+    if old[0].project(point(contacts[0]), tolerance)?.distance
+        > old[1].project(point(contacts[0]), tolerance)?.distance
+    {
+        contacts.swap(0, 1);
+    }
+    let pcurves = [blend.first_pcurve(), blend.second_pcurve()];
+    let mut range = blend.center_range();
+    let middle = (range.start + range.end) * 0.5;
+    let center = blend.center_curve().evaluate(middle)?.point;
+    let mut parents = Vec::new();
+    let mut offsets = Vec::new();
+    for side in 0..2 {
+        let uv = pcurves[side].evaluate(middle)?.point;
+        let normal = old[side].normal(uv.x, uv.y)?;
+        let distance = blend.radius()
+            * (center - old[side].evaluate(uv.x, uv.y)?.point).dot(normal).signum();
+        parents.push(supports[&contacts[side]].clone());
+        offsets.push(Surface3::Offset(super::OffsetSurface3::new(
+            parents[side].clone(), distance, tolerance,
+        )?));
+    }
+    if blend.center_period().is_none() {
+        let bounds = face_parameter_bounds(topology, id, tolerance)?[0];
+        let margin = bounds.span().abs() * 0.25;
+        let low = (bounds.start.min(bounds.end) - margin).max(range.start.min(range.end));
+        let high = (bounds.start.max(bounds.end) + margin).min(range.start.max(range.end));
+        range = if range.span() >= 0.0 {
+            ParameterRange::new(low, high)?
+        } else {
+            ParameterRange::new(high, low)?
+        };
+    }
+    let mut guides = [Vec::new(), Vec::new()];
+    for index in 0..=32 {
+        let parameter = range.start + range.span() * index as f64 / 32.0;
+        let first = pcurves[0].evaluate(parameter)?.point;
+        let second = pcurves[1].evaluate(parameter)?.point;
+        let Ok(corrected) = super::intersection::correct_surface_pair_near(
+            &offsets[0], &offsets[1], [first.x, first.y, second.x, second.y], tolerance,
+        ) else {
+            return Ok(None);
+        };
+        guides[0].push(Point2::new(corrected[0], corrected[1]));
+        guides[1].push(Point2::new(corrected[2], corrected[3]));
+    }
+    for side in 0..2 {
+        super::intersection::unwrap_periodic_points(&mut guides[side], offsets[side].domains());
+    }
+    let rolled = (|| -> KernelResult<Surface3> {
+        let center = SurfaceIntersectionCurve::new(
+            offsets[0].clone(),
+            offsets[1].clone(),
+            super::intersection::smooth_nurbs_guide(&guides[0], range)?.into(),
+            super::intersection::smooth_nurbs_guide(&guides[1], range)?.into(),
+            range,
+            tolerance,
+            tolerance.linear,
+        )?;
+        let [first, second] = center.exact_pcurves();
+        Ok(super::RollingBallSurface3::new(
+            center.into(), parents[0].clone(), parents[1].clone(), first, second,
+            range, blend.radius(), tolerance,
+        )?
+        .with_center_period(blend.center_period())
+        .into())
+    })();
+    Ok(rolled.ok())
 }
 
 pub(crate) fn replace_face(

@@ -5228,9 +5228,60 @@ impl EdgeBlendSurface3 {
         self.ruled
     }
 
+    /// Continue the blend along its spine by `padding` at both ends, without
+    /// changing it inside its current range. Closed spines are returned as is.
+    pub(crate) fn extended(&self, padding: f64) -> KernelResult<Self> {
+        if self.center_period.is_some() || padding <= 0.0 {
+            return Ok(self.clone());
+        }
+        let low = self.center_range.start.min(self.center_range.end) - padding;
+        let high = self.center_range.start.max(self.center_range.end) + padding;
+        let range = if self.center_range.span() >= 0.0 {
+            ParameterRange::new(low, high)?
+        } else {
+            ParameterRange::new(high, low)?
+        };
+        let center: Curve3 = match self.center_curve.as_ref() {
+            Curve3::SurfaceIntersection(curve) => curve.extended(range)?.into(),
+            curve if curve.domain().contains_range(range, 0.0) => curve.clone(),
+            _ => return Err(super::unsupported("blend spine cannot be continued")),
+        };
+        let [first_pcurve, second_pcurve] = match &center {
+            Curve3::SurfaceIntersection(curve) if self.shared_intersection => curve.exact_pcurves(),
+            _ => [self.first_pcurve.extended(range)?, self.second_pcurve.extended(range)?],
+        };
+        let extended = Self::with_section(
+            center,
+            *self.first_surface.clone(),
+            *self.second_surface.clone(),
+            first_pcurve,
+            second_pcurve,
+            range,
+            self.radius,
+            self.tolerance,
+            self.ruled,
+        )?;
+        // Construction certifies only the ends and middle. A continued spine
+        // can leave its supports' intersection in between.
+        let (start, end) = (self.center_range.start.min(self.center_range.end),
+            self.center_range.start.max(self.center_range.end));
+        for index in 1..8 {
+            let fraction = index as f64 / 8.0;
+            for parameter in [low + (start - low) * fraction, end + (high - end) * fraction] {
+                extended.point(parameter, 0.5)?;
+            }
+        }
+        Ok(extended)
+    }
+
     pub fn center_curve(&self) -> &Curve3 {
         &self.center_curve
     }
+
+    pub(crate) fn center_period(&self) -> Option<f64> {
+        self.center_period
+    }
+
     pub(crate) fn with_center_period(mut self, period: Option<f64>) -> Self {
         self.center_period = period;
         self

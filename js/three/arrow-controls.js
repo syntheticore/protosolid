@@ -10,10 +10,6 @@ export default class ArrowControls extends TransformControls {
     this.adaptiveTranslationSnap = true
     this.translationSnapOrigin = startPosition.clone()
 
-    // Keep size constant
-    const canvas = window.alcRenderer.canvas
-    this.size = 1200 / (canvas.offsetWidth + canvas.offsetHeight)
-
     // Use invisible dummy to measure change
     this.dummy = new THREE.Object3D()
     this.dummy.position.copy(startPosition)

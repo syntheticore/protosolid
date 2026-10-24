@@ -24,6 +24,9 @@ import {
 } from 'three';
 import { snapTranslation, translationSnapStep } from './gizmo-snapping.js';
 
+// Screen size of one gizmo unit in CSS pixels at size 1
+const GIZMO_PIXEL_SIZE = 60;
+
 const _raycaster = new Raycaster();
 
 const _tempVector = new Vector3();
@@ -57,6 +60,7 @@ class TransformControls extends Object3D {
     this.domElement = domElement;
 
     const _gizmo = new TransformControlsGizmo();
+    _gizmo.domElement = domElement;
     this._gizmo = _gizmo;
     this.add( _gizmo );
 
@@ -1258,7 +1262,8 @@ class TransformControlsGizmo extends Object3D {
 
       }
 
-      handle.scale.set( 1, 1, 1 ).multiplyScalar( factor * this.size / 7 );
+      // Keep a constant pixel size, independent of the viewport size
+      handle.scale.set( 1, 1, 1 ).multiplyScalar( factor * this.size * GIZMO_PIXEL_SIZE / this.domElement.clientHeight );
 
       // TODO: simplify helpers and consider decoupling from gizmo
 

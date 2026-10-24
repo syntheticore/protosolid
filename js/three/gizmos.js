@@ -19,10 +19,8 @@ export class TransformGizmo extends THREE.Object3D {
     this.rotationControl.setMode('rotate')
     this.controls = [this.translationControl, this.rotationControl]
 
-    const size = 1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight)
     this.setSpace(space)
     this.controls.forEach(control => {
-      control.setSize(size)
       control.attach(this.dummy)
       this.add(control)
 
@@ -108,7 +106,6 @@ export class CanvasPositionGizmo extends TransformControls {
     this.setSpace('local')
     this.showZ = false
     this.adaptiveTranslationSnap = true
-    this.setSize(1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight))
     this.attach(this.dummy)
 
     this.addEventListener('objectChange', () => {
@@ -302,7 +299,7 @@ export class FeatureGizmos {
       }
       control.setFrame(center, orientation)
       control.set(value, side)
-      if(descriptor.size) control.setSize(descriptor.size * 1200 / (renderer.canvas.offsetWidth + renderer.canvas.offsetHeight))
+      if(descriptor.size) control.setSize(descriptor.size)
     }
   }
 

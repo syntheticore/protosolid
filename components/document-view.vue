@@ -50,7 +50,7 @@
               IconButton(
                 icon="camera"
                 title="Fit All"
-                @mouseenter="bus.emit('preview-zoom-all')"
+                @mouseenter="previewOnHover && bus.emit('preview-zoom-all')"
                 @mouseleave="bus.emit('unpreview-camera')"
                 @click="bus.emit('zoom-all')"
               )
@@ -58,7 +58,7 @@
               IconButton(
                 icon="crop-alt"
                 title="Fit Active"
-                @mouseenter="bus.emit('preview-zoom-active')"
+                @mouseenter="previewOnHover && bus.emit('preview-zoom-active')"
                 @mouseleave="bus.emit('unpreview-camera')"
                 @click="bus.emit('zoom-active')"
               )
@@ -67,7 +67,7 @@
                 v-if="document.selection.items.length"
                 icon="search-plus"
                 title="Fit Selection"
-                @mouseenter="bus.emit('preview-zoom-selection')"
+                @mouseenter="previewOnHover && bus.emit('preview-zoom-selection')"
                 @mouseleave="bus.emit('unpreview-camera')"
                 @click="bus.emit('zoom-selection')"
               )
@@ -78,7 +78,7 @@
             IconButton(
               icon="solar-panel"
               title="Look at nearest plane"
-              @mouseenter="lookAtPlane(true)"
+              @mouseenter="previewOnHover && lookAtPlane(true)"
               @mouseleave="bus.emit('unpreview-camera')"
               @click="lookAtPlane()"
             )
@@ -94,7 +94,7 @@
             :items="projectionModes"
             hot-key="O"
             v-model:chosen="projectionMode"
-            @hover="previewProjectionMode = $event"
+            @hover="previewProjectionMode = previewOnHover ? $event : null"
             @unhover="previewProjectionMode = null"
           )
 
@@ -104,7 +104,7 @@
             :items="displayModes"
             hot-key="W"
             v-model:chosen="displayMode"
-            @hover="previewDisplayMode = $event === 'pathTraced' ? null : $event"
+            @hover="previewDisplayMode = previewOnHover && $event !== 'pathTraced' ? $event : null"
             @unhover="previewDisplayMode = null"
           )
 
@@ -114,7 +114,7 @@
             :items="colorModes"
             hot-key="M"
             v-model:chosen="colorMode"
-            @hover="previewColorMode = $event"
+            @hover="previewColorMode = previewOnHover ? $event : null"
             @unhover="previewColorMode = null"
           )
 
@@ -299,6 +299,7 @@
 
   import { ManipulationTool } from './../js/tools.js'
   import { rotationFromNormal } from './../js/core/utils.js'
+  import preferences, { emitter as prefEmitter } from './../js/preferences.js'
 
   export default {
     name: 'DocumentView',
@@ -365,6 +366,7 @@
         colorMode: 'material',
         previewColorMode: null,
         sketchSection: true,
+        previewOnHover: preferences.previewOnHover,
       }
     },
 
@@ -425,6 +427,11 @@
     mounted() {
       this.bus.on('keydown', this.keyDown)
       this.bus.emit('activate-tool', ManipulationTool)
+      this.unbindPrefs = prefEmitter.on('updated', () => this.previewOnHover = preferences.previewOnHover )
+    },
+
+    unmounted() {
+      this.unbindPrefs()
     },
 
     methods: {

@@ -2,10 +2,7 @@
 
   header.tab-bar
 
-    MenuButton.left.app-menu-btn
-
-      template(v-slot:icon="")
-        AppLogo
+    MenuButton.left.app-menu-btn(icon="bars")
 
       AppMenu(
         v-bind="$attrs"
@@ -84,13 +81,14 @@
       margin-right: 3px
 
   .app-menu-btn
-    // color: #ff9f90
-    color: $highlight * 1.2
     margin-top: 5px
     margin-bottom: 3px
 
     :deep(.button)
       border-radius: 4px
+
+      &:hover
+        color: $highlight * 1.2
 
     [data-platform="darwin"] &
       display: none

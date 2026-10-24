@@ -269,7 +269,7 @@ function openPreferencesWindow(section) {
   preferencesWindow = new BrowserWindow({
     parent: mainWindow,
     width: 760,
-    height: 560,
+    height: 500,
     minWidth: 680,
     minHeight: 480,
     resizable: false,

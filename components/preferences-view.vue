@@ -58,7 +58,7 @@
       section(v-else-if="activeSection === 'appearance'")
         header
           h1 Appearance
-          p Control how ProtoSolid and the modeling viewport are displayed.
+          p Control how the interface and the modeling viewport are displayed.
 
         .settings-group
           label
@@ -90,6 +90,18 @@
               strong Blurred overlays
               small Blur content behind floating controls
             input.input(type="checkbox" v-model="preferences.blurredOverlays")
+
+      section(v-else-if="activeSection === 'behaviour'")
+        header
+          h1 Behaviour
+          p Control how the interface responds while you work.
+
+        .settings-group
+          label
+            span.setting-label
+              strong Preview on hover
+              small Preview zoom, projection, shading and material options while hovering them
+            input.input(type="checkbox" v-model="preferences.previewOnHover")
 
           label
             span.setting-label
@@ -142,7 +154,7 @@
       transition(name="fade")
         .restart(v-if="restartRequired")
           span Some settings changes require a restart.
-          button.button(@click="restart") Restart ProtoSolid
+          button.button(@click="restart") Restart now
 </template>
 
 
@@ -350,6 +362,7 @@
         restartRequired: false,
         sections: [
           { id: 'appearance', title: 'Appearance', icon: 'desktop' },
+          { id: 'behaviour', title: 'Behaviour', icon: 'sliders-h' },
           { id: 'files', title: 'Files', icon: 'save' },
           { id: 'units', title: 'Units', icon: 'ruler' },
           { id: 'tolerances', title: 'Tolerances', icon: 'crosshairs' },

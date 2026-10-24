@@ -13,6 +13,7 @@ const preferences = {
   shadowMaps: true,
   blurredOverlays: true,
   timelineFeatureVisibility: 'all',
+  previewOnHover: true,
   zoomToCursor: true,
   cacheTesselation: true,
   centerOfMassTolerance: '0.01mm',
@@ -69,7 +70,7 @@ function openPreferences(section) {
   const url = new URL(window.location.href)
   url.searchParams.set('window', 'preferences')
   if(section) url.searchParams.set('section', section)
-  window.open(url, 'protosolid-settings', 'popup,width=760,height=560')
+  window.open(url, 'protosolid-settings', 'popup,width=760,height=500')
 }
 
 export { emitter, savePreferences, loadPreferences, applyPreferences, openPreferences }

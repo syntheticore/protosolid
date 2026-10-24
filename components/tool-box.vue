@@ -597,6 +597,10 @@
           format: 'STL',
           maxDistance: 0.1,
           maxAngle: 10.0,
+          structure: 'assembly',
+          unit: 'mm',
+          includeHidden: false,
+          colors: true,
           autoSave: false,
         }
         this.document.activeComponent.creator.exportConfigs.push(config)

@@ -160,6 +160,13 @@ const template = [
           mainWindow.webContents.send('importFile')
         },
       },
+      {
+        label: "Export...",
+        accelerator: "CmdOrCtrl+E",
+        click: async () => {
+          mainWindow.webContents.send('exportFile')
+        },
+      },
       { type: 'separator' },
       {
         id: 'save',
@@ -458,28 +465,30 @@ ipcMain.on('vue-ready', function() {
   }, 1000)
 });
 
+// Formats are comma-separated extensions, with or without leading dots.
+const formatExtensions = format => format.toLowerCase().split(',').map(extension => extension.trim().replace(/^\./, ''))
+const formatName = extension => extension == 'cad' ? 'ProtoSolid Documents' : `${extension.toUpperCase()} Files`
+
+// Each extension is offered as its own file type.
 ipcMain.handle('get-save-path', (e, format, title) => {
-  const extension = format.toLowerCase().replace(/^\./, '')
-  const name = (extension == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
+  const extensions = formatExtensions(format)
   return dialog.showSaveDialog({
-    ...(title && { defaultPath: `${title}.${extension}` }),
+    ...(title && { defaultPath: `${title}.${extensions[0]}` }),
     properties: ['createDirectory', 'showOverwriteConfirmation'],
     filters: [
-      { name, extensions: [extension] },
+      ...extensions.map(extension => ({ name: formatName(extension), extensions: [extension] })),
       { name: 'All Files', extensions: ['*'] },
     ]
   }).then(e => e.filePath )
 })
 
+// All extensions open as one file type, named after the first.
 ipcMain.handle('get-load-path', (e, format) => {
   const isImage = format.toLowerCase() == 'image/*'
-  const extension = format.toLowerCase().replace(/^\./, '')
-  const name = isImage
-    ? 'Image Files'
-    : (extension == 'cad' ? 'ProtoSolid Documents' : format + ' Files')
+  const name = isImage ? 'Image Files' : formatName(formatExtensions(format)[0])
   const extensions = isImage
     ? ['avif', 'bmp', 'gif', 'ico', 'jpeg', 'jpg', 'png', 'svg', 'webp']
-    : [extension]
+    : formatExtensions(format)
   return dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [

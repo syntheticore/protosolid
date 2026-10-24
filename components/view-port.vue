@@ -407,7 +407,8 @@
 
       exportPreview: function() {
         const config = this.document.activeExportConfig
-        if(!config) return null
+        // STEP keeps the exact BREP; only mesh formats preview a tessellation.
+        if(!config || config.format == 'STEP') return null
         return {
           config,
           componentId: this.document.activeExportComponentId,

@@ -2,8 +2,8 @@ import * as THREE from 'three'
 import { nextTick, markRaw } from 'vue'
 
 import { Timeline } from './timeline.js'
-import { saveFile, loadFile } from '../utils.js'
-import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature } from './features.js'
+import { saveFile, loadFile, chooseSavePath } from '../utils.js'
+import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature, PlaceFeature } from './features.js'
 import { Selection } from '../selection.js'
 import { SectionView } from './component.js'
 import Emitter from '../emitter.js'
@@ -15,7 +15,7 @@ import { showDialog } from '../dialogs.js'
 import { makeID, lastId, setLastId } from './id.js'
 import Expression from './expression.js'
 import preferences from '../preferences.js'
-import { autoExportComponents } from './export.js'
+import { autoExportComponents, exportConfigured } from './export.js'
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -166,6 +166,28 @@ export default class Document extends Emitter {
     feature.componentId = component.sourceId()
     feature.body = () => body.reference()
     await this.addFeature(feature)
+  }
+
+  async placeFile(file) {
+    const feature = new PlaceFeature(this)
+    feature.useFile(file)
+    await this.addFeature(feature)
+  }
+
+  // The save dialog's extension selects the format. Without Electron there
+  // is no save dialog, so the export downloads as STEP.
+  async exportComponent(component = this.activeComponent) {
+    const title = component.creator.title
+    const path = window.ipc ? await chooseSavePath('step,stl,3mf', title) : null
+    if(window.ipc && !path) return
+    const extension = path?.split('.').pop().toUpperCase()
+    const format = !extension || extension == 'STP' ? 'STEP' : extension
+    await exportConfigured(component, { format, path })
+  }
+
+  // Referenced files may have changed while this document was closed.
+  async checkLinkedFiles() {
+    await Promise.all(this.timeline.features.map(feature => feature.checkSource?.()))
   }
 
   keepPose() {
@@ -858,6 +880,7 @@ export default class Document extends Emitter {
     this.isFresh = false
     this.treeletsExpandedByDefault = false
     await this.applyDump(dump, materials, 'Opening document', file.path?.split(/[\\/]/).pop() || 'Document', true)
+    await this.checkLinkedFiles()
   }
 
   async applyDump(dump, materials, title, detail, resetCamera = false) {

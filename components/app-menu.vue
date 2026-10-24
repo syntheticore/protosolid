@@ -36,9 +36,14 @@
             span Save as...
 
         li
-          button(disabled="disabled")
+          button(@click="$emit('import-file')")
             Icon(icon="file-import" fixed-width)
             span Import...
+
+        li
+          button(@click="$emit('export-file')")
+            Icon(icon="file-export" fixed-width)
+            span Export...
 
         //- li
         //-   button(disabled="disabled")

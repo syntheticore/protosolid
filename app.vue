@@ -19,6 +19,8 @@
       @open-document="loadDocument"
       @save-document="saveDocument"
       @save-document-as="saveDocumentAs"
+      @import-file="importFile"
+      @export-file="exportFile"
       @delete-document="closeDocument"
     )
 
@@ -82,6 +84,8 @@
     emitter as prefEmitter,
   } from './js/preferences.js'
   import Document from './js/core/document.js'
+  import { stepFiletype } from './js/core/features.js'
+  import { loadFile } from './js/utils.js'
   import Emitter from './js/emitter.js'
   import { ManipulationTool } from './js/tools.js'
 
@@ -155,6 +159,8 @@
       window.ipc.on('openFile', loadDocument)
       window.ipc.on('saveFile', saveDocument)
       window.ipc.on('saveFileAs', saveDocumentAs)
+      window.ipc.on('importFile', importFile)
+      window.ipc.on('exportFile', exportFile)
       window.ipc.on('closeFile', () => closeDocument(activeDocument.value) )
 
       watch(() => activeDocument.value?.canSave ?? false, canSave => {
@@ -283,6 +289,33 @@
 
   function saveDocumentAs() {
     return activeDocument.value.save(true)
+  }
+
+  // The menu imports STEP files only, each into a new document. Documents
+  // are placed from the toolbar.
+  async function importFile() {
+    if(documentBusy.value) return
+    try {
+      const file = await loadFile(stepFiletype, 'text')
+      await createDocument()
+      await activeDocument.value.placeFile(file)
+      bus.emit('zoom-all')
+    } catch(error) {
+      if(error == 'canceled') return
+      console.error(error)
+      alert('The file could not be imported.')
+    }
+  }
+
+  async function exportFile() {
+    if(documentBusy.value) return
+    try {
+      await activeDocument.value.exportComponent()
+    } catch(error) {
+      if(error == 'canceled') return
+      console.error(error)
+      alert(`The component could not be exported: ${error.message || error}`)
+    }
   }
 
   async function closeDocument(doc) {

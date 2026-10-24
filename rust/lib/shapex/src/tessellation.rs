@@ -297,6 +297,18 @@ impl Kernel {
         cache: &mut BTreeMap<EdgeId, EdgePolyline>,
     ) -> KernelResult<TriangleMesh> {
         let face = self.topology().face(face_id)?;
+        // Boundary samples lie on their edges; imported or healed entities
+        // may sit as far from the support as their own tolerances allow.
+        let mut boundary_tolerance = face.tolerance();
+        for loop_id in face.loops() {
+            let first = self.topology().loop_(*loop_id)?.first();
+            let mut current = first;
+            while let Some(coedge_id) = current {
+                let coedge = self.topology().coedge(coedge_id)?;
+                boundary_tolerance = boundary_tolerance.max(self.topology().edge(coedge.edge())?.tolerance());
+                current = Some(coedge.next()).filter(|next| Some(*next) != first);
+            }
+        }
         if let Some(seed) = self.sample_rectangular_chart(face_id, options)?
             .or(self.sample_full_periodic_band(face_id, options)?) {
             return finish_surface_triangulation(
@@ -304,6 +316,7 @@ impl Kernel {
                 face.orientation(),
                 face_id,
                 self.tolerance(),
+                boundary_tolerance,
                 options,
                 seed,
             );
@@ -335,7 +348,7 @@ impl Kernel {
                     vertex.uv = Point2::new(uv.0, uv.1);
                 }
             }
-            unwrap_periodic_ring(tessellation_surface, self.tolerance(), ring)?;
+            unwrap_periodic_ring(tessellation_surface, self.tolerance(), boundary_tolerance, ring)?;
         }
         if rings.is_empty() || rings[0].len() < 3 {
             return Err(KernelError::new(
@@ -418,6 +431,7 @@ impl Kernel {
                     face.orientation(),
                     face_id,
                     self.tolerance(),
+                    boundary_tolerance,
                     options,
                     seed,
                 );
@@ -444,6 +458,7 @@ impl Kernel {
             face.orientation(),
             face_id,
             self.tolerance(),
+            boundary_tolerance,
             options,
             SurfaceTriangulationSeed {
                 uvs,
@@ -990,6 +1005,7 @@ fn finish_surface_triangulation(
     orientation: FaceOrientation,
     face_id: FaceId,
     tolerance: ModelTolerance,
+    boundary_tolerance: f64,
     options: TessellationOptions,
     seed: SurfaceTriangulationSeed,
 ) -> KernelResult<TriangleMesh> {
@@ -1002,7 +1018,7 @@ fn finish_surface_triangulation(
     let mut normals = Vec::with_capacity(positions.len());
     for (uv, point) in uvs.iter().zip(&positions) {
         let (lifted, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
-        let allowed = tolerance.linear_at_scale(point.to_vec().magnitude());
+        let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()).max(boundary_tolerance);
         if lifted.distance(*point) > allowed {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
@@ -1136,6 +1152,7 @@ fn adaptive_isoparametric_samples(
 fn unwrap_periodic_ring(
     surface: &super::Surface3,
     tolerance: ModelTolerance,
+    boundary_tolerance: f64,
     ring: &mut [BoundaryVertex],
 ) -> KernelResult<()> {
     let domains = surface.domains();
@@ -1167,9 +1184,10 @@ fn unwrap_periodic_ring(
     for vertex in ring.iter_mut() {
         let original_uv = vertex.uv;
         let (lifted, du, dv) = surface.first_order(original_uv.x, original_uv.y)?;
-        if lifted.distance(vertex.point)
-            <= tolerance.linear_at_scale(vertex.point.to_vec().magnitude().max(1.0))
-        {
+        let allowed = tolerance
+            .linear_at_scale(vertex.point.to_vec().magnitude().max(1.0))
+            .max(boundary_tolerance);
+        if lifted.distance(vertex.point) <= allowed {
             continue;
         }
         let singular_periodic_coordinate =
@@ -1192,9 +1210,7 @@ fn unwrap_periodic_ring(
             ));
         }
         let projection = surface.project(vertex.point, tolerance)?;
-        if projection.distance
-            > tolerance.linear_at_scale(vertex.point.to_vec().magnitude().max(1.0))
-        {
+        if projection.distance > allowed {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
                 "periodic face boundary does not lie on its retained surface",

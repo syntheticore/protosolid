@@ -3,7 +3,7 @@ import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarR
 import { makeID } from './id.js'
 import { markRaw } from 'vue'
 import { resolveCompoundSelection, restoreCompoundSelections, identifyTopology, topologyItems } from './topology.js'
-import { seedProfileTopology, trackTopology, trackOperations } from './topology-history.js'
+import { seedProfileTopology, seedImportTopology, trackTopology, trackOperations } from './topology-history.js'
 import { captureTopologySelection, namespaceTopology } from './topological-naming.js'
 import { normalFromMatrix, rotationFromNormal, EPSILON } from './utils.js'
 import { fail } from './errors.js'
@@ -499,6 +499,11 @@ export class Solid extends Volumetric {
     return new SolidReference(this)
   }
 }
+// Wrap bodies read from an exchange file, owned by the importing feature.
+export function importedCompound(componentId, geometry, owner) {
+  return seedImportTopology(new Compound(componentId, geometry), owner)
+}
+
 export class Compound extends Volumetric {
   constructor(componentId, geometry) {
     super()

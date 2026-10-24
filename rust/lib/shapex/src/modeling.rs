@@ -1391,6 +1391,23 @@ impl Compound {
         )
     }
 
+    /// The same solids under another tolerance policy. Entities keep the
+    /// tolerances they were certified with, so a model sewn at a coarser
+    /// precision remains valid next to models of the finer one.
+    pub(crate) fn with_tolerance(&self, tolerance: ModelTolerance) -> KernelResult<Self> {
+        let mut kernel = Kernel::new(tolerance)?;
+        let mut bodies = Vec::new();
+        let mut history = OperationHistory::default();
+        let mut certificates = BTreeMap::new();
+        for solid in &self.solids {
+            let body = kernel.topology.import_body(solid.state.topology(), solid.body)?;
+            bodies.push(body);
+            certificates.insert(body, PhysicalCertificate { properties: solid.mass_properties() });
+            history.absorb(self.history.identity(self.topology().body_entity_names(solid.body)?));
+        }
+        Self::from_parts(kernel, super::identity::fresh_uuid(), bodies, history, certificates, [self])
+    }
+
     pub fn chamfer(&self, edges: &[EdgeHandle], distance: f64) -> KernelResult<Self> {
         self.chamfer_with_tangent_propagation(edges, distance, false)
     }

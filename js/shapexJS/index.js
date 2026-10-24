@@ -1059,6 +1059,10 @@ export function createShapex(bindings) {
   }
 
   class Compound extends NativeValue {
+    static fromStep(text, tolerance = ModelTolerance.default()) {
+      instance(tolerance, ModelTolerance, 'tolerance')
+      return nativeCall(() => new Compound(bindings.compoundFromStep(String(text), new Float64Array(tolerance.toArray()))))
+    }
     volume() { return this._raw().volume() }
     surfaceArea() { return this._raw().surfaceArea() }
     centroid() { return new Point3(...Array.from(this._raw().centroid())) }
@@ -1209,6 +1213,60 @@ export function createShapex(bindings) {
     }
   }
 
+  // STEP product structures as plain data: products with a name, their own
+  // bodies or null, an [r, g, b] colour or null per body, and occurrences
+  // placing other products by index. Written files use mm or in.
+  const StepAssembly = Object.freeze({
+    fromStep(text, tolerance = ModelTolerance.default()) {
+      instance(tolerance, ModelTolerance, 'tolerance')
+      const raw = nativeCall(() => bindings.NativeStepAssembly.fromStep(String(text), new Float64Array(tolerance.toArray())))
+      const placement = values => new RigidTransform3(Matrix3.fromCols(
+        new Vec3(values[0], values[1], values[2]),
+        new Vec3(values[3], values[4], values[5]),
+        new Vec3(values[6], values[7], values[8]),
+      ), new Vec3(values[9], values[10], values[11]), tolerance)
+      try {
+        const products = Array.from({ length: raw.productCount }, (_, index) => {
+          const bodies = raw.productBodies(index)
+          const colorValues = raw.productColors(index)
+          const colors = Array.from({ length: colorValues.length / 3 }, (_, solid) =>
+            Number.isNaN(colorValues[solid * 3]) ? null : Object.freeze(Array.from(colorValues.subarray(solid * 3, solid * 3 + 3))))
+          const occurrences = Array.from({ length: raw.occurrenceCount(index) }, (_, occurrence) => Object.freeze({
+            product: raw.occurrenceProduct(index, occurrence),
+            placement: placement(raw.occurrenceTransform(index, occurrence)),
+          }))
+          return Object.freeze({
+            name: raw.productName(index),
+            bodies: bodies ? new Compound(bodies) : null,
+            colors: Object.freeze(colors),
+            occurrences: Object.freeze(occurrences),
+          })
+        })
+        return Object.freeze({ products: Object.freeze(products), roots: Object.freeze(Array.from(raw.roots())) })
+      } finally { free(raw) }
+    },
+    toStep({ products, roots, unit = 'mm' }, timestamp = new Date().toISOString().slice(0, 19)) {
+      const raw = new bindings.NativeStepAssembly()
+      try {
+        nativeCall(() => raw.setUnit(String(unit)))
+        products = array(products, 'products')
+        products.forEach((product, index) => {
+          raw.addProduct(String(product.name))
+          if(product.bodies) nativeCall(() => raw.setBodies(index, instance(product.bodies, Compound, `products[${index}].bodies`)._raw()))
+          if(product.colors) raw.setColors(index, new Float64Array(array(product.colors, `products[${index}].colors`)
+            .flatMap(color => color ? Array.from(color, Number) : [NaN, NaN, NaN])))
+        })
+        products.forEach((product, index) => array(product.occurrences, `products[${index}].occurrences`).forEach(occurrence => {
+          const placement = instance(occurrence.placement, RigidTransform3, 'occurrence.placement')
+          nativeCall(() => raw.addOccurrence(index, occurrence.product,
+            new Float64Array(placement._values()), new Float64Array(placement.tolerance.toArray())))
+        }))
+        array(roots, 'roots').forEach(root => nativeCall(() => raw.addRoot(root)))
+        return nativeCall(() => raw.toStep(String(timestamp)))
+      } finally { free(raw) }
+    },
+  })
+
   return Object.freeze({
     ShapexError,
     Point2, Vec2, Point3, Vec3, Vector3: Vec3, Matrix3, Quaternion,
@@ -1217,7 +1275,7 @@ export function createShapex(bindings) {
     Curve2, TrimmedCurve2: BoundTrimmedCurve2, TrimmedCurve3, Path2, Wire2: BoundWire2, Profile,
     TessellationOptions, FilletOptions, TriangleMesh, Polyline,
     BooleanKind,
-    Face, Edge, Vertex, Solid, Compound, Resolution,
+    Face, Edge, Vertex, Solid, Compound, Resolution, StepAssembly,
   })
 }
 

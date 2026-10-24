@@ -12,6 +12,7 @@ use shapex::{
     RigidTransform3, Surface3, SurfaceChart,
     ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
     ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, Solid, SplitKeep,
+    StepAssembly, StepLengthUnit, StepOccurrence, StepProduct,
     TessellationOptions, TriangleMesh, TrimmedCurve2, Vec2, Vec3, VertexHandle, Wire2,
 };
 use wasm_bindgen::prelude::*;
@@ -424,6 +425,148 @@ pub fn loft(sections: JsValue, align_sections: bool) -> Result<NativeCompound, J
         )
         .map(|inner| NativeCompound { inner })
         .map_err(js_error)
+}
+
+#[wasm_bindgen(js_name = compoundFromStep)]
+pub fn compound_from_step(text: &str, tolerance_values: &[f64]) -> Result<NativeCompound, JsValue> {
+    Compound::from_step(text, tolerance(tolerance_values)?)
+        .map(|inner| NativeCompound { inner })
+        .map_err(js_error)
+}
+
+/// A STEP product structure, built for export or read from a file.
+#[wasm_bindgen(js_name = NativeStepAssembly)]
+pub struct NativeStepAssembly {
+    inner: StepAssembly,
+}
+
+#[wasm_bindgen(js_class = NativeStepAssembly)]
+impl NativeStepAssembly {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { inner: StepAssembly::default() }
+    }
+    #[wasm_bindgen(js_name = fromStep)]
+    pub fn from_step(text: &str, tolerance_values: &[f64]) -> Result<NativeStepAssembly, JsValue> {
+        StepAssembly::from_step(text, tolerance(tolerance_values)?)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+    #[wasm_bindgen(js_name = addProduct)]
+    pub fn add_product(&mut self, name: &str) -> usize {
+        self.inner.products.push(StepProduct {
+            name: name.into(),
+            bodies: None,
+            colors: Vec::new(),
+            occurrences: Vec::new(),
+        });
+        self.inner.products.len() - 1
+    }
+    #[wasm_bindgen(js_name = setBodies)]
+    pub fn set_bodies(&mut self, product: usize, bodies: &NativeCompound) -> Result<(), JsValue> {
+        self.product_mut(product)?.bodies = Some(bodies.inner.clone());
+        Ok(())
+    }
+    /// RGB triples per solid; NaN components leave a solid uncoloured.
+    #[wasm_bindgen(js_name = setColors)]
+    pub fn set_colors(&mut self, product: usize, values: &[f64]) -> Result<(), JsValue> {
+        self.product_mut(product)?.colors = values
+            .chunks_exact(3)
+            .map(|rgb| (!rgb[0].is_nan()).then(|| [rgb[0], rgb[1], rgb[2]]))
+            .collect();
+        Ok(())
+    }
+    #[wasm_bindgen(js_name = setUnit)]
+    pub fn set_unit(&mut self, unit: &str) -> Result<(), JsValue> {
+        self.inner.unit = match unit {
+            "mm" => StepLengthUnit::Millimetre,
+            "in" => StepLengthUnit::Inch,
+            _ => return Err(JsValue::from_str("STEP length unit must be mm or in")),
+        };
+        Ok(())
+    }
+    #[wasm_bindgen(js_name = addOccurrence)]
+    pub fn add_occurrence(
+        &mut self,
+        product: usize,
+        child: usize,
+        transform_values: &[f64],
+        tolerance_values: &[f64],
+    ) -> Result<(), JsValue> {
+        if child >= self.inner.products.len() {
+            return Err(JsValue::from_str("occurrence product does not exist"));
+        }
+        let placement = transform(transform_values, tolerance(tolerance_values)?)?;
+        self.product_mut(product)?.occurrences.push(StepOccurrence { product: child, placement });
+        Ok(())
+    }
+    #[wasm_bindgen(js_name = addRoot)]
+    pub fn add_root(&mut self, product: usize) -> Result<(), JsValue> {
+        self.product_mut(product)?;
+        self.inner.roots.push(product);
+        Ok(())
+    }
+    #[wasm_bindgen(js_name = toStep)]
+    pub fn to_step(&self, timestamp: &str) -> Result<String, JsValue> {
+        self.inner.to_step(timestamp).map_err(js_error)
+    }
+    #[wasm_bindgen(getter, js_name = productCount)]
+    pub fn product_count(&self) -> usize {
+        self.inner.products.len()
+    }
+    #[wasm_bindgen(js_name = productName)]
+    pub fn product_name(&self, product: usize) -> Result<String, JsValue> {
+        Ok(self.product(product)?.name.clone())
+    }
+    #[wasm_bindgen(js_name = productBodies)]
+    pub fn product_bodies(&self, product: usize) -> Result<Option<NativeCompound>, JsValue> {
+        Ok(self.product(product)?.bodies.clone().map(|inner| NativeCompound { inner }))
+    }
+    /// RGB triples per solid, NaN for uncoloured solids.
+    #[wasm_bindgen(js_name = productColors)]
+    pub fn product_colors(&self, product: usize) -> Result<Float64Array, JsValue> {
+        let values = self.product(product)?
+            .colors
+            .iter()
+            .flat_map(|color| color.unwrap_or([f64::NAN; 3]))
+            .collect::<Vec<_>>();
+        Ok(f64_array(&values))
+    }
+    #[wasm_bindgen(js_name = occurrenceCount)]
+    pub fn occurrence_count(&self, product: usize) -> Result<usize, JsValue> {
+        Ok(self.product(product)?.occurrences.len())
+    }
+    #[wasm_bindgen(js_name = occurrenceProduct)]
+    pub fn occurrence_product(&self, product: usize, occurrence: usize) -> Result<usize, JsValue> {
+        Ok(self.occurrence(product, occurrence)?.product)
+    }
+    /// Rotation columns, then translation.
+    #[wasm_bindgen(js_name = occurrenceTransform)]
+    pub fn occurrence_transform(&self, product: usize, occurrence: usize) -> Result<Float64Array, JsValue> {
+        let placement = self.occurrence(product, occurrence)?.placement;
+        let (rotation, translation) = (placement.rotation(), placement.translation());
+        Ok(f64_array(&[
+            rotation.x.x, rotation.x.y, rotation.x.z,
+            rotation.y.x, rotation.y.y, rotation.y.z,
+            rotation.z.x, rotation.z.y, rotation.z.z,
+            translation.x, translation.y, translation.z,
+        ]))
+    }
+    pub fn roots(&self) -> Vec<u32> {
+        self.inner.roots.iter().map(|root| *root as u32).collect()
+    }
+}
+
+impl NativeStepAssembly {
+    fn product(&self, product: usize) -> Result<&StepProduct, JsValue> {
+        self.inner.products.get(product).ok_or_else(|| JsValue::from_str("STEP product does not exist"))
+    }
+    fn product_mut(&mut self, product: usize) -> Result<&mut StepProduct, JsValue> {
+        self.inner.products.get_mut(product).ok_or_else(|| JsValue::from_str("STEP product does not exist"))
+    }
+    fn occurrence(&self, product: usize, occurrence: usize) -> Result<&StepOccurrence, JsValue> {
+        self.product(product)?.occurrences.get(occurrence).ok_or_else(|| JsValue::from_str("STEP occurrence does not exist"))
+    }
 }
 
 #[wasm_bindgen(js_name = NativeMesh)]

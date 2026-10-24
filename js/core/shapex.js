@@ -72,6 +72,17 @@ export function transformFromMatrix(matrix) {
   )
 }
 
+export function matrixFromTransform(transform) {
+  const { x, y, z } = transform.rotation()
+  const translation = transform.translation()
+  return new THREE.Matrix4().set(
+    x.x, y.x, z.x, translation.x,
+    x.y, y.y, z.y, translation.y,
+    x.z, y.z, z.z, translation.z,
+    0, 0, 0, 1,
+  )
+}
+
 // Consume temporary topology handles when only their IDs are needed.
 export function consumeEntityIds(entities) {
   return entities.map(entity => {

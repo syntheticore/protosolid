@@ -332,10 +332,42 @@ fn validate_no_self_intersection(
                 .collect::<Vec<_>>();
             let intersection =
                 curve_pair_intersection(&segments[first], &segments[second], tolerance)?;
+            let first_range = segments[first].range();
+            let second_range = segments[second].range();
+            let shared_parameters = [first_range.start, first_range.end]
+                .into_iter()
+                .zip(first_endpoints)
+                .flat_map(|(a, first_point)| {
+                    [second_range.start, second_range.end]
+                        .into_iter()
+                        .zip(second_endpoints)
+                        .filter(move |(_, second_point)| first_point.distance(*second_point) <= tolerance.linear)
+                        .map(move |(b, _)| (a, b))
+                })
+                .collect::<Vec<_>>();
+            // Tangent neighbors approximated independently, as in exchanged
+            // files, can touch repeatedly near their common vertex. Contact
+            // that stays within tolerance from that vertex is the junction.
+            let tangent_run = |hit: &CurvePairHit| -> KernelResult<bool> {
+                for (a, b) in &shared_parameters {
+                    let mut connected = true;
+                    for index in 1..16 {
+                        let unit = index as f64 / 16.0;
+                        let p = segments[first].curve().evaluate(a + (hit.first_parameter - a) * unit)?.point;
+                        let q = segments[second].curve().evaluate(b + (hit.second_parameter - b) * unit)?.point;
+                        if p.distance(q) > tolerance.linear * 8.0 {
+                            connected = false;
+                            break;
+                        }
+                    }
+                    if connected {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            };
             let crossing = intersection.hits.iter().try_fold(false, |crossing, hit| -> KernelResult<bool> {
                 if crossing { return Ok(true); }
-                let first_range = segments[first].range();
-                let second_range = segments[second].range();
                 if !adjacent
                     && [first_range.start, first_range.end].contains(&hit.first_parameter)
                     && [second_range.start, second_range.end].contains(&hit.second_parameter) {
@@ -346,7 +378,9 @@ fn validate_no_self_intersection(
                     let b = segments[second].curve().first_order(hit.second_parameter)?.0;
                     if a.distance(b) > tolerance.linear { return Ok(false); }
                 }
-                Ok(!adjacent || shared.iter().all(|shared| shared.distance(hit.point) > tolerance.linear * 8.0))
+                Ok(!adjacent
+                    || shared.iter().all(|shared| shared.distance(hit.point) > tolerance.linear * 8.0)
+                        && !tangent_run(hit)?)
             })?;
             if intersection.coincident || crossing {
                 return Err(invalid(format!("wire must not self-intersect (edges {first} and {second})")));

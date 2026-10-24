@@ -33,6 +33,23 @@ export function seedProfileTopology(compound, profiles, owner, extraSources = []
   return compound
 }
 
+// Imported bodies carry no construction semantics. Their order in the stored
+// file is fixed, so it identifies faces across regenerations.
+export function seedImportTopology(compound, owner) {
+  compound.solids().forEach((solid, body) => {
+    solid.faces().forEach((face, index) => {
+      nameTopology(face, 'face', 'import/face', [`${body}/${index}`], owner)
+    })
+    for(const edge of solid.edges()) {
+      nameTopology(edge, 'edge', 'import/boundary',
+        edge.connectedFaces().flatMap(face => face.topology.anchors), owner)
+    }
+    nameTopology(solid, 'body', 'import/body', [`${body}`], owner)
+  })
+  identifyTopology(compound)
+  return compound
+}
+
 // Document naming policy per operation; native construction roles only
 // describe geometry. `role` names an output cell, and `continues` decides
 // whether a cell the kernel resolves a source to keeps that source's

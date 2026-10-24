@@ -18,6 +18,8 @@
 
     Icon(:icon="feature.constructor.icon" fixed-width :class="{ future: isFuture }")
 
+    Icon.outdated(v-if="feature.newerData" icon="exclamation-circle")
+
     nav.actions.bordered(@dblclick.stop)
 
       button(
@@ -25,6 +27,14 @@
         @click.stop="moveMarker()"
       )
         Icon(icon="directions" fixed-width)
+
+      button(
+        v-if="feature.newerData"
+        title="Update to the latest revision of the referenced file"
+        :disabled="document.isRegenerating"
+        @click.stop="updateSource()"
+      )
+        Icon(icon="sync-alt" fixed-width)
 
       button(
         v-if="canEdit"
@@ -81,6 +91,13 @@
 
     &.warning > svg
       color: $warn !important
+
+    > .outdated
+      position: absolute
+      top: 6px
+      right: 6px
+      font-size: 9px
+      color: $warn
 
     &:hover
 
@@ -170,6 +187,7 @@
         let title = this.feature.title
         const error = this.feature.error
         if(error) title += ': ' + error.msg
+        if(this.feature.newerData) title += ' (the referenced file has changed)'
         return title
       },
 
@@ -222,6 +240,10 @@
       deleteFeature() {
         this.document.markChanged()
         this.document.removeFeature(this.feature)
+      },
+
+      updateSource() {
+        this.feature.updateSource()
       },
 
       moveMarker() {

@@ -3,7 +3,90 @@ import * as THREE from 'three'
 
 import { saveFile } from '../utils.js'
 import { relativeComponentTransform } from './assembly.js'
-import { tessellateMesh } from './shapex.js'
+import { shapex, tessellateMesh, transformFromMatrix } from './shapex.js'
+
+
+// STEP
+// Exact bodies of the component and its subcomponents in the component's
+// frame. An assembly writes one product per component definition, placed by
+// its occurrences. A flat assembly places every component's product in the
+// exported component directly, and a single part holds all bodies.
+export async function exportStep(component, path, config = {}) {
+  const title = component.creator.title
+  const owned = []
+  const products = []
+  const product = (name, shape, occurrences) => shape || occurrences.length ? products.push({
+    name, bodies: shape?.bodies || null, colors: shape?.colors || [], occurrences,
+  }) - 1 : null
+
+  // A component's own exported solids and their colours.
+  const own = occurrence => {
+    const solids = occurrence.compound.solids()
+    const exported = solids.filter(solid => config.includeHidden || !occurrence.isItemHidden(solid.id))
+    if(!exported.length) return null
+    let bodies = occurrence.compound.geom()
+    if(exported.length < solids.length) {
+      const parts = exported.map(solid => solid.geom().toCompound())
+      bodies = parts[0].combined(parts.slice(1))
+      owned.push(...parts, bodies)
+    }
+    const color = config.colors === false ? null : stepColor(occurrence.creator.color)
+    return { bodies, colors: exported.map(() => color) }
+  }
+  const children = occurrence => occurrence.children.filter(child => config.includeHidden || !child.creator.hidden)
+  const descendants = occurrence => children(occurrence).flatMap(child => [child, ...descendants(child)])
+  const placement = occurrence => transformFromMatrix(relativeComponentTransform(occurrence, component))
+
+  try {
+    let root
+    if(config.structure == 'single') {
+      const shapes = [component, ...descendants(component)].flatMap(occurrence => {
+        const shape = own(occurrence)
+        if(!shape) return []
+        const bodies = shape.bodies.transformed(placement(occurrence))
+        owned.push(bodies)
+        return [{ ...shape, bodies }]
+      })
+      const bodies = shapes[0]?.bodies.combined(shapes.slice(1).map(shape => shape.bodies))
+      if(bodies) owned.push(bodies)
+      root = product(title, bodies && { bodies, colors: shapes.flatMap(shape => shape.colors) }, [])
+    } else if(config.structure == 'flat') {
+      const indices = new Map()
+      const occurrences = descendants(component).map(occurrence => {
+        const id = occurrence.sourceId()
+        if(!indices.has(id)) indices.set(id, product(occurrence.creator.title, own(occurrence), []))
+        return { product: indices.get(id), placement: placement(occurrence) }
+      }).filter(occurrence => occurrence.product !== null)
+      root = product(title, own(component), occurrences)
+    } else {
+      // Occurrences hiding different children are different products.
+      const signature = occurrence => `${occurrence.sourceId()}(${children(occurrence).map(signature)})`
+      const indices = new Map()
+      const assembly = occurrence => {
+        const id = signature(occurrence)
+        if(!indices.has(id)) {
+          const occurrences = children(occurrence)
+            .map(child => ({ product: assembly(child), placement: transformFromMatrix(child.localTransform()) }))
+            .filter(child => child.product !== null)
+          indices.set(id, product(occurrence.creator.title, own(occurrence), occurrences))
+        }
+        return indices.get(id)
+      }
+      root = assembly(component)
+    }
+    if(root === null) throw new Error(`Cannot export empty component "${title}"`)
+    const step = shapex.StepAssembly.toStep({ products, roots: [root], unit: config.unit || 'mm' })
+    return await saveFile(step, 'step', path, title)
+  } finally {
+    owned.forEach(compound => compound.free())
+  }
+}
+
+// STEP colours are sRGB components in [0, 1].
+function stepColor(color) {
+  const { r, g, b } = new THREE.Color(color).getRGB({}, THREE.SRGBColorSpace)
+  return [r, g, b]
+}
 
 
 // STL
@@ -110,6 +193,7 @@ export async function exportConfigured(component, config) {
   const exporter = {
     STL: exportStl,
     '3MF': export3mf,
+    STEP: exportStep,
   }[config.format]
   if(!exporter) throw new Error(`Unsupported export format: ${config.format}`)
   return await exporter(component, config.path, config)

@@ -38,21 +38,41 @@
         h3 Export Settings
 
         label
-          ComboBox(v-model="config.format" @update:model-value="document.markChanged()" label="Format" :options="['STL', '3MF'].map(format => ({ value: format, label: format }))")
+          ComboBox(v-model="config.format" @update:model-value="document.markChanged()" label="Format" :options="['STL', '3MF', 'STEP'].map(format => ({ value: format, label: format }))")
           span Format
 
-        label
-          input.input(type="number" v-model="config.maxDistance" min="0.0" step="0.01" max="10.0")
-          span Max Deviation
+        template(v-if="isMesh")
 
-        label
-          input.input(type="number" v-model="config.maxAngle" min="0.0" step="0.1" max="360.0")
-          span Max Angular Deviation
+          label
+            input.input(type="number" v-model="config.maxDistance" min="0.0" step="0.01" max="10.0")
+            span Max Deviation
+
+          label
+            input.input(type="number" v-model="config.maxAngle" min="0.0" step="0.1" max="360.0")
+            span Max Angular Deviation
 
         label
           button.button(title="Choose file location" @click="chooseDestination")
             Icon(icon="folder")
           span(:title="path") {{ path || 'Destination Path' }}
+
+        template(v-if="!isMesh")
+
+          label
+            ComboBox(:model-value="config.structure || 'assembly'" @update:model-value="set('structure', $event)" label="Structure" :options="structureOptions")
+            span Structure
+
+          label
+            ComboBox(:model-value="config.unit || 'mm'" @update:model-value="set('unit', $event)" label="Units" :options="unitOptions")
+            span Units
+
+          label(title="Export hidden components and bodies")
+            input(type="checkbox" v-model="config.includeHidden")
+            span Include Hidden
+
+          label(title="Export component colors")
+            input(type="checkbox" :checked="config.colors !== false" @change="set('colors', $event.target.checked)")
+            span Colors
 
         label(title="Auto-export when saving document")
           input(type="checkbox" v-model="config.autoSave")
@@ -113,6 +133,25 @@
         return this.document.activeExportConfig === this.config &&
           this.document.activeExportComponentId === this.component.id
       },
+
+      isMesh() {
+        return this.config.format != 'STEP'
+      },
+
+      structureOptions() {
+        return [
+          { value: 'assembly', label: 'Assembly' },
+          { value: 'flat', label: 'Flat Assembly' },
+          { value: 'single', label: 'Single Part' },
+        ]
+      },
+
+      unitOptions() {
+        return [
+          { value: 'mm', label: 'Millimeters' },
+          { value: 'in', label: 'Inches' },
+        ]
+      },
     },
 
     watch: {
@@ -139,6 +178,11 @@
           this.document.activateComponent(this.component)
           this.document.activateExport(this.config, this.component)
         }
+      },
+
+      set(key, value) {
+        this.config[key] = value
+        this.document.markChanged()
       },
 
       chooseDestination: async function() {

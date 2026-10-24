@@ -45,6 +45,7 @@ mod primitives;
 mod profile;
 mod section;
 mod sew;
+mod step;
 mod sweep;
 mod sweep_limits;
 mod sweeps;
@@ -98,6 +99,7 @@ pub use topology::{
     Body, BodyId, Coedge, CoedgeId, Edge, EdgeId, EntityId, Face, FaceId, FaceOrientation, Loop,
     LoopId, LoopKind, Shell, ShellId, ShellKind, Topology, Vertex, VertexId,
 };
+pub use step::{StepAssembly, StepLengthUnit, StepOccurrence, StepProduct};
 pub use transform::RigidTransform3;
 pub use validation::ValidationReport;
 pub use wire::{TrimmedCurve2, Wire2};

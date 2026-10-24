@@ -3,10 +3,11 @@ import { markRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
-import { Compound } from './geom3d.js'
+import { Compound, importedCompound } from './geom3d.js'
+import { shapex, modelTolerance, matrixFromTransform } from './shapex.js'
 import { PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
-import { normalFromMatrix, rad, rotationFromNormal } from './utils.js'
+import { normalFromMatrix, parseHsl, rad, rotationFromNormal } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
 import { checkedOutData, parseDocument } from './document-format.js'
@@ -1641,15 +1642,55 @@ export class PlaneFeature extends Feature {
 Serialize.register(PlaneFeature, 'PlaneFeature')
 
 
+// Features that store a referenced file's contents regenerate without it.
+// The file is compared again when the document is opened; a newer revision
+// is offered for update but never applied silently.
+async function readNewerRevision(feature, filetype, normalize = data => data) {
+  if(!feature.filePath || !feature.cachedData || !window.ipc) return null
+  try {
+    const file = await loadFile(filetype, 'text', feature.filePath)
+    const data = normalize(file.data)
+    return data == feature.cachedData ? null : data
+  } catch(error) {
+    console.warn(`Referenced file ${feature.filePath} could not be read`, error)
+    return null
+  }
+}
+
+export const stepFiletype = '.step,.stp'
+const placeFiletype = `.cad,${stepFiletype}`
+
+// STEP files open with their exchange structure keyword. Only documents
+// are normalized to their checked-out state.
+const isStepData = data => data.trimStart().startsWith('ISO-10303-21')
+const sourceData = data => isStepData(data) ? data : checkedOutData(data)
+
+
+// Products take their first solid's sRGB colour. Uncoloured products fan out
+// from the feature's color by the golden angle.
+function stepColor(product, color, index) {
+  const rgb = product.colors.find(Boolean)
+  if(rgb) {
+    const { h, s, l } = new THREE.Color().setRGB(...rgb, THREE.SRGBColorSpace).getHSL({}, THREE.SRGBColorSpace)
+    const round = value => Number(value.toFixed(2))
+    return `hsl(${round(h * 360)}, ${round(s * 100)}%, ${round(l * 100)}%)`
+  }
+  const { h, s, l } = parseHsl(color)
+  return `hsl(${(h + index * 137.508) % 360}, ${s}%, ${l}%)`
+}
+
+
+// Places a ProtoSolid document's components, or a STEP file's product
+// structure, read-only in the active component.
 export class PlaceFeature extends Feature {
   static icon = 'link'
 
   constructor(doc) {
     super(doc, false, 'Place', {
       filePath: {
-        title: 'Document',
+        title: 'File',
         type: 'file',
-        filetype: '.cad',
+        filetype: placeFiletype,
         autoActivate: true,
       },
       variantOption: {
@@ -1658,19 +1699,27 @@ export class PlaceFeature extends Feature {
         options: {},
         when: feature => !!feature.sourceVariant()?.options?.length,
       },
+      flatten: {
+        title: 'Flatten',
+        type: 'bool',
+        icons: ['layer-group', 'sitemap'],
+        when: feature => isStepData(feature.cachedData || ''),
+      },
     })
 
     this.filePath = null
+    this.flatten = false
     this.cachedData = null
     this.variantOption = null
     this.importTransform = new THREE.Matrix4()
     this.sourceTree = null
-    this.pendingData = null
-    this.pendingTree = null
     this.activationError = null
     this.sourceRevision = null
+    this.newerData = null
     this.linkCheck = 0
     this.importGizmo = null
+    this.color = null
+    this.stepSource = null
   }
 
   isComplete() {
@@ -1679,17 +1728,19 @@ export class PlaceFeature extends Feature {
 
   async chooseFile() {
     const linkCheck = ++this.linkCheck
-    const file = await loadFile('.cad', 'text')
-    file.data = checkedOutData(file.data)
-    const sourceTree = this.parseSource(file.data)
-    if(linkCheck != this.linkCheck) return
+    const file = await loadFile(placeFiletype, 'text')
+    if(linkCheck == this.linkCheck) this.useFile(file)
+  }
+
+  useFile(file) {
+    file.data = sourceData(file.data)
+    if(isStepData(file.data)) this.color ||= this.document.timeline.makeColor()
+    const sourceTree = this.parseSource(file.data, null, file.path)
     this.filePath = file.path
     this.cachedData = file.data
     this.sourceTree = sourceTree
     this.variantOption = this.normalizedVariantOption(sourceTree)
     this.sourceRevision = this.snapshotRevision(file.data)
-    this.pendingData = null
-    this.pendingTree = null
     this.activationError = null
   }
 
@@ -1697,53 +1748,26 @@ export class PlaceFeature extends Feature {
     return this.filePath ? this.filePath.split(/[\\/]/).pop() : 'Choose file…'
   }
 
-  async activate() {
-    const linkCheck = ++this.linkCheck
-    this.pendingData = null
-    this.pendingTree = null
-    this.activationError = null
-    if(!this.filePath || !this.cachedData || !window.ipc) return
-
-    try {
-      const file = await loadFile('.cad', 'text', this.filePath)
-      file.data = checkedOutData(file.data)
-      if(linkCheck != this.linkCheck) return
-      if(file.data == this.cachedData) return
-      this.pendingTree = this.parseSource(file.data, this.variantOption)
-      this.pendingData = file.data
-      this.activationError = {
-        type: 'warning',
-        msg: 'The imported document has changed. Confirm to update it.',
-      }
-    } catch(error) {
-      if(linkCheck != this.linkCheck) return
-      console.error(error)
-      this.pendingData = null
-      this.pendingTree = null
-      this.activationError = {
-        type: 'error',
-        msg: 'The imported document could not be read. Choose a replacement file or cancel.',
-      }
-    }
+  async checkSource() {
+    this.newerData = await readNewerRevision(this, placeFiletype, sourceData)
   }
 
-  commit() {
-    if(!this.pendingData || !this.pendingTree) return
-    this.cachedData = this.pendingData
+  updateSource() {
+    this.cachedData = this.newerData
     this.sourceTree = this.parseSource(this.cachedData, this.variantOption)
     this.variantOption = this.normalizedVariantOption(this.sourceTree, this.variantOption)
     this.sourceRevision = this.snapshotRevision(this.cachedData)
-    this.pendingData = null
-    this.pendingTree = null
-    this.activationError = null
+    this.newerData = null
     this.document.timeline.invalidateFeature(this)
     this.document.regenerate()
+    this.document.markChanged()
   }
 
   execute(tree) {
     if(this.suppressUpdate || !this.isComplete()) return
     this.error = null
     this.updateSourceVariant()
+    if(isStepData(this.cachedData)) this.sourceTree = this.parseSource(this.cachedData)
     withTopologyNaming(this, () => {
       this.updateFeature(tree)
       if(this.error?.type == 'error') return
@@ -1855,7 +1879,7 @@ export class PlaceFeature extends Feature {
   }
 
   identifyImportedShapes(compound, sourceCompound) {
-    const geometryRevision = `${this.sourceRevision}/variant-${this.variantOption ?? 'default'}`
+    const geometryRevision = `${this.sourceRevision}/variant-${this.variantOption ?? 'default'}${this.flatten ? '/flat' : ''}`
     compound.namespaceTopology(`import/${sourceCompound.componentId}`)
     compound.solids().forEach(solid => {
       solid.faces().forEach(face => {
@@ -1894,7 +1918,8 @@ export class PlaceFeature extends Feature {
     return `${data.length}-${(hash >>> 0).toString(36)}`
   }
 
-  parseSource(data, variantOption=null) {
+  parseSource(data, variantOption=null, path=this.filePath) {
+    if(isStepData(data)) return this.parseStepSource(data, path)
     const previousLastId = lastId
     try {
       const dump = parseDocument(data, { document: this.document, sketches: {} })
@@ -1917,24 +1942,84 @@ export class PlaceFeature extends Feature {
     }
   }
 
+  // Reading and sewing a STEP file is costly; its source tree changes only
+  // with the file's contents and the flatten option.
+  parseStepSource(data, path) {
+    if(this.stepSource?.data !== data || this.stepSource.flatten !== this.flatten) {
+      const title = path ? path.split(/[\\/]/).pop().replace(/\.[^.]*$/, '') : 'STEP Import'
+      const tree = this.flatten ?
+        this.stepComponent(null, 'step', title, this.color, shapex.Compound.fromStep(data, modelTolerance)) :
+        this.stepAssembly(shapex.StepAssembly.fromStep(data, modelTolerance), title)
+      this.stepSource = markRaw({ data, flatten: this.flatten, tree: markRaw(tree) })
+    }
+    return this.stepSource.tree
+  }
+
+  stepComponent(parent, id, title, color, bodies) {
+    const component = new Component(parent, id)
+    component.readOnly = true
+    component.creator = new ComponentDefinition(title, color)
+    if(bodies) component.compound = importedCompound(id, bodies, this.id)
+    parent?.children.push(component)
+    return component
+  }
+
+  // Each product placed more than once becomes an instance of its first
+  // occurrence. Several root products share a root named after the file.
+  stepAssembly(assembly, title) {
+    const canonicals = new Map()
+    const place = (parent, id, index, transform, occurrenceSource) => {
+      const product = assembly.products[index]
+      const canonical = canonicals.get(index)
+      let component
+      if(canonical) {
+        occurrenceSource ||= canonical
+        component = new Component(parent, id)
+        component.readOnly = true
+        component.instanceOf = canonical.id
+        component.sourceOccurrence = occurrenceSource.id
+        component.creator = Object.assign(Object.create(canonical.creator), { hidden: false })
+        component.compound = canonical.compound.cloneForComponent(id)
+        parent?.children.push(component)
+      } else {
+        component = this.stepComponent(parent, id, product.name || title,
+          stepColor(product, this.color, index), product.bodies)
+        canonicals.set(index, component)
+      }
+      component.designTransform = transform
+      product.occurrences.forEach((occurrence, child) => place(component, `${id}/${child}`,
+        occurrence.product, matrixFromTransform(occurrence.placement), occurrenceSource?.children[child]))
+      return component
+    }
+    if(assembly.roots.length == 1) return place(null, 'step', assembly.roots[0], null)
+    const root = this.stepComponent(null, 'step', title, this.color, null)
+    assembly.roots.forEach((index, child) => place(root, `step/${child}`, index, null))
+    return root
+  }
+
   getValues() {
     return {
       filePath: this.filePath,
       cachedData: this.cachedData,
       variantOption: this.variantOption,
       importTransform: this.importTransform,
+      color: this.color,
+      flatten: this.flatten,
     }
   }
 
   setValues(values) {
     const cachedDataChanged = values.cachedData !== this.cachedData
     const variantChanged = values.variantOption !== this.variantOption
+    const flattenChanged = !!values.flatten !== this.flatten
+    this.color = values.color || null
+    this.flatten = !!values.flatten
     this.filePath = values.filePath || null
     this.cachedData = values.cachedData || null
     this.variantOption = values.variantOption ?? null
     this.sourceRevision = this.cachedData ? this.snapshotRevision(this.cachedData) : null
     this.importTransform = values.importTransform || new THREE.Matrix4()
-    if(cachedDataChanged || variantChanged) {
+    if(cachedDataChanged || variantChanged || flattenChanged) {
       this.sourceTree = this.cachedData ? this.parseSource(this.cachedData, this.variantOption) : null
       this.variantOption = this.normalizedVariantOption(this.sourceTree, this.variantOption)
     }
@@ -1973,8 +2058,6 @@ export class PlaceFeature extends Feature {
 
   dispose() {
     this.linkCheck++
-    this.pendingData = null
-    this.pendingTree = null
     this.activationError = null
     this.clearImportGizmo()
     super.dispose()

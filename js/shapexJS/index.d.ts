@@ -491,7 +491,28 @@ export interface Shapex {
   Edge: new(raw: unknown) => Edge
   Vertex: new(raw: unknown) => Vertex
   Solid: new(raw: unknown) => Solid
-  Compound: new(raw: unknown) => Compound
+  Compound: { new(raw: unknown): Compound, fromStep(text: string, tolerance?: ModelTolerance): Compound }
+  StepAssembly: {
+    /** The product structure of a STEP file, in millimetres. */
+    fromStep(text: string, tolerance?: ModelTolerance): StepAssemblyData
+    /** AP214 text writing every product once, placed by its occurrences. */
+    toStep(assembly: StepAssemblyData, timestamp?: string): string
+  }
+}
+
+export interface StepAssemblyData {
+  products: ReadonlyArray<{
+    name: string
+    /** The product's own solids in its own coordinates. */
+    bodies: Compound | null
+    /** RGB colours in [0, 1] per solid of `bodies`, null when uncoloured. */
+    colors?: ReadonlyArray<readonly [number, number, number] | null>
+    occurrences: ReadonlyArray<{ product: number, placement: RigidTransform3 }>
+  }>
+  /** Products that no other product places. */
+  roots: ReadonlyArray<number>
+  /** The written length unit; read assemblies are in millimetres. */
+  unit?: 'mm' | 'in'
 }
 
 export interface InitOptions {

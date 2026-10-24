@@ -1,6 +1,6 @@
 # Shapex saved-document regressions
 
-This directory contains thirty-nine saved `.cad` regressions.
+This directory contains saved `.cad` regressions.
 All files exercise real modeling workflows and saved references.
 Every feature in a passing regression must complete without an error or partial
 reference loss.
@@ -46,6 +46,7 @@ reference loss.
 | `042-reverse-revolution-between-spline-faces.cad` | Reverse circular revolution between two spline faces across a trim gap |
 | `044-joined-revolution-upper-rim-fillet.cad` | Joined revolution between spline faces with a 1 mm upper rim fillet |
 | `045-cut-rounded-shell-rim-fillets.cad` | Cut rounded shell with lower corner fillets and 1 mm fillets on both complete upper rims; hidden circle seams must not subdivide the selection or result |
+| `046-chamfered-box-staged-fillets.cad` | Box with a 7 mm top chamfer, then successive fillets: 8 mm vertical corners and 4.5 mm ridges ending on four-face chamfer corners, a top edge, a chamfer base and a corner fillet's bottom rim |
 
 From the repository root:
 

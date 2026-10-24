@@ -9,8 +9,8 @@ use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::trim::{align_pcurve_to_face_chart, face_boundary_curves, face_parameter_bounds,
     intersection_chart_copies, partition_to_faces, point_in_sampled_trim, trim_samples};
 use super::{BooleanKind, Compound, FaceOrientation, IntersectionSet, Kernel, KernelResult,
-    Curve3, Line2, Line3, LoopKind, ModelTolerance, ParameterRange, Plane3,
-    PlaneCurveProjection, SplitKeep};
+    Curve2, Curve3, Line2, Line3, LoopKind, ModelTolerance, ParameterRange, Plane3,
+    PlaneCurveProjection, SplitKeep, Surface3};
 
 type FaceCurve = super::trim::FaceCurve<SegmentProvenance>;
 
@@ -54,6 +54,9 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
     let scale = source.vertices().map(|vertex| vertex.point().to_vec().magnitude())
         .fold(1.0_f64, f64::max);
     let probe = (tolerance.linear_at_scale(scale) * 128.0).max(scale * 1e-4);
+    // Short enough to stay inside thin but genuine section bands, long enough
+    // for a tangential contact to leave the plane far beyond rounding noise.
+    let contact = tolerance.linear_at_scale(scale) * 128.0;
     let mut prepared = Vec::new();
     for face in source.faces() {
         let boundary = face_boundary_curves(source.topology(), face.topology_id(), tolerance)?
@@ -81,7 +84,8 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
                     for range in partition_to_faces(&intersection.curve, &pcurve, &boundary,
                         &intersection.second_pcurve, &rectangle, tolerance)
                         .map_err(|error| context("trim", error))? {
-                        if !lies_on_boundary(&intersection.curve, range, &boundary, tolerance)? {
+                        if !lies_on_boundary(&intersection.curve, range, &boundary, tolerance)?
+                            && crosses_plane(face.surface(), &pcurve, range, contact, signed)? {
                             curves.push(FaceCurve { provenance: Default::default(),
                                 curve: intersection.curve.clone(), pcurve: pcurve.clone(), range,
                                 loop_end: false, loop_kind: LoopKind::Outer, parameter_seam: false });
@@ -176,6 +180,20 @@ fn lies_on_boundary(curve: &Curve3, range: ParameterRange, boundary: &[FaceCurve
         if coincident { return Ok(true); }
     }
     Ok(false)
+}
+
+/// Where the plane only touches a face tangentially, intersection can still
+/// report short branches inside that zero band. Such a branch separates no
+/// material: the face must lie on opposite sides of a real section curve.
+fn crosses_plane(surface: &Surface3, pcurve: &Curve2, range: ParameterRange, distance: f64,
+    signed: impl Fn(Point3) -> f64) -> KernelResult<bool> {
+    let (uv, tangent) = pcurve.first_order(range.middle())?;
+    let across = Vec2::new(-tangent.y, tangent.x).normalize();
+    let value = surface.evaluate(uv.x, uv.y)?;
+    let step = across * distance / (value.du * across.x + value.dv * across.y).magnitude();
+    let first = signed(surface.evaluate(uv.x + step.x, uv.y + step.y)?.point);
+    let second = signed(surface.evaluate(uv.x - step.x, uv.y - step.y)?.point);
+    Ok((first > 0.0) != (second > 0.0))
 }
 
 fn plane_boundary(plane: Plane3, low: Point2, high: Point2) -> KernelResult<Vec<FaceCurve>> {

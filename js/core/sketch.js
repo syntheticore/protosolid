@@ -943,6 +943,25 @@ export class Sketch {
         if(!line) return tangentRoundCurves(...c.items.map(item => item.curve()), c.temporary)
         return tangentToRoundCurve(line.curve(), [0, 1], linePrim, curve.curve(), c.temporary)
 
+      } else if(c instanceof SymmetricConstraint) {
+        const [mirror, first, second] = c.items.map(item => item.curve())
+        const linePrim = idMap[mirror.id].at(-1)
+        const symmetric = c.handlePairs().map(([i, j]) => ({
+          id: `${id++}`,
+          type: 'p2p_symmetric_ppl',
+          p1_id: pointPrimitive({ curve: () => first, index: i }).id,
+          p2_id: pointPrimitive({ curve: () => second, index: j }).id,
+          l_id: linePrim.id,
+          temporary: c.temporary,
+        }))
+        if(c.items[1].index !== undefined || first instanceof Line) return symmetric
+        // Mirrored centers or endpoints leave the radius free.
+        const [c1, c2] = [first, second].map(curve => idMap[curve.id].at(-1).id)
+        return [...symmetric, first instanceof Circle ?
+          { id: `${id++}`, type: 'equal_radius_cc', c1_id: c1, c2_id: c2, temporary: c.temporary } :
+          { id: `${id++}`, type: 'equal_radius_aa', a1_id: c1, a2_id: c2, temporary: c.temporary },
+        ]
+
       } else if(c instanceof CoincidentConstraint) {
         const constraintPrims = c.items.map(pointPrimitive)
         return { id: `${id++}`, type: 'p2p_coincident', p1_id: constraintPrims[0].id, p2_id: constraintPrims[1].id, temporary: c.temporary }
@@ -1391,6 +1410,42 @@ export class TangentConstraint extends Constraint {
   typename() { return 'Tangent Constraint' }
 }
 Serialize.register(TangentConstraint, 'TangentConstraint')
+
+// Items are the mirror line, followed by two points or two curves of the
+// same type that are mirror images of each other across it.
+export class SymmetricConstraint extends Constraint {
+  static icon = 'constraint-symmetric'
+  typename() { return 'Symmetric Constraint' }
+
+  constructor(...items) {
+    super(...items)
+    const [mirror, first, second] = this.items.map(item => item.curve())
+    if(this.items[1].index !== undefined || first instanceof Circle) return
+    // Either curve may run in the same direction as the other's mirror image.
+    const image = mirror.reflect(first.endpoints()[0])
+    const ends = second.endpoints()
+    this.reversed = image.distanceTo(ends[1]) < image.distanceTo(ends[0])
+  }
+
+  // Handle indices of the first and second item that mirror each other
+  handlePairs() {
+    const [, first, second] = this.items
+    if(first.index !== undefined) return [[first.index, second.index]]
+    const curve = first.curve()
+    if(curve instanceof Circle) return [[0, 0]]
+    const indices = curve instanceof Arc ? [1, 2] : [0, 1]
+    const counterparts = this.reversed ? indices.toReversed() : indices
+    return indices.map((index, i) => [index, counterparts[i]])
+  }
+
+  dump() {
+    return {
+      ...super.dump(),
+      reversed: this.reversed,
+    }
+  }
+}
+Serialize.register(SymmetricConstraint, 'SymmetricConstraint')
 
 export class Dimension extends Constraint {
   static icon = 'dimension'

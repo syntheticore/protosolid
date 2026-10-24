@@ -555,6 +555,15 @@ const definitions = {
     arc(256, 512, 232, 240, 300),
     arrow(256, 116, -90, 104, 176),
   ],
+  'sketch-mirror': [
+    link(72, 440, 136, 72, 64),
+    handle(72, 440),
+    handle(136, 72),
+    link(440, 440, 376, 72, 64),
+    handle(440, 440),
+    handle(376, 72),
+    dashed(256, 0, 256, 512, 5),
+  ],
   'dimension': [
     seg(24, 28, 24, 484, 48),
     seg(488, 28, 488, 484, 48),
@@ -610,6 +619,11 @@ const definitions = {
   'constraint-tangent': [
     ring(256, 304, 168, 80),
     seg(40, 136, 472, 136, 80),
+  ],
+  'constraint-symmetric': [
+    circle(88, 256, 88),
+    circle(424, 256, 88),
+    dashed(256, 0, 256, 512, 4, 72),
   ],
 
   // Display modes

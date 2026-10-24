@@ -281,9 +281,11 @@
     EqualConstraintTool,
     ConcentricConstraintTool,
     TangentConstraintTool,
+    SymmetricConstraintTool,
     FixConstraintTool,
     DimensionTool,
     OffsetTool,
+    SketchMirrorTool,
     ProjectTool,
     DiagnosticShadingTool,
     InterferenceTool,
@@ -382,6 +384,7 @@
               { title: 'Break', icon: 'sketch-break' },
               { title: 'Extend', icon: 'sketch-extend' },
               { title: 'Offset', tool: OffsetTool },
+              { title: 'Mirror', tool: SketchMirrorTool },
               { title: 'Project', tool: ProjectTool, hotKey: 'P', keyCode: 80 },
               { title: 'Intersect', icon: 'sketch-intersect' },
             ]
@@ -398,6 +401,7 @@
               { title: 'Tangent', tool: TangentConstraintTool },
               { title: 'Equal', tool: EqualConstraintTool },
               { title: 'Concentric', tool: ConcentricConstraintTool },
+              { title: 'Symmetric', tool: SymmetricConstraintTool },
               { title: 'Fix', tool: FixConstraintTool }, //XXX also ground for assemblies
             ],
           },

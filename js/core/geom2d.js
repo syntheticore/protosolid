@@ -219,6 +219,13 @@ export class Line extends SketchElement {
     return this.points[1].clone().sub(this.points[0])
   }
 
+  // Mirror image of a point across the infinite extension of this line
+  reflect(point) {
+    const direction = this.direction().normalize()
+    const offset = point.clone().sub(this.points[0])
+    return this.points[0].clone().add(direction.multiplyScalar(2 * offset.dot(direction))).sub(offset)
+  }
+
   axialReference() {
     return new AxialReference(new CurveReference(this))
   }

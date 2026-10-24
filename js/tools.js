@@ -37,6 +37,7 @@ import {
   EqualConstraint,
   ConcentricConstraint,
   TangentConstraint,
+  SymmetricConstraint,
   FixConstraint,
   Dimension,
   OffsetConstraint,
@@ -2189,6 +2190,10 @@ export class ConstraintTool extends HighlightTool {
       this.items = []
       return
     }
+    this.pick(curve)
+  }
+
+  pick(curve) {
     if(!this.acceptsItem(curve)) {
       window.bus.emit('toast', 'Unsupported geometry for this constraint')
       return
@@ -2321,6 +2326,127 @@ export class TangentConstraintTool extends ConstraintTool {
       items.filter(item => round(item) || item instanceof Spline).length == 1) ||
       items.every(round) ||
       (items.some(item => item instanceof Spline) && items.some(round))
+  }
+}
+
+const mirrorable = elem => elem instanceof SketchPoint || elem instanceof Line || elem instanceof Circle || elem instanceof Arc
+
+function sameItem(left, right) {
+  if(!(left instanceof ElemRef) || !(right instanceof ElemRef)) return toRaw(left) == toRaw(right)
+  return toRaw(left.curve()) == toRaw(right.curve()) && left.index == right.index
+}
+
+// Picks the mirror line first, then any number of symmetric pairs.
+export class SymmetricConstraintTool extends ConstraintTool {
+  static constraintType = SymmetricConstraint
+  static icon = 'constraint-symmetric'
+  static selectors = ['point', 'curve']
+
+  acceptsItem(item) {
+    const [mirror, first] = this.items
+    const curve = item instanceof ElemRef ? item.curve() : item
+    if(!mirror) return !(item instanceof ElemRef) && mirrorable(curve)
+    if(toRaw(curve) == toRaw(mirror) || (first && sameItem(item, first))) return false
+    if(first) return first instanceof ElemRef ? item instanceof ElemRef : item.constructor == first.constructor
+    return item instanceof ElemRef || (mirrorable(item) && !(item instanceof SketchPoint))
+  }
+
+  pick(item) {
+    const [mirror, first] = this.items
+    if(!mirror) {
+      if(item instanceof Line) this.items = [item]
+      else window.bus.emit('toast', 'Select the mirror line first')
+      return
+    }
+    if(!first) {
+      this.items = [mirror, item]
+      return
+    }
+    this.sketch.addConstraint(new SymmetricConstraint(mirror, first, item))
+    this.viewport.updateRegions(true)
+    this.items = [mirror]
+  }
+}
+
+function mirroredElement(elem, mirror) {
+  const reflect = point => mirror.reflect(point)
+  if(elem instanceof SketchPoint) return new SketchPoint(reflect(elem.point))
+  if(elem instanceof Line) return new Line(...elem.points.map(reflect))
+  if(elem instanceof Circle) return new Circle(reflect(elem.center()), elem.radius)
+  // Reflection reverses the traversal direction of arcs.
+  const direction = mirror.direction()
+  const angle = Math.atan2(direction.y, direction.x)
+  return new Arc(reflect(elem.center()), elem.radius, 2 * angle - elem.start, -elem.sweep)
+}
+
+// Picks the mirror line first, then mirrors the elements selected beforehand,
+// followed by each element clicked afterwards.
+export class SketchMirrorTool extends HighlightTool {
+  static icon = 'sketch-mirror'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, ['curve', 'point'])
+    this.sketch = sketch
+    this.localSpace = true
+    this.cursor = 'crosshair'
+    this.items = []
+    this.preselection = viewport.document.selection.items.filter(item => this.acceptsInput(item))
+  }
+
+  acceptsInput(item) {
+    const elem = item instanceof ElemRef ? item.curve() : item
+    return mirrorable(elem) && elem.sketch == this.sketch && toRaw(elem) != toRaw(this.items[0]) &&
+      (!(item instanceof ElemRef) || elem instanceof SketchPoint)
+  }
+
+  // A point element is offered both as itself and as its handle.
+  orderItems(items) {
+    return [...new Set(items.map(item => toRaw(item instanceof ElemRef ? item.curve() : item)))]
+  }
+
+  async click(vec, coords) {
+    const item = await this.getObject(coords)
+    if(!item) {
+      this.items = []
+      return
+    }
+    if(this.items.length) return this.mirror([item])
+    if(!(item instanceof Line)) return window.bus.emit('toast', 'Select the mirror line first')
+    this.items = [item]
+    if(!this.preselection.length) return
+    const copies = this.mirror(this.preselection.filter(elem => toRaw(elem) != toRaw(item)))
+    const selection = this.viewport.document.selection
+    selection.clear()
+    copies.forEach(copy => selection.add(copy))
+    this.preselection = []
+  }
+
+  mirror(elements) {
+    const [mirror] = this.items
+    const copies = elements.map(elem => {
+      const copy = mirroredElement(elem, mirror)
+      copy.isReference = elem.isReference
+      this.sketch.add(copy)
+      this.sketch.addConstraint(elem instanceof SketchPoint ?
+        new SymmetricConstraint(mirror, new ElemRef(elem, 0), new ElemRef(copy, 0)) :
+        new SymmetricConstraint(mirror, elem, copy))
+      return copy
+    })
+    // Symmetry already joins copies wherever their originals meet. Points on
+    // the mirror line additionally have to stay there to keep each original
+    // joined to its own image.
+    elements.filter(elem => !elem.projection).forEach(elem => elem.handles().forEach((point, index) => {
+      if(!isTouchPoint(elem, index) || !mirror.reflect(point).almost(point)) return
+      const onMirror = this.sketch.constraints.some(constraint =>
+        (constraint instanceof TouchConstraint || constraint instanceof MidpointConstraint) &&
+        constraint.items.some(other => other.index === undefined && toRaw(other.curve()) == toRaw(mirror)) &&
+        constraint.items.some(other => other.index !== undefined &&
+          this.sketch.coincidentPointsConnected(elem, index, other.curve(), other.index))
+      ) || [0, 1].some(end => this.sketch.coincidentPointsConnected(elem, index, mirror, end))
+      if(!onMirror) this.sketch.addConstraint(new TouchConstraint(new ElemRef(elem, index), mirror))
+    }))
+    this.viewport.updateRegions(true)
+    return copies
   }
 }
 

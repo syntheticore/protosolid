@@ -88,6 +88,14 @@ export function satisfiesConstraints(primitives, constraints) {
         const error = Math.atan2(cross(a, b), dot(a, b)) - c.angle
         return near(Math.atan2(Math.sin(error), Math.cos(error)))
       }
+      case 'p2p_symmetric_ppl': {
+        // The connection is normal to the mirror line, its midpoint on it.
+        const line = byId.get(c.l_id), dir = direction(c.l_id)
+        const p1 = point(c.p1_id), p2 = point(c.p2_id)
+        const midpoint = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+        return near(dot(vector(p1, p2), dir) / norm(dir)) &&
+          near(cross(vector(point(line.p1_id), midpoint), dir) / norm(dir))
+      }
       case 'equal_length': return near(norm(direction(c.l1_id)), norm(direction(c.l2_id)))
       case 'point_on_circle':
       case 'point_on_arc': {

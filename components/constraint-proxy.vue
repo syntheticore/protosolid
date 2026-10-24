@@ -141,7 +141,7 @@
 
 <script setup>
 
-  import { Dimension, CoincidentConstraint, ConcentricConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, PerpendicularConstraint, ParallelConstraint, EqualConstraint } from '../js/core/sketch.js'
+  import { Dimension, CoincidentConstraint, ConcentricConstraint, TouchConstraint, MidpointConstraint, IntersectionConstraint, TangentConstraint, PerpendicularConstraint, ParallelConstraint, EqualConstraint, SymmetricConstraint } from '../js/core/sketch.js'
   import { Line, Circle, Arc } from '../js/core/geom2d.js'
   import DimensionControls from '../js/three/dimension-controls.js'
   import { tangentPoint, perpendicularPoint } from '../js/three/constraint-icons.js'
@@ -235,6 +235,18 @@
     if(props.constraint instanceof EqualConstraint ||
       props.constraint instanceof ParallelConstraint) return props.constraint.items.map(item => {
       const curve = item.curve()
+      return {
+        pos: transformPosition(curve instanceof Line ? curve.midpoint() : curve.sample(0.5), sketch),
+      }
+    })
+
+    // Mark the two mirror images rather than the mirror line.
+    if(props.constraint instanceof SymmetricConstraint) return props.constraint.items.slice(1).map(item => {
+      const curve = item.curve()
+      if(item.index !== undefined) return {
+        pos: transformPosition(point(item, true), sketch),
+        offset: { x: 14, y: -14 },
+      }
       return {
         pos: transformPosition(curve instanceof Line ? curve.midpoint() : curve.sample(0.5), sketch),
       }

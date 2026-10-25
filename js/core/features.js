@@ -402,9 +402,9 @@ export class PatternFeature extends SolidFeature {
           radial: { title: 'Radial', icon: 'pattern-radial' },
         },
       },
-      center: {
-        title: 'Center',
-        type: 'point',
+      axis: {
+        title: 'Axis',
+        type: 'axis',
         when: feature => feature.patternType == 'radial',
       },
       uCount: {
@@ -452,7 +452,7 @@ export class PatternFeature extends SolidFeature {
     })
 
     this.patternType = 'grid'
-    this.center = null
+    this.axis = null
     this.uOffset = 10
     this.uCount = 2
     this.vOffset = 10
@@ -495,7 +495,7 @@ export class PatternFeature extends SolidFeature {
 
     const comp = tree.findChild(this.componentId)
     const transforms = this.patternType == 'radial' ?
-      this.radialTransforms(references.center) : this.gridTransforms()
+      this.radialTransforms(references.axis) : this.gridTransforms()
 
     const componentSources = references.inputs.filter(input => input?.typename?.() == 'Component')
     componentSources.forEach(source => {
@@ -551,29 +551,45 @@ export class PatternFeature extends SolidFeature {
     return transforms
   }
 
-  radialTransforms(centerItem) {
-    const center = centerItem instanceof THREE.Matrix4 ?
-      new THREE.Vector3().setFromMatrixPosition(centerItem) : centerItem
+  radialTransforms(axis) {
+    const origin = new THREE.Vector3().setFromMatrixPosition(axis)
+    const direction = normalFromMatrix(axis)
     const transforms = []
     for(let i = 1; i < Math.floor(this.radialCount); i++) {
       const angle = rad(this.radialStep * i)
-      const transform = new THREE.Matrix4().makeTranslation(center.clone().negate())
-          .premultiply(new THREE.Matrix4().makeRotationZ(angle))
-          .premultiply(new THREE.Matrix4().makeTranslation(center))
+      const transform = new THREE.Matrix4().makeTranslation(origin.clone().negate())
+          .premultiply(new THREE.Matrix4().makeRotationAxis(direction, angle))
+          .premultiply(new THREE.Matrix4().makeTranslation(origin))
       transform.topologyKey = `radial/${i}`
       transforms.push(transform)
     }
     return transforms
   }
 
+  sourceCenter() {
+    const source = this.inputs().at(-1).getItem()
+    const center = source.center()
+    if(source instanceof Component) {
+      const owner = this.document.top().findChild(this.componentId)
+      center.applyMatrix4(baselineWorldTransform(owner).invert().multiply(baselineWorldTransform(source)))
+    }
+    return center
+  }
+
   getGizmo() {
     if(this.patternType == 'radial') {
-      const item = this.center().getItem()
-      const center = item instanceof THREE.Matrix4 ?
-        new THREE.Vector3().setFromMatrixPosition(item) : item.clone()
+      const axis = this.axis().getItem()
+      const sourceCenter = this.sourceCenter()
+      const direction = normalFromMatrix(axis)
+      const origin = new THREE.Vector3().setFromMatrixPosition(axis)
+      const center = origin.clone().addScaledVector(direction, sourceCenter.clone().sub(origin).dot(direction))
+      const radial = sourceCenter.sub(center)
+      if(radial.lengthSq() < 1e-12) radial.setFromMatrixColumn(axis, 0)
+      radial.normalize()
+      const rotation = new THREE.Matrix4().makeBasis(radial, direction.clone().cross(radial), direction)
       return {
         radialStep: {
-          type: 'angle', center, rotation: new THREE.Matrix4(), value: this.radialStep,
+          type: 'angle', center, rotation, value: this.radialStep,
           cb: angle => {
             this.setExpression('radialStep', null)
             this.radialStep = angle
@@ -582,12 +598,7 @@ export class PatternFeature extends SolidFeature {
       }
     }
 
-    const source = this.inputs().at(-1).getItem()
-    const center = source.center()
-    if(source instanceof Component) {
-      const owner = this.document.top().findChild(this.componentId)
-      center.applyMatrix4(baselineWorldTransform(owner).invert().multiply(baselineWorldTransform(source)))
-    }
+    const center = this.sourceCenter()
     const step = (key, direction) => ({
       type: 'length', center, direction,
       value: Math.abs(this[key]), side: this[key] >= 0,

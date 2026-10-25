@@ -7751,6 +7751,52 @@ fn transverse_circle_on_open_torus_shell() {
 
 #[test]
 fn fillet_spline_prism_cap_edges() {
+    let body = spline_prism();
+    let curved = spline_prism_cap_curves(&body);
+    assert_eq!(curved.len(), 4);
+    // Where a spline meets a line at about 143 degrees, the cap contact ends
+    // on the line beyond the spline's end, outside its support's domain.
+    let volume = body.volume();
+    for radius in [1.0, 3.0] {
+        for edges in curved.iter().map(|edge| vec![edge.clone()]).chain([curved.clone()]) {
+            let result = body.check_edge_blends(&edges, radius).unwrap();
+            assert_eq!(result.solids().len(), 1);
+            assert_eq!(result.faces().count(), body.faces().count() + edges.len());
+            assert!(result.volume() < volume && result.volume() > volume * 0.9);
+            result
+                .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn shell_filleted_spline_prism_through_flat_end() {
+    let body = spline_prism();
+    let body = body.fillet(&spline_prism_cap_curves(&body), 5.0).unwrap();
+    let volume = body.volume();
+    let ends = body
+        .faces()
+        .filter(|face| match face.surface() {
+            Surface3::Plane(plane) => plane.normal().z.abs() < 0.5,
+            _ => false,
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(ends.len(), 2);
+    for opening in ends {
+        let result = body.shell(&[opening.clone()], -1.0).unwrap();
+        assert_eq!(result.solids().len(), 1);
+        assert_eq!(result.faces().count(), 2 * body.faces().count() - 1);
+        assert!(result.volume() > 0.0 && result.volume() < volume * 0.2);
+        result
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap();
+    }
+}
+
+// Two spline sides joined by lines, meeting them at obtuse and acute corners.
+fn spline_prism() -> super::Compound {
     let tolerance = ModelTolerance::default();
     let bezier = |points: &[(f64, f64)]| {
         let degree = points.len() - 1;
@@ -7792,31 +7838,18 @@ fn fillet_spline_prism_cap_edges() {
         tolerance,
     )
     .unwrap();
-    let body = Profile::new(wire, [], tolerance)
+    Profile::new(wire, [], tolerance)
         .unwrap()
         .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 22.5))
-        .unwrap();
-    let curved = body
-        .edges()
+        .unwrap()
+}
+
+fn spline_prism_cap_curves(body: &super::Compound) -> Vec<super::EdgeHandle> {
+    body.edges()
         .filter(|edge| {
             let p = edge.endpoints().unwrap();
             (p[0].z - p[1].z).abs() < 1e-9 && !matches!(edge.curve(), Curve3::Line(_))
         })
         .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(curved.len(), 4);
-    // Where a spline meets a line at about 143 degrees, the cap contact ends
-    // on the line beyond the spline's end, outside its support's domain.
-    let volume = body.volume();
-    for radius in [1.0, 3.0] {
-        for edges in curved.iter().map(|edge| vec![edge.clone()]).chain([curved.clone()]) {
-            let result = body.check_edge_blends(&edges, radius).unwrap();
-            assert_eq!(result.solids().len(), 1);
-            assert_eq!(result.faces().count(), body.faces().count() + edges.len());
-            assert!(result.volume() < volume && result.volume() > volume * 0.9);
-            result
-                .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
-                .unwrap();
-        }
-    }
+        .collect()
 }

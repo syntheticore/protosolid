@@ -347,6 +347,7 @@ fn offset_edge(
     };
     let mut shared_pcurves = BTreeMap::new();
     let mut shared_curve = None;
+    let mut continued = false;
     let mut shared_points = Vec::<Vec<Point3>>::new();
     let same_charts = !faces.iter().any(|face| reparameterized.contains(face));
     if same_charts {
@@ -354,8 +355,11 @@ fn offset_edge(
             let coedge = topology.coedge(*coedge_id)?;
             let face = topology.loop_(coedge.loop_id())?.face();
             shared_pcurves.insert(*coedge_id, coedge.pcurve().clone());
-            if shared_curve.is_none() {
+            // Carry the curve in a chart where it is an iso-line, if any, so
+            // that offset corners beyond the source edge's ends can reach it.
+            if shared_curve.is_none() || matches!(coedge.pcurve(), Curve2::Line(_)) && !continued {
                 shared_curve = Some(carried_curve(face, coedge.pcurve())?);
+                continued = matches!(coedge.pcurve(), Curve2::Line(_));
             }
             shared_points.push(
                 [0.0, 0.25, 0.5, 0.75, 1.0]

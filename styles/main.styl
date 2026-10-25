@@ -255,7 +255,9 @@ input[type="color"]
     flex: 1 1 auto
 
 .handle
-  size = 21px
+  // Even sizes keep the handle centered on its rounded screen position,
+  // where screen-space point discs are drawn
+  size = 22px
   // padding: 7px
   position: absolute
   display: block
@@ -274,8 +276,8 @@ input[type="color"]
     content: ''
     margin: 0
     padding: 0
-    width:  7px
-    height: 7px
+    width:  8px
+    height: 8px
     border-radius: 99px
     background: white
 

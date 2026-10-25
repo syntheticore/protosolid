@@ -48,7 +48,7 @@
     removeMeshes()
 
     if(props.element instanceof SketchPoint) {
-      mesh = new ScreenPointObject(22)
+      mesh = new ScreenPointObject(26)
     } else {
       const vertices = props.element.tesselate()
       if(!vertices) return

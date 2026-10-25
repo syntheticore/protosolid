@@ -61,8 +61,8 @@
 
     &:hover, &:active, &.highlighted
       &::before
-        width: 5px
-        height: 5px
+        width:  calc(100% - 10px)
+        height: calc(100% - 10px)
 
     &.highlighted::before
       background: $highlight

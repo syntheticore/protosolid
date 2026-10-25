@@ -2,6 +2,120 @@
 
 use super::*;
 
+// Solved profile and the two fillet operations in cannot-shell.cad.
+fn twice_filleted_arrow() -> crate::Compound {
+    let tolerance = ModelTolerance::default();
+    let points = [
+        (-2.9312171977861046, 45.81231271970444),
+        (-1.890522698465444, 47.79076855888661),
+        (27.91205038939795, 63.82269725795327),
+        (44.91441132658731, 65.4919389764288),
+        (35.21955057735643, 89.33372170506867),
+        (-2.0092509300350017, 62.07210292760956),
+        (-5.1908645709734795, 63.68572903162131),
+        (-5.1908645709734795, 84.97898606569127),
+        (-8.021470417833681, 86.79835241889275),
+        (-37.05191770274903, 73.54491436921849),
+        (-38.20969991342599, 71.94075241337818),
+        (-44.69511187143471, 12.018576827575835),
+        (-42.28449223921115, 9.84845030968457),
+        (-0.0009748927061039581, 18.98100649952064),
+    ].map(|(x, y)| Point2::new(x, y));
+    let arcs = std::collections::BTreeMap::from([
+        (0, (-0.9430383472867704, 46.02944138761163, 3.2503713870558792, 2.06433154001986)),
+        (5, (-3.1908645709734778, 63.68572903162131, -0.93873784253222, -std::f64::consts::PI)),
+        (7, (-7.190864570973478, 84.97898606569127, 0.0, 1.9990721032924696)),
+        (9, (-36.22131185588883, 71.725548016017, 1.999072103292467, 3.0337817249867047)),
+        (11, (-42.70672381389755, 11.803372430214656, 3.033781724986704, 4.925105315606756)),
+    ]);
+    let segments = (0..points.len()).map(|index| {
+        let (start, end) = (points[index], points[(index + 1) % points.len()]);
+        match arcs.get(&index) {
+            Some(&(x, y, a, b)) => TrimmedCurve2::new(
+                crate::Circle2::new(Point2::new(x, y), 2.0000000000000013).unwrap(),
+                ParameterRange::new(a, b).unwrap(),
+            ).unwrap(),
+            None => TrimmedCurve2::line(start, end).unwrap(),
+        }
+    });
+    let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
+    let body = Profile::new(Wire2::new(segments, tolerance).unwrap(), [], tolerance).unwrap()
+        .extrude(plane, Vec3::new(0.0, 11.0, 0.0)).unwrap();
+    let corners = body.edges().filter(|edge| {
+        let [a, b] = edge.endpoints().unwrap();
+        (a.y - b.y).abs() > 10.0 && [points[3].x, points[4].x, points[13].x]
+            .iter().any(|x| (a.x - x).abs() < tolerance.linear)
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(corners.len(), 3);
+    let body = body.fillet(&corners, 4.0).unwrap();
+    let rim = body.edges().find(|edge| {
+        let [a, b] = edge.endpoints().unwrap();
+        a.y.abs() < tolerance.linear && b.y.abs() < tolerance.linear
+            && [a, b].iter().any(|p| (p.x - points[0].x).abs() < tolerance.linear
+                && (p.z + points[0].y).abs() < tolerance.linear)
+            && a.distance(b) > 20.0
+    }).unwrap().clone();
+    body.fillet(&[rim], 1.0).unwrap()
+}
+
+#[test]
+fn shell_twice_filleted_arrow_without_openings() {
+    let body = twice_filleted_arrow();
+    assert_eq!(body.faces().count(), 36);
+    let mut failures = Vec::new();
+    for thickness in [0.5, 0.75, 0.982, 0.983, 0.984, 0.985, 0.987, 0.989, 0.99, 0.993,
+        0.997, 0.999, 0.9995, 1.0, 1.01, 1.016, 1.1, 1.5, 1.99, 2.0, 2.01, 2.5, 3.0] {
+        for join in [ShellJoin::Rounded, ShellJoin::Sharp] {
+            let shell = match body.shell_with_join(&[], -thickness, join) {
+                Ok(shell) => shell,
+                Err(error) => {
+                    failures.push(format!("{thickness} mm {join:?}: {error}"));
+                    continue;
+                }
+            };
+            assert_eq!(shell.solids().len(), 1);
+            assert_eq!(shell.topology().shells().count(), 2);
+            assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+            if let Err(error) = shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()) {
+                failures.push(format!("{thickness} mm {join:?} tessellation: {error}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+#[ignore = "targeted shell timing; run in release mode with --ignored --nocapture --test-threads=1"]
+fn benchmark_closed_shell_regressions() {
+    let arrow = twice_filleted_arrow();
+    let slot = filleted_chamfered_slot_document_51();
+    for (name, body, thickness, join) in [
+        ("arrow", &arrow, 0.5, ShellJoin::Sharp),
+        ("slot", &slot, 6.0, ShellJoin::Rounded),
+        ("arrow", &arrow, 0.9995, ShellJoin::Rounded),
+        ("arrow", &arrow, 1.016, ShellJoin::Rounded),
+        ("arrow", &arrow, 3.0, ShellJoin::Rounded),
+    ] {
+        let mut construction = Vec::new();
+        let mut tessellation = Vec::new();
+        for iteration in 0..4 {
+            let start = std::time::Instant::now();
+            let shell = body.shell_with_join(&[], -thickness, join).unwrap();
+            let built = start.elapsed().as_secs_f64();
+            let start = std::time::Instant::now();
+            shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+            let meshed = start.elapsed().as_secs_f64();
+            assert_eq!(shell.solids().len(), 1);
+            assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
+            if iteration > 0 { construction.push(built); tessellation.push(meshed); }
+        }
+        construction.sort_by(f64::total_cmp);
+        tessellation.sort_by(f64::total_cmp);
+        println!("{name} {join:?} {thickness} mm: construction {:.6}s, tessellation {:.6}s (medians; 1 warmup, 3 measured)",
+            construction[1], tessellation[1]);
+    }
+}
+
 #[test]
 fn shell_support_extension_preserves_rational_surface_chart() {
     let surface = NurbsSurface3::new(

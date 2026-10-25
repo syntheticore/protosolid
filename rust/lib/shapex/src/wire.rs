@@ -865,7 +865,16 @@ fn general_parametric_pair(
         }
         let first_point = first.curve().first_order(first_parameter)?.0;
         let second_point = second.curve().first_order(second_parameter)?.0;
-        if first_point.distance(second_point) <= tolerance.linear * 8.0
+        let shared = shared_endpoints.iter().any(|(a, b, _)| {
+            (first_parameter - a).abs() <= tolerance.parameter * 16.0
+                && (second_parameter - b).abs() <= tolerance.parameter * 16.0
+        });
+        // A clamped or stalled Newton iterate is not an additional root.
+        // At a high-order tangent endpoint the curves can remain within model
+        // tolerance far from their only intersection, creating false crossings.
+        let root_tolerance = (tolerance.linear * 1.0e-3).max(f64::EPSILON * 4096.0
+            * first_point.to_vec().magnitude().max(second_point.to_vec().magnitude()).max(1.0));
+        if (shared || first_point.distance(second_point) <= root_tolerance)
             && !hits.iter().any(|hit: &CurvePairHit| {
                 (hit.first_parameter - first_parameter).abs() <= tolerance.parameter * 16.0
                     && (hit.second_parameter - second_parameter).abs() <= tolerance.parameter * 16.0

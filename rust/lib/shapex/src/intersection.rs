@@ -1831,6 +1831,7 @@ fn trace_surface_intersections_in_domains(
     tolerance: ModelTolerance,
     interpolate_guides: bool,
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    let poles = collapsed_plane_join_poles(first, second, first_domains, second_domains, tolerance)?;
     let parameter_scale = first_domains
         .iter()
         .chain(&second_domains)
@@ -1897,8 +1898,14 @@ fn trace_surface_intersections_in_domains(
         Ok(())
     };
 
-    if matches!(first, Surface3::Nurbs(_) | Surface3::Offset(_))
-        && matches!(second, Surface3::Nurbs(_) | Surface3::Offset(_))
+    fn nurbs_backed(surface: &Surface3) -> bool {
+        match surface {
+            Surface3::Nurbs(_) => true,
+            Surface3::Offset(offset) => nurbs_backed(offset.base()),
+            _ => false,
+        }
+    }
+    if nurbs_backed(first) && nurbs_backed(second)
     {
         let mut stack = Vec::new();
         let second_cells = rational_surface_cells(second, second_domains)?;
@@ -2025,6 +2032,9 @@ fn trace_surface_intersections_in_domains(
         parameters.dedup_by(|first, second| {
             parameter_distance(*first, *second) <= tolerance.parameter * 16.0
         });
+        if poles.iter().any(|(_, _, pole, _, cutoff)| parameters.iter().all(|uv| {
+            first.first_order(uv[0], uv[1]).is_ok_and(|value| value.0.distance(*pole) <= *cutoff)
+        })) { continue; }
         // At a tangency the residual is quadratic in parameter error, so a
         // converged trace can still sit next to a trim corner. A nearby box
         // endpoint is usable only if it is a common point of both supports.
@@ -2632,6 +2642,28 @@ fn trace_reaches_seed(
     Ok(false)
 }
 
+fn collapsed_plane_join_poles(
+    first: &Surface3, second: &Surface3,
+    first_domains: [super::ParameterRange; 2], second_domains: [super::ParameterRange; 2],
+    tolerance: ModelTolerance,
+) -> KernelResult<Vec<(usize, f64, Point3, (f64, f64), f64)>> {
+    let mut poles = Vec::new();
+    for (side, surface, other, domains) in [(0, first, second, first_domains), (1, second, first, second_domains)] {
+        let (Surface3::RollingBall(blend), Surface3::Plane(plane)) = (surface, other) else { continue; };
+        for u in [blend.center_range().start, blend.center_range().end] {
+            if !domains[0].contains(u, tolerance) { continue; }
+            let a = surface.first_order(u, 0.0)?.0;
+            let b = surface.first_order(u, 1.0)?.0;
+            let roundoff = f64::EPSILON * a.to_vec().magnitude().max(1.0) * 2048.0;
+            let projection = plane.project(a)?;
+            if a.distance(b) <= roundoff * 8.0 && projection.distance.abs() <= roundoff {
+                poles.push((side, u, a, projection.parameters, (roundoff * blend.radius()).sqrt() * 2.0));
+            }
+        }
+    }
+    Ok(poles)
+}
+
 fn trace_surface_intersection_direction(
     first: &Surface3,
     second: &Surface3,
@@ -2643,6 +2675,7 @@ fn trace_surface_intersection_direction(
     tolerance: ModelTolerance,
     adaptive: bool,
 ) -> KernelResult<Vec<[f64; 4]>> {
+    let poles = collapsed_plane_join_poles(first, second, first_domains, second_domains, tolerance)?;
     let mut result = Vec::new();
     let mut current = seed;
     let mut previous_tangent = None;
@@ -2774,6 +2807,18 @@ fn trace_surface_intersection_direction(
             second_domains,
             tolerance.parameter * 8.0,
         ) {
+            break;
+        }
+        if let Some((side, u, _, other_uv, _)) = poles.iter().find(|(_, _, pole, _, cutoff)| {
+            first.first_order(next[0], next[1]).is_ok_and(|value| value.0.distance(*pole) <= *cutoff)
+        }) {
+            // The entire transverse chart closes to one point here. Following
+            // its numerical residual around the chart manufactures a loop.
+            let mut endpoint = next;
+            endpoint[side * 2] = *u;
+            endpoint[(1 - side) * 2] = other_uv.0;
+            endpoint[(1 - side) * 2 + 1] = other_uv.1;
+            result.push(endpoint);
             break;
         }
         if parameter_distance(next, current) <= tolerance.parameter * 16.0 {

@@ -429,7 +429,8 @@ impl SurfaceProjectionPcurve2 {
             // for the tangential position: adjacent uses can acquire different
             // endpoints when their guides stop at different residuals.
             if residual.magnitude() <= f64::EPSILON * scale * 2048.0 {
-                return Ok((uv.0 + lift.x, uv.1 + lift.y));
+                return Ok((domains[0].nearest(uv.0, guide.x) + lift.x,
+                    domains[1].nearest(uv.1, guide.y) + lift.y));
             }
             let a00 = du.magnitude2();
             let a01 = du.dot(dv);
@@ -474,7 +475,8 @@ impl SurfaceProjectionPcurve2 {
         // Once refinement stops improving, retain the existing certification
         // allowance for a curve that lies only within tolerance of its support.
         if point.distance(target) <= self.tolerance.linear_at_scale(scale) {
-            return Ok((uv.0 + lift.x, uv.1 + lift.y));
+            return Ok((domains[0].nearest(uv.0, guide.x) + lift.x,
+                domains[1].nearest(uv.1, guide.y) + lift.y));
         }
         Err(KernelError::new(
             DiagnosticKind::NumericalFailure,
@@ -814,11 +816,13 @@ impl SurfaceIntersectionCurve {
     pub(crate) fn positional_uncertainty(&self, parameter: f64) -> KernelResult<f64> {
         let parameters = self.corrected_parameters(parameter)?;
         let (point, first_u, first_v) = self.first_surface.first_order(parameters[0], parameters[1])?;
-        let (_, second_u, second_v) = self.second_surface.first_order(parameters[2], parameters[3])?;
+        let (other, second_u, second_v) = self.second_surface.first_order(parameters[2], parameters[3])?;
         let sine = first_u.cross(first_v).normalize()
             .cross(second_u.cross(second_v).normalize()).magnitude();
         if sine <= self.tolerance.angular { return Ok(f64::INFINITY); }
-        Ok(self.achieved_error.max(self.tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0))) / sine)
+        let residual = self.support_residual(parameters, point, other).magnitude();
+        let roundoff = f64::EPSILON * point.to_vec().magnitude().max(other.to_vec().magnitude()).max(1.0) * 2048.0;
+        Ok(residual.max(roundoff) / sine)
     }
 
     pub fn pcurve_for_surface(&self, surface: &Surface3) -> Option<&Curve2> {

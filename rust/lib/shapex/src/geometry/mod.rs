@@ -837,8 +837,15 @@ impl Curve3 {
         seeds.sort_by(f64::total_cmp);
         seeds.dedup();
         let mut best = None;
+        let mut previous = None;
+        let mut minima = Vec::new();
         for parameter in seeds {
-            let projected = self.first_order(parameter)?.0;
+            let (projected, tangent) = self.first_order(parameter)?;
+            let gradient = (projected - point).dot(tangent);
+            if let Some((last_parameter, last_gradient)) = previous {
+                if last_gradient < 0.0 && gradient > 0.0 { minima.push((last_parameter, parameter)); }
+            }
+            previous = Some((parameter, gradient));
             let distance = projected.distance(point);
             if best
                 .as_ref()
@@ -855,9 +862,26 @@ impl Curve3 {
         if matches!(self, Self::Line(_) | Self::Circle(_)) {
             return Ok(best);
         }
-        refine_curve_projection(point, range, tolerance, best, |parameter| {
+        let mut best = refine_curve_projection(point, range, tolerance, best, |parameter| {
             self.first_order(parameter)
-        })
+        })?;
+        // A focal configuration makes distance-only descent arbitrarily slow.
+        // Bracket the stationary minima to retain the closest interior foot.
+        for (mut low, mut high) in minima {
+            for _ in 0..48 {
+                let middle = (low + high) * 0.5;
+                let (value, tangent) = self.first_order(middle)?;
+                if (value - point).dot(tangent) < 0.0 { low = middle; }
+                else { high = middle; }
+            }
+            let parameter = (low + high) * 0.5;
+            let projected = self.first_order(parameter)?.0;
+            let distance = projected.distance(point);
+            if distance < best.distance {
+                best = Projection1 { parameter, point: projected, distance };
+            }
+        }
+        Ok(best)
     }
 
     pub fn project(&self, point: Point3, tolerance: ModelTolerance) -> KernelResult<Projection1> {
@@ -1167,6 +1191,7 @@ impl Surface3 {
 
     pub fn normal(&self, u: f64, v: f64) -> KernelResult<Vec3> {
         match self {
+            Self::RollingBall(blend) => blend.normal(u, v),
             Self::Sphere(sphere) => {
                 let radial = sphere.evaluate(u, v)?.point - sphere.center();
                 if radial.magnitude2() == 0.0 {

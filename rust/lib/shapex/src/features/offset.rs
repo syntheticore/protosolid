@@ -466,6 +466,23 @@ pub(super) fn collapsed_support(
                     .into(),
             ), torus.minor_radius() + distance < -tolerance.linear))
         }
+        Surface3::Revolved(revolved) => {
+            if let Curve2::Circle(circle) = revolved.profile() {
+                if circle.radius() + distance <= tolerance.linear {
+                    let frame = revolved.frame();
+                    let center = frame.origin() + frame.z() * circle.center().y;
+                    let support = if zero(circle.center().x) {
+                        CollapsedSupport::Point(center)
+                    } else {
+                        CollapsedSupport::Curve(crate::Circle3::new(center,
+                            frame.x() * circle.center().x, frame.y() * circle.center().x, tolerance,
+                        )?.into())
+                    };
+                    return Ok(Some((support, circle.radius() + distance < -tolerance.linear)));
+                }
+            }
+            None
+        }
         Surface3::RollingBall(blend) => {
             let range = blend.center_range();
             let parameter = (range.start + range.end) * 0.5;

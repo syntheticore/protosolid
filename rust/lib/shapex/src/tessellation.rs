@@ -568,10 +568,29 @@ impl Kernel {
         options: TessellationOptions,
     ) -> KernelResult<EdgePolyline> {
         let edge = self.topology().edge(edge_id)?;
+        let mut branches = Vec::new();
+        for coedge_id in edge.coedges() {
+            let coedge = self.topology().coedge(*coedge_id)?;
+            let loop_value = self.topology().loop_(coedge.loop_id())?;
+            let face = self.topology().face(loop_value.face())?;
+            let mut samples = Vec::new();
+            if matches!(face.surface(), super::Surface3::RollingBall(_)) {
+                for loop_id in face.loops() {
+                    for id in self.topology().loop_coedges(*loop_id)? {
+                        let boundary = self.topology().coedge(id)?;
+                        for fraction in [0.0, 0.25, 0.5, 0.75] {
+                            samples.push(boundary.pcurve().evaluate(boundary.range().start
+                                + boundary.range().span() * fraction)?.point);
+                        }
+                    }
+                }
+            }
+            branches.push(rolling_ball_branch(face.surface(), &samples)?);
+        }
         sample_edge_with_surface_constraint(edge, options, &|first, last| {
             let mut chord_error = 0.0_f64;
             let mut angular_error = 0.0_f64;
-            for coedge_id in edge.coedges() {
+            for (coedge_id, branch) in edge.coedges().iter().zip(&branches) {
                 let coedge = self.topology().coedge(*coedge_id)?;
                 let loop_value = self.topology().loop_(coedge.loop_id())?;
                 let face = self.topology().face(loop_value.face())?;
@@ -586,7 +605,7 @@ impl Kernel {
                 };
                 let normal_at = |parameter| -> KernelResult<Vec3> {
                     let uv = uv_at(parameter)?;
-                    surface_point_normal(face.surface(), uv.x, uv.y).map(|value| value.1)
+                    surface_point_normal_on_branch(face.surface(), uv.x, uv.y, *branch).map(|value| value.1)
                 };
                 angular_error = angular_error.max(
                     normal_at(first + (last - first) * 0.25)?
@@ -603,7 +622,7 @@ impl Kernel {
                     curve_sample(edge.curve(), last)?.point,
                 ];
                 let (chord, angle) = surface_edge_error(
-                    face.surface(), face.orientation(), (0, 1), &uvs, &positions,
+                    face.surface(), face.orientation(), (0, 1), &uvs, &positions, *branch,
                 )?;
                 chord_error = chord_error.max(chord);
                 angular_error = angular_error.max(angle);
@@ -1004,9 +1023,10 @@ fn finish_surface_triangulation(
         boundary_edges,
         mut triangles,
     } = seed;
+    let branch = rolling_ball_branch(surface, &uvs)?;
     let mut normals = Vec::with_capacity(positions.len());
     for (uv, point) in uvs.iter().zip(&positions) {
-        let (lifted, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
+        let (lifted, mut normal) = surface_point_normal_on_branch(surface, uv.x, uv.y, branch)?;
         let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()).max(boundary_tolerance);
         if lifted.distance(*point) > allowed {
             return Err(geometry_error("tessellation chart does not lift its exact BREP boundary"));
@@ -1029,6 +1049,7 @@ fn finish_surface_triangulation(
         &mut positions,
         &mut normals,
         &mut triangles,
+        branch,
     )?;
     triangles.retain_mut(|triangle| {
         let geometric_normal = (positions[triangle[1]] - positions[triangle[0]])
@@ -1100,6 +1121,7 @@ fn adaptive_isoparametric_samples(
                     (0, 1),
                     &[Point2::new(first_u, first_v), Point2::new(last_u, last_v)],
                     &[first_point, last_point],
+                    None,
                 )?;
                 if chord_error > options.chord_tolerance
                     || angular_error.max(first_normal.angle(last_normal).0) > options.angular_tolerance
@@ -1225,6 +1247,7 @@ fn refine_surface_triangles(
     positions: &mut Vec<Point3>,
     normals: &mut Vec<Vec3>,
     triangles: &mut Vec<[usize; 3]>,
+    branch: Option<f64>,
 ) -> KernelResult<()> {
     // Refinement only appends vertices. Unchanged edges and triangles retain
     // identical UVs, so their exact error estimates can be reused across rounds.
@@ -1245,7 +1268,7 @@ fn refine_surface_triangles(
                 let (chord_error, mut angular_error) = if let Some(error) = edge_errors.get(&edge) {
                     *error
                 } else {
-                    let error = surface_edge_error(surface, orientation, edge, uvs, positions)?;
+                    let error = surface_edge_error(surface, orientation, edge, uvs, positions, branch)?;
                     edge_errors.insert(edge, error);
                     error
                 };
@@ -1275,7 +1298,7 @@ fn refine_surface_triangles(
             {
                 *error
             } else {
-                let error = surface_triangle_error(surface, orientation, triangle, uvs, positions)?;
+                let error = surface_triangle_error(surface, orientation, triangle, uvs, positions, branch)?;
                 triangle_errors.insert(triangle, error);
                 error
             };
@@ -1313,7 +1336,7 @@ fn refine_surface_triangles(
             let mut worst_angle = 0.0_f64;
             for triangle in triangles.iter().copied() {
                 let (chord, mut angle) =
-                    surface_triangle_error(surface, orientation, triangle, uvs, positions)?;
+                    surface_triangle_error(surface, orientation, triangle, uvs, positions, branch)?;
                 let [a, b, c] = triangle;
                 if let Some(resolved_error) = collapsed_periodic_angular_error(
                     surface,
@@ -1343,7 +1366,7 @@ fn refine_surface_triangles(
         let mut midpoints = BTreeMap::new();
         for edge in &marked_edges {
             let uv = Point2::from_vec((uvs[edge.0].to_vec() + uvs[edge.1].to_vec()) * 0.5);
-            let (point, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
+            let (point, mut normal) = surface_point_normal_on_branch(surface, uv.x, uv.y, branch)?;
             if orientation == FaceOrientation::Reversed {
                 normal = -normal;
             }
@@ -1365,7 +1388,7 @@ fn refine_surface_triangles(
                     let uv = Point2::from_vec(
                         (uvs[a].to_vec() + uvs[b].to_vec() + uvs[c].to_vec()) / 3.0,
                     );
-                    let (point, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
+                    let (point, mut normal) = surface_point_normal_on_branch(surface, uv.x, uv.y, branch)?;
                     if orientation == FaceOrientation::Reversed {
                         normal = -normal;
                     }
@@ -1495,11 +1518,33 @@ fn collapsed_periodic_angular_error(
 }
 
 fn surface_point_normal(surface: &super::Surface3, u: f64, v: f64) -> KernelResult<(Point3, Vec3)> {
+    surface_point_normal_on_branch(surface, u, v, None)
+}
+
+// A retained tube face lies on one side of its focal curve. Straight UV
+// chords used by display triangles can stray across that curve; their normal
+// must keep the face's branch rather than flip with the chart Jacobian.
+fn rolling_ball_branch(surface: &super::Surface3, samples: &[Point2]) -> KernelResult<Option<f64>> {
+    let super::Surface3::RollingBall(blend) = surface else { return Ok(None); };
+    let mut strongest = 0.0_f64;
+    for uv in samples {
+        let (_, du, dv) = surface.first_order(uv.x, uv.y)?;
+        let orientation = du.cross(dv).dot(blend.radial_normal(uv.x, uv.y)?);
+        if orientation.abs() > strongest.abs() { strongest = orientation; }
+    }
+    Ok(Some(strongest.signum()))
+}
+
+fn surface_point_normal_on_branch(surface: &super::Surface3, u: f64, v: f64, branch: Option<f64>) -> KernelResult<(Point3, Vec3)> {
     let (point, du, dv) = surface.first_order(u, v)?;
     let normal = match surface {
         // Longitude is singular at a sphere's poles even though the exact
         // surface normal remains well defined there.
         super::Surface3::Sphere(sphere) => point - sphere.center(),
+        super::Surface3::RollingBall(blend) => match branch {
+            Some(sign) => blend.radial_normal(u, v)? * sign,
+            None => surface.normal(u, v)?,
+        },
         super::Surface3::Cone(_) if v == 0.0 => {
             // A cone tip has one limiting normal per meridian. Retain that
             // meridian's normal at the shared apex instead of normalizing zero.
@@ -1543,12 +1588,13 @@ fn surface_edge_error(
     edge: (usize, usize),
     uvs: &[Point2],
     positions: &[Point3],
+    branch: Option<f64>,
 ) -> KernelResult<(f64, f64)> {
     let evaluate = |fraction: f64| -> KernelResult<(Point3, Point3, Vec3)> {
         let uv = Point2::from_vec(
             uvs[edge.0].to_vec() * (1.0 - fraction) + uvs[edge.1].to_vec() * fraction,
         );
-        let (point, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
+        let (point, mut normal) = surface_point_normal_on_branch(surface, uv.x, uv.y, branch)?;
         let chord = Point3::from_vec(
             positions[edge.0].to_vec() * (1.0 - fraction) + positions[edge.1].to_vec() * fraction,
         );
@@ -1576,6 +1622,7 @@ fn surface_triangle_error(
     triangle: [usize; 3],
     uvs: &[Point2],
     positions: &[Point3],
+    branch: Option<f64>,
 ) -> KernelResult<(f64, f64)> {
     let [a, b, c] = triangle;
     let center_uv = Point2::from_vec((uvs[a].to_vec() + uvs[b].to_vec() + uvs[c].to_vec()) / 3.0);
@@ -1584,7 +1631,7 @@ fn surface_triangle_error(
     );
     let evaluate = |vertex: usize| -> KernelResult<(Point3, Point3, Vec3)> {
         let uv = Point2::from_vec((uvs[vertex].to_vec() + center_uv.to_vec()) * 0.5);
-        let (point, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
+        let (point, mut normal) = surface_point_normal_on_branch(surface, uv.x, uv.y, branch)?;
         let chord = Point3::from_vec((positions[vertex].to_vec() + center_chord.to_vec()) * 0.5);
         if orientation == FaceOrientation::Reversed {
             normal = -normal;

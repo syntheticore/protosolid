@@ -176,8 +176,17 @@ pub(super) fn rounded_join_center(
     let [start, end] = edge.vertices().map(|vertex| {
         let faces = topology.vertex_edges(vertex)?.into_iter().map(|edge| topology.edge_faces(edge))
             .collect::<KernelResult<Vec<_>>>()?.into_iter().flatten().collect::<BTreeSet<_>>();
-        let constraints = faces.iter().map(|face| Ok(CornerConstraint::Surface(topology.face(*face)?.surface(), None)))
+        let mut constraints = faces.iter().map(|face| Ok(CornerConstraint::Surface(topology.face(*face)?.surface(), None)))
             .collect::<KernelResult<Vec<_>>>()?;
+        for incident in topology.vertex_edges(vertex)? {
+            let adjacent = topology.edge_faces(incident)?;
+            let edge = topology.edge(incident)?;
+            if adjacent.len() == 2 && matches!(edge.curve(), Curve3::Line(_) | Curve3::Circle(_))
+                && !tangent_contact(topology, incident, adjacent[0], adjacent[1], tolerance)?.is_empty()
+            {
+                constraints.push(CornerConstraint::Curve(edge.curve()));
+            }
+        }
         // Tangential intersections amplify a model-tolerance residual into a
         // visible trim gap. Refine the shared center before constructing joins.
         let mut exact = tolerance;
@@ -220,15 +229,104 @@ pub(super) fn reparameterize_join_intersection(
     let Curve3::SurfaceIntersection(curve) = &intersection.curve else { return Ok(intersection); };
     let range = curve.range();
     let exact = curve.exact_pcurves();
-    let start = exact[0].evaluate(range.start)?.point;
-    let end = exact[0].evaluate(range.end)?.point;
-    if (start.y - end.y).abs() < 1.0 - tolerance.parameter * 64.0 { return Ok(intersection); }
+    let mut start = exact[0].evaluate(range.start)?.point;
+    let mut end = exact[0].evaluate(range.end)?.point;
+    let first_point = intersection.curve.first_order(range.start)?.0;
+    let last_point = intersection.curve.first_order(range.end)?.0;
+    let linear = tolerance.linear_at_scale(first_point.to_vec().magnitude().max(last_point.to_vec().magnitude()));
+    if first_point.distance(last_point) <= linear {
+        let pole_cap = matches!(curve.second_surface(), Surface3::Plane(_))
+            && (start.x - end.x).abs() <= tolerance.parameter * 64.0
+            && curve.first_surface().first_order(start.x, 0.0)?.0
+                .distance(curve.first_surface().first_order(start.x, 1.0)?.0) <= linear;
+        // A closed spatial loop need not be monotone in either contact angle.
+        // Only cap intersections at a collapsed section need pole anchoring.
+        if !pole_cap { return Ok(intersection); }
+    }
+    if (start.y - end.y).abs() < tolerance.parameter * 64.0 { return Ok(intersection); }
+    let mut focal_endpoint = false;
+    // A branch can end on the common section where the longitudinal tube
+    // derivative vanishes. Surface equality alone also admits every other
+    // point of that section; anchor the endpoint at its focal parameter.
+    if let Surface3::RollingBall(blend) = curve.first_surface() {
+        let middle = (start.y + end.y) * 0.5;
+        for endpoint in [&mut start, &mut end] {
+            if ![blend.center_range().start, blend.center_range().end].iter()
+                .any(|u| (endpoint.x - u).abs() <= tolerance.parameter * 64.0) { continue; }
+            let center = blend.center_curve().evaluate(endpoint.x)?;
+            let center_tangent = center.first_derivative;
+            let tangent = center_tangent.normalize();
+            let first = curve.first_surface().first_order(endpoint.x, 0.0)?.0;
+            let last = curve.first_surface().first_order(endpoint.x, 1.0)?.0;
+            let pole_plane = match curve.second_surface() {
+                Surface3::Plane(plane) if first.distance(last) <= tolerance.linear * 0.01
+                    && (first - plane.origin()).dot(plane.normal()).abs() <= tolerance.linear * 0.01 => Some(plane),
+                _ => None,
+            };
+            if pole_plane.is_none() && !matches!(curve.second_surface(), Surface3::RollingBall(other)
+                if matches!(other.center_curve(), Curve3::Line(_))) { continue; }
+            let speed = |v| -> KernelResult<f64> {
+                let (point, du, _) = curve.first_surface().first_order(endpoint.x, v)?;
+                if let Some(plane) = pole_plane {
+                    // At a pole all angles meet the plane. The real branch
+                    // ends where its normal curvature changes sign.
+                    let radial = (point - center.point) / blend.radius();
+                    let radial_derivative = (du - center_tangent) / blend.radius();
+                    Ok((center.second_derivative.dot(radial)
+                        - blend.radius() * radial_derivative.magnitude2()) * radial.dot(plane.normal()))
+                } else { Ok(du.dot(tangent)) }
+            };
+            // A regular intersection can also meet the end section. Only
+            // continue an endpoint already in the slow focal neighborhood;
+            // moving a regular endpoint would select a different branch.
+            if pole_plane.is_none() && speed(endpoint.y)?.abs() > center_tangent.magnitude() * 0.01 { continue; }
+            let mut a = middle;
+            let mut b = if endpoint.y < middle { 0.0 } else { 1.0 };
+            let mut sa = speed(a)?;
+            let sb = speed(b)?;
+            if sb.abs() <= f64::EPSILON * center_tangent.magnitude() * 2048.0 {
+                endpoint.y = b;
+                focal_endpoint = true;
+                continue;
+            }
+            if sa * sb > 0.0 { continue; }
+            for _ in 0..48 {
+                let v = (a + b) * 0.5;
+                let sv = speed(v)?;
+                if sa * sv > 0.0 { a = v; sa = sv; } else { b = v; }
+            }
+            endpoint.y = (a + b) * 0.5;
+            focal_endpoint = true;
+        }
+    }
+    let full_angle = (start.y - end.y).abs() >= 1.0 - tolerance.parameter * 64.0;
+    if !full_angle && !focal_endpoint { return Ok(intersection); }
     // A contact rail is a second intersection branch at the end of a join.
     // Continue across the join angle, rather than allowing the guide's gauge
     // to flatten onto that rail near a consumed fillet.
-    let mut points = [vec![start], vec![exact[1].evaluate(range.start)?.point]];
+    let other_endpoint = |uv: Point2, parameter| -> KernelResult<Point2> {
+        if full_angle { return Ok(exact[1].evaluate(parameter)?.point); }
+        let point = curve.first_surface().first_order(uv.x, uv.y)?.0;
+        let seed = exact[1].evaluate(parameter)?.point;
+        let projected = curve.second_surface().project_near(point, seed, tolerance)?.parameters;
+        Ok(Point2::new(projected.0, projected.1))
+    };
+    let mut points = [vec![start], vec![other_endpoint(start, range.start)?]];
+    let plane_pole = if let (Surface3::RollingBall(blend), Surface3::Plane(plane)) =
+        (curve.first_surface(), curve.second_surface())
+    {
+        let domain = blend.center_range();
+        [domain.start, domain.end].into_iter().find_map(|pole| {
+            let a = curve.first_surface().first_order(pole, 0.0).ok()?.0;
+            let b = curve.first_surface().first_order(pole, 1.0).ok()?.0;
+            (a.distance(b) <= tolerance.linear * 0.01
+                && (a - plane.origin()).dot(plane.normal()).abs() <= tolerance.linear * 0.01)
+                .then_some((plane, pole, if pole == domain.start { domain.end } else { domain.start }))
+        })
+    } else { None };
     for index in 1..64 {
         let fraction = index as f64 / 64.0;
+        let fraction = if !full_angle { (1.0 - (std::f64::consts::PI * fraction).cos()) * 0.5 } else { fraction };
         let v = start.y + (end.y - start.y) * fraction;
         let mut low = range.start;
         let mut high = range.end;
@@ -240,6 +338,36 @@ pub(super) fn reparameterize_join_intersection(
         let parameter = (low + high) * 0.5;
         let a = curve.first_pcurve().evaluate(parameter)?.point;
         let b = curve.second_pcurve().evaluate(parameter)?.point;
+        // A vanished circular section is also a root of a cap intersection.
+        // Isolate the interior branch before Newton can jump onto that pole.
+        if let Some((plane, pole, opposite)) = plane_pole {
+            let height = |u| curve.first_surface().first_order(u, v)
+                .map(|(point, _, _)| (point - plane.origin()).dot(plane.normal()));
+            let mut low = opposite;
+            let mut sign = height(low)?;
+            let mut bracket = None;
+            for step in 1..40 {
+                let high = pole + (opposite - pole) * 2.0_f64.powi(-step);
+                let value = height(high)?;
+                if value.abs() <= f64::EPSILON * plane.origin().to_vec().magnitude().max(1.0) * 256.0 { break; }
+                if sign * value < 0.0 { bracket = Some((low, high)); break; }
+                low = high;
+                sign = value;
+            }
+            if let Some((mut low, mut high)) = bracket {
+                let sign = height(low)?;
+                for _ in 0..48 {
+                    let middle = (low + high) * 0.5;
+                    if height(middle)? * sign > 0.0 { low = middle; } else { high = middle; }
+                }
+                let u = (low + high) * 0.5;
+                let point = curve.first_surface().first_order(u, v)?.0;
+                let uv = plane.project(point)?.parameters;
+                points[0].push(Point2::new(u, v));
+                points[1].push(Point2::new(uv.0, uv.1));
+                continue;
+            }
+        }
         let uv = crate::intersection::correct_surface_pair_with_gauge(curve.first_surface(), curve.second_surface(),
                 [a.x, v, b.x, b.y], [0.0, 1.0, 0.0, 0.0], domains[0], domains[1], tolerance)?
                 .ok_or_else(|| invalid("join intersection could not continue across its contact angle"))?;
@@ -247,10 +375,15 @@ pub(super) fn reparameterize_join_intersection(
         points[1].push(Point2::new(uv[2], uv[3]));
     }
     points[0].push(end);
-    points[1].push(exact[1].evaluate(range.end)?.point);
+    points[1].push(other_endpoint(end, range.end)?);
+    let guide = |points: &[Point2]| -> KernelResult<Curve2> {
+        let parameters = (0..points.len()).map(|index|
+            range.start + range.span() * index as f64 / (points.len() - 1) as f64).collect::<Vec<_>>();
+        let linear = crate::intersection::interpolating_nurbs_guide(points, &parameters)?;
+        crate::intersection::smooth_interpolating_guide(&linear)
+    };
     let rebuilt = SurfaceIntersectionCurve::new(curve.first_surface().clone(), curve.second_surface().clone(),
-        crate::intersection::smooth_nurbs_guide(&points[0], range)?.into(),
-        crate::intersection::smooth_nurbs_guide(&points[1], range)?.into(), range, tolerance, curve.achieved_error())?;
+        guide(&points[0])?, guide(&points[1])?, range, tolerance, curve.achieved_error())?;
     let exact = rebuilt.exact_pcurves();
     Ok(crate::SurfaceSurfaceCurve { curve: rebuilt.into(), first_pcurve: exact[0].clone(),
         second_pcurve: exact[1].clone(), achieved_error: intersection.achieved_error })
@@ -499,10 +632,30 @@ pub(super) fn offset_regions_with_joins(
     for first in base_count..supports.len() {
         for second in 0..first {
             if parents[first - base_count].contains(&second) { continue; }
+            let shared_section = if second >= base_count {
+                let a = topology.edge(joins[first - base_count])?;
+                let b = topology.edge(joins[second - base_count])?;
+                a.vertices().iter().position(|vertex| b.vertices().contains(vertex))
+                    .map(|end| &boundaries[first][if end == 0 { 3 } else { 1 }])
+            } else { None };
             let intersections = supports[first].intersect_surface_in_bounds(&supports[second],
                 trim_bounds(&boundaries[first], tolerance)?, trim_bounds(&boundaries[second], tolerance)?, tolerance)?;
             let IntersectionSet::Isolated(intersections) = intersections else { continue; };
             for intersection in intersections {
+                // Adjacent joins already carry their common end section.
+                // Near tangency, tracing that section again creates partial
+                // duplicate trims instead of an additional intersection branch.
+                if let Some(section) = shared_section {
+                    let range = match intersection.curve.domain().bounds {
+                        crate::DomainBounds::Bounded(range) => range,
+                        _ => unreachable!(),
+                    };
+                    let on_section = (0..=8).map(|index| {
+                        let point = intersection.curve.evaluate(range.start + range.span() * index as f64 / 8.0)?.point;
+                        Ok(section.curve.project_on_trim(point, section.range, tolerance)?.distance <= tolerance.linear * 16.0)
+                    }).collect::<KernelResult<Vec<_>>>()?.into_iter().all(|on| on);
+                    if on_section { continue; }
+                }
                 let intersection = reparameterize_join_intersection(intersection,
                     [trim_bounds(&boundaries[first], tolerance)?, trim_bounds(&boundaries[second], tolerance)?], tolerance)?;
                 let first_pcurve = align_pcurve_to_face_chart(&intersection.first_pcurve, None,
@@ -623,6 +776,18 @@ pub(super) fn offset_regions_with_joins(
                     if !point_in_trim(original_uv, original)? { return Ok(None); }
                 }
                 let point = surface.evaluate(uv.x, uv.y)?.point;
+                if index >= base_count {
+                    let Surface3::RollingBall(blend) = surface else { unreachable!() };
+                    let center = blend.center_curve().evaluate(uv.x)?;
+                    let bend = (point - center.point).dot(center.second_derivative);
+                    let speed2 = center.first_derivative.magnitude2();
+                    // A nearest point in the interior of the source edge must
+                    // minimize squared distance. Beyond the focal set the
+                    // same ball defines an inverted, hidden part of the tube.
+                    if speed2 - bend < -f64::EPSILON * speed2.max(bend.abs()) * 2048.0 {
+                        return Ok(None);
+                    }
+                }
                 if classifier.classify(point)? == PointClassification::Outside {
                     return Ok(None);
                 }

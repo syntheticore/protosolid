@@ -654,8 +654,11 @@ pub(super) fn refine_support_corner(
         };
         let step = crate::Vec3::new(step[0], step[1], step[2]);
         // Near tangency a small normal residual can hide a large movement.
-        // Require positional convergence as well.
-        if worst <= tolerance.linear * 0.1 && step.magnitude() <= tolerance.linear * 0.01 {
+        // Require positional convergence as well, within evaluation roundoff.
+        let roundoff = f64::EPSILON * point.to_vec().magnitude().max(1.0) * 64.0;
+        if worst <= (tolerance.linear * 0.1).max(roundoff)
+            && step.magnitude() <= (tolerance.linear * 0.01).max(roundoff)
+        {
             return Ok(point);
         }
         if step.magnitude() <= tolerance.linear * 0.001 {

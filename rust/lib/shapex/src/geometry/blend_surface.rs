@@ -330,8 +330,8 @@ impl EdgeBlendSurface3 {
         let first_unit = first_radial.normalize();
         let second_unit = second_radial.normalize();
         let cosine = first_unit.dot(second_unit).clamp(-1.0, 1.0);
-        let angle = cosine.acos();
-        if angle <= self.tolerance.angular || std::f64::consts::PI - angle <= self.tolerance.angular
+        let angle = first_unit.cross(second_unit).magnitude().atan2(cosine);
+        if std::f64::consts::PI - angle <= self.tolerance.angular
         {
             return Err(geometry_error("rolling-ball contact normals do not define a regular circular span"));
         }
@@ -340,7 +340,7 @@ impl EdgeBlendSurface3 {
         let second_derivative = (second.1 - center_tangent) / self.radius;
         let cosine_derivative =
             first_derivative.dot(second_unit) + first_unit.dot(second_derivative);
-        let angle_derivative = -cosine_derivative / sine;
+        let angle_derivative = if angle <= self.tolerance.angular { 0.0 } else { -cosine_derivative / sine };
         Ok(CircularBlendSection {
             center_point,
             center_tangent,
@@ -371,7 +371,7 @@ impl EdgeBlendSurface3 {
             .section(self.center_parameter(parameter))?
             .circular
             .unwrap();
-        Ok(Some(std::f64::consts::TAU / section.angle))
+        Ok((section.angle > self.tolerance.angular).then(|| std::f64::consts::TAU / section.angle))
     }
 
     pub(super) fn first_order(&self, parameter: f64, blend: f64) -> KernelResult<(Point3, Vec3, Vec3)> {
@@ -404,6 +404,21 @@ impl EdgeBlendSurface3 {
             angle_derivative,
         } = circular.expect("circular sections include their prepared frame");
         let weight = |fraction: f64, fraction_derivative: f64| {
+            // A concave crease can fade tangentially into a filleted rim.
+            // Its contact rails coincide at the end; slerp has a finite limit
+            // there even though the usual sine quotient is 0/0.
+            if angle * fraction.abs().max(1.0) < 1.0e-4 {
+                let squared = fraction * fraction;
+                let angle2 = angle * angle;
+                return (
+                    fraction * (1.0 + (1.0 - squared) * angle2 / 6.0
+                        + (7.0 - 10.0 * squared + 3.0 * squared * squared) * angle2 * angle2 / 360.0),
+                    fraction * ((1.0 - squared) * angle / 3.0
+                        + (7.0 - 10.0 * squared + 3.0 * squared * squared) * angle * angle2 / 90.0),
+                    fraction_derivative * (1.0 + (1.0 - 3.0 * squared) * angle2 / 6.0
+                        + (7.0 - 30.0 * squared + 15.0 * squared * squared) * angle2 * angle2 / 360.0),
+                );
+            }
             let numerator = (fraction * angle).sin();
             let numerator_theta = fraction * (fraction * angle).cos();
             let value = numerator / sine;
@@ -429,6 +444,50 @@ impl EdgeBlendSurface3 {
 
     pub(super) fn point(&self, parameter: f64, blend: f64) -> KernelResult<Point3> {
         self.first_order(parameter, blend).map(|value| value.0)
+    }
+
+    pub(crate) fn radial_normal(&self, parameter: f64, blend: f64) -> KernelResult<Vec3> {
+        let parameter = self.center_parameter(parameter);
+        let section = self.section(parameter)?.circular.unwrap();
+        let radial = (self.point(parameter, blend)? - section.center_point).normalize();
+        let axis = if section.angle > self.tolerance.angular * 8.0 {
+            section.first_unit.cross(section.second_unit)
+        } else {
+            (section.first_derivative.cross(section.second_unit)
+                + section.first_unit.cross(section.second_derivative))
+                * (self.center_range.middle() - parameter).signum()
+        };
+        Ok(radial * (-section.center_tangent.dot(axis)).signum())
+    }
+
+    pub(super) fn normal(&self, parameter: f64, blend: f64) -> KernelResult<Vec3> {
+        let parameter = self.center_parameter(parameter);
+        let (point, du, dv) = self.first_order(parameter, blend)?;
+        let section = self.section(parameter)?.circular.unwrap();
+        let radial = (point - section.center_point).normalize();
+        let mut sign = if section.angle > self.tolerance.angular * 8.0 {
+            du.cross(dv).dot(radial)
+        } else {
+            // At a collapsed end section, the two contact normals agree.
+            // Their derivative gives the one-sided circular frame without
+            // amplifying the residual difference between those normals.
+            let direction = (self.center_range.middle() - parameter).signum();
+            let axis = (section.first_derivative.cross(section.second_unit)
+                + section.first_unit.cross(section.second_derivative)) * direction;
+            let center = self.center_curve.evaluate(parameter)?;
+            let longitudinal = center.first_derivative.magnitude2()
+                - (point - center.point).dot(center.second_derivative);
+            -center.first_derivative.dot(axis) * longitudinal
+        };
+        if sign == 0.0 {
+            let direction = (self.center_range.middle() - parameter).signum();
+            let nearby = self.shifted(parameter, direction * self.center_range.span().abs() * 1.0e-4);
+            let (point, du, dv) = self.first_order(nearby, blend)?;
+            let center = self.center_curve.first_order(nearby)?.0;
+            sign = du.cross(dv).dot(point - center);
+        }
+        if sign == 0.0 { return Err(geometry_error("rolling-ball normal has no regular one-sided limit")); }
+        Ok(radial * sign.signum())
     }
 
     pub(super) fn shifted(&self, parameter: f64, delta: f64) -> f64 {

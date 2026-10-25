@@ -5,7 +5,11 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-30',
 
-  ignore: ['dist', 'dist/**'],
+  ignore: ['dist', 'dist/**', 'rust/**', 'electron/**', 'js/shapexJS/rust/**'],
+
+  experimental: {
+    watcher: 'parcel',
+  },
 
   devtools: {
     enabled: false,
@@ -52,6 +56,11 @@ export default defineNuxtConfig({
 
   vite: {
     // plugins: [wasm()],
+    server: {
+      watch: {
+        ignored: ['**/rust/**', '**/electron/**'],
+      },
+    },
     css: {
       preprocessorOptions: {
         stylus: {

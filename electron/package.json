@@ -10,6 +10,7 @@
     "directories": {
       "buildResources": "build"
     },
+    "electronLanguages": ["en-US"],
     "mac": {
       "icon": "build/icon.icns"
     },

@@ -68,9 +68,7 @@
 
 <script setup>
 
-  import '@fontsource-variable/inter'
-  import '@fontsource/comfortaa'
-  import '@fontsource/orbitron'
+  import './styles/fonts.css'
   import { provide } from 'vue'
   import { init_planegcs_module } from '@salusoft89/planegcs'
   import sketchSolverWasm from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url'

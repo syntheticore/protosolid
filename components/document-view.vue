@@ -130,6 +130,11 @@
             input(type="checkbox" v-model="sketchSection")
             span Section
 
+        .display-row(v-if="document.activeSketch")
+          label.display-toggle(title="Show sketch constraint markers")
+            input(type="checkbox" v-model="showConstraintMarkers")
+            span Constraints
+
       .pose(:class="{ hidden: !document.top().hasPoseChange() || document.activeMerge }")
 
         h1 POSE
@@ -313,6 +318,7 @@
 <script>
 
   import * as THREE from 'three'
+  import { computed } from 'vue'
 
   import {
     CreateComponentFeature,
@@ -327,6 +333,12 @@
     name: 'DocumentView',
 
     inject: ['bus', 'highlight'],
+
+    provide() {
+      return {
+        'show-constraint-markers': computed(() => this.showConstraintMarkers),
+      }
+    },
 
     props: {
       document: Object,
@@ -388,6 +400,7 @@
         colorMode: 'material',
         previewColorMode: null,
         sketchSection: true,
+        showConstraintMarkers: true,
         previewOnHover: preferences.previewOnHover,
         alwaysShowSideLabels: preferences.alwaysShowSideLabels,
       }

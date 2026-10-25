@@ -2,7 +2,7 @@
 
   //- Sketch constraint proxy
   Icon.constraint(
-    v-if="!dimension"
+    v-if="!dimension && (showMarkers || selected || curveSelected)"
     v-for="proxy in arrangedProxies"
     :icon="(constraint.icon && constraint.icon()) ||constraint.constructor.icon"
     :class="{ selected, preview: preview || drawingToolActive }"
@@ -16,7 +16,7 @@
 
   //- Sketch dimension
   .dimension(
-    v-else
+    v-else-if="dimension"
     :class="{ selected, preview: preview || drawingToolActive }"
     :style="{ top: projectedProxies[0].coords.y + 'px', left: projectedProxies[0].coords.x + 'px' }"
     @click.stop="select"
@@ -162,8 +162,12 @@
   const highlight = inject('highlight')
   const constraintIcons = inject('constraint-icons', null)
   const constraintIconLayout = inject('constraint-icon-layout', null)
+  const showMarkers = inject('show-constraint-markers')
 
   const selected = computed(() => props.document.selection.has(props.constraint) )
+  const curveSelected = computed(() =>
+    props.constraint.items.some(item => props.document.selection.has(item.curve()))
+  )
   const drawingToolActive = computed(() => props.activeTool instanceof SketchTool)
   const isDiameter = computed(() =>
     props.constraint.items.length == 1 && props.constraint.items[0].curve() instanceof Circle
